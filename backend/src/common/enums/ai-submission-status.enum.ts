@@ -1,0 +1,5 @@
+export enum AiSubmissionStatus {
+  PENDING = 'PENDING',
+  VALIDATED = 'VALIDATED',
+  REJECTED_MISMATCH = 'REJECTED_MISMATCH',
+}
