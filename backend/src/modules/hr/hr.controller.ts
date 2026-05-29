@@ -26,7 +26,7 @@ export class HrController {
   }
 
   @Patch('leaves/:id/action')
-  @Roles('HOD', 'Dean', 'HR', 'Admin')
+  @Roles('HOD', 'Dean', 'HR', 'SuperAdmin')
   act(@Param('id') id: string, @Body() dto: LeaveActionDto) {
     return this.hr.actOnLeave(id, dto);
   }
@@ -37,7 +37,7 @@ export class HrController {
   }
 
   @Post('staff-attendance/:userId/check-in')
-  @Roles('HR', 'Admin', 'Faculty', 'HOD')
+  @Roles('HR', 'SuperAdmin', 'Faculty', 'HOD')
   checkIn(@Param('userId') userId: string, @Body('work_date') workDate: string) {
     return this.hr.recordStaffAttendance(userId, workDate);
   }

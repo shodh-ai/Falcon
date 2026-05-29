@@ -10,6 +10,8 @@ const Sheet = SheetPrimitive.Root;
 const SheetTrigger = SheetPrimitive.Trigger;
 const SheetClose = SheetPrimitive.Close;
 const SheetPortal = SheetPrimitive.Portal;
+const SheetTitle = SheetPrimitive.Title;
+const SheetDescription = SheetPrimitive.Description;
 
 const SheetOverlay = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Overlay>,
@@ -49,6 +51,8 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Con
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
+        <SheetTitle className="sr-only">Sheet</SheetTitle>
+        <SheetDescription className="sr-only">Sheet dialog</SheetDescription>
         {children}
         <SheetPrimitive.Close className="absolute right-4 top-4 rounded-lg opacity-80 ring-offset-background transition-opacity hover:opacity-100 touch-target">
           <X className="h-5 w-5" />
@@ -60,4 +64,4 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Con
 );
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 
-export { Sheet, SheetPortal, SheetOverlay, SheetTrigger, SheetClose, SheetContent };
+export { Sheet, SheetPortal, SheetOverlay, SheetTrigger, SheetClose, SheetContent, SheetTitle };

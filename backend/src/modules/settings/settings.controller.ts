@@ -13,7 +13,7 @@ export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
   @Post('import/users')
-  @Roles('Admin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),

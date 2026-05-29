@@ -18,7 +18,7 @@ export class IqacController {
   }
 
   @Post('placements/jobs')
-  @Roles('Admin', 'PlacementCell')
+  @Roles('SuperAdmin', 'PlacementCell')
   createJob(@Body() dto: CreateJobPostingDto) {
     return this.iqac.createJob(dto);
   }

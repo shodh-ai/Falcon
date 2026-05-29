@@ -24,9 +24,12 @@ export function TimetableWidget({ slots }: TimetableWidgetProps) {
           <Clock className="h-5 w-5 text-sgvu-gold" />
           Today&apos;s Timetable
         </CardTitle>
-        <CardDescription>Your classes for Saturday</CardDescription>
+        <CardDescription>Your registered classes for today</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {slots.length === 0 && (
+          <p className="text-sm text-muted-foreground">No registered classes today.</p>
+        )}
         {slots.map((slot) => (
           <div
             key={slot.id}

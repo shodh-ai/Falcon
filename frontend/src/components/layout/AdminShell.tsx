@@ -2,7 +2,8 @@
 
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
-import { adminPortal } from '@/lib/navigation';
+import { adminPortal, filterPortalConfigForRole } from '@/lib/navigation';
+import { useAuth } from '@/context/AuthContext';
 
 const mockAdminNotifications = [
   { id: '1', title: '12 leave requests pending', body: 'HOD approvals needed', type: 'warning' as const, unread: true },
@@ -10,8 +11,11 @@ const mockAdminNotifications = [
 ];
 
 export function AdminShell({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const config = filterPortalConfigForRole(adminPortal, user?.role);
+
   return (
-    <AppShell config={adminPortal} notifications={mockAdminNotifications}>
+    <AppShell config={config} notifications={mockAdminNotifications}>
       {children}
     </AppShell>
   );

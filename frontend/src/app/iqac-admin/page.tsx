@@ -8,9 +8,9 @@ import { useEffect, useState } from 'react';
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const roles = [
   { id: 1, name: 'IQAC' },
-  { id: 2, name: 'Dean / Principal / Heads' },
-  { id: 3, name: 'Faculty Member' },
-  { id: 4, name: 'Lab Staff' },
+  { id: 2, name: 'Dean' },
+  { id: 3, name: 'Faculty' },
+  { id: 4, name: 'HOD' },
   { id: 5, name: 'President' },
   { id: 6, name: 'HR' },
 ];
@@ -226,7 +226,7 @@ export default function AdminPage() {
   };
 
   const handleDownloadTemplate = () => {
-    const template = `Designation,January,February,March,April,May,June,July,August,September,October,November,December\nDean/ Principal/ Heads,"Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Preparation of Curriculum Feedback Analysis","DAPC Meetings","DAPC Meetings","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Timetable Preparation for coming semester"\nFaculty Member,"PPT Uploading (Rest all units)","Conduction of VAC course","Conduction of VAC course","Preparation/Revision of PO, PSO and CO","Students undertaking field projects","PPT uploading (atleast 2 Units)","PPT Uploading (Rest all units)","Preparation of PT file","Conduction of VAC course","Conduction of VAC course","Conduction of Remedial Classes","PPT uploading (atleast 2 Units)"\nLab Staff,"Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements"`;
+    const template = `Designation,January,February,March,April,May,June,July,August,September,October,November,December\nDean,"Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Preparation of Curriculum Feedback Analysis","DAPC Meetings","DAPC Meetings","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Activity Reports with geotagged photographs","Timetable Preparation for coming semester"\nFaculty,"PPT Uploading (Rest all units)","Conduction of VAC course","Conduction of VAC course","Preparation/Revision of PO, PSO and CO","Students undertaking field projects","PPT uploading (atleast 2 Units)","PPT Uploading (Rest all units)","Preparation of PT file","Conduction of VAC course","Conduction of VAC course","Conduction of Remedial Classes","PPT uploading (atleast 2 Units)"\nHOD,"Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements","Maintenance of Stocks/ Stock Register/ Lab Requirements"`;
     const blob = new Blob([template], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

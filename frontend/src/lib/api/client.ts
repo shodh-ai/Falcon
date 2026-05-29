@@ -10,8 +10,19 @@ export interface ApiRequest {
   data?: unknown;
 }
 
+function tenantSubdomainHeader(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const base = process.env.NEXT_PUBLIC_SAAS_BASE_DOMAIN ?? 'localhost';
+  const host = window.location.hostname;
+  let sub = process.env.NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+  if (host.endsWith('.localhost')) sub = host.replace('.localhost', '');
+  else if (base !== 'localhost' && host.endsWith(`.${base}`)) sub = host.slice(0, -(base.length + 1));
+  return { 'x-tenant-subdomain': sub };
+}
+
 export const authHeaders = (token: string): Record<string, string> => ({
   Authorization: `Bearer ${token}`,
+  ...tenantSubdomainHeader(),
 });
 
 export const jsonHeaders = (token: string): Record<string, string> => ({

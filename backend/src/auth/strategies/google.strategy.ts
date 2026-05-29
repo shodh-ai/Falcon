@@ -4,9 +4,12 @@ import { Strategy, VerifyCallback } from 'passport-google-oauth20';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import type { Request } from 'express';
 import { User } from '../../entities/user.entity';
 import { Role } from '../../entities/role.entity';
-import { JwtService } from '@nestjs/jwt';
+import { AuthService } from '../auth.service';
+import { TenantService } from '../../tenant/tenant.service';
+import { resolveAllowedEmailDomains } from '../utils/resolve-allowed-domains';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
@@ -16,7 +19,8 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     private userRepository: Repository<User>,
     @InjectRepository(Role)
     private roleRepository: Repository<Role>,
-    private jwtService: JwtService,
+    private authService: AuthService,
+    private tenantService: TenantService,
   ) {
     super({
       clientID: configService.get('GOOGLE_CLIENT_ID') || 'local-placeholder-client-id',
@@ -25,71 +29,90 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         configService.get('GOOGLE_CALLBACK_URL') ||
         'http://localhost:4000/auth/google/callback',
       scope: ['profile', 'email'],
-      passReqToCallback: false,
+      passReqToCallback: true,
     });
   }
 
   async validate(
-    accessToken: string,
-    refreshToken: string,
-    profile: any,
+    req: { headers?: Record<string, string | string[] | undefined> },
+    _accessToken: string,
+    _refreshToken: string,
+    profile: { name: { givenName: string; familyName: string }; emails: { value: string }[]; id: string },
     done: VerifyCallback,
-  ): Promise<any> {
+  ): Promise<void> {
     const { name, emails, id } = profile;
     const email = emails[0].value;
-    const allowedDomain = this.configService.get('ALLOWED_DOMAIN');
 
-    // Check if email domain is allowed
-    if (!email.endsWith(`@${allowedDomain}`)) {
+    const reqWithCookies = req as Request & { cookies?: Record<string, string> };
+    const subdomain =
+      reqWithCookies.cookies?.tenant_subdomain ??
+      (typeof req.headers?.['x-tenant-subdomain'] === 'string'
+        ? req.headers['x-tenant-subdomain']
+        : null) ??
+      process.env.DEFAULT_TENANT_SUBDOMAIN ??
+      'sgvu';
+
+    const tenant = await this.tenantService.findBySubdomain(subdomain);
+    const allowedDomains = resolveAllowedEmailDomains(
+      tenant,
+      this.configService.get('ALLOWED_DOMAIN'),
+    );
+
+    if (!this.authService.validateDomainForTenant(email, allowedDomains)) {
       throw new UnauthorizedException(
-        `Only @${allowedDomain} emails are allowed to access this system`,
+        `Email domain not allowed for ${tenant.name}. Allowed: ${allowedDomains.join(', ')}`,
       );
     }
 
-    // Find or create user
     let user = await this.userRepository.findOne({
-      where: { email },
+      where: { email, tenant_id: tenant.tenant_id },
       relations: ['role', 'department'],
     });
 
     if (!user) {
-      // Create new user with default role (Faculty)
+      const legacy = await this.userRepository.findOne({
+        where: { email },
+        relations: ['role', 'department'],
+      });
+      if (legacy) {
+        legacy.tenant_id = tenant.tenant_id;
+        user = await this.userRepository.save(legacy);
+      }
+    }
+
+    if (!user) {
       const defaultRole = await this.roleRepository.findOne({
         where: { role_name: 'Faculty' },
       });
 
       user = this.userRepository.create({
-        name: name.givenName + ' ' + name.familyName,
+        name: `${name.givenName} ${name.familyName}`,
         email,
         google_id: id,
         role_id: defaultRole?.role_id,
         is_active: true,
+        tenant_id: tenant.tenant_id,
       });
 
       user = await this.userRepository.save(user);
-    } else {
-      // Update google_id if not set
-      if (!user.google_id) {
-        user.google_id = id;
-        await this.userRepository.save(user);
-      }
+      user = await this.userRepository.findOne({
+        where: { user_id: user.user_id },
+        relations: ['role', 'department'],
+      });
+    } else if (!user.google_id) {
+      user.google_id = id;
+      await this.userRepository.save(user);
     }
 
-    // Check if user is active
+    if (!user) {
+      throw new UnauthorizedException('Could not create or locate user account');
+    }
+
     if (!user.is_active) {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    // Generate JWT token
-    const payload = {
-      sub: user.user_id,
-      email: user.email,
-      role: user.role?.role_name,
-      name: user.name,
-    };
-
-    const token = this.jwtService.sign(payload);
-
-    done(null, { user, token });
+    const token = this.authService.signToken(user, tenant.tenant_id, tenant.pg_schema);
+    done(null, { user, token, tenant });
   }
 }

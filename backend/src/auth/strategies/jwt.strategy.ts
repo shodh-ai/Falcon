@@ -2,16 +2,14 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from '../../entities/user.entity';
+import { AuthService } from '../auth.service';
+import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private configService: ConfigService,
-    @InjectRepository(User)
-    private userRepository: Repository<User>,
+    private authService: AuthService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -20,11 +18,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: any) {
-    const user = await this.userRepository.findOne({
-      where: { user_id: payload.sub },
-      relations: ['role', 'department'],
-    });
+  async validate(payload: AuthTokenPayload) {
+    if (!payload.tenantId) {
+      throw new UnauthorizedException('Token missing tenant context');
+    }
+
+    const user = await this.authService.findById(payload.sub, payload.tenantId);
 
     if (!user) {
       throw new UnauthorizedException();
@@ -42,6 +41,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role_id: user.role_id,
       department: user.department?.dept_name,
       dept_id: user.dept_id,
+      tenant_id: payload.tenantId,
+      tenant_schema: payload.tenantSchema ?? 'public',
     };
   }
 }

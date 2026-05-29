@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import type { NavGroup } from '@/lib/navigation';
+import { useTenant } from '@/context/TenantContext';
 
 interface AppSidebarProps {
   personaLabel: string;
@@ -25,6 +26,9 @@ export function AppSidebar({
   className,
 }: AppSidebarProps) {
   const pathname = usePathname();
+  const { branding } = useTenant();
+  const shortName = branding?.name?.split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase() ?? 'ERP';
+  const displayName = branding?.name?.split(' ')[0] ?? 'University';
 
   return (
     <aside
@@ -37,12 +41,12 @@ export function AppSidebar({
       <div className={cn('flex h-16 items-center border-b border-white/10 px-3', collapsed ? 'justify-center' : 'justify-between')}>
         {!collapsed && (
           <div className="min-w-0 px-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">SGVU</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">{displayName}</p>
             <p className="truncate text-sm font-semibold">{personaLabel}</p>
           </div>
         )}
         {collapsed && (
-          <span className="text-xs font-black text-sgvu-gold">S</span>
+          <span className="text-xs font-black text-sgvu-gold">{shortName.charAt(0)}</span>
         )}
         <Button
           variant="ghost"

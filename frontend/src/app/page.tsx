@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { api } from '@/lib/api';
 import { getDashboardPathForRole } from '@/lib/auth-routing';
+import { useTenant } from '@/context/TenantContext';
 import { LogIn } from 'lucide-react';
 
 export default function Home() {
   const { isAuthenticated, login, user } = useAuth();
+  const { branding } = useTenant();
   const router = useRouter();
 
   useEffect(() => {
@@ -45,10 +47,10 @@ export default function Home() {
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              University Governance System
+              {branding?.name ?? 'University ERP'}
             </h1>
             <p className="text-gray-600">
-              Task Management and Data Collection System
+              Student, faculty &amp; management portal
             </p>
           </div>
 
@@ -80,7 +82,7 @@ export default function Home() {
 
             <div className="text-center">
               <p className="text-sm text-gray-500">
-                Only @mygyanvihar.org emails are allowed
+                Only @mygyanvihar.com / @mygyanvihar.org emails are allowed
               </p>
             </div>
           </div>

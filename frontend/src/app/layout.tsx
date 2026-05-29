@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import { TenantProvider } from "@/context/TenantContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SGVU ERP",
-  description: "Suresh Gyan Vihar University — student, faculty & management portal",
+  title: "University ERP",
+  description: "Multi-tenant university student, faculty & management portal",
 };
 
 export default function RootLayout({
@@ -30,7 +31,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>{children}</AuthProvider>
+        <TenantProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </TenantProvider>
         <Toaster position="top-center" richColors closeButton />
       </body>
     </html>

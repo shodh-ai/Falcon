@@ -1,13 +1,14 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { Role } from './role.entity';
 import { Department } from './department.entity';
+import { BaseTenantEntity } from './base-tenant.entity';
 
 @Entity('users')
-@Index(['email'], { unique: true })
+@Index(['tenant_id', 'email'], { unique: true })
 @Index(['google_id'])
 @Index(['role_id'])
 @Index(['dept_id'])
-export class User {
+export class User extends BaseTenantEntity {
   @PrimaryGeneratedColumn('uuid')
   user_id: string;
 

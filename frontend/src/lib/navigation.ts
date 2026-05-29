@@ -3,19 +3,20 @@ import {
   LayoutDashboard,
   Wallet,
   GraduationCap,
-  Building2,
-  DoorOpen,
-  User,
   ClipboardCheck,
+  ClipboardList,
   CalendarDays,
   ListChecks,
   Users,
   BarChart3,
   Kanban,
   Settings,
-  BookOpen,
   Bus,
   Shield,
+  UserRoundCog,
+  Handshake,
+  LifeBuoy,
+  Award,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -23,6 +24,7 @@ export interface NavItem {
   href: string;
   icon: LucideIcon;
   keywords?: string[];
+  roles?: string[];
 }
 
 export interface NavGroup {
@@ -38,44 +40,59 @@ export interface PortalConfig {
   commandItems: NavItem[];
 }
 
+export function filterPortalConfigForRole(config: PortalConfig, role: string | undefined | null): PortalConfig {
+  const normalizedRole = (role ?? '').trim();
+  const navGroups = config.navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.roles || item.roles.includes(normalizedRole)),
+    }))
+    .filter((group) => group.items.length > 0);
+  const commandItems = config.commandItems.filter((item) => !item.roles || item.roles.includes(normalizedRole));
+
+  return { ...config, navGroups, commandItems };
+}
+
 export const studentPortal: PortalConfig = {
   personaLabel: 'Student Portal',
   personaTitle: 'My SGVU',
   homeHref: '/student/dashboard',
   navGroups: [
     {
-      title: 'Home',
+      title: 'Overview',
       items: [{ label: 'Dashboard', href: '/student/dashboard', icon: LayoutDashboard, keywords: ['home', 'overview'] }],
     },
     {
       title: 'Academics',
       items: [
-        { label: 'Course Registration', href: '/student/courses', icon: BookOpen, keywords: ['cbcs', 'electives'] },
-        { label: 'Exams & Hall Ticket', href: '/student/exams', icon: GraduationCap, keywords: ['exam', 'hall ticket'] },
+        { label: 'Academics', href: '/student/academics', icon: GraduationCap, keywords: ['grades', 'attendance', 'results'] },
+        { label: 'Examinations', href: '/student/exams', icon: ClipboardList, keywords: ['exam', 'hall ticket', 'admit card', 'schedule'] },
       ],
     },
     {
-      title: 'Finance',
-      items: [{ label: 'Fees & Payments', href: '/student/fees', icon: Wallet, keywords: ['fee', 'pay', 'dues'] }],
+      title: 'Mentorship',
+      items: [{ label: 'Proctor Connect', href: '/student/mentorship', icon: Handshake, keywords: ['mentor', 'meeting', 'leave'] }],
     },
     {
-      title: 'Operations',
+      title: 'Profile',
       items: [
-        { label: 'Hostel', href: '/student/hostel', icon: Building2, keywords: ['hostel', 'room'] },
-        { label: 'Gate Pass', href: '/student/gate-pass', icon: DoorOpen, keywords: ['hostel', 'gate', 'qr', 'exit'] },
+        { label: 'My Profile & Vault', href: '/student/profile', icon: UserRoundCog, keywords: ['profile', 'bank', 'documents'] },
+        { label: 'Achievements & Certifications', href: '/student/profile/certificates', icon: Award, keywords: ['certificate', 'course', 'workshop', 'sports', 'iqac'] },
       ],
     },
     {
-      title: 'Account',
-      items: [{ label: 'Profile & ID Card', href: '/student/profile', icon: User, keywords: ['profile', 'id'] }],
+      title: 'Support',
+      items: [{ label: 'Helpdesk & Tickets', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'support'] }],
     },
   ],
   commandItems: [
     { label: 'Dashboard', href: '/student/dashboard', icon: LayoutDashboard },
-    { label: 'Pay Fees', href: '/student/fees', icon: Wallet, keywords: ['finance'] },
-    { label: 'Apply for Gate Pass', href: '/student/gate-pass', icon: DoorOpen, keywords: ['hostel'] },
-    { label: 'Download Hall Ticket', href: '/student/exams', icon: GraduationCap },
-    { label: 'Course Registration', href: '/student/courses', icon: BookOpen },
+    { label: 'Academics', href: '/student/academics', icon: GraduationCap },
+    { label: 'Examinations', href: '/student/exams', icon: ClipboardList },
+    { label: 'Proctor Connect', href: '/student/mentorship', icon: Handshake },
+    { label: 'My Profile', href: '/student/profile', icon: UserRoundCog },
+    { label: 'Certificates', href: '/student/profile/certificates', icon: Award },
+    { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
 };
 
@@ -90,7 +107,10 @@ export const facultyPortal: PortalConfig = {
     },
     {
       title: 'Academics',
-      items: [{ label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'class'] }],
+      items: [
+        { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'class'] },
+        { label: 'Mentorship & Certificates', href: '/faculty/mentorship', icon: Handshake, keywords: ['proctor', 'mentor', 'certificates'] },
+      ],
     },
     {
       title: 'HR',
@@ -103,6 +123,7 @@ export const facultyPortal: PortalConfig = {
   ],
   commandItems: [
     { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck },
+    { label: 'Mentorship & Certificates', href: '/faculty/mentorship', icon: Handshake },
     { label: 'Apply for Leave', href: '/faculty/leaves', icon: CalendarDays },
     { label: 'IQAC Tasks', href: '/faculty/iqac', icon: ListChecks },
   ],
@@ -123,20 +144,20 @@ export const adminPortal: PortalConfig = {
     {
       title: 'Modules',
       items: [
-        { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield },
-        { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban },
-        { label: 'Academics', href: '/admin/academics', icon: GraduationCap },
-        { label: 'Finance', href: '/admin/finance', icon: Wallet },
-        { label: 'HR & Payroll', href: '/admin/hr', icon: Users },
-        { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3 },
-        { label: 'Operations', href: '/admin/operations', icon: Bus },
-        { label: 'Settings & IT', href: '/admin/settings', icon: Settings },
+        { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield, roles: ['SuperAdmin', 'Registrar'] },
+        { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
+        { label: 'Academics', href: '/admin/academics', icon: GraduationCap, roles: ['SuperAdmin', 'Registrar'] },
+        { label: 'Finance', href: '/admin/finance', icon: Wallet, roles: ['SuperAdmin', 'Accountant', 'President'] },
+        { label: 'HR & Payroll', href: '/admin/hr', icon: Users, roles: ['SuperAdmin', 'HR', 'President'] },
+        { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },
+        { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
+        { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['SuperAdmin'] },
       ],
     },
   ],
   commandItems: [
-    { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban },
+    { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
     { label: 'Pending Approvals', href: '/admin/dashboard', icon: ListChecks },
-    { label: 'Export Reports', href: '/admin/dashboard', icon: BarChart3 },
+    { label: 'Export Reports', href: '/admin/dashboard', icon: BarChart3, roles: ['SuperAdmin', 'President', 'IQAC'] },
   ],
 };

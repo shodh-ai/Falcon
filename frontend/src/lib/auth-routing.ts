@@ -4,13 +4,7 @@
 export function getDashboardPathForRole(role: string | undefined | null): string {
   const r = (role ?? '').trim().toLowerCase();
 
-  if (
-    r.includes('faculty') ||
-    r === 'hod' ||
-    r.includes('dean') ||
-    r.includes('principal') ||
-    r.includes('head')
-  ) {
+  if (r === 'faculty' || r === 'hod' || r === 'dean') {
     return '/faculty/dashboard';
   }
 
@@ -19,12 +13,16 @@ export function getDashboardPathForRole(role: string | undefined | null): string
   }
 
   if (
-    r === 'admin' ||
     r === 'iqac' ||
     r === 'hr' ||
     r === 'president' ||
     r === 'registrar' ||
     r === 'superadmin' ||
+    r === 'accountant' ||
+    r === 'warden' ||
+    r === 'librarian' ||
+    r === 'placementcell' ||
+    r === 'transportofficer' ||
     r.includes('admission')
   ) {
     return '/admin/dashboard';

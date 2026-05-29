@@ -10,6 +10,9 @@ interface User {
   role_id?: number;
   department?: string;
   dept_id?: number;
+  tenant_id?: string;
+  tenant_schema?: string;
+  features?: string[];
 }
 
 interface AuthContextType {
@@ -40,8 +43,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const api = process.env.NEXT_PUBLIC_API_URL;
           if (api) {
+            const { getSubdomainFromClient } = await import('@/lib/tenant');
             const res = await fetch(`${api}/auth/profile`, {
-              headers: { Authorization: `Bearer ${storedToken}` },
+              headers: {
+                Authorization: `Bearer ${storedToken}`,
+                'x-tenant-subdomain': getSubdomainFromClient(),
+              },
             });
             if (res.ok) {
               const fresh = await res.json();
@@ -76,8 +83,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const activeToken = token || localStorage.getItem('token');
     if (!activeToken) return null;
 
+    const { getSubdomainFromClient } = await import('@/lib/tenant');
     const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/profile`, {
-      headers: { Authorization: `Bearer ${activeToken}` },
+      headers: {
+        Authorization: `Bearer ${activeToken}`,
+        'x-tenant-subdomain': getSubdomainFromClient(),
+      },
     });
 
     if (!response.ok) return null;

@@ -62,4 +62,18 @@ export class FinanceService {
     }
     return this.transactions.find({ order: { created_at: 'DESC' } });
   }
+
+  async getPendingDues(studentUserId: string): Promise<FeeDemand[]> {
+    const demands = await this.demands.find({
+      where: { student_user_id: studentUserId },
+      order: { due_date: 'ASC' },
+    });
+    return demands.filter((d) => {
+      const status = String(d.status ?? '').toUpperCase();
+      if (status === 'PAID' || status === 'WAIVED') return false;
+      const total = Number(d.total_amount);
+      const paid = Number(d.paid_amount);
+      return total - paid > 0;
+    });
+  }
 }

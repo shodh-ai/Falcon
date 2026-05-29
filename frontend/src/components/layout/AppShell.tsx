@@ -2,6 +2,8 @@
 
 import { useState, type ReactNode } from 'react';
 import { Menu } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -21,6 +23,8 @@ interface AppShellProps {
 export function AppShell({ config, children, notifications = [], profileHref }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = usePathname();
+  const mobileItems = config.commandItems.slice(0, 4);
 
   const sidebar = (
     <AppSidebar
@@ -85,6 +89,29 @@ export function AppShell({ config, children, notifications = [], profileHref }: 
 
         <main className="flex-1 px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:pb-8">{children}</main>
       </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur lg:hidden">
+        <ul className="mx-auto grid max-w-lg grid-cols-4">
+          {mobileItems.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={cn(
+                    'flex flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium touch-target',
+                    active ? 'text-sgvu-navy' : 'text-muted-foreground',
+                  )}
+                >
+                  <Icon className={cn('h-5 w-5', active && 'text-sgvu-gold')} />
+                  <span className="line-clamp-1">{item.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
     </div>
   );
 }

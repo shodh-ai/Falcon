@@ -1,3 +1,6 @@
+export { Tenant } from './tenant.entity';
+export { TenantSubscription } from './tenant-subscription.entity';
+export type { TenantFeature } from './tenant-subscription.entity';
 export { Role } from './role.entity';
 export { Department } from './department.entity';
 export { User } from './user.entity';
@@ -17,13 +20,23 @@ export { DocumentVerification } from './document-verification.entity';
 
 export { Subject } from './subject.entity';
 export { Batch } from './batch.entity';
+export { AcademicCourse } from './academic-course.entity';
+export { StudentCourseEnrollment } from './student-course-enrollment.entity';
+export { AcademicTimetable } from './academic-timetable.entity';
 export { AttendanceRecord } from './attendance-record.entity';
 export { ExamResult } from './exam-result.entity';
+export { ExamSchedule } from './exam-schedule.entity';
+export { ExamApplication } from './exam-application.entity';
 export { GradingPolicy } from './grading-policy.entity';
+export { AcademicMentorship } from './academic-mentorship.entity';
+export { StudentProfile } from './student-profile.entity';
+export { StudentCertificate } from './student-certificate.entity';
+export { ProctorInteraction } from './proctor-interaction.entity';
 
 export { FeeDemand } from './fee-demand.entity';
 export { Transaction } from './transaction.entity';
 export { LateFinePolicy } from './late-fine-policy.entity';
+export { HelpdeskTicket } from './helpdesk-ticket.entity';
 
 export { LeaveRequest } from './leave-request.entity';
 export { LeaveBalance } from './leave-balance.entity';
@@ -35,5 +48,8 @@ export { AlumniServiceRequest } from './alumni-service-request.entity';
 
 export { HostelRoom } from './hostel-room.entity';
 export { GatePass } from './gate-pass.entity';
+export { HostelAllocation } from './hostel-allocation.entity';
+export { HostelRequest } from './hostel-request.entity';
 export { LibraryBook } from './library-book.entity';
 export { TransportRoute } from './transport-route.entity';
+export { SystemAlert } from './system-alert.entity';

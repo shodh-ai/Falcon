@@ -17,7 +17,7 @@ export class FinanceController {
   }
 
   @Post('demands')
-  @Roles('Admin', 'Accountant')
+  @Roles('SuperAdmin', 'Accountant')
   createDemand(@Body() dto: CreateFeeDemandDto) {
     return this.finance.createDemand(dto);
   }

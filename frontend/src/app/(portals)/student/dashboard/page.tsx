@@ -1,25 +1,79 @@
 'use client';
 
-import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { TimetableWidget } from '@/components/student/TimetableWidget';
-import { AttendanceMeterWidget } from '@/components/student/AttendanceMeterWidget';
-import { FinancialDuesWidget } from '@/components/student/FinancialDuesWidget';
-import { GatePassDialog } from '@/components/student/GatePassDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  mockAttendance,
-  mockFeeDues,
-  mockTimetableToday,
-} from '@/lib/mock/student-dashboard';
-import { GraduationCap, BookOpen } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { Bell, CalendarClock, CreditCard, GraduationCap, UserRoundCheck } from 'lucide-react';
+import type { TimetableSlot } from '@/lib/mock/student-dashboard';
+import { useAuthedApi } from '@/lib/api';
+
+type Summary = {
+  cgpa: number;
+  credits_completed: number;
+  credits_required: number;
+  attendance_percent: number;
+};
+
+type Alert = {
+  alert_id: string;
+  title: string;
+  message: string | null;
+};
+
+type TimetableResponse = {
+  timetable_id: string;
+  course_name: string;
+  room: string | null;
+  faculty_name: string | null;
+  start_time: string;
+  end_time: string;
+  status: 'upcoming' | 'ongoing' | 'done';
+};
 
 export default function StudentDashboardPage() {
   const { user } = useAuth();
+  const api = useAuthedApi();
   const firstName = user?.name?.split(' ')[0] ?? 'Student';
-  const hallTicketBlocked = mockAttendance.percentage < 75 || mockFeeDues.totalPending > 0;
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
+
+  useEffect(() => {
+    async function loadDashboard() {
+      try {
+        const [metrics, alertRows, timetableRows] = await Promise.all([
+          api.get<Summary>('/api/academics/dashboard/metrics'),
+          api.get<Alert[]>('/api/system/alerts/my-alerts'),
+          api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
+        ]);
+        setSummary(metrics);
+        setAlerts(alertRows);
+        setTimetable(
+          timetableRows.map((slot) => ({
+            id: slot.timetable_id,
+            subject: slot.course_name,
+            room: `${slot.room ?? 'Room TBA'}${slot.faculty_name ? ` · ${slot.faculty_name}` : ''}`,
+            start: slot.start_time.slice(0, 5),
+            end: slot.end_time.slice(0, 5),
+            status: slot.status,
+          })),
+        );
+      } catch (error) {
+        console.error('Failed to load dashboard', error);
+      }
+    }
+    void loadDashboard();
+  }, [api]);
+
+  const stats = [
+    { label: 'Overall CGPA', value: '8.42', helper: 'Up by 0.12 from last semester', icon: GraduationCap },
+    { label: 'Credits', value: `${summary?.credits_completed ?? 108} / ${summary?.credits_required ?? 160}`, helper: 'Graduation progress', icon: CreditCard },
+    { label: 'Attendance', value: `${summary?.attendance_percent ?? 84}%`, helper: 'Current semester', icon: UserRoundCheck },
+  ];
+  stats[0].value = `${summary?.cgpa ?? 8.2}`;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -27,74 +81,84 @@ export default function StudentDashboardPage() {
         <p className="text-sm font-medium text-sgvu-gold">Good afternoon</p>
         <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">Hi, {firstName}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Here&apos;s where you stand today — classes, attendance, and fees at a glance.
+          Your academic health at a glance: performance, credits, attendance, and proctor touchpoints.
         </p>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
-        <div className="lg:col-span-2">
-          <TimetableWidget slots={mockTimetableToday} />
-        </div>
-        <div className="space-y-4 lg:space-y-6">
-          <AttendanceMeterWidget
-            percentage={mockAttendance.percentage}
-            present={mockAttendance.present}
-            total={mockAttendance.total}
-            minimumRequired={mockAttendance.minimumRequired}
-          />
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {stats.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Card key={item.label}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{item.label}</p>
+                  <Icon className="h-4 w-4 text-sgvu-gold" />
+                </div>
+                <p className="mt-2 text-2xl font-bold text-sgvu-navy">{item.value}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{item.helper}</p>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:gap-6">
-        <FinancialDuesWidget
-          totalPending={mockFeeDues.totalPending}
-          dueDate={mockFeeDues.dueDate}
-          items={mockFeeDues.items}
-        />
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick actions</CardTitle>
+      <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Bell className="h-4 w-4 text-sgvu-gold" />
+              Alerts & Notifications
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <GatePassDialog />
-            <Button asChild variant="outline" className="w-full justify-start gap-2 touch-target" size="lg">
-              <Link href="/student/courses">
-                <BookOpen className="h-5 w-5 text-sgvu-gold" />
-                Course Registration (CBCS)
-              </Link>
-            </Button>
-            <div className="rounded-xl border border-dashed border-border p-4">
-              <div className="flex items-start justify-between gap-2">
+            {alerts.length === 0 && (
+              <p className="text-sm text-muted-foreground">No unread alerts right now.</p>
+            )}
+            {alerts.map((alert) => (
+              <div key={alert.alert_id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
                 <div>
-                  <p className="flex items-center gap-2 font-semibold text-sgvu-navy">
-                    <GraduationCap className="h-5 w-5" />
-                    Hall Ticket
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {hallTicketBlocked
-                      ? 'Blocked: attendance below 75% or fees pending.'
-                      : 'Ready to download.'}
-                  </p>
+                  <p className="text-sm font-medium">{alert.title}</p>
+                  {alert.message && <p className="text-xs text-muted-foreground">{alert.message}</p>}
                 </div>
-                {hallTicketBlocked && <Badge variant="destructive">Locked</Badge>}
+                <Badge
+                  variant="warning"
+                  className="shrink-0"
+                >
+                  unread
+                </Badge>
               </div>
-              <Button
-                asChild={!hallTicketBlocked}
-                disabled={hallTicketBlocked}
-                className="mt-4 w-full"
-                variant={hallTicketBlocked ? 'outline' : 'default'}
-              >
-                {hallTicketBlocked ? (
-                  <span>Download unavailable</span>
-                ) : (
-                  <Link href="/student/exams">Download Hall Ticket</Link>
-                )}
-              </Button>
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarClock className="h-4 w-4 text-sgvu-gold" />
+              Attendance trend
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span>Present</span>
+                <span className="font-semibold">{summary?.attendance_percent ?? 0}%</span>
+              </div>
+              <Progress value={summary?.attendance_percent ?? 0} />
             </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span>Minimum Required</span>
+                <span className="font-semibold">75%</span>
+              </div>
+              <Progress value={75} />
+            </div>
+            <p className="text-xs text-muted-foreground">Subject-wise attendance is available in Academics.</p>
           </CardContent>
         </Card>
       </div>
+
+      <TimetableWidget slots={timetable} />
     </div>
   );
 }
