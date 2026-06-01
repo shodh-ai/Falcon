@@ -8,7 +8,10 @@ export default function ParentDashboardPage() {
   const [overview, setOverview] = useState<{ children: Array<{ name: string; official_email: string }> } | null>(null);
 
   useEffect(() => {
-    void api.get('/api/parent/overview').then(setOverview).catch(() => setOverview(null));
+    void api
+      .get<{ children: Array<{ name: string; official_email: string }> }>('/api/parent/overview')
+      .then(setOverview)
+      .catch(() => setOverview(null));
   }, [api]);
 
   return (

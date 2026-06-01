@@ -8,7 +8,7 @@ import { useAuthedApi } from '@/lib/api';
 export default function PlacementDrivesPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const load = () => void api.get('/api/placement/drives').then(setRows).catch(() => setRows([]));
+  const load = () => void api.get<Record<string, unknown>[]>('/api/placement/drives').then(setRows).catch(() => setRows([]));
   useEffect(() => {
     load();
   }, [api]);

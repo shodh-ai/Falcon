@@ -7,7 +7,7 @@ export default function PlacementMockInterviewsPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   useEffect(() => {
-    void api.get('/api/placement/mock-interviews').then(setRows).catch(() => setRows([]));
+    void api.get<Record<string, unknown>[]>('/api/placement/mock-interviews').then(setRows).catch(() => setRows([]));
   }, [api]);
   return (
     <div className="p-6">

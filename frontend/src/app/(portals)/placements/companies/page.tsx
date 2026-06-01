@@ -7,7 +7,7 @@ export default function PlacementCompaniesPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   useEffect(() => {
-    void api.get('/api/placement/companies').then(setRows).catch(() => setRows([]));
+    void api.get<Record<string, unknown>[]>('/api/placement/companies').then(setRows).catch(() => setRows([]));
   }, [api]);
   return (
     <div className="p-6">

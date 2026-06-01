@@ -7,7 +7,7 @@ export default function AdminOpsTimetablePage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   useEffect(() => {
-    void api.get('/api/admin-ops/timetable?academic_year=2026-27').then(setRows).catch(() => setRows([]));
+    void api.get<Record<string, unknown>[]>('/api/admin-ops/timetable?academic_year=2026-27').then(setRows).catch(() => setRows([]));
   }, [api]);
   return (
     <div className="p-6">

@@ -7,7 +7,7 @@ export default function AdminOpsAssetsPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   useEffect(() => {
-    void api.get('/api/admin-ops/assets').then(setRows).catch(() => setRows([]));
+    void api.get<Record<string, unknown>[]>('/api/admin-ops/assets').then(setRows).catch(() => setRows([]));
   }, [api]);
   return (
     <div className="p-6">

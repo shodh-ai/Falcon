@@ -11,8 +11,10 @@ export default function AlumniAdminDonationsPage() {
   const [ledger, setLedger] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
-    void api.get('/api/alumni-admin/donations/summary').then(setSummary);
-    void api.get('/api/alumni-admin/donations').then(setLedger);
+    void api
+      .get<{ total_funds_raised_fy: number; financial_year_start: string }>('/api/alumni-admin/donations/summary')
+      .then(setSummary);
+    void api.get<Record<string, unknown>[]>('/api/alumni-admin/donations').then(setLedger);
   }, [api]);
 
   return (
