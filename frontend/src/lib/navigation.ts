@@ -20,6 +20,30 @@ import {
   Award,
   UserCog,
   Banknote,
+  BookOpen,
+  FileText,
+  PenLine,
+  Eye,
+  FlaskConical,
+  LineChart,
+  NotebookPen,
+  CalendarClock,
+  Microscope,
+  FolderLock,
+  Timer,
+  ArrowUpCircle,
+  Briefcase,
+  Archive,
+  DoorOpen,
+  Medal,
+  Library,
+  BusFront,
+  TrendingUp,
+  Heart,
+  Calendar,
+  CheckCircle,
+  DollarSign,
+  Network,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -58,7 +82,7 @@ export function filterPortalConfigForRole(config: PortalConfig, role: string | u
 
 export const studentPortal: PortalConfig = {
   personaLabel: 'Student Portal',
-  personaTitle: 'SGVU Academics',
+  personaTitle: 'SGVU Student Life',
   homeHref: '/student/dashboard',
   navGroups: [
     {
@@ -66,44 +90,49 @@ export const studentPortal: PortalConfig = {
       items: [{ label: 'Dashboard', href: '/student/dashboard', icon: LayoutDashboard, keywords: ['home', 'overview'] }],
     },
     {
-      title: 'Academics',
+      title: 'Profile & Admission Hub',
       items: [
-        { label: 'Academics & DA Uploads', href: '/student/academics', icon: GraduationCap, keywords: ['grades', 'attendance', 'results', 'digital assignments', 'cbcs'] },
-        { label: 'Examinations', href: '/student/exams', icon: ClipboardList, keywords: ['exam', 'hall ticket', 'admit card', 'schedule'] },
+        { label: 'My Profile & Master Data', href: '/student/profile', icon: UserRoundCog, keywords: ['profile', 'aadhaar', 'scholarship', 'enrollment'] },
+        { label: 'Admission & Document Vault', href: '/student/admission-vault', icon: Archive, keywords: ['admission', 'counseling', 'entrance', 'migration'] },
+        { label: 'Exit & Alumni Transition', href: '/student/exit', icon: DoorOpen, keywords: ['no dues', 'degree', 'alumni', 'graduation'] },
+      ],
+    },
+    {
+      title: 'Academics & Examinations',
+      items: [
+        { label: 'Subjects & Registration (CBCS)', href: '/student/registration', icon: BookOpen, keywords: ['cbcs', 'electives', 'credits', 'courses'] },
+        { label: 'Attendance & Progression', href: '/student/attendance', icon: ClipboardCheck, keywords: ['attendance', 'semester', 'progression'] },
+        { label: 'Marks & Grade Cards', href: '/student/marks', icon: TrendingUp, keywords: ['sgpa', 'cgpa', 'backlog', 'atkt', 'grades'] },
+        { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList, keywords: ['admit card', 'seating', 'ufm', 'revaluation'] },
       ],
     },
     {
       title: 'Campus Services',
       items: [
-        { label: 'Hostel & Gate Pass', href: '/student/hostel', icon: Bus, keywords: ['room', 'mess', 'gate pass'] },
-        { label: 'Finance & Fees', href: '/student/fees', icon: Wallet, keywords: ['fee demands', 'receipts', 'pay fees'] },
+        { label: 'Hostel & Mess', href: '/student/hostel', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'room'] },
+        { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
+        { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
+        { label: 'Extra-Curriculars', href: '/student/extracurriculars', icon: Medal, keywords: ['ncc', 'nss', 'sodeca', 'credits'] },
       ],
     },
     {
-      title: 'Mentorship',
-      items: [{ label: 'Proctor Connect', href: '/student/mentorship', icon: Handshake, keywords: ['mentor', 'meeting', 'leave'] }],
-    },
-    {
-      title: 'Profile',
+      title: 'Support & Placements',
       items: [
-        { label: 'My Profile & Vault', href: '/student/profile', icon: UserRoundCog, keywords: ['profile', 'bank', 'documents'] },
-        { label: 'Achievements & Certifications', href: '/student/profile/certificates', icon: Award, keywords: ['certificate', 'course', 'workshop', 'sports', 'iqac'] },
+        { label: 'Mentorship (Proctor)', href: '/student/mentorship', icon: Handshake, keywords: ['proctor', 'mentor', 'meeting'] },
+        { label: 'Placements & Internships', href: '/student/placements', icon: Briefcase, keywords: ['placement', 'jobs', 'internship'] },
+        { label: 'Grievances & Helpdesk', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'discipline', 'grievance'] },
       ],
-    },
-    {
-      title: 'Support',
-      items: [{ label: 'Helpdesk & Tickets', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'support'] }],
     },
   ],
   commandItems: [
     { label: 'Dashboard', href: '/student/dashboard', icon: LayoutDashboard },
-    { label: 'Academics & DA', href: '/student/academics', icon: GraduationCap },
-    { label: 'Examinations', href: '/student/exams', icon: ClipboardList },
-    { label: 'Hostel', href: '/student/hostel', icon: Bus },
-    { label: 'Fees', href: '/student/fees', icon: Wallet },
-    { label: 'Proctor Connect', href: '/student/mentorship', icon: Handshake },
     { label: 'My Profile', href: '/student/profile', icon: UserRoundCog },
-    { label: 'Certificates', href: '/student/profile/certificates', icon: Award },
+    { label: 'Admission Vault', href: '/student/admission-vault', icon: Archive },
+    { label: 'CBCS Registration', href: '/student/registration', icon: BookOpen },
+    { label: 'Attendance', href: '/student/attendance', icon: ClipboardCheck },
+    { label: 'Marks', href: '/student/marks', icon: TrendingUp },
+    { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
+    { label: 'Hostel', href: '/student/hostel', icon: Bus },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
 };
@@ -118,92 +147,109 @@ export const facultyPortal: PortalConfig = {
       items: [{ label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard }],
     },
     {
-      title: 'Academics',
+      title: 'Academics & Teaching',
       items: [
-        { label: 'Academics, Attendance & DA', href: '/faculty/academics', icon: ClipboardCheck, keywords: ['attendance', 'class', 'materials', 'digital assignments', 'grade da'] },
-        { label: 'Mentorship & Certificates', href: '/faculty/mentorship', icon: Handshake, keywords: ['proctor', 'mentor', 'certificates'] },
+        { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp'] },
+        { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
+        { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt'] },
+        { label: 'Digital Assignments (DA)', href: '/faculty/assignments', icon: FileText, keywords: ['da', 'submission', 'deadline'] },
+        { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
+        { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
+        { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
+        { label: 'Digital Class Logbook', href: '/faculty/logbook', icon: NotebookPen, keywords: ['lecture', 'topic', 'log'] },
       ],
     },
     {
-      title: 'HR',
-      items: [{ label: 'HR & Employee Hub', href: '/faculty/leaves', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'punch'] }],
+      title: 'Students & Mentoring',
+      items: [
+        { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['proctor', 'mentor', 'certificates'] },
+        { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
+      ],
     },
     {
-      title: 'IQAC',
-      items: [{ label: 'Falcon Core Tasks', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload'] }],
+      title: 'Research & Duties',
+      items: [
+        { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
+        { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
+      ],
+    },
+    {
+      title: 'Administration',
+      items: [
+        { label: 'HR & Employee Hub', href: '/faculty/leaves', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'punch'] },
+        { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
+      ],
     },
   ],
   commandItems: [
-    { label: 'Academics, Attendance & DA', href: '/faculty/academics', icon: ClipboardCheck },
-    { label: 'Mentorship & Certificates', href: '/faculty/mentorship', icon: Handshake },
+    { label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard },
+    { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock },
+    { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck },
+    { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen },
+    { label: 'Digital Assignments', href: '/faculty/assignments', icon: FileText },
+    { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine },
+    { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap },
+    { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake },
+    { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope },
+    { label: 'Exam Invigilation', href: '/faculty/invigilation', icon: Eye },
+    { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical },
     { label: 'HR & Employee Hub', href: '/faculty/leaves', icon: CalendarDays },
     { label: 'Falcon Core Tasks', href: '/faculty/iqac', icon: ListChecks },
+    { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart },
+    { label: 'Class Logbook', href: '/faculty/logbook', icon: NotebookPen },
   ],
 };
 
 export const hrPortal: PortalConfig = {
   personaLabel: 'HR Operations',
-  personaTitle: 'HR Command Center',
+  personaTitle: 'Falcon HRMS',
   homeHref: '/hr/dashboard',
   navGroups: [
     {
-      title: 'Core HR',
+      title: 'Home',
+      items: [{ label: 'Dashboard', href: '/hr/dashboard', icon: LayoutDashboard, keywords: ['metrics', 'actions'] }],
+    },
+    {
+      title: 'Employee Master',
       items: [
-        { label: 'Dashboard', href: '/hr/dashboard', icon: LayoutDashboard, keywords: ['metrics', 'actions'] },
-        { label: 'Directory', href: '/hr/directory', icon: UserCog, keywords: ['employees', 'master', 'database'] },
+        { label: 'Employee Directory', href: '/hr/directory', icon: Users, keywords: ['staff', '500', 'roster'] },
+        { label: 'KYC & Document Vault', href: '/hr/kyc', icon: FolderLock, keywords: ['pan', 'aadhaar', 'bank', 'encrypted'] },
       ],
     },
     {
-      title: 'Time & Leave',
+      title: 'Time & Leaves',
       items: [
-        { label: 'Attendance Matrix', href: '/hr/attendance-matrix', icon: CalendarRange, keywords: ['attendance', 'month', 'calendar'] },
-        { label: 'Leaves', href: '/hr/leaves', icon: CalendarDays, keywords: ['leave', 'hod approved', 'queue'] },
-        { label: 'Holidays', href: '/hr/holidays', icon: ClipboardList, keywords: ['diwali', 'summer break', 'calendar'] },
+        { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'] },
+        { label: 'Leave Management & Balances', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval'] },
       ],
     },
     {
-      title: 'Payroll',
+      title: 'Payroll & Finance',
       items: [
-        { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, keywords: ['basic', 'hra', 'da', 'pf'] },
-        { label: 'Run Payroll', href: '/hr/payroll/run', icon: Banknote, keywords: ['payslip', 'salary', 'bullmq'] },
+        { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, keywords: ['basic', 'hra', 'da', 'pf', 'tds'] },
+        { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, keywords: ['run payroll', 'payslip', 'lwp'] },
       ],
     },
     {
-      title: 'Recruitment',
+      title: 'Performance & Lifecycle',
       items: [
-        { label: 'Job Postings', href: '/hr/recruitment/jobs', icon: ClipboardCheck, keywords: ['ats', 'jobs'] },
-        { label: 'Pipeline', href: '/hr/recruitment/pipeline', icon: Kanban, keywords: ['kanban', 'applicants'] },
-      ],
-    },
-    {
-      title: 'Lifecycle',
-      items: [
-        { label: 'Onboarding', href: '/hr/onboarding', icon: Handshake, keywords: ['email', 'id card', 'workstation'] },
-        { label: 'Offboarding', href: '/hr/offboarding', icon: Shield, keywords: ['no dues', 'clearance'] },
-      ],
-    },
-    {
-      title: 'PMS',
-      items: [
-        { label: 'Appraisals', href: '/hr/pms/appraisals', icon: Award, keywords: ['cycle', 'performance'] },
-        { label: 'Faculty KPIs', href: '/hr/pms/faculty-kpis', icon: BarChart3, keywords: ['research', 'patents', 'feedback'] },
+        { label: 'Recruitment (ATS)', href: '/hr/recruitment', icon: Briefcase, keywords: ['kanban', 'hired', 'interview'] },
+        { label: 'Appraisals & API Scores', href: '/hr/appraisals', icon: Award, keywords: ['ugc', 'api', 'scopus', 'research'] },
+        { label: 'Promotions & Workflows', href: '/hr/promotions', icon: ArrowUpCircle, keywords: ['associate prof', 'professor', 'eligible'] },
       ],
     },
   ],
   commandItems: [
     { label: 'HR Dashboard', href: '/hr/dashboard', icon: LayoutDashboard },
-    { label: 'Directory', href: '/hr/directory', icon: UserCog },
-    { label: 'Attendance Matrix', href: '/hr/attendance-matrix', icon: CalendarRange },
-    { label: 'Leaves', href: '/hr/leaves', icon: CalendarDays },
-    { label: 'Holidays', href: '/hr/holidays', icon: ClipboardList },
+    { label: 'Employee Directory', href: '/hr/directory', icon: Users },
+    { label: 'KYC Vault', href: '/hr/kyc', icon: FolderLock },
+    { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer },
+    { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays },
     { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet },
-    { label: 'Run Payroll', href: '/hr/payroll/run', icon: Banknote },
-    { label: 'Job Postings', href: '/hr/recruitment/jobs', icon: ClipboardCheck },
-    { label: 'Pipeline', href: '/hr/recruitment/pipeline', icon: Kanban },
-    { label: 'Onboarding', href: '/hr/onboarding', icon: Handshake },
-    { label: 'Offboarding', href: '/hr/offboarding', icon: Shield },
-    { label: 'Appraisals', href: '/hr/pms/appraisals', icon: Award },
-    { label: 'Faculty KPIs', href: '/hr/pms/faculty-kpis', icon: BarChart3 },
+    { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote },
+    { label: 'Recruitment ATS', href: '/hr/recruitment', icon: Briefcase },
+    { label: 'Appraisals & API', href: '/hr/appraisals', icon: Award },
+    { label: 'Promotions', href: '/hr/promotions', icon: ArrowUpCircle },
   ],
 };
 
@@ -286,26 +332,55 @@ export const financePortal: PortalConfig = {
 
 export const iqacPortal: PortalConfig = {
   personaLabel: 'IQAC Administration',
-  personaTitle: 'Falcon Core · Compliance',
+  personaTitle: 'Central Monitoring & Analytics',
   homeHref: '/iqac/dashboard',
   navGroups: [
     {
-      title: 'Accreditation',
+      title: 'Analytics & KPI',
       items: [
-        { label: 'Dashboard', href: '/iqac/dashboard', icon: LayoutDashboard, keywords: ['heat map', 'departments'] },
-        { label: 'Task Master', href: '/iqac/task-master', icon: ListChecks, keywords: ['recurring', 'monthly', 'governance'] },
-        { label: 'Document Vault', href: '/iqac/document-vault', icon: ClipboardList, keywords: ['ai', 'gemini', 'submissions'] },
-        { label: 'Student Achievements', href: '/iqac/student-achievements', icon: Award, keywords: ['certificates', 'naac points'] },
-        { label: 'Export Center', href: '/iqac/export-center', icon: BarChart3, keywords: ['excel', 'reports', 'accreditation'] },
+        { label: 'Master KPI Dashboard', href: '/iqac/dashboard', icon: LayoutDashboard, keywords: ['fsr', 'phd', 'grants'] },
+        { label: 'Ranking Analytics (NIRF)', href: '/iqac/ranking', icon: LineChart, keywords: ['nirf', 'simulation', 'ranking'] },
+      ],
+    },
+    {
+      title: 'Faculty & Academic Data',
+      items: [
+        { label: 'Faculty Contributions', href: '/iqac/faculty-data', icon: Users, keywords: ['publications', 'patents', 'fdp'] },
+        { label: 'Academic Audits & Feedback', href: '/iqac/audits', icon: ClipboardCheck, keywords: ['sss', 'survey', 'feedback'] },
+      ],
+    },
+    {
+      title: 'Student Outcomes',
+      items: [
+        { label: 'Progression & Placements', href: '/iqac/student-outcomes', icon: GraduationCap, keywords: ['lpa', 'alumni', 'placed'] },
+        { label: 'Student Achievements', href: '/iqac/student-achievements', icon: Award, keywords: ['certificates', 'naac'] },
+      ],
+    },
+    {
+      title: 'Alumni Relations',
+      items: [
+        { label: 'Alumni Verification', href: '/iqac/alumni/verification', icon: CheckCircle, keywords: ['approve', 'pending'] },
+        { label: 'Donation Ledger', href: '/iqac/alumni/donations', icon: DollarSign, keywords: ['endowment', '80g'] },
+        { label: 'Alumni Events', href: '/iqac/alumni/events', icon: Calendar, keywords: ['rsvp', 'meet'] },
+      ],
+    },
+    {
+      title: 'Accreditation & Reports',
+      items: [
+        { label: 'NAAC Document Repository', href: '/iqac/repository', icon: FolderLock, keywords: ['criterion', '7 criteria', 'vault'] },
+        { label: 'Report Generator (AQAR & SSR)', href: '/iqac/reports', icon: FileText, keywords: ['aqar', 'ssr', 'pdf'] },
+        { label: 'Falcon Core Tasks', href: '/iqac/tasks', icon: ListChecks, keywords: ['task master', 'ai', 'submissions'] },
       ],
     },
   ],
   commandItems: [
-    { label: 'IQAC Dashboard', href: '/iqac/dashboard', icon: LayoutDashboard },
-    { label: 'Task Master', href: '/iqac/task-master', icon: ListChecks },
-    { label: 'Document Vault', href: '/iqac/document-vault', icon: ClipboardList },
-    { label: 'Student Achievements', href: '/iqac/student-achievements', icon: Award },
-    { label: 'Export Center', href: '/iqac/export-center', icon: BarChart3 },
+    { label: 'KPI Dashboard', href: '/iqac/dashboard', icon: LayoutDashboard },
+    { label: 'NIRF Analytics', href: '/iqac/ranking', icon: LineChart },
+    { label: 'Faculty Data', href: '/iqac/faculty-data', icon: Users },
+    { label: 'NAAC Repository', href: '/iqac/repository', icon: FolderLock },
+    { label: 'AQAR / SSR Reports', href: '/iqac/reports', icon: FileText },
+    { label: 'Alumni Verification', href: '/iqac/alumni/verification', icon: CheckCircle },
+    { label: 'Falcon Core Tasks', href: '/iqac/tasks', icon: ListChecks },
   ],
 };
 
@@ -402,6 +477,39 @@ export const presidentPortal: PortalConfig = {
     { label: 'Compliance', href: '/president/compliance', icon: Shield },
     { label: 'HR Analytics', href: '/president/hr-analytics', icon: Users },
   ],
+};
+
+export const alumniPortal: PortalConfig = {
+  personaLabel: 'Falcon Alumni Network',
+  personaTitle: 'Graduate Portal',
+  homeHref: '/alumni/dashboard',
+  navGroups: [
+    {
+      title: 'Alumni Network',
+      items: [
+        { label: 'Dashboard', href: '/alumni/dashboard', icon: LayoutDashboard, keywords: ['overview', 'alumni'] },
+        { label: 'My Career Profile', href: '/alumni/profile', icon: UserCog, keywords: ['organization', 'linkedin', 'higher education'] },
+        { label: 'Alumni Directory', href: '/alumni/directory', icon: Network, keywords: ['batch', 'network', 'microsoft'] },
+        { label: 'Mentorship Program', href: '/alumni/mentorship', icon: Handshake, keywords: ['mentor', 'guidance', 'students'] },
+        { label: 'Giving Back', href: '/alumni/donations', icon: Heart, keywords: ['donation', '80g', 'razorpay', 'endowment'] },
+        { label: 'Alumni Events', href: '/alumni/events', icon: Calendar, keywords: ['meet', 'rsvp', 'guest lecture'] },
+        { label: 'University Services', href: '/alumni/services', icon: FileText, keywords: ['transcript', 'migration', 'degree'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Alumni Dashboard', href: '/alumni/dashboard', icon: LayoutDashboard },
+    { label: 'Career Profile', href: '/alumni/profile', icon: UserCog },
+    { label: 'Directory', href: '/alumni/directory', icon: Network },
+    { label: 'Donations', href: '/alumni/donations', icon: Heart },
+    { label: 'Events', href: '/alumni/events', icon: Calendar },
+  ],
+};
+
+/** Legacy portal key — routes redirect to IQAC; nav mirrors iqacPortal. */
+export const alumniAdminPortal: PortalConfig = {
+  ...iqacPortal,
+  homeHref: '/iqac/alumni/verification',
 };
 
 export const adminPortal: PortalConfig = {

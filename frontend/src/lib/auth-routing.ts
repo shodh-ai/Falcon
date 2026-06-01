@@ -44,6 +44,10 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/parent/dashboard';
   }
 
+  if (r === 'alumni') {
+    return '/alumni/dashboard';
+  }
+
   if (r === 'examcell' || r === 'exam cell') {
     return '/exam-cell/dashboard';
   }
@@ -72,6 +76,7 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'librarian') return 'Library Workspace';
   if (r === 'president') return 'Executive Workspace';
   if (r === 'parent') return 'Parent Workspace';
+  if (r === 'alumni') return 'Alumni Network';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell Workspace';
   return `${role} Workspace`;
 }
@@ -89,6 +94,7 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'librarian') return 'Library';
   if (r === 'president') return 'Executive';
   if (r === 'parent') return 'Parent';
+  if (r === 'alumni') return 'Alumni';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell';
   return role;
 }
@@ -100,11 +106,13 @@ const portalRoles: Record<string, string[]> = {
   '/hr': ['hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],
   '/finance': ['accountant', 'superadmin'],
-  '/iqac': ['iqac', 'superadmin'],
+  '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
   '/library': ['librarian', 'superadmin'],
   '/president': ['president', 'superadmin'],
   '/parent': ['parent', 'superadmin'],
   '/exam-cell': ['examcell', 'superadmin'],
+  '/alumni': ['alumni'],
+  '/alumni-admin': ['iqac', 'superadmin', 'registrar', 'president'],
   '/admin': ['superadmin', 'registrar'],
 };
 

@@ -1,5 +1,5 @@
-import { HrmsPage } from '@/components/workspaces/HrmsPage';
+import { redirect } from 'next/navigation';
 
-export default function HrAppraisalsPage() {
-  return <HrmsPage kind="appraisals" />;
+export default function HrPmsAppraisalsRedirect() {
+  redirect('/hr/appraisals');
 }

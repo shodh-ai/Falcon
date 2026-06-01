@@ -1,21 +1,107 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { IqacService } from './iqac.service';
+import { IqacAnalyticsService } from './iqac-analytics.service';
+import { AlumniAdminService } from '../alumni/alumni-admin.service';
 import { CreateJobPostingDto } from './dto/create-job-posting.dto';
 import { ApplyToJobDto } from './dto/apply-to-job.dto';
 import { CreateAlumniRequestDto } from './dto/create-alumni-request.dto';
 
+type AuthUser = { user_id: string; tenant_id?: string };
+
 @Controller('iqac')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class IqacController {
-  constructor(private readonly iqac: IqacService) {}
+  constructor(
+    private readonly iqac: IqacService,
+    private readonly analytics: IqacAnalyticsService,
+    private readonly alumniAdmin: AlumniAdminService,
+  ) {}
 
   @Get('dashboard')
   @Roles('SuperAdmin', 'IQAC', 'President')
-  dashboard() {
-    return this.iqac.getDashboard();
+  dashboard(@Req() req: { user: AuthUser }) {
+    return this.analytics.getKpiDashboard(this.tenant(req));
+  }
+
+  @Get('ranking-analytics')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  ranking(@Req() req: { user: AuthUser }) {
+    return this.analytics.getRankingAnalytics(this.tenant(req));
+  }
+
+  @Get('faculty-data')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  facultyData(
+    @Req() req: { user: AuthUser },
+    @Query('tab') tab = 'publications',
+    @Query('academic_year') academicYear?: string,
+  ) {
+    return this.analytics.getFacultyData(this.tenant(req), tab, academicYear);
+  }
+
+  @Get('faculty-data/export')
+  @Roles('SuperAdmin', 'IQAC')
+  @Header('Content-Type', 'text/csv')
+  async facultyExport(
+    @Req() req: { user: AuthUser },
+    @Query('tab') tab = 'publications',
+    @Res() res: Response,
+  ) {
+    const data = await this.analytics.getFacultyData(this.tenant(req), tab);
+    const csv = this.analytics.exportFacultyCsv(data.rows as Record<string, unknown>[]);
+    res.setHeader('Content-Disposition', `attachment; filename="iqac-faculty-${tab}.csv"`);
+    res.send(csv);
+  }
+
+  @Get('student-outcomes')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  studentOutcomes(@Req() req: { user: AuthUser }) {
+    return this.analytics.getStudentOutcomes(this.tenant(req));
+  }
+
+  @Get('repository')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  repository(
+    @Req() req: { user: AuthUser },
+    @Query('criterion') criterion?: string,
+    @Query('academic_year') academicYear?: string,
+  ) {
+    return this.analytics.getRepository(
+      this.tenant(req),
+      criterion ? Number(criterion) : undefined,
+      academicYear,
+    );
+  }
+
+  @Get('audits')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  audits(@Req() req: { user: AuthUser }, @Query('academic_year') academicYear?: string) {
+    return this.analytics.getAudits(this.tenant(req), academicYear);
+  }
+
+  @Get('reports')
+  @Roles('SuperAdmin', 'IQAC')
+  reports(@Req() req: { user: AuthUser }) {
+    return this.analytics.listReports(this.tenant(req));
+  }
+
+  @Post('reports/generate')
+  @Roles('SuperAdmin', 'IQAC')
+  generateReport(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { report_type: 'AQAR' | 'SSR'; academic_year: string },
+  ) {
+    return this.analytics.generateReport(this.tenant(req), req.user.user_id, dto);
+  }
+
+  @Post('analytics/refresh')
+  @Roles('SuperAdmin', 'IQAC')
+  refreshViews() {
+    return this.analytics.refreshMaterializedViews();
   }
 
   @Get('task-master')
@@ -26,7 +112,16 @@ export class IqacController {
 
   @Post('task-master')
   @Roles('SuperAdmin', 'IQAC')
-  createTaskMaster(@Body() dto: { task_name?: string; task_description?: string; role_id?: number; month?: string; is_recurring?: boolean }) {
+  createTaskMaster(
+    @Body()
+    dto: {
+      task_name?: string;
+      task_description?: string;
+      role_id?: number;
+      month?: string;
+      is_recurring?: boolean;
+    },
+  ) {
     return this.iqac.createTaskMaster(dto);
   }
 
@@ -72,5 +167,58 @@ export class IqacController {
   @Post('alumni/requests')
   createAlumniRequest(@Body() dto: CreateAlumniRequestDto) {
     return this.iqac.createAlumniRequest(dto);
+  }
+
+  @Get('alumni/verification-queue')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar', 'President')
+  alumniVerificationQueue(@Req() req: { user: AuthUser }) {
+    return this.alumniAdmin.verificationQueue(this.tenant(req));
+  }
+
+  @Patch('alumni/profiles/:alumniId/verify')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar')
+  alumniVerify(
+    @Req() req: { user: AuthUser },
+    @Param('alumniId') alumniId: string,
+    @Body() dto: { action: 'approve' | 'reject' },
+  ) {
+    return this.alumniAdmin.verifyProfile(this.tenant(req), alumniId, req.user.user_id, dto);
+  }
+
+  @Get('alumni/donations')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar')
+  alumniDonations(@Req() req: { user: AuthUser }) {
+    return this.alumniAdmin.donationLedger(this.tenant(req));
+  }
+
+  @Get('alumni/donations/summary')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar')
+  alumniDonationSummary(@Req() req: { user: AuthUser }) {
+    return this.alumniAdmin.donationSummary(this.tenant(req));
+  }
+
+  @Get('alumni/engagement')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  alumniEngagement(@Req() req: { user: AuthUser }) {
+    return this.alumniAdmin.engagementAnalytics(this.tenant(req));
+  }
+
+  @Get('alumni/events')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar')
+  alumniEvents(@Req() req: { user: AuthUser }) {
+    return this.alumniAdmin.listEventsAdmin(this.tenant(req));
+  }
+
+  @Post('alumni/events')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar')
+  alumniCreateEvent(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { title: string; event_date: string; venue?: string; description?: string },
+  ) {
+    return this.alumniAdmin.createEvent(this.tenant(req), dto);
+  }
+
+  private tenant(req: { user: AuthUser }) {
+    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
 }

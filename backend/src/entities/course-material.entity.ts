@@ -32,6 +32,12 @@ export class CourseMaterial extends BaseTenantEntity {
   @Column({ type: 'text', nullable: true })
   file_key: string | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  module_id: string | null;
+
+  @Column({ type: 'varchar', length: 50, default: 'NOTES' })
+  material_type: string;
+
   @CreateDateColumn()
   uploaded_at: Date;
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,10 +11,10 @@ import { Loader2 } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
 
 const categories = [
-  { label: 'Name Correction', value: 'ACADEMICS' },
-  { label: 'Fee Receipt not generated', value: 'FINANCE' },
-  { label: 'WiFi login issue', value: 'IT' },
-  { label: 'Hostel Maintenance', value: 'HOSTEL' },
+  { label: 'IT / WiFi', value: 'IT' },
+  { label: 'Maintenance', value: 'HOSTEL' },
+  { label: 'Academics', value: 'ACADEMICS' },
+  { label: 'Finance', value: 'FINANCE' },
 ] as const;
 
 type Ticket = {
@@ -23,10 +24,19 @@ type Ticket = {
   subject: string;
 };
 
+type DisciplineRecord = {
+  record_id: string;
+  incident_type: string;
+  description: string;
+  action_taken: string;
+  date_logged: string;
+};
+
 export default function StudentHelpdeskPage() {
   const api = useAuthedApi();
-  const [form, setForm] = useState({ category: 'ACADEMICS', subject: '', description: '' });
+  const [form, setForm] = useState({ category: 'IT', subject: '', description: '' });
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [discipline, setDiscipline] = useState<DisciplineRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -43,7 +53,8 @@ export default function StudentHelpdeskPage() {
 
   useEffect(() => {
     void loadTickets();
-  }, []);
+    void api.get<DisciplineRecord[]>('/api/student/discipline').then(setDiscipline).catch(() => setDiscipline([]));
+  }, [api]);
 
   async function handleCreateTicket() {
     if (form.subject.trim().length < 5 || form.description.trim().length < 10) {
@@ -69,11 +80,28 @@ export default function StudentHelpdeskPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">Helpdesk & Ticketing</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Raise requests once and track ownership and status across departments.</p>
-      </section>
+    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
+      <StudentPageHeader
+        title="Grievances & Helpdesk"
+        description="Raise IT or maintenance grievances. Discipline records are read-only official notices from Proctor/Warden."
+      />
+
+      {discipline.length > 0 && (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardHeader>
+            <CardTitle className="text-base text-destructive">Discipline records (read-only)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {discipline.map((d) => (
+              <div key={d.record_id} className="rounded-lg border border-destructive/30 bg-background p-3 text-sm">
+                <p className="font-semibold">{d.incident_type} · {new Date(d.date_logged).toLocaleDateString()}</p>
+                <p className="mt-1">{d.description}</p>
+                <p className="mt-1 text-muted-foreground">Action: {d.action_taken}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">

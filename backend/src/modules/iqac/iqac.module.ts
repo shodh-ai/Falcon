@@ -10,9 +10,12 @@ import { TaskAssignment } from '../../entities/task-assignment.entity';
 import { TaskMaster } from '../../entities/task-master.entity';
 import { IqacController } from './iqac.controller';
 import { IqacService } from './iqac.service';
+import { IqacAnalyticsService } from './iqac-analytics.service';
+import { AlumniModule } from '../alumni/alumni.module';
 
 @Module({
   imports: [
+    AlumniModule,
     TypeOrmModule.forFeature([
       JobPosting,
       JobApplication,
@@ -25,7 +28,7 @@ import { IqacService } from './iqac.service';
     ]),
   ],
   controllers: [IqacController],
-  providers: [IqacService],
-  exports: [IqacService],
+  providers: [IqacService, IqacAnalyticsService],
+  exports: [IqacService, IqacAnalyticsService],
 })
 export class IqacModule {}

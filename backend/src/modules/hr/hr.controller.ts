@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { HrService } from './hr.service';
+import { HrAdminService } from './hr-admin.service';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { LeaveActionDto } from './dto/leave-action.dto';
 import { RunPayrollDto, UpdateEmployeeDto } from './dto/hr-operations.dto';
@@ -14,7 +15,10 @@ type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: st
 @Controller(['hr', 'api/hr'])
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class HrController {
-  constructor(private readonly hr: HrService) {}
+  constructor(
+    private readonly hr: HrService,
+    private readonly hrAdmin: HrAdminService,
+  ) {}
 
   @Post('leaves')
   createLeave(@Body() dto: CreateLeaveRequestDto) {
@@ -132,7 +136,126 @@ export class HrController {
   @Get('employees')
   @Roles('HR', 'SuperAdmin')
   listEmployees(@Req() req: { user: AuthUser }) {
-    return this.hr.listEmployees(this.resolveTenantId(req.user));
+    return this.hrAdmin.listDirectory(this.resolveTenantId(req.user));
+  }
+
+  @Get('directory')
+  @Roles('HR', 'SuperAdmin')
+  directory(@Req() req: { user: AuthUser }) {
+    return this.hrAdmin.listDirectory(this.resolveTenantId(req.user));
+  }
+
+  @Get('employees/:userId/360')
+  @Roles('HR', 'SuperAdmin')
+  employee360(@Param('userId') userId: string, @Req() req: { user: AuthUser }) {
+    return this.hrAdmin.getEmployee360(this.resolveTenantId(req.user), userId, false);
+  }
+
+  @Post('employees/:userId/kyc/reveal')
+  @Roles('HR', 'SuperAdmin')
+  revealKyc(
+    @Param('userId') userId: string,
+    @Req() req: { user: AuthUser },
+    @Body('field_group') fieldGroup: 'PAN' | 'AADHAAR' | 'BANK' | 'ALL' = 'ALL',
+  ) {
+    return this.hrAdmin.revealKyc(
+      this.resolveTenantId(req.user),
+      userId,
+      req.user.user_id,
+      fieldGroup,
+    );
+  }
+
+  @Patch('employees/:userId/master')
+  @Roles('HR', 'SuperAdmin')
+  updateEmployeeMaster(
+    @Param('userId') userId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.hrAdmin.upsertEmployeeProfile(
+      this.resolveTenantId(req.user),
+      userId,
+      body as Parameters<HrAdminService['upsertEmployeeProfile']>[2],
+    );
+  }
+
+  @Get('leaves/balances-grid')
+  @Roles('HR', 'SuperAdmin')
+  leaveBalancesGrid(@Req() req: { user: AuthUser }, @Query('year') year?: string) {
+    return this.hrAdmin.listLeaveBalancesGrid(
+      this.resolveTenantId(req.user),
+      year ? Number(year) : new Date().getFullYear(),
+    );
+  }
+
+  @Post('leaves/balance-adjust')
+  @Roles('HR', 'SuperAdmin')
+  adjustLeaveBalance(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+    return this.hrAdmin.adjustLeaveBalance(
+      this.resolveTenantId(req.user),
+      body.user_id as string,
+      body as Parameters<HrAdminService['adjustLeaveBalance']>[2],
+    );
+  }
+
+  @Post('biometric-sync')
+  @HttpCode(HttpStatus.OK)
+  biometricSync(
+    @Req() req: { user: AuthUser },
+    @Body() body: { secret?: string; punches?: { employee_id: string; punch_time: string; device_id?: string; punch_type: 'IN' | 'OUT' }[] },
+  ) {
+    if (body.punches?.length) {
+      this.hrAdmin.validateBiometricWebhook(body.secret);
+    }
+    const tenantId = this.resolveTenantId(req.user);
+    if (body.punches?.length) {
+      return this.hrAdmin.ingestBiometricPunches(tenantId, body.punches);
+    }
+    return this.hrAdmin.processBiometricLogs(tenantId);
+  }
+
+  @Get('payroll/packages')
+  @Roles('HR', 'SuperAdmin')
+  payPackages(@Req() req: { user: AuthUser }) {
+    return this.hrAdmin.listPayPackages(this.resolveTenantId(req.user));
+  }
+
+  @Post('payroll/packages')
+  @Roles('HR', 'SuperAdmin')
+  upsertPayPackage(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+    return this.hrAdmin.upsertPayPackage(
+      this.resolveTenantId(req.user),
+      body as Parameters<HrAdminService['upsertPayPackage']>[1],
+    );
+  }
+
+  @Get('appraisals/api-scores')
+  @Roles('HR', 'SuperAdmin')
+  apiScores(@Req() req: { user: AuthUser }, @Query('year') year?: string) {
+    return this.hrAdmin.listAppraisalsWithApi(
+      this.resolveTenantId(req.user),
+      year ? Number(year) : new Date().getFullYear(),
+    );
+  }
+
+  @Get('promotions/candidates')
+  @Roles('HR', 'SuperAdmin')
+  promotionCandidates(@Req() req: { user: AuthUser }) {
+    return this.hrAdmin.listPromotionCandidates(this.resolveTenantId(req.user));
+  }
+
+  @Post('recruitment/applicants/:applicantId/hire')
+  @Roles('HR', 'SuperAdmin')
+  hireApplicant(
+    @Param('applicantId') applicantId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.hrAdmin.hireApplicant(
+      this.resolveTenantId(req.user),
+      applicantId,
+      req.user.user_id,
+    );
   }
 
   @Get('employees/:userId/profile')

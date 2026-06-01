@@ -28,6 +28,7 @@ export { AcademicAssignment } from './academic-assignment.entity';
 export { AssignmentSubmission } from './assignment-submission.entity';
 export { CourseAttendanceLog } from './course-attendance-log.entity';
 export { CourseMaterial } from './course-material.entity';
+export { CourseModule } from './course-module.entity';
 export { AttendanceRecord } from './attendance-record.entity';
 export { ExamResult } from './exam-result.entity';
 export { ExamSchedule } from './exam-schedule.entity';
@@ -53,6 +54,9 @@ export { StaffGatePass } from './staff-gate-pass.entity';
 export { JobPosting } from './job-posting.entity';
 export { JobApplication } from './job-application.entity';
 export { AlumniServiceRequest } from './alumni-service-request.entity';
+export { AlumniProfile } from './alumni-profile.entity';
+export { AlumniDonation } from './alumni-donation.entity';
+export { AlumniEvent } from './alumni-event.entity';
 
 export { HostelRoom } from './hostel-room.entity';
 export { GatePass } from './gate-pass.entity';

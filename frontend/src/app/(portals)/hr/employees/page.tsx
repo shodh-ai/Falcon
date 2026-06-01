@@ -1,5 +1,5 @@
-import { HrmsPage } from '@/components/workspaces/HrmsPage';
+import { redirect } from 'next/navigation';
 
-export default function HrEmployeesLegacyPage() {
-  return <HrmsPage kind="directory" />;
+export default function HrEmployeesRedirect() {
+  redirect('/hr/directory');
 }

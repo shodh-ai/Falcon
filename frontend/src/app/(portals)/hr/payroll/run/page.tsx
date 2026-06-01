@@ -1,5 +1,5 @@
-import { HrmsPage } from '@/components/workspaces/HrmsPage';
+import { redirect } from 'next/navigation';
 
-export default function HrPayrollRunPage() {
-  return <HrmsPage kind="payrollRun" />;
+export default function HrPayrollRunRedirect() {
+  redirect('/hr/payroll/processing');
 }

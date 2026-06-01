@@ -1,5 +1,5 @@
-import { HrmsPage } from '@/components/workspaces/HrmsPage';
+import { redirect } from 'next/navigation';
 
-export default function HrRecruitmentJobsPage() {
-  return <HrmsPage kind="jobs" />;
+export default function HrRecruitmentJobsRedirect() {
+  redirect('/hr/recruitment');
 }

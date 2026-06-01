@@ -9,6 +9,8 @@ import { useAuth } from '@/context/AuthContext';
 import { academicsApi } from '@/lib/api/api.academics';
 import { API_URL } from '@/lib/api/client';
 import { examsApi, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
+import { useAuthedApi } from '@/lib/api';
+import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 
 type TabKey = 'schedule' | 'admit' | 'reeval';
 
@@ -16,9 +18,16 @@ function formatTime(hhmmss: string) {
   return String(hhmmss).slice(0, 5);
 }
 
+type ExamDesk = {
+  ufm_cases: { description: string; penalty_applied?: string; incident_type?: string }[];
+  seating: { exam_name: string; block: string; room: string; seat: string; exam_date: string }[];
+};
+
 export default function StudentExamsPage() {
   const { token, user } = useAuth();
+  const api = useAuthedApi();
   const [tab, setTab] = useState<TabKey>('schedule');
+  const [examDesk, setExamDesk] = useState<ExamDesk | null>(null);
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [eligibility, setEligibility] = useState<ExamEligibilityResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +82,8 @@ export default function StudentExamsPage() {
       }
     };
     void load();
-  }, [token, user?.user_id]);
+    void api.get<ExamDesk>('/api/student/exam-desk').then(setExamDesk).catch(() => setExamDesk(null));
+  }, [token, user?.user_id, api]);
 
   const downloadAdmitCard = async () => {
     if (!token) return;
@@ -120,14 +130,43 @@ export default function StudentExamsPage() {
     { key: 'reeval', label: 'Backlogs & Re-evaluation', icon: RefreshCcw },
   ];
 
+  const hasUfm = (examDesk?.ufm_cases?.length ?? 0) > 0;
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-sgvu-navy">Examinations</h2>
-          <p className="text-sm text-muted-foreground">Exam schedule, admit card, and re-evaluation requests</p>
-        </div>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+      <StudentPageHeader
+        title="Exam Desk"
+        description="Admit card, seating plans, revaluation — blocked when dues or attendance fall below thresholds."
+      />
+
+      {hasUfm && (
+        <Card className="border-destructive bg-destructive/10">
+          <CardContent className="p-4 text-sm">
+            <p className="font-bold text-destructive">UFM / Disciplinary notice — read only</p>
+            {examDesk!.ufm_cases.map((c, i) => (
+              <p key={i} className="mt-2">
+                {c.incident_type ?? 'UFM'}: {c.description}
+                {c.penalty_applied ? ` · Penalty: ${c.penalty_applied}` : ''}
+              </p>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {examDesk?.seating && examDesk.seating.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Seating plan</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {examDesk.seating.map((s, i) => (
+              <p key={i}>
+                <strong>{s.exam_name}</strong> ({s.exam_date}): Block {s.block}, Room {s.room}, Seat {s.seat}
+              </p>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {error ? (
         <Card className="border-destructive/40">

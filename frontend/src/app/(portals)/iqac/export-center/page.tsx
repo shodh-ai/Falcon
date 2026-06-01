@@ -1,5 +1,5 @@
-import { WorkspaceRoutePage } from '@/components/workspaces/WorkspaceRoutePage';
+import { redirect } from 'next/navigation';
 
-export default function IqacExportCenterPage() {
-  return <WorkspaceRoutePage portal="iqac" page="exportCenter" />;
+export default function IqacExportCenterRedirect() {
+  redirect('/iqac/reports');
 }

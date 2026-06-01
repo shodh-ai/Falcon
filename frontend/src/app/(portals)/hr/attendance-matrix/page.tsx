@@ -1,5 +1,5 @@
-import { HrmsPage } from '@/components/workspaces/HrmsPage';
+import { redirect } from 'next/navigation';
 
-export default function HrAttendanceMatrixPage() {
-  return <HrmsPage kind="attendance" />;
+export default function HrAttendanceMatrixRedirect() {
+  redirect('/hr/attendance');
 }

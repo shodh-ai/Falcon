@@ -11,9 +11,21 @@ import {
   parentPortal,
   examCellPortal,
   presidentPortal,
+  alumniPortal,
+  alumniAdminPortal,
 } from '@/lib/navigation';
 
-type PortalKey = 'hod' | 'hostel-admin' | 'finance' | 'iqac' | 'library' | 'president' | 'parent' | 'exam-cell';
+type PortalKey =
+  | 'hod'
+  | 'hostel-admin'
+  | 'finance'
+  | 'iqac'
+  | 'library'
+  | 'president'
+  | 'parent'
+  | 'exam-cell'
+  | 'alumni'
+  | 'alumni-admin';
 
 const configs = {
   hod: hodPortal,
@@ -24,6 +36,8 @@ const configs = {
   parent: parentPortal,
   'exam-cell': examCellPortal,
   president: presidentPortal,
+  alumni: alumniPortal,
+  'alumni-admin': alumniAdminPortal,
 };
 
 export function GenericPortalShell({

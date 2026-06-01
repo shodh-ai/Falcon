@@ -95,7 +95,7 @@ export default function FacultyDashboardPage() {
     : 'Web Punch-In';
 
   const attendanceHref = (c: FacultyClass) => {
-    return `/faculty/academics?courseId=${encodeURIComponent(c.course_id)}`;
+    return `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
   };
 
   async function actOnGatePass(passId: string, status: 'APPROVED' | 'REJECTED') {

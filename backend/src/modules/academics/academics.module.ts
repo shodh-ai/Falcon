@@ -13,6 +13,8 @@ import { AcademicAssignment } from '../../entities/academic-assignment.entity';
 import { AssignmentSubmission } from '../../entities/assignment-submission.entity';
 import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity';
 import { CourseMaterial } from '../../entities/course-material.entity';
+import { CourseModule } from '../../entities/course-module.entity';
+import { FeeDemand } from '../../entities/fee-demand.entity';
 import { StudentProfile } from '../../entities/student-profile.entity';
 import { StudentCertificate } from '../../entities/student-certificate.entity';
 import { ProctorInteraction } from '../../entities/proctor-interaction.entity';
@@ -28,9 +30,15 @@ import { ProctorService } from './proctor.service';
 import { CertificatesController } from './certificates.controller';
 import { CertificatesService } from './certificates.service';
 import { AssignmentsService } from './assignments.service';
+import { FacultyWorkspacesService } from './faculty-workspaces.service';
+import { CourseLmsService } from './course-lms.service';
+import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
+import { MarksHistoryService } from './marks-history.service';
+import { StorageModule } from '../../storage/storage.module';
 
 @Module({
   imports: [
+    StorageModule,
     TypeOrmModule.forFeature([
       Subject,
       Batch,
@@ -45,6 +53,8 @@ import { AssignmentsService } from './assignments.service';
       AssignmentSubmission,
       CourseAttendanceLog,
       CourseMaterial,
+      CourseModule,
+      FeeDemand,
       StudentProfile,
       StudentCertificate,
       ProctorInteraction,
@@ -55,7 +65,27 @@ import { AssignmentsService } from './assignments.service';
     ]),
   ],
   controllers: [AcademicsController, ProctorController, CertificatesController],
-  providers: [AcademicsService, AcademicsFacultyService, ProctorService, CertificatesService, AssignmentsService],
-  exports: [AcademicsService, AcademicsFacultyService, ProctorService, CertificatesService, AssignmentsService],
+  providers: [
+    AcademicsService,
+    AcademicsFacultyService,
+    ProctorService,
+    CertificatesService,
+    AssignmentsService,
+    FacultyWorkspacesService,
+    CourseLmsService,
+    MarksheetPdfService,
+    MarksHistoryService,
+  ],
+  exports: [
+    AcademicsService,
+    AcademicsFacultyService,
+    ProctorService,
+    CertificatesService,
+    AssignmentsService,
+    FacultyWorkspacesService,
+    CourseLmsService,
+    MarksheetPdfService,
+    MarksHistoryService,
+  ],
 })
 export class AcademicsModule {}
