@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { FalconLogo } from '@/components/brand/FalconLogo';
 import type { NavGroup } from '@/lib/navigation';
-import { useTenant } from '@/context/TenantContext';
 
 interface AppSidebarProps {
   personaLabel: string;
@@ -26,9 +26,6 @@ export function AppSidebar({
   className,
 }: AppSidebarProps) {
   const pathname = usePathname();
-  const { branding } = useTenant();
-  const shortName = branding?.name?.split(' ').map((w) => w[0]).join('').slice(0, 3).toUpperCase() ?? 'ERP';
-  const displayName = branding?.name?.split(' ')[0] ?? 'University';
 
   return (
     <aside
@@ -38,21 +35,30 @@ export function AppSidebar({
         className,
       )}
     >
-      <div className={cn('flex h-16 items-center border-b border-white/10 px-3', collapsed ? 'justify-center' : 'justify-between')}>
+      <div
+        className={cn(
+          'flex h-[4.5rem] items-center border-b border-white/10 px-3',
+          collapsed ? 'justify-center' : 'justify-between',
+        )}
+      >
         {!collapsed && (
-          <div className="min-w-0 px-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">{displayName}</p>
-            <p className="truncate text-sm font-semibold">{personaLabel}</p>
+          <div className="min-w-0 px-1">
+            <p className="text-lg font-black tracking-tight text-white">Falcon</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-sgvu-gold/85">
+              SGVU Workspace
+            </p>
+            <p className="mt-1 truncate text-[11px] font-medium text-blue-100/70">{personaLabel}</p>
           </div>
         )}
-        {collapsed && (
-          <span className="text-xs font-black text-sgvu-gold">{shortName.charAt(0)}</span>
-        )}
+        {collapsed && <FalconLogo size={32} />}
         <Button
           variant="ghost"
           size="icon"
           onClick={onToggleCollapse}
-          className="hidden shrink-0 text-white hover:bg-white/10 lg:flex"
+          className={cn(
+            'hidden shrink-0 text-white hover:bg-white/10 lg:flex',
+            collapsed && 'absolute right-1 top-3',
+          )}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}

@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.tenant_subscriptions (
 CREATE INDEX IF NOT EXISTS idx_tenant_subscriptions_tenant ON public.tenant_subscriptions(tenant_id);
 
 -- ---------------------------------------------------------------------------
--- 2. Seed SGVU (legacy data stays in public schema; new tenants get own schema)
+-- 2. Seed SGVU (existing data stays in public schema; new tenants get own schema)
 -- ---------------------------------------------------------------------------
 INSERT INTO public.tenants (
   tenant_id,

@@ -56,5 +56,13 @@ export async function apiFetch<T>(token: string | null, req: ApiRequest): Promis
     throw new Error(`API ${res.status} ${res.statusText}: ${text}`);
   }
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+
+  const text = await res.text();
+  if (!text.trim()) return null as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('Invalid JSON response from server');
+  }
 }

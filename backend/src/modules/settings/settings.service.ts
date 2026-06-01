@@ -7,7 +7,7 @@ export class SettingsService {
 
   constructor(private readonly csv: CsvUploadService) {}
 
-  async importLegacyUsers(buffer: Buffer): Promise<CsvImportResult> {
+  async importUsers(buffer: Buffer): Promise<CsvImportResult> {
     return this.csv.processCsv(buffer, async (row, rowIndex) => {
       if (!row.email && !row.name) {
         throw new Error(`Row ${rowIndex}: missing required email/name`);

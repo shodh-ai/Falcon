@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react';
+import { FileText, Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
 
@@ -42,6 +42,29 @@ type TimetableResponse = {
   end_time: string;
 };
 
+type StudentAssignment = {
+  assignment: {
+    assignment_id: string;
+    title: string;
+    description: string | null;
+    reference_file_path: string | null;
+    max_marks: number;
+    due_date: string;
+    course?: {
+      course_code: string;
+      course_name: string;
+    };
+  };
+  submission: {
+    submission_id: string;
+    file_path: string;
+    submitted_at: string;
+    marks_awarded: string | null;
+    faculty_remarks: string | null;
+  } | null;
+  status: 'PENDING' | 'SUBMITTED' | 'GRADED' | 'OVERDUE';
+};
+
 export default function StudentAcademicsPage() {
   const api = useAuthedApi();
   const [loading, setLoading] = useState(true);
@@ -50,22 +73,27 @@ export default function StudentAcademicsPage() {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [electives, setElectives] = useState<Course[]>([]);
   const [timetable, setTimetable] = useState<TimetableResponse[]>([]);
+  const [assignments, setAssignments] = useState<StudentAssignment[]>([]);
   const [selectedElectives, setSelectedElectives] = useState<string[]>([]);
   const [selectedSemester, setSelectedSemester] = useState(1);
+  const [uploadingAssignmentId, setUploadingAssignmentId] = useState<string | null>(null);
+  const [assignmentFiles, setAssignmentFiles] = useState<Record<string, File | null>>({});
 
   async function loadAcademics() {
     setLoading(true);
     try {
-      const [metricsData, enrollmentData, electiveData, timetableData] = await Promise.all([
+      const [metricsData, enrollmentData, electiveData, timetableData, assignmentData] = await Promise.all([
         api.get<Metrics>('/api/academics/dashboard/metrics'),
         api.get<Enrollment[]>('/api/academics/courses/my-enrollments'),
         api.get<Course[]>('/api/academics/courses/available-electives'),
         api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
+        api.get<StudentAssignment[]>('/api/academics/assignments/my'),
       ]);
       setMetrics(metricsData);
       setEnrollments(enrollmentData);
       setElectives(electiveData);
       setTimetable(timetableData);
+      setAssignments(assignmentData);
       setSelectedElectives([]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load academics');
@@ -129,6 +157,28 @@ export default function StudentAcademicsPage() {
       toast.error(error instanceof Error ? error.message : 'Registration failed');
     } finally {
       setRegistering(false);
+    }
+  }
+
+  async function submitAssignment(event: FormEvent<HTMLFormElement>, assignmentId: string) {
+    event.preventDefault();
+    const file = assignmentFiles[assignmentId];
+    if (!file) {
+      toast.error('Select a PDF before uploading');
+      return;
+    }
+    const body = new FormData();
+    body.append('file', file);
+    setUploadingAssignmentId(assignmentId);
+    try {
+      await api.post(`/api/academics/assignments/${assignmentId}/submit`, body);
+      toast.success('Digital Assignment uploaded');
+      setAssignmentFiles((prev) => ({ ...prev, [assignmentId]: null }));
+      await loadAcademics();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Assignment upload failed');
+    } finally {
+      setUploadingAssignmentId(null);
     }
   }
 
@@ -302,6 +352,107 @@ export default function StudentAcademicsPage() {
           </CardContent>
         </Card>
       </div>}
+
+      {!loading && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-sgvu-gold" />
+              Digital Assignments
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Upload pending DA PDFs before the deadline and view grades once faculty publishes marks.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {assignments.map((row) => (
+              <div key={row.assignment.assignment_id} className="rounded-xl border p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-sgvu-navy">{row.assignment.title}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {row.assignment.course?.course_code} · Due {new Date(row.assignment.due_date).toLocaleString()} ·{' '}
+                      {row.assignment.max_marks} marks
+                    </p>
+                    {row.assignment.description && (
+                      <p className="mt-1 text-sm text-muted-foreground">{row.assignment.description}</p>
+                    )}
+                    {row.assignment.reference_file_path && (
+                      <a
+                        href={row.assignment.reference_file_path}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block text-sm font-medium text-sgvu-navy underline"
+                      >
+                        Open question PDF
+                      </a>
+                    )}
+                  </div>
+                  <Badge
+                    variant={
+                      row.status === 'GRADED'
+                        ? 'default'
+                        : row.status === 'OVERDUE'
+                          ? 'destructive'
+                          : 'outline'
+                    }
+                  >
+                    {row.status}
+                  </Badge>
+                </div>
+
+                {row.submission ? (
+                  <div className="mt-3 rounded-lg bg-muted p-3 text-sm">
+                    <p>
+                      Submitted {new Date(row.submission.submitted_at).toLocaleString()} ·{' '}
+                      <a href={row.submission.file_path} target="_blank" rel="noreferrer" className="underline">
+                        View upload
+                      </a>
+                    </p>
+                    <p className="mt-1 font-medium">
+                      Marks: {row.submission.marks_awarded ?? 'Awaiting evaluation'} / {row.assignment.max_marks}
+                    </p>
+                    {row.submission.faculty_remarks && (
+                      <p className="mt-1 text-muted-foreground">Remarks: {row.submission.faculty_remarks}</p>
+                    )}
+                  </div>
+                ) : (
+                  <form className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]" onSubmit={(event) => submitAssignment(event, row.assignment.assignment_id)}>
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      className="rounded-xl border bg-background px-3 py-2 text-sm"
+                      disabled={row.status === 'OVERDUE'}
+                      onChange={(event) =>
+                        setAssignmentFiles((prev) => ({
+                          ...prev,
+                          [row.assignment.assignment_id]: event.target.files?.[0] ?? null,
+                        }))
+                      }
+                    />
+                    <Button
+                      type="submit"
+                      disabled={row.status === 'OVERDUE' || uploadingAssignmentId === row.assignment.assignment_id}
+                    >
+                      {uploadingAssignmentId === row.assignment.assignment_id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      Upload PDF
+                    </Button>
+                  </form>
+                )}
+              </div>
+            ))}
+            {assignments.length === 0 && (
+              <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                No Digital Assignments assigned yet.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {!loading && (
         <Card>

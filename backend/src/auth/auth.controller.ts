@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Get,
   Headers,
   NotFoundException,
   Param,
+  Post,
   Req,
   Res,
   UnauthorizedException,
@@ -17,8 +19,9 @@ import { User } from '../entities/user.entity';
 import { Public } from '../common/decorators/roles.decorator';
 import { AuthService } from './auth.service';
 import { TenantService } from '../tenant/tenant.service';
+import { LocalLoginDto } from './dto/local-login.dto';
 
-@Controller('auth')
+@Controller(['auth', 'api/auth'])
 export class AuthController {
   constructor(
     @InjectRepository(User)
@@ -48,6 +51,15 @@ export class AuthController {
   }
 
   @Public()
+  @Post('local-login')
+  async localLogin(
+    @Body() dto: LocalLoginDto,
+    @Headers('x-tenant-subdomain') tenantSubdomain: string | undefined,
+  ) {
+    return this.authService.localLogin(dto.email, dto.password, tenantSubdomain);
+  }
+
+  @Public()
   @Get('dev-login/:email')
   async devLogin(
     @Param('email') email: string,
@@ -63,7 +75,7 @@ export class AuthController {
 
     const user = await this.userRepository.findOne({
       where: { email, tenant_id: tenant.tenant_id },
-      relations: ['role', 'department'],
+      relations: ['role', 'department', 'userRoles', 'userRoles.role'],
     });
 
     if (!user) {
@@ -74,7 +86,9 @@ export class AuthController {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    const token = this.authService.signToken(user, tenant.tenant_id, tenant.pg_schema);
+    await this.authService.ensurePrimaryRoleMapping(user);
+    const refreshed = await this.authService.findById(user.user_id, tenant.tenant_id);
+    const token = this.authService.signToken(refreshed ?? user, tenant.tenant_id, tenant.pg_schema);
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendUrl}/auth/callback?token=${token}`);
   }

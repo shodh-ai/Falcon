@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, JoinColumn, ManyToOne } from 'typeorm';
+import { User } from './user.entity';
 
 @Entity('operations_hostel_rooms')
 @Index(['hostel_block', 'room_number'], { unique: true })
@@ -23,6 +24,13 @@ export class HostelRoom {
 
   @Column({ length: 20, default: 'AVAILABLE' })
   status: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  warden_user_id: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'warden_user_id' })
+  warden: User | null;
 
   @CreateDateColumn()
   created_at: Date;

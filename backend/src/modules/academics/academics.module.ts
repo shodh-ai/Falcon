@@ -9,9 +9,16 @@ import { AcademicMentorship } from '../../entities/academic-mentorship.entity';
 import { AcademicCourse } from '../../entities/academic-course.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
+import { AcademicAssignment } from '../../entities/academic-assignment.entity';
+import { AssignmentSubmission } from '../../entities/assignment-submission.entity';
+import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity';
+import { CourseMaterial } from '../../entities/course-material.entity';
 import { StudentProfile } from '../../entities/student-profile.entity';
 import { StudentCertificate } from '../../entities/student-certificate.entity';
 import { ProctorInteraction } from '../../entities/proctor-interaction.entity';
+import { StaffAttendance } from '../../entities/staff-attendance.entity';
+import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
+import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { User } from '../../entities/user.entity';
 import { AcademicsController } from './academics.controller';
 import { AcademicsService } from './academics.service';
@@ -20,6 +27,7 @@ import { ProctorController } from './proctor.controller';
 import { ProctorService } from './proctor.service';
 import { CertificatesController } from './certificates.controller';
 import { CertificatesService } from './certificates.service';
+import { AssignmentsService } from './assignments.service';
 
 @Module({
   imports: [
@@ -33,14 +41,21 @@ import { CertificatesService } from './certificates.service';
       AcademicCourse,
       StudentCourseEnrollment,
       AcademicTimetable,
+      AcademicAssignment,
+      AssignmentSubmission,
+      CourseAttendanceLog,
+      CourseMaterial,
       StudentProfile,
       StudentCertificate,
       ProctorInteraction,
+      StaffAttendance,
+      StaffLeaveRequest,
+      StaffGatePass,
       User,
     ]),
   ],
   controllers: [AcademicsController, ProctorController, CertificatesController],
-  providers: [AcademicsService, AcademicsFacultyService, ProctorService, CertificatesService],
-  exports: [AcademicsService, AcademicsFacultyService, ProctorService, CertificatesService],
+  providers: [AcademicsService, AcademicsFacultyService, ProctorService, CertificatesService, AssignmentsService],
+  exports: [AcademicsService, AcademicsFacultyService, ProctorService, CertificatesService, AssignmentsService],
 })
 export class AcademicsModule {}

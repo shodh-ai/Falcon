@@ -6,6 +6,8 @@ export interface AuthTokenPayload {
   sub: string;
   email: string;
   role?: string;
+  roles?: string[];
+  primaryRole?: string;
   name: string;
   tenantId: string;
   tenantSchema: string;

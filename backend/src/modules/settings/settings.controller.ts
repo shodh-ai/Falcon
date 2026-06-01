@@ -33,6 +33,6 @@ export class SettingsController {
   )
   importUsers(@UploadedFile() file: Express.Multer.File, @Body() _dto: ImportUsersDto) {
     if (!file) throw new BadRequestException('CSV file is required');
-    return this.settings.importLegacyUsers(file.buffer);
+    return this.settings.importUsers(file.buffer);
   }
 }

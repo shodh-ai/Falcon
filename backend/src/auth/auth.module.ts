@@ -9,6 +9,7 @@ import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
+import { UserRole } from '../entities/user-role.entity';
 import { AUTH_PROVIDER } from './interfaces/auth-provider.interface';
 import { LocalAuthProvider } from './providers/local-auth.provider';
 import { KeycloakAuthProvider } from './providers/keycloak-auth.provider';
@@ -25,7 +26,7 @@ const authProviderFactory = {
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Role]),
+    TypeOrmModule.forFeature([User, Role, UserRole]),
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -16,8 +16,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "University ERP",
-  description: "Multi-tenant university student, faculty & management portal",
+  title: "Falcon | SGVU Campus OS",
+  description:
+    "Falcon — the premium Campus Operating System for Suresh Gyan Vihar University. Academics, HR, finance, hostel, and compliance in one workspace.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/falcon-logo.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({

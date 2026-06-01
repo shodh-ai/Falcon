@@ -9,6 +9,10 @@ import { GradingPolicy } from '../../entities/grading-policy.entity';
 import { AcademicCourse } from '../../entities/academic-course.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
+import { User } from '../../entities/user.entity';
+import { StaffAttendance } from '../../entities/staff-attendance.entity';
+import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
+import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
@@ -30,6 +34,11 @@ export class AcademicsService {
     @InjectRepository(StudentCourseEnrollment)
     private courseEnrollments: Repository<StudentCourseEnrollment>,
     @InjectRepository(AcademicTimetable) private timetables: Repository<AcademicTimetable>,
+    @InjectRepository(User) private users: Repository<User>,
+    @InjectRepository(StaffAttendance) private staffAttendance: Repository<StaffAttendance>,
+    @InjectRepository(StaffLeaveRequest)
+    private staffLeaveRequests: Repository<StaffLeaveRequest>,
+    @InjectRepository(StaffGatePass) private staffGatePasses: Repository<StaffGatePass>,
   ) {}
 
   listSubjects() {
@@ -216,6 +225,183 @@ export class AcademicsService {
     });
   }
 
+  async getHodDashboard(tenantId: string, hodUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const today = new Date().toISOString().slice(0, 10);
+    const faculty = await this.listDepartmentFacultyRaw(tenantId, deptIds);
+    const facultyIds = faculty.map((row) => row.user_id);
+
+    const [facultyPresentToday, totalStudents, enrollments, pendingLeaves, pendingGatePasses] = await Promise.all([
+      facultyIds.length
+        ? this.staffAttendance
+            .createQueryBuilder('attendance')
+            .where('attendance.user_id IN (:...facultyIds)', { facultyIds })
+            .andWhere('attendance.work_date = :today', { today })
+            .andWhere('attendance.check_in_at IS NOT NULL')
+            .getCount()
+        : Promise.resolve(0),
+      this.users
+        .createQueryBuilder('user')
+        .leftJoin('user.role', 'role')
+        .where('user.tenant_id = :tenantId', { tenantId })
+        .andWhere("role.role_name = 'Student'")
+        .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+        .getCount(),
+      this.courseEnrollments
+        .createQueryBuilder('enrollment')
+        .leftJoin('enrollment.student', 'student')
+        .where('enrollment.tenant_id = :tenantId', { tenantId })
+        .andWhere(deptIds.length ? 'student.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+        .getMany(),
+      this.listHodLeaveApprovals(tenantId, hodUserId),
+      this.listHodGatePassApprovals(tenantId, hodUserId),
+    ]);
+
+    const averageAttendance =
+      enrollments.length > 0
+        ? Number(
+            (
+              enrollments.reduce((sum, row) => sum + Number(row.attendance_percent ?? 0), 0) /
+              enrollments.length
+            ).toFixed(2),
+          )
+        : 0;
+
+    return {
+      faculty_present_today: facultyPresentToday,
+      total_faculty: faculty.length,
+      total_students: totalStudents,
+      average_department_attendance: averageAttendance,
+      pending_leave_approvals: pendingLeaves.length,
+      pending_gate_pass_approvals: pendingGatePasses.length,
+    };
+  }
+
+  async listHodFacultyRoster(tenantId: string, hodUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const faculty = await this.listDepartmentFacultyRaw(tenantId, deptIds);
+    const facultyIds = faculty.map((row) => row.user_id);
+    const allocations =
+      facultyIds.length === 0
+        ? []
+        : await this.timetables.find({
+            where: { tenant_id: tenantId, faculty_user_id: In(facultyIds) },
+            relations: ['course'],
+            order: { day_of_week: 'ASC', start_time: 'ASC' },
+          });
+
+    return faculty.map((row) => ({
+      user_id: row.user_id,
+      name: row.name,
+      email: row.email,
+      department: row.department?.dept_name ?? null,
+      role: row.role?.role_name ?? null,
+      courses: allocations
+        .filter((allocation) => allocation.faculty_user_id === row.user_id)
+        .map((allocation) => ({
+          timetable_id: allocation.timetable_id,
+          course_id: allocation.course_id,
+          course_code: allocation.course?.course_code,
+          course_name: allocation.course?.course_name,
+          day_of_week: allocation.day_of_week,
+          start_time: allocation.start_time,
+          end_time: allocation.end_time,
+          room: allocation.room,
+        })),
+    }));
+  }
+
+  async allocateHodCourse(
+    tenantId: string,
+    hodUserId: string,
+    dto: { timetable_id: string; faculty_user_id: string },
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const faculty = await this.users.findOne({
+      where: { user_id: dto.faculty_user_id, tenant_id: tenantId },
+      relations: ['role'],
+    });
+    if (!faculty || !deptIds.includes(faculty.dept_id)) {
+      throw new Error('Faculty member is outside this HOD department scope');
+    }
+
+    await this.timetables.update(
+      { timetable_id: dto.timetable_id, tenant_id: tenantId },
+      { faculty_user_id: dto.faculty_user_id },
+    );
+    return this.timetables.findOne({
+      where: { timetable_id: dto.timetable_id, tenant_id: tenantId },
+      relations: ['course', 'faculty'],
+    });
+  }
+
+  async listHodStudents(tenantId: string, hodUserId: string, lowAttendance = false) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const students = await this.users
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.department', 'department')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('user.tenant_id = :tenantId', { tenantId })
+      .andWhere("role.role_name = 'Student'")
+      .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+      .orderBy('user.name', 'ASC')
+      .getMany();
+
+    const studentIds = students.map((row) => row.user_id);
+    const enrollments =
+      studentIds.length === 0
+        ? []
+        : await this.courseEnrollments.find({
+            where: { tenant_id: tenantId, student_user_id: In(studentIds) },
+            relations: ['course'],
+            order: { semester: 'DESC' },
+          });
+
+    return students
+      .map((student) => {
+        const rows = enrollments.filter((row) => row.student_user_id === student.user_id);
+        const attendance =
+          rows.length > 0
+            ? Number((rows.reduce((sum, row) => sum + Number(row.attendance_percent), 0) / rows.length).toFixed(2))
+            : 0;
+        return {
+          user_id: student.user_id,
+          name: student.name,
+          email: student.email,
+          department: student.department?.dept_name ?? null,
+          average_attendance: attendance,
+          course_count: rows.length,
+          low_attendance: attendance < 75,
+        };
+      })
+      .filter((student) => !lowAttendance || student.low_attendance);
+  }
+
+  async listHodLeaveApprovals(tenantId: string, hodUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.staffLeaveRequests
+      .createQueryBuilder('leave')
+      .leftJoinAndSelect('leave.staff', 'staff')
+      .leftJoinAndSelect('staff.department', 'department')
+      .where('leave.tenant_id = :tenantId', { tenantId })
+      .andWhere('leave.status = :status', { status: 'PENDING' })
+      .andWhere(deptIds.length ? 'staff.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+      .orderBy('leave.applied_at', 'ASC')
+      .getMany();
+  }
+
+  async listHodGatePassApprovals(tenantId: string, hodUserId: string) {
+    return this.staffGatePasses.find({
+      where: {
+        tenant_id: tenantId,
+        reporting_officer_id: hodUserId,
+        status: 'PENDING',
+      },
+      relations: ['staff'],
+      order: { out_time: 'ASC' },
+    });
+  }
+
   private toEnrollmentDto(row: StudentCourseEnrollment) {
     return {
       enrollment_id: row.enrollment_id,
@@ -247,5 +433,31 @@ export class AcademicsService {
   private toMinutes(time: string) {
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
+  }
+
+  private async resolveHodDepartmentIds(hodUserId: string) {
+    const directDepartments = await this.users.manager.query(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+      [hodUserId],
+    );
+    const hod = await this.users.findOne({ where: { user_id: hodUserId } });
+    return Array.from(
+      new Set<number>([
+        ...directDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...(hod?.dept_id ? [hod.dept_id] : []),
+      ]),
+    );
+  }
+
+  private listDepartmentFacultyRaw(tenantId: string, deptIds: number[]) {
+    return this.users
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .leftJoinAndSelect('user.department', 'department')
+      .where('user.tenant_id = :tenantId', { tenantId })
+      .andWhere("role.role_name IN ('Faculty', 'HOD', 'Dean')")
+      .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+      .orderBy('user.name', 'ASC')
+      .getMany();
   }
 }

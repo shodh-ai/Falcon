@@ -127,7 +127,7 @@ export default function StudentMentorshipPage() {
         <Card className="lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Book a 15-min Meeting</CardTitle>
-            <Badge>Calendly-style slots</Badge>
+            <Badge>Meeting slots</Badge>
           </CardHeader>
           <CardContent className="grid gap-2 sm:grid-cols-3">
             {['10:00 AM', '11:30 AM', '2:15 PM', '4:30 PM'].map((slot) => (

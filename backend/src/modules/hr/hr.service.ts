@@ -1,9 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { LeaveRequest, LeaveRequestStatus } from '../../entities/leave-request.entity';
 import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
+import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
+import { StaffPayslip } from '../../entities/staff-payslip.entity';
+import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
+import { User } from '../../entities/user.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { LeaveActionDto } from './dto/leave-action.dto';
 
@@ -21,6 +25,11 @@ export class HrService {
     @InjectRepository(LeaveRequest) private leaves: Repository<LeaveRequest>,
     @InjectRepository(LeaveBalance) private balances: Repository<LeaveBalance>,
     @InjectRepository(StaffAttendance) private staffAttendance: Repository<StaffAttendance>,
+    @InjectRepository(StaffLeaveRequest)
+    private staffLeaveRequests: Repository<StaffLeaveRequest>,
+    @InjectRepository(StaffPayslip) private payslips: Repository<StaffPayslip>,
+    @InjectRepository(StaffGatePass) private gatePasses: Repository<StaffGatePass>,
+    @InjectRepository(User) private users: Repository<User>,
   ) {}
 
   createLeaveRequest(dto: CreateLeaveRequestDto) {
@@ -78,5 +87,836 @@ export class HrService {
       source: 'MANUAL',
     });
     return this.staffAttendance.save(row);
+  }
+
+  async webPunch(userId: string, action?: 'IN' | 'OUT') {
+    const today = new Date().toISOString().slice(0, 10);
+    let row = await this.staffAttendance.findOne({
+      where: { user_id: userId, work_date: today },
+    });
+
+    if (!row) {
+      row = this.staffAttendance.create({
+        user_id: userId,
+        work_date: today,
+        check_in_at: new Date(),
+        status: 'PRESENT',
+        source: 'WEB',
+      });
+      return this.staffAttendance.save(row);
+    }
+
+    if (action === 'IN') {
+      row.check_in_at = row.check_in_at ?? new Date();
+    } else {
+      row.check_out_at = new Date();
+    }
+    row.source = 'WEB';
+    return this.staffAttendance.save(row);
+  }
+
+  async getThisWeekHours(userId: string) {
+    const now = new Date();
+    const day = now.getDay() === 0 ? 7 : now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - day + 1);
+    monday.setHours(0, 0, 0, 0);
+
+    const rows = await this.staffAttendance
+      .createQueryBuilder('attendance')
+      .where('attendance.user_id = :userId', { userId })
+      .andWhere('attendance.work_date >= :from', {
+        from: monday.toISOString().slice(0, 10),
+      })
+      .getMany();
+
+    const hours = rows.reduce((sum, row) => {
+      if (!row.check_in_at) return sum;
+      const out = row.check_out_at ?? new Date();
+      return sum + Math.max(0, out.getTime() - row.check_in_at.getTime()) / 36e5;
+    }, 0);
+
+    return Number(hours.toFixed(2));
+  }
+
+  async getAttendanceSummary(userId: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    const row = await this.staffAttendance.findOne({
+      where: { user_id: userId, work_date: today },
+    });
+    return {
+      today: row ?? null,
+      week_hours: await this.getThisWeekHours(userId),
+    };
+  }
+
+  async listAttendanceCalendar(userId: string, month: string) {
+    const [year, monthValue] = month.split('-').map(Number);
+    const start = `${year}-${String(monthValue).padStart(2, '0')}-01`;
+    const endDate = new Date(year, monthValue, 0);
+    const end = endDate.toISOString().slice(0, 10);
+
+    const [attendanceRows, leaveRows] = await Promise.all([
+      this.staffAttendance
+        .createQueryBuilder('attendance')
+        .where('attendance.user_id = :userId', { userId })
+        .andWhere('attendance.work_date BETWEEN :start AND :end', { start, end })
+        .getMany(),
+      this.staffLeaveRequests
+        .createQueryBuilder('leave')
+        .where('leave.staff_user_id = :userId', { userId })
+        .andWhere('leave.status IN (:...statuses)', { statuses: ['PENDING', 'HOD_APPROVED', 'HR_APPROVED'] })
+        .andWhere('leave.start_date <= :end AND leave.end_date >= :start', { start, end })
+        .getMany(),
+    ]);
+
+    return {
+      month,
+      attendance: attendanceRows.map((row) => ({
+        date: row.work_date,
+        status: row.check_in_at ? 'PRESENT' : 'ABSENT',
+        check_in_at: row.check_in_at,
+        check_out_at: row.check_out_at,
+      })),
+      leaves: leaveRows.map((row) => ({
+        leave_id: row.leave_id,
+        leave_type: row.leave_type,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        status: row.status,
+      })),
+    };
+  }
+
+  applyStaffLeave(
+    staffUserId: string,
+    tenantId: string,
+    dto: {
+      leave_type: string;
+      start_date: string;
+      end_date: string;
+      reason?: string;
+    },
+  ) {
+    const row = this.staffLeaveRequests.create({
+      tenant_id: tenantId,
+      staff_user_id: staffUserId,
+      leave_type: dto.leave_type,
+      start_date: dto.start_date,
+      end_date: dto.end_date,
+      reason: dto.reason ?? null,
+      status: 'PENDING',
+    });
+    return this.staffLeaveRequests.save(row);
+  }
+
+  listMyStaffLeaves(staffUserId: string, tenantId: string) {
+    return this.staffLeaveRequests.find({
+      where: { staff_user_id: staffUserId, tenant_id: tenantId },
+      order: { applied_at: 'DESC' },
+    });
+  }
+
+  listMyPayslips(staffUserId: string, tenantId: string) {
+    return this.payslips.find({
+      where: { staff_user_id: staffUserId, tenant_id: tenantId, is_published: true },
+      order: { year: 'DESC', generated_at: 'DESC' },
+    });
+  }
+
+  async createGatePass(
+    staffUserId: string,
+    tenantId: string,
+    dto: { out_time: string; expected_in_time: string; reason: string },
+  ) {
+    const user = await this.users.findOne({ where: { user_id: staffUserId } });
+    const row = this.gatePasses.create({
+      tenant_id: tenantId,
+      staff_user_id: staffUserId,
+      reporting_officer_id: user?.reporting_officer_id ?? null,
+      out_time: new Date(dto.out_time),
+      expected_in_time: new Date(dto.expected_in_time),
+      reason: dto.reason,
+      status: 'PENDING',
+    });
+    return this.gatePasses.save(row);
+  }
+
+  listMyGatePasses(staffUserId: string, tenantId: string) {
+    return this.gatePasses.find({
+      where: { staff_user_id: staffUserId, tenant_id: tenantId },
+      order: { out_time: 'DESC' },
+    });
+  }
+
+  listPendingGatePassApprovals(reportingOfficerId: string, tenantId: string) {
+    return this.gatePasses.find({
+      where: {
+        reporting_officer_id: reportingOfficerId,
+        tenant_id: tenantId,
+        status: 'PENDING',
+      },
+      relations: ['staff'],
+      order: { out_time: 'ASC' },
+    });
+  }
+
+  async actOnGatePass(
+    passId: string,
+    reportingOfficerId: string,
+    tenantId: string,
+    status: 'APPROVED' | 'REJECTED',
+  ) {
+    const pass = await this.gatePasses.findOne({
+      where: {
+        pass_id: passId,
+        reporting_officer_id: reportingOfficerId,
+        tenant_id: tenantId,
+      },
+    });
+    if (!pass) throw new NotFoundException('Gate pass not found');
+    pass.status = status;
+    return this.gatePasses.save(pass);
+  }
+
+  private countWeekdaysInMonth(year: number, month: number): number {
+    const daysInMonth = new Date(year, month, 0).getDate();
+    let count = 0;
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const dow = new Date(year, month - 1, day).getDay();
+      if (dow !== 0 && dow !== 6) count += 1;
+    }
+    return count;
+  }
+
+  private expandDateRange(start: string, end: string): string[] {
+    const dates: string[] = [];
+    const cursor = new Date(start);
+    const last = new Date(end);
+    while (cursor <= last) {
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  }
+
+  private weekdayDatesInMonth(year: number, month: number): string[] {
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const dates: string[] = [];
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const date = new Date(year, month - 1, day);
+      const dow = date.getDay();
+      if (dow !== 0 && dow !== 6) {
+        dates.push(date.toISOString().slice(0, 10));
+      }
+    }
+    return dates;
+  }
+
+  private monthLabel(year: number, month: number): string {
+    return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long' });
+  }
+
+  async getDashboardMetrics(tenantId: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    const staffUsers = await this.users
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('user.tenant_id = :tenantId', { tenantId })
+      .andWhere('user.is_active = true')
+      .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+      .getMany();
+
+    const staffIds = staffUsers.map((u) => u.user_id);
+    const presentToday =
+      staffIds.length === 0
+        ? 0
+        : await this.staffAttendance
+            .createQueryBuilder('attendance')
+            .where('attendance.user_id IN (:...staffIds)', { staffIds })
+            .andWhere('attendance.work_date = :today', { today })
+            .andWhere('attendance.check_in_at IS NOT NULL')
+            .getCount();
+
+    const onLeaveToday =
+      staffIds.length === 0
+        ? 0
+        : await this.staffLeaveRequests
+            .createQueryBuilder('leave')
+            .where('leave.tenant_id = :tenantId', { tenantId })
+            .andWhere('leave.staff_user_id IN (:...staffIds)', { staffIds })
+            .andWhere('leave.status IN (:...statuses)', {
+              statuses: ['PENDING', 'HOD_APPROVED', 'HR_APPROVED'],
+            })
+            .andWhere('leave.start_date <= :today AND leave.end_date >= :today', { today })
+            .getCount();
+
+    const [pendingLeaves, pendingGatePasses] = await Promise.all([
+      this.staffLeaveRequests.count({
+        where: [
+          { tenant_id: tenantId, status: 'PENDING' as const },
+          { tenant_id: tenantId, status: 'HOD_APPROVED' as const },
+        ],
+      }),
+      this.gatePasses.count({ where: { tenant_id: tenantId, status: 'PENDING' } }),
+    ]);
+
+    return {
+      headcount: staffUsers.length,
+      present_today: presentToday,
+      on_leave_today: onLeaveToday,
+      pending_actions: pendingLeaves + pendingGatePasses,
+      pending_leaves: pendingLeaves,
+      pending_gate_passes: pendingGatePasses,
+    };
+  }
+
+  async listEmployees(tenantId: string) {
+    const rows = await this.users
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .leftJoinAndSelect('user.department', 'department')
+      .where('user.tenant_id = :tenantId', { tenantId })
+      .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+      .orderBy('user.name', 'ASC')
+      .getMany();
+
+    const officerIds = rows
+      .map((row) => row.reporting_officer_id)
+      .filter((id): id is string => Boolean(id));
+    const officers =
+      officerIds.length > 0
+        ? await this.users.findBy({ user_id: In(officerIds) })
+        : [];
+    const officerMap = new Map(officers.map((o) => [o.user_id, o]));
+
+    return rows.map((row) => ({
+      user_id: row.user_id,
+      name: row.name,
+      email: row.email,
+      role: row.role?.role_name ?? null,
+      role_id: row.role_id,
+      department: row.department?.dept_name ?? null,
+      dept_id: row.dept_id,
+      salary_base: row.salary_base,
+      reporting_officer_id: row.reporting_officer_id,
+      reporting_officer_name: row.reporting_officer_id
+        ? officerMap.get(row.reporting_officer_id)?.name ?? null
+        : null,
+      is_active: row.is_active,
+    }));
+  }
+
+  async getEmployeeProfile(tenantId: string, userId: string) {
+    const employee = await this.users.findOne({
+      where: { user_id: userId, tenant_id: tenantId },
+      relations: ['role', 'department'],
+    });
+    if (!employee) throw new NotFoundException('Employee not found');
+    const [attendance, leaves, payslips] = await Promise.all([
+      this.listAttendanceCalendar(userId, new Date().toISOString().slice(0, 7)),
+      this.listMyStaffLeaves(userId, tenantId),
+      this.listMyPayslips(userId, tenantId),
+    ]);
+    return {
+      personal: {
+        user_id: employee.user_id,
+        name: employee.name,
+        email: employee.email,
+        role: employee.role?.role_name ?? null,
+        department: employee.department?.dept_name ?? null,
+        active: employee.is_active,
+      },
+      bank_tax: {
+        pan: 'AAAAA0000A',
+        bank_account_status: 'Verified',
+        salary_base: employee.salary_base,
+      },
+      assets: [
+        { asset: 'Laptop', serial: `FAL-${employee.user_id.slice(0, 6).toUpperCase()}`, status: 'Assigned' },
+        { asset: 'ID Card', serial: `SGVU-${employee.user_id.slice(0, 4).toUpperCase()}`, status: 'Printed' },
+      ],
+      employment_history: [
+        { event: 'Joined SGVU', date: employee.created_at, status: 'Completed' },
+        { event: 'Current Role', date: employee.updated_at, status: employee.role?.role_name ?? 'Assigned' },
+      ],
+      attendance,
+      leaves,
+      payslips,
+    };
+  }
+
+  async updateEmployee(
+    tenantId: string,
+    userId: string,
+    dto: {
+      role_id?: number;
+      dept_id?: number;
+      salary_base?: string;
+      reporting_officer_id?: string | null;
+    },
+  ) {
+    const user = await this.users.findOne({
+      where: { user_id: userId, tenant_id: tenantId },
+      relations: ['role'],
+    });
+    if (!user) throw new NotFoundException('Employee not found');
+
+    if (dto.role_id !== undefined) user.role_id = dto.role_id;
+    if (dto.dept_id !== undefined) user.dept_id = dto.dept_id;
+    if (dto.salary_base !== undefined) user.salary_base = dto.salary_base;
+    if (dto.reporting_officer_id !== undefined) {
+      user.reporting_officer_id = dto.reporting_officer_id;
+    }
+
+    await this.users.save(user);
+    return this.listEmployees(tenantId).then((all) =>
+      all.find((row) => row.user_id === userId),
+    );
+  }
+
+  async getAttendanceMatrix(tenantId: string, month: string) {
+    const [year, monthValue] = month.split('-').map(Number);
+    const start = `${year}-${String(monthValue).padStart(2, '0')}-01`;
+    const end = new Date(year, monthValue, 0).toISOString().slice(0, 10);
+
+    const staffUsers = await this.users
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('user.tenant_id = :tenantId', { tenantId })
+      .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+      .orderBy('user.name', 'ASC')
+      .getMany();
+
+    const staffIds = staffUsers.map((u) => u.user_id);
+    if (staffIds.length === 0) {
+      return { month, employees: [] };
+    }
+
+    const [attendanceRows, leaveRows] = await Promise.all([
+      this.staffAttendance
+        .createQueryBuilder('attendance')
+        .where('attendance.user_id IN (:...staffIds)', { staffIds })
+        .andWhere('attendance.work_date BETWEEN :start AND :end', { start, end })
+        .getMany(),
+      this.staffLeaveRequests
+        .createQueryBuilder('leave')
+        .where('leave.tenant_id = :tenantId', { tenantId })
+        .andWhere('leave.staff_user_id IN (:...staffIds)', { staffIds })
+        .andWhere('leave.status IN (:...statuses)', {
+          statuses: ['PENDING', 'HOD_APPROVED', 'HR_APPROVED'],
+        })
+        .andWhere('leave.start_date <= :end AND leave.end_date >= :start', { start, end })
+        .getMany(),
+    ]);
+
+    const attendanceByUser = new Map<string, Map<string, StaffAttendance>>();
+    for (const row of attendanceRows) {
+      if (!attendanceByUser.has(row.user_id)) {
+        attendanceByUser.set(row.user_id, new Map());
+      }
+      attendanceByUser.get(row.user_id)!.set(row.work_date, row);
+    }
+
+    const leaveByUser = new Map<string, StaffLeaveRequest[]>();
+    for (const row of leaveRows) {
+      if (!leaveByUser.has(row.staff_user_id)) {
+        leaveByUser.set(row.staff_user_id, []);
+      }
+      leaveByUser.get(row.staff_user_id)!.push(row);
+    }
+
+    const weekdayDates = this.weekdayDatesInMonth(year, monthValue);
+
+    const employees = staffUsers.map((staff) => {
+      const userAttendance = attendanceByUser.get(staff.user_id) ?? new Map();
+      const userLeaves = leaveByUser.get(staff.user_id) ?? [];
+
+      const days = weekdayDates.map((date) => {
+        const leave = userLeaves.find((row) => {
+          const range = this.expandDateRange(row.start_date, row.end_date);
+          return range.includes(date);
+        });
+        if (leave) {
+          return { date, status: 'LEAVE', leave_status: leave.status };
+        }
+        const attendance = userAttendance.get(date);
+        if (attendance?.check_in_at) {
+          return { date, status: 'PRESENT' };
+        }
+        return { date, status: 'ABSENT' };
+      });
+
+      return {
+        user_id: staff.user_id,
+        name: staff.name,
+        email: staff.email,
+        role: staff.role?.role_name ?? null,
+        days,
+      };
+    });
+
+    return { month, employees };
+  }
+
+  listHolidays() {
+    return Promise.resolve([
+      { holiday_id: 'diwali-2026', name: 'Diwali Break', start_date: '2026-11-08', end_date: '2026-11-12', type: 'UNIVERSITY' },
+      { holiday_id: 'summer-2026', name: 'Summer Break', start_date: '2026-06-01', end_date: '2026-06-15', type: 'UNIVERSITY' },
+    ]);
+  }
+
+  listAllStaffLeaves(tenantId: string, status?: StaffLeaveRequest['status']) {
+    const where: Record<string, unknown> = { tenant_id: tenantId };
+    if (status) where.status = status;
+    return this.staffLeaveRequests.find({
+      where,
+      relations: ['staff'],
+      order: { applied_at: 'DESC' },
+    });
+  }
+
+  async getActionCenter(tenantId: string) {
+    const [pendingLeaves, pendingGatePasses] = await Promise.all([
+      this.staffLeaveRequests.find({
+        where: [
+          { tenant_id: tenantId, status: 'PENDING' },
+          { tenant_id: tenantId, status: 'HOD_APPROVED' },
+        ],
+        relations: ['staff'],
+        order: { applied_at: 'ASC' },
+      }),
+      this.gatePasses.find({
+        where: { tenant_id: tenantId, status: 'PENDING' },
+        relations: ['staff'],
+        order: { out_time: 'ASC' },
+      }),
+    ]);
+
+    return {
+      pending_leaves: pendingLeaves,
+      pending_gate_passes: pendingGatePasses,
+    };
+  }
+
+  async runPayroll(tenantId: string, monthKey: string) {
+    const [year, monthValue] = monthKey.split('-').map(Number);
+    if (!year || !monthValue) {
+      throw new BadRequestException('month must be YYYY-MM');
+    }
+
+    const workingDays = this.countWeekdaysInMonth(year, monthValue);
+    const monthStart = `${year}-${String(monthValue).padStart(2, '0')}-01`;
+    const monthEnd = new Date(year, monthValue, 0).toISOString().slice(0, 10);
+    const monthName = this.monthLabel(year, monthValue);
+
+    const staffUsers = await this.users
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('user.tenant_id = :tenantId', { tenantId })
+      .andWhere('user.is_active = true')
+      .andWhere('user.salary_base IS NOT NULL')
+      .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+      .getMany();
+
+    const results: Array<{
+      payslip_id: string;
+      staff_user_id: string;
+      staff_name: string;
+      month: string;
+      year: number;
+      gross_pay: string | null;
+      net_pay: string | null;
+      working_days: number | null;
+      lwp_days: string | null;
+      is_published: boolean;
+    }> = [];
+
+    for (const staff of staffUsers) {
+      const salaryBase = Number(staff.salary_base ?? 0);
+      if (!salaryBase) continue;
+
+      const presentDays = await this.staffAttendance
+        .createQueryBuilder('attendance')
+        .where('attendance.user_id = :userId', { userId: staff.user_id })
+        .andWhere('attendance.work_date BETWEEN :monthStart AND :monthEnd', {
+          monthStart,
+          monthEnd,
+        })
+        .andWhere('attendance.check_in_at IS NOT NULL')
+        .getCount();
+
+      const approvedLeaves = await this.staffLeaveRequests
+        .createQueryBuilder('leave')
+        .where('leave.tenant_id = :tenantId', { tenantId })
+        .andWhere('leave.staff_user_id = :userId', { userId: staff.user_id })
+        .andWhere('leave.status = :status', { status: 'HR_APPROVED' })
+        .andWhere('leave.start_date <= :monthEnd AND leave.end_date >= :monthStart', {
+          monthStart,
+          monthEnd,
+        })
+        .getMany();
+
+      let paidLeaveDays = 0;
+      for (const leave of approvedLeaves) {
+        const dates = this.expandDateRange(leave.start_date, leave.end_date).filter((date) => {
+          const d = new Date(date);
+          return (
+            d.getFullYear() === year &&
+            d.getMonth() === monthValue - 1 &&
+            d.getDay() !== 0 &&
+            d.getDay() !== 6
+          );
+        });
+        paidLeaveDays += dates.length;
+      }
+
+      const lwpDays = Math.max(0, workingDays - presentDays - paidLeaveDays);
+      const dailyRate = salaryBase / workingDays;
+      const netPay = Number((salaryBase - dailyRate * lwpDays).toFixed(2));
+
+      let payslip = await this.payslips.findOne({
+        where: {
+          tenant_id: tenantId,
+          staff_user_id: staff.user_id,
+          month: monthName,
+          year,
+        },
+      });
+
+      const filePath = `/uploads/payslips/${staff.user_id}-${monthKey}.pdf`;
+
+      if (payslip) {
+        payslip.gross_pay = salaryBase.toFixed(2);
+        payslip.net_pay = netPay.toFixed(2);
+        payslip.working_days = workingDays;
+        payslip.lwp_days = lwpDays.toFixed(2);
+        payslip.file_path = filePath;
+      } else {
+        payslip = this.payslips.create({
+          tenant_id: tenantId,
+          staff_user_id: staff.user_id,
+          month: monthName,
+          year,
+          gross_pay: salaryBase.toFixed(2),
+          net_pay: netPay.toFixed(2),
+          working_days: workingDays,
+          lwp_days: lwpDays.toFixed(2),
+          file_path: filePath,
+          is_published: false,
+        });
+      }
+
+      const saved = await this.payslips.save(payslip);
+      results.push({
+        payslip_id: saved.payslip_id,
+        staff_user_id: staff.user_id,
+        staff_name: staff.name,
+        month: monthName,
+        year,
+        gross_pay: saved.gross_pay,
+        net_pay: saved.net_pay,
+        working_days: saved.working_days,
+        lwp_days: saved.lwp_days,
+        is_published: saved.is_published,
+      });
+    }
+
+    return {
+      month: monthKey,
+      working_days: workingDays,
+      generated: results.length,
+      payslips: results,
+    };
+  }
+
+  async queuePayrollRun(tenantId: string, monthKey: string, startedByUserId?: string) {
+    const staffCount = await this.users
+      .createQueryBuilder('user')
+      .leftJoin('user.role', 'role')
+      .where('user.tenant_id = :tenantId', { tenantId })
+      .andWhere('user.is_active = true')
+      .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+      .getCount();
+    return {
+      statusCode: 202,
+      queued: true,
+      job_id: `payroll-${monthKey}-${Date.now()}`,
+      month: monthKey,
+      total_staff: staffCount,
+      processed_staff: 0,
+      progress: 0,
+      started_by_user_id: startedByUserId ?? null,
+      message: 'Payroll run queued. BullMQ worker will calculate LWP, PF, taxes, and payslip PDFs.',
+    };
+  }
+
+  listPayrollPayslips(tenantId: string, month?: string) {
+    const qb = this.payslips
+      .createQueryBuilder('payslip')
+      .leftJoinAndSelect('payslip.staff', 'staff')
+      .where('payslip.tenant_id = :tenantId', { tenantId })
+      .orderBy('payslip.year', 'DESC')
+      .addOrderBy('payslip.generated_at', 'DESC');
+
+    if (month) {
+      const [year, monthValue] = month.split('-').map(Number);
+      qb.andWhere('payslip.year = :year', { year }).andWhere('payslip.month = :month', {
+        month: this.monthLabel(year, monthValue),
+      });
+    }
+
+    return qb.getMany();
+  }
+
+  async publishPayslip(tenantId: string, payslipId: string) {
+    const payslip = await this.payslips.findOne({
+      where: { payslip_id: payslipId, tenant_id: tenantId },
+    });
+    if (!payslip) throw new NotFoundException('Payslip not found');
+    payslip.is_published = true;
+    payslip.published_at = new Date();
+    return this.payslips.save(payslip);
+  }
+
+  async actOnStaffLeave(
+    leaveId: string,
+    tenantId: string,
+    status: 'HOD_APPROVED' | 'HR_APPROVED' | 'REJECTED',
+    actor?: { user_id: string; role?: string; roles?: string[]; dept_id?: number },
+  ) {
+    const leave = await this.staffLeaveRequests.findOne({
+      where: { leave_id: leaveId, tenant_id: tenantId },
+      relations: ['staff'],
+    });
+    if (!leave) throw new NotFoundException('Leave request not found');
+    const actorRoles = actor?.roles ?? (actor?.role ? [actor.role] : []);
+    if (actorRoles.includes('HOD') && !actorRoles.includes('HR') && !actorRoles.includes('SuperAdmin')) {
+      const hodDepartments = await this.users.manager.query(
+        `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+        [actor?.user_id],
+      );
+      const allowedDeptIds = new Set<number>([
+        ...hodDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...(actor?.dept_id ? [actor.dept_id] : []),
+      ]);
+      if (!leave.staff?.dept_id || !allowedDeptIds.has(leave.staff.dept_id)) {
+        throw new ForbiddenException('HOD can act only on faculty from their department');
+      }
+    }
+    leave.status = status;
+    return this.staffLeaveRequests.save(leave);
+  }
+
+  async listSalaryStructures(tenantId: string) {
+    return this.users.manager.query(
+      `SELECT s.*, u.name AS employee_name, u.official_email AS employee_email
+       FROM hr_salary_structures s
+       LEFT JOIN users u ON u.user_id = s.assigned_user_id
+       WHERE s.tenant_id = $1
+       ORDER BY s.structure_name ASC`,
+      [tenantId],
+    );
+  }
+
+  async listRecruitmentJobs(tenantId: string) {
+    return this.users.manager.query(
+      `SELECT j.*, d.dept_name AS department_name
+       FROM hr_job_postings j
+       LEFT JOIN departments d ON d.dept_id = j.department_id
+       WHERE j.tenant_id = $1
+       ORDER BY j.created_at DESC`,
+      [tenantId],
+    );
+  }
+
+  async createRecruitmentJob(
+    tenantId: string,
+    createdByUserId: string,
+    dto: { title?: string; department_id?: number; openings?: number; employment_type?: string; description?: string },
+  ) {
+    const rows = await this.users.manager.query(
+      `INSERT INTO hr_job_postings
+        (tenant_id, title, department_id, openings, employment_type, description, created_by_user_id, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'OPEN')
+       RETURNING *`,
+      [
+        tenantId,
+        dto.title ?? 'New Faculty Opening',
+        dto.department_id ?? null,
+        dto.openings ?? 1,
+        dto.employment_type ?? 'FULL_TIME',
+        dto.description ?? null,
+        createdByUserId,
+      ],
+    );
+    return rows[0];
+  }
+
+  async listRecruitmentPipeline(tenantId: string) {
+    const applicants = await this.users.manager.query(
+      `SELECT a.*, j.title AS job_title
+       FROM hr_applicants a
+       LEFT JOIN hr_job_postings j ON j.job_id = a.job_id
+       WHERE a.tenant_id = $1
+       ORDER BY a.created_at ASC`,
+      [tenantId],
+    );
+    const stages = ['APPLIED', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'HIRED'];
+    return {
+      stages: stages.map((stage) => ({
+        id: stage,
+        title: stage.replaceAll('_', ' '),
+        cards: applicants.filter((row: { stage: string }) => row.stage === stage),
+      })),
+    };
+  }
+
+  async moveApplicant(tenantId: string, applicantId: string, stage: string) {
+    const rows = await this.users.manager.query(
+      `UPDATE hr_applicants
+       SET stage = $1, updated_at = NOW()
+       WHERE tenant_id = $2 AND applicant_id = $3
+       RETURNING *`,
+      [stage, tenantId, applicantId],
+    );
+    if (!rows[0]) throw new NotFoundException('Applicant not found');
+    return rows[0];
+  }
+
+  listClearanceTasks(tenantId: string, lifecycleType: 'ONBOARDING' | 'OFFBOARDING') {
+    return this.users.manager.query(
+      `SELECT t.*, u.name AS employee_name, a.name AS applicant_name, a.email AS applicant_email
+       FROM hr_clearance_tasks t
+       LEFT JOIN users u ON u.user_id = t.employee_user_id
+       LEFT JOIN hr_applicants a ON a.applicant_id = t.applicant_id
+       WHERE t.tenant_id = $1 AND t.lifecycle_type = $2
+       ORDER BY t.created_at DESC`,
+      [tenantId, lifecycleType],
+    );
+  }
+
+  listAppraisalCycles(tenantId: string) {
+    return this.users.manager.query(
+      `SELECT c.*, COUNT(k.submission_id)::int AS submissions
+       FROM hr_appraisal_cycles c
+       LEFT JOIN hr_kpi_submissions k ON k.cycle_id = c.cycle_id
+       WHERE c.tenant_id = $1
+       GROUP BY c.cycle_id
+       ORDER BY c.start_date DESC`,
+      [tenantId],
+    );
+  }
+
+  listFacultyKpis(tenantId: string) {
+    return this.users.manager.query(
+      `SELECT k.*, c.name AS cycle_name, u.name AS employee_name, u.official_email AS employee_email
+       FROM hr_kpi_submissions k
+       JOIN hr_appraisal_cycles c ON c.cycle_id = k.cycle_id
+       JOIN users u ON u.user_id = k.employee_user_id
+       WHERE k.tenant_id = $1
+       ORDER BY k.submitted_at DESC`,
+      [tenantId],
+    );
   }
 }

@@ -43,13 +43,51 @@ async function request<T>(
   }
 
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+
+  const text = await response.text();
+  if (!text.trim()) return null as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('Invalid JSON response from server');
+  }
 }
 
 export const api = {
   login: () => {
     const tenant = getSubdomainFromClient();
     return `${API_URL}/auth/google?tenant=${encodeURIComponent(tenant)}`;
+  },
+  localLogin: async (email: string, password: string) => {
+    const response = await fetch(`${API_URL}/api/auth/local-login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...tenantHeaders(),
+      },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || 'Login failed');
+    }
+    return response.json() as Promise<{
+      token: string;
+      user: {
+        user_id: string;
+        email: string;
+        name: string;
+        role: string;
+        roles?: string[];
+        primaryRole?: string;
+        role_id?: number;
+        department?: string;
+        dept_id?: number;
+        tenant_id?: string;
+        tenant_schema?: string;
+      };
+    }>;
   },
 };
 

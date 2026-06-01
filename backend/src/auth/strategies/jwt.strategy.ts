@@ -33,11 +33,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account is inactive');
     }
 
+    const roleClaims = this.authService.getRoleClaims(user);
+
     return {
       user_id: user.user_id,
       email: user.email,
       name: user.name,
-      role: user.role?.role_name,
+      role: roleClaims.primaryRole,
+      roles: roleClaims.roles,
+      primaryRole: roleClaims.primaryRole,
       role_id: user.role_id,
       department: user.department?.dept_name,
       dept_id: user.dept_id,

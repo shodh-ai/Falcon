@@ -253,8 +253,8 @@ export default function AdminPage() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#d6b65d]">Admin Management Center</p>
-            <h1 className="mt-1 text-2xl font-black text-[#08234a]">University Governance System</h1>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#d6b65d]">Falcon Admin</p>
+            <h1 className="mt-1 text-2xl font-black text-[#08234a]">Falcon OS · SGVU</h1>
             <p className="text-sm text-slate-500">{user.name} • {user.role}</p>
           </div>
           <button onClick={() => router.push('/dashboard')} className="rounded-xl bg-[#08234a] px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#0d356f]">Back to Dashboard</button>

@@ -12,6 +12,42 @@ import { CreateAlumniRequestDto } from './dto/create-alumni-request.dto';
 export class IqacController {
   constructor(private readonly iqac: IqacService) {}
 
+  @Get('dashboard')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  dashboard() {
+    return this.iqac.getDashboard();
+  }
+
+  @Get('task-master')
+  @Roles('SuperAdmin', 'IQAC')
+  listTaskMaster() {
+    return this.iqac.listTaskMaster();
+  }
+
+  @Post('task-master')
+  @Roles('SuperAdmin', 'IQAC')
+  createTaskMaster(@Body() dto: { task_name?: string; task_description?: string; role_id?: number; month?: string; is_recurring?: boolean }) {
+    return this.iqac.createTaskMaster(dto);
+  }
+
+  @Get('document-vault')
+  @Roles('SuperAdmin', 'IQAC')
+  documentVault() {
+    return this.iqac.listDocumentVault();
+  }
+
+  @Get('student-achievements')
+  @Roles('SuperAdmin', 'IQAC', 'President')
+  studentAchievements() {
+    return this.iqac.listStudentAchievements();
+  }
+
+  @Get('export-center')
+  @Roles('SuperAdmin', 'IQAC')
+  exportCenter() {
+    return this.iqac.getExportCenter();
+  }
+
   @Get('placements/jobs')
   listJobs() {
     return this.iqac.listJobs();

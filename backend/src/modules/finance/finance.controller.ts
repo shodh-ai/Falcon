@@ -11,9 +11,31 @@ import { GatewayWebhookDto } from './dto/gateway-webhook.dto';
 export class FinanceController {
   constructor(private readonly finance: FinanceService) {}
 
+  @Get('dashboard')
+  @Roles('SuperAdmin', 'Accountant', 'President')
+  dashboard() {
+    return this.finance.getDashboard();
+  }
+
   @Get('demands')
   listDemands(@Query('studentUserId') studentUserId?: string) {
     return this.finance.listDemands(studentUserId);
+  }
+
+  @Post('demands/bulk-generate')
+  @Roles('SuperAdmin', 'Accountant')
+  bulkGenerateDemands(
+    @Body()
+    dto: {
+      program?: string;
+      semester?: number;
+      academic_year?: string;
+      due_date?: string;
+      tuition_fee?: number;
+      development_fee?: number;
+    },
+  ) {
+    return this.finance.bulkGenerateDemands(dto);
   }
 
   @Post('demands')
@@ -25,6 +47,24 @@ export class FinanceController {
   @Get('transactions')
   listTransactions(@Query('studentUserId') studentUserId?: string) {
     return this.finance.listTransactions(studentUserId);
+  }
+
+  @Get('defaulters')
+  @Roles('SuperAdmin', 'Accountant', 'President')
+  listDefaulters() {
+    return this.finance.listDefaulters();
+  }
+
+  @Post('defaulters/lock-admit-cards')
+  @Roles('SuperAdmin', 'Accountant')
+  lockAdmitCards() {
+    return this.finance.lockAdmitCards();
+  }
+
+  @Post('scholarships')
+  @Roles('SuperAdmin', 'Accountant')
+  applyScholarship(@Body() dto: { student_user_id?: string; discount_percent?: number }) {
+    return this.finance.applyScholarship(dto);
   }
 
   @Get('fine-policies')

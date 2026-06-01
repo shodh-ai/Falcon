@@ -11,6 +11,7 @@ import { CommandMenu } from '@/components/layout/CommandMenu';
 import { NotificationBell, type AppNotification } from '@/components/layout/NotificationBell';
 import { ProfileMenu } from '@/components/layout/ProfileMenu';
 import { AppSidebar } from '@/components/layout/AppSidebar';
+import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher';
 import type { PortalConfig } from '@/lib/navigation';
 
 interface AppShellProps {
@@ -70,14 +71,16 @@ export function AppShell({ config, children, notifications = [], profileHref }: 
             </Sheet>
 
             <div className="hidden min-w-0 sm:block">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-sgvu-gold">{config.personaLabel}</p>
-              <h1 className="truncate text-base font-semibold text-sgvu-navy sm:text-lg">{config.personaTitle}</h1>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-sgvu-gold">Falcon</p>
+              <h1 className="truncate text-base font-black text-sgvu-navy sm:text-lg">{config.personaTitle}</h1>
+              <p className="truncate text-[11px] font-medium text-muted-foreground">{config.personaLabel}</p>
             </div>
 
-            <div className="ml-auto flex flex-1 items-center justify-end gap-2 sm:gap-3 md:max-w-xl md:flex-initial">
-              <div className="hidden flex-1 md:block">
+            <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+              <div className="hidden md:block">
                 <CommandMenu items={config.commandItems} />
               </div>
+              <WorkspaceSwitcher />
               <NotificationBell notifications={notifications} />
               <ProfileMenu profileHref={profileHref ?? config.homeHref.replace('/dashboard', '/profile')} />
             </div>

@@ -37,7 +37,7 @@ function buildModelCandidates(configuredModel: string): string[] {
   return [first, ...fallbacks].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 }
 
-/** Maps Gemini payload → DB (supports CSV schema + legacy status/remarks). */
+/** Maps Gemini payload → DB (supports CSV schema + existing status/remarks). */
 function toAuditResult(obj: Record<string, unknown>): AiAuditResult {
   if (typeof obj.is_valid === 'boolean') {
     const valid = obj.is_valid;

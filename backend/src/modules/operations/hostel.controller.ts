@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -14,8 +15,9 @@ export class HostelController {
 
   @Get('my-allocation')
   @Roles('Student')
-  myAllocation(@Req() req: { user: AuthUser }) {
-    return this.hostel.getMyAllocation(req.user.user_id);
+  async myAllocation(@Req() req: { user: AuthUser }, @Res() res: Response) {
+    const allocation = await this.hostel.getMyAllocation(req.user.user_id);
+    return res.status(200).json(allocation);
   }
 
   @Post('requests')

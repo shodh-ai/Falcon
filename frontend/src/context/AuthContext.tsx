@@ -7,6 +7,8 @@ interface User {
   email: string;
   name: string;
   role: string;
+  roles?: string[];
+  primaryRole?: string;
   role_id?: number;
   department?: string;
   dept_id?: number;

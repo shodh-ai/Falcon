@@ -5,6 +5,7 @@ import { AcademicMentorship } from '../../entities/academic-mentorship.entity';
 import { StudentProfile } from '../../entities/student-profile.entity';
 import { ProctorInteraction } from '../../entities/proctor-interaction.entity';
 import { User } from '../../entities/user.entity';
+import { StudentCertificate } from '../../entities/student-certificate.entity';
 import { AssignMentorDto } from './dto/assign-mentor.dto';
 import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
 
@@ -15,6 +16,8 @@ export class ProctorService {
     @InjectRepository(StudentProfile) private profiles: Repository<StudentProfile>,
     @InjectRepository(ProctorInteraction) private interactions: Repository<ProctorInteraction>,
     @InjectRepository(User) private users: Repository<User>,
+    @InjectRepository(StudentCertificate)
+    private certificates: Repository<StudentCertificate>,
   ) {}
 
   async assignMentor(dto: AssignMentorDto, assignedByUserId: string) {
@@ -122,6 +125,71 @@ export class ProctorService {
         email: m.student?.email,
       },
     }));
+  }
+
+  async getPendingApprovals(proctorUserId: string, tenantId: string) {
+    const mentorships = await this.mentorships.find({
+      where: { proctor_user_id: proctorUserId, is_active: true },
+      relations: ['student'],
+    });
+    const studentIds = mentorships.map((m) => m.student_user_id);
+    if (studentIds.length === 0) {
+      return { certificates: [] };
+    }
+
+    const certificates = await this.certificates
+      .createQueryBuilder('certificate')
+      .leftJoinAndSelect('certificate.student', 'student')
+      .where('certificate.tenant_id = :tenantId', { tenantId })
+      .andWhere('certificate.verification_status = :status', { status: 'PENDING' })
+      .andWhere('certificate.student_user_id IN (:...studentIds)', { studentIds })
+      .orderBy('certificate.uploaded_at', 'DESC')
+      .getMany();
+
+    return {
+      certificates: certificates.map((certificate) => ({
+        certificate_id: certificate.certificate_id,
+        title: certificate.title,
+        issuer: certificate.issuer,
+        issue_date: certificate.issue_date,
+        uploaded_at: certificate.uploaded_at,
+        student: certificate.student
+          ? {
+              user_id: certificate.student.user_id,
+              name: certificate.student.name,
+              email: certificate.student.email,
+            }
+          : null,
+      })),
+    };
+  }
+
+  async approveCertificate(
+    proctorUserId: string,
+    tenantId: string,
+    certificateId: string,
+    status: 'VERIFIED' | 'REJECTED' = 'VERIFIED',
+    rejectionReason?: string,
+  ) {
+    const certificate = await this.certificates.findOne({
+      where: { certificate_id: certificateId, tenant_id: tenantId },
+    });
+    if (!certificate) throw new NotFoundException('Certificate not found');
+
+    const mentorship = await this.mentorships.findOne({
+      where: {
+        student_user_id: certificate.student_user_id,
+        proctor_user_id: proctorUserId,
+        is_active: true,
+      },
+    });
+    if (!mentorship) throw new ForbiddenException('Certificate is not assigned to your mentee');
+
+    certificate.verification_status = status;
+    certificate.verified_by_user_id = proctorUserId;
+    certificate.verified_at = new Date();
+    certificate.rejection_reason = status === 'REJECTED' ? rejectionReason ?? null : null;
+    return this.certificates.save(certificate);
   }
 
 }

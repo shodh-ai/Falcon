@@ -1,7 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { mkdirSync, writeFileSync } from 'fs';
+import { extname } from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { AttendanceRecord } from '../../entities/attendance-record.entity';
+import { AcademicTimetable } from '../../entities/academic-timetable.entity';
+import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
+import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity';
+import { CourseMaterial } from '../../entities/course-material.entity';
+import { ObjectStorageService } from '../../storage/object-storage.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 
 export interface FacultyTodayClassDto {
@@ -32,6 +40,15 @@ export class AcademicsFacultyService {
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(AttendanceRecord)
     private readonly attendanceRepo: Repository<AttendanceRecord>,
+    @InjectRepository(AcademicTimetable)
+    private readonly timetableRepo: Repository<AcademicTimetable>,
+    @InjectRepository(StudentCourseEnrollment)
+    private readonly enrollmentRepo: Repository<StudentCourseEnrollment>,
+    @InjectRepository(CourseAttendanceLog)
+    private readonly courseAttendanceLogs: Repository<CourseAttendanceLog>,
+    @InjectRepository(CourseMaterial)
+    private readonly courseMaterials: Repository<CourseMaterial>,
+    private readonly objectStorage: ObjectStorageService,
   ) {}
 
   async getFacultyTodayClasses(facultyUserId: string): Promise<FacultyTodayClassDto[]> {
@@ -170,6 +187,137 @@ export class AcademicsFacultyService {
     });
   }
 
+  async getFacultyAcademicTimetableToday(facultyUserId: string, tenantId: string) {
+    const day = new Date().getDay();
+    const isoDay = day === 0 ? 7 : day;
+    const rows = await this.timetableRepo.find({
+      where: {
+        tenant_id: tenantId,
+        faculty_user_id: facultyUserId,
+        day_of_week: isoDay,
+      },
+      relations: ['course'],
+      order: { start_time: 'ASC' },
+    });
+
+    return Promise.all(
+      rows.map(async (row) => ({
+        timetable_id: row.timetable_id,
+        course_id: row.course_id,
+        course_code: row.course.course_code,
+        course_name: row.course.course_name,
+        room: row.room,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        student_count: await this.enrollmentRepo.count({
+          where: {
+            tenant_id: tenantId,
+            course_id: row.course_id,
+            status: 'ENROLLED',
+          },
+        }),
+      })),
+    );
+  }
+
+  async getCourseStudents(courseId: string, facultyUserId: string, tenantId: string) {
+    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const rows = await this.enrollmentRepo.find({
+      where: {
+        tenant_id: tenantId,
+        course_id: courseId,
+        status: 'ENROLLED',
+      },
+      relations: ['student'],
+      order: { student_user_id: 'ASC' },
+    });
+
+    return rows.map((row) => ({
+      student_id: row.student_user_id,
+      name: row.student?.name ?? 'Student',
+      roll_number: row.student?.email ?? row.student_user_id,
+      email: row.student?.email ?? null,
+    }));
+  }
+
+  async getCourseAttendanceState(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+    date = new Date().toISOString().slice(0, 10),
+  ) {
+    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const log = await this.courseAttendanceLogs.findOne({
+      where: {
+        tenant_id: tenantId,
+        course_id: courseId,
+        faculty_user_id: facultyUserId,
+        date,
+      },
+    });
+
+    return {
+      course_id: courseId,
+      date,
+      locked: this.isAttendanceLocked(date),
+      attendance_data: log?.attendance_data ?? null,
+    };
+  }
+
+  async saveCourseAttendanceLog(
+    facultyUserId: string,
+    tenantId: string,
+    dto: {
+      course_id: string;
+      date?: string;
+      attendance_data: { student_id: string; status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED' }[];
+    },
+  ) {
+    await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
+    const date = dto.date ?? new Date().toISOString().slice(0, 10);
+    if (this.isAttendanceLocked(date)) {
+      throw new ForbiddenException(
+        'Attendance locked. Contact Admin to modify records older than 3 days.',
+      );
+    }
+
+    await this.courseAttendanceLogs.upsert(
+      {
+        tenant_id: tenantId,
+        course_id: dto.course_id,
+        faculty_user_id: facultyUserId,
+        date,
+        attendance_data: dto.attendance_data,
+      },
+      ['tenant_id', 'course_id', 'faculty_user_id', 'date'],
+    );
+
+    return { saved: dto.attendance_data.length, date };
+  }
+
+  async uploadCourseMaterial(
+    facultyUserId: string,
+    tenantId: string,
+    dto: { course_id?: string; title?: string },
+    file: Express.Multer.File,
+  ) {
+    if (!dto.course_id || !dto.title?.trim()) {
+      throw new NotFoundException('Course and title are required');
+    }
+    await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
+    const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
+    const stored = await this.persistMaterialFile(tenantId, uniqueName, file);
+    const row = this.courseMaterials.create({
+      tenant_id: tenantId,
+      course_id: dto.course_id,
+      faculty_user_id: facultyUserId,
+      title: dto.title.trim(),
+      file_path: stored.filePath,
+      file_key: stored.fileKey,
+    });
+    return this.courseMaterials.save(row);
+  }
+
   private formatTime12h(hhmm: string): string {
     const [hStr, mStr] = hhmm.split(':');
     let h = parseInt(hStr, 10);
@@ -178,5 +326,42 @@ export class AcademicsFacultyService {
     h = h % 12;
     if (h === 0) h = 12;
     return `${h}:${m} ${ampm}`;
+  }
+
+  private async assertFacultyTeachesCourse(courseId: string, facultyUserId: string, tenantId: string) {
+    const row = await this.timetableRepo.findOne({
+      where: {
+        tenant_id: tenantId,
+        course_id: courseId,
+        faculty_user_id: facultyUserId,
+      },
+    });
+    if (!row) throw new NotFoundException('Course not found in your teaching timetable');
+  }
+
+  private isAttendanceLocked(date: string) {
+    const selected = new Date(`${date}T00:00:00`);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.floor((today.getTime() - selected.getTime()) / 86_400_000);
+    return diffDays > 3;
+  }
+
+  private async persistMaterialFile(
+    tenantId: string,
+    uniqueName: string,
+    file: Express.Multer.File,
+  ): Promise<{ filePath: string; fileKey: string | null }> {
+    if (this.objectStorage.isEnabled()) {
+      const key = this.objectStorage.buildKey(tenantId, uniqueName);
+      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      return { filePath: stored.url, fileKey: stored.key };
+    }
+    const uploadPath = process.env.UPLOAD_PATH || './uploads';
+    const targetDir = `${uploadPath}/${tenantId}/course-materials`;
+    mkdirSync(targetDir, { recursive: true });
+    const fullPath = `${targetDir}/${uniqueName}`;
+    writeFileSync(fullPath, file.buffer);
+    return { filePath: fullPath, fileKey: null };
   }
 }

@@ -66,17 +66,17 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
 
     let user = await this.userRepository.findOne({
       where: { email, tenant_id: tenant.tenant_id },
-      relations: ['role', 'department'],
+      relations: ['role', 'department', 'userRoles', 'userRoles.role'],
     });
 
     if (!user) {
-      const legacy = await this.userRepository.findOne({
+      const existing = await this.userRepository.findOne({
         where: { email },
-        relations: ['role', 'department'],
+        relations: ['role', 'department', 'userRoles', 'userRoles.role'],
       });
-      if (legacy) {
-        legacy.tenant_id = tenant.tenant_id;
-        user = await this.userRepository.save(legacy);
+      if (existing) {
+        existing.tenant_id = tenant.tenant_id;
+        user = await this.userRepository.save(existing);
       }
     }
 
@@ -97,7 +97,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       user = await this.userRepository.save(user);
       user = await this.userRepository.findOne({
         where: { user_id: user.user_id },
-        relations: ['role', 'department'],
+        relations: ['role', 'department', 'userRoles', 'userRoles.role'],
       });
     } else if (!user.google_id) {
       user.google_id = id;
@@ -112,7 +112,9 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    const token = this.authService.signToken(user, tenant.tenant_id, tenant.pg_schema);
+    await this.authService.ensurePrimaryRoleMapping(user);
+    const refreshed = await this.authService.findById(user.user_id, tenant.tenant_id);
+    const token = this.authService.signToken(refreshed ?? user, tenant.tenant_id, tenant.pg_schema);
     done(null, { user, token, tenant });
   }
 }

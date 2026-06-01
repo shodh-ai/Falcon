@@ -5,12 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  CheckCircle2,
-  Eye,
-  Loader2,
-  XCircle,
-} from 'lucide-react';
+import { CheckCircle2, Eye, XCircle } from 'lucide-react';
+import { FalconLoader } from '@/components/brand/FalconLoader';
 import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -38,6 +34,10 @@ interface PendingCertificate {
   } | null;
 }
 
+interface PendingApprovals {
+  certificates: PendingCertificate[];
+}
+
 export default function FacultyMentorshipPage() {
   const api = useAuthedApi();
   const { token } = useAuth();
@@ -48,11 +48,11 @@ export default function FacultyMentorshipPage() {
   useEffect(() => {
     Promise.all([
       api.get<StudentInfo[]>('/api/academics/proctor/my-students'),
-      api.get<PendingCertificate[]>('/api/academics/certificates/pending-verification'),
+      api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
     ])
-      .then(([studentsData, certificatesData]) => {
+      .then(([studentsData, approvals]) => {
         setStudents(studentsData);
-        setPendingCertificates(certificatesData);
+        setPendingCertificates(approvals.certificates);
         setLoading(false);
       })
       .catch(err => {
@@ -87,9 +87,9 @@ export default function FacultyMentorshipPage() {
       : undefined;
 
     try {
-      await api.patch(`/api/academics/certificates/${certificateId}/verify`, {
+      await api.post('/api/academics/proctor/approve-certificate', {
+        certificate_id: certificateId,
         status,
-        points_awarded: status === 'VERIFIED' ? 5 : 0,
         rejection_reason,
       });
       setPendingCertificates((prev) => prev.filter((item) => item.certificate_id !== certificateId));
@@ -106,11 +106,7 @@ export default function FacultyMentorshipPage() {
         <p className="mt-1 text-sm text-muted-foreground">View and manage students assigned to you for mentorship.</p>
       </section>
 
-      {loading && (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
-      )}
+      {loading && <FalconLoader label="Loading mentorship roster…" />}
 
       {!loading && (
         <Card>

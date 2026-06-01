@@ -10,7 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
 
 const categories = [
-  { label: 'Name Correction in ERP', value: 'ACADEMICS' },
+  { label: 'Name Correction', value: 'ACADEMICS' },
   { label: 'Fee Receipt not generated', value: 'FINANCE' },
   { label: 'WiFi login issue', value: 'IT' },
   { label: 'Hostel Maintenance', value: 'HOSTEL' },

@@ -3,6 +3,7 @@
 import { CreditCard, LogOut, Settings, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { getWorkspaceLabelForRole } from '@/lib/auth-routing';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,11 +31,11 @@ export function ProfileMenu({ profileHref = '/student/profile' }: ProfileMenuPro
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-11 gap-2 px-2 touch-target">
-          <Avatar className="h-9 w-9">
+        <Button variant="ghost" className="h-11 shrink-0 gap-2 px-2 touch-target">
+          <Avatar className="h-9 w-9 shrink-0">
             <AvatarFallback>{user?.name?.charAt(0) ?? 'U'}</AvatarFallback>
           </Avatar>
-          <span className="hidden max-w-[8rem] truncate text-sm font-semibold text-sgvu-navy md:inline">
+          <span className="hidden max-w-[9rem] truncate text-sm font-semibold text-sgvu-navy lg:inline xl:max-w-[12rem]">
             {user?.name ?? 'Guest'}
           </span>
         </Button>
@@ -42,7 +43,14 @@ export function ProfileMenu({ profileHref = '/student/profile' }: ProfileMenuPro
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
           <p className="font-semibold">{user?.name ?? 'Guest'}</p>
-          <p className="text-xs font-normal text-muted-foreground">{user?.role ?? 'Student'}</p>
+          <p className="text-xs font-normal text-muted-foreground">
+            {getWorkspaceLabelForRole(user?.primaryRole ?? user?.role ?? 'Student')}
+          </p>
+          {user?.roles && user.roles.length > 1 && (
+            <p className="mt-1 text-[11px] font-normal text-muted-foreground">
+              Roles: {user.roles.join(', ')}
+            </p>
+          )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push(profileHref)}>

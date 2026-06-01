@@ -8,7 +8,7 @@ import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
 import { BookProctorMeetingDto } from './dto/book-proctor-meeting.dto';
 import { SendProctorMessageDto } from './dto/send-proctor-message.dto';
 
-type AuthUser = { user_id: string; role?: string };
+type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
 @Controller('api/academics/proctor')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -56,6 +56,34 @@ export class ProctorController {
   @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
   getMyStudents(@Req() req: { user: AuthUser }) {
     return this.proctor.getMyAssignedStudents(req.user.user_id);
+  }
+
+  @Get('pending-approvals')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  getPendingApprovals(@Req() req: { user: AuthUser }) {
+    return this.proctor.getPendingApprovals(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Post('approve-certificate')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  approveCertificate(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { certificate_id: string; status?: 'VERIFIED' | 'REJECTED'; rejection_reason?: string },
+  ) {
+    return this.proctor.approveCertificate(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      dto.certificate_id,
+      dto.status ?? 'VERIFIED',
+      dto.rejection_reason,
+    );
+  }
+
+  private resolveTenantId(user: AuthUser) {
+    return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
 
 }
