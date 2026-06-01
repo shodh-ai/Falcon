@@ -8,8 +8,8 @@ export default function AdminOpsFleetPage() {
   const [fleet, setFleet] = useState<Record<string, unknown>[]>([]);
   const [fuel, setFuel] = useState<Record<string, unknown>[]>([]);
   useEffect(() => {
-    void api.get('/api/admin-ops/fleet').then(setFleet);
-    void api.get('/api/admin-ops/fleet/fuel-logs').then(setFuel);
+    void api.get<Record<string, unknown>[]>('/api/admin-ops/fleet').then(setFleet);
+    void api.get<Record<string, unknown>[]>('/api/admin-ops/fleet/fuel-logs').then(setFuel);
   }, [api]);
   return (
     <div className="p-6 space-y-6">

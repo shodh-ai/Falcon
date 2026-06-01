@@ -11,8 +11,10 @@ export default function IqacAlumniDonationsPage() {
   const [ledger, setLedger] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
-    void api.get('/iqac/alumni/donations/summary').then(setSummary);
-    void api.get('/iqac/alumni/donations').then(setLedger);
+    void api
+      .get<{ total_funds_raised_fy: number; financial_year_start: string }>('/iqac/alumni/donations/summary')
+      .then(setSummary);
+    void api.get<Record<string, unknown>[]>('/iqac/alumni/donations').then(setLedger);
   }, [api]);
 
   return (

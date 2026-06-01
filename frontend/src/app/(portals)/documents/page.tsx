@@ -7,7 +7,10 @@ export default function DocumentsVaultPage() {
   const api = useAuthedApi();
   const [docs, setDocs] = useState<Array<{ folder: string; title: string; file_url: string }>>([]);
   useEffect(() => {
-    void api.get('/api/reports/documents').then(setDocs).catch(() => setDocs([]));
+    void api
+      .get<Array<{ folder: string; title: string; file_url: string }>>('/api/reports/documents')
+      .then(setDocs)
+      .catch(() => setDocs([]));
   }, [api]);
 
   const folders = [...new Set(docs.map((d) => d.folder))];

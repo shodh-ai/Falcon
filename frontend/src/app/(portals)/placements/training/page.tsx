@@ -7,7 +7,7 @@ export default function PlacementTrainingPage() {
   const api = useAuthedApi();
   const [sessions, setSessions] = useState<Record<string, unknown>[]>([]);
   useEffect(() => {
-    void api.get('/api/placement/training-sessions').then(setSessions).catch(() => setSessions([]));
+    void api.get<Record<string, unknown>[]>('/api/placement/training-sessions').then(setSessions).catch(() => setSessions([]));
   }, [api]);
   return (
     <div className="p-6">
