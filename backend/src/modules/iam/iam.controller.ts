@@ -18,7 +18,7 @@ export class IamController {
   }
 
   @Post('campuses')
-  @Roles('Admin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   createCampus(@Body() dto: CreateCampusDto) {
     return this.iam.createCampus(dto);
   }
@@ -29,7 +29,7 @@ export class IamController {
   }
 
   @Post('schools')
-  @Roles('Admin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   createSchool(@Body() dto: CreateSchoolDto) {
     return this.iam.createSchool(dto);
   }
@@ -40,7 +40,7 @@ export class IamController {
   }
 
   @Post('programs')
-  @Roles('Admin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   createProgram(@Body() dto: CreateProgramDto) {
     return this.iam.createProgram(dto);
   }

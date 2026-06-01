@@ -34,8 +34,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             SGVU
           </div>
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#d6b65d]">Suresh Gyan Vihar</p>
-            <p className="text-sm text-blue-100">University Governance</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#d6b65d]">Falcon</p>
+            <p className="text-sm font-medium text-blue-100">SGVU Workspace</p>
           </div>
         </div>
 
@@ -93,13 +93,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 SGVU
               </div>
               <div>
-                <p className="font-bold text-[#08234a]">SGVU</p>
-                <p className="text-xs text-slate-500">Governance System</p>
+                <p className="font-black text-[#08234a]">Falcon</p>
+                <p className="text-xs font-medium text-slate-500">SGVU Workspace</p>
               </div>
             </div>
             <div className="hidden lg:block">
-              <p className="text-sm font-medium text-[#d6b65d]">Official Portal</p>
-              <h1 className="text-2xl font-bold text-[#08234a]">University Task Management System</h1>
+              <p className="text-sm font-medium text-[#d6b65d]">Powered by Falcon</p>
+              <h1 className="text-2xl font-black text-[#08234a]">Falcon Core</h1>
             </div>
             <div className="flex items-center gap-3 rounded-2xl bg-[#08234a]/5 px-4 py-2">
               <BarChart3 className="h-5 w-5 text-[#d6b65d]" />

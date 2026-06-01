@@ -12,26 +12,38 @@ export class Transaction {
   @PrimaryGeneratedColumn('uuid')
   transaction_id: string;
 
-  @ManyToOne(() => FeeDemand)
+  @ManyToOne(() => FeeDemand, { nullable: true })
   @JoinColumn({ name: 'demand_id' })
-  demand: FeeDemand;
+  demand: FeeDemand | null;
 
-  @Column()
-  demand_id: string;
+  @Column({ type: 'uuid', nullable: true })
+  demand_id: string | null;
 
-  @Column({ type: 'uuid' })
-  student_user_id: string;
+  @Column({ type: 'uuid', nullable: true })
+  student_user_id: string | null;
 
-  @Column({ length: 20, default: 'RAZORPAY' })
+  @Column({ type: 'varchar', length: 20, default: 'RAZORPAY' })
   gateway: PaymentGateway;
 
-  @Column({ length: 120, nullable: true })
-  gateway_reference: string;
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  gateway_reference: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true, unique: true })
+  gateway_order_id: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true, unique: true })
+  gateway_payment_id: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  payment_mode: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  receipt_url: string | null;
 
   @Column({ type: 'numeric', precision: 12, scale: 2 })
   amount: number;
 
-  @Column({ length: 20, default: 'INITIATED' })
+  @Column({ type: 'varchar', length: 20, default: 'INITIATED' })
   status: TransactionStatus;
 
   @Column({ type: 'jsonb', nullable: true })

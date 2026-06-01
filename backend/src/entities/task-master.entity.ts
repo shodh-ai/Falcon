@@ -15,7 +15,7 @@ export class TaskMaster {
   role: Role;
 
   @Column({ nullable: true })
-  role_id: number;
+  role_id: number | null;
 
   @Column({ length: 20 })
   month: string;
@@ -24,7 +24,7 @@ export class TaskMaster {
   is_recurring: boolean;
 
   @Column({ type: 'text', nullable: true })
-  task_description: string;
+  task_description: string | null;
 
   @CreateDateColumn()
   created_at: Date;

@@ -23,7 +23,7 @@ export class OperationsController {
   }
 
   @Patch('gate-passes/:id/approve')
-  @Roles('Warden', 'Admin')
+  @Roles('Warden', 'SuperAdmin')
   approvePass(@Param('id') id: string, @Req() req: { user?: { sub?: string } }) {
     return this.ops.approveGatePass(id, req.user?.sub ?? '');
   }
@@ -39,7 +39,7 @@ export class OperationsController {
   }
 
   @Post('library/books')
-  @Roles('Librarian', 'Admin')
+  @Roles('Librarian', 'SuperAdmin')
   createBook(@Body() dto: CreateLibraryBookDto) {
     return this.ops.createBook(dto);
   }
@@ -50,7 +50,7 @@ export class OperationsController {
   }
 
   @Post('transport/routes')
-  @Roles('TransportOfficer', 'Admin')
+  @Roles('TransportOfficer', 'SuperAdmin')
   createRoute(@Body() dto: CreateTransportRouteDto) {
     return this.ops.createRoute(dto);
   }

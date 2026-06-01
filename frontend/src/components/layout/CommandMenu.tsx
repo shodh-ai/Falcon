@@ -45,7 +45,7 @@ export function CommandMenu({ items }: CommandMenuProps) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-11 w-full max-w-md items-center gap-2 rounded-xl border border-input bg-background px-4 text-sm text-muted-foreground transition hover:border-ring touch-target"
+        className="flex h-11 w-[min(100%,280px)] items-center gap-2 rounded-xl border border-input bg-background px-4 text-sm text-muted-foreground transition hover:border-ring touch-target"
       >
         <span className="flex-1 text-left">Search pages, actions…</span>
         <kbd className="hidden rounded-md border bg-muted px-2 py-0.5 text-xs font-medium sm:inline">

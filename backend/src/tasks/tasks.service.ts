@@ -277,6 +277,9 @@ export class TasksService {
     const assignments: TaskAssignment[] = [];
 
     for (const task of tasks) {
+      if (!task.role_id) {
+        continue;
+      }
       const users = await this.userRepository.find({
         where: { role_id: task.role_id, is_active: true },
       });

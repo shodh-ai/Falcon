@@ -3,6 +3,7 @@ export * from './api.iam';
 export * from './api.admissions';
 export * from './api.academics';
 export * from './api.finance';
+export * from './api.exams';
 export * from './api.hr';
 export * from './api.iqac';
 export * from './api.operations';

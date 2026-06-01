@@ -2,16 +2,14 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from '../../entities/user.entity';
+import { AuthService } from '../auth.service';
+import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private configService: ConfigService,
-    @InjectRepository(User)
-    private userRepository: Repository<User>,
+    private authService: AuthService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -20,11 +18,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: any) {
-    const user = await this.userRepository.findOne({
-      where: { user_id: payload.sub },
-      relations: ['role', 'department'],
-    });
+  async validate(payload: AuthTokenPayload & { authType?: string; parentMobile?: string }) {
+    if (!payload.tenantId) {
+      throw new UnauthorizedException('Token missing tenant context');
+    }
+
+    if (payload.authType === 'parent') {
+      return {
+        user_id: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        role: 'Parent',
+        roles: ['Parent'],
+        primaryRole: 'Parent',
+        tenant_id: payload.tenantId,
+        tenant_schema: payload.tenantSchema ?? 'public',
+        auth_type: 'parent',
+        parent_mobile: payload.parentMobile,
+      };
+    }
+
+    const user = await this.authService.findById(payload.sub, payload.tenantId);
 
     if (!user) {
       throw new UnauthorizedException();
@@ -34,14 +48,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account is inactive');
     }
 
+    const roleClaims = this.authService.getRoleClaims(user);
+
     return {
       user_id: user.user_id,
       email: user.email,
       name: user.name,
-      role: user.role?.role_name,
+      role: roleClaims.primaryRole,
+      roles: roleClaims.roles,
+      primaryRole: roleClaims.primaryRole,
       role_id: user.role_id,
       department: user.department?.dept_name,
       dept_id: user.dept_id,
+      tenant_id: payload.tenantId,
+      tenant_schema: payload.tenantSchema ?? 'public',
     };
   }
 }

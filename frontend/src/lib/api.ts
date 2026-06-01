@@ -1,45 +1,108 @@
+import { useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
+import { getSubdomainFromClient } from '@/lib/tenant';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-export const api = {
-  login: () => `${API_URL}/auth/google`,
-  profile: (token: string) => ({
-    url: `${API_URL}/auth/profile`,
-    headers: { Authorization: `Bearer ${token}` },
-  }),
-  tasks: {
-    myTasks: (token: string, status?: string) => ({
-      url: `${API_URL}/tasks/assignments/my${status ? `?status=${status}` : ''}`,
-      headers: { Authorization: `Bearer ${token}` },
-    }),
-    submissions: (token: string, assignmentId: string, data: any) => ({
-      url: `${API_URL}/tasks/submissions/${assignmentId}`,
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      data,
-    }),
-    upload: (token: string, file: File) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      return {
-        url: `${API_URL}/uploads/single`,
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        data: formData,
-      };
+function tenantHeaders(): Record<string, string> {
+  return { 'x-tenant-subdomain': getSubdomainFromClient() };
+}
+
+type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+
+async function request<T>(
+  token: string | null,
+  router: ReturnType<typeof useRouter>,
+  path: string,
+  method: Method = 'GET',
+  body?: unknown,
+): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method,
+    headers: {
+      ...tenantHeaders(),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
     },
+    body: body ? (body instanceof FormData ? body : JSON.stringify(body)) : undefined,
+  });
+
+  if (response.status === 401) {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    }
+    router.replace('/login');
+    throw new Error('Unauthorized');
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(text || `Request failed with status ${response.status}`);
+  }
+
+  if (response.status === 204) return undefined as T;
+
+  const text = await response.text();
+  if (!text.trim()) return null as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('Invalid JSON response from server');
+  }
+}
+
+export const api = {
+  login: () => {
+    const tenant = getSubdomainFromClient();
+    return `${API_URL}/auth/google?tenant=${encodeURIComponent(tenant)}`;
   },
-  users: {
-    stats: (token: string) => ({
-      url: `${API_URL}/users/stats`,
-      headers: { Authorization: `Bearer ${token}` },
-    }),
-  },
-  scheduler: {
-    distribute: (token: string, month: string) => ({
-      url: `${API_URL}/scheduler/distribute`,
+  localLogin: async (email: string, password: string) => {
+    const response = await fetch(`${API_URL}/api/auth/local-login`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      data: { month },
-    }),
+      headers: {
+        'Content-Type': 'application/json',
+        ...tenantHeaders(),
+      },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || 'Login failed');
+    }
+    return response.json() as Promise<{
+      token: string;
+      user: {
+        user_id: string;
+        email: string;
+        name: string;
+        role: string;
+        roles?: string[];
+        primaryRole?: string;
+        role_id?: number;
+        department?: string;
+        dept_id?: number;
+        tenant_id?: string;
+        tenant_schema?: string;
+      };
+    }>;
   },
 };
+
+export function useAuthedApi() {
+  const { token } = useAuth();
+  const router = useRouter();
+
+  return useMemo(
+    () => ({
+      get: <T>(path: string) => request<T>(token, router, path, 'GET'),
+      post: <T>(path: string, body?: unknown) => request<T>(token, router, path, 'POST', body),
+      patch: <T>(path: string, body?: unknown) => request<T>(token, router, path, 'PATCH', body),
+      put: <T>(path: string, body?: unknown) => request<T>(token, router, path, 'PUT', body),
+      del: <T>(path: string) => request<T>(token, router, path, 'DELETE'),
+    }),
+    [token, router],
+  );
+}

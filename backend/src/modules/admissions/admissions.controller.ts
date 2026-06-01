@@ -17,13 +17,13 @@ export class AdmissionsController {
   }
 
   @Post('leads')
-  @Roles('Admin', 'AdmissionsOfficer')
+  @Roles('SuperAdmin', 'AdmissionsOfficer')
   createLead(@Body() dto: CreateLeadDto) {
     return this.admissions.createLead(dto);
   }
 
   @Patch('leads/:id/stage')
-  @Roles('Admin', 'AdmissionsOfficer')
+  @Roles('SuperAdmin', 'AdmissionsOfficer')
   updateStage(@Param('id') id: string, @Body() dto: UpdateLeadStageDto) {
     return this.admissions.updateLeadStage(id, dto);
   }

@@ -2,6 +2,8 @@
 
 import { useState, type ReactNode } from 'react';
 import { Menu } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -9,6 +11,7 @@ import { CommandMenu } from '@/components/layout/CommandMenu';
 import { NotificationBell, type AppNotification } from '@/components/layout/NotificationBell';
 import { ProfileMenu } from '@/components/layout/ProfileMenu';
 import { AppSidebar } from '@/components/layout/AppSidebar';
+import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher';
 import type { PortalConfig } from '@/lib/navigation';
 
 interface AppShellProps {
@@ -21,6 +24,8 @@ interface AppShellProps {
 export function AppShell({ config, children, notifications = [], profileHref }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = usePathname();
+  const mobileItems = config.commandItems.slice(0, 4);
 
   const sidebar = (
     <AppSidebar
@@ -66,14 +71,16 @@ export function AppShell({ config, children, notifications = [], profileHref }: 
             </Sheet>
 
             <div className="hidden min-w-0 sm:block">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-sgvu-gold">{config.personaLabel}</p>
-              <h1 className="truncate text-base font-semibold text-sgvu-navy sm:text-lg">{config.personaTitle}</h1>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-sgvu-gold">Falcon</p>
+              <h1 className="truncate text-base font-black text-sgvu-navy sm:text-lg">{config.personaTitle}</h1>
+              <p className="truncate text-[11px] font-medium text-muted-foreground">{config.personaLabel}</p>
             </div>
 
-            <div className="ml-auto flex flex-1 items-center justify-end gap-2 sm:gap-3 md:max-w-xl md:flex-initial">
-              <div className="hidden flex-1 md:block">
+            <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+              <div className="hidden md:block">
                 <CommandMenu items={config.commandItems} />
               </div>
+              <WorkspaceSwitcher />
               <NotificationBell notifications={notifications} />
               <ProfileMenu profileHref={profileHref ?? config.homeHref.replace('/dashboard', '/profile')} />
             </div>
@@ -85,6 +92,29 @@ export function AppShell({ config, children, notifications = [], profileHref }: 
 
         <main className="flex-1 px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:pb-8">{children}</main>
       </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur lg:hidden">
+        <ul className="mx-auto grid max-w-lg grid-cols-4">
+          {mobileItems.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={cn(
+                    'flex flex-col items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium touch-target',
+                    active ? 'text-sgvu-navy' : 'text-muted-foreground',
+                  )}
+                >
+                  <Icon className={cn('h-5 w-5', active && 'text-sgvu-gold')} />
+                  <span className="line-clamp-1">{item.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
     </div>
   );
 }

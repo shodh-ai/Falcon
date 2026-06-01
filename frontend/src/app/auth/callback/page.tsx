@@ -1,5 +1,6 @@
 'use client';
 
+import { FalconLoader } from '@/components/brand/FalconLoader';
 import { useAuth } from '@/context/AuthContext';
 import { getDashboardPathForRole } from '@/lib/auth-routing';
 import { useRouter } from 'next/navigation';
@@ -33,7 +34,7 @@ export default function AuthCallbackPage() {
 
         const user = await response.json();
         login(token, user);
-        router.replace(getDashboardPathForRole(user.role));
+        router.replace(getDashboardPathForRole(user.primaryRole ?? user.role));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Authentication failed.');
       }
@@ -44,27 +45,20 @@ export default function AuthCallbackPage() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <div className="w-full max-w-md rounded-lg bg-white p-6 text-center shadow">
-          <h1 className="mb-2 text-xl font-semibold text-gray-900">Sign in failed</h1>
-          <p className="mb-6 text-gray-600">{error}</p>
+      <div className="flex min-h-screen items-center justify-center bg-sgvu-surface px-4">
+        <div className="w-full max-w-md rounded-2xl border bg-background p-6 text-center shadow-sm">
+          <h1 className="mb-2 text-xl font-black text-sgvu-navy">Sign in failed</h1>
+          <p className="mb-6 text-sm font-medium text-muted-foreground">{error}</p>
           <button
             onClick={() => router.replace('/')}
-            className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700"
+            className="rounded-xl bg-sgvu-navy px-4 py-2.5 text-sm font-semibold text-white hover:bg-sgvu-navy/90"
           >
-            Back to login
+            Back to Falcon login
           </button>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="rounded-lg bg-white p-6 text-center shadow">
-        <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
-        <p className="text-gray-600">Completing sign in...</p>
-      </div>
-    </div>
-  );
+  return <FalconLoader label="Completing Falcon sign in…" className="min-h-screen bg-sgvu-surface" />;
 }

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -9,10 +9,24 @@ import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../entities/user.entity';
 import { Role } from '../entities/role.entity';
+import { UserRole } from '../entities/user-role.entity';
+import { AUTH_PROVIDER } from './interfaces/auth-provider.interface';
+import { LocalAuthProvider } from './providers/local-auth.provider';
+import { KeycloakAuthProvider } from './providers/keycloak-auth.provider';
+import { AuthTenantCookieMiddleware } from './middleware/auth-tenant-cookie.middleware';
+
+const authProviderFactory = {
+  provide: AUTH_PROVIDER,
+  useFactory: (local: LocalAuthProvider, keycloak: KeycloakAuthProvider) => {
+    const mode = process.env.AUTH_PROVIDER ?? 'local';
+    return mode === 'keycloak' ? keycloak : local;
+  },
+  inject: [LocalAuthProvider, KeycloakAuthProvider],
+};
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Role]),
+    TypeOrmModule.forFeature([User, Role, UserRole]),
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -26,7 +40,18 @@ import { Role } from '../entities/role.entity';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, GoogleStrategy, JwtStrategy],
-  exports: [AuthService],
+  providers: [
+    AuthService,
+    LocalAuthProvider,
+    KeycloakAuthProvider,
+    authProviderFactory,
+    GoogleStrategy,
+    JwtStrategy,
+  ],
+  exports: [AuthService, AUTH_PROVIDER],
 })
-export class AuthModule {}
+export class AuthModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(AuthTenantCookieMiddleware).forRoutes('auth/google');
+  }
+}

@@ -8,6 +8,7 @@ import { User } from '../entities/user.entity';
 import { TasksService } from '../tasks/tasks.service';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { wrapFalconEmailHtml } from '../common/email/falcon-email.template';
 
 @Injectable()
 export class SchedulerService {
@@ -158,20 +159,22 @@ export class SchedulerService {
   ) {
     const frontendUrl = this.configService.get('FRONTEND_URL') || 'http://localhost:3000';
     
+    const bodyHtml = `
+        <h2 style="margin-top:0;color:#08234a;">Falcon Core Reminder</h2>
+        <p>Dear ${userName},</p>
+        <p>This is a reminder that you have a pending Falcon Core task that needs to be completed:</p>
+        <p><strong>Task:</strong> ${taskName}</p>
+        <p><strong>Due Date:</strong> ${dueDate ? new Date(dueDate).toLocaleDateString() : 'N/A'}</p>
+        <p>Please sign in to your Falcon Workspace to complete this task:</p>
+        <p><a href="${frontendUrl}" style="display:inline-block;background:#08234a;color:#d6b65d;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600;">Open Falcon Dashboard</a></p>
+        <p style="margin-bottom:0;">Best regards,<br>SGVU IQAC Team</p>
+      `;
+
     const mailOptions = {
       from: this.configService.get('EMAIL_FROM') || 'noreply@mygyanvihar.org',
       to: email,
-      subject: 'Reminder: Pending Task Submission',
-      html: `
-        <h2>Task Reminder</h2>
-        <p>Dear ${userName},</p>
-        <p>This is a reminder that you have a pending task that needs to be completed:</p>
-        <p><strong>Task:</strong> ${taskName}</p>
-        <p><strong>Due Date:</strong> ${dueDate ? new Date(dueDate).toLocaleDateString() : 'N/A'}</p>
-        <p>Please login to the University Governance System to complete your task:</p>
-        <p><a href="${frontendUrl}">Access the System</a></p>
-        <p>Best regards,<br>IQAC Team</p>
-      `,
+      subject: 'Falcon Reminder: Pending Task Submission',
+      html: wrapFalconEmailHtml(bodyHtml, frontendUrl),
     };
 
     await this.emailTransporter.sendMail(mailOptions);
@@ -182,15 +185,18 @@ export class SchedulerService {
     subject: string,
     content: string,
   ) {
+    const frontendUrl = this.configService.get('FRONTEND_URL') || 'http://localhost:3000';
+    const bodyHtml = `
+        <h2 style="margin-top:0;color:#08234a;">${subject}</h2>
+        <div>${content}</div>
+        <p style="margin-bottom:0;">Best regards,<br>Falcon Campus OS</p>
+      `;
+
     const mailOptions = {
       from: this.configService.get('EMAIL_FROM'),
       to,
-      subject,
-      html: `
-        <h2>${subject}</h2>
-        <p>${content}</p>
-        <p>Best regards,<br>University Governance System</p>
-      `,
+      subject: `[Falcon] ${subject}`,
+      html: wrapFalconEmailHtml(bodyHtml, frontendUrl),
     };
 
     await this.emailTransporter.sendMail(mailOptions);
