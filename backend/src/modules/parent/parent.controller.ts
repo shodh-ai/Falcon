@@ -1,57 +1,75 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/roles.decorator';
+import { ReadOnlyPortal } from '../../common/decorators/read-only-portal.decorator';
+import { ReadOnlyPortalGuard } from '../../common/guards/read-only-portal.guard';
 import { ParentService } from './parent.service';
 
+type ParentUser = { parent_mobile?: string; auth_type?: string };
+
 @Controller('api/parent')
+@ReadOnlyPortal()
+@UseGuards(ReadOnlyPortalGuard)
 export class ParentController {
   constructor(private readonly parent: ParentService) {}
 
+  @Public()
   @Post('otp/request')
   requestOtp(@Body('mobile') mobile: string) {
     return this.parent.requestOtp(mobile);
   }
 
+  @Public()
+  @Post('otp/verify')
+  verifyOtp(@Body() dto: { mobile: string; otp: string }) {
+    return this.parent.verifyOtp(dto.mobile, dto.otp);
+  }
+
   @Get('overview')
-  overview(@Query('mobile') mobile = '+919999000001') {
-    return this.parent.getChildOverview(mobile);
+  @UseGuards(JwtAuthGuard)
+  overview(@Req() req: { user: ParentUser }, @Query('mobile') mobile?: string) {
+    return this.parent.getChildOverview(this.parent.resolveMobile(req.user, mobile));
   }
 
   @Get('attendance')
-  attendanceForParent(@Query('mobile') mobile = '+919999000001') {
-    return this.parent.getAttendanceForParent(mobile);
+  @UseGuards(JwtAuthGuard)
+  attendance(@Req() req: { user: ParentUser }, @Query('mobile') mobile?: string) {
+    return this.parent.getAttendanceForParent(this.parent.resolveMobile(req.user, mobile));
   }
 
   @Get('marks')
-  marksForParent(@Query('mobile') mobile = '+919999000001') {
-    return this.parent.getMarksForParent(mobile);
+  @UseGuards(JwtAuthGuard)
+  marks(@Req() req: { user: ParentUser }, @Query('mobile') mobile?: string) {
+    return this.parent.getMarksForParent(this.parent.resolveMobile(req.user, mobile));
   }
 
   @Get('fees')
-  feesForParent(@Query('mobile') mobile = '+919999000001') {
-    return this.parent.getFeeDuesForParent(mobile);
+  @UseGuards(JwtAuthGuard)
+  fees(@Req() req: { user: ParentUser }, @Query('mobile') mobile?: string) {
+    return this.parent.getFeeDuesForParent(this.parent.resolveMobile(req.user, mobile));
   }
 
   @Get('discipline')
-  disciplineForParent(@Query('mobile') mobile = '+919999000001') {
-    return this.parent.getDisciplineForParent(mobile);
+  @UseGuards(JwtAuthGuard)
+  discipline(@Req() req: { user: ParentUser }, @Query('mobile') mobile?: string) {
+    return this.parent.getDisciplineForParent(this.parent.resolveMobile(req.user, mobile));
   }
 
   @Get('students/:studentUserId/attendance')
-  attendance(@Param('studentUserId') studentUserId: string) {
+  @UseGuards(JwtAuthGuard)
+  attendanceById(@Param('studentUserId') studentUserId: string) {
     return this.parent.getAttendance(studentUserId);
   }
 
   @Get('students/:studentUserId/marks')
-  marks(@Param('studentUserId') studentUserId: string) {
+  @UseGuards(JwtAuthGuard)
+  marksById(@Param('studentUserId') studentUserId: string) {
     return this.parent.getMarks(studentUserId);
   }
 
   @Get('students/:studentUserId/fees')
-  fees(@Param('studentUserId') studentUserId: string) {
+  @UseGuards(JwtAuthGuard)
+  feesById(@Param('studentUserId') studentUserId: string) {
     return this.parent.getFeeDues(studentUserId);
-  }
-
-  @Get('students/:studentUserId/discipline')
-  discipline(@Param('studentUserId') studentUserId: string) {
-    return this.parent.getDiscipline(studentUserId);
   }
 }

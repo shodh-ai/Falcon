@@ -6,7 +6,6 @@ import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
 import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
-import { GatewayWebhookDto } from './dto/gateway-webhook.dto';
 
 @Injectable()
 export class FinanceService {
@@ -29,7 +28,7 @@ export class FinanceService {
     return this.demands.save(this.demands.create(dto));
   }
 
-  async getDashboard() {
+  async getDashboard(tenantId: string) {
     const today = new Date().toISOString().slice(0, 10);
     const successfulToday = await this.transactions
       .createQueryBuilder('transaction')
@@ -42,10 +41,23 @@ export class FinanceService {
       .getMany();
     const recentTransactions = await this.transactions.find({
       where: { status: 'SUCCESS' },
-      relations: ['demand'],
       order: { created_at: 'DESC' },
       take: 8,
     });
+
+    const budgets = await this.demands.manager.query(
+      `SELECT b.budget_id, d.dept_name AS department,
+              b.allocated_amount, b.utilized_amount,
+              CASE WHEN b.allocated_amount > 0
+                THEN ROUND((b.utilized_amount / b.allocated_amount) * 100, 1)
+                ELSE 0 END AS utilization_percent
+       FROM fin_budgets b
+       LEFT JOIN departments d ON d.dept_id = b.department_id
+       WHERE b.tenant_id = $1
+       ORDER BY utilization_percent DESC
+       LIMIT 12`,
+      [tenantId],
+    );
 
     return {
       todays_collection: successfulToday.reduce((sum, row) => sum + Number(row.amount), 0),
@@ -55,6 +67,7 @@ export class FinanceService {
       ),
       recent_transactions: recentTransactions,
       transaction_count_today: successfulToday.length,
+      budget_utilization: budgets,
     };
   }
 
@@ -137,11 +150,6 @@ export class FinanceService {
       .andWhere('status NOT IN (:...skip)', { skip: ['OVERDUE', 'WAIVED'] })
       .execute();
     this.logger.log(`Late-fee sweep: marked ${result.affected ?? 0} demands as OVERDUE`);
-  }
-
-  async handleGatewayWebhook(provider: 'razorpay' | 'payu', dto: GatewayWebhookDto) {
-    this.logger.log(`Received ${provider} webhook event=${dto.event}`);
-    return { received: true, provider, event: dto.event };
   }
 
   listTransactions(studentUserId?: string) {

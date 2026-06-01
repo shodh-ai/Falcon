@@ -52,6 +52,14 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/exam-cell/dashboard';
   }
 
+  if (r === 'placementcell' || r === 'placement cell') {
+    return '/placements/dashboard';
+  }
+
+  if (r === 'transportofficer' || r === 'transport officer') {
+    return '/admin-ops/fleet';
+  }
+
   if (
     r === 'registrar' ||
     r === 'superadmin' ||
@@ -113,6 +121,10 @@ const portalRoles: Record<string, string[]> = {
   '/exam-cell': ['examcell', 'superadmin'],
   '/alumni': ['alumni'],
   '/alumni-admin': ['iqac', 'superadmin', 'registrar', 'president'],
+  '/admin-ops': ['registrar', 'superadmin', 'transportofficer'],
+  '/placements': ['placementcell', 'superadmin', 'registrar'],
+  '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'parent'],
+  '/reports': ['registrar', 'superadmin', 'president', 'accountant'],
   '/admin': ['superadmin', 'registrar'],
 };
 

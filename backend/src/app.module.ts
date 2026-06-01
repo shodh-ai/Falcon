@@ -33,6 +33,7 @@ import { OperationsModule } from './modules/operations/operations.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { TenantModule } from './tenant/tenant.module';
 import { StorageModule } from './storage/storage.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -102,6 +103,7 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
     SettingsModule,
     HelpdeskModule,
     StudentPortalModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [

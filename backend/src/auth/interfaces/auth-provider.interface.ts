@@ -11,6 +11,8 @@ export interface AuthTokenPayload {
   name: string;
   tenantId: string;
   tenantSchema: string;
+  authType?: 'parent' | 'staff';
+  parentMobile?: string;
 }
 
 export interface AuthenticatedUser {

@@ -18,9 +18,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: AuthTokenPayload) {
+  async validate(payload: AuthTokenPayload & { authType?: string; parentMobile?: string }) {
     if (!payload.tenantId) {
       throw new UnauthorizedException('Token missing tenant context');
+    }
+
+    if (payload.authType === 'parent') {
+      return {
+        user_id: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        role: 'Parent',
+        roles: ['Parent'],
+        primaryRole: 'Parent',
+        tenant_id: payload.tenantId,
+        tenant_schema: payload.tenantSchema ?? 'public',
+        auth_type: 'parent',
+        parent_mobile: payload.parentMobile,
+      };
     }
 
     const user = await this.authService.findById(payload.sub, payload.tenantId);

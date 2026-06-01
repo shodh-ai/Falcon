@@ -1,5 +1,5 @@
-import { WorkspaceRoutePage } from '@/components/workspaces/WorkspaceRoutePage';
+import { redirect } from 'next/navigation';
 
-export default function FinanceFeeDemandsPage() {
-  return <WorkspaceRoutePage portal="finance" page="feeDemands" />;
+export default function FeeDemandsRedirect() {
+  redirect('/finance/fee-structures');
 }

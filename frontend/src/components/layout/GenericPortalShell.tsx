@@ -13,6 +13,8 @@ import {
   presidentPortal,
   alumniPortal,
   alumniAdminPortal,
+  adminOpsPortal,
+  placementPortal,
 } from '@/lib/navigation';
 
 type PortalKey =
@@ -25,7 +27,9 @@ type PortalKey =
   | 'parent'
   | 'exam-cell'
   | 'alumni'
-  | 'alumni-admin';
+  | 'alumni-admin'
+  | 'admin-ops'
+  | 'placements';
 
 const configs = {
   hod: hodPortal,
@@ -38,6 +42,8 @@ const configs = {
   president: presidentPortal,
   alumni: alumniPortal,
   'alumni-admin': alumniAdminPortal,
+  'admin-ops': adminOpsPortal,
+  placements: placementPortal,
 };
 
 export function GenericPortalShell({

@@ -44,6 +44,11 @@ import {
   CheckCircle,
   DollarSign,
   Network,
+  Building2,
+  Receipt,
+  Landmark,
+  BookMarked,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -307,26 +312,46 @@ export const hostelAdminPortal: PortalConfig = {
 
 export const financePortal: PortalConfig = {
   personaLabel: 'Finance Office',
-  personaTitle: 'Fees & Accounts',
+  personaTitle: 'Finance & Accounts',
   homeHref: '/finance/dashboard',
   navGroups: [
     {
-      title: 'Finance Control',
+      title: 'Overview',
       items: [
-        { label: 'Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, keywords: ['collection', 'outstanding'] },
-        { label: 'Fee Demands', href: '/finance/fee-demands', icon: Wallet, keywords: ['bulk', 'semester', 'fees', 'invoices'] },
-        { label: 'Transactions', href: '/finance/transactions', icon: Banknote, keywords: ['ledger', 'receipt', 'razorpay'] },
-        { label: 'Defaulters', href: '/finance/defaulters', icon: Shield, keywords: ['dues', 'admit card lock'] },
-        { label: 'Scholarships', href: '/finance/scholarships', icon: Award, keywords: ['waiver', 'discount'] },
+        { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, keywords: ['cash flow', 'collection', 'budget'] },
+      ],
+    },
+    {
+      title: 'Receivables (Student Revenue)',
+      items: [
+        { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
+        { label: 'Collections & Receipts', href: '/finance/collections', icon: Banknote, keywords: ['razorpay', 'payu', 'gateway'] },
+        { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
+      ],
+    },
+    {
+      title: 'Payables & Expenses',
+      items: [
+        { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'] },
+        { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'] },
+        { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'] },
+      ],
+    },
+    {
+      title: 'Core Accounting',
+      items: [
+        { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'] },
+        { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'] },
+        { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'] },
       ],
     },
   ],
   commandItems: [
     { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
-    { label: 'Fee Demands', href: '/finance/fee-demands', icon: Wallet },
-    { label: 'Transactions', href: '/finance/transactions', icon: Banknote },
-    { label: 'Defaulters', href: '/finance/defaulters', icon: Shield },
-    { label: 'Scholarships', href: '/finance/scholarships', icon: Award },
+    { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet },
+    { label: 'Collections', href: '/finance/collections', icon: Banknote },
+    { label: 'Vendors', href: '/finance/vendors', icon: Building2 },
+    { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet },
   ],
 };
 
@@ -503,6 +528,52 @@ export const alumniPortal: PortalConfig = {
     { label: 'Directory', href: '/alumni/directory', icon: Network },
     { label: 'Donations', href: '/alumni/donations', icon: Heart },
     { label: 'Events', href: '/alumni/events', icon: Calendar },
+  ],
+};
+
+export const adminOpsPortal: PortalConfig = {
+  personaLabel: 'Campus Administration',
+  personaTitle: 'Registrar & Facilities',
+  homeHref: '/admin-ops/dashboard',
+  navGroups: [
+    {
+      title: 'Admin Ops',
+      items: [
+        { label: 'Dashboard', href: '/admin-ops/dashboard', icon: LayoutDashboard },
+        { label: 'Inventory & Assets', href: '/admin-ops/assets', icon: Archive },
+        { label: 'Fleet & Transport', href: '/admin-ops/fleet', icon: Bus },
+        { label: 'Event Management', href: '/admin-ops/events', icon: Calendar },
+        { label: 'Master Timetable', href: '/admin-ops/timetable', icon: CalendarClock },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Assets', href: '/admin-ops/assets', icon: Archive },
+    { label: 'Fleet', href: '/admin-ops/fleet', icon: Bus },
+    { label: 'Timetable', href: '/admin-ops/timetable', icon: CalendarClock },
+  ],
+};
+
+export const placementPortal: PortalConfig = {
+  personaLabel: 'Placement Cell',
+  personaTitle: 'Training & Placements ATS',
+  homeHref: '/placements/dashboard',
+  navGroups: [
+    {
+      title: 'Campus Recruitment',
+      items: [
+        { label: 'Dashboard', href: '/placements/dashboard', icon: LayoutDashboard },
+        { label: 'Company Master', href: '/placements/companies', icon: Building2 },
+        { label: 'Placement Drives', href: '/placements/drives', icon: Briefcase },
+        { label: 'Skill & Training', href: '/placements/training', icon: GraduationCap },
+        { label: 'Mock Interviews', href: '/placements/mock-interviews', icon: Users },
+        { label: 'Resume Builder', href: '/placements/resumes', icon: FileText },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Companies', href: '/placements/companies', icon: Building2 },
+    { label: 'Drives', href: '/placements/drives', icon: Briefcase },
   ],
 };
 
