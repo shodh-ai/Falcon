@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS course_modules (
   UNIQUE (course_id, module_number)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_course_modules_course_module_unique
+  ON course_modules(course_id, module_number);
+
 CREATE INDEX IF NOT EXISTS idx_course_modules_course ON course_modules(tenant_id, course_id, module_number);
 
 ALTER TABLE course_materials ADD COLUMN IF NOT EXISTS module_id UUID REFERENCES course_modules(module_id) ON DELETE SET NULL;

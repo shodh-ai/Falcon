@@ -8,6 +8,12 @@ ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS opt_in_mentorship BOOLEAN N
 ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS profile_updated_at TIMESTAMPTZ;
 ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS enrollment_number VARCHAR(40);
 ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS career_update_due_at TIMESTAMPTZ;
+ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS graduation_year INT;
+
+UPDATE student_profiles
+SET graduation_year = CAST(batch AS INT)
+WHERE graduation_year IS NULL
+  AND batch ~ '^\d+$';
 
 UPDATE alumni_profiles
 SET current_organization = COALESCE(current_organization, current_company)

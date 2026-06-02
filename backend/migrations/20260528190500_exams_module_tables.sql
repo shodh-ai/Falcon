@@ -15,14 +15,28 @@ CREATE TABLE IF NOT EXISTS exam_schedules (
 CREATE INDEX IF NOT EXISTS idx_exam_schedules_exam_date ON exam_schedules(exam_date);
 CREATE INDEX IF NOT EXISTS idx_exam_schedules_subject_id ON exam_schedules(subject_id);
 
-ALTER TABLE exam_schedules
-  ADD CONSTRAINT fk_exam_schedules_subject
-  FOREIGN KEY (subject_id) REFERENCES academic_subjects(subject_id)
-  ON DELETE RESTRICT;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_exam_schedules_subject'
+  ) THEN
+    ALTER TABLE exam_schedules
+      ADD CONSTRAINT fk_exam_schedules_subject
+      FOREIGN KEY (subject_id) REFERENCES academic_subjects(subject_id)
+      ON DELETE RESTRICT;
+  END IF;
+END $$;
 
-ALTER TABLE exam_schedules
-  ADD CONSTRAINT chk_exam_schedules_type
-  CHECK (exam_type IN ('MID_TERM', 'END_TERM', 'PRACTICAL'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_exam_schedules_type'
+  ) THEN
+    ALTER TABLE exam_schedules
+      ADD CONSTRAINT chk_exam_schedules_type
+      CHECK (exam_type IN ('MID_TERM', 'END_TERM', 'PRACTICAL'));
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS exam_applications (
   exam_application_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -38,29 +52,71 @@ CREATE TABLE IF NOT EXISTS exam_applications (
 CREATE INDEX IF NOT EXISTS idx_exam_applications_student ON exam_applications(student_user_id);
 CREATE INDEX IF NOT EXISTS idx_exam_applications_status ON exam_applications(status);
 
-ALTER TABLE exam_applications
-  ADD CONSTRAINT fk_exam_applications_subject
-  FOREIGN KEY (subject_id) REFERENCES academic_subjects(subject_id)
-  ON DELETE RESTRICT;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_exam_applications_subject'
+  ) THEN
+    ALTER TABLE exam_applications
+      ADD CONSTRAINT fk_exam_applications_subject
+      FOREIGN KEY (subject_id) REFERENCES academic_subjects(subject_id)
+      ON DELETE RESTRICT;
+  END IF;
+END $$;
 
-ALTER TABLE exam_applications
-  ADD CONSTRAINT fk_exam_applications_student
-  FOREIGN KEY (student_user_id) REFERENCES users(user_id)
-  ON DELETE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_exam_applications_student'
+  ) THEN
+    ALTER TABLE exam_applications
+      ADD CONSTRAINT fk_exam_applications_student
+      FOREIGN KEY (student_user_id) REFERENCES users(user_id)
+      ON DELETE CASCADE;
+  END IF;
+END $$;
 
-ALTER TABLE exam_applications
-  ADD CONSTRAINT fk_exam_applications_demand
-  FOREIGN KEY (finance_demand_id) REFERENCES finance_fee_demands(demand_id)
-  ON DELETE SET NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_exam_applications_demand'
+  ) THEN
+    ALTER TABLE exam_applications
+      ADD CONSTRAINT fk_exam_applications_demand
+      FOREIGN KEY (finance_demand_id) REFERENCES finance_fee_demands(demand_id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;
 
-ALTER TABLE exam_applications
-  ADD CONSTRAINT chk_exam_applications_type
-  CHECK (application_type IN ('RE_EVALUATION', 'BACKLOG'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_exam_applications_type'
+  ) THEN
+    ALTER TABLE exam_applications
+      ADD CONSTRAINT chk_exam_applications_type
+      CHECK (application_type IN ('RE_EVALUATION', 'BACKLOG'));
+  END IF;
+END $$;
 
-ALTER TABLE exam_applications
-  ADD CONSTRAINT chk_exam_applications_fee_status
-  CHECK (fee_status IN ('PENDING', 'PAID', 'WAIVED'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_exam_applications_fee_status'
+  ) THEN
+    ALTER TABLE exam_applications
+      ADD CONSTRAINT chk_exam_applications_fee_status
+      CHECK (fee_status IN ('PENDING', 'PAID', 'WAIVED'));
+  END IF;
+END $$;
 
-ALTER TABLE exam_applications
-  ADD CONSTRAINT chk_exam_applications_status
-  CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_exam_applications_status'
+  ) THEN
+    ALTER TABLE exam_applications
+      ADD CONSTRAINT chk_exam_applications_status
+      CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED'));
+  END IF;
+END $$;
