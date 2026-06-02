@@ -18,6 +18,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/scripts ./scripts
 
 RUN mkdir -p /app/uploads
 
