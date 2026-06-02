@@ -1,6 +1,6 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from '../entities/user.entity';
 import { UserRole } from '../entities/user-role.entity';
@@ -9,6 +9,12 @@ import {
   type IAuthProvider,
 } from './interfaces/auth-provider.interface';
 import { TenantService } from '../tenant/tenant.service';
+
+type LoginCredentialRow = {
+  user_id: string;
+  password_hash: string;
+  is_active: boolean;
+};
 
 @Injectable()
 export class AuthService {
@@ -20,6 +26,7 @@ export class AuthService {
     @Inject(AUTH_PROVIDER)
     private readonly authProvider: IAuthProvider,
     private readonly tenantService: TenantService,
+    private readonly dataSource: DataSource,
   ) {}
 
   getProviderId(): string {
@@ -60,31 +67,29 @@ export class AuthService {
     const subdomain = tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
     const tenant = await this.tenantService.findBySubdomain(subdomain);
 
-    // Load hash in a join-free query: password_hash has select:false and can be
-    // dropped when combined with one-to-many joins in getOne().
-    const credential = await this.userRepository
-      .createQueryBuilder('user')
-      .select('user.user_id', 'userId')
-      .addSelect('user.password_hash', 'passwordHash')
-      .addSelect('user.is_active', 'isActive')
-      .where('LOWER(user.email) = LOWER(:email)', { email })
-      .andWhere('user.tenant_id = :tenantId', { tenantId: tenant.tenant_id })
-      .getRawOne<{ userId: string; passwordHash: string | null; isActive: boolean }>();
+    const [credential] = await this.dataSource.query<LoginCredentialRow[]>(
+      `SELECT user_id, password_hash, is_active
+       FROM users
+       WHERE LOWER(official_email) = LOWER($1)
+         AND tenant_id = $2
+       LIMIT 1`,
+      [email, tenant.tenant_id],
+    );
 
-    if (!credential?.passwordHash) {
+    if (!credential?.password_hash) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    if (!credential.isActive) {
+    if (!credential.is_active) {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    const valid = await bcrypt.compare(password, credential.passwordHash);
+    const valid = await bcrypt.compare(password, credential.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const user = await this.findById(credential.userId, tenant.tenant_id);
+    const user = await this.findById(credential.user_id, tenant.tenant_id);
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
