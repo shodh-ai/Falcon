@@ -48,6 +48,8 @@ export { HelpdeskTicket } from './helpdesk-ticket.entity';
 export { LeaveRequest } from './leave-request.entity';
 export { LeaveBalance } from './leave-balance.entity';
 export { StaffAttendance } from './staff-attendance.entity';
+export { HrHoliday } from './hr-holiday.entity';
+export { HrDailyAttendance } from './hr-daily-attendance.entity';
 export { StaffLeaveRequest } from './staff-leave-request.entity';
 export { StaffPayslip } from './staff-payslip.entity';
 export { StaffGatePass } from './staff-gate-pass.entity';

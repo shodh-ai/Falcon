@@ -9,9 +9,12 @@ import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
 import { StaffPayslip } from '../../entities/staff-payslip.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { User } from '../../entities/user.entity';
+import { HrHoliday } from '../../entities/hr-holiday.entity';
+import { HrDailyAttendance } from '../../entities/hr-daily-attendance.entity';
 import { HrController } from './hr.controller';
 import { HrService } from './hr.service';
 import { HrAdminService } from './hr-admin.service';
+import { HrWorkforceService } from './hr-workforce.service';
 
 @Module({
   imports: [
@@ -24,10 +27,12 @@ import { HrAdminService } from './hr-admin.service';
       StaffPayslip,
       StaffGatePass,
       User,
+      HrHoliday,
+      HrDailyAttendance,
     ]),
   ],
   controllers: [HrController],
-  providers: [HrService, HrAdminService, HrFieldEncryptionService],
-  exports: [HrService, HrAdminService, HrFieldEncryptionService],
+  providers: [HrService, HrAdminService, HrWorkforceService, HrFieldEncryptionService],
+  exports: [HrService, HrAdminService, HrWorkforceService, HrFieldEncryptionService],
 })
 export class HrModule {}

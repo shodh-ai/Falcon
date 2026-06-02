@@ -4,6 +4,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { HrService } from './hr.service';
 import { HrAdminService } from './hr-admin.service';
+import { HrWorkforceService } from './hr-workforce.service';
+import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { LeaveActionDto } from './dto/leave-action.dto';
 import { RunPayrollDto, UpdateEmployeeDto } from './dto/hr-operations.dto';
@@ -18,6 +20,7 @@ export class HrController {
   constructor(
     private readonly hr: HrService,
     private readonly hrAdmin: HrAdminService,
+    private readonly workforce: HrWorkforceService,
   ) {}
 
   @Post('leaves')
@@ -296,9 +299,9 @@ export class HrController {
   }
 
   @Get('holidays')
-  @Roles('HR', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'SuperAdmin')
   holidays() {
-    return this.hr.listHolidays();
+    return this.workforce.listHolidaysGrouped();
   }
 
   @Get('action-center')
@@ -395,6 +398,75 @@ export class HrController {
   @Roles('HR', 'SuperAdmin')
   facultyKpis(@Req() req: { user: AuthUser }) {
     return this.hr.listFacultyKpis(this.resolveTenantId(req.user));
+  }
+
+  @Get('workforce/today')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'SuperAdmin')
+  workforceToday(@Req() req: { user: AuthUser }) {
+    return this.workforce.getTodayWidget(req.user.user_id);
+  }
+
+  @Post('workforce/requests')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'SuperAdmin')
+  workforceApply(
+    @Req() req: { user: AuthUser },
+    @Body() dto: {
+      request_type: StaffRequestType;
+      leave_type?: string;
+      start_date?: string;
+      end_date?: string;
+      regularization_date?: string;
+      missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
+      reason?: string;
+    },
+  ) {
+    return this.workforce.applyRequest(req.user.user_id, this.resolveTenantId(req.user), dto);
+  }
+
+  @Get('workforce/my-requests')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'SuperAdmin')
+  workforceMyRequests(@Req() req: { user: AuthUser }) {
+    return this.workforce.listMyRequests(req.user.user_id, this.resolveTenantId(req.user));
+  }
+
+  @Get('workforce/team/pending')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'SuperAdmin')
+  workforceTeamPending(
+    @Req() req: { user: AuthUser },
+    @Query('type') type?: StaffRequestType,
+  ) {
+    return this.workforce.listTeamPending(req.user.user_id, this.resolveTenantId(req.user), type);
+  }
+
+  @Patch('workforce/team/:leaveId/action')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'SuperAdmin')
+  workforceTeamAction(
+    @Param('leaveId') leaveId: string,
+    @Req() req: { user: AuthUser },
+    @Body() dto: { action: 'APPROVE' | 'REJECT'; comment?: string },
+  ) {
+    return this.workforce.actOnTeamRequest(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      leaveId,
+      dto.action,
+      dto.comment,
+    );
+  }
+
+  @Post('workforce/biometric/sync')
+  @Roles('HR', 'SuperAdmin')
+  runBiometricSync() {
+    return this.workforce.syncFromBiometricSources();
+  }
+
+  @Post('workforce/biometric/simulate')
+  @Roles('HR', 'SuperAdmin', 'Faculty', 'HOD')
+  simulateBiometric(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { user_id?: string; date?: string; action: 'IN' | 'OUT'; at?: string },
+  ) {
+    return this.workforce.simulateBiometricPunch(dto.user_id ?? req.user.user_id, dto);
   }
 
   private resolveTenantId(user: AuthUser) {

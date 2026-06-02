@@ -149,30 +149,10 @@ export class HrService {
     return this.staffAttendance.save(row);
   }
 
-  async webPunch(userId: string, action?: 'IN' | 'OUT') {
-    const today = new Date().toISOString().slice(0, 10);
-    let row = await this.staffAttendance.findOne({
-      where: { user_id: userId, work_date: today },
-    });
-
-    if (!row) {
-      row = this.staffAttendance.create({
-        user_id: userId,
-        work_date: today,
-        check_in_at: new Date(),
-        status: 'PRESENT',
-        source: 'WEB',
-      });
-      return this.staffAttendance.save(row);
-    }
-
-    if (action === 'IN') {
-      row.check_in_at = row.check_in_at ?? new Date();
-    } else {
-      row.check_out_at = new Date();
-    }
-    row.source = 'WEB';
-    return this.staffAttendance.save(row);
+  async webPunch(_userId: string, _action?: 'IN' | 'OUT') {
+    throw new ForbiddenException(
+      'Web punch-in is disabled. Attendance is synced from biometrics only. Use Regularize Attendance for corrections.',
+    );
   }
 
   async getThisWeekHours(userId: string) {
@@ -693,10 +673,13 @@ export class HrService {
   }
 
   listHolidays() {
-    return Promise.resolve([
-      { holiday_id: 'diwali-2026', name: 'Diwali Break', start_date: '2026-11-08', end_date: '2026-11-12', type: 'UNIVERSITY' },
-      { holiday_id: 'summer-2026', name: 'Summer Break', start_date: '2026-06-01', end_date: '2026-06-15', type: 'UNIVERSITY' },
-    ]);
+    return this.users.manager.query(
+      `SELECT holiday_id, title AS name, date AS start_date, date AS end_date, type, description
+       FROM hr_holidays
+       WHERE date >= CURRENT_DATE
+       ORDER BY date ASC
+       LIMIT 40`,
+    );
   }
 
   listAllStaffLeaves(tenantId: string, status?: StaffLeaveRequest['status']) {

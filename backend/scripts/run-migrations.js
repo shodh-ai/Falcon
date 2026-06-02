@@ -10,6 +10,29 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 
+/** Load backend/.env so local `npm run db:migrate` uses DB_USERNAME=apple (not postgres). */
+function loadEnvFile() {
+  const envPath = path.join(__dirname, '..', '.env');
+  if (!fs.existsSync(envPath)) return;
+  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = val;
+  }
+}
+
+loadEnvFile();
+
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
 
 /** Seed-only files (idempotent); run after schema exists via db:migrate. */
@@ -48,10 +71,11 @@ async function run() {
   const seedOnly = process.argv.includes('--seed');
   const files = listSqlFiles(seedOnly);
 
+  const cfg = dbConfig();
   console.log(
     seedOnly
-      ? `Running ${files.length} seed file(s) against ${dbConfig().database}...`
-      : `Running ${files.length} migration(s) against ${dbConfig().database}...`,
+      ? `Running ${files.length} seed file(s) as ${cfg.user}@${cfg.host}/${cfg.database}...`
+      : `Running ${files.length} migration(s) as ${cfg.user}@${cfg.host}/${cfg.database}...`,
   );
 
   const client = new Client(dbConfig());

@@ -4,6 +4,8 @@ import { User } from './user.entity';
 
 export type StaffLeaveStatus = 'PENDING' | 'HOD_APPROVED' | 'HR_APPROVED' | 'REJECTED';
 
+export type StaffRequestType = 'LEAVE' | 'ON_DUTY' | 'COMP_OFF_CREDIT' | 'REGULARIZATION';
+
 @Entity('staff_leave_requests')
 @Index(['tenant_id', 'staff_user_id', 'status'])
 export class StaffLeaveRequest extends BaseTenantEntity {
@@ -17,6 +19,9 @@ export class StaffLeaveRequest extends BaseTenantEntity {
   @JoinColumn({ name: 'staff_user_id' })
   staff: User;
 
+  @Column({ type: 'varchar', length: 50, default: 'LEAVE' })
+  request_type: StaffRequestType;
+
   @Column({ type: 'varchar', length: 50 })
   leave_type: string;
 
@@ -28,6 +33,12 @@ export class StaffLeaveRequest extends BaseTenantEntity {
 
   @Column({ type: 'text', nullable: true })
   reason: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  regularization_date: string | null;
+
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  missed_punch_type: 'IN' | 'OUT' | 'BOTH' | null;
 
   @Column({ type: 'varchar', length: 50, default: 'PENDING' })
   status: StaffLeaveStatus;
