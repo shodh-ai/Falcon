@@ -60,27 +60,32 @@ export class AuthService {
     const subdomain = tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
     const tenant = await this.tenantService.findBySubdomain(subdomain);
 
-    const user = await this.userRepository
+    // Load hash in a join-free query: password_hash has select:false and can be
+    // dropped when combined with one-to-many joins in getOne().
+    const credential = await this.userRepository
       .createQueryBuilder('user')
-      .addSelect('user.password_hash')
-      .leftJoinAndSelect('user.role', 'role')
-      .leftJoinAndSelect('user.department', 'department')
-      .leftJoinAndSelect('user.userRoles', 'userRoles')
-      .leftJoinAndSelect('userRoles.role', 'mappedRole')
+      .select('user.user_id', 'userId')
+      .addSelect('user.password_hash', 'passwordHash')
+      .addSelect('user.is_active', 'isActive')
       .where('LOWER(user.email) = LOWER(:email)', { email })
       .andWhere('user.tenant_id = :tenantId', { tenantId: tenant.tenant_id })
-      .getOne();
+      .getRawOne<{ userId: string; passwordHash: string | null; isActive: boolean }>();
 
-    if (!user || !user.password_hash) {
+    if (!credential?.passwordHash) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    if (!user.is_active) {
+    if (!credential.isActive) {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    const valid = await bcrypt.compare(password, credential.passwordHash);
     if (!valid) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    const user = await this.findById(credential.userId, tenant.tenant_id);
+    if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
