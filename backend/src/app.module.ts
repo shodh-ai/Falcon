@@ -68,7 +68,7 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
         password: configService.get('DB_PASSWORD', 'postgres'),
         database: configService.get('DB_DATABASE', 'university_governance'),
         entities: Object.values(entities).filter((e) => typeof e === 'function'),
-        synchronize: false,
+        synchronize: configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
         logging: configService.get('NODE_ENV') === 'development',
       }),
       inject: [ConfigService],
