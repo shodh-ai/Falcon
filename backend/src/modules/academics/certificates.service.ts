@@ -15,7 +15,10 @@ import {
   StudentCertificate,
 } from '../../entities/student-certificate.entity';
 import { AcademicMentorship } from '../../entities/academic-mentorship.entity';
+import { User } from '../../entities/user.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 
 const ALLOWED_CERTIFICATE_MIME_TYPES = [
   'application/pdf',
@@ -49,7 +52,11 @@ export class CertificatesService {
     private readonly certificates: Repository<StudentCertificate>,
     @InjectRepository(AcademicMentorship)
     private readonly mentorships: Repository<AcademicMentorship>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
     private readonly objectStorage: ObjectStorageService,
+    private readonly workflowRouting: WorkflowRoutingService,
+    private readonly workflowNotify: WorkflowNotificationService,
   ) {}
 
   async uploadCertificate(
@@ -83,7 +90,26 @@ export class CertificatesService {
       points_awarded: 0,
     });
 
-    return this.certificates.save(certificate);
+    const saved = await this.certificates.save(certificate);
+
+    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+
+    try {
+      const approver = await this.workflowRouting.getStudentProctor(studentUserId);
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver,
+        title: 'Certificate verification required',
+        message: `${student?.name ?? 'Your mentee'} uploaded "${saved.title}" for verification.`,
+        actionLink: '/faculty/mentorship',
+        category: 'ACADEMICS',
+        requesterName: student?.name,
+      });
+    } catch {
+      /* no active proctor — student upload still succeeds */
+    }
+
+    return saved;
   }
 
   listMyCertificates(studentUserId: string, tenantId: string) {

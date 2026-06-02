@@ -117,6 +117,12 @@ export class HrController {
     return this.hr.listPendingGatePassApprovals(req.user.user_id, this.resolveTenantId(req.user));
   }
 
+  @Get('gate-passes/pending-hr')
+  @Roles('HR', 'SuperAdmin')
+  pendingHrGatePasses(@Req() req: { user: AuthUser }) {
+    return this.hr.listPendingHrGatePasses(this.resolveTenantId(req.user));
+  }
+
   @Patch('gate-passes/:passId/action')
   @Roles('HOD', 'Dean', 'HR', 'SuperAdmin', 'Faculty')
   actOnGatePass(

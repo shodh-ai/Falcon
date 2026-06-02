@@ -259,6 +259,23 @@ export class AcademicsController {
     return this.academics.allocateHodCourse(this.resolveTenantId(req.user), req.user.user_id, dto);
   }
 
+  @Patch('faculty/timetable/:timetableId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  updateTimetableSlot(
+    @Req() req: { user: AuthUser },
+    @Param('timetableId') timetableId: string,
+    @Body()
+    dto: {
+      day_of_week?: number;
+      start_time?: string;
+      end_time?: string;
+      room?: string;
+      cancelled?: boolean;
+    },
+  ) {
+    return this.academics.updateTimetableSlot(this.resolveTenantId(req.user), timetableId, dto);
+  }
+
   @Get('hod/student-monitor')
   @Roles('HOD', 'Dean', 'SuperAdmin')
   hodStudentMonitor(

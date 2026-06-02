@@ -2,12 +2,14 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { FinanceLedgerService } from './finance-ledger.service';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 @Injectable()
 export class FinanceAccountsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly ledger: FinanceLedgerService,
+    private readonly notify: NotificationEmitterService,
   ) {}
 
   listTemplates(tenantId: string) {
@@ -120,6 +122,7 @@ export class FinanceAccountsService {
       );
       if (existing.length) continue;
 
+      const amount = tuitionFee + developmentFee;
       await this.dataSource.query(
         `INSERT INTO finance_fee_demands
            (tenant_id, student_user_id, fee_head, academic_year, semester, total_amount, paid_amount,
@@ -130,7 +133,7 @@ export class FinanceAccountsService {
           student.user_id,
           academicYear,
           semester,
-          tuitionFee + developmentFee,
+          amount,
           dueDate,
           JSON.stringify({
             program: dto.program ?? 'B.Tech',
@@ -140,6 +143,13 @@ export class FinanceAccountsService {
           dto.template_id ?? null,
         ],
       );
+      this.notify.feeGenerated({
+        tenantId,
+        userId: student.user_id,
+        amount,
+        dueDate: String(dueDate),
+        feeHead: 'SEMESTER_FEE',
+      });
       generated += 1;
     }
 

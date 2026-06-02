@@ -67,8 +67,8 @@ export class FinanceController {
 
   @Post('demands')
   @Roles('SuperAdmin', 'Accountant')
-  createDemand(@Body() dto: CreateFeeDemandDto) {
-    return this.finance.createDemand(dto);
+  createDemand(@Req() req: { user: AuthUser }, @Body() dto: CreateFeeDemandDto) {
+    return this.finance.createDemand(dto, this.tenant(req));
   }
 
   @Post('demands/bulk-generate')
@@ -109,8 +109,8 @@ export class FinanceController {
 
   @Post('defaulters/lock-admit-cards')
   @Roles('SuperAdmin', 'Accountant')
-  lockAdmitCards() {
-    return this.finance.lockAdmitCards();
+  lockAdmitCards(@Req() req: { user: AuthUser }) {
+    return this.finance.lockAdmitCards(this.tenant(req));
   }
 
   @Post('scholarships')

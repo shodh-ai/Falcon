@@ -12,6 +12,9 @@ import { TaskMaster } from '../../entities/task-master.entity';
 import { CreateJobPostingDto } from './dto/create-job-posting.dto';
 import { ApplyToJobDto } from './dto/apply-to-job.dto';
 import { CreateAlumniRequestDto } from './dto/create-alumni-request.dto';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 /**
  * Placement & alumni extensions for the existing IQAC module. The existing
@@ -30,14 +33,32 @@ export class IqacService {
     @InjectRepository(Submission) private submissions: Repository<Submission>,
     @InjectRepository(TaskAssignment) private taskAssignments: Repository<TaskAssignment>,
     @InjectRepository(TaskMaster) private taskMaster: Repository<TaskMaster>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly notify: NotificationEmitterService,
   ) {}
 
   listJobs() {
     return this.jobs.find({ order: { created_at: 'DESC' } });
   }
 
-  createJob(dto: CreateJobPostingDto) {
-    return this.jobs.save(this.jobs.create(dto));
+  async createJob(dto: CreateJobPostingDto, tenantId: string) {
+    const saved = await this.jobs.save(this.jobs.create(dto));
+    const students = await this.dataSource.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id
+       FROM users u
+       INNER JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND r.role_name = 'Student'`,
+      [tenantId],
+    );
+    for (const row of students) {
+      this.notify.jobPosted({
+        tenantId,
+        userId: row.user_id,
+        companyName: saved.company_name,
+        roleTitle: saved.role_title,
+      });
+    }
+    return saved;
   }
 
   async applyToJob(jobId: string, dto: ApplyToJobDto) {

@@ -1,13 +1,17 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM', 'INTERNAL', 'ASSIGNMENT'] as const;
 type ExamType = (typeof EXAM_TYPES)[number];
 
 @Injectable()
 export class FacultyWorkspacesService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly notify: NotificationEmitterService,
+  ) {}
 
   async listFacultyCourses(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
@@ -142,6 +146,26 @@ export class FacultyWorkspacesService {
        RETURNING mark_id`,
       [tenantId, courseId, examType, facultyUserId],
     );
+
+    const courseRows = await this.dataSource.query<Array<{ course_name: string }>>(
+      `SELECT course_name FROM academic_courses WHERE course_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [courseId, tenantId],
+    );
+    const courseName = courseRows[0]?.course_name ?? 'your course';
+    const students = await this.dataSource.query<Array<{ student_user_id: string }>>(
+      `SELECT student_user_id FROM student_course_enrollments
+       WHERE course_id = $1 AND tenant_id = $2`,
+      [courseId, tenantId],
+    );
+    for (const row of students) {
+      this.notify.marksPublished({
+        tenantId,
+        userId: row.student_user_id,
+        courseName,
+        examType,
+      });
+    }
+
     return { published: result.length };
   }
 

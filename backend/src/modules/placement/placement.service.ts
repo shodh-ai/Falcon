@@ -1,13 +1,17 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
 export class PlacementService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly notify: NotificationEmitterService,
+  ) {}
 
   private tenant(tenantId?: string) {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
@@ -49,8 +53,8 @@ export class PlacementService {
     );
   }
 
-  createDrive(tenantId: string, dto: Record<string, unknown>) {
-    return this.db.query(
+  async createDrive(tenantId: string, dto: Record<string, unknown>) {
+    const rows = await this.db.query(
       `INSERT INTO placement_drives
          (tenant_id, company_id, job_profile, package_details_lpa, min_cgpa, max_backlogs, drive_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -65,6 +69,26 @@ export class PlacementService {
         dto.drive_date ?? null,
       ],
     );
+    const drive = rows[0] as { job_profile: string };
+    const company = await this.db.query<Array<{ company_name: string }>>(
+      `SELECT company_name FROM placement_companies WHERE company_id = $1`,
+      [dto.company_id],
+    );
+    const students = await this.db.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id FROM users u
+       INNER JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND r.role_name = 'Student'`,
+      [this.tenant(tenantId)],
+    );
+    for (const student of students) {
+      this.notify.jobPosted({
+        tenantId: this.tenant(tenantId),
+        userId: student.user_id,
+        companyName: company[0]?.company_name ?? 'Company',
+        roleTitle: String(drive.job_profile ?? 'Role'),
+      });
+    }
+    return rows;
   }
 
   async checkEligibility(studentUserId: string, driveId: string) {

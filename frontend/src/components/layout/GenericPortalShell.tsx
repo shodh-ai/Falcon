@@ -55,7 +55,7 @@ export function GenericPortalShell({
 }) {
   const config = configs[portal];
   return (
-    <AppShell config={config} notifications={[]} profileHref={config.homeHref}>
+    <AppShell config={config} profileHref={config.homeHref}>
       {children}
     </AppShell>
   );

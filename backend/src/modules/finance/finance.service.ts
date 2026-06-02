@@ -6,6 +6,7 @@ import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
 import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 @Injectable()
 export class FinanceService {
@@ -15,6 +16,7 @@ export class FinanceService {
     @InjectRepository(FeeDemand) private demands: Repository<FeeDemand>,
     @InjectRepository(Transaction) private transactions: Repository<Transaction>,
     @InjectRepository(LateFinePolicy) private finePolicies: Repository<LateFinePolicy>,
+    private readonly notify: NotificationEmitterService,
   ) {}
 
   listDemands(studentUserId?: string) {
@@ -24,8 +26,16 @@ export class FinanceService {
     return this.demands.find({ order: { due_date: 'ASC' } });
   }
 
-  createDemand(dto: CreateFeeDemandDto) {
-    return this.demands.save(this.demands.create(dto));
+  async createDemand(dto: CreateFeeDemandDto, tenantId: string) {
+    const saved = await this.demands.save(this.demands.create(dto));
+    this.notify.feeGenerated({
+      tenantId,
+      userId: saved.student_user_id,
+      amount: Number(saved.total_amount),
+      dueDate: String(saved.due_date),
+      feeHead: saved.fee_head,
+    });
+    return saved;
   }
 
   async getDashboard(tenantId: string) {
@@ -188,11 +198,19 @@ export class FinanceService {
     }));
   }
 
-  async lockAdmitCards() {
+  async lockAdmitCards(tenantId: string) {
     const defaulters = await this.listDefaulters();
+    const studentIds = [...new Set(defaulters.map((row) => row.student_user_id))];
+    for (const userId of studentIds) {
+      this.notify.admitCardLocked({
+        tenantId,
+        userId,
+        actionLink: '/student/finance',
+      });
+    }
     return {
       locked: true,
-      affected_students: new Set(defaulters.map((row) => row.student_user_id)).size,
+      affected_students: studentIds.length,
       exam_signal: 'DEFaulter admit-card lock active for open fee demands',
     };
   }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -14,6 +15,7 @@ import { SchedulerModule } from './scheduler/scheduler.module';
 import { UsersModule } from './users/users.module';
 import { HandoverModule } from './handover/handover.module';
 import { NotificationsModule } from './core/notifications/notifications.module';
+import { WorkflowModule } from './core/workflow/workflow.module';
 import { IdGeneratorModule } from './core/id-generator/id-generator.module';
 import { IamModule } from './modules/iam/iam.module';
 import { AdmissionsModule } from './modules/admissions/admissions.module';
@@ -46,6 +48,7 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [ConfigModule],
@@ -74,6 +77,7 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
       inject: [ConfigService],
     }),
     NotificationsModule,
+    WorkflowModule,
     IdGeneratorModule,
     TenantModule,
     StorageModule,

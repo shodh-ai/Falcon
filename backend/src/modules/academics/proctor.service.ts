@@ -8,6 +8,9 @@ import { User } from '../../entities/user.entity';
 import { StudentCertificate } from '../../entities/student-certificate.entity';
 import { AssignMentorDto } from './dto/assign-mentor.dto';
 import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 
 @Injectable()
 export class ProctorService {
@@ -18,6 +21,9 @@ export class ProctorService {
     @InjectRepository(User) private users: Repository<User>,
     @InjectRepository(StudentCertificate)
     private certificates: Repository<StudentCertificate>,
+    private readonly notify: NotificationEmitterService,
+    private readonly workflowRouting: WorkflowRoutingService,
+    private readonly workflowNotify: WorkflowNotificationService,
   ) {}
 
   async assignMentor(dto: AssignMentorDto, assignedByUserId: string) {
@@ -82,7 +88,8 @@ export class ProctorService {
     const mentorship = await this.mentorships.findOne({ where: { student_user_id: studentUserId, is_active: true } });
     if (!mentorship) throw new NotFoundException('No active proctor assigned');
 
-    return this.interactions.save(
+    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const saved = await this.interactions.save(
       this.interactions.create({
         student_user_id: studentUserId,
         proctor_user_id: mentorship.proctor_user_id,
@@ -94,6 +101,21 @@ export class ProctorService {
         status: 'REQUESTED',
       }),
     );
+
+    if (student?.tenant_id) {
+      const approver = await this.workflowRouting.getStudentProctor(studentUserId);
+      this.workflowNotify.notifyApprover({
+        tenantId: student.tenant_id,
+        approver,
+        title: 'Proctor meeting requested',
+        message: `${student.name} requested a meeting on ${meetingAt}.${note ? ` Note: ${note}` : ''}`,
+        actionLink: '/faculty/mentorship',
+        category: 'ACADEMICS',
+        requesterName: student.name,
+      });
+    }
+
+    return saved;
   }
 
   async sendMessage(studentUserId: string, message: string) {

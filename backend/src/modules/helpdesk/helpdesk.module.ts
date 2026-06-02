@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
+import { User } from '../../entities/user.entity';
 import { TicketController } from './ticket.controller';
 import { TicketService } from './ticket.service';
 import { TICKET_PROVIDER } from './providers/ticket-provider.interface';
@@ -17,7 +18,7 @@ const ticketProviderFactory = {
 };
 
 @Module({
-  imports: [TypeOrmModule.forFeature([HelpdeskTicket])],
+  imports: [TypeOrmModule.forFeature([HelpdeskTicket, User])],
   controllers: [TicketController],
   providers: [
     TicketService,

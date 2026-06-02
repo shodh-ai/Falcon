@@ -50,19 +50,20 @@ export class ExamsService {
     });
 
     if (dto.application_type === 'RE_EVALUATION') {
+      const student = await this.users.findOne({ where: { user_id: studentUserId } });
+      const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
       const academicYear = this.getAcademicYear();
       const dueDate = this.addDays(new Date(), 3).toISOString().slice(0, 10);
-      const demand = await this.finance.createDemand({
-        student_user_id: studentUserId,
-        fee_head: 'RE_EVALUATION',
-        academic_year: academicYear,
-        semester: null,
-        total_amount: 500,
-        paid_amount: 0,
-        due_date: dueDate,
-        status: 'PENDING',
-        fee_breakup: { subject_id: dto.subject_id, type: 'RE_EVALUATION' },
-      } as any);
+      const demand = await this.finance.createDemand(
+        {
+          student_user_id: studentUserId,
+          fee_head: 'RE_EVALUATION',
+          academic_year: academicYear,
+          total_amount: 500,
+          due_date: dueDate,
+        },
+        tenantId,
+      );
       application.finance_demand_id = demand.demand_id;
     }
 

@@ -7,6 +7,8 @@ import { HostelRequest } from '../../entities/hostel-request.entity';
 import { HostelRoom } from '../../entities/hostel-room.entity';
 import { User } from '../../entities/user.entity';
 import { CreateHostelRequestDto } from './dto/create-hostel-request.dto';
+import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 
 @Injectable()
 export class HostelService {
@@ -15,6 +17,8 @@ export class HostelService {
     @InjectRepository(HostelRequest) private requests: Repository<HostelRequest>,
     @InjectRepository(HostelRoom) private rooms: Repository<HostelRoom>,
     @InjectRepository(User) private users: Repository<User>,
+    private readonly workflowRouting: WorkflowRoutingService,
+    private readonly workflowNotify: WorkflowNotificationService,
   ) {}
 
   async getMyAllocation(studentUserId: string) {
@@ -48,18 +52,51 @@ export class HostelService {
     };
   }
 
-  createRequest(studentUserId: string, dto: CreateHostelRequestDto) {
+  async createRequest(studentUserId: string, dto: CreateHostelRequestDto) {
     const isGatePass = dto.request_type === 'GATE_PASS';
     const payload = dto.payload ?? null;
-    return this.requests.save(
+    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+
+    let wardenUserId: string | null = null;
+    try {
+      const warden = await this.workflowRouting.getWardenForStudent(studentUserId);
+      wardenUserId = warden.userId;
+    } catch {
+      wardenUserId = null;
+    }
+
+    const saved = await this.requests.save(
       this.requests.create({
         student_user_id: studentUserId,
         request_type: dto.request_type,
         payload,
         remarks: dto.remarks ?? null,
         qr_token: isGatePass ? randomBytes(20).toString('hex') : null,
+        warden_user_id: wardenUserId,
       } as Partial<HostelRequest>),
     );
+
+    if (wardenUserId && student) {
+      const warden = await this.workflowRouting.getWardenForStudent(studentUserId);
+      const label =
+        dto.request_type === 'MAINTENANCE'
+          ? 'Hostel maintenance request'
+          : dto.request_type === 'GATE_PASS'
+            ? 'Hostel gate pass request'
+            : `Hostel ${dto.request_type} request`;
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver: warden,
+        title: label,
+        message: `${student?.name ?? 'A student'} submitted: ${dto.remarks ?? dto.request_type}.`,
+        actionLink: '/hostel-admin/requests',
+        category: 'HOSTEL',
+        requesterName: student?.name,
+      });
+    }
+
+    return saved;
   }
 
   listMyRequests(studentUserId: string) {

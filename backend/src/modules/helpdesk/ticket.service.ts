@@ -8,6 +8,10 @@ import {
   TICKET_PROVIDER,
   type ITicketProvider,
 } from './providers/ticket-provider.interface';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
+import { User } from '../../entities/user.entity';
 
 @Injectable()
 export class TicketService {
@@ -16,10 +20,42 @@ export class TicketService {
     private readonly ticketProvider: ITicketProvider,
     @InjectRepository(HelpdeskTicket)
     private tickets: Repository<HelpdeskTicket>,
+    private readonly notify: NotificationEmitterService,
+    private readonly workflowRouting: WorkflowRoutingService,
+    private readonly workflowNotify: WorkflowNotificationService,
+    @InjectRepository(User) private readonly users: Repository<User>,
   ) {}
 
-  createTicket(studentUserId: string, dto: CreateTicketDto) {
-    return this.ticketProvider.createTicket(studentUserId, dto);
+  async createTicket(studentUserId: string, dto: CreateTicketDto) {
+    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+
+    const assignee = await this.workflowRouting.getHelpdeskAssignee(
+      studentUserId,
+      tenantId,
+      dto.category,
+    );
+
+    const ticket = await this.tickets.save(
+      this.tickets.create({
+        student_user_id: studentUserId,
+        ...dto,
+        assigned_to_user_id: assignee.userId,
+        status: 'PENDING',
+      }),
+    );
+
+    this.workflowNotify.notifyApprover({
+      tenantId,
+      approver: assignee,
+      title: `Helpdesk: ${dto.subject}`,
+      message: `${student?.name ?? 'Student'} opened a ${dto.category} ticket.`,
+      actionLink: `/helpdesk/tickets/${ticket.ticket_id}`,
+      category: 'HELPDESK',
+      requesterName: student?.name,
+    });
+
+    return ticket;
   }
 
   listMyTickets(studentUserId: string) {
@@ -60,6 +96,22 @@ export class TicketService {
       sent_at: new Date().toISOString(),
     });
     ticket.conversation = conversation;
-    return this.tickets.save(ticket);
+    const saved = await this.tickets.save(ticket);
+
+    if (isAdminActor && !isStudentOwner) {
+      const student = await this.tickets.manager.query<Array<{ tenant_id: string }>>(
+        `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
+        [ticket.student_user_id],
+      );
+      const tenantId = student[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+      this.notify.ticketReply({
+        tenantId,
+        userId: ticket.student_user_id,
+        ticketId: ticket.ticket_id,
+        subject: ticket.subject,
+      });
+    }
+
+    return saved;
   }
 }

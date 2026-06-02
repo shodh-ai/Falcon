@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { Subject } from '../../entities/subject.entity';
 import { Batch } from '../../entities/batch.entity';
 import { AttendanceRecord } from '../../entities/attendance-record.entity';
@@ -39,7 +40,27 @@ export class AcademicsService {
     @InjectRepository(StaffLeaveRequest)
     private staffLeaveRequests: Repository<StaffLeaveRequest>,
     @InjectRepository(StaffGatePass) private staffGatePasses: Repository<StaffGatePass>,
+    private readonly notify: NotificationEmitterService,
   ) {}
+
+  private async notifyCourseStudents(
+    tenantId: string,
+    courseId: string,
+    courseName: string,
+    changeSummary: string,
+  ) {
+    const enrollments = await this.courseEnrollments.find({
+      where: { tenant_id: tenantId, course_id: courseId },
+    });
+    for (const row of enrollments) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: row.student_user_id,
+        courseName,
+        changeSummary,
+      });
+    }
+  }
 
   listSubjects() {
     return this.subjects.find({ order: { subject_code: 'ASC' } });
@@ -329,10 +350,55 @@ export class AcademicsService {
       { timetable_id: dto.timetable_id, tenant_id: tenantId },
       { faculty_user_id: dto.faculty_user_id },
     );
-    return this.timetables.findOne({
+    const slot = await this.timetables.findOne({
       where: { timetable_id: dto.timetable_id, tenant_id: tenantId },
       relations: ['course', 'faculty'],
     });
+    if (slot?.course_id) {
+      await this.notifyCourseStudents(
+        tenantId,
+        slot.course_id,
+        slot.course?.course_name ?? 'Course',
+        `Faculty assignment updated for this slot.`,
+      );
+    }
+    return slot;
+  }
+
+  async updateTimetableSlot(
+    tenantId: string,
+    timetableId: string,
+    dto: {
+      day_of_week?: number;
+      start_time?: string;
+      end_time?: string;
+      room?: string;
+      cancelled?: boolean;
+    },
+  ) {
+    const slot = await this.timetables.findOne({
+      where: { timetable_id: timetableId, tenant_id: tenantId },
+      relations: ['course'],
+    });
+    if (!slot) throw new NotFoundException('Timetable slot not found');
+
+    if (dto.day_of_week !== undefined) slot.day_of_week = dto.day_of_week;
+    if (dto.start_time !== undefined) slot.start_time = dto.start_time;
+    if (dto.end_time !== undefined) slot.end_time = dto.end_time;
+    if (dto.room !== undefined) slot.room = dto.room;
+    const saved = await this.timetables.save(slot);
+
+    const summary = dto.cancelled
+      ? 'Class cancelled for this slot.'
+      : `Rescheduled to ${saved.day_of_week} ${saved.start_time}–${saved.end_time}${saved.room ? ` (${saved.room})` : ''}.`;
+
+    await this.notifyCourseStudents(
+      tenantId,
+      saved.course_id,
+      slot.course?.course_name ?? 'Course',
+      summary,
+    );
+    return saved;
   }
 
   async listHodStudents(tenantId: string, hodUserId: string, lowAttendance = false) {

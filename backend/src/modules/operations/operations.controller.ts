@@ -23,9 +23,15 @@ export class OperationsController {
   }
 
   @Patch('gate-passes/:id/approve')
-  @Roles('Warden', 'SuperAdmin')
-  approvePass(@Param('id') id: string, @Req() req: { user?: { sub?: string } }) {
-    return this.ops.approveGatePass(id, req.user?.sub ?? '');
+  @Roles('Warden', 'SuperAdmin', 'HOD')
+  approvePass(@Param('id') id: string, @Req() req: { user: { user_id: string } }) {
+    return this.ops.approveGatePass(id, req.user.user_id);
+  }
+
+  @Patch('gate-passes/:id/reject')
+  @Roles('Warden', 'SuperAdmin', 'HOD')
+  rejectPass(@Param('id') id: string, @Req() req: { user: { user_id: string } }) {
+    return this.ops.rejectGatePass(id, req.user.user_id);
   }
 
   @Get('gate-passes')

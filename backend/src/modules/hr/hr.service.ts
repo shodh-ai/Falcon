@@ -10,11 +10,13 @@ import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { User } from '../../entities/user.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { LeaveActionDto } from './dto/leave-action.dto';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 
-type ApprovalStep = 'PENDING_HOD' | 'PENDING_DEAN' | 'PENDING_HR';
-
-const APPROVAL_FLOW: Record<ApprovalStep, LeaveRequestStatus> = {
-  PENDING_HOD: 'PENDING_DEAN',
+/** HOD (reporting officer) first, then HR admin — no generic HR inbox on create. */
+const APPROVAL_FLOW: Partial<Record<LeaveRequestStatus, LeaveRequestStatus>> = {
+  PENDING_HOD: 'PENDING_HR',
   PENDING_DEAN: 'PENDING_HR',
   PENDING_HR: 'APPROVED',
 };
@@ -30,15 +32,38 @@ export class HrService {
     @InjectRepository(StaffPayslip) private payslips: Repository<StaffPayslip>,
     @InjectRepository(StaffGatePass) private gatePasses: Repository<StaffGatePass>,
     @InjectRepository(User) private users: Repository<User>,
+    private readonly notify: NotificationEmitterService,
+    private readonly workflowRouting: WorkflowRoutingService,
+    private readonly workflowNotify: WorkflowNotificationService,
   ) {}
 
-  createLeaveRequest(dto: CreateLeaveRequestDto) {
+  async createLeaveRequest(dto: CreateLeaveRequestDto) {
+    const requester = await this.users.findOne({
+      where: { user_id: dto.requester_user_id },
+    });
+    if (!requester?.tenant_id) {
+      throw new BadRequestException('Requester tenant not found');
+    }
+
     const entity = this.leaves.create({
       ...dto,
       status: 'PENDING_HOD',
       approval_trail: { history: [] },
     });
-    return this.leaves.save(entity);
+    const saved = await this.leaves.save(entity);
+
+    const approver = await this.workflowRouting.getReportingOfficer(dto.requester_user_id);
+    this.workflowNotify.notifyApprover({
+      tenantId: requester.tenant_id,
+      approver,
+      title: 'Leave approval required',
+      message: `${requester.name} applied for ${saved.leave_type} leave (${saved.start_date} – ${saved.end_date}).`,
+      actionLink: '/faculty/leaves',
+      category: 'HR',
+      requesterName: requester.name,
+    });
+
+    return saved;
   }
 
   listLeaveRequests(userId?: string, status?: LeaveRequestStatus) {
@@ -52,7 +77,8 @@ export class HrService {
     const leave = await this.leaves.findOne({ where: { leave_request_id: leaveId } });
     if (!leave) throw new NotFoundException('Leave request not found');
 
-    if (!(leave.status in APPROVAL_FLOW)) {
+    const next = APPROVAL_FLOW[leave.status];
+    if (!next && leave.status !== 'REJECTED') {
       throw new BadRequestException(`Cannot act on leave in status ${leave.status}`);
     }
 
@@ -67,11 +93,45 @@ export class HrService {
     });
 
     leave.status =
-      dto.action === 'REJECT'
-        ? 'REJECTED'
-        : APPROVAL_FLOW[leave.status as ApprovalStep];
+      dto.action === 'REJECT' ? 'REJECTED' : (next ?? leave.status);
     leave.approval_trail = { history };
-    return this.leaves.save(leave);
+    const previousStatus = leave.status;
+    const saved = await this.leaves.save(leave);
+
+    const requester = await this.users.findOne({
+      where: { user_id: saved.requester_user_id },
+    });
+    const tenantId = requester?.tenant_id;
+    if (!tenantId) return saved;
+
+    if (
+      dto.action !== 'REJECT' &&
+      previousStatus === 'PENDING_HOD' &&
+      saved.status === 'PENDING_HR'
+    ) {
+      const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver: hrAdmin,
+        title: 'Leave awaiting HR approval',
+        message: `${requester.name}'s leave was approved by HOD and needs HR final sign-off.`,
+        actionLink: '/hr/leaves',
+        category: 'HR',
+        requesterName: requester.name,
+      });
+    }
+
+    if (saved.status === 'APPROVED') {
+      this.notify.leaveApproved({
+        tenantId,
+        userId: saved.requester_user_id,
+        leaveType: saved.leave_type,
+        startDate: saved.start_date,
+        endDate: saved.end_date,
+      });
+    }
+
+    return saved;
   }
 
   listBalances(userId: string) {
@@ -230,16 +290,32 @@ export class HrService {
     dto: { out_time: string; expected_in_time: string; reason: string },
   ) {
     const user = await this.users.findOne({ where: { user_id: staffUserId } });
+    const reportingOfficerId = user?.reporting_officer_id ?? null;
     const row = this.gatePasses.create({
       tenant_id: tenantId,
       staff_user_id: staffUserId,
-      reporting_officer_id: user?.reporting_officer_id ?? null,
+      reporting_officer_id: reportingOfficerId,
       out_time: new Date(dto.out_time),
       expected_in_time: new Date(dto.expected_in_time),
       reason: dto.reason,
       status: 'PENDING',
     });
-    return this.gatePasses.save(row);
+    const saved = await this.gatePasses.save(row);
+
+    if (reportingOfficerId) {
+      const approver = await this.workflowRouting.getReportingOfficer(staffUserId);
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver,
+        title: 'Gate pass approval required',
+        message: `${user?.name ?? 'Staff member'} requested a mid-duty gate pass.`,
+        actionLink: '/faculty/gate-pass',
+        category: 'HR',
+        requesterName: user?.name,
+      });
+    }
+
+    return saved;
   }
 
   listMyGatePasses(staffUserId: string, tenantId: string) {
@@ -261,22 +337,79 @@ export class HrService {
     });
   }
 
+  listPendingHrGatePasses(tenantId: string) {
+    return this.gatePasses.find({
+      where: { tenant_id: tenantId, status: 'PENDING_HR' },
+      relations: ['staff'],
+      order: { out_time: 'ASC' },
+    });
+  }
+
   async actOnGatePass(
     passId: string,
-    reportingOfficerId: string,
+    actorUserId: string,
     tenantId: string,
     status: 'APPROVED' | 'REJECTED',
   ) {
     const pass = await this.gatePasses.findOne({
-      where: {
-        pass_id: passId,
-        reporting_officer_id: reportingOfficerId,
-        tenant_id: tenantId,
-      },
+      where: { pass_id: passId, tenant_id: tenantId },
+      relations: ['staff'],
     });
     if (!pass) throw new NotFoundException('Gate pass not found');
-    pass.status = status;
-    return this.gatePasses.save(pass);
+
+    const staff = await this.users.findOne({ where: { user_id: pass.staff_user_id } });
+
+    if (pass.status === 'PENDING') {
+      if (pass.reporting_officer_id !== actorUserId) {
+        throw new ForbiddenException('Only the assigned reporting officer can act on this pass');
+      }
+      if (status === 'REJECTED') {
+        pass.status = 'REJECTED';
+        const saved = await this.gatePasses.save(pass);
+        if (staff?.tenant_id) {
+          this.notify.gatePassUpdated({
+            tenantId: staff.tenant_id,
+            userId: pass.staff_user_id,
+            status: 'REJECTED',
+            actionLink: '/faculty/gate-pass',
+          });
+        }
+        return saved;
+      }
+      pass.status = 'PENDING_HR';
+      const saved = await this.gatePasses.save(pass);
+      const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver: hrAdmin,
+        title: 'Gate pass awaiting HR approval',
+        message: `${staff?.name ?? 'Staff'} gate pass was approved by HOD and needs HR sign-off.`,
+        actionLink: '/hr/gate-passes',
+        category: 'HR',
+        requesterName: staff?.name,
+      });
+      return saved;
+    }
+
+    if (pass.status === 'PENDING_HR') {
+      const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
+      if (hrAdmin.userId !== actorUserId) {
+        throw new ForbiddenException('Only HR admin can finalize this gate pass');
+      }
+      pass.status = status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+      const saved = await this.gatePasses.save(pass);
+      if (staff?.tenant_id) {
+        this.notify.gatePassUpdated({
+          tenantId: staff.tenant_id,
+          userId: pass.staff_user_id,
+          status: status === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+          actionLink: '/faculty/gate-pass',
+        });
+      }
+      return saved;
+    }
+
+    throw new BadRequestException(`Cannot act on gate pass in status ${pass.status}`);
   }
 
   private countWeekdaysInMonth(year: number, month: number): number {

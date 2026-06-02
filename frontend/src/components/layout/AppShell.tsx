@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { CommandMenu } from '@/components/layout/CommandMenu';
-import { NotificationBell, type AppNotification } from '@/components/layout/NotificationBell';
+import { LiveNotificationBell } from '@/components/layout/LiveNotificationBell';
 import { ProfileMenu } from '@/components/layout/ProfileMenu';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher';
@@ -17,11 +17,10 @@ import type { PortalConfig } from '@/lib/navigation';
 interface AppShellProps {
   config: PortalConfig;
   children: ReactNode;
-  notifications?: AppNotification[];
   profileHref?: string;
 }
 
-export function AppShell({ config, children, notifications = [], profileHref }: AppShellProps) {
+export function AppShell({ config, children, profileHref }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -81,7 +80,7 @@ export function AppShell({ config, children, notifications = [], profileHref }: 
                 <CommandMenu items={config.commandItems} />
               </div>
               <WorkspaceSwitcher />
-              <NotificationBell notifications={notifications} />
+              <LiveNotificationBell />
               <ProfileMenu profileHref={profileHref ?? config.homeHref.replace('/dashboard', '/profile')} />
             </div>
           </div>

@@ -150,8 +150,8 @@ export class IqacController {
 
   @Post('placements/jobs')
   @Roles('SuperAdmin', 'PlacementCell')
-  createJob(@Body() dto: CreateJobPostingDto) {
-    return this.iqac.createJob(dto);
+  createJob(@Req() req: { user: AuthUser }, @Body() dto: CreateJobPostingDto) {
+    return this.iqac.createJob(dto, req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001');
   }
 
   @Post('placements/jobs/:id/apply')

@@ -18,9 +18,10 @@ type Summary = {
 };
 
 type Alert = {
-  alert_id: string;
+  notification_id: string;
   title: string;
   message: string | null;
+  is_read: boolean;
 };
 
 type TimetableResponse = {
@@ -44,13 +45,31 @@ export default function StudentDashboardPage() {
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [metrics, alertRows, timetableRows] = await Promise.all([
+        const [metricsResult, alertsResult, timetableResult] = await Promise.allSettled([
           api.get<Summary>('/api/academics/dashboard/metrics'),
-          api.get<Alert[]>('/api/system/alerts/my-alerts'),
+          api.get<Alert[]>('/api/notifications?limit=10'),
           api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
         ]);
-        setSummary(metrics);
-        setAlerts(alertRows);
+
+        if (metricsResult.status === 'fulfilled') {
+          setSummary(metricsResult.value);
+        } else {
+          console.error('Failed to load dashboard metrics', metricsResult.reason);
+        }
+
+        if (alertsResult.status === 'fulfilled') {
+          setAlerts(alertsResult.value);
+        } else {
+          console.warn('Notifications unavailable', alertsResult.reason);
+          setAlerts([]);
+        }
+
+        const timetableRows =
+          timetableResult.status === 'fulfilled' ? timetableResult.value : [];
+        if (timetableResult.status === 'rejected') {
+          console.error('Failed to load timetable', timetableResult.reason);
+        }
+
         setTimetable(
           timetableRows.map((slot) => ({
             id: slot.timetable_id,
@@ -115,17 +134,16 @@ export default function StudentDashboardPage() {
             {alerts.length === 0 && (
               <p className="text-sm text-muted-foreground">No unread alerts right now.</p>
             )}
-            {alerts.map((alert) => (
-              <div key={alert.alert_id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
+            {alerts
+              .filter((alert) => !alert.is_read)
+              .map((alert) => (
+              <div key={alert.notification_id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
                 <div>
                   <p className="text-sm font-medium">{alert.title}</p>
                   {alert.message && <p className="text-xs text-muted-foreground">{alert.message}</p>}
                 </div>
-                <Badge
-                  variant="warning"
-                  className="shrink-0"
-                >
-                  unread
+                <Badge variant="warning" className="shrink-0">
+                  new
                 </Badge>
               </div>
             ))}
