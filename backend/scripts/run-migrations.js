@@ -1,0 +1,75 @@
+/**
+ * Apply SQL migrations from backend/migrations/ (sorted by filename).
+ *
+ * Uses DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE from the environment
+ * (same vars as the NestJS app). Safe to run in Coolify backend terminal:
+ *   npm run db:migrate
+ *   npm run db:seed
+ */
+const fs = require('fs');
+const path = require('path');
+const { Client } = require('pg');
+
+const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
+
+/** Seed-only files (idempotent); run after schema exists via db:migrate. */
+const SEED_FILES = [
+  '20260529152000_seed_master_test_personas.sql',
+];
+
+function dbConfig() {
+  return {
+    host: process.env.DB_HOST || 'localhost',
+    port: Number(process.env.DB_PORT || 5432),
+    user: process.env.DB_USERNAME || process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD ?? '',
+    database: process.env.DB_DATABASE || 'university_governance',
+  };
+}
+
+function listSqlFiles(seedOnly) {
+  const all = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((name) => name.endsWith('.sql'))
+    .sort();
+
+  if (!seedOnly) {
+    return all.map((name) => path.join(MIGRATIONS_DIR, name));
+  }
+
+  const selected = all.filter((name) => SEED_FILES.includes(name));
+  if (selected.length === 0) {
+    throw new Error(`No seed files found. Expected: ${SEED_FILES.join(', ')}`);
+  }
+  return selected.map((name) => path.join(MIGRATIONS_DIR, name));
+}
+
+async function run() {
+  const seedOnly = process.argv.includes('--seed');
+  const files = listSqlFiles(seedOnly);
+
+  console.log(
+    seedOnly
+      ? `Running ${files.length} seed file(s) against ${dbConfig().database}...`
+      : `Running ${files.length} migration(s) against ${dbConfig().database}...`,
+  );
+
+  const client = new Client(dbConfig());
+  await client.connect();
+
+  try {
+    for (const file of files) {
+      const sql = fs.readFileSync(file, 'utf8');
+      console.log(`>>> ${path.basename(file)}`);
+      await client.query(sql);
+    }
+    console.log(seedOnly ? 'Seed complete.' : 'Migrations complete.');
+  } finally {
+    await client.end();
+  }
+}
+
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
