@@ -9,8 +9,10 @@ import {
   type JobPostedPayload,
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
+  type CourseMaterialAddedPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
+  type MeetingRespondedPayload,
   type TicketReplyPayload,
   type TimetableChangedPayload,
   type WorkflowApprovalRequiredPayload,
@@ -41,6 +43,10 @@ export class NotificationEmitterService {
     this.events.emit(NotificationEvents.ACADEMICS_MARKS_PUBLISHED, payload);
   }
 
+  courseMaterialAdded(payload: CourseMaterialAddedPayload) {
+    this.events.emit(NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED, payload);
+  }
+
   gatePassUpdated(payload: GatePassUpdatedPayload) {
     this.events.emit(NotificationEvents.OPERATIONS_GATE_PASS_UPDATED, payload);
   }
@@ -51,6 +57,10 @@ export class NotificationEmitterService {
 
   meetingRequested(payload: MeetingRequestedPayload) {
     this.events.emit(NotificationEvents.ACADEMICS_MEETING_REQUESTED, payload);
+  }
+
+  meetingResponded(payload: MeetingRespondedPayload) {
+    this.events.emit(NotificationEvents.ACADEMICS_MEETING_RESPONDED, payload);
   }
 
   jobPosted(payload: JobPostedPayload) {

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { toast } from 'sonner';
 import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
@@ -12,6 +11,7 @@ import { useAuthedApi } from '@/lib/api';
 
 type FacultyAssignment = {
   assignment_id: string;
+  course_id: string;
   title: string;
   due_date: string;
   max_marks: number;
@@ -40,7 +40,7 @@ export default function FacultyAssignmentsPage() {
         description="Dedicated DA workspace — deadlines, late submission policy, and PDF grading."
         actions={
           <Button size="sm" asChild>
-            <Link href="/faculty/academics?tab=da">Create DA (full editor)</Link>
+            <Link href="/faculty/courses">Open a course → DA tab</Link>
           </Button>
         }
       />
@@ -71,17 +71,8 @@ export default function FacultyAssignmentsPage() {
               <p>
                 {a.course?.course_code} · Due {new Date(a.due_date).toLocaleString()} · Max {a.max_marks} marks
               </p>
-              <Button
-                className="mt-3"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  toast.message('Open full DA grader', {
-                    description: 'Use the legacy academics DA panel for PDF mark entry until inline grader ships.',
-                  })
-                }
-              >
-                Grade submissions
+              <Button className="mt-3" variant="outline" size="sm" asChild>
+                <Link href={`/faculty/courses/${a.course_id}?tab=assignments`}>Grade submissions</Link>
               </Button>
             </CardContent>
           </Card>

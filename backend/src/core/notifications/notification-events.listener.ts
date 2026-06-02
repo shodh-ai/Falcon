@@ -18,8 +18,10 @@ import {
   type JobPostedPayload,
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
+  type CourseMaterialAddedPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
+  type MeetingRespondedPayload,
   type TicketReplyPayload,
   type TimetableChangedPayload,
   type WorkflowApprovalRequiredPayload,
@@ -129,6 +131,20 @@ export class NotificationEventsListener {
     });
   }
 
+  @OnEvent(NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED)
+  async onCourseMaterialAdded(payload: CourseMaterialAddedPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'ACADEMICS',
+      title: payload.title || 'New study material',
+      message:
+        payload.message ||
+        `New study material "${payload.materialTitle}" added for ${payload.courseName}.`,
+      actionLink: payload.actionLink ?? `/student/courses/${payload.courseId}`,
+    });
+  }
+
   @OnEvent(NotificationEvents.ACADEMICS_MARKS_PUBLISHED)
   async onMarksPublished(payload: MarksPublishedPayload) {
     await this.persistAndQueue({
@@ -180,11 +196,31 @@ export class NotificationEventsListener {
       tenantId: payload.tenantId,
       userId: payload.userId,
       category: 'ACADEMICS',
-      title: payload.title || 'Proctor Meeting Request',
+      title: payload.title || 'Mentorship meeting request',
       message:
         payload.message ||
-        `${payload.studentName} requested a meeting on ${payload.meetingAt}.`,
+        `${payload.studentName} (mentee) requested a meeting on ${payload.meetingAt}.`,
       actionLink: payload.actionLink ?? '/faculty/mentorship',
+    });
+  }
+
+  @OnEvent(NotificationEvents.ACADEMICS_MEETING_RESPONDED)
+  async onMeetingResponded(payload: MeetingRespondedPayload) {
+    const approved = payload.status === 'APPROVED';
+    const when = new Date(payload.meetingAt).toLocaleString();
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'ACADEMICS',
+      title:
+        payload.title ||
+        (approved ? 'Mentorship meeting approved' : 'Mentorship meeting declined'),
+      message:
+        payload.message ||
+        (approved
+          ? `Your mentor meeting for ${when} was approved.${payload.remarks ? ` ${payload.remarks}` : ''}`
+          : `Your mentor meeting for ${when} was declined.${payload.remarks ? ` Reason: ${payload.remarks}` : ''}`),
+      actionLink: payload.actionLink ?? '/student/mentorship',
     });
   }
 

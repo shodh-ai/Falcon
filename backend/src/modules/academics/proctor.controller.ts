@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -7,6 +7,7 @@ import { AssignMentorDto } from './dto/assign-mentor.dto';
 import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
 import { BookProctorMeetingDto } from './dto/book-proctor-meeting.dto';
 import { SendProctorMessageDto } from './dto/send-proctor-message.dto';
+import { RespondMentorshipMeetingDto } from './dto/respond-mentorship-meeting.dto';
 
 type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
@@ -43,6 +44,33 @@ export class ProctorController {
   @Roles('Student')
   bookMeeting(@Req() req: { user: AuthUser }, @Body() dto: BookProctorMeetingDto) {
     return this.proctor.bookMeeting(req.user.user_id, dto.meeting_at, dto.note);
+  }
+
+  @Get('meetings/my')
+  @Roles('Student')
+  myMeetings(@Req() req: { user: AuthUser }) {
+    return this.proctor.listStudentMeetings(req.user.user_id);
+  }
+
+  @Get('meetings/pending')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  pendingMeetings(@Req() req: { user: AuthUser }) {
+    return this.proctor.listPendingMeetings(req.user.user_id);
+  }
+
+  @Post('meetings/:meetingId/respond')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  respondToMeeting(
+    @Param('meetingId') meetingId: string,
+    @Req() req: { user: AuthUser },
+    @Body() dto: RespondMentorshipMeetingDto,
+  ) {
+    return this.proctor.respondToMeeting(
+      req.user.user_id,
+      meetingId,
+      dto.status,
+      dto.remarks,
+    );
   }
 
   @Post('messages')

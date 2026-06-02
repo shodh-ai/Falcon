@@ -4,9 +4,11 @@ export const NotificationEvents = {
   ACADEMICS_ATTENDANCE_WARNING: 'academics.attendance_warning',
   ACADEMICS_TIMETABLE_CHANGED: 'academics.timetable_changed',
   ACADEMICS_MARKS_PUBLISHED: 'academics.marks_published',
+  ACADEMICS_COURSE_MATERIAL_ADDED: 'academics.course_material_added',
   OPERATIONS_GATE_PASS_UPDATED: 'operations.gate_pass_updated',
   HR_LEAVE_APPROVED: 'hr.leave_approved',
   ACADEMICS_MEETING_REQUESTED: 'academics.meeting_requested',
+  ACADEMICS_MEETING_RESPONDED: 'academics.meeting_responded',
   PLACEMENT_JOB_POSTED: 'placement.job_posted',
   HELPDESK_TICKET_REPLY: 'helpdesk.ticket_reply',
   OPERATIONS_LIBRARY_OVERDUE: 'operations.library_overdue',
@@ -46,6 +48,12 @@ export type MarksPublishedPayload = BaseNotificationPayload & {
   examType: string;
 };
 
+export type CourseMaterialAddedPayload = BaseNotificationPayload & {
+  courseId: string;
+  courseName: string;
+  materialTitle: string;
+};
+
 export type GatePassUpdatedPayload = BaseNotificationPayload & {
   status: 'APPROVED' | 'REJECTED';
 };
@@ -59,6 +67,12 @@ export type LeaveApprovedPayload = BaseNotificationPayload & {
 export type MeetingRequestedPayload = BaseNotificationPayload & {
   studentName: string;
   meetingAt: string;
+};
+
+export type MeetingRespondedPayload = BaseNotificationPayload & {
+  status: 'APPROVED' | 'REJECTED';
+  meetingAt: string;
+  remarks?: string;
 };
 
 export type JobPostedPayload = BaseNotificationPayload & {

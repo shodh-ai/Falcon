@@ -14,8 +14,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
+import {
+  assignmentPdfInterceptor,
+  assignmentReferencePdfInterceptor,
+  courseMaterialInterceptor,
+} from './lms-upload.config';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -120,7 +123,7 @@ export class AcademicsController {
 
   @Post('faculty/materials/upload')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(courseMaterialInterceptor())
   uploadFacultyMaterial(
     @Req() req: { user: AuthUser },
     @Body() dto: { course_id?: string; title?: string },
@@ -149,7 +152,7 @@ export class AcademicsController {
 
   @Post('faculty/assignments')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(assignmentReferencePdfInterceptor())
   createFacultyAssignment(
     @Req() req: { user: AuthUser },
     @Body() dto: { course_id?: string; title?: string; description?: string; max_marks?: string; due_date?: string },
@@ -174,6 +177,37 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       assignmentId,
     );
+  }
+
+  @Get('faculty/assignments/:assignmentId/roster')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listAssignmentRoster(
+    @Param('assignmentId') assignmentId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.assignments.listAssignmentRoster(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+  }
+
+  @Get('faculty/submissions/:submissionId/download')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async downloadSubmission(
+    @Param('submissionId') submissionId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    const submission = await this.assignments.getSubmissionForFacultyDownload(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      submissionId,
+    );
+    const file = await this.assignments.streamSubmissionFile(submission);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    return file.stream.pipe(res);
   }
 
   @Post('faculty/submissions/:submissionId/grade')
@@ -334,7 +368,7 @@ export class AcademicsController {
 
   @Post('assignments/:assignmentId/submit')
   @Roles('Student')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(assignmentPdfInterceptor())
   submitAssignment(
     @Param('assignmentId') assignmentId: string,
     @Req() req: { user: AuthUser },
@@ -570,9 +604,42 @@ export class AcademicsController {
     return this.courseLms.setModuleStatus(req.user.user_id, this.resolveTenantId(req.user), moduleId, status);
   }
 
+  @Post('faculty/courses/:courseId/modules')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  addCourseModule(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { title?: string; module_number?: number },
+  ) {
+    return this.courseLms.addModule(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      { title: body.title ?? '', module_number: body.module_number },
+    );
+  }
+
+  @Post('faculty/courses/modules/:moduleId/materials')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  @UseInterceptors(courseMaterialInterceptor())
+  uploadModuleMaterial(
+    @Param('moduleId') moduleId: string,
+    @Req() req: { user: AuthUser },
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { title?: string; material_type?: string },
+  ) {
+    return this.courseLms.uploadModuleMaterial(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      moduleId,
+      file,
+      body,
+    );
+  }
+
   @Post('faculty/courses/modules/:moduleId/complete')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }))
+  @UseInterceptors(courseMaterialInterceptor())
   completeModule(
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },

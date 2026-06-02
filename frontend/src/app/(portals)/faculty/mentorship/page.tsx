@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
+import { PendingMeetingRequests, type PendingMeeting } from '@/components/mentorship/PendingMeetingRequests';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
@@ -36,6 +37,7 @@ interface PendingCertificate {
 
 interface PendingApprovals {
   certificates: PendingCertificate[];
+  meetings?: PendingMeeting[];
 }
 
 export default function FacultyMentorshipPage() {
@@ -43,22 +45,30 @@ export default function FacultyMentorshipPage() {
   const { token } = useAuth();
   const [students, setStudents] = useState<StudentInfo[]>([]);
   const [pendingCertificates, setPendingCertificates] = useState<PendingCertificate[]>([]);
+  const [pendingMeetings, setPendingMeetings] = useState<PendingMeeting[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  function loadWorkspace() {
+    setLoading(true);
     Promise.all([
       api.get<StudentInfo[]>('/api/academics/proctor/my-students'),
       api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
+      api.get<PendingMeeting[]>('/api/academics/proctor/meetings/pending'),
     ])
-      .then(([studentsData, approvals]) => {
+      .then(([studentsData, approvals, meetings]) => {
         setStudents(studentsData);
         setPendingCertificates(approvals.certificates);
+        setPendingMeetings(meetings);
         setLoading(false);
       })
       .catch(err => {
         toast.error(err.message || 'Failed to load mentorship workspace');
         setLoading(false);
       });
+  }
+
+  useEffect(() => {
+    loadWorkspace();
   }, [api]);
 
   async function openCertificate(certificateId: string) {
@@ -102,11 +112,15 @@ export default function FacultyMentorshipPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">Mentorship - My Students</h2>
-        <p className="mt-1 text-sm text-muted-foreground">View and manage students assigned to you for mentorship.</p>
+        <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">Mentorship — My Mentees</h2>
+        <p className="mt-1 text-sm text-muted-foreground">View and manage mentees assigned to you for mentorship.</p>
       </section>
 
       {loading && <FalconLoader label="Loading mentorship roster…" />}
+
+      {!loading && (
+        <PendingMeetingRequests meetings={pendingMeetings} onUpdated={loadWorkspace} />
+      )}
 
       {!loading && (
         <Card>
@@ -128,7 +142,7 @@ export default function FacultyMentorshipPage() {
                 <div>
                   <p className="font-semibold text-sgvu-navy">{certificate.title}</p>
                   <p className="text-sm text-muted-foreground">
-                    {certificate.issuer} · {certificate.student?.name ?? 'Student'}
+                    {certificate.issuer} · {certificate.student?.name ?? 'Mentee'}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     Issued: {certificate.issue_date ?? 'Not specified'}
@@ -161,7 +175,7 @@ export default function FacultyMentorshipPage() {
       {!loading && students.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center">
-            <p className="text-muted-foreground">No students assigned to you yet.</p>
+            <p className="text-muted-foreground">No mentees assigned to you yet.</p>
           </CardContent>
         </Card>
       )}
@@ -172,7 +186,7 @@ export default function FacultyMentorshipPage() {
             <Card key={item.mentorship_id}>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span>Student Profile</span>
+                  <span>Mentee profile</span>
                   <Badge variant="secondary">Active</Badge>
                 </CardTitle>
               </CardHeader>

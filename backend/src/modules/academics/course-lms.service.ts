@@ -18,6 +18,7 @@ import { AcademicTimetable } from '../../entities/academic-timetable.entity';
 import { User } from '../../entities/user.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { AssignmentsService } from './assignments.service';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 @Injectable()
 export class CourseLmsService {
@@ -30,6 +31,7 @@ export class CourseLmsService {
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly assignments: AssignmentsService,
     private readonly objectStorage: ObjectStorageService,
+    private readonly notificationEmitter: NotificationEmitterService,
   ) {}
 
   async getFacultyWorkspace(facultyUserId: string, tenantId: string, courseId: string) {
@@ -123,6 +125,70 @@ export class CourseLmsService {
     mod.completed_at = new Date();
     await this.modules.save(mod);
 
+    const course = await this.getCourseOrFail(mod.course_id, tenantId);
+    await this.notifyEnrolledStudents(tenantId, mod.course_id, course.course_name, material.title);
+
+    return { module: mod, material };
+  }
+
+  async addModule(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    dto: { title: string; module_number?: number },
+  ) {
+    await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    if (!dto.title?.trim()) throw new BadRequestException('Module title is required');
+
+    const existing = await this.modules.find({
+      where: { tenant_id: tenantId, course_id: courseId },
+      order: { module_number: 'DESC' },
+      take: 1,
+    });
+    const nextNumber = dto.module_number ?? (existing[0]?.module_number ?? 0) + 1;
+
+    const mod = await this.modules.save(
+      this.modules.create({
+        tenant_id: tenantId,
+        course_id: courseId,
+        faculty_user_id: facultyUserId,
+        module_number: nextNumber,
+        title: dto.title.trim(),
+        description: null,
+        status: 'PENDING',
+      }),
+    );
+    return mod;
+  }
+
+  async uploadModuleMaterial(
+    facultyUserId: string,
+    tenantId: string,
+    moduleId: string,
+    file: Express.Multer.File,
+    dto: { title?: string; material_type?: string },
+  ) {
+    const mod = await this.getModuleForFaculty(moduleId, facultyUserId, tenantId);
+    if (!file) throw new BadRequestException('File is required');
+
+    const course = await this.getCourseOrFail(mod.course_id, tenantId);
+    const materialType = (dto.material_type ?? 'NOTES').toUpperCase();
+    const stored = await this.persistFile(tenantId, file);
+    const material = await this.materials.save(
+      this.materials.create({
+        tenant_id: tenantId,
+        course_id: mod.course_id,
+        faculty_user_id: facultyUserId,
+        module_id: mod.module_id,
+        title: dto.title?.trim() || `${mod.title} — ${materialType}`,
+        file_path: stored.filePath,
+        file_key: stored.fileKey,
+        material_type: materialType,
+      }),
+    );
+
+    await this.notifyEnrolledStudents(tenantId, mod.course_id, course.course_name, material.title);
+
     return { module: mod, material };
   }
 
@@ -186,13 +252,6 @@ export class CourseLmsService {
     });
     if (!enrolled) throw new ForbiddenException('Not enrolled in this course');
 
-    const mod = material.module_id
-      ? await this.modules.findOne({ where: { module_id: material.module_id } })
-      : null;
-    if (mod && mod.status !== 'COMPLETED') {
-      throw new ForbiddenException('Module materials are available after the faculty marks the module complete');
-    }
-
     return material;
   }
 
@@ -251,6 +310,27 @@ export class CourseLmsService {
     });
     if (!mod) throw new NotFoundException('Module not found');
     return mod;
+  }
+
+  private async notifyEnrolledStudents(
+    tenantId: string,
+    courseId: string,
+    courseName: string,
+    materialTitle: string,
+  ) {
+    const enrolled = await this.enrollments.find({
+      where: { tenant_id: tenantId, course_id: courseId, status: 'ENROLLED' },
+      select: ['student_user_id'],
+    });
+    for (const row of enrolled) {
+      this.notificationEmitter.courseMaterialAdded({
+        tenantId,
+        userId: row.student_user_id,
+        courseId,
+        courseName,
+        materialTitle,
+      });
+    }
   }
 
   private async persistFile(tenantId: string, file: Express.Multer.File) {

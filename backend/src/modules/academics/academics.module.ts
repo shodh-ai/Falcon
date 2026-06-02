@@ -18,6 +18,7 @@ import { FeeDemand } from '../../entities/fee-demand.entity';
 import { StudentProfile } from '../../entities/student-profile.entity';
 import { StudentCertificate } from '../../entities/student-certificate.entity';
 import { ProctorInteraction } from '../../entities/proctor-interaction.entity';
+import { MentorshipMeeting } from '../../entities/mentorship-meeting.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
@@ -58,6 +59,7 @@ import { StorageModule } from '../../storage/storage.module';
       StudentProfile,
       StudentCertificate,
       ProctorInteraction,
+      MentorshipMeeting,
       StaffAttendance,
       StaffLeaveRequest,
       StaffGatePass,

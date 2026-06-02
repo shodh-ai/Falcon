@@ -123,7 +123,7 @@ export const studentPortal: PortalConfig = {
     {
       title: 'Support & Placements',
       items: [
-        { label: 'Mentorship (Proctor)', href: '/student/mentorship', icon: Handshake, keywords: ['proctor', 'mentor', 'meeting'] },
+        { label: 'Mentorship', href: '/student/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'meeting'] },
         { label: 'Placements & Internships', href: '/student/placements', icon: Briefcase, keywords: ['placement', 'jobs', 'internship'] },
         { label: 'Grievances & Helpdesk', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'discipline', 'grievance'] },
       ],
@@ -167,7 +167,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Students & Mentoring',
       items: [
-        { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['proctor', 'mentor', 'certificates'] },
+        { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
         { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
       ],
     },

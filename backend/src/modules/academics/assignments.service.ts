@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { mkdirSync, writeFileSync } from 'fs';
-import { extname } from 'path';
+import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { basename, extname, resolve } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { Repository } from 'typeorm';
 import { AcademicAssignment } from '../../entities/academic-assignment.entity';
@@ -9,6 +9,7 @@ import { AssignmentSubmission } from '../../entities/assignment-submission.entit
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { assertPdfUpload } from './lms-upload.config';
 
 @Injectable()
 export class AssignmentsService {
@@ -83,6 +84,43 @@ export class AssignmentsService {
     });
 
     return this.assignments.save(row);
+  }
+
+  async listAssignmentRoster(facultyUserId: string, tenantId: string, assignmentId: string) {
+    const assignment = await this.assignments.findOne({
+      where: { tenant_id: tenantId, assignment_id: assignmentId, faculty_user_id: facultyUserId },
+      relations: ['course'],
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+
+    const enrolled = await this.enrollments.find({
+      where: { tenant_id: tenantId, course_id: assignment.course_id, status: 'ENROLLED' },
+      relations: ['student'],
+      order: { student_user_id: 'ASC' },
+    });
+
+    const submissions = await this.submissions.find({
+      where: { tenant_id: tenantId, assignment_id: assignmentId },
+    });
+    const byStudent = new Map(submissions.map((s) => [s.student_user_id, s]));
+
+    return {
+      assignment,
+      roster: enrolled.map((row) => {
+        const sub = byStudent.get(row.student_user_id);
+        return {
+          student_user_id: row.student_user_id,
+          student_name: row.student?.name ?? 'Student',
+          student_email: row.student?.email ?? null,
+          submitted: Boolean(sub),
+          submission_id: sub?.submission_id ?? null,
+          submitted_at: sub?.submitted_at ?? null,
+          marks_awarded: sub?.marks_awarded ?? null,
+          faculty_remarks: sub?.faculty_remarks ?? null,
+          status: sub?.marks_awarded ? 'GRADED' : sub ? 'SUBMITTED' : 'NOT_SUBMITTED',
+        };
+      }),
+    };
   }
 
   async listSubmissions(facultyUserId: string, tenantId: string, assignmentId: string) {
@@ -181,12 +219,16 @@ export class AssignmentsService {
     assignmentId: string,
     file?: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('PDF file is required');
-
     const assignment = await this.assignments.findOne({
       where: { tenant_id: tenantId, assignment_id: assignmentId },
     });
     if (!assignment) throw new NotFoundException('Assignment not found');
+
+    if (new Date() > new Date(assignment.due_date)) {
+      throw new ForbiddenException('The deadline for this assignment has passed.');
+    }
+
+    assertPdfUpload(file);
 
     const enrollment = await this.enrollments.findOne({
       where: {
@@ -197,11 +239,8 @@ export class AssignmentsService {
       },
     });
     if (!enrollment) throw new ForbiddenException('You are not enrolled in this course');
-    if (new Date(assignment.due_date).getTime() < Date.now()) {
-      throw new ForbiddenException('Assignment deadline has passed');
-    }
 
-    const stored = await this.persistAssignmentFile(tenantId, 'assignment-submissions', file);
+    const stored = await this.persistAssignmentFile(tenantId, 'assignment-submissions', file!);
     await this.submissions.upsert(
       {
         tenant_id: tenantId,
@@ -219,6 +258,40 @@ export class AssignmentsService {
     return this.submissions.findOne({
       where: { tenant_id: tenantId, assignment_id: assignmentId, student_user_id: studentUserId },
     });
+  }
+
+  async getSubmissionForFacultyDownload(
+    facultyUserId: string,
+    tenantId: string,
+    submissionId: string,
+  ) {
+    const submission = await this.submissions.findOne({
+      where: { tenant_id: tenantId, submission_id: submissionId },
+      relations: ['assignment'],
+    });
+    if (!submission) throw new NotFoundException('Submission not found');
+    if (submission.assignment.faculty_user_id !== facultyUserId) {
+      throw new ForbiddenException('You can download only your assignment submissions');
+    }
+    return submission;
+  }
+
+  async streamSubmissionFile(submission: AssignmentSubmission) {
+    if (submission.file_key && this.objectStorage.isEnabled()) {
+      const stream = await this.objectStorage.getDownloadStream(submission.file_key);
+      return { stream, filename: `${submission.submission_id}.pdf`, mimeType: 'application/pdf' };
+    }
+    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+    const filePath = submission.file_path.startsWith('/')
+      ? submission.file_path
+      : resolve(process.cwd(), submission.file_path);
+    const resolved = filePath.includes(uploadRoot) ? filePath : resolve(uploadRoot, submission.file_path);
+    if (!existsSync(resolved)) throw new NotFoundException('File not found on server');
+    return {
+      stream: createReadStream(resolved),
+      filename: basename(resolved),
+      mimeType: 'application/pdf',
+    };
   }
 
   private async assertFacultyTeachesCourse(courseId: string, facultyUserId: string, tenantId: string) {

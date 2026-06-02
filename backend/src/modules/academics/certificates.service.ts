@@ -249,7 +249,7 @@ export class CertificatesService {
   private async assertProctorCanAccess(studentUserId: string, proctorUserId: string) {
     const canAccess = await this.isAssignedProctor(studentUserId, proctorUserId);
     if (!canAccess) {
-      throw new ForbiddenException('Only the assigned proctor can verify this certificate');
+      throw new ForbiddenException('Only the assigned mentor can verify this certificate');
     }
   }
 

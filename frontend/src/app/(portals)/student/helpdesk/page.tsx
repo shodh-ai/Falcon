@@ -83,7 +83,7 @@ export default function StudentHelpdeskPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
       <StudentPageHeader
         title="Grievances & Helpdesk"
-        description="Raise IT or maintenance grievances. Discipline records are read-only official notices from Proctor/Warden."
+        description="Raise IT or maintenance grievances. Discipline records are read-only official notices from Mentor/Warden."
       />
 
       {discipline.length > 0 && (

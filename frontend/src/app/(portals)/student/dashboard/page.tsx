@@ -100,7 +100,7 @@ export default function StudentDashboardPage() {
         <p className="text-sm font-medium text-sgvu-gold">Good afternoon</p>
         <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">Hi, {firstName}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your academic health at a glance: performance, credits, attendance, and proctor touchpoints.
+          Your academic health at a glance: performance, credits, attendance, and mentor touchpoints.
         </p>
       </section>
 
