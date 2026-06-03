@@ -286,11 +286,14 @@ export class StudentPortalService {
   }
 
   async getExamDesk(tenantId: string, userId: string) {
+    const examLabel = `COALESCE(sub.subject_name, sub.subject_code, es.exam_type::text, 'Exam')`;
+
     const ufm = await this.dataSource.query(
       `SELECT c.case_id, c.description, c.penalty_applied, c.status, c.logged_at,
-              es.exam_name, es.exam_date
+              ${examLabel} AS exam_name, es.exam_date
        FROM ufm_cases c
        LEFT JOIN exam_schedules es ON es.exam_schedule_id = c.exam_id
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
        WHERE c.student_user_id = $1 AND c.tenant_id = $2
        ORDER BY c.logged_at DESC`,
       [userId, tenantId],
@@ -302,15 +305,17 @@ export class StudentPortalService {
        WHERE student_user_id = $1 AND tenant_id = $2 AND incident_type = 'UFM'
        ORDER BY date_logged DESC`,
       [userId, tenantId],
-    );
+    ).catch(() => []);
 
     const seating = await this.dataSource.query(
-      `SELECT sp.seating_plan_id, sp.room, sp.seating_map, es.exam_name, es.exam_date, es.start_time
+      `SELECT sp.seating_plan_id, sp.room, sp.seating_map,
+              ${examLabel} AS exam_name, es.exam_date, es.start_time
        FROM exam_seating_plans sp
        JOIN exam_schedules es ON es.exam_schedule_id = sp.exam_schedule_id
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
        WHERE sp.tenant_id = $1 AND sp.published = true`,
       [tenantId],
-    );
+    ).catch(() => []);
 
     const mySeats = seating
       .map((plan: { seating_map: unknown[]; exam_name: string; exam_date: string; room: string }) => {

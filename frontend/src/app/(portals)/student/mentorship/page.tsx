@@ -128,15 +128,15 @@ export default function StudentMentorshipPage() {
   }
 
   async function sendMessage() {
-    if (!message.trim() || !mentor) return;
+    const text = message.trim();
+    if (!text || !mentor) return;
+    if (text.length < 3) {
+      toast.error('Please enter at least a few characters for your message');
+      return;
+    }
     setSendingMessage(true);
     try {
-      await api.post('/api/helpdesk/tickets', {
-        category: 'MENTORSHIP',
-        subject: 'Message from mentee via Mentorship Portal',
-        description: message.trim(),
-        assigned_to_user_id: mentor.proctor.user_id,
-      });
+      await api.post('/api/academics/proctor/messages', { message: text });
       setMessage('');
       toast.success('Message sent to your mentor');
     } catch (error) {

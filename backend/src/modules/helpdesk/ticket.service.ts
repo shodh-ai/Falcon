@@ -9,7 +9,10 @@ import {
   type ITicketProvider,
 } from './providers/ticket-provider.interface';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
-import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import {
+  WorkflowRoutingService,
+  type RoutedApprover,
+} from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { User } from '../../entities/user.entity';
 
@@ -30,16 +33,21 @@ export class TicketService {
     const student = await this.users.findOne({ where: { user_id: studentUserId } });
     const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
 
-    const assignee = await this.workflowRouting.getHelpdeskAssignee(
-      studentUserId,
-      tenantId,
-      dto.category,
-    );
+    const assignee: RoutedApprover = dto.assigned_to_user_id
+      ? {
+          userId: dto.assigned_to_user_id,
+          name: 'Mentor',
+          email: '',
+          routeReason: 'MENTORSHIP_DIRECT',
+        }
+      : await this.workflowRouting.getHelpdeskAssignee(studentUserId, tenantId, dto.category);
+
+    const { assigned_to_user_id: _omit, ...ticketFields } = dto;
 
     const ticket = await this.tickets.save(
       this.tickets.create({
         student_user_id: studentUserId,
-        ...dto,
+        ...ticketFields,
         assigned_to_user_id: assignee.userId,
         status: 'PENDING',
       }),
