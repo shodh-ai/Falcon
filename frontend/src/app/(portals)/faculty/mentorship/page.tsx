@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
 import { PendingMeetingRequests, type PendingMeeting } from '@/components/mentorship/PendingMeetingRequests';
+import { PendingLeaveRequests, type PendingLeaveRequest } from '@/components/mentorship/PendingLeaveRequests';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
@@ -38,6 +39,7 @@ interface PendingCertificate {
 interface PendingApprovals {
   certificates: PendingCertificate[];
   meetings?: PendingMeeting[];
+  leave_requests?: PendingLeaveRequest[];
 }
 
 export default function FacultyMentorshipPage() {
@@ -46,6 +48,7 @@ export default function FacultyMentorshipPage() {
   const [students, setStudents] = useState<StudentInfo[]>([]);
   const [pendingCertificates, setPendingCertificates] = useState<PendingCertificate[]>([]);
   const [pendingMeetings, setPendingMeetings] = useState<PendingMeeting[]>([]);
+  const [pendingLeaveRequests, setPendingLeaveRequests] = useState<PendingLeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
   function loadWorkspace() {
@@ -54,11 +57,13 @@ export default function FacultyMentorshipPage() {
       api.get<StudentInfo[]>('/api/academics/proctor/my-students'),
       api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
       api.get<PendingMeeting[]>('/api/academics/proctor/meetings/pending'),
+      api.get<PendingLeaveRequest[]>('/api/academics/proctor/leave-requests/pending'),
     ])
-      .then(([studentsData, approvals, meetings]) => {
+      .then(([studentsData, approvals, meetings, leaves]) => {
         setStudents(studentsData);
         setPendingCertificates(approvals.certificates);
         setPendingMeetings(meetings);
+        setPendingLeaveRequests(leaves.length ? leaves : approvals.leave_requests ?? []);
         setLoading(false);
       })
       .catch(err => {
@@ -120,6 +125,10 @@ export default function FacultyMentorshipPage() {
 
       {!loading && (
         <PendingMeetingRequests meetings={pendingMeetings} onUpdated={loadWorkspace} />
+      )}
+
+      {!loading && (
+        <PendingLeaveRequests requests={pendingLeaveRequests} onUpdated={loadWorkspace} />
       )}
 
       {!loading && (

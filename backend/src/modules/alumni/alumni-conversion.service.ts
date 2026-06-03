@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -27,7 +28,7 @@ export class AlumniConversionService {
 
     try {
       await this.queue.add('convert', job, {
-        jobId: `conv:${job.tenantId}:${job.studentUserId}:${Date.now()}`,
+        jobId: `conv-${job.tenantId}-${job.studentUserId}-${Date.now()}`,
         removeOnComplete: true,
         attempts: 3,
       });
@@ -80,7 +81,13 @@ export class AlumniConversionService {
   async runConversion(job: AlumniConversionJob) {
     const users = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email, u.tenant_id,
-              sp.enrollment_no, sp.graduation_year, sp.program_name
+              sp.student_profile_id,
+              sp.enrollment_no,
+              CASE
+                WHEN sp.batch ~ '^[0-9]{4}$' THEN CAST(sp.batch AS INT)
+                ELSE NULL
+              END AS graduation_year,
+              NULL::varchar AS program_name
        FROM users u
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        WHERE u.user_id = $1 AND u.tenant_id = $2`,
@@ -93,7 +100,9 @@ export class AlumniConversionService {
     const status = job.autoVerify ? 'VERIFIED' : 'PENDING';
 
     const existing = await this.dataSource.query(
-      `SELECT alumni_id FROM alumni_profiles WHERE tenant_id = $1 AND student_user_id = $2`,
+      `SELECT COALESCE(p.alumni_id, p.alumni_profile_id) AS row_id
+       FROM alumni_profiles p
+       WHERE p.tenant_id = $1 AND p.student_user_id = $2`,
       [job.tenantId, job.studentUserId],
     );
 
@@ -105,9 +114,9 @@ export class AlumniConversionService {
              current_organization = COALESCE($5, current_organization),
              user_id = $2,
              profile_updated_at = NOW()
-         WHERE alumni_id = $1`,
+         WHERE COALESCE(alumni_id, alumni_profile_id) = $1`,
         [
-          existing[0].alumni_id,
+          existing[0].row_id,
           job.studentUserId,
           status,
           job.linkedinUrl ?? null,
@@ -115,15 +124,18 @@ export class AlumniConversionService {
         ],
       );
     } else {
+      const newAlumniId = randomUUID();
       try {
         await this.dataSource.query(
           `INSERT INTO alumni_profiles (
-             tenant_id, alumni_id, student_user_id, user_id, name, email,
-             enrollment_number, batch_year, graduation_year, program_name,
+             tenant_id, alumni_profile_id, alumni_id, student_profile_id, student_user_id, user_id,
+             name, email, enrollment_number, batch_year, graduation_year, program_name,
              current_organization, linkedin_url, verification_status, profile_updated_at
-           ) VALUES ($1, gen_random_uuid(), $2, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, NOW())`,
+           ) VALUES ($1, $2, $2, $3, $4, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, NOW())`,
           [
             job.tenantId,
+            newAlumniId,
+            user.student_profile_id ?? null,
             job.studentUserId,
             user.name,
             user.official_email,

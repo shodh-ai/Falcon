@@ -8,6 +8,8 @@ import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
 import { BookProctorMeetingDto } from './dto/book-proctor-meeting.dto';
 import { SendProctorMessageDto } from './dto/send-proctor-message.dto';
 import { RespondMentorshipMeetingDto } from './dto/respond-mentorship-meeting.dto';
+import { SubmitMentorLeaveRequestDto } from './dto/submit-mentor-leave-request.dto';
+import { RespondMentorLeaveRequestDto } from './dto/respond-mentor-leave-request.dto';
 
 type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
@@ -79,6 +81,43 @@ export class ProctorController {
     return this.proctor.sendMessage(req.user.user_id, dto.message);
   }
 
+  @Post('leave-requests')
+  @Roles('Student')
+  submitLeaveRequest(@Req() req: { user: AuthUser }, @Body() dto: SubmitMentorLeaveRequestDto) {
+    return this.proctor.submitLeaveRequest(
+      req.user.user_id,
+      dto.reason,
+      dto.start_date,
+      dto.end_date,
+    );
+  }
+
+  @Get('leave-requests/my')
+  @Roles('Student')
+  myLeaveRequests(@Req() req: { user: AuthUser }) {
+    return this.proctor.listStudentLeaveRequests(req.user.user_id);
+  }
+
+  @Get('leave-requests/pending')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  pendingLeaveRequests(@Req() req: { user: AuthUser }) {
+    return this.proctor.listPendingLeaveRequests(req.user.user_id);
+  }
+
+  @Post('leave-requests/:interactionId/respond')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  respondToLeaveRequest(
+    @Param('interactionId') interactionId: string,
+    @Req() req: { user: AuthUser },
+    @Body() dto: RespondMentorLeaveRequestDto,
+  ) {
+    return this.proctor.respondToLeaveRequest(
+      req.user.user_id,
+      interactionId,
+      dto.status,
+      dto.remarks,
+    );
+  }
 
   @Get('my-students')
   @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')

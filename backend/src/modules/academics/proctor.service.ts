@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { AcademicMentorship } from '../../entities/academic-mentorship.entity';
 import { StudentProfile } from '../../entities/student-profile.entity';
 import { ProctorInteraction } from '../../entities/proctor-interaction.entity';
@@ -225,6 +225,152 @@ export class ProctorService {
     };
   }
 
+  async submitLeaveRequest(
+    studentUserId: string,
+    reason: string,
+    startDate: string,
+    endDate: string,
+  ) {
+    const mentorship = await this.mentorships.findOne({ where: { student_user_id: studentUserId, is_active: true } });
+    if (!mentorship) throw new NotFoundException('No active mentor assigned');
+
+    const start = new Date(`${startDate}T00:00:00`);
+    const end = new Date(`${endDate}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new BadRequestException('Invalid start or end date');
+    }
+    if (end < start) {
+      throw new BadRequestException('End date cannot be before start date');
+    }
+
+    const trimmedReason = reason.trim();
+    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+
+    const row = await this.interactions.save(
+      this.interactions.create({
+        student_user_id: studentUserId,
+        proctor_user_id: mentorship.proctor_user_id,
+        interaction_type: 'LEAVE_REQUEST',
+        payload: {
+          reason: trimmedReason,
+          start_date: startDate,
+          end_date: endDate,
+        },
+        status: 'PENDING',
+      }),
+    );
+
+    if (student?.tenant_id) {
+      const range = `${start.toLocaleDateString('en-IN')} – ${end.toLocaleDateString('en-IN')}`;
+      this.notify.meetingRequested({
+        tenantId: student.tenant_id,
+        userId: mentorship.proctor_user_id,
+        studentName: student.name,
+        meetingAt: range,
+        title: 'Leave / permission request from mentee',
+        message: `${student.name} requested leave/permission (${range}). Reason: ${trimmedReason}`,
+        actionLink: '/faculty/mentorship',
+      });
+    }
+
+    return this.mapLeaveRequest(row, student?.name);
+  }
+
+  async listPendingLeaveRequests(proctorUserId: string) {
+    const rows = await this.interactions.find({
+      where: {
+        proctor_user_id: proctorUserId,
+        interaction_type: 'LEAVE_REQUEST',
+        status: 'PENDING',
+      },
+      order: { created_at: 'ASC' },
+    });
+    const studentIds = [...new Set(rows.map((r) => r.student_user_id))];
+    const students = studentIds.length
+      ? await this.users.find({ where: { user_id: In(studentIds) } })
+      : [];
+    const nameById = new Map(students.map((s) => [s.user_id, s.name]));
+    return rows.map((r) => this.mapLeaveRequest(r, nameById.get(r.student_user_id)));
+  }
+
+  async listStudentLeaveRequests(studentUserId: string) {
+    const rows = await this.interactions.find({
+      where: { student_user_id: studentUserId, interaction_type: 'LEAVE_REQUEST' },
+      order: { created_at: 'DESC' },
+      take: 10,
+    });
+    return rows.map((r) => this.mapLeaveRequest(r));
+  }
+
+  async respondToLeaveRequest(
+    proctorUserId: string,
+    interactionId: string,
+    status: 'APPROVED' | 'REJECTED',
+    remarks?: string,
+  ) {
+    const row = await this.interactions.findOne({ where: { interaction_id: interactionId } });
+    if (!row || row.interaction_type !== 'LEAVE_REQUEST') {
+      throw new NotFoundException('Leave request not found');
+    }
+    if (row.proctor_user_id !== proctorUserId) {
+      throw new ForbiddenException('This request is not assigned to you');
+    }
+    if (row.status !== 'PENDING') {
+      throw new BadRequestException('This leave request has already been processed');
+    }
+
+    const trimmedRemarks = remarks?.trim() ?? '';
+    if (status === 'REJECTED' && trimmedRemarks.length < 3) {
+      throw new BadRequestException('Please provide a short reason for declining');
+    }
+
+    row.status = status;
+    row.payload = {
+      ...(row.payload ?? {}),
+      mentor_remarks: trimmedRemarks || null,
+      responded_at: new Date().toISOString(),
+    };
+    const saved = await this.interactions.save(row);
+
+    const student = await this.users.findOne({ where: { user_id: row.student_user_id } });
+    const start = String(row.payload?.start_date ?? '');
+    const end = String(row.payload?.end_date ?? '');
+    const range = start && end ? `${start} – ${end}` : 'requested dates';
+
+    if (student?.tenant_id) {
+      this.notify.meetingResponded({
+        tenantId: student.tenant_id,
+        userId: row.student_user_id,
+        status,
+        meetingAt: range,
+        remarks: trimmedRemarks,
+        title: status === 'APPROVED' ? 'Leave request approved' : 'Leave request declined',
+        message: `Your mentor ${status === 'APPROVED' ? 'approved' : 'declined'} your leave/permission request for ${range}.${
+          trimmedRemarks ? ` Note: ${trimmedRemarks}` : ''
+        }`,
+        actionLink: '/student/mentorship',
+      });
+    }
+
+    return this.mapLeaveRequest(saved, student?.name);
+  }
+
+  private mapLeaveRequest(row: ProctorInteraction, studentName?: string) {
+    const payload = row.payload ?? {};
+    return {
+      interaction_id: row.interaction_id,
+      student_user_id: row.student_user_id,
+      student_name: studentName ?? null,
+      proctor_user_id: row.proctor_user_id,
+      reason: String(payload.reason ?? ''),
+      start_date: String(payload.start_date ?? ''),
+      end_date: String(payload.end_date ?? ''),
+      status: row.status,
+      mentor_remarks: payload.mentor_remarks ? String(payload.mentor_remarks) : null,
+      created_at: row.created_at,
+    };
+  }
+
   async sendMessage(studentUserId: string, message: string) {
     const mentorship = await this.mentorships.findOne({ where: { student_user_id: studentUserId, is_active: true } });
     if (!mentorship) throw new NotFoundException('No active mentor assigned');
@@ -264,7 +410,8 @@ export class ProctorService {
     });
     const studentIds = mentorships.map((m) => m.student_user_id);
     if (studentIds.length === 0) {
-      return { certificates: [], meetings: pendingMeetings };
+      const leaveRequests = await this.listPendingLeaveRequests(proctorUserId);
+      return { certificates: [], meetings: pendingMeetings, leave_requests: leaveRequests };
     }
 
     const certificates = await this.certificates
@@ -276,8 +423,11 @@ export class ProctorService {
       .orderBy('certificate.uploaded_at', 'DESC')
       .getMany();
 
+    const leaveRequests = await this.listPendingLeaveRequests(proctorUserId);
+
     return {
       meetings: pendingMeetings,
+      leave_requests: leaveRequests,
       certificates: certificates.map((certificate) => ({
         certificate_id: certificate.certificate_id,
         title: certificate.title,

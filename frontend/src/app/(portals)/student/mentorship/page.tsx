@@ -32,6 +32,20 @@ export default function StudentMentorshipPage() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [meetingLoading, setMeetingLoading] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<StudentMeeting[]>([]);
+  const [leaveReason, setLeaveReason] = useState('');
+  const [leaveStart, setLeaveStart] = useState('');
+  const [leaveEnd, setLeaveEnd] = useState('');
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+  const [leaveRequests, setLeaveRequests] = useState<
+    { interaction_id: string; reason: string; start_date: string; end_date: string; status: string }[]
+  >([]);
+
+  function loadLeaveRequests() {
+    void api
+      .get<typeof leaveRequests>('/api/academics/proctor/leave-requests/my')
+      .then(setLeaveRequests)
+      .catch(() => setLeaveRequests([]));
+  }
 
   function loadMeetings() {
     void api
@@ -46,6 +60,7 @@ export default function StudentMentorshipPage() {
         setMentor(data);
         setLoading(false);
         loadMeetings();
+        loadLeaveRequests();
       })
       .catch((err) => {
         toast.error(err.message || 'Failed to load mentor info');
@@ -76,6 +91,39 @@ export default function StudentMentorshipPage() {
       toast.error(error instanceof Error ? error.message : 'Unable to book meeting');
     } finally {
       setMeetingLoading(null);
+    }
+  }
+
+  async function sendLeaveRequest() {
+    const reason = leaveReason.trim();
+    if (!reason) {
+      toast.error('Please enter a reason for leave or permission');
+      return;
+    }
+    if (!leaveStart || !leaveEnd) {
+      toast.error('Please select start and end dates');
+      return;
+    }
+    if (leaveEnd < leaveStart) {
+      toast.error('End date cannot be before start date');
+      return;
+    }
+    setSubmittingLeave(true);
+    try {
+      await api.post('/api/academics/proctor/leave-requests', {
+        reason,
+        start_date: leaveStart,
+        end_date: leaveEnd,
+      });
+      setLeaveReason('');
+      setLeaveStart('');
+      setLeaveEnd('');
+      toast.success('Leave request sent to your mentor');
+      loadLeaveRequests();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to send leave request');
+    } finally {
+      setSubmittingLeave(false);
     }
   }
 
@@ -182,12 +230,52 @@ export default function StudentMentorshipPage() {
                 <CardTitle>Permissions / leave requests</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Input placeholder="Reason for leave / exemption" />
+                <Input
+                  placeholder="Reason for leave / exemption"
+                  value={leaveReason}
+                  onChange={(e) => setLeaveReason(e.target.value)}
+                />
                 <div className="grid grid-cols-2 gap-2">
-                  <Input type="date" />
-                  <Input type="date" />
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">From</label>
+                    <Input
+                      type="date"
+                      value={leaveStart}
+                      onChange={(e) => setLeaveStart(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">To</label>
+                    <Input
+                      type="date"
+                      value={leaveEnd}
+                      min={leaveStart || undefined}
+                      onChange={(e) => setLeaveEnd(e.target.value)}
+                    />
+                  </div>
                 </div>
-                <Button className="w-full">Send to mentor</Button>
+                <Button
+                  className="w-full"
+                  onClick={() => void sendLeaveRequest()}
+                  disabled={submittingLeave}
+                >
+                  {submittingLeave ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send to mentor'}
+                </Button>
+                {leaveRequests.length > 0 && (
+                  <ul className="space-y-2 border-t pt-3 text-sm">
+                    {leaveRequests.slice(0, 3).map((r) => (
+                      <li key={r.interaction_id} className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          {r.start_date} – {r.end_date}: {r.reason.slice(0, 40)}
+                          {r.reason.length > 40 ? '…' : ''}
+                        </span>
+                        <Badge variant={r.status === 'APPROVED' ? 'default' : r.status === 'REJECTED' ? 'destructive' : 'secondary'}>
+                          {r.status}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </CardContent>
             </Card>
 
