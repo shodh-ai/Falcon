@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -19,13 +19,32 @@ export class AlumniConversionService {
   ) {}
 
   async enqueueConversion(job: AlumniConversionJob) {
-    await this.queue.add('convert', job, {
-      jobId: `${job.tenantId}:${job.studentUserId}`,
-      removeOnComplete: true,
-      attempts: 3,
-    });
-    this.logger.log(`Queued alumni conversion for student ${job.studentUserId}`);
-    return { queued: true };
+    if (!job.tenantId?.trim()) {
+      throw new InternalServerErrorException(
+        'Tenant context missing on your session. Sign out and sign in again, then retry.',
+      );
+    }
+
+    try {
+      await this.queue.add('convert', job, {
+        jobId: `conv:${job.tenantId}:${job.studentUserId}:${Date.now()}`,
+        removeOnComplete: true,
+        attempts: 3,
+      });
+      this.logger.log(`Queued alumni conversion for student ${job.studentUserId}`);
+      return { queued: true };
+    } catch (err) {
+      this.logger.warn(
+        `Alumni queue unavailable for ${job.studentUserId}, running inline: ${err instanceof Error ? err.message : err}`,
+      );
+      const result = await this.runConversion(job);
+      if (result.skipped) {
+        throw new InternalServerErrorException(
+          `Alumni registration could not complete (${result.reason ?? 'unknown'}).`,
+        );
+      }
+      return { queued: false, ...result };
+    }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
@@ -96,25 +115,30 @@ export class AlumniConversionService {
         ],
       );
     } else {
-      await this.dataSource.query(
-        `INSERT INTO alumni_profiles (
-           tenant_id, alumni_id, student_user_id, user_id, name, email,
-           enrollment_number, batch_year, graduation_year, program_name,
-           current_organization, linkedin_url, verification_status, profile_updated_at
-         ) VALUES ($1, gen_random_uuid(), $2, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, NOW())`,
-        [
-          job.tenantId,
-          job.studentUserId,
-          user.name,
-          user.official_email,
-          user.enrollment_no,
-          batchYear,
-          user.program_name,
-          job.placementOrganization ?? null,
-          job.linkedinUrl ?? null,
-          status,
-        ],
-      );
+      try {
+        await this.dataSource.query(
+          `INSERT INTO alumni_profiles (
+             tenant_id, alumni_id, student_user_id, user_id, name, email,
+             enrollment_number, batch_year, graduation_year, program_name,
+             current_organization, linkedin_url, verification_status, profile_updated_at
+           ) VALUES ($1, gen_random_uuid(), $2, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, NOW())`,
+          [
+            job.tenantId,
+            job.studentUserId,
+            user.name,
+            user.official_email,
+            user.enrollment_no,
+            batchYear,
+            user.program_name,
+            job.placementOrganization ?? null,
+            job.linkedinUrl ?? null,
+            status,
+          ],
+        );
+      } catch (insertErr) {
+        this.logger.error(`alumni_profiles insert failed: ${insertErr}`);
+        throw insertErr;
+      }
     }
 
     await this.dataSource.query(
@@ -122,10 +146,14 @@ export class AlumniConversionService {
        WHERE tenant_id = $1 AND student_user_id = $2`,
       [job.tenantId, job.studentUserId],
     );
-    await this.dataSource.query(
-      `UPDATE student_profiles SET alumni_conversion_flag = true WHERE user_id = $1`,
-      [job.studentUserId],
-    );
+    try {
+      await this.dataSource.query(
+        `UPDATE student_profiles SET alumni_conversion_flag = true WHERE user_id = $1`,
+        [job.studentUserId],
+      );
+    } catch (flagErr) {
+      this.logger.warn(`alumni_conversion_flag update skipped: ${flagErr}`);
+    }
 
     if (job.autoVerify) {
       const role = await this.dataSource.query(

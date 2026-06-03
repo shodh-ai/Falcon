@@ -12,6 +12,18 @@ import { User } from './user.entity';
 
 export type HrDailyAttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'MISSED_PUNCH';
 
+export type CalculatedAttendanceStatus =
+  | 'FULL_DAY'
+  | 'HALF_DAY'
+  | 'LESS_THAN_HALF_DAY'
+  | 'ABSENT'
+  | 'WEEK_OFF'
+  | 'HOLIDAY'
+  | 'RESTRICTED_HOLIDAY'
+  | 'LATE_COMING'
+  | 'EARLY_GOING'
+  | 'PENDING_REQUEST';
+
 @Entity('hr_daily_attendance')
 @Index(['user_id', 'date'], { unique: true })
 export class HrDailyAttendance {
@@ -42,6 +54,9 @@ export class HrDailyAttendance {
 
   @Column({ type: 'boolean', default: false })
   is_regularized: boolean;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  calculated_status: CalculatedAttendanceStatus | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;

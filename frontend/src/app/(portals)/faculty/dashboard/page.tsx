@@ -43,7 +43,6 @@ export default function FacultyDashboardPage() {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovals>({ certificates: [] });
   const [gatePassApprovals, setGatePassApprovals] = useState<GatePassApproval[]>([]);
   const [loading, setLoading] = useState(true);
-  const [punching, setPunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,7 +53,7 @@ export default function FacultyDashboardPage() {
         setError(null);
         const [classData, hrData, approvalData, gatePassData] = await Promise.all([
           api.get<FacultyClass[]>('/api/academics/faculty/timetable/today'),
-          api.get<HrSummary>('/api/hr/attendance/my-summary'),
+          api.get<HrSummary>('/api/hr/workforce/today').catch(() => api.get<HrSummary>('/api/hr/attendance/my-summary')),
           api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
           api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals'),
         ]);
@@ -79,21 +78,6 @@ export default function FacultyDashboardPage() {
     };
   }, [api]);
 
-  async function webPunch() {
-    setPunching(true);
-    try {
-      const nextAction = hrSummary?.today?.check_in_at && !hrSummary.today.check_out_at ? 'OUT' : 'IN';
-      await api.post('/api/hr/attendance/web-punch', { action: nextAction });
-      setHrSummary(await api.get<HrSummary>('/api/hr/attendance/my-summary'));
-    } finally {
-      setPunching(false);
-    }
-  }
-
-  const punchLabel = hrSummary?.today?.check_in_at && !hrSummary.today.check_out_at
-    ? 'Web Punch-Out'
-    : 'Web Punch-In';
-
   const attendanceHref = (c: FacultyClass) => {
     return `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
   };
@@ -107,7 +91,7 @@ export default function FacultyDashboardPage() {
     <div className="mx-auto max-w-6xl space-y-6">
       <section>
         <h2 className="text-2xl font-bold text-sgvu-navy">Faculty Dashboard</h2>
-        <p className="text-sm text-muted-foreground">Command center for classes, HR punch, and mentorship approvals.</p>
+        <p className="text-sm text-muted-foreground">Command center for classes, biometric HR, and mentorship approvals.</p>
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
@@ -115,15 +99,17 @@ export default function FacultyDashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-sgvu-gold" />
-              Web Attendance
+              Today&apos;s attendance
             </CardTitle>
-            <CardDescription>Web punch for today</CardDescription>
+            <CardDescription>Biometric sync — read-only</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-3xl font-black text-sgvu-navy">{hrSummary?.week_hours ?? 0}h</p>
-            <p className="text-sm text-muted-foreground">Logged this week</p>
-            <Button className="h-14 w-full text-base" onClick={webPunch} disabled={punching}>
-              {punching ? <Loader2 className="h-4 w-4 animate-spin" /> : punchLabel}
+            <p className="text-sm font-medium text-sgvu-navy">
+              In: {(hrSummary as { display?: { in_time: string } })?.display?.in_time ?? '—'} | Out:{' '}
+              {(hrSummary as { display?: { out_time: string } })?.display?.out_time ?? '—'}
+            </p>
+            <Button className="h-12 w-full" variant="outline" asChild>
+              <Link href="/faculty/hr">Open HR hub · regularize</Link>
             </Button>
           </CardContent>
         </Card>

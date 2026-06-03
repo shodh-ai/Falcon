@@ -181,7 +181,8 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Administration',
       items: [
-        { label: 'HR & Employee Hub', href: '/faculty/leaves', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'punch'] },
+        { label: 'HR & Employee Hub', href: '/faculty/hr', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'od', 'regularization'] },
+        { label: 'Team requests', href: '/faculty/team-requests', icon: ClipboardCheck, keywords: ['approve', 'hod', 'pending on me'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
       ],
     },

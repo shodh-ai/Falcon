@@ -5,6 +5,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { HrService } from './hr.service';
 import { HrAdminService } from './hr-admin.service';
 import { HrWorkforceService } from './hr-workforce.service';
+import { AttendanceCalculationService } from './attendance-calculation.service';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { LeaveActionDto } from './dto/leave-action.dto';
@@ -21,6 +22,7 @@ export class HrController {
     private readonly hr: HrService,
     private readonly hrAdmin: HrAdminService,
     private readonly workforce: HrWorkforceService,
+    private readonly attendanceCalc: AttendanceCalculationService,
   ) {}
 
   @Post('leaves')
@@ -286,8 +288,17 @@ export class HrController {
   @Get('attendance/matrix')
   @Roles('HR', 'SuperAdmin')
   attendanceMatrix(@Req() req: { user: AuthUser }, @Query('month') month?: string) {
-    return this.hr.getAttendanceMatrix(
+    return this.attendanceCalc.getMatrixMonth(
       this.resolveTenantId(req.user),
+      month ?? new Date().toISOString().slice(0, 7),
+    );
+  }
+
+  @Get('attendance/calendar')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'SuperAdmin')
+  attendanceCalendar(@Req() req: { user: AuthUser }, @Query('month') month?: string) {
+    return this.attendanceCalc.getMonthCalendar(
+      req.user.user_id,
       month ?? new Date().toISOString().slice(0, 7),
     );
   }

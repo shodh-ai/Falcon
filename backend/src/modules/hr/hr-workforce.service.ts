@@ -11,9 +11,7 @@ import { User } from '../../entities/user.entity';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
-
-const SHIFT_START_HOUR = 10;
-const SHIFT_END_HOUR = 18;
+import { AttendanceCalculationService } from './attendance-calculation.service';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -39,37 +37,61 @@ export class HrWorkforceService {
     private readonly notify: NotificationEmitterService,
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
+    private readonly attendanceCalc: AttendanceCalculationService,
   ) {}
 
   async getTodayWidget(userId: string) {
     const today = new Date().toISOString().slice(0, 10);
-    const row = await this.dailyAttendance.findOne({ where: { user_id: userId, date: today } });
+    const calc = await this.attendanceCalc.calculateAndPersist(userId, today);
+    const shift = calc.shift;
+
+    const shiftStart = this.parseShiftClock(today, shift.start_time);
+    const shiftEnd = this.parseShiftClock(today, shift.end_time);
     const now = new Date();
-    const shiftStart = new Date(`${today}T${String(SHIFT_START_HOUR).padStart(2, '0')}:00:00`);
-    const shiftEnd = new Date(`${today}T${String(SHIFT_END_HOUR).padStart(2, '0')}:00:00`);
-    const spanMs = shiftEnd.getTime() - shiftStart.getTime();
+    const spanMs = Math.max(shiftEnd.getTime() - shiftStart.getTime(), 1);
     const elapsedMs = Math.min(Math.max(now.getTime() - shiftStart.getTime(), 0), spanMs);
-    const progressPercent = spanMs > 0 ? Math.round((elapsedMs / spanMs) * 100) : 0;
+    const progressPercent = Math.round((elapsedMs / spanMs) * 100);
 
     const formatTime = (d: Date | null | undefined) =>
       d ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--';
 
-    const hours = row?.total_hours ? Number(row.total_hours) : this.computeHours(row?.first_in_time, row?.last_out_time);
+    const hours = calc.total_hours ?? 0;
 
     return {
       date: today,
-      shift: { start: '10:00 AM', end: '06:00 PM', progress_percent: progressPercent },
-      first_in: row?.first_in_time ?? null,
-      last_out: row?.last_out_time ?? null,
-      display: {
-        in_time: formatTime(row?.first_in_time),
-        out_time: formatTime(row?.last_out_time),
-        hours_worked_today: hours > 0 ? this.formatHours(hours) : row?.first_in_time ? this.formatHours(hours) : '0:00',
+      shift: {
+        name: shift.shift_name,
+        start: this.formatTime12(shift.start_time),
+        end: this.formatTime12(shift.end_time),
+        progress_percent: progressPercent,
       },
-      status: row?.status ?? 'ABSENT',
-      is_regularized: row?.is_regularized ?? false,
+      first_in: calc.first_in_time,
+      last_out: calc.last_out_time,
+      display: {
+        in_time: formatTime(calc.first_in_time),
+        out_time: formatTime(calc.last_out_time),
+        hours_worked_today: hours > 0 ? this.formatHours(hours) : calc.first_in_time ? this.formatHours(hours) : '0:00',
+      },
+      calculated_status: calc.calculated_status,
+      status: calc.calculated_status,
+      tooltip: calc.tooltip,
+      is_regularized: false,
       read_only: true,
     };
+  }
+
+  private parseShiftClock(date: string, time: string) {
+    const [h, m] = time.split(':').map(Number);
+    const d = new Date(`${date}T00:00:00`);
+    d.setHours(h, m, 0, 0);
+    return d;
+  }
+
+  private formatTime12(time: string) {
+    const [h, m] = time.split(':').map(Number);
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   }
 
   listUpcomingHolidays(fromDate?: string) {
@@ -274,6 +296,7 @@ export class HrWorkforceService {
 
     for (const leg of legacyRows) {
       await this.upsertDailyFromPunches(leg.user_id, leg.work_date, leg.check_in_at, leg.check_out_at);
+      await this.attendanceCalc.calculateAndPersist(leg.user_id, leg.work_date);
     }
 
     this.logger.debug(`Biometric sync completed for ${legacyRows.length} legacy row(s) on ${today}`);
@@ -306,6 +329,8 @@ export class HrWorkforceService {
     }
     row.total_hours = this.computeHours(row.first_in_time, row.last_out_time).toFixed(2);
     await this.dailyAttendance.save(row);
+
+    await this.attendanceCalc.calculateAndPersist(userId, date);
 
     let leg = await this.legacyAttendance.findOne({ where: { user_id: userId, work_date: date } });
     if (!leg) {
@@ -353,6 +378,7 @@ export class HrWorkforceService {
     row.is_regularized = true;
     row.total_hours = this.computeHours(row.first_in_time, row.last_out_time).toFixed(2);
     await this.dailyAttendance.save(row);
+    await this.attendanceCalc.calculateAndPersist(userId, date);
   }
 
   private async markPresentForOd(userId: string, date: string) {
@@ -366,6 +392,7 @@ export class HrWorkforceService {
     if (!row.last_out_time) row.last_out_time = new Date(`${date}T17:30:00`);
     row.total_hours = this.computeHours(row.first_in_time, row.last_out_time).toFixed(2);
     await this.dailyAttendance.save(row);
+    await this.attendanceCalc.calculateAndPersist(userId, date);
   }
 
   private async creditCompOff(userId: string, days: number) {
