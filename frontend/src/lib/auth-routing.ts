@@ -60,15 +60,17 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/admin-ops/fleet';
   }
 
+  if (r === 'superadmin') {
+    return '/super-admin/dashboard';
+  }
+
   if (
     r === 'registrar' ||
-    r === 'superadmin' ||
-    r === 'placementcell' ||
-    r === 'transportofficer' ||
     r.includes('admission')
   ) {
-    return '/admin/dashboard';
+    return r.includes('admission') ? '/admissions-crm/pipeline' : '/admin/dashboard';
   }
+
   return '/dashboard';
 }
 
@@ -116,6 +118,7 @@ const portalRoles: Record<string, string[]> = {
   '/finance': ['accountant', 'superadmin'],
   '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
   '/library': ['librarian', 'superadmin'],
+  '/library-admin': ['librarian', 'superadmin'],
   '/president': ['president', 'superadmin'],
   '/parent': ['parent', 'superadmin'],
   '/exam-cell': ['examcell', 'superadmin'],
@@ -126,6 +129,8 @@ const portalRoles: Record<string, string[]> = {
   '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'parent'],
   '/reports': ['registrar', 'superadmin', 'president', 'accountant'],
   '/admin': ['superadmin', 'registrar'],
+  '/super-admin': ['superadmin'],
+  '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
 };
 
 export function canRoleAccessPath(

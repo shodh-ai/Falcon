@@ -18,12 +18,14 @@ import {
   type JobPostedPayload,
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
+  type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
   type TicketReplyPayload,
   type TimetableChangedPayload,
+  type TransportBusApproachingPayload,
   type WorkflowApprovalRequiredPayload,
 } from './notification.events';
 
@@ -287,6 +289,34 @@ export class NotificationEventsListener {
         payload.message ||
         `"${payload.bookTitle}" was due on ${payload.dueDate}. Please return it to avoid fines.`,
       actionLink: payload.actionLink ?? '/student/library',
+    });
+  }
+
+  @OnEvent(NotificationEvents.OPERATIONS_LIBRARY_RESERVATION_READY)
+  async onLibraryReservationReady(payload: LibraryReservationReadyPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'OPERATIONS',
+      title: payload.title || 'Reserved book ready',
+      message:
+        payload.message ||
+        `Your reserved book "${payload.bookTitle}" is ready for pickup at the circulation counter.`,
+      actionLink: payload.actionLink ?? '/student/library',
+    });
+  }
+
+  @OnEvent(NotificationEvents.OPERATIONS_TRANSPORT_BUS_APPROACHING)
+  async onTransportBusApproaching(payload: TransportBusApproachingPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'OPERATIONS',
+      title: payload.title || 'Bus approaching',
+      message:
+        payload.message ||
+        `🚌 Your bus is about ${payload.etaMinutes} minutes away from ${payload.stopName}!`,
+      actionLink: payload.actionLink ?? '/student/transport',
     });
   }
 

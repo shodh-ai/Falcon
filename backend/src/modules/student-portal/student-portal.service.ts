@@ -545,4 +545,85 @@ export class StudentPortalService {
 
     return { open_jobs: jobs, my_applications: applications };
   }
+
+  async getFinanceLedger(userId: string) {
+    const pending_demands = await this.dataSource.query(
+      `SELECT demand_id, fee_head, academic_year, semester, total_amount, paid_amount, due_date, status, fee_breakup
+       FROM finance_fee_demands
+       WHERE student_user_id = $1 AND status NOT IN ('PAID', 'WAIVED')
+       ORDER BY due_date ASC`,
+      [userId],
+    );
+
+    const payment_history = await this.dataSource.query(
+      `SELECT t.transaction_id, t.amount, t.status, t.payment_mode, t.receipt_url, t.created_at,
+              t.gateway_payment_id, t.demand_id, d.fee_head
+       FROM finance_transactions t
+       LEFT JOIN finance_fee_demands d ON d.demand_id = t.demand_id
+       WHERE t.student_user_id = $1 AND t.status = 'SUCCESS'
+       ORDER BY t.created_at DESC`,
+      [userId],
+    );
+
+    const total_outstanding = (pending_demands as Array<{ total_amount: string; paid_amount: string }>).reduce(
+      (sum, row) => sum + Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
+      0,
+    );
+
+    return { pending_demands, payment_history, total_outstanding };
+  }
+
+  async payDemandMock(userId: string, demandId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT * FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
+      [demandId, userId],
+    );
+    const demand = rows[0] as {
+      demand_id: string;
+      total_amount: string;
+      paid_amount: string;
+      status: string;
+    } | undefined;
+    if (!demand) {
+      throw new BadRequestException('Fee demand not found');
+    }
+    if (demand.status === 'PAID') {
+      return { already_paid: true, demand_id: demandId };
+    }
+
+    const outstanding = Math.max(0, Number(demand.total_amount) - Number(demand.paid_amount ?? 0));
+    if (outstanding <= 0) {
+      throw new BadRequestException('Nothing due on this demand');
+    }
+
+    const paymentId = `MOCK-${Date.now()}`;
+    const txnRows = await this.dataSource.query(
+      `INSERT INTO finance_transactions (
+         student_user_id, demand_id, gateway, gateway_payment_id, gateway_reference,
+         amount, status, payment_mode, receipt_url
+       ) VALUES ($1, $2, 'RAZORPAY', $3, $3, $4, 'SUCCESS', 'UPI', $5)
+       RETURNING *`,
+      [
+        userId,
+        demandId,
+        paymentId,
+        outstanding,
+        `/receipts/${paymentId}.pdf`,
+      ],
+    );
+
+    await this.dataSource.query(
+      `UPDATE finance_fee_demands
+       SET paid_amount = total_amount, status = 'PAID'
+       WHERE demand_id = $1`,
+      [demandId],
+    );
+
+    return {
+      success: true,
+      transaction: txnRows[0],
+      receipt_url: txnRows[0]?.receipt_url,
+      message: `Payment of ₹${outstanding} recorded successfully`,
+    };
+  }
 }

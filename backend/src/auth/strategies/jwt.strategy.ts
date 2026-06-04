@@ -50,7 +50,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const roleClaims = this.authService.getRoleClaims(user);
 
-    return {
+    const baseUser = {
       user_id: user.user_id,
       email: user.email,
       name: user.name,
@@ -63,5 +63,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       tenant_id: payload.tenantId,
       tenant_schema: payload.tenantSchema ?? 'public',
     };
+
+    if (payload.impersonator_user_id) {
+      return {
+        ...baseUser,
+        impersonator_user_id: payload.impersonator_user_id,
+        read_only_impersonation: payload.read_only_impersonation === true,
+        impersonation_session_id: payload.impersonation_session_id,
+      };
+    }
+
+    return baseUser;
   }
 }

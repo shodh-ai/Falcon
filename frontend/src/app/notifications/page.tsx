@@ -53,7 +53,10 @@ export default function NotificationsPage() {
       await notificationsApi.markRead(token, id).catch(() => undefined);
       await refresh();
     }
-    if (actionLink) router.push(actionLink);
+    if (actionLink) {
+      const path = actionLink.startsWith('/') ? actionLink : `/${actionLink}`;
+      router.push(path === '/student/fees' ? '/student/finance' : path);
+    }
   };
 
   return (

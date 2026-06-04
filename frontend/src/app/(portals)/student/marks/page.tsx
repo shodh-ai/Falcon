@@ -348,7 +348,7 @@ export default function StudentMarksPage() {
                       <Link href="/student/exams?intent=revaluation">Apply for Re-evaluation</Link>
                     </Button>
                     <Button size="sm" variant="default" asChild>
-                      <Link href="/student/fees?intent=arrear">Register for Arrear Exam</Link>
+                      <Link href="/student/finance?intent=arrear">Register for Arrear Exam</Link>
                     </Button>
                   </span>
                 </li>

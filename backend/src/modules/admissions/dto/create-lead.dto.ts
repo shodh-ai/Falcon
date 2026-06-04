@@ -24,6 +24,11 @@ export class CreateLeadDto {
   preferred_program_id?: number;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  stage?: string;
+
+  @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
 }

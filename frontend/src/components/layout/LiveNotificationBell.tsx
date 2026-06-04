@@ -28,7 +28,8 @@ export function LiveNotificationBell() {
       await Promise.all([refreshCount(), refreshList()]);
     }
     if (n.actionLink) {
-      router.push(n.actionLink);
+      const path = n.actionLink.startsWith('/') ? n.actionLink : `/${n.actionLink}`;
+      router.push(path === '/student/fees' ? '/student/finance' : path);
     }
   };
 

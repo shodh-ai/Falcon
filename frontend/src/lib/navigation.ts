@@ -114,6 +114,7 @@ export const studentPortal: PortalConfig = {
     {
       title: 'Campus Services',
       items: [
+        { label: 'My Financial Ledger', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
         { label: 'Hostel & Mess', href: '/student/hostel', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'room'] },
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
@@ -137,6 +138,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Attendance', href: '/student/attendance', icon: ClipboardCheck },
     { label: 'Marks', href: '/student/marks', icon: TrendingUp },
     { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
+    { label: 'Financial Ledger', href: '/student/finance', icon: Wallet },
     { label: 'Hostel', href: '/student/hostel', icon: Bus },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
@@ -174,6 +176,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Research & Duties',
       items: [
+        { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
         { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
       ],
@@ -199,6 +202,7 @@ export const facultyPortal: PortalConfig = {
     { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope },
     { label: 'Exam Invigilation', href: '/faculty/invigilation', icon: Eye },
     { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical },
+    { label: 'Library OPAC', href: '/faculty/library', icon: Library },
     { label: 'HR & Employee Hub', href: '/faculty/leaves', icon: CalendarDays },
     { label: 'Falcon Core Tasks', href: '/faculty/iqac', icon: ListChecks },
     { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart },
@@ -411,24 +415,28 @@ export const iqacPortal: PortalConfig = {
 };
 
 export const libraryPortal: PortalConfig = {
-  personaLabel: 'Library',
-  personaTitle: 'Catalog & Circulation',
+  personaLabel: 'Falcon Library',
+  personaTitle: 'Catalog & Circulation (Koha replacement)',
   homeHref: '/library/dashboard',
   navGroups: [
     {
-      title: 'Library',
+      title: 'Library Operations',
       items: [
-        { label: 'Catalog', href: '/library/catalog', icon: ClipboardList, keywords: ['search', 'add books'] },
-        { label: 'Circulation', href: '/library/circulation', icon: Users, keywords: ['issue', 'return'] },
-        { label: 'Overdue Fines', href: '/library/fines', icon: Banknote, keywords: ['finance sync'] },
+        { label: 'Library Dashboard', href: '/library/dashboard', icon: LayoutDashboard, keywords: ['metrics', 'issued', 'overdue'] },
+        { label: 'Circulation Desk', href: '/library/circulation', icon: Users, keywords: ['issue', 'return', 'scanner', 'barcode'] },
+        { label: 'Cataloging & Inventory', href: '/library/catalog', icon: ClipboardList, keywords: ['isbn', 'auto-fetch'] },
+        { label: 'Defaulters & Fines', href: '/library/fines', icon: Banknote, keywords: ['finance', 'overdue'] },
+        { label: 'NAAC Reports', href: '/library/reports', icon: FileText, keywords: ['utilization', 'export', 'naac'] },
+        { label: 'Gate Register', href: '/library/gate', icon: DoorOpen, keywords: ['walk-in', 'ipad'] },
       ],
     },
   ],
   commandItems: [
-    { label: 'Library Dashboard', href: '/library/dashboard', icon: LayoutDashboard },
-    { label: 'Catalog', href: '/library/catalog', icon: ClipboardList },
+    { label: 'Dashboard', href: '/library/dashboard', icon: LayoutDashboard },
     { label: 'Circulation', href: '/library/circulation', icon: Users },
-    { label: 'Overdue Fines', href: '/library/fines', icon: Banknote },
+    { label: 'Cataloging', href: '/library/catalog', icon: ClipboardList },
+    { label: 'Fines', href: '/library/fines', icon: Banknote },
+    { label: 'NAAC Reports', href: '/library/reports', icon: FileText },
   ],
 };
 
@@ -543,6 +551,7 @@ export const adminOpsPortal: PortalConfig = {
         { label: 'Dashboard', href: '/admin-ops/dashboard', icon: LayoutDashboard },
         { label: 'Inventory & Assets', href: '/admin-ops/assets', icon: Archive },
         { label: 'Fleet & Transport', href: '/admin-ops/fleet', icon: Bus },
+        { label: 'Transport Hub', href: '/admin-ops/transport', icon: BusFront },
         { label: 'Event Management', href: '/admin-ops/events', icon: Calendar },
         { label: 'Master Timetable', href: '/admin-ops/timetable', icon: CalendarClock },
       ],

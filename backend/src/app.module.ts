@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -36,6 +36,15 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SuperAdminModule } from './modules/super-admin/super-admin.module';
+import { LmsExtendedModule } from './modules/lms-extended/lms-extended.module';
+import { HostelTatkalModule } from './modules/hostel-tatkal/hostel-tatkal.module';
+import { CampusWalletModule } from './modules/campus-wallet/campus-wallet.module';
+import { TransportModule } from './modules/transport/transport.module';
+import { LibraryModule } from './modules/library/library.module';
+import { AuditModule } from './core/audit/audit.module';
+import { RedisModule } from './core/redis/redis.module';
+import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
 import { TenantModule } from './tenant/tenant.module';
 import { StorageModule } from './storage/storage.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -76,6 +85,8 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
       }),
       inject: [ConfigService],
     }),
+    AuditModule,
+    RedisModule,
     NotificationsModule,
     WorkflowModule,
     IdGeneratorModule,
@@ -108,10 +119,17 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
     HelpdeskModule,
     StudentPortalModule,
     ReportsModule,
+    SuperAdminModule,
+    LmsExtendedModule,
+    HostelTatkalModule,
+    CampusWalletModule,
+    TransportModule,
+    LibraryModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_GUARD, useClass: ImpersonationReadOnlyGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TenantSchemaInterceptor },
   ],

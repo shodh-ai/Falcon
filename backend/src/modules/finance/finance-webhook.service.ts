@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Transaction } from '../../entities/transaction.entity';
@@ -17,6 +18,7 @@ export class FinanceWebhookService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly receipts: FinanceReceiptService,
     private readonly ledger: FinanceLedgerService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -83,6 +85,14 @@ export class FinanceWebhookService {
         demand.status =
           paid >= Number(demand.total_amount) ? 'PAID' : paid > 0 ? 'PARTIALLY_PAID' : demand.status;
         await this.demands.save(demand);
+
+        if (demand.status === 'PAID') {
+          this.events.emit('finance.demand_paid', {
+            demandId: demand.demand_id,
+            feeHead: demand.fee_head,
+            studentUserId: demand.student_user_id,
+          });
+        }
       }
     }
 

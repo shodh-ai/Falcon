@@ -33,7 +33,7 @@ export default function ParentFeesPage() {
             <p className="text-muted-foreground">Due {f.due_date} · {f.status}</p>
             <p className="mt-1">Outstanding {formatInr(due)}</p>
             {due > 0 && (
-              <Button className="mt-2" size="sm" onClick={() => window.open('/student/fees', '_blank')}>
+              <Button className="mt-2" size="sm" onClick={() => window.open('/student/finance', '_blank')}>
                 Pay Now (Student Gateway)
               </Button>
             )}

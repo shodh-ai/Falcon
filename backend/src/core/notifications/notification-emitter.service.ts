@@ -9,12 +9,14 @@ import {
   type JobPostedPayload,
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
+  type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
   type TicketReplyPayload,
   type TimetableChangedPayload,
+  type TransportBusApproachingPayload,
   type WorkflowApprovalRequiredPayload,
 } from './notification.events';
 
@@ -73,6 +75,14 @@ export class NotificationEmitterService {
 
   libraryOverdue(payload: LibraryOverduePayload) {
     this.events.emit(NotificationEvents.OPERATIONS_LIBRARY_OVERDUE, payload);
+  }
+
+  reservationReady(payload: LibraryReservationReadyPayload) {
+    this.events.emit(NotificationEvents.OPERATIONS_LIBRARY_RESERVATION_READY, payload);
+  }
+
+  busApproaching(payload: TransportBusApproachingPayload) {
+    this.events.emit(NotificationEvents.OPERATIONS_TRANSPORT_BUS_APPROACHING, payload);
   }
 
   approvalRequired(payload: WorkflowApprovalRequiredPayload) {

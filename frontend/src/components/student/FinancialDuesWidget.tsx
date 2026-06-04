@@ -48,7 +48,7 @@ export function FinancialDuesWidget({ totalPending, dueDate, items }: FinancialD
       </CardContent>
       <CardFooter>
         <Button asChild className="w-full" variant="secondary" size="lg">
-          <Link href="/student/fees">Pay Now</Link>
+          <Link href="/student/finance">Pay Now</Link>
         </Button>
       </CardFooter>
     </Card>

@@ -9,6 +9,7 @@ import { Progress } from '@/components/ui/progress';
 import { CourseWorkspaceTabs } from '@/components/lms/CourseWorkspaceTabs';
 import { StudentMaterialsTab } from '@/components/lms/StudentMaterialsTab';
 import { StudentAssignmentsTab } from '@/components/lms/StudentAssignmentsTab';
+import { LmsExtendedTabs } from '@/components/lms/LmsExtendedTabs';
 import { useAuthedApi } from '@/lib/api';
 import type { StudentWorkspace } from '@/lib/api/lms';
 
@@ -66,13 +67,16 @@ export default function StudentCourseWorkspacePage() {
         tabs={[
           { id: 'materials', label: 'Course materials' },
           { id: 'assignments', label: 'Digital assignments (DA)' },
+          { id: 'live', label: 'Live & forum' },
         ]}
       />
 
       {tab === 'materials' ? (
         <StudentMaterialsTab modules={data.modules} />
-      ) : (
+      ) : tab === 'assignments' ? (
         <StudentAssignmentsTab assignments={data.assignments} onSubmitted={load} />
+      ) : (
+        <LmsExtendedTabs courseId={courseId!} mode="student" />
       )}
     </div>
   );

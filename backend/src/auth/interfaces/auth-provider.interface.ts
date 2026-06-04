@@ -12,7 +12,9 @@ export interface AuthTokenPayload {
   tenantId: string;
   tenantSchema: string;
   authType?: 'parent' | 'staff';
-  parentMobile?: string;
+  impersonator_user_id?: string;
+  read_only_impersonation?: boolean;
+  impersonation_session_id?: string;
 }
 
 export interface AuthenticatedUser {

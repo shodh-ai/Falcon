@@ -1,10 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.useWebSocketAdapter(new IoAdapter(app));
   app.use(cookieParser());
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
   const saasBase = process.env.SAAS_BASE_DOMAIN ?? 'localhost';

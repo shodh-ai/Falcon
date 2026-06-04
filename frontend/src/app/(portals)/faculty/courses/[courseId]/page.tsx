@@ -7,6 +7,7 @@ import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
 import { CourseWorkspaceTabs } from '@/components/lms/CourseWorkspaceTabs';
 import { FacultyMaterialsTab } from '@/components/lms/FacultyMaterialsTab';
 import { FacultyAssignmentsTab } from '@/components/lms/FacultyAssignmentsTab';
+import { LmsExtendedTabs } from '@/components/lms/LmsExtendedTabs';
 import { useAuthedApi } from '@/lib/api';
 import type { FacultyWorkspace } from '@/lib/api/lms';
 
@@ -53,13 +54,16 @@ export default function FacultyCourseWorkspacePage() {
         tabs={[
           { id: 'materials', label: 'Reference materials' },
           { id: 'assignments', label: 'Digital assignments (DA)' },
+          { id: 'live', label: 'Live & forum' },
         ]}
       />
 
       {tab === 'materials' ? (
         <FacultyMaterialsTab courseId={courseId!} workspace={workspace} onRefresh={load} />
-      ) : (
+      ) : tab === 'assignments' ? (
         <FacultyAssignmentsTab courseId={courseId!} />
+      ) : (
+        <LmsExtendedTabs courseId={courseId!} mode="faculty" />
       )}
     </div>
   );

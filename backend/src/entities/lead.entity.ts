@@ -2,7 +2,10 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 
 export type LeadStage =
   | 'INQUIRY'
+  | 'RAW_LEAD'
   | 'CONTACTED'
+  | 'APPLICATION_STARTED'
+  | 'FEE_PAID'
   | 'DOCUMENT_VERIFICATION'
   | 'APPLICATION_SUBMITTED'
   | 'OFFERED'
@@ -37,6 +40,12 @@ export class Lead {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, unknown> | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
+  @Column({ type: 'int', default: 0 })
+  lead_score: number;
 
   @CreateDateColumn()
   created_at: Date;

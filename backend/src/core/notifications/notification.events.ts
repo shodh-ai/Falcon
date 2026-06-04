@@ -12,6 +12,8 @@ export const NotificationEvents = {
   PLACEMENT_JOB_POSTED: 'placement.job_posted',
   HELPDESK_TICKET_REPLY: 'helpdesk.ticket_reply',
   OPERATIONS_LIBRARY_OVERDUE: 'operations.library_overdue',
+  OPERATIONS_LIBRARY_RESERVATION_READY: 'operations.library_reservation_ready',
+  OPERATIONS_TRANSPORT_BUS_APPROACHING: 'operations.transport_bus_approaching',
   WORKFLOW_APPROVAL_REQUIRED: 'workflow.approval_required',
 } as const;
 
@@ -88,6 +90,15 @@ export type TicketReplyPayload = BaseNotificationPayload & {
 export type LibraryOverduePayload = BaseNotificationPayload & {
   bookTitle: string;
   dueDate: string;
+};
+
+export type LibraryReservationReadyPayload = BaseNotificationPayload & {
+  bookTitle: string;
+};
+
+export type TransportBusApproachingPayload = BaseNotificationPayload & {
+  stopName: string;
+  etaMinutes: number;
 };
 
 export type WorkflowApprovalRequiredPayload = BaseNotificationPayload & {

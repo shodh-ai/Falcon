@@ -72,6 +72,19 @@ export class StudentPortalController {
     return this.portal.getTransport(this.tenant(req), req.user.user_id);
   }
 
+  @Get('finance')
+  finance(@Req() req: { user: AuthUser }) {
+    return this.portal.getFinanceLedger(req.user.user_id);
+  }
+
+  @Post('finance/pay')
+  payFee(
+    @Req() req: { user: AuthUser },
+    @Body() body: { demand_id: string },
+  ) {
+    return this.portal.payDemandMock(req.user.user_id, body.demand_id);
+  }
+
   @Get('placements')
   placements(@Req() req: { user: AuthUser }) {
     return this.portal.getPlacements(this.tenant(req), req.user.user_id);
