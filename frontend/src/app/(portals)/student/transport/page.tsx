@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
 import { toast } from 'sonner';
-import { Bus, MapPin, QrCode, Radio } from 'lucide-react';
+import { Bus, QrCode } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentTabBar } from '@/components/student/StudentTabBar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -213,32 +215,21 @@ export default function StudentTransportPage() {
   }, [busLocation, live, home]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Transport Hub"
         description="Find your route, pay zone-based fees, show your digital bus pass, and track your bus live."
       />
 
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ['find', 'Find Route', MapPin],
-            ['pass', 'My Pass', QrCode],
-            ['track', 'Track Bus', Radio],
-          ] as const
-        ).map(([id, label, Icon]) => (
-          <Button
-            key={id}
-            variant={tab === id ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTab(id)}
-            className={tab === id ? 'bg-sgvu-navy' : ''}
-          >
-            <Icon className="mr-1.5 h-4 w-4" />
-            {label}
-          </Button>
-        ))}
-      </div>
+      <StudentTabBar
+        tabs={[
+          { id: 'find' as Tab, label: 'Find Route' },
+          { id: 'pass' as Tab, label: 'My Pass' },
+          { id: 'track' as Tab, label: 'Track Bus' },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
       {tab === 'find' && (
         <>
@@ -395,6 +386,6 @@ export default function StudentTransportPage() {
           )}
         </>
       )}
-    </div>
+    </StudentPageShell>
   );
 }

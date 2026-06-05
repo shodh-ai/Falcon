@@ -6,6 +6,10 @@ import { Calendar, Loader2, Ticket } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { toast } from 'sonner';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentTabBar } from '@/components/student/StudentTabBar';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -83,35 +87,31 @@ export default function StudentEventsPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <StudentLoadingState label="Loading campus events…" />;
   }
 
   return (
-    <div className="space-y-6">
+    <StudentPageShell>
       <StudentPageHeader
         title="Falcon Events"
         description="Global campus calendar — LIVE events only, after the full approval chain."
       />
 
       {blockedDates.length > 0 ? (
-        <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">University blocked dates: </span>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900">
+          <span className="font-semibold">University blocked dates: </span>
           {blockedDates.map((b) => b.title).join(' · ')}
         </div>
       ) : null}
 
-      <div className="flex gap-2">
-        <Button variant={tab === 'discover' ? 'default' : 'outline'} onClick={() => setTab('discover')}>
-          Discover
-        </Button>
-        <Button variant={tab === 'tickets' ? 'default' : 'outline'} onClick={() => setTab('tickets')}>
-          My Tickets
-        </Button>
-      </div>
+      <StudentTabBar
+        tabs={[
+          { id: 'discover' as const, label: 'Discover', count: events.length },
+          { id: 'tickets' as const, label: 'My Tickets', count: tickets.length },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
       {tab === 'discover' ? (
         <div className="space-y-6">
@@ -175,7 +175,7 @@ export default function StudentEventsPage() {
             </div>
           ))}
           {events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No upcoming approved events yet.</p>
+            <StudentEmptyState icon={Calendar} title="No events yet" description="Approved campus events will appear here." />
           ) : null}
         </div>
       ) : (
@@ -215,10 +215,10 @@ export default function StudentEventsPage() {
             </Card>
           ))}
           {tickets.length === 0 && !freshTicket ? (
-            <p className="text-sm text-muted-foreground">No tickets yet — explore Discover to register.</p>
+            <StudentEmptyState icon={Ticket} title="No tickets yet" description="Explore Discover to register for events." />
           ) : null}
         </div>
       )}
-    </div>
+    </StudentPageShell>
   );
 }

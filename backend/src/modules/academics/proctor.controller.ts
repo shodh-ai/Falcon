@@ -3,6 +3,8 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ProctorService } from './proctor.service';
+import { MentorshipChatService } from './mentorship-chat.service';
+import { SendMentorshipChatDto } from './dto/send-mentorship-chat.dto';
 import { AssignMentorDto } from './dto/assign-mentor.dto';
 import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
 import { BookProctorMeetingDto } from './dto/book-proctor-meeting.dto';
@@ -16,7 +18,10 @@ type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 @Controller('api/academics/proctor')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProctorController {
-  constructor(private readonly proctor: ProctorService) {}
+  constructor(
+    private readonly proctor: ProctorService,
+    private readonly chat: MentorshipChatService,
+  ) {}
 
   @Post('mentorships')
   @Roles('SuperAdmin', 'Registrar', 'HOD', 'Dean')
@@ -75,26 +80,52 @@ export class ProctorController {
     );
   }
 
+  @Get('chat/mentees')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  chatMentees(@Req() req: { user: AuthUser }) {
+    return this.chat.listMenteesWithChatSummary(req.user.user_id);
+  }
+
+  @Get('chat/thread/:studentUserId')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  chatThread(@Param('studentUserId') studentUserId: string, @Req() req: { user: AuthUser }) {
+    return this.chat.getThread(req.user.user_id, studentUserId, true);
+  }
+
+  @Post('chat')
+  @Roles('Student', 'Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  sendChat(@Req() req: { user: AuthUser }, @Body() dto: SendMentorshipChatDto) {
+    if (dto.student_user_id) {
+      return this.chat.sendFacultyMessage(req.user.user_id, dto.student_user_id, dto.message);
+    }
+    return this.chat.sendStudentMessage(req.user.user_id, dto.message);
+  }
+
+  @Get('chat/my')
+  @Roles('Student')
+  myChatThread(@Req() req: { user: AuthUser }) {
+    return this.chat.getStudentThread(req.user.user_id);
+  }
+
+  /** @deprecated Use POST /chat — kept for backward compatibility */
   @Post('messages')
   @Roles('Student')
   sendMessage(@Req() req: { user: AuthUser }, @Body() dto: SendProctorMessageDto) {
-    return this.proctor.sendMessage(req.user.user_id, dto.message);
+    return this.chat.sendStudentMessage(req.user.user_id, dto.message);
   }
 
+  /** @deprecated Use GET /chat/my */
+  @Get('messages/my')
+  @Roles('Student')
+  myMessages(@Req() req: { user: AuthUser }) {
+    return this.chat.getStudentThread(req.user.user_id);
+  }
+
+  /** @deprecated Use GET /chat/mentees */
   @Get('messages/inbox')
   @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
   messageInbox(@Req() req: { user: AuthUser }) {
-    return this.proctor.listMessageInbox(req.user.user_id);
-  }
-
-  @Post('messages/:interactionId/reply')
-  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
-  replyToMessage(
-    @Param('interactionId') interactionId: string,
-    @Req() req: { user: AuthUser },
-    @Body() dto: { reply: string },
-  ) {
-    return this.proctor.replyToMessage(req.user.user_id, interactionId, dto.reply);
+    return this.chat.listMenteesWithChatSummary(req.user.user_id);
   }
 
   @Post('leave-requests')

@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Activity, Medal } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentStatCard } from '@/components/student/StudentStatCard';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 
@@ -20,46 +24,52 @@ export default function StudentExtracurricularsPage() {
   }, [api]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Extra-Curriculars (NCC / NSS / SODECA)"
         description="Centralized log of non-academic university credits — camps, ranks, and SODECA points."
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-3">
         {(data?.totals ?? []).map((t) => (
-          <Card key={t.activity_type}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{t.activity_type}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-black text-sgvu-navy">{t.credits}</p>
-              <p className="text-xs text-muted-foreground">credits logged</p>
-            </CardContent>
-          </Card>
+          <StudentStatCard
+            key={t.activity_type}
+            label={t.activity_type}
+            value={t.credits}
+            helper="Credits logged"
+            icon={Medal}
+            tone="gold"
+          />
         ))}
+        {!data?.totals?.length && (
+          <StudentStatCard label="Total credits" value={0} helper="No activities logged yet" icon={Medal} />
+        )}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Activity log</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {(data?.records ?? []).map((r, i) => (
-            <div key={i} className="rounded-lg border p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <Badge>{r.activity_type}</Badge>
-                <span className="text-muted-foreground">{r.event_date ? new Date(r.event_date).toLocaleDateString() : '—'}</span>
+      <StudentSectionCard title="Activity log" description="Chronological record of extracurricular participation" icon={Activity}>
+        {(data?.records ?? []).length === 0 ? (
+          <StudentEmptyState
+            icon={Activity}
+            title="No activities yet"
+            description="Faculty and admin will log NSS camps, NCC activities, and SODECA events here."
+          />
+        ) : (
+          <div className="space-y-3">
+            {(data?.records ?? []).map((r, i) => (
+              <div key={i} className="rounded-2xl border border-border/70 bg-white p-4 text-sm transition hover:border-sgvu-gold/40">
+                <div className="flex items-center justify-between gap-2">
+                  <Badge>{r.activity_type}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {r.event_date ? new Date(r.event_date).toLocaleDateString() : '—'}
+                  </span>
+                </div>
+                <p className="mt-2 font-medium text-sgvu-navy">{r.details}</p>
+                <p className="mt-1 text-xs font-semibold text-sgvu-gold">+{r.credits_awarded} credits</p>
               </div>
-              <p className="mt-2">{r.details}</p>
-              <p className="mt-1 text-xs text-sgvu-gold">+{r.credits_awarded} credits</p>
-            </div>
-          ))}
-          {!data?.records?.length && (
-            <p className="text-muted-foreground">No extracurricular records yet. Faculty/Admin will log NSS camps and NCC activities here.</p>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            ))}
+          </div>
+        )}
+      </StudentSectionCard>
+    </StudentPageShell>
   );
 }

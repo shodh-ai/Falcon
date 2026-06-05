@@ -28,7 +28,11 @@ export function LiveNotificationBell() {
       await Promise.all([refreshCount(), refreshList()]);
     }
     if (n.actionLink) {
-      const path = n.actionLink.startsWith('/') ? n.actionLink : `/${n.actionLink}`;
+      let path = n.actionLink.startsWith('/') ? n.actionLink : `/${n.actionLink}`;
+      const legacyHelpdesk = path.match(/^\/student\/helpdesk\/([^/?#]+)$/);
+      if (legacyHelpdesk) {
+        path = `/student/helpdesk?ticket=${encodeURIComponent(legacyHelpdesk[1])}`;
+      }
       router.push(path === '/student/fees' ? '/student/finance' : path);
     }
   };

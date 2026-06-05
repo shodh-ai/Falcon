@@ -31,6 +31,7 @@ import { HrDashboardService } from './hr-dashboard.service';
 import { HrReportsService } from './hr-reports.service';
 import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
 import { HrEntityScopeInterceptor } from '../../common/interceptors/hr-entity-scope.interceptor';
+import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { HrEntityScopeInterceptor } from '../../common/interceptors/hr-entity-sc
     HrReportsService,
     HrWorkflowRoutingService,
     HrEntityScopeInterceptor,
+    EntityScopeGuard,
   ],
   exports: [
     HrService,

@@ -262,7 +262,7 @@ export class NotificationEventsListener {
       category: 'HELPDESK',
       title: payload.title || 'Helpdesk Reply',
       message: payload.message || `Update on your ticket: ${payload.subject}`,
-      actionLink: payload.actionLink ?? `/student/helpdesk/${payload.ticketId}`,
+      actionLink: payload.actionLink ?? '/student/helpdesk',
     });
   }
 

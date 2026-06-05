@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentStatCard } from '@/components/student/StudentStatCard';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
@@ -137,28 +140,21 @@ export default function StudentMarksPage() {
     });
   }
 
+  if (loading && !data) {
+    return <StudentLoadingState label="Loading grade history…" />;
+  }
+
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Marks & Grade Cards"
         description="Semester-wise grade history, continuous assessment (CAT / DA), and backlog (ATKT) status — VTOP-style."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Cumulative performance</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-8">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">CGPA</p>
-            <p className="text-4xl font-black text-sgvu-navy">{loading ? '—' : data?.cgpa?.toFixed(2) ?? '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Credits earned</p>
-            <p className="text-4xl font-black text-sgvu-navy">{loading ? '—' : data?.total_credits_earned ?? '—'}</p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <StudentStatCard label="CGPA" value={data?.cgpa?.toFixed(2) ?? '—'} helper="Cumulative grade point average" tone="gold" />
+        <StudentStatCard label="Credits earned" value={data?.total_credits_earned ?? '—'} helper="Total credits completed" />
+      </div>
 
       <Card>
         <CardHeader>
@@ -367,6 +363,6 @@ export default function StudentMarksPage() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </StudentPageShell>
   );
 }

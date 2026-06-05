@@ -45,8 +45,8 @@ export class FacultyWorkspacesService {
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
     const students = await this.dataSource.query(
-      `SELECT u.user_id AS student_user_id, u.name, sp.profile_id,
-              COALESCE(sp.profile_id::text, u.user_id::text) AS roll_number
+      `SELECT u.user_id AS student_user_id, u.name, sp.student_profile_id,
+              COALESCE(sp.enrollment_no, u.user_id::text) AS roll_number
        FROM student_course_enrollments e
        INNER JOIN users u ON u.user_id = e.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id

@@ -53,11 +53,44 @@ END;
 ALTER TABLE helpdesk_tickets
   ALTER COLUMN status SET DEFAULT 'PENDING';
 
--- Ensure constraints exist (drop any old ones if names collide)
-ALTER TABLE helpdesk_tickets
-  DROP CONSTRAINT IF EXISTS chk_helpdesk_tickets_category;
-ALTER TABLE helpdesk_tickets
-  ADD CONSTRAINT chk_helpdesk_tickets_category CHECK (category IN ('FINANCE', 'ACADEMICS', 'IT', 'HOSTEL'));
+-- Ensure category constraint (idempotent; includes MENTORSHIP for mentorship portal tickets)
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'public.helpdesk_tickets'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) ILIKE '%category%'
+  LOOP
+    EXECUTE format('ALTER TABLE helpdesk_tickets DROP CONSTRAINT IF EXISTS %I', r.conname);
+  END LOOP;
+END $$;
+
+UPDATE helpdesk_tickets
+SET category = UPPER(TRIM(category))
+WHERE category IS NOT NULL;
+
+UPDATE helpdesk_tickets
+SET category = 'ACADEMICS'
+WHERE category NOT IN ('FINANCE', 'ACADEMICS', 'IT', 'HOSTEL', 'MENTORSHIP');
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.helpdesk_tickets'::regclass
+      AND conname = 'chk_helpdesk_tickets_category'
+      AND pg_get_constraintdef(oid) ILIKE '%MENTORSHIP%'
+  ) THEN
+    ALTER TABLE helpdesk_tickets
+      ADD CONSTRAINT chk_helpdesk_tickets_category
+      CHECK (category IN ('FINANCE', 'ACADEMICS', 'IT', 'HOSTEL', 'MENTORSHIP'));
+  END IF;
+END $$;
 
 ALTER TABLE helpdesk_tickets
   DROP CONSTRAINT IF EXISTS chk_helpdesk_tickets_status;

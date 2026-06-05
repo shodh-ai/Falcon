@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { EntityScopeContext } from '../../common/entity-scope/entity-scope.context';
 
 export type HrModuleKey =
   | 'onboarding'
@@ -35,9 +36,22 @@ export type AllowedEntity = { id: number; name: string; code: string };
 export class HrEntityContextService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  /** Strict entity filter — no OR NULL leakage across entities. */
-  entityFilterSql(alias: string, paramIndex: number): string {
+  /** Strict entity filter — uses request scope when entityId omitted. */
+  entityFilterSql(alias: string, paramIndex: number, entityId?: number): string {
+    const scoped = entityId ?? EntityScopeContext.getEntityId();
+    if (!scoped) {
+      throw new ForbiddenException('Entity scope is required for this query');
+    }
     return ` AND ${alias}.entity_id = $${paramIndex}`;
+  }
+
+  /** Resolved entity for the active request (interceptor / guard). */
+  getScopedEntityId(fallback?: number): number {
+    const scoped = EntityScopeContext.getEntityId() ?? fallback;
+    if (!scoped) {
+      throw new ForbiddenException('Entity scope is required');
+    }
+    return scoped;
   }
 
   async listEntities(tenantId: string) {
@@ -95,11 +109,16 @@ export class HrEntityContextService {
       [userId, entityId, tenantId],
     );
     if (!rows[0]) {
-      throw new ForbiddenException('You do not have access to this entity');
+      throw new ForbiddenException('You do not have access to this Organization Entity.');
     }
   }
 
   async resolveEntityId(tenantId: string, entityIdRaw?: string | number): Promise<number> {
+    const fromContext = EntityScopeContext.getEntityId();
+    if (fromContext && (entityIdRaw == null || entityIdRaw === '')) {
+      return fromContext;
+    }
+
     if (entityIdRaw != null && entityIdRaw !== '') {
       const entityId = Number(entityIdRaw);
       if (!Number.isFinite(entityId) || entityId <= 0) {
@@ -113,14 +132,11 @@ export class HrEntityContextService {
       return entityId;
     }
 
-    const rows = await this.dataSource.query(
-      `SELECT entity_id FROM org_entities
-       WHERE tenant_id = $1 AND is_active = true
-       ORDER BY entity_id ASC LIMIT 1`,
-      [tenantId],
+    if (fromContext) return fromContext;
+
+    throw new ForbiddenException(
+      'Organization entity required. Send x-entity-id header or entity_id query param.',
     );
-    if (!rows[0]) throw new NotFoundException('No org entities configured for tenant');
-    return Number(rows[0].entity_id);
   }
 
   async getPermissions(tenantId: string, userId: string): Promise<HrCapabilities | null> {

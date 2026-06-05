@@ -11,6 +11,9 @@ import { API_URL } from '@/lib/api/client';
 import { examsApi, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
 import { useAuthedApi } from '@/lib/api';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentTabBar } from '@/components/student/StudentTabBar';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 
 type TabKey = 'schedule' | 'admit' | 'reeval';
 
@@ -132,8 +135,12 @@ export default function StudentExamsPage() {
 
   const hasUfm = (examDesk?.ufm_cases?.length ?? 0) > 0;
 
+  if (loading && schedules.length === 0) {
+    return <StudentLoadingState label="Loading examination data…" />;
+  }
+
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+    <StudentPageShell>
       <StudentPageHeader
         title="Exam Desk"
         description="Admit card, seating plans, revaluation — blocked when dues or attendance fall below thresholds."
@@ -180,25 +187,11 @@ export default function StudentExamsPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {tabs.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-left text-sm transition ${
-                active ? 'border-ring bg-background' : 'border-border/70 bg-background/70 hover:border-ring'
-              }`}
-            >
-              <Icon className="h-4 w-4 text-sgvu-gold" />
-              <span className="font-medium text-sgvu-navy">{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <StudentTabBar
+        tabs={tabs.map((t) => ({ id: t.key, label: t.label }))}
+        active={tab}
+        onChange={setTab}
+      />
 
       {tab === 'schedule' ? (
         <Card>
@@ -351,6 +344,6 @@ export default function StudentExamsPage() {
           </CardContent>
         </Card>
       ) : null}
-    </div>
+    </StudentPageShell>
   );
 }

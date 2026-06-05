@@ -115,7 +115,7 @@ export class TicketService {
     ticket.conversation = conversation;
     const saved = await this.tickets.save(ticket);
 
-    if (isAdminActor && !isStudentOwner) {
+    if (isAdminActor && !isStudentOwner && ticket.category !== 'MENTORSHIP') {
       const student = await this.tickets.manager.query<Array<{ tenant_id: string }>>(
         `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
         [ticket.student_user_id],

@@ -18,4 +18,7 @@ export class AcademicCourse extends BaseTenantEntity {
 
   @Column({ type: 'boolean', default: false })
   is_elective: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  entity_id: number | null;
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Building2, CalendarRange, DoorOpen, Loader2, QrCode } from 'lucide-react';
+import { Building2, Loader2, QrCode } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,12 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentTabBar } from '@/components/student/StudentTabBar';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
+import { StudentInfoTile } from '@/components/student/StudentInfoTile';
 
 type Allocation = {
   hostel_block: string | null;
@@ -127,7 +133,7 @@ export default function StudentHostelPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Hostel & Mess"
         description="Gate passes, leave requests, and room details — synced live with your warden desk."
@@ -138,70 +144,37 @@ export default function StudentHostelPage() {
         }
       />
 
-      <Card className="border-sgvu-gold/20">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Building2 className="h-5 w-5 text-sgvu-gold" />
-            Current allocation
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm">
-          {loading && <p className="text-muted-foreground">Loading…</p>}
-          {!loading && !allocation && (
-            <p className="text-muted-foreground">
-              No active room yet.{' '}
-              <Link href="/student/hostel-booking" className="font-medium text-sgvu-navy underline">
-                Join the hostel sale
-              </Link>
-            </p>
-          )}
-          {allocation && (
-            <div className="grid gap-2 sm:grid-cols-2">
-              <p>
-                <span className="text-muted-foreground">Block</span>
-                <br />
-                <span className="font-semibold text-sgvu-navy">{allocation.hostel_block}</span>
-              </p>
-              <p>
-                <span className="text-muted-foreground">Room · Bed</span>
-                <br />
-                <span className="font-semibold">
-                  {allocation.room_number} · {allocation.bed_number ?? 'TBD'}
-                </span>
-              </p>
-              <p>
-                <span className="text-muted-foreground">Mess</span>
-                <br />
-                {allocation.mess_plan}
-              </p>
-              <p>
-                <span className="text-muted-foreground">Warden</span>
-                <br />
-                {allocation.warden?.name ?? '—'}
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <StudentSectionCard title="Current allocation" description="Your room, mess plan, and warden contact" icon={Building2} tone="gold">
+        {loading ? (
+          <StudentLoadingState label="Loading hostel data…" className="min-h-[12vh]" />
+        ) : !allocation ? (
+          <StudentEmptyState
+            title="No active room"
+            description="Join the hostel sale to get allocated."
+            action={
+              <Button asChild variant="outline" size="sm">
+                <Link href="/student/hostel-booking">Book a bed</Link>
+              </Button>
+            }
+          />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <StudentInfoTile label="Block" value={allocation.hostel_block} />
+            <StudentInfoTile label="Room · Bed" value={`${allocation.room_number} · ${allocation.bed_number ?? 'TBD'}`} />
+            <StudentInfoTile label="Mess plan" value={allocation.mess_plan} />
+            <StudentInfoTile label="Warden" value={allocation.warden?.name} />
+          </div>
+        )}
+      </StudentSectionCard>
 
-      <div className="flex gap-2 border-b">
-        <button
-          type="button"
-          className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'gate' ? 'border-sgvu-gold text-sgvu-navy' : 'border-transparent text-muted-foreground'}`}
-          onClick={() => setTab('gate')}
-        >
-          <DoorOpen className="mr-1 inline h-4 w-4" />
-          Gate pass
-        </button>
-        <button
-          type="button"
-          className={`border-b-2 px-4 py-2 text-sm font-medium ${tab === 'leave' ? 'border-sgvu-gold text-sgvu-navy' : 'border-transparent text-muted-foreground'}`}
-          onClick={() => setTab('leave')}
-        >
-          <CalendarRange className="mr-1 inline h-4 w-4" />
-          Leave
-        </button>
-      </div>
+      <StudentTabBar
+        tabs={[
+          { id: 'gate' as const, label: 'Gate pass' },
+          { id: 'leave' as const, label: 'Leave' },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
       {tab === 'gate' ? (
         <Card>
@@ -304,6 +277,6 @@ export default function StudentHostelPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </StudentPageShell>
   );
 }

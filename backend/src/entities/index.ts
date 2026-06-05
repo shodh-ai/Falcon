@@ -38,6 +38,7 @@ export { AcademicMentorship } from './academic-mentorship.entity';
 export { StudentProfile } from './student-profile.entity';
 export { StudentCertificate } from './student-certificate.entity';
 export { ProctorInteraction } from './proctor-interaction.entity';
+export { MentorshipChat } from './mentorship-chat.entity';
 export { MentorshipMeeting } from './mentorship-meeting.entity';
 
 export { FeeDemand } from './fee-demand.entity';

@@ -32,10 +32,57 @@ function valueAt(row: unknown, key: string): unknown {
   }, row);
 }
 
-function displayValue(value: unknown) {
+const ISO_DAY_LABELS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function formatCourseAllocations(value: unknown[]) {
+  const seen = new Set<string>();
+  return value
+    .filter((item) => {
+      if (!item || typeof item !== 'object') return false;
+      const row = item as Record<string, unknown>;
+      const key = String(row.course_id ?? row.course_code ?? row.timetable_id ?? '');
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((item) => {
+      const row = item as Record<string, unknown>;
+      const code = String(row.course_code ?? '').trim();
+      const name = String(row.course_name ?? '').trim();
+      const slots = value.filter(
+        (slot) =>
+          slot &&
+          typeof slot === 'object' &&
+          String((slot as Record<string, unknown>).course_id ?? '') === String(row.course_id ?? ''),
+      );
+      const schedule = slots
+        .map((slot) => {
+          const s = slot as Record<string, unknown>;
+          const day = Number(s.day_of_week);
+          const dayLabel = Number.isFinite(day) ? (ISO_DAY_LABELS[day] ?? `Day ${day}`) : '';
+          const start = String(s.start_time ?? '').slice(0, 5);
+          return dayLabel && start ? `${dayLabel} ${start}` : '';
+        })
+        .filter(Boolean)
+        .join(', ');
+      const label = code && name ? `${code} · ${name}` : code || name || 'Course';
+      return schedule ? `${label} (${schedule})` : label;
+    })
+    .join('; ');
+}
+
+function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toLocaleString();
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) return new Date(value).toLocaleDateString();
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '—';
+    if (value.every((item) => item && typeof item === 'object' && ('course_code' in item || 'course_name' in item))) {
+      return formatCourseAllocations(value);
+    }
+    return value.map((item) => displayValue(item)).join(', ');
+  }
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }
@@ -236,7 +283,10 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
                 {rows.slice(0, 25).map((row, index) => (
                   <tr key={index} className="border-b last:border-0">
                     {config.columns!.map((column) => (
-                      <td key={column.key} className="px-3 py-3 align-top">
+                      <td
+                        key={column.key}
+                        className={`px-3 py-3 align-top ${column.key === 'courses' ? 'max-w-md break-words text-xs leading-relaxed' : ''}`}
+                      >
                         {displayValue(valueAt(row, column.key))}
                       </td>
                     ))}

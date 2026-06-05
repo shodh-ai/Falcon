@@ -3,10 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { TimetableWidget } from '@/components/student/TimetableWidget';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentStatCard } from '@/components/student/StudentStatCard';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Bell, CalendarClock, CreditCard, GraduationCap, UserRoundCheck } from 'lucide-react';
+import { Bell, CalendarClock, CreditCard, GraduationCap, Sparkles, UserRoundCheck } from 'lucide-react';
 import type { TimetableSlot } from '@/lib/mock/student-dashboard';
 import { useAuthedApi } from '@/lib/api';
 
@@ -34,6 +37,13 @@ type TimetableResponse = {
   status: 'upcoming' | 'ongoing' | 'done';
 };
 
+function greeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
 export default function StudentDashboardPage() {
   const { user } = useAuth();
   const api = useAuthedApi();
@@ -51,25 +61,11 @@ export default function StudentDashboardPage() {
           api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
         ]);
 
-        if (metricsResult.status === 'fulfilled') {
-          setSummary(metricsResult.value);
-        } else {
-          console.error('Failed to load dashboard metrics', metricsResult.reason);
-        }
+        if (metricsResult.status === 'fulfilled') setSummary(metricsResult.value);
+        if (alertsResult.status === 'fulfilled') setAlerts(alertsResult.value);
+        else setAlerts([]);
 
-        if (alertsResult.status === 'fulfilled') {
-          setAlerts(alertsResult.value);
-        } else {
-          console.warn('Notifications unavailable', alertsResult.reason);
-          setAlerts([]);
-        }
-
-        const timetableRows =
-          timetableResult.status === 'fulfilled' ? timetableResult.value : [];
-        if (timetableResult.status === 'rejected') {
-          console.error('Failed to load timetable', timetableResult.reason);
-        }
-
+        const timetableRows = timetableResult.status === 'fulfilled' ? timetableResult.value : [];
         setTimetable(
           timetableRows.map((slot) => ({
             id: slot.timetable_id,
@@ -87,96 +83,106 @@ export default function StudentDashboardPage() {
     void loadDashboard();
   }, [api]);
 
-  const stats = [
-    { label: 'Overall CGPA', value: '8.42', helper: 'Up by 0.12 from last semester', icon: GraduationCap },
-    { label: 'Credits', value: `${summary?.credits_completed ?? 108} / ${summary?.credits_required ?? 160}`, helper: 'Graduation progress', icon: CreditCard },
-    { label: 'Attendance', value: `${summary?.attendance_percent ?? 84}%`, helper: 'Current semester', icon: UserRoundCheck },
-  ];
-  stats[0].value = `${summary?.cgpa ?? 8.2}`;
+  const unreadAlerts = alerts.filter((alert) => !alert.is_read);
+  const attendance = summary?.attendance_percent ?? 0;
+  const attendanceTone = attendance >= 75 ? 'success' : 'warning';
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <section>
-        <p className="text-sm font-medium text-sgvu-gold">Good afternoon</p>
-        <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">Hi, {firstName}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Your academic health at a glance: performance, credits, attendance, and mentor touchpoints.
-        </p>
+    <StudentPageShell>
+      <section className="overflow-hidden rounded-[2rem] border border-sgvu-navy/10 bg-gradient-to-br from-sgvu-navy via-sgvu-navy to-slate-900 p-6 text-white shadow-xl shadow-sgvu-navy/15 md:p-8">
+        <div className="relative">
+          <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-sgvu-gold/20 blur-3xl" />
+          <div className="relative">
+            <p className="flex items-center gap-2 text-sm font-medium text-sgvu-gold">
+              <Sparkles className="h-4 w-4" />
+              {greeting()}
+            </p>
+            <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">Hi, {firstName}</h2>
+            <p className="mt-2 max-w-2xl text-sm font-medium text-white/75">
+              Your academic health at a glance — performance, credits, attendance, and today&apos;s schedule.
+            </p>
+          </div>
+        </div>
       </section>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {stats.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Card key={item.label}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{item.label}</p>
-                  <Icon className="h-4 w-4 text-sgvu-gold" />
-                </div>
-                <p className="mt-2 text-2xl font-bold text-sgvu-navy">{item.value}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{item.helper}</p>
-              </CardContent>
-            </Card>
-          );
-        })}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <StudentStatCard
+          label="Overall CGPA"
+          value={(summary?.cgpa ?? 8.2).toFixed(2)}
+          helper="Cumulative grade point average"
+          icon={GraduationCap}
+          tone="gold"
+        />
+        <StudentStatCard
+          label="Credits"
+          value={`${summary?.credits_completed ?? 108} / ${summary?.credits_required ?? 160}`}
+          helper="Graduation progress"
+          icon={CreditCard}
+        />
+        <StudentStatCard
+          label="Attendance"
+          value={`${attendance}%`}
+          helper={attendance >= 75 ? 'Above minimum threshold' : 'Below 75% minimum'}
+          icon={UserRoundCheck}
+          tone={attendanceTone}
+        />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Bell className="h-4 w-4 text-sgvu-gold" />
-              Alerts & Notifications
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {alerts.length === 0 && (
-              <p className="text-sm text-muted-foreground">No unread alerts right now.</p>
-            )}
-            {alerts
-              .filter((alert) => !alert.is_read)
-              .map((alert) => (
-              <div key={alert.notification_id} className="flex items-center justify-between gap-2 rounded-lg border p-3">
-                <div>
-                  <p className="text-sm font-medium">{alert.title}</p>
-                  {alert.message && <p className="text-xs text-muted-foreground">{alert.message}</p>}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <StudentSectionCard
+          title="Alerts & Notifications"
+          description="Unread updates from academics, finance, and campus services"
+          icon={Bell}
+          className="lg:col-span-2"
+        >
+          {unreadAlerts.length === 0 ? (
+            <StudentEmptyState
+              icon={Bell}
+              title="All caught up"
+              description="No unread alerts right now. Check back later for updates."
+            />
+          ) : (
+            <div className="space-y-3">
+              {unreadAlerts.map((alert) => (
+                <div
+                  key={alert.notification_id}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-gold/40"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-sgvu-navy">{alert.title}</p>
+                    {alert.message ? <p className="mt-0.5 text-xs text-muted-foreground">{alert.message}</p> : null}
+                  </div>
+                  <Badge variant="warning" className="shrink-0">
+                    New
+                  </Badge>
                 </div>
-                <Badge variant="warning" className="shrink-0">
-                  new
-                </Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CalendarClock className="h-4 w-4 text-sgvu-gold" />
-              Attendance trend
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+              ))}
+            </div>
+          )}
+        </StudentSectionCard>
+
+        <StudentSectionCard title="Attendance trend" description="Current semester vs minimum required" icon={CalendarClock}>
+          <div className="space-y-4">
             <div>
-              <div className="mb-1 flex items-center justify-between text-sm">
-                <span>Present</span>
-                <span className="font-semibold">{summary?.attendance_percent ?? 0}%</span>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="font-medium">Present</span>
+                <span className="font-bold text-sgvu-navy">{attendance}%</span>
               </div>
-              <Progress value={summary?.attendance_percent ?? 0} />
+              <Progress value={attendance} className="h-2.5" />
             </div>
             <div>
-              <div className="mb-1 flex items-center justify-between text-sm">
-                <span>Minimum Required</span>
-                <span className="font-semibold">75%</span>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="font-medium">Minimum required</span>
+                <span className="font-bold text-sgvu-navy">75%</span>
               </div>
-              <Progress value={75} />
+              <Progress value={75} className="h-2.5" />
             </div>
-            <p className="text-xs text-muted-foreground">Subject-wise attendance is available in Academics.</p>
-          </CardContent>
-        </Card>
+            <p className="text-xs text-muted-foreground">Subject-wise breakdown is available under Attendance & Progression.</p>
+          </div>
+        </StudentSectionCard>
       </div>
 
       <TimetableWidget slots={timetable} />
-    </div>
+    </StudentPageShell>
   );
 }

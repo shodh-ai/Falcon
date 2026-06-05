@@ -409,6 +409,15 @@ export class ProctorService {
     );
   }
 
+  async listStudentMessages(studentUserId: string) {
+    const rows = await this.interactions.find({
+      where: { student_user_id: studentUserId, interaction_type: 'MESSAGE' },
+      order: { created_at: 'ASC' },
+      take: 50,
+    });
+    return rows.map((row) => this.mapMessageThread(row));
+  }
+
   async listMessageInbox(proctorUserId: string) {
     const rows = await this.interactions.find({
       where: { proctor_user_id: proctorUserId, interaction_type: 'MESSAGE' },
@@ -421,18 +430,25 @@ export class ProctorService {
     const nameById = new Map(students.map((s) => [s.user_id, s.name]));
 
     return rows.map((row) => {
-      const payload = row.payload ?? {};
+      const mapped = this.mapMessageThread(row);
       return {
-        interaction_id: row.interaction_id,
-        student_user_id: row.student_user_id,
+        ...mapped,
         student_name: nameById.get(row.student_user_id) ?? null,
-        message: String(payload.message ?? ''),
-        replies: Array.isArray(payload.replies) ? payload.replies : [],
-        helpdesk_ticket_id: payload.helpdesk_ticket_id ? String(payload.helpdesk_ticket_id) : null,
-        status: row.status,
-        created_at: row.created_at,
       };
     });
+  }
+
+  private mapMessageThread(row: ProctorInteraction) {
+    const payload = row.payload ?? {};
+    return {
+      interaction_id: row.interaction_id,
+      student_user_id: row.student_user_id,
+      message: String(payload.message ?? ''),
+      replies: Array.isArray(payload.replies) ? payload.replies : [],
+      helpdesk_ticket_id: payload.helpdesk_ticket_id ? String(payload.helpdesk_ticket_id) : null,
+      status: row.status,
+      created_at: row.created_at,
+    };
   }
 
   async replyToMessage(proctorUserId: string, interactionId: string, reply: string) {

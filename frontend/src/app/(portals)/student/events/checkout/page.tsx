@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Clock, Loader2 } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
@@ -101,15 +103,11 @@ export default function EventCheckoutPage() {
   }
 
   if (loading || !hold || !reg) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center p-6">
-        <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" />
-      </div>
-    );
+    return <StudentLoadingState label="Loading checkout session…" />;
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-6 p-4 md:p-6">
+    <StudentPageShell width="4xl" className="max-w-lg">
       <div
         className={`sticky top-0 z-10 -mx-4 border-b px-4 py-3 md:-mx-6 md:px-6 ${
           urgent ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50'
@@ -151,6 +149,6 @@ export default function EventCheckoutPage() {
       {checkout && (
         <RazorpayMockCheckout open order={checkout} onClose={() => setCheckout(null)} onSuccess={confirmPayment} />
       )}
-    </div>
+    </StudentPageShell>
   );
 }

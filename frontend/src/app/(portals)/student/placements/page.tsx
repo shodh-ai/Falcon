@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Briefcase, Building2 } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 
@@ -20,50 +23,54 @@ export default function StudentPlacementsPage() {
   }, [api]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Placements & Internships"
         description="Open campus drives and your application status. Apply via the placement cell when drives open."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">My applications</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {(data?.my_applications ?? []).map((a) => (
-            <div key={a.application_id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
-              <div>
-                <p className="font-medium">{a.job_title}</p>
-                <p className="text-muted-foreground">{a.company_name}</p>
+      <StudentSectionCard title="My applications" description="Track status of your submitted applications" icon={Briefcase}>
+        {(data?.my_applications ?? []).length === 0 ? (
+          <StudentEmptyState title="No applications yet" description="Apply to open positions below when campus drives are active." />
+        ) : (
+          <div className="space-y-3">
+            {(data?.my_applications ?? []).map((a) => (
+              <div
+                key={a.application_id}
+                className="flex items-center justify-between rounded-2xl border border-border/70 bg-white p-4 text-sm transition hover:border-sgvu-gold/40"
+              >
+                <div>
+                  <p className="font-semibold text-sgvu-navy">{a.job_title}</p>
+                  <p className="text-muted-foreground">{a.company_name}</p>
+                </div>
+                <Badge>{a.status}</Badge>
               </div>
-              <Badge>{a.status}</Badge>
-            </div>
-          ))}
-          {!data?.my_applications?.length && (
-            <p className="text-muted-foreground">No applications yet.</p>
-          )}
-        </CardContent>
-      </Card>
+            ))}
+          </div>
+        )}
+      </StudentSectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Open positions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {(data?.open_jobs ?? []).map((j) => (
-            <div key={j.jd_id} className="rounded-lg border p-3 text-sm">
-              <p className="font-medium">{j.job_title}</p>
-              <p className="text-muted-foreground">{j.company_name} · Min CGPA {j.min_cgpa}</p>
-              {j.application_deadline && (
-                <p className="text-xs text-muted-foreground">
-                  Deadline {new Date(j.application_deadline).toLocaleDateString()}
+      <StudentSectionCard title="Open positions" description="Active campus recruitment drives" icon={Building2}>
+        {(data?.open_jobs ?? []).length === 0 ? (
+          <StudentEmptyState title="No open drives" description="New placement opportunities will appear here when announced." />
+        ) : (
+          <div className="space-y-3">
+            {(data?.open_jobs ?? []).map((j) => (
+              <div key={j.jd_id} className="rounded-2xl border border-border/70 bg-white p-4 text-sm transition hover:border-sgvu-gold/40">
+                <p className="font-semibold text-sgvu-navy">{j.job_title}</p>
+                <p className="text-muted-foreground">
+                  {j.company_name} · Min CGPA {j.min_cgpa}
                 </p>
-              )}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+                {j.application_deadline && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Deadline {new Date(j.application_deadline).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </StudentSectionCard>
+    </StudentPageShell>
   );
 }

@@ -1,8 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { AlertTriangle, Headphones, MessageSquarePlus, Ticket } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +22,7 @@ const categories = [
   { label: 'Finance', value: 'FINANCE' },
 ] as const;
 
-type Ticket = {
+type TicketRow = {
   ticket_id: string;
   category: string;
   status: string;
@@ -34,15 +39,17 @@ type DisciplineRecord = {
 
 export default function StudentHelpdeskPage() {
   const api = useAuthedApi();
+  const searchParams = useSearchParams();
+  const highlightTicketId = searchParams.get('ticket');
   const [form, setForm] = useState({ category: 'IT', subject: '', description: '' });
-  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [discipline, setDiscipline] = useState<DisciplineRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   async function loadTickets() {
     try {
-      const data = await api.get<Ticket[]>('/api/helpdesk/tickets/my-tickets');
+      const data = await api.get<TicketRow[]>('/api/helpdesk/tickets/my-tickets');
       setTickets(data);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load tickets');
@@ -80,37 +87,33 @@ export default function StudentHelpdeskPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
+    <StudentPageShell>
       <StudentPageHeader
         title="Grievances & Helpdesk"
         description="Raise IT or maintenance grievances. Discipline records are read-only official notices from Mentor/Warden."
       />
 
       {discipline.length > 0 && (
-        <Card className="border-destructive/40 bg-destructive/5">
-          <CardHeader>
-            <CardTitle className="text-base text-destructive">Discipline records (read-only)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <StudentSectionCard title="Discipline records" description="Official notices — read only" icon={AlertTriangle} tone="danger">
+          <div className="space-y-3">
             {discipline.map((d) => (
-              <div key={d.record_id} className="rounded-lg border border-destructive/30 bg-background p-3 text-sm">
-                <p className="font-semibold">{d.incident_type} · {new Date(d.date_logged).toLocaleDateString()}</p>
+              <div key={d.record_id} className="rounded-2xl border border-destructive/30 bg-background p-4 text-sm">
+                <p className="font-semibold text-destructive">
+                  {d.incident_type} · {new Date(d.date_logged).toLocaleDateString()}
+                </p>
                 <p className="mt-1">{d.description}</p>
                 <p className="mt-1 text-muted-foreground">Action: {d.action_taken}</p>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </StudentSectionCard>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Raise New Ticket</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <StudentSectionCard title="Raise new ticket" description="Describe your issue clearly for faster resolution" icon={MessageSquarePlus} tone="gold">
+          <div className="space-y-3">
             <select
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={form.category}
               onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))}
             >
@@ -120,47 +123,51 @@ export default function StudentHelpdeskPage() {
                 </option>
               ))}
             </select>
-            <Input
-              placeholder="Short subject"
-              value={form.subject}
-              onChange={(event) => setForm((prev) => ({ ...prev, subject: event.target.value }))}
-            />
-            <Input
-              placeholder="Describe the issue"
+            <Input placeholder="Short subject" value={form.subject} onChange={(event) => setForm((prev) => ({ ...prev, subject: event.target.value }))} />
+            <textarea
+              className="min-h-24 w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm leading-6 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="Describe the issue in detail…"
               value={form.description}
               onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
             />
             <Button className="w-full" onClick={handleCreateTicket} disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Ticket'}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </StudentSectionCard>
 
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Ticket Tracking</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loading && <p className="text-sm text-muted-foreground">Loading tickets...</p>}
-            {tickets.map((ticket) => (
-              <div key={ticket.ticket_id} className="rounded-lg border p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-semibold">{ticket.ticket_id}</p>
-                  <Badge variant={ticket.status === 'RESOLVED' ? 'default' : ticket.status === 'IN_PROGRESS' ? 'secondary' : 'outline'}>
-                    {ticket.status}
-                  </Badge>
+        <StudentSectionCard
+          title="Ticket tracking"
+          description={`${tickets.length} ticket${tickets.length === 1 ? '' : 's'} on record`}
+          icon={Headphones}
+        >
+          {loading ? (
+            <StudentLoadingState label="Loading tickets…" className="min-h-[20vh]" />
+          ) : tickets.length === 0 ? (
+            <StudentEmptyState icon={Ticket} title="No tickets yet" description="Raise a ticket on the left when you need help." />
+          ) : (
+            <div className="space-y-3">
+              {tickets.map((ticket) => (
+                <div
+                  key={ticket.ticket_id}
+                  className={`rounded-2xl border p-4 transition hover:shadow-sm ${
+                    highlightTicketId === ticket.ticket_id ? 'border-sgvu-gold bg-sgvu-gold/10' : 'border-border/70 bg-white'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-mono text-xs text-muted-foreground">{ticket.ticket_id}</p>
+                    <Badge variant={ticket.status === 'RESOLVED' ? 'success' : ticket.status === 'IN_PROGRESS' ? 'secondary' : 'outline'}>
+                      {ticket.status}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 font-semibold text-sgvu-navy">{ticket.subject}</p>
+                  <p className="text-xs text-muted-foreground">{ticket.category}</p>
                 </div>
-                <p className="mt-1 text-sm">{ticket.subject}</p>
-                <p className="text-xs text-muted-foreground">{ticket.category}</p>
-                <Button variant="ghost" className="mt-2 h-auto p-0 text-sm text-sgvu-navy">
-                  Open chat with handler
-                </Button>
-              </div>
-            ))}
-            {!loading && tickets.length === 0 && <p className="text-sm text-muted-foreground">No tickets raised yet.</p>}
-          </CardContent>
-        </Card>
+              ))}
+            </div>
+          )}
+        </StudentSectionCard>
       </div>
-    </div>
+    </StudentPageShell>
   );
 }

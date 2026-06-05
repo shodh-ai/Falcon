@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, QrCode } from 'lucide-react';
 import { toast } from 'sonner';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentTabBar } from '@/components/student/StudentTabBar';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -123,38 +127,36 @@ export default function ClubManagementPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
+    return <StudentLoadingState label="Loading club management…" />;
   }
 
   if (clubs.length === 0) {
     return (
-      <div className="p-6">
+      <StudentPageShell>
         <StudentPageHeader title="Club Management" description="Coordinator access only." />
-        <p className="text-sm text-muted-foreground">You are not assigned as a club coordinator.</p>
-      </div>
+        <StudentEmptyState title="Access restricted" description="You are not assigned as a club coordinator." />
+      </StudentPageShell>
     );
   }
 
   const liveEvents = events.filter((e) => e.status === 'LIVE');
 
   return (
-    <div className="space-y-6">
+    <StudentPageShell>
       <StudentPageHeader
         title="Club Management"
         description="Propose ad-hoc events, track multi-tier approvals, and scan QR tickets on event day."
       />
 
-      <div className="flex flex-wrap gap-2">
-        {(['propose', 'events', 'scanner'] as const).map((t) => (
-          <Button key={t} variant={tab === t ? 'default' : 'outline'} onClick={() => setTab(t)}>
-            {t === 'propose' ? 'Propose' : t === 'events' ? 'My events' : 'Scanner'}
-          </Button>
-        ))}
-      </div>
+      <StudentTabBar
+        tabs={[
+          { id: 'propose' as const, label: 'Propose' },
+          { id: 'events' as const, label: 'My events', count: events.length },
+          { id: 'scanner' as const, label: 'Scanner', count: liveEvents.length },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
       {tab === 'propose' ? (
         <Card>
@@ -345,6 +347,6 @@ export default function ClubManagementPage() {
           </CardContent>
         </Card>
       ) : null}
-    </div>
+    </StudentPageShell>
   );
 }

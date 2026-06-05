@@ -19,6 +19,8 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
+import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
+import { SkipEntityScope } from '../../common/decorators/skip-entity-scope.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { HrPermission } from '../../common/decorators/hr-permission.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -46,7 +48,7 @@ import type { StaffLeaveStatus } from '../../entities/staff-leave-request.entity
 type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[]; dept_id?: number };
 
 @Controller(['hr', 'api/hr'])
-@UseGuards(JwtAuthGuard, RolesGuard, HrPermissionGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, HrPermissionGuard, EntityScopeGuard)
 export class HrController {
   constructor(
     private readonly hr: HrService,
@@ -299,6 +301,7 @@ export class HrController {
   }
 
   @Get('entities')
+  @SkipEntityScope()
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean')
   listEntities(@Req() req: { user: AuthUser }) {
     const roles = req.user.roles?.length ? req.user.roles : req.user.role ? [req.user.role] : [];
@@ -310,6 +313,7 @@ export class HrController {
   }
 
   @Get('admin/permissions')
+  @SkipEntityScope()
   @Roles('HRAdmin', 'SuperAdmin')
   permissionMatrix(
     @Req() req: { user: AuthUser },

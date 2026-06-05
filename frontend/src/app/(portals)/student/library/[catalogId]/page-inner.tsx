@@ -4,10 +4,13 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { toast } from 'sonner';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, BookOpen, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { useAuthedApi } from '@/lib/api';
 
 type CatalogDetail = {
@@ -43,68 +46,84 @@ export default function StudentLibraryBookPage({ catalogId }: { catalogId: strin
   }
 
   if (!book) {
-    return <p className="p-6 text-sm text-muted-foreground">Loading…</p>;
+    return <StudentLoadingState label="Loading book details…" />;
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
-      <Link href="/student/library" className="inline-flex items-center gap-1 text-sm text-sgvu-navy hover:underline">
+    <StudentPageShell width="5xl">
+      <Link
+        href="/student/library"
+        className="inline-flex items-center gap-1.5 rounded-xl border border-border/70 bg-white px-3 py-2 text-sm font-semibold text-sgvu-navy transition hover:border-sgvu-gold/50"
+      >
         <ArrowLeft className="h-4 w-4" /> Back to catalog
       </Link>
 
-      <div className="flex flex-col gap-6 sm:flex-row">
-        <div className="relative mx-auto h-56 w-40 shrink-0 overflow-hidden rounded-lg bg-muted shadow-md sm:mx-0">
-          {book.cover_image_url ? (
-            <Image src={book.cover_image_url} alt={book.title} fill className="object-cover" unoptimized />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No cover</div>
-          )}
-        </div>
-        <div className="flex-1 space-y-2">
-          <h1 className="text-2xl font-bold text-sgvu-navy">{book.title}</h1>
-          <p className="text-muted-foreground">{book.author}</p>
-          <p className="text-sm">ISBN {book.isbn} · {book.publisher} · {book.category}</p>
-          <div className="flex flex-wrap gap-2 pt-2">
-            <Badge variant={book.available_copies > 0 ? 'default' : 'destructive'}>
-              Total: {book.total_copies} | Available: {book.available_copies}
-            </Badge>
-            {book.primary_shelf && (
-              <Badge variant="outline">Shelf: {book.primary_shelf}</Badge>
+      <section className="overflow-hidden rounded-[1.75rem] border border-sgvu-navy/10 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm md:p-8">
+        <div className="flex flex-col gap-6 sm:flex-row">
+          <div className="relative mx-auto h-56 w-40 shrink-0 overflow-hidden rounded-2xl border border-border/60 bg-muted shadow-lg sm:mx-0">
+            {book.cover_image_url ? (
+              <Image src={book.cover_image_url} alt={book.title} fill className="object-cover" unoptimized />
+            ) : (
+              <div className="flex h-full flex-col justify-between bg-gradient-to-br from-sgvu-navy to-slate-800 p-4">
+                <BookOpen className="h-6 w-6 text-sgvu-gold" />
+                <p className="text-xs font-semibold text-white/90">{book.title}</p>
+              </div>
             )}
           </div>
-          {book.available_copies === 0 ? (
-            <Button className="mt-4 bg-sgvu-navy" onClick={() => void placeHold()}>
-              Place hold
-            </Button>
-          ) : (
-            <p className="mt-4 text-sm font-medium text-emerald-700">
-              Available now — visit the circulation desk with your ID to borrow.
+          <div className="flex-1 space-y-3">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-sgvu-gold">{book.category}</p>
+            <h1 className="text-2xl font-black text-sgvu-navy sm:text-3xl">{book.title}</h1>
+            <p className="text-muted-foreground">{book.author}</p>
+            <p className="text-sm">
+              ISBN {book.isbn} · {book.publisher}
             </p>
-          )}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Badge variant={book.available_copies > 0 ? 'success' : 'destructive'}>
+                {book.available_copies}/{book.total_copies} available
+              </Badge>
+              {book.primary_shelf && <Badge variant="outline">Shelf: {book.primary_shelf}</Badge>}
+            </div>
+            {book.available_copies === 0 ? (
+              <Button className="mt-2 bg-sgvu-navy" onClick={() => void placeHold()}>
+                Place hold
+              </Button>
+            ) : (
+              <p className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm font-medium text-emerald-800">
+                Available now — visit the circulation desk with your ID to borrow.
+              </p>
+            )}
+          </div>
         </div>
+      </section>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <StudentStatCard label="Total copies" value={book.total_copies} helper="In library catalog" icon={BookOpen} />
+        <StudentStatCard
+          label="Available now"
+          value={book.available_copies}
+          helper={book.available_copies > 0 ? 'Ready to borrow' : 'Place a hold to queue'}
+          tone={book.available_copies > 0 ? 'success' : 'warning'}
+          icon={MapPin}
+        />
       </div>
 
       {book.synopsis && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Synopsis</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm leading-relaxed text-muted-foreground">{book.synopsis}</CardContent>
-        </Card>
+        <StudentSectionCard title="Synopsis" description="About this title" icon={BookOpen}>
+          <p className="text-sm leading-relaxed text-muted-foreground">{book.synopsis}</p>
+        </StudentSectionCard>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Copy locations</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1 text-sm">
+      <StudentSectionCard title="Copy locations" description="Accession numbers and shelf positions" icon={MapPin}>
+        <div className="space-y-2 text-sm">
           {book.copies.map((c) => (
-            <p key={c.accession_number}>
-              {c.accession_number} — {c.shelf_location} · <span className="font-medium">{c.status}</span>
-            </p>
+            <div key={c.accession_number} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-white px-3 py-2">
+              <span className="font-mono text-xs text-muted-foreground">{c.accession_number}</span>
+              <span>{c.shelf_location}</span>
+              <Badge variant="outline">{c.status}</Badge>
+            </div>
           ))}
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </StudentSectionCard>
+    </StudentPageShell>
   );
 }

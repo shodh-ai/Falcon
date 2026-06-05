@@ -36,6 +36,9 @@ export class User extends BaseTenantEntity {
   @Column({ nullable: true })
   dept_id: number;
 
+  @Column({ type: 'int', nullable: true })
+  entity_id: number | null;
+
   @Column({ type: 'uuid', nullable: true })
   reporting_officer_id: string | null;
 

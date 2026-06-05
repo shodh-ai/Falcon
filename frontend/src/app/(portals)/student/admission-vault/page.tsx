@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { FileCheck2, FileText, History, Receipt } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentInfoTile } from '@/components/student/StudentInfoTile';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 
@@ -25,81 +29,81 @@ export default function StudentAdmissionVaultPage() {
   }, [api]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Admission & Document Vault"
         description="Read-only timeline of how you joined SGVU — application, counseling, entrance exams, and verified documents."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Admission summary</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <p>Type: {String(data?.profile?.admission_type ?? data?.application?.admission_type ?? '—')}</p>
-          <p>Number: {String(data?.profile?.admission_number ?? data?.application?.application_no ?? '—')}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground">Migration certificate:</span>
-            <Badge variant="secondary">{String(data?.profile?.migration_certificate_status ?? 'PENDING')}</Badge>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StudentInfoTile label="Admission type" value={data?.profile?.admission_type ?? data?.application?.admission_type} icon={FileText} />
+        <StudentInfoTile label="Admission number" value={data?.profile?.admission_number ?? data?.application?.application_no} icon={FileCheck2} />
+        <StudentInfoTile label="Migration certificate" value={data?.profile?.migration_certificate_status ?? 'PENDING'} icon={Receipt} />
+      </div>
 
       {data?.timeline && data.timeline.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Timeline</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <StudentSectionCard title="Admission timeline" description="Key milestones from application to enrollment" icon={History}>
+          <div className="space-y-4">
             {data.timeline.map((item, i) => (
-              <div key={i} className="flex gap-3 border-l-2 border-sgvu-gold pl-3">
-                <p className="text-sm font-medium">{item.label}</p>
-                <p className="text-xs text-muted-foreground">{new Date(item.date).toLocaleDateString()}</p>
+              <div key={i} className="relative flex gap-4 border-l-2 border-sgvu-gold pl-5">
+                <div className="absolute -left-[5px] top-1.5 h-2 w-2 rounded-full bg-sgvu-gold" />
+                <div>
+                  <p className="text-sm font-semibold text-sgvu-navy">{item.label}</p>
+                  <p className="text-xs text-muted-foreground">{new Date(item.date).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
+                </div>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </StudentSectionCard>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Entrance & counseling</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4 text-sm">
-          {(data?.entrance_exams ?? []).map((exam, i) => (
-            <p key={i}>
-              {String(exam.exam_name)} — Score {String(exam.score ?? '—')} ({String(exam.result_status)})
-            </p>
-          ))}
-          {(data?.counseling_rounds ?? []).map((c, i) => (
-            <p key={i}>
-              Round {String(c.round_no)}: {String(c.allotted_program)} — {String(c.decision)}
-            </p>
-          ))}
-          {!data?.entrance_exams?.length && !data?.counseling_rounds?.length && (
-            <p className="text-muted-foreground">No entrance/counseling records linked yet.</p>
-          )}
-        </CardContent>
-      </Card>
+      <StudentSectionCard title="Entrance & counseling" description="Exam scores and allotment rounds" icon={FileCheck2}>
+        {(data?.entrance_exams ?? []).length === 0 && (data?.counseling_rounds ?? []).length === 0 ? (
+          <StudentEmptyState title="No entrance records" description="Entrance exam and counseling records will appear once linked." />
+        ) : (
+          <div className="space-y-3 text-sm">
+            {(data?.entrance_exams ?? []).map((exam, i) => (
+              <div key={i} className="rounded-2xl border border-border/70 bg-white p-3">
+                <p className="font-semibold text-sgvu-navy">{String(exam.exam_name)}</p>
+                <p className="text-muted-foreground">
+                  Score {String(exam.score ?? '—')} · {String(exam.result_status)}
+                </p>
+              </div>
+            ))}
+            {(data?.counseling_rounds ?? []).map((c, i) => (
+              <div key={i} className="rounded-2xl border border-border/70 bg-white p-3">
+                <p className="font-semibold text-sgvu-navy">Round {String(c.round_no)}</p>
+                <p className="text-muted-foreground">
+                  {String(c.allotted_program)} — {String(c.decision)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </StudentSectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Documents & receipts</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          {(data?.documents ?? []).map((doc) => (
-            <div key={String(doc.certificate_id)} className="flex flex-wrap items-center gap-2">
-              <span>{String(doc.title)}</span>
-              <Badge variant="outline">{String(doc.verification_status)}</Badge>
-            </div>
-          ))}
-          {(data?.admission_fee_receipts ?? []).map((r) => (
-            <p key={String(r.demand_id)}>
-              {String(r.fee_head)}: ₹{String(r.paid_amount)} / ₹{String(r.total_amount)} ({String(r.status)})
-            </p>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+      <StudentSectionCard title="Documents & receipts" description="Verified certificates and fee payment records" icon={Receipt}>
+        {(data?.documents ?? []).length === 0 && (data?.admission_fee_receipts ?? []).length === 0 ? (
+          <StudentEmptyState title="No documents on file" description="Uploaded admission documents will appear here." />
+        ) : (
+          <div className="space-y-3 text-sm">
+            {(data?.documents ?? []).map((doc) => (
+              <div key={String(doc.certificate_id)} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/70 bg-white p-3">
+                <span className="font-medium text-sgvu-navy">{String(doc.title)}</span>
+                <Badge variant="outline">{String(doc.verification_status)}</Badge>
+              </div>
+            ))}
+            {(data?.admission_fee_receipts ?? []).map((r) => (
+              <div key={String(r.demand_id)} className="rounded-2xl border border-border/70 bg-white p-3">
+                <p className="font-medium text-sgvu-navy">{String(r.fee_head)}</p>
+                <p className="text-muted-foreground">
+                  ₹{String(r.paid_amount)} / ₹{String(r.total_amount)} · {String(r.status)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </StudentSectionCard>
+    </StudentPageShell>
   );
 }

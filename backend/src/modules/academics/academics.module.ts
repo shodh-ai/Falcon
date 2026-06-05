@@ -18,6 +18,7 @@ import { FeeDemand } from '../../entities/fee-demand.entity';
 import { StudentProfile } from '../../entities/student-profile.entity';
 import { StudentCertificate } from '../../entities/student-certificate.entity';
 import { ProctorInteraction } from '../../entities/proctor-interaction.entity';
+import { MentorshipChat } from '../../entities/mentorship-chat.entity';
 import { MentorshipMeeting } from '../../entities/mentorship-meeting.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
@@ -28,6 +29,8 @@ import { AcademicsService } from './academics.service';
 import { AcademicsFacultyService } from './academics-faculty.service';
 import { ProctorController } from './proctor.controller';
 import { ProctorService } from './proctor.service';
+import { MentorshipChatService } from './mentorship-chat.service';
+import { MentorshipChatCleanupService } from './mentorship-chat-cleanup.service';
 import { CertificatesController } from './certificates.controller';
 import { CertificatesService } from './certificates.service';
 import { AssignmentsService } from './assignments.service';
@@ -61,6 +64,7 @@ import { HelpdeskModule } from '../helpdesk/helpdesk.module';
       StudentProfile,
       StudentCertificate,
       ProctorInteraction,
+      MentorshipChat,
       MentorshipMeeting,
       StaffAttendance,
       StaffLeaveRequest,
@@ -73,6 +77,8 @@ import { HelpdeskModule } from '../helpdesk/helpdesk.module';
     AcademicsService,
     AcademicsFacultyService,
     ProctorService,
+    MentorshipChatService,
+    MentorshipChatCleanupService,
     CertificatesService,
     AssignmentsService,
     FacultyWorkspacesService,

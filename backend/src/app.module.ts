@@ -54,6 +54,7 @@ import { SystemModule } from './system/system.module';
 import { TenantContextInterceptor } from './tenant/interceptors/tenant-context.interceptor';
 import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.interceptor';
 import { HrEntityScopeInterceptor } from './common/interceptors/hr-entity-scope.interceptor';
+import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscriber';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { HrEntityScopeInterceptor } from './common/interceptors/hr-entity-scope.
         password: configService.get('DB_PASSWORD', 'postgres'),
         database: configService.get('DB_DATABASE', 'university_governance'),
         entities: Object.values(entities).filter((e) => typeof e === 'function'),
+        subscribers: [EntityScopeSubscriber],
         synchronize: configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
         logging: configService.get('NODE_ENV') === 'development',
       }),

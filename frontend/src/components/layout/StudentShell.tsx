@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Users } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { studentPortal } from '@/lib/navigation';
-import { StudentFaqChat } from '@/components/student/StudentFaqChat';
 import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi } from '@/lib/api/api.campus-events';
 import type { PortalConfig } from '@/lib/navigation';
@@ -41,7 +40,6 @@ export function StudentShell({ children }: { children: ReactNode }) {
   return (
     <AppShell config={config} profileHref="/student/profile">
       {children}
-      <StudentFaqChat />
     </AppShell>
   );
 }

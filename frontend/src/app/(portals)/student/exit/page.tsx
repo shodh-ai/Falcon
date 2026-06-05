@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Award, GraduationCap, ShieldCheck, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -36,10 +39,7 @@ export default function StudentExitPage() {
 
   async function registerAlumni() {
     try {
-      await api.post('/api/alumni/register', {
-        linkedin_url: linkedin,
-        placement_organization: org,
-      });
+      await api.post('/api/alumni/register', { linkedin_url: linkedin, placement_organization: org });
       toast.success('Alumni portal registration submitted');
       load();
     } catch (e) {
@@ -47,61 +47,71 @@ export default function StudentExitPage() {
     }
   }
 
+  const progress = data?.progress_percent ?? 0;
+
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Exit & Alumni Transition"
         description="No-dues clearance, degree issuance status, and alumni portal registration for final-semester students."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">No-dues tracker</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Progress value={data?.progress_percent ?? 0} className="h-3" />
-          <p className="text-sm text-muted-foreground">{data?.progress_percent ?? 0}% departments cleared</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {(data?.no_dues ?? []).map((step) => (
-              <div key={step.key} className="flex items-center justify-between rounded-lg border p-3 text-sm">
-                <span>{step.label}</span>
-                <Badge variant={step.cleared ? 'default' : 'secondary'}>{step.cleared ? 'Cleared' : 'Pending'}</Badge>
-              </div>
-            ))}
+      <StudentStatCard
+        label="No-dues clearance"
+        value={`${progress}%`}
+        helper={`${(data?.no_dues ?? []).filter((s) => s.cleared).length} of ${data?.no_dues?.length ?? 0} departments cleared`}
+        icon={ShieldCheck}
+        tone={progress === 100 ? 'success' : 'warning'}
+      />
+
+      <StudentSectionCard title="Department clearance tracker" description="Each department must sign off before degree issuance" icon={ShieldCheck}>
+        <Progress value={progress} className="mb-4 h-3" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(data?.no_dues ?? []).map((step) => (
+            <div key={step.key} className="flex items-center justify-between rounded-2xl border border-border/70 bg-white p-4 text-sm">
+              <span className="font-medium text-sgvu-navy">{step.label}</span>
+              <Badge variant={step.cleared ? 'success' : 'warning'}>{step.cleared ? 'Cleared' : 'Pending'}</Badge>
+            </div>
+          ))}
+        </div>
+      </StudentSectionCard>
+
+      <StudentSectionCard title="Final result & degree" description="Award status and certificate availability" icon={Award}>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StudentStatCard label="Final result" value={data?.final_result ?? 'In progress'} helper="Academic outcome" />
+          <StudentStatCard label="Degree status" value={data?.degree_award_status ?? '—'} helper="Award processing" />
+          <StudentStatCard
+            label="Degree issued"
+            value={data?.degree_issued_date ? new Date(data.degree_issued_date).toLocaleDateString() : 'Not yet'}
+            helper="Official issuance date"
+          />
+        </div>
+        <Button variant="outline" size="sm" className="mt-4" disabled>
+          Download provisional certificate (when issued)
+        </Button>
+      </StudentSectionCard>
+
+      <StudentSectionCard
+        title="Alumni conversion"
+        description="Register for the alumni portal after graduation"
+        icon={GraduationCap}
+        tone={data?.alumni_converted ? 'success' : 'gold'}
+      >
+        {data?.alumni_converted ? (
+          <p className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm font-medium text-emerald-800">
+            You are registered for the Alumni Portal.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <Input placeholder="LinkedIn profile URL" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} />
+            <Input placeholder="Placement organization" value={org} onChange={(e) => setOrg(e.target.value)} />
+            <Button onClick={() => void registerAlumni()}>
+              <UserPlus className="h-4 w-4" />
+              Register for Alumni Portal
+            </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Final result & degree</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm space-y-1">
-          <p>Result: {data?.final_result ?? 'In progress'}</p>
-          <p>Degree status: {data?.degree_award_status ?? '—'}</p>
-          <p>Degree issued: {data?.degree_issued_date ? new Date(data.degree_issued_date).toLocaleDateString() : 'Not yet issued'}</p>
-          <Button variant="outline" size="sm" className="mt-2" disabled>
-            Download provisional certificate (when issued)
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Alumni conversion</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {data?.alumni_converted ? (
-            <p className="text-sm text-emerald-700">You are registered for the Alumni Portal.</p>
-          ) : (
-            <>
-              <Input placeholder="LinkedIn profile URL" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} />
-              <Input placeholder="Placement organization" value={org} onChange={(e) => setOrg(e.target.value)} />
-              <Button onClick={() => void registerAlumni()}>Register for Alumni Portal</Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        )}
+      </StudentSectionCard>
+    </StudentPageShell>
   );
 }

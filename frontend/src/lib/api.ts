@@ -24,6 +24,7 @@ async function request<T>(
   path: string,
   method: Method = 'GET',
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
   let response: Response;
   try {
@@ -33,6 +34,7 @@ async function request<T>(
         ...tenantHeaders(),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+        ...extraHeaders,
       },
       body: body ? (body instanceof FormData ? body : JSON.stringify(body)) : undefined,
     });
@@ -109,11 +111,16 @@ export function useAuthedApi() {
 
   return useMemo(
     () => ({
-      get: <T>(path: string) => request<T>(token, router, path, 'GET'),
-      post: <T>(path: string, body?: unknown) => request<T>(token, router, path, 'POST', body),
-      patch: <T>(path: string, body?: unknown) => request<T>(token, router, path, 'PATCH', body),
-      put: <T>(path: string, body?: unknown) => request<T>(token, router, path, 'PUT', body),
-      del: <T>(path: string) => request<T>(token, router, path, 'DELETE'),
+      get: <T>(path: string, headers?: Record<string, string>) =>
+        request<T>(token, router, path, 'GET', undefined, headers),
+      post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+        request<T>(token, router, path, 'POST', body, headers),
+      patch: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+        request<T>(token, router, path, 'PATCH', body, headers),
+      put: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+        request<T>(token, router, path, 'PUT', body, headers),
+      del: <T>(path: string, headers?: Record<string, string>) =>
+        request<T>(token, router, path, 'DELETE', undefined, headers),
     }),
     [token, router],
   );

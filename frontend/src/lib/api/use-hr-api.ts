@@ -6,16 +6,16 @@ import { useHrEntity } from '@/context/HrEntityContext';
 
 export function useHrApi() {
   const api = useAuthedApi();
-  const { withEntityQuery } = useHrEntity();
+  const { withEntityQuery, entityHeaders } = useHrEntity();
 
   return useMemo(
     () => ({
-      get: <T>(path: string) => api.get<T>(withEntityQuery(path)),
-      post: <T>(path: string, body?: unknown) => api.post<T>(withEntityQuery(path), body),
-      patch: <T>(path: string, body?: unknown) => api.patch<T>(withEntityQuery(path), body),
-      put: <T>(path: string, body?: unknown) => api.put<T>(withEntityQuery(path), body),
-      del: <T>(path: string) => api.del<T>(withEntityQuery(path)),
+      get: <T>(path: string) => api.get<T>(withEntityQuery(path), entityHeaders),
+      post: <T>(path: string, body?: unknown) => api.post<T>(withEntityQuery(path), body, entityHeaders),
+      patch: <T>(path: string, body?: unknown) => api.patch<T>(withEntityQuery(path), body, entityHeaders),
+      put: <T>(path: string, body?: unknown) => api.put<T>(withEntityQuery(path), body, entityHeaders),
+      del: <T>(path: string) => api.del<T>(withEntityQuery(path), entityHeaders),
     }),
-    [api, withEntityQuery],
+    [api, withEntityQuery, entityHeaders],
   );
 }

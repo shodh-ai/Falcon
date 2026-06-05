@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getSubdomainFromClient } from '@/lib/tenant';
-import { StudentInboxPanel } from '@/components/mentorship/StudentInboxPanel';
+import { MentorshipChatMessenger } from '@/components/mentorship/MentorshipChatMessenger';
 
 interface StudentInfo {
   mentorship_id: string;
@@ -122,7 +122,7 @@ export default function FacultyMentorshipPage() {
 
       {loading && <FalconLoader label="Loading mentorship roster…" />}
 
-      {!loading && <StudentInboxPanel />}
+      {!loading && <MentorshipChatMessenger />}
 
       {!loading && (
         <PendingMeetingRequests meetings={pendingMeetings} onUpdated={loadWorkspace} />

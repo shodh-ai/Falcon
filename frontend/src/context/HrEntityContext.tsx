@@ -17,6 +17,7 @@ type HrEntityContextValue = {
   entityVersion: number;
   setEntityId: (id: number) => void;
   withEntityQuery: (path: string) => string;
+  entityHeaders: Record<string, string>;
   loading: boolean;
   refreshEntities: () => Promise<void>;
 };
@@ -35,6 +36,20 @@ function mapAllowedEntities(
   }));
 }
 
+function mapApiEntities(rows: OrgEntity[]): OrgEntity[] {
+  return rows.map((e) => ({
+    entity_id: Number(e.entity_id),
+    entity_code: e.entity_code,
+    entity_name: e.entity_name,
+  }));
+}
+
+function intersectWithAllowed(list: OrgEntity[], allowed: OrgEntity[]): OrgEntity[] {
+  if (allowed.length === 0) return list;
+  const allowedIds = new Set(allowed.map((e) => e.entity_id));
+  return list.filter((e) => allowedIds.has(e.entity_id));
+}
+
 export function HrEntityProvider({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuth();
   const [entities, setEntities] = useState<OrgEntity[]>([]);
@@ -42,13 +57,22 @@ export function HrEntityProvider({ children }: { children: React.ReactNode }) {
   const [entityVersion, setEntityVersion] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const applyEntityList = useCallback((list: OrgEntity[]) => {
-    setEntities(list);
-    const stored = localStorage.getItem(STORAGE_KEY);
-    const storedId = stored ? Number(stored) : null;
-    const valid = list.find((e) => e.entity_id === storedId);
-    setEntityIdState(valid?.entity_id ?? list[0]?.entity_id ?? null);
-  }, []);
+  const authAllowed = useMemo(
+    () => mapAllowedEntities(user?.allowed_entities),
+    [user?.allowed_entities],
+  );
+
+  const applyEntityList = useCallback(
+    (list: OrgEntity[]) => {
+      const scoped = intersectWithAllowed(list, authAllowed);
+      setEntities(scoped);
+      const stored = localStorage.getItem(STORAGE_KEY);
+      const storedId = stored ? Number(stored) : null;
+      const valid = scoped.find((e) => e.entity_id === storedId);
+      setEntityIdState(valid?.entity_id ?? scoped[0]?.entity_id ?? null);
+    },
+    [authAllowed],
+  );
 
   const refreshEntities = useCallback(async () => {
     if (!token) return;
@@ -60,16 +84,16 @@ export function HrEntityProvider({ children }: { children: React.ReactNode }) {
         },
       });
       if (res.ok) {
-        applyEntityList((await res.json()) as OrgEntity[]);
+        applyEntityList(mapApiEntities((await res.json()) as OrgEntity[]));
         return;
       }
     } catch {
       /* fall through to auth payload */
     }
-    if (user?.allowed_entities?.length) {
-      applyEntityList(mapAllowedEntities(user.allowed_entities));
+    if (authAllowed.length) {
+      applyEntityList(authAllowed);
     }
-  }, [token, user?.allowed_entities, applyEntityList]);
+  }, [token, authAllowed, applyEntityList]);
 
   useEffect(() => {
     if (!token) {
@@ -77,17 +101,18 @@ export function HrEntityProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setLoading(true);
-    if (user?.allowed_entities?.length) {
-      applyEntityList(mapAllowedEntities(user.allowed_entities));
+    if (authAllowed.length) {
+      applyEntityList(authAllowed);
     }
     void refreshEntities().finally(() => setLoading(false));
-  }, [token, user?.allowed_entities, refreshEntities, applyEntityList]);
+  }, [token, authAllowed, refreshEntities, applyEntityList]);
 
   const setEntityId = useCallback((id: number) => {
+    if (!entities.some((e) => e.entity_id === id)) return;
     setEntityIdState(id);
     setEntityVersion((v) => v + 1);
     localStorage.setItem(STORAGE_KEY, String(id));
-  }, []);
+  }, [entities]);
 
   const withEntityQuery = useCallback(
     (path: string) => {
@@ -98,9 +123,22 @@ export function HrEntityProvider({ children }: { children: React.ReactNode }) {
     [entityId],
   );
 
+  const entityHeaders = useMemo((): Record<string, string> => {
+    return entityId ? { 'x-entity-id': String(entityId) } : {};
+  }, [entityId]);
+
   const value = useMemo(
-    () => ({ entities, entityId, entityVersion, setEntityId, withEntityQuery, loading, refreshEntities }),
-    [entities, entityId, entityVersion, setEntityId, withEntityQuery, loading, refreshEntities],
+    () => ({
+      entities,
+      entityId,
+      entityVersion,
+      setEntityId,
+      withEntityQuery,
+      entityHeaders,
+      loading,
+      refreshEntities,
+    }),
+    [entities, entityId, entityVersion, setEntityId, withEntityQuery, entityHeaders, loading, refreshEntities],
   );
 
   return <HrEntityContext.Provider value={value}>{children}</HrEntityContext.Provider>;

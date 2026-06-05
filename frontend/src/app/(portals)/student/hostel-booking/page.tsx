@@ -6,6 +6,7 @@ import { io, Socket } from 'socket.io-client';
 import { BedDouble, Building2, Layers, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
@@ -117,7 +118,7 @@ export default function StudentHostelBookingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Hostel Bed Booking"
         description="Pick hostel → floor → room → bed. You have a 3-minute checkout window once a bed is reserved."
@@ -140,7 +141,7 @@ export default function StudentHostelBookingPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1">
-            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-sgvu-navy" />}
             {catalog.map((h) => (
               <button
                 key={h.hostel_block}
@@ -225,6 +226,6 @@ export default function StudentHostelBookingPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </StudentPageShell>
   );
 }

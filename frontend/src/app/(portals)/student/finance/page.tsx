@@ -5,7 +5,11 @@ import Link from 'next/link';
 import { Download, IndianRupee, Lock, Unlock, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StudentPageShell } from '@/components/student/StudentPageShell';
+import { StudentSectionCard } from '@/components/student/StudentSectionCard';
+import { StudentStatCard } from '@/components/student/StudentStatCard';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
@@ -105,13 +109,13 @@ export default function StudentFinancePage() {
   const locked = ledger?.gates?.admit_card_locked ?? false;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
+    <StudentPageShell width="5xl">
       <StudentPageHeader
         title="My Financial Ledger"
         description="Pay hostel fines, tuition, and other demands via secure Razorpay checkout."
       />
 
-      <Card className={locked ? 'border-amber-300 bg-amber-50/60' : 'border-emerald-300 bg-emerald-50/40'}>
+      <Card className={locked ? 'border-amber-300 bg-amber-50/60 shadow-md' : 'border-emerald-300 bg-emerald-50/40 shadow-md'}>
         <CardContent className="flex flex-wrap items-center gap-4 pt-6">
           {locked ? (
             <Lock className="h-10 w-10 text-amber-700" />
@@ -138,24 +142,18 @@ export default function StudentFinancePage() {
       </Card>
 
       {ledger && ledger.total_outstanding > 0 && (
-        <Card className="border-sgvu-gold/30">
-          <CardContent className="flex items-center gap-3 pt-6">
-            <Wallet className="h-8 w-8 text-sgvu-gold" />
-            <div>
-              <p className="text-sm text-muted-foreground">Total outstanding</p>
-              <p className="text-3xl font-black text-sgvu-navy">{formatInr(ledger.total_outstanding)}</p>
-            </div>
-          </CardContent>
-        </Card>
+        <StudentStatCard
+          label="Total outstanding"
+          value={formatInr(ledger.total_outstanding)}
+          helper="Across all pending fee demands"
+          icon={Wallet}
+          tone="warning"
+        />
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Pending fee demands</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <StudentSectionCard title="Pending fee demands" description="Pay online to unlock admit card and no-dues" icon={IndianRupee} tone="gold">
           {(ledger?.pending_demands ?? []).length === 0 && (
-            <p className="text-sm text-muted-foreground">No pending fees — you&apos;re all clear.</p>
+            <StudentEmptyState title="All clear" description="No pending fees — you're up to date." />
           )}
           {(ledger?.pending_demands ?? []).map((d) => {
             const due = outstanding(d);
@@ -191,14 +189,10 @@ export default function StudentFinancePage() {
               </div>
             );
           })}
-        </CardContent>
-      </Card>
+      </StudentSectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Payment history</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
+      <StudentSectionCard title="Payment history" description="Past transactions and receipt downloads" icon={Download}>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase text-muted-foreground">
@@ -224,8 +218,8 @@ export default function StudentFinancePage() {
               ))}
             </tbody>
           </table>
-        </CardContent>
-      </Card>
+          </div>
+      </StudentSectionCard>
 
       {checkout && (
         <RazorpayMockCheckout
@@ -235,6 +229,6 @@ export default function StudentFinancePage() {
           onSuccess={confirmPayment}
         />
       )}
-    </div>
+    </StudentPageShell>
   );
 }

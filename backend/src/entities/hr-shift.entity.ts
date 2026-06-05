@@ -23,6 +23,9 @@ export class HrShift {
   @Column({ type: 'numeric', precision: 4, scale: 2, default: 8 })
   full_day_min_hours: number;
 
+  @Column({ type: 'int', nullable: true })
+  entity_id: number | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 }
