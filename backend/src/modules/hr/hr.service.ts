@@ -13,6 +13,8 @@ import { LeaveActionDto } from './dto/leave-action.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
+import { HrLeavePolicyService } from './hr-leave-policy.service';
+import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 
 /** HOD (reporting officer) first, then HR admin — no generic HR inbox on create. */
 const APPROVAL_FLOW: Partial<Record<LeaveRequestStatus, LeaveRequestStatus>> = {
@@ -35,6 +37,8 @@ export class HrService {
     private readonly notify: NotificationEmitterService,
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
+    private readonly leavePolicies: HrLeavePolicyService,
+    private readonly workflowBuilder: HrWorkflowBuilderService,
   ) {}
 
   async createLeaveRequest(dto: CreateLeaveRequestDto) {
@@ -228,7 +232,7 @@ export class HrService {
     };
   }
 
-  applyStaffLeave(
+  async applyStaffLeave(
     staffUserId: string,
     tenantId: string,
     dto: {
@@ -238,6 +242,13 @@ export class HrService {
       reason?: string;
     },
   ) {
+    const profile = await this.users.manager.query(
+      `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2`,
+      [staffUserId, tenantId],
+    );
+    const entityId = Number(profile[0]?.entity_id ?? 1);
+    await this.leavePolicies.validateLeaveApplication(tenantId, entityId, staffUserId, dto);
+
     const row = this.staffLeaveRequests.create({
       tenant_id: tenantId,
       staff_user_id: staffUserId,
@@ -430,7 +441,7 @@ export class HrService {
     return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long' });
   }
 
-  async getDashboardMetrics(tenantId: string) {
+  async getDashboardMetrics(tenantId: string, entityId: number) {
     const today = new Date().toISOString().slice(0, 10);
     const staffUsers = await this.users
       .createQueryBuilder('user')
@@ -438,6 +449,13 @@ export class HrService {
       .where('user.tenant_id = :tenantId', { tenantId })
       .andWhere('user.is_active = true')
       .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+      .andWhere(
+        `user.user_id IN (
+          SELECT p.user_id FROM hr_employee_profiles p
+          WHERE p.tenant_id = :tenantId AND p.entity_id = :entityId
+        )`,
+        { tenantId, entityId },
+      )
       .getMany();
 
     const staffIds = staffUsers.map((u) => u.user_id);
@@ -682,14 +700,21 @@ export class HrService {
     );
   }
 
-  listAllStaffLeaves(tenantId: string, status?: StaffLeaveRequest['status']) {
-    const where: Record<string, unknown> = { tenant_id: tenantId };
-    if (status) where.status = status;
-    return this.staffLeaveRequests.find({
-      where,
-      relations: ['staff'],
-      order: { applied_at: 'DESC' },
-    });
+  listAllStaffLeaves(tenantId: string, entityId: number, status?: StaffLeaveRequest['status']) {
+    const qb = this.staffLeaveRequests
+      .createQueryBuilder('leave')
+      .leftJoinAndSelect('leave.staff', 'staff')
+      .where('leave.tenant_id = :tenantId', { tenantId })
+      .andWhere(
+        `leave.staff_user_id IN (
+          SELECT p.user_id FROM hr_employee_profiles p
+          WHERE p.tenant_id = :tenantId AND p.entity_id = :entityId
+        )`,
+        { tenantId, entityId },
+      )
+      .orderBy('leave.applied_at', 'DESC');
+    if (status) qb.andWhere('leave.status = :status', { status });
+    return qb.getMany();
   }
 
   async getActionCenter(tenantId: string) {
@@ -867,11 +892,18 @@ export class HrService {
     };
   }
 
-  listPayrollPayslips(tenantId: string, month?: string) {
+  listPayrollPayslips(tenantId: string, entityId: number, month?: string) {
     const qb = this.payslips
       .createQueryBuilder('payslip')
       .leftJoinAndSelect('payslip.staff', 'staff')
       .where('payslip.tenant_id = :tenantId', { tenantId })
+      .andWhere(
+        `payslip.staff_user_id IN (
+          SELECT p.user_id FROM hr_employee_profiles p
+          WHERE p.tenant_id = :tenantId AND p.entity_id = :entityId
+        )`,
+        { tenantId, entityId },
+      )
       .orderBy('payslip.year', 'DESC')
       .addOrderBy('payslip.generated_at', 'DESC');
 
@@ -920,29 +952,45 @@ export class HrService {
         throw new ForbiddenException('HOD can act only on faculty from their department');
       }
     }
-    leave.status = status;
+    const profile = await this.users.manager.query(
+      `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2`,
+      [leave.staff_user_id, tenantId],
+    );
+    const entityId = Number(profile[0]?.entity_id ?? 1);
+    const next = await this.workflowBuilder.resolveNextApprover(
+      tenantId,
+      entityId,
+      'LEAVE',
+      leave.staff_user_id,
+      status === 'HOD_APPROVED' ? 0 : 99,
+    );
+    if (next && status === 'HOD_APPROVED' && !next.approver_user_id) {
+      leave.status = 'HR_APPROVED';
+    } else {
+      leave.status = status;
+    }
     return this.staffLeaveRequests.save(leave);
   }
 
-  async listSalaryStructures(tenantId: string) {
+  async listSalaryStructures(tenantId: string, entityId: number) {
     return this.users.manager.query(
       `SELECT s.*, u.name AS employee_name, u.official_email AS employee_email
        FROM hr_salary_structures s
        LEFT JOIN users u ON u.user_id = s.assigned_user_id
-       WHERE s.tenant_id = $1
+       WHERE s.tenant_id = $1 AND (s.entity_id = $2 OR s.entity_id IS NULL)
        ORDER BY s.structure_name ASC`,
-      [tenantId],
+      [tenantId, entityId],
     );
   }
 
-  async listRecruitmentJobs(tenantId: string) {
+  async listRecruitmentJobs(tenantId: string, entityId: number) {
     return this.users.manager.query(
       `SELECT j.*, d.dept_name AS department_name
        FROM hr_job_postings j
        LEFT JOIN departments d ON d.dept_id = j.department_id
-       WHERE j.tenant_id = $1
+       WHERE j.tenant_id = $1 AND j.entity_id = $2
        ORDER BY j.created_at DESC`,
-      [tenantId],
+      [tenantId, entityId],
     );
   }
 
@@ -969,14 +1017,14 @@ export class HrService {
     return rows[0];
   }
 
-  async listRecruitmentPipeline(tenantId: string) {
+  async listRecruitmentPipeline(tenantId: string, entityId: number) {
     const applicants = await this.users.manager.query(
       `SELECT a.*, j.title AS job_title
        FROM hr_applicants a
        LEFT JOIN hr_job_postings j ON j.job_id = a.job_id
-       WHERE a.tenant_id = $1
+       WHERE a.tenant_id = $1 AND a.entity_id = $2
        ORDER BY a.created_at ASC`,
-      [tenantId],
+      [tenantId, entityId],
     );
     const stages = ['APPLIED', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'HIRED'];
     return {

@@ -7,6 +7,7 @@ export const NotificationEvents = {
   ACADEMICS_COURSE_MATERIAL_ADDED: 'academics.course_material_added',
   OPERATIONS_GATE_PASS_UPDATED: 'operations.gate_pass_updated',
   HR_LEAVE_APPROVED: 'hr.leave_approved',
+  HR_PENALTY_APPLIED: 'hr.penalty_applied',
   ACADEMICS_MEETING_REQUESTED: 'academics.meeting_requested',
   ACADEMICS_MEETING_RESPONDED: 'academics.meeting_responded',
   PLACEMENT_JOB_POSTED: 'placement.job_posted',

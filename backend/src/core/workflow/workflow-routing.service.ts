@@ -22,7 +22,7 @@ export type RoutedApprover = {
 @Injectable()
 export class WorkflowRoutingService {
   private readonly hrAdminEmail =
-    process.env.WORKFLOW_HR_ADMIN_EMAIL ?? 'hr@mygyanvihar.com';
+    process.env.WORKFLOW_HR_ADMIN_EMAIL ?? 'hr.admin@mygyanvihar.com';
   private readonly financeAdminEmail =
     process.env.WORKFLOW_FINANCE_ADMIN_EMAIL ?? 'finance@mygyanvihar.com';
   private readonly itAdminEmail =

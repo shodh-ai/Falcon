@@ -59,6 +59,10 @@ export class NotificationEmitterService {
     this.events.emit(NotificationEvents.HR_LEAVE_APPROVED, payload);
   }
 
+  penaltyApplied(payload: LeaveApprovedPayload & { message?: string }) {
+    this.events.emit(NotificationEvents.HR_PENALTY_APPLIED, payload);
+  }
+
   meetingRequested(payload: MeetingRequestedPayload) {
     this.events.emit(NotificationEvents.ACADEMICS_MEETING_REQUESTED, payload);
   }

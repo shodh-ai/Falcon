@@ -18,6 +18,17 @@ import { HrService } from './hr.service';
 import { HrAdminService } from './hr-admin.service';
 import { HrWorkforceService } from './hr-workforce.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
+import { HrEntityContextService } from './hr-entity-context.service';
+import { HrRulesService } from './hr-rules.service';
+import { HrEssService } from './hr-ess.service';
+import { HrDynamicRulesService } from './hr-dynamic-rules.service';
+import { HrOrgStructureService } from './hr-org-structure.service';
+import { HrLeavePolicyService } from './hr-leave-policy.service';
+import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
+import { HrChecklistService } from './hr-checklist.service';
+import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
+import { HrDashboardService } from './hr-dashboard.service';
+import { HrReportsService } from './hr-reports.service';
 
 @Module({
   imports: [
@@ -37,7 +48,40 @@ import { AttendanceCalculationService } from './attendance-calculation.service';
     ]),
   ],
   controllers: [HrController],
-  providers: [HrService, HrAdminService, HrWorkforceService, AttendanceCalculationService, HrFieldEncryptionService],
-  exports: [HrService, HrAdminService, HrWorkforceService, AttendanceCalculationService, HrFieldEncryptionService],
+  providers: [
+    HrService,
+    HrAdminService,
+    HrWorkforceService,
+    AttendanceCalculationService,
+    HrFieldEncryptionService,
+    HrEntityContextService,
+    HrRulesService,
+    HrEssService,
+    HrDynamicRulesService,
+    HrOrgStructureService,
+    HrLeavePolicyService,
+    HrWorkflowBuilderService,
+    HrChecklistService,
+    HrPermissionGuard,
+    HrDashboardService,
+    HrReportsService,
+  ],
+  exports: [
+    HrService,
+    HrAdminService,
+    HrWorkforceService,
+    AttendanceCalculationService,
+    HrFieldEncryptionService,
+    HrEntityContextService,
+    HrRulesService,
+    HrEssService,
+    HrDynamicRulesService,
+    HrOrgStructureService,
+    HrLeavePolicyService,
+    HrWorkflowBuilderService,
+    HrChecklistService,
+    HrDashboardService,
+    HrReportsService,
+  ],
 })
 export class HrModule {}

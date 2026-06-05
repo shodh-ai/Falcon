@@ -194,6 +194,18 @@ export class NotificationEventsListener {
     });
   }
 
+  @OnEvent(NotificationEvents.HR_PENALTY_APPLIED)
+  async onPenaltyApplied(payload: LeaveApprovedPayload & { message?: string }) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'HR',
+      title: payload.title || 'Attendance penalty applied',
+      message: payload.message || 'An attendance penalty was applied to your record.',
+      actionLink: payload.actionLink ?? '/ess/calendar',
+    });
+  }
+
   @OnEvent(NotificationEvents.ACADEMICS_MEETING_REQUESTED)
   async onMeetingRequested(payload: MeetingRequestedPayload) {
     await this.persistAndQueue({

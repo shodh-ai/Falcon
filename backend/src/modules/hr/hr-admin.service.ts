@@ -9,6 +9,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
+import { HrEntityContextService } from './hr-entity-context.service';
+import { HrChecklistService } from './hr-checklist.service';
 
 const API_POINTS: Record<string, number> = {
   JOURNAL: 10,
@@ -25,23 +27,29 @@ export class HrAdminService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly crypto: HrFieldEncryptionService,
     private readonly config: ConfigService,
+    private readonly entityCtx: HrEntityContextService,
+    private readonly checklists: HrChecklistService,
   ) {}
 
-  async listDirectory(tenantId: string) {
+  async listDirectory(tenantId: string, entityId: number) {
+    const params: unknown[] = [tenantId, entityId];
+    const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     return this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.is_active,
               r.role_name AS role, d.dept_name AS department,
-              p.employee_id, p.designation, p.joining_date,
+              p.employee_id, p.designation, p.joining_date, p.entity_id,
+              oe.entity_name,
               ro.name AS reporting_officer_name
        FROM users u
        LEFT JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
+       LEFT JOIN org_entities oe ON oe.entity_id = p.entity_id
        LEFT JOIN users ro ON ro.user_id = u.reporting_officer_id
        WHERE u.tenant_id = $1
-         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')
+         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
        ORDER BY u.name ASC`,
-      [tenantId],
+      params,
     );
   }
 
@@ -49,13 +57,14 @@ export class HrAdminService {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.is_active, u.reporting_officer_id,
               r.role_name AS role, d.dept_name AS department,
-              p.profile_id, p.employee_id, p.designation, p.joining_date,
+              p.profile_id, p.employee_id, p.designation, p.joining_date, p.org_unit_id,
               p.pan_encrypted, p.aadhaar_encrypted, p.bank_account_encrypted, p.ifsc_code, p.pf_uan,
-              ro.name AS reporting_officer_name
+              ro.name AS reporting_officer_name, ou.unit_name AS org_unit_name
        FROM users u
        LEFT JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
+       LEFT JOIN hr_org_units ou ON ou.unit_id = p.org_unit_id
        LEFT JOIN users ro ON ro.user_id = u.reporting_officer_id
        WHERE u.tenant_id = $1 AND u.user_id = $2`,
       [tenantId, userId],
@@ -83,6 +92,8 @@ export class HrAdminService {
       designation: row.designation ?? row.role,
       joining_date: row.joining_date,
       reporting_officer_name: row.reporting_officer_name,
+      org_unit_id: row.org_unit_id,
+      org_unit_name: row.org_unit_name,
       ifsc_code: row.ifsc_code,
       pf_uan: row.pf_uan,
       kyc: {
@@ -124,6 +135,8 @@ export class HrAdminService {
       bank_account_no?: string;
       ifsc_code?: string;
       pf_uan?: string;
+      org_unit_id?: string;
+      entity_id?: number;
     },
   ) {
     const pan = dto.pan_number !== undefined ? this.crypto.encrypt(dto.pan_number) : undefined;
@@ -133,13 +146,16 @@ export class HrAdminService {
     const rows = await this.dataSource.query(
       `INSERT INTO hr_employee_profiles (
          tenant_id, user_id, employee_id, designation, joining_date,
-         pan_encrypted, aadhaar_encrypted, bank_account_encrypted, ifsc_code, pf_uan, updated_at
+         pan_encrypted, aadhaar_encrypted, bank_account_encrypted, ifsc_code, pf_uan,
+         org_unit_id, entity_id, updated_at
        ) VALUES ($1,$2,COALESCE($3, 'SGVU-' || substr($2::text, 1, 8)), $4, COALESCE($5::date, CURRENT_DATE),
-         $6,$7,$8,$9,$10, NOW())
+         $6,$7,$8,$9,$10,$11,$12, NOW())
        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
          employee_id = COALESCE(EXCLUDED.employee_id, hr_employee_profiles.employee_id),
          designation = COALESCE(EXCLUDED.designation, hr_employee_profiles.designation),
          joining_date = COALESCE(EXCLUDED.joining_date, hr_employee_profiles.joining_date),
+         org_unit_id = COALESCE(EXCLUDED.org_unit_id, hr_employee_profiles.org_unit_id),
+         entity_id = COALESCE(EXCLUDED.entity_id, hr_employee_profiles.entity_id),
          pan_encrypted = COALESCE(EXCLUDED.pan_encrypted, hr_employee_profiles.pan_encrypted),
          aadhaar_encrypted = COALESCE(EXCLUDED.aadhaar_encrypted, hr_employee_profiles.aadhaar_encrypted),
          bank_account_encrypted = COALESCE(EXCLUDED.bank_account_encrypted, hr_employee_profiles.bank_account_encrypted),
@@ -158,12 +174,14 @@ export class HrAdminService {
         bank ?? null,
         dto.ifsc_code ?? null,
         dto.pf_uan ?? null,
+        dto.org_unit_id ?? null,
+        dto.entity_id ?? null,
       ],
     );
     return rows[0];
   }
 
-  async listLeaveBalancesGrid(tenantId: string, year: number) {
+  async listLeaveBalancesGrid(tenantId: string, year: number, entityId: number) {
     return this.dataSource.query(
       `SELECT u.user_id, u.name, p.employee_id,
               MAX(CASE WHEN b.leave_type = 'CL' THEN b.entitled - b.used END) AS cl_balance,
@@ -172,12 +190,13 @@ export class HrAdminService {
               MAX(CASE WHEN b.leave_type = 'MATERNITY' THEN b.entitled - b.used END) AS maternity_balance
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id
-       LEFT JOIN hr_leave_balances b ON b.user_id = u.user_id AND b.year = $2
+       JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
+       LEFT JOIN hr_leave_balances b ON b.user_id = u.user_id AND b.year = $3
        WHERE u.tenant_id = $1 AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')
+         ${this.entityCtx.entityFilterSql('p', 2)}
        GROUP BY u.user_id, u.name, p.employee_id
        ORDER BY u.name`,
-      [tenantId, year],
+      [tenantId, entityId, year],
     );
   }
 
@@ -209,13 +228,14 @@ export class HrAdminService {
 
   async ingestBiometricPunches(
     tenantId: string,
-    punches: { employee_id: string; punch_time: string; device_id?: string; punch_type: 'IN' | 'OUT' }[],
+    punches: { employee_id: string; punch_time: string; device_id?: string; punch_type: 'IN' | 'OUT'; entity_id?: number }[],
+    entityId?: number,
   ) {
     for (const punch of punches) {
       await this.dataSource.query(
-        `INSERT INTO hr_biometric_logs (tenant_id, employee_id, punch_time, device_id, punch_type)
-         VALUES ($1, $2, $3::timestamptz, $4, $5)`,
-        [tenantId, punch.employee_id, punch.punch_time, punch.device_id ?? null, punch.punch_type],
+        `INSERT INTO hr_biometric_logs (tenant_id, entity_id, employee_id, punch_time, device_id, punch_type)
+         VALUES ($1, $2, $3, $4::timestamptz, $5, $6)`,
+        [tenantId, punch.entity_id ?? entityId ?? null, punch.employee_id, punch.punch_time, punch.device_id ?? null, punch.punch_type],
       );
     }
     return this.processBiometricLogs(tenantId);
@@ -269,15 +289,15 @@ export class HrAdminService {
     return { processed, pending: logs.length - processed };
   }
 
-  async listPayPackages(tenantId: string) {
+  async listPayPackages(tenantId: string, entityId: number) {
     return this.dataSource.query(
       `SELECT pkg.*, u.name AS employee_name, p.employee_id
        FROM hr_employee_pay_packages pkg
        JOIN users u ON u.user_id = pkg.user_id
-       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id
-       WHERE pkg.tenant_id = $1
+       JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = pkg.tenant_id
+       WHERE pkg.tenant_id = $1 ${this.entityCtx.entityFilterSql('p', 2)}
        ORDER BY u.name`,
-      [tenantId],
+      [tenantId, entityId],
     );
   }
 
@@ -349,14 +369,15 @@ export class HrAdminService {
     return rows[0];
   }
 
-  async listAppraisalsWithApi(tenantId: string, year: number) {
+  async listAppraisalsWithApi(tenantId: string, year: number, entityId: number) {
     const faculty = await this.dataSource.query(
       `SELECT u.user_id, u.name, p.employee_id, r.role_name
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id
-       WHERE u.tenant_id = $1 AND r.role_name IN ('Faculty', 'HOD', 'Dean')`,
-      [tenantId],
+       JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
+       WHERE u.tenant_id = $1 AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         ${this.entityCtx.entityFilterSql('p', 2)}`,
+      [tenantId, entityId],
     );
     for (const f of faculty) {
       await this.calculateApiScore(tenantId, f.user_id, year);
@@ -365,14 +386,15 @@ export class HrAdminService {
       `SELECT a.*, u.name AS employee_name, p.employee_id
        FROM hr_employee_appraisals a
        JOIN users u ON u.user_id = a.user_id
-       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id
-       WHERE a.tenant_id = $1 AND a.appraisal_year = $2
+       JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = a.tenant_id
+       WHERE a.tenant_id = $1 AND a.appraisal_year = $3
+         ${this.entityCtx.entityFilterSql('p', 2)}
        ORDER BY a.auto_api_score DESC`,
-      [tenantId, year],
+      [tenantId, entityId, year],
     );
   }
 
-  async listPromotionCandidates(tenantId: string) {
+  async listPromotionCandidates(tenantId: string, entityId: number) {
     const year = new Date().getFullYear();
     return this.dataSource.query(
       `SELECT u.user_id, u.name, p.employee_id, p.designation, p.joining_date,
@@ -387,16 +409,17 @@ export class HrAdminService {
               END AS promotion_eligibility
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = $1
-       LEFT JOIN hr_employee_appraisals a ON a.user_id = u.user_id AND a.appraisal_year = $2 AND a.tenant_id = $1
+       JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = $1
+       LEFT JOIN hr_employee_appraisals a ON a.user_id = u.user_id AND a.appraisal_year = $3 AND a.tenant_id = $1
        LEFT JOIN LATERAL (
          SELECT to_designation, effective_date FROM hr_promotion_history
          WHERE employee_user_id = u.user_id AND tenant_id = $1
          ORDER BY effective_date DESC LIMIT 1
        ) ph ON TRUE
        WHERE u.tenant_id = $1 AND r.role_name IN ('Faculty', 'HOD')
+         ${this.entityCtx.entityFilterSql('p', 2)}
        ORDER BY a.auto_api_score DESC NULLS LAST`,
-      [tenantId, year],
+      [tenantId, entityId, year],
     );
   }
 
@@ -433,12 +456,40 @@ export class HrAdminService {
       `UPDATE hr_applicants SET stage = 'HIRED', hired_user_id = $2, updated_at = NOW() WHERE applicant_id = $1`,
       [applicantId, userId],
     );
-    await this.dataSource.query(
-      `INSERT INTO hr_clearance_tasks (tenant_id, applicant_id, lifecycle_type, department_owner, task_name, status, due_date)
-       VALUES ($1, $2, 'ONBOARDING', 'IT', 'Create @mygyanvihar.com email', 'PENDING', CURRENT_DATE + 3),
-              ($1, $2, 'ONBOARDING', 'HR', 'Print employee ID card', 'PENDING', CURRENT_DATE + 5)`,
-      [tenantId, applicantId],
+    const entityRows = await this.dataSource.query(
+      `SELECT entity_id FROM org_entities WHERE tenant_id = $1 ORDER BY entity_id LIMIT 1`,
+      [tenantId],
     );
+    const entityId = entityRows[0]?.entity_id ?? null;
+    await this.dataSource.query(
+      `INSERT INTO hr_clearance_tasks (tenant_id, entity_id, applicant_id, lifecycle_type, department_owner, task_name, status, due_date)
+       VALUES ($1, $3, $2, 'ONBOARDING', 'IT', 'Create @mygyanvihar.com email', 'PENDING', CURRENT_DATE + 3),
+              ($1, $3, $2, 'ONBOARDING', 'HR', 'Print employee ID card', 'PENDING', CURRENT_DATE + 5)`,
+      [tenantId, applicantId, entityId],
+    );
+    const pipelineRows = await this.dataSource.query(
+      `INSERT INTO hr_onboarding_pipelines (tenant_id, entity_id, applicant_id, user_id, stage, progress_percent)
+       VALUES ($1, $2, $3, $4, 'DOCUMENTS', 0)
+       RETURNING pipeline_id`,
+      [tenantId, entityId, applicantId, userId],
+    );
+    const pipelineId = pipelineRows[0]?.pipeline_id;
+    if (pipelineId && entityId) {
+      await this.checklists.spawnOnboardingInstances(tenantId, entityId, userId, pipelineId);
+      const steps = [
+        ['PAN_UPLOAD', 'Upload PAN', 1],
+        ['OFFER_LETTER', 'Sign Offer Letter', 2],
+        ['POLICIES', 'Read Policies', 3],
+        ['ID_CARD_PHOTO', 'ID Card Photo', 4],
+      ];
+      for (const [key, label, order] of steps) {
+        await this.dataSource.query(
+          `INSERT INTO hr_onboarding_steps (pipeline_id, step_key, step_label, sort_order)
+           VALUES ($1,$2,$3,$4) ON CONFLICT (pipeline_id, step_key) DO NOTHING`,
+          [pipelineId, key, label, order],
+        );
+      }
+    }
     return { user_id: userId, email, onboarding_triggered: true };
   }
 

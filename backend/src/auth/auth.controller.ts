@@ -19,6 +19,7 @@ import { User } from '../entities/user.entity';
 import { Public } from '../common/decorators/roles.decorator';
 import { AuthService } from './auth.service';
 import { TenantService } from '../tenant/tenant.service';
+import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { LocalLoginDto } from './dto/local-login.dto';
 
 @Controller(['auth', 'api/auth'])
@@ -28,6 +29,7 @@ export class AuthController {
     private userRepository: Repository<User>,
     private authService: AuthService,
     private tenantService: TenantService,
+    private hrEntityCtx: HrEntityContextService,
   ) {}
 
   @Get('google')
@@ -46,8 +48,12 @@ export class AuthController {
 
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
-  getProfile(@Req() req: Request) {
-    return req.user;
+  async getProfile(@Req() req: Request & { user: { user_id: string; tenant_id?: string } }) {
+    const user = req.user;
+    const caps = user.tenant_id
+      ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
+      : null;
+    return { ...user, hr_capabilities: caps ?? {} };
   }
 
   @Public()

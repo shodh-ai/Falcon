@@ -14,6 +14,7 @@ import { AUTH_PROVIDER } from './interfaces/auth-provider.interface';
 import { LocalAuthProvider } from './providers/local-auth.provider';
 import { KeycloakAuthProvider } from './providers/keycloak-auth.provider';
 import { AuthTenantCookieMiddleware } from './middleware/auth-tenant-cookie.middleware';
+import { HrModule } from '../modules/hr/hr.module';
 
 const authProviderFactory = {
   provide: AUTH_PROVIDER,
@@ -26,6 +27,7 @@ const authProviderFactory = {
 
 @Module({
   imports: [
+    HrModule,
     TypeOrmModule.forFeature([User, Role, UserRole]),
     PassportModule,
     JwtModule.registerAsync({

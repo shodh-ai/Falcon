@@ -6,6 +6,9 @@ import { HrDailyAttendance, CalculatedAttendanceStatus } from '../../entities/hr
 import { HrHoliday } from '../../entities/hr-holiday.entity';
 import { HrShift } from '../../entities/hr-shift.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
+import { HrRulesService } from './hr-rules.service';
+import { HrDynamicRulesService } from './hr-dynamic-rules.service';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 export type ShiftContext = {
   shift_id: string;
@@ -38,6 +41,9 @@ export class AttendanceCalculationService {
     @InjectRepository(HrShift) private readonly shifts: Repository<HrShift>,
     @InjectRepository(StaffLeaveRequest) private readonly requests: Repository<StaffLeaveRequest>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly rules: HrRulesService,
+    private readonly dynamicRules: HrDynamicRulesService,
+    private readonly notify: NotificationEmitterService,
   ) {}
 
   async getEmployeeShift(userId: string): Promise<ShiftContext> {
@@ -203,14 +209,17 @@ export class AttendanceCalculationService {
     return { month, shift, days };
   }
 
-  async getMatrixMonth(tenantId: string, month: string) {
+  async getMatrixMonth(tenantId: string, month: string, entityId: number) {
+    const params: unknown[] = [tenantId, entityId];
+    const entityFilter = ` AND p.entity_id = $2`;
     const staff = await this.dataSource.query<Array<{ user_id: string; name: string }>>(
       `SELECT u.user_id, u.name FROM users u
        JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
        WHERE u.tenant_id = $1 AND u.is_active = true
-         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')
+         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
        ORDER BY u.name`,
-      [tenantId],
+      params,
     );
 
     const employees = await Promise.all(
@@ -236,16 +245,32 @@ export class AttendanceCalculationService {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const date = yesterday.toISOString().slice(0, 10);
-
     const rows = await this.daily.find({ where: { date } });
     for (const row of rows) {
       try {
-        await this.calculateAndPersist(row.user_id, date);
+        const result = await this.calculateAndPersist(row.user_id, date);
+        await this.evaluateDynamicRules(row.user_id, date, result);
       } catch (e) {
         this.logger.warn(`Recalc failed ${row.user_id} ${date}: ${e}`);
       }
     }
     this.logger.log(`Nightly attendance recalc for ${rows.length} records on ${date}`);
+  }
+
+  private async evaluateDynamicRules(userId: string, date: string, result: DayCalculationResult) {
+    const profile = await this.dataSource.query(
+      `SELECT tenant_id, entity_id FROM hr_employee_profiles WHERE user_id = $1 LIMIT 1`,
+      [userId],
+    );
+    if (!profile[0]?.tenant_id || profile[0].entity_id == null) return;
+
+    await this.dynamicRules.evaluateRulesForDay(
+      profile[0].tenant_id as string,
+      Number(profile[0].entity_id),
+      userId,
+      date,
+      result,
+    );
   }
 
   private async hasPendingRequest(userId: string, date: string) {
