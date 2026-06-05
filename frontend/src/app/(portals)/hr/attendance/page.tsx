@@ -5,10 +5,12 @@ import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
 import { Button } from '@/components/ui/button';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 export default function HrAttendancePage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [syncing, setSyncing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -47,7 +49,7 @@ export default function HrAttendancePage() {
       />
 
       <HrAttendanceCalendar
-        key={`${month}-${refreshKey}`}
+        key={`${entityId}-${month}-${refreshKey}`}
         mode="matrix"
         month={month}
         title={`Master matrix — ${month}`}

@@ -58,12 +58,28 @@ import {
   ClipboardPen,
 } from 'lucide-react';
 
+export type HrModuleKey =
+  | 'onboarding'
+  | 'offboarding'
+  | 'payroll'
+  | 'biometrics'
+  | 'leaves'
+  | 'documents'
+  | 'policies'
+  | 'rules'
+  | 'directory'
+  | 'attendance'
+  | 'recruitment'
+  | 'reports'
+  | 'dashboard';
+
 export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
   keywords?: string[];
   roles?: string[];
+  hrModule?: HrModuleKey;
 }
 
 export interface NavGroup {
@@ -89,6 +105,58 @@ export function filterPortalConfigForRole(config: PortalConfig, role: string | u
     .filter((group) => group.items.length > 0);
   const commandItems = config.commandItems.filter((item) => !item.roles || item.roles.includes(normalizedRole));
 
+  return { ...config, navGroups, commandItems };
+}
+
+export type HrCapabilities = Partial<Record<HrModuleKey, 'none' | 'read' | 'write'>>;
+
+const HR_FULL_ACCESS_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'HR']);
+
+function hasHrPermission(
+  permissions: string[] | undefined,
+  module: HrModuleKey,
+  minLevel: 'read' | 'write' = 'read',
+): boolean {
+  if (!permissions?.length) return false;
+  const levels = minLevel === 'write' ? ['write'] : ['read', 'write'];
+  return permissions.some((p) => {
+    const [mod, level] = p.split(':');
+    return mod === module && levels.includes(level);
+  });
+}
+
+function canSeeHrNavItem(
+  item: NavItem,
+  role: string,
+  caps?: HrCapabilities | null,
+  permissions?: string[],
+): boolean {
+  if (item.roles && !item.roles.includes(role)) return false;
+  if (HR_FULL_ACCESS_ROLES.has(role)) return true;
+  if (!item.hrModule) return true;
+  if (permissions?.length) {
+    return hasHrPermission(permissions, item.hrModule, 'read');
+  }
+  const access = caps?.[item.hrModule] ?? 'none';
+  return access !== 'none';
+}
+
+export function filterPortalConfigForHrCapabilities(
+  config: PortalConfig,
+  role: string | undefined | null,
+  caps?: HrCapabilities | null,
+  permissions?: string[],
+): PortalConfig {
+  const normalizedRole = (role ?? '').trim();
+  const navGroups = config.navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canSeeHrNavItem(item, normalizedRole, caps, permissions)),
+    }))
+    .filter((group) => group.items.length > 0);
+  const commandItems = config.commandItems.filter((item) =>
+    canSeeHrNavItem(item, normalizedRole, caps, permissions),
+  );
   return { ...config, navGroups, commandItems };
 }
 
@@ -195,6 +263,7 @@ export const facultyPortal: PortalConfig = {
       title: 'Administration',
       items: [
         { label: 'HR & Employee Hub', href: '/faculty/hr', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'od', 'regularization'] },
+        { label: 'Employee Self Service (ESS)', href: '/ess/calendar', icon: UserRoundCog, keywords: ['ess', 'calendar', 'documents', 'policies'] },
         { label: 'Team requests', href: '/faculty/team-requests', icon: ClipboardCheck, keywords: ['approve', 'hod', 'pending on me'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
@@ -228,49 +297,106 @@ export const hrPortal: PortalConfig = {
   navGroups: [
     {
       title: 'Home',
-      items: [{ label: 'Dashboard', href: '/hr/dashboard', icon: LayoutDashboard, keywords: ['metrics', 'actions'] }],
+      items: [{ label: 'Dashboard', href: '/hr/dashboard', icon: LayoutDashboard, keywords: ['metrics', 'actions'], hrModule: 'dashboard' }],
     },
     {
       title: 'Employee Master',
       items: [
-        { label: 'Employee Directory', href: '/hr/directory', icon: Users, keywords: ['staff', '500', 'roster'] },
-        { label: 'KYC & Document Vault', href: '/hr/kyc', icon: FolderLock, keywords: ['pan', 'aadhaar', 'bank', 'encrypted'] },
+        { label: 'Employee Directory', href: '/hr/directory', icon: Users, keywords: ['staff', '500', 'roster'], hrModule: 'directory' },
+        { label: 'KYC & Document Vault', href: '/hr/kyc', icon: FolderLock, keywords: ['pan', 'aadhaar', 'bank', 'encrypted'], hrModule: 'documents' },
       ],
     },
     {
       title: 'Time & Leaves',
       items: [
-        { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'] },
-        { label: 'Leave Management & Balances', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval'] },
+        { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'], hrModule: 'attendance' },
+        { label: 'Leave Management & Balances', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval'], hrModule: 'leaves' },
       ],
     },
     {
       title: 'Payroll & Finance',
       items: [
-        { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, keywords: ['basic', 'hra', 'da', 'pf', 'tds'] },
-        { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, keywords: ['run payroll', 'payslip', 'lwp'] },
+        { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, keywords: ['basic', 'hra', 'da', 'pf', 'tds'], hrModule: 'payroll' },
+        { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, keywords: ['run payroll', 'payslip', 'lwp'], hrModule: 'payroll' },
       ],
     },
     {
       title: 'Performance & Lifecycle',
       items: [
-        { label: 'Recruitment (ATS)', href: '/hr/recruitment', icon: Briefcase, keywords: ['kanban', 'hired', 'interview'] },
-        { label: 'Appraisals & API Scores', href: '/hr/appraisals', icon: Award, keywords: ['ugc', 'api', 'scopus', 'research'] },
-        { label: 'Promotions & Workflows', href: '/hr/promotions', icon: ArrowUpCircle, keywords: ['associate prof', 'professor', 'eligible'] },
+        { label: 'Onboarding Pipeline', href: '/hr/onboarding', icon: Kanban, keywords: ['kanban', 'hired', 'new hire'], hrModule: 'onboarding' },
+        { label: 'Offboarding & Exit', href: '/hr/offboarding', icon: DoorOpen, keywords: ['resignation', 'fnf', 'separation'], hrModule: 'offboarding' },
+        { label: 'Recruitment (ATS)', href: '/hr/recruitment', icon: Briefcase, keywords: ['kanban', 'hired', 'interview'], hrModule: 'recruitment' },
+        { label: 'Appraisals & API Scores', href: '/hr/appraisals', icon: Award, keywords: ['ugc', 'api', 'scopus', 'research'], hrModule: 'directory' },
+        { label: 'Promotions & Workflows', href: '/hr/promotions', icon: ArrowUpCircle, keywords: ['associate prof', 'professor', 'eligible'], hrModule: 'directory' },
+      ],
+    },
+    {
+      title: 'Administration',
+      items: [
+        { label: 'HR Permissions Matrix', href: '/hr/admin/permissions', icon: Shield, keywords: ['access', 'roles', 'matrix'], roles: ['HRAdmin', 'SuperAdmin'] },
+        { label: 'Attendance Rules Engine', href: '/hr/admin/rules', icon: Settings, keywords: ['grace', 'penalty', 'shifts'], roles: ['HRAdmin', 'SuperAdmin'] },
+        { label: 'Org Structure', href: '/hr/admin/org-structure', icon: Network, keywords: ['zone', 'branch', 'department'], roles: ['HRAdmin', 'SuperAdmin'] },
+        { label: 'Leave Policies', href: '/hr/admin/leave-policies', icon: CalendarDays, keywords: ['clubbing', 'sandwich', 'accrual'], roles: ['HRAdmin', 'SuperAdmin'] },
+        { label: 'Approval Workflows', href: '/hr/admin/workflows', icon: ListChecks, keywords: ['approver', 'chain', 'resignation'], roles: ['HRAdmin', 'SuperAdmin'] },
+        { label: 'Checklist Templates', href: '/hr/admin/checklist-templates', icon: ClipboardList, keywords: ['onboarding', 'offboarding', 'tasks'], roles: ['HRAdmin', 'SuperAdmin'] },
+        { label: 'Company Policies', href: '/hr/policies', icon: FileText, keywords: ['posh', 'leave policy', 'cms'], hrModule: 'policies' },
+        { label: 'Analytics & Reports', href: '/hr/reports', icon: FileSpreadsheet, keywords: ['export', 'muster', 'ugc', 'naac', 'excel'], hrModule: 'reports' },
       ],
     },
   ],
   commandItems: [
-    { label: 'HR Dashboard', href: '/hr/dashboard', icon: LayoutDashboard },
-    { label: 'Employee Directory', href: '/hr/directory', icon: Users },
-    { label: 'KYC Vault', href: '/hr/kyc', icon: FolderLock },
-    { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer },
-    { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays },
-    { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet },
-    { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote },
-    { label: 'Recruitment ATS', href: '/hr/recruitment', icon: Briefcase },
-    { label: 'Appraisals & API', href: '/hr/appraisals', icon: Award },
-    { label: 'Promotions', href: '/hr/promotions', icon: ArrowUpCircle },
+    { label: 'HR Dashboard', href: '/hr/dashboard', icon: LayoutDashboard, hrModule: 'dashboard' },
+    { label: 'Employee Directory', href: '/hr/directory', icon: Users, hrModule: 'directory' },
+    { label: 'KYC Vault', href: '/hr/kyc', icon: FolderLock, hrModule: 'documents' },
+    { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, hrModule: 'attendance' },
+    { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, hrModule: 'leaves' },
+    { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, hrModule: 'payroll' },
+    { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, hrModule: 'payroll' },
+    { label: 'Recruitment ATS', href: '/hr/recruitment', icon: Briefcase, hrModule: 'recruitment' },
+    { label: 'Appraisals & API', href: '/hr/appraisals', icon: Award, hrModule: 'directory' },
+    { label: 'Promotions', href: '/hr/promotions', icon: ArrowUpCircle, hrModule: 'directory' },
+    { label: 'Onboarding', href: '/hr/onboarding', icon: Kanban, hrModule: 'onboarding' },
+    { label: 'Offboarding', href: '/hr/offboarding', icon: DoorOpen, hrModule: 'offboarding' },
+    { label: 'Analytics & Reports', href: '/hr/reports', icon: FileSpreadsheet, hrModule: 'reports' },
+    { label: 'HR Permissions', href: '/hr/admin/permissions', icon: Shield, roles: ['HRAdmin', 'SuperAdmin'] },
+    { label: 'Attendance Rules', href: '/hr/admin/rules', icon: Settings, roles: ['HRAdmin', 'SuperAdmin'] },
+  ],
+};
+
+export const essPortal: PortalConfig = {
+  personaLabel: 'Employee Self Service',
+  personaTitle: 'ESS Portal',
+  homeHref: '/ess/calendar',
+  navGroups: [
+    {
+      title: 'My Work',
+      items: [
+        { label: 'My Calendar', href: '/ess/calendar', icon: Calendar, keywords: ['shift', 'holiday', 'attendance'] },
+        { label: 'Leaves', href: '/ess/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'comp-off'] },
+      ],
+    },
+    {
+      title: 'Documents & Policies',
+      items: [
+        { label: 'Document Vault', href: '/ess/documents', icon: FolderLock, keywords: ['payslip', 'form 16', 'appraisal'] },
+        { label: 'Company Policies', href: '/ess/policies', icon: FileText, keywords: ['posh', 'acknowledge', 'policy'] },
+      ],
+    },
+    {
+      title: 'Lifecycle',
+      items: [
+        { label: 'Onboarding', href: '/ess/onboarding', icon: Kanban, keywords: ['new hire', 'pan', 'offer'] },
+        { label: 'Resignation', href: '/ess/offboarding', icon: DoorOpen, keywords: ['exit', 'notice', 'resign'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'My Calendar', href: '/ess/calendar', icon: Calendar },
+    { label: 'Leaves', href: '/ess/leaves', icon: CalendarDays },
+    { label: 'Documents', href: '/ess/documents', icon: FolderLock },
+    { label: 'Policies', href: '/ess/policies', icon: FileText },
+    { label: 'Onboarding', href: '/ess/onboarding', icon: Kanban },
+    { label: 'Resignation', href: '/ess/offboarding', icon: DoorOpen },
   ],
 };
 

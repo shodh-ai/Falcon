@@ -12,6 +12,8 @@ import { UpdateStudentProfileDto } from './dto/update-student-profile.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
+import { assertNoPendingRow } from '../../common/validators/pending-request.util';
+import { TicketService } from '../helpdesk/ticket.service';
 
 @Injectable()
 export class ProctorService {
@@ -26,6 +28,7 @@ export class ProctorService {
     private readonly notify: NotificationEmitterService,
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
+    private readonly ticketService: TicketService,
   ) {}
 
   async assignMentor(dto: AssignMentorDto, assignedByUserId: string) {
@@ -97,6 +100,11 @@ export class ProctorService {
     }
 
     const topic = note?.trim() || 'Mentorship meeting request';
+
+    await assertNoPendingRow(this.meetings, {
+      student_user_id: studentUserId,
+      status: 'PENDING',
+    });
 
     const meeting = await this.meetings.save(
       this.meetings.create({
@@ -246,6 +254,12 @@ export class ProctorService {
     const trimmedReason = reason.trim();
     const student = await this.users.findOne({ where: { user_id: studentUserId } });
 
+    await assertNoPendingRow(this.interactions, {
+      student_user_id: studentUserId,
+      interaction_type: 'LEAVE_REQUEST',
+      status: 'PENDING',
+    });
+
     const row = await this.interactions.save(
       this.interactions.create({
         student_user_id: studentUserId,
@@ -375,15 +389,78 @@ export class ProctorService {
     const mentorship = await this.mentorships.findOne({ where: { student_user_id: studentUserId, is_active: true } });
     if (!mentorship) throw new NotFoundException('No active mentor assigned');
 
+    const trimmed = message.trim();
+    const snippet = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+    const ticket = await this.ticketService.createTicket(studentUserId, {
+      category: 'MENTORSHIP',
+      subject: snippet || 'Mentorship message',
+      description: trimmed,
+      assigned_to_user_id: mentorship.proctor_user_id,
+    });
+
     return this.interactions.save(
       this.interactions.create({
         student_user_id: studentUserId,
         proctor_user_id: mentorship.proctor_user_id,
         interaction_type: 'MESSAGE',
-        payload: { message },
+        payload: { message: trimmed, helpdesk_ticket_id: ticket.ticket_id, replies: [] },
         status: 'SENT',
       }),
     );
+  }
+
+  async listMessageInbox(proctorUserId: string) {
+    const rows = await this.interactions.find({
+      where: { proctor_user_id: proctorUserId, interaction_type: 'MESSAGE' },
+      order: { created_at: 'DESC' },
+    });
+    if (rows.length === 0) return [];
+
+    const studentIds = [...new Set(rows.map((r) => r.student_user_id))];
+    const students = await this.users.find({ where: { user_id: In(studentIds) } });
+    const nameById = new Map(students.map((s) => [s.user_id, s.name]));
+
+    return rows.map((row) => {
+      const payload = row.payload ?? {};
+      return {
+        interaction_id: row.interaction_id,
+        student_user_id: row.student_user_id,
+        student_name: nameById.get(row.student_user_id) ?? null,
+        message: String(payload.message ?? ''),
+        replies: Array.isArray(payload.replies) ? payload.replies : [],
+        helpdesk_ticket_id: payload.helpdesk_ticket_id ? String(payload.helpdesk_ticket_id) : null,
+        status: row.status,
+        created_at: row.created_at,
+      };
+    });
+  }
+
+  async replyToMessage(proctorUserId: string, interactionId: string, reply: string) {
+    const row = await this.interactions.findOne({ where: { interaction_id: interactionId } });
+    if (!row) throw new NotFoundException('Message not found');
+    if (row.proctor_user_id !== proctorUserId) throw new ForbiddenException('Not your mentee message');
+    if (row.interaction_type !== 'MESSAGE') throw new BadRequestException('Not a message thread');
+
+    const trimmed = reply.trim();
+    if (!trimmed) throw new BadRequestException('Reply cannot be empty');
+
+    const payload = row.payload ?? {};
+    const replies = Array.isArray(payload.replies) ? [...payload.replies] : [];
+    replies.push({
+      from: 'PROCTOR',
+      message: trimmed,
+      sent_at: new Date().toISOString(),
+    });
+    row.payload = { ...payload, replies };
+    row.status = 'REPLIED';
+    const saved = await this.interactions.save(row);
+
+    const ticketId = payload.helpdesk_ticket_id ? String(payload.helpdesk_ticket_id) : null;
+    if (ticketId) {
+      await this.ticketService.addMessage(ticketId, proctorUserId, 'Faculty', trimmed);
+    }
+
+    return saved;
   }
 
   async getMyAssignedStudents(proctorUserId: string) {

@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { KanbanBoard, type KanbanColumn } from '@/components/workspaces/KanbanBoard';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type PipelineResponse = {
   stages: Array<{
@@ -21,7 +22,8 @@ type PipelineResponse = {
 };
 
 export default function HrRecruitmentPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
 
   const load = () => {
@@ -49,7 +51,7 @@ export default function HrRecruitmentPage() {
 
   useEffect(() => {
     load();
-  }, [api]);
+  }, [api, entityId]);
 
   async function moveCard(applicantId: string, stage: string) {
     try {

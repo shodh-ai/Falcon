@@ -2,12 +2,27 @@
 
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
-import { hrPortal } from '@/lib/navigation';
+import { HrEntitySwitcher } from '@/components/hr/HrEntitySwitcher';
+import { HrEntityProvider } from '@/context/HrEntityContext';
+import { useAuth } from '@/context/AuthContext';
+import { filterPortalConfigForHrCapabilities, filterPortalConfigForRole, hrPortal } from '@/lib/navigation';
 
 export function HrShell({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const role = user?.primaryRole ?? user?.role ?? '';
+  const roleFiltered = filterPortalConfigForRole(hrPortal, role);
+  const config = filterPortalConfigForHrCapabilities(
+    roleFiltered,
+    role,
+    user?.hr_capabilities,
+    user?.permissions,
+  );
+
   return (
-    <AppShell config={hrPortal} profileHref="/hr/dashboard">
-      {children}
-    </AppShell>
+    <HrEntityProvider>
+      <AppShell config={config} profileHref="/hr/dashboard" headerExtra={<HrEntitySwitcher />}>
+        {children}
+      </AppShell>
+    </HrEntityProvider>
   );
 }

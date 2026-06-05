@@ -13,6 +13,7 @@ import {
   Res,
   StreamableFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -20,6 +21,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { HrPermission } from '../../common/decorators/hr-permission.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { HrService } from './hr.service';
 import { HrAdminService } from './hr-admin.service';
 import { HrWorkforceService } from './hr-workforce.service';
@@ -131,6 +133,12 @@ export class HrController {
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myStaffLeaves(@Req() req: { user: AuthUser }) {
     return this.hr.listMyStaffLeaves(req.user.user_id, this.resolveTenantId(req.user));
+  }
+
+  @Get('leaves/my-balances')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  myLeaveBalances(@Req() req: { user: AuthUser }) {
+    return this.hr.listBalances(req.user.user_id);
   }
 
   @Get('payslips/my-payslips')
@@ -293,7 +301,12 @@ export class HrController {
   @Get('entities')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean')
   listEntities(@Req() req: { user: AuthUser }) {
-    return this.entityCtx.listEntities(this.resolveTenantId(req.user));
+    const roles = req.user.roles?.length ? req.user.roles : req.user.role ? [req.user.role] : [];
+    return this.entityCtx.listAllowedEntities(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      roles,
+    );
   }
 
   @Get('admin/permissions')
@@ -681,7 +694,7 @@ export class HrController {
   @Post('payroll/run')
   @HttpCode(HttpStatus.ACCEPTED)
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  @HrPermission('payroll', 'write')
+  @RequirePermission('payroll', 'write')
   async runPayroll(@Req() req: { user: AuthUser }, @Body() dto: RunPayrollDto) {
     return this.hr.queuePayrollRun(this.resolveTenantId(req.user), dto.month, req.user.user_id);
   }

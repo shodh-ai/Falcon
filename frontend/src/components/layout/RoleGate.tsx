@@ -4,14 +4,20 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ShieldAlert } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { canRoleAccessPath, getDashboardPathForRole } from '@/lib/auth-routing';
+import { canRoleAccessPath, getDashboardPathForRole, type HrCapabilities } from '@/lib/auth-routing';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 
 export function RoleGate({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const allowed = canRoleAccessPath(user?.roles?.length ? user.roles : user?.role, pathname);
+  const allowed = canRoleAccessPath(
+    user?.roles?.length ? user.roles : user?.role,
+    pathname,
+    user?.hr_capabilities as HrCapabilities | undefined,
+    user?.permissions,
+    user?.email,
+  );
 
   useEffect(() => {
     if (isLoading) return;

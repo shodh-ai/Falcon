@@ -9,6 +9,7 @@ import {
   type IAuthProvider,
 } from './interfaces/auth-provider.interface';
 import { TenantService } from '../tenant/tenant.service';
+import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 
 type LoginCredentialRow = {
   user_id: string;
@@ -27,6 +28,7 @@ export class AuthService {
     private readonly authProvider: IAuthProvider,
     private readonly tenantService: TenantService,
     private readonly dataSource: DataSource,
+    private readonly hrEntityCtx: HrEntityContextService,
   ) {}
 
   getProviderId(): string {
@@ -99,6 +101,13 @@ export class AuthService {
     const tokenUser = freshUser ?? user;
     const roleClaims = this.getRoleClaims(tokenUser);
     const token = this.signToken(tokenUser, tenant.tenant_id, tenant.pg_schema);
+    const caps = await this.hrEntityCtx.getPermissions(tenant.tenant_id, tokenUser.user_id);
+    const permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
+    const allowedRows = await this.hrEntityCtx.listAllowedEntities(
+      tenant.tenant_id,
+      tokenUser.user_id,
+      roleClaims.roles,
+    );
     return {
       token,
       user: {
@@ -113,6 +122,9 @@ export class AuthService {
         dept_id: tokenUser.dept_id,
         tenant_id: tenant.tenant_id,
         tenant_schema: tenant.pg_schema,
+        hr_capabilities: caps ?? {},
+        permissions,
+        allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
       },
     };
   }

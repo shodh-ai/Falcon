@@ -53,6 +53,7 @@ import { MetricsModule } from './metrics/metrics.module';
 import { SystemModule } from './system/system.module';
 import { TenantContextInterceptor } from './tenant/interceptors/tenant-context.interceptor';
 import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.interceptor';
+import { HrEntityScopeInterceptor } from './common/interceptors/hr-entity-scope.interceptor';
 
 @Module({
   imports: [
@@ -136,6 +137,8 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
     { provide: APP_GUARD, useClass: ImpersonationReadOnlyGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TenantSchemaInterceptor },
+    HrEntityScopeInterceptor,
+    { provide: APP_INTERCEPTOR, useClass: HrEntityScopeInterceptor },
   ],
 })
 export class AppModule {}

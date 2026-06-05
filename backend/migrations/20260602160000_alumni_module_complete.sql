@@ -7,6 +7,8 @@ ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS higher_education_details JS
 ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS opt_in_mentorship BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS profile_updated_at TIMESTAMPTZ;
 ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS enrollment_number VARCHAR(40);
+ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS enrollment_number VARCHAR(40);
+UPDATE student_profiles SET enrollment_number = admission_number WHERE enrollment_number IS NULL AND admission_number IS NOT NULL;
 ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS career_update_due_at TIMESTAMPTZ;
 ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS graduation_year INT;
 

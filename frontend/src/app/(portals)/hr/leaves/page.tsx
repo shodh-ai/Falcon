@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type LeaveRequest = {
   leave_id?: string;
@@ -31,7 +32,8 @@ type BalanceRow = {
 };
 
 export default function HrLeavesPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [tab, setTab] = useState<'approvals' | 'balances'>('approvals');
   const [pending, setPending] = useState<LeaveRequest[]>([]);
   const [balances, setBalances] = useState<BalanceRow[]>([]);
@@ -43,7 +45,7 @@ export default function HrLeavesPage() {
     } else {
       void api.get<BalanceRow[]>(`/api/hr/leaves/balances-grid?year=${year}`).then(setBalances);
     }
-  }, [api, tab, year]);
+  }, [api, entityId, tab, year]);
 
   async function hrApprove(leaveId: string, status: 'HR_APPROVED' | 'REJECTED') {
     try {

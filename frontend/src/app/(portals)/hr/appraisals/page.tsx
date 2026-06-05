@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type AppraisalRow = {
   appraisal_record_id: string;
@@ -16,13 +17,14 @@ type AppraisalRow = {
 };
 
 export default function HrAppraisalsPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [year, setYear] = useState(new Date().getFullYear());
   const [rows, setRows] = useState<AppraisalRow[]>([]);
 
   useEffect(() => {
     void api.get<AppraisalRow[]>(`/api/hr/appraisals/api-scores?year=${year}`).then(setRows);
-  }, [api, year]);
+  }, [api, entityId, year]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">

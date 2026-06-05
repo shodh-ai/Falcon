@@ -6,7 +6,8 @@ import { Lock } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type EmployeeRow = {
   user_id: string;
@@ -15,13 +16,15 @@ type EmployeeRow = {
 };
 
 export default function HrKycVaultPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [rows, setRows] = useState<EmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     void api.get<EmployeeRow[]>('/api/hr/directory').then(setRows).finally(() => setLoading(false));
-  }, [api]);
+  }, [api, entityId]);
 
   if (loading) return <FalconLoader label="Loading KYC vault index…" />;
 

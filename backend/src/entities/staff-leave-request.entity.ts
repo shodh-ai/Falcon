@@ -43,6 +43,18 @@ export class StaffLeaveRequest extends BaseTenantEntity {
   @Column({ type: 'varchar', length: 50, default: 'PENDING' })
   status: StaffLeaveStatus;
 
+  @Column({ type: 'int', nullable: true })
+  entity_id: number | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  workflow_id: string | null;
+
+  @Column({ type: 'int', default: 0 })
+  current_step_order: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  current_approver_user_id: string | null;
+
   @CreateDateColumn()
   applied_at: Date;
 }

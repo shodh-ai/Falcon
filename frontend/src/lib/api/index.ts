@@ -10,3 +10,4 @@ export * from './api.operations';
 export * from './api.hostel-admin';
 export * from './api.campus-events';
 export * from './api.settings';
+export * from './use-hr-api';

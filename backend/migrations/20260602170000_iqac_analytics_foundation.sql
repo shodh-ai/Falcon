@@ -29,19 +29,60 @@ CREATE TABLE IF NOT EXISTS iqac_report_jobs (
 );
 
 DROP MATERIALIZED VIEW IF EXISTS iqac_mv_placement_stats;
-CREATE MATERIALIZED VIEW iqac_mv_placement_stats AS
-SELECT
-  pa.tenant_id,
-  COALESCE(d.dept_name, 'University-wide') AS dept_name,
-  COUNT(DISTINCT pa.student_user_id)::int AS total_placed,
-  ROUND(AVG(jd.package_lpa)::numeric, 2) AS average_package,
-  ROUND(MAX(jd.package_lpa)::numeric, 2) AS highest_package
-FROM placement_applications pa
-JOIN placement_job_descriptions jd ON jd.jd_id = pa.jd_id
-JOIN users u ON u.user_id = pa.student_user_id
-LEFT JOIN departments d ON d.dept_id = u.dept_id
-WHERE jd.package_lpa IS NOT NULL
-GROUP BY pa.tenant_id, d.dept_name;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'placement_applications' AND column_name = 'jd_id'
+  ) THEN
+    EXECUTE $mv$
+      CREATE MATERIALIZED VIEW iqac_mv_placement_stats AS
+      SELECT
+        pa.tenant_id,
+        COALESCE(d.dept_name, 'University-wide') AS dept_name,
+        COUNT(DISTINCT pa.student_user_id)::int AS total_placed,
+        ROUND(AVG(jd.package_lpa)::numeric, 2) AS average_package,
+        ROUND(MAX(jd.package_lpa)::numeric, 2) AS highest_package
+      FROM placement_applications pa
+      JOIN placement_job_descriptions jd ON jd.jd_id = pa.jd_id
+      JOIN users u ON u.user_id = pa.student_user_id
+      LEFT JOIN departments d ON d.dept_id = u.dept_id
+      WHERE jd.package_lpa IS NOT NULL
+      GROUP BY pa.tenant_id, d.dept_name
+    $mv$;
+  ELSIF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'placement_job_applications'
+  ) THEN
+    EXECUTE $mv$
+      CREATE MATERIALIZED VIEW iqac_mv_placement_stats AS
+      SELECT
+        u.tenant_id,
+        COALESCE(d.dept_name, 'University-wide') AS dept_name,
+        COUNT(DISTINCT pja.student_user_id) FILTER (WHERE pja.status IN ('ACCEPTED', 'OFFERED'))::int AS total_placed,
+        ROUND(AVG(jp.ctc_lpa)::numeric, 2) AS average_package,
+        ROUND(MAX(jp.ctc_lpa)::numeric, 2) AS highest_package
+      FROM placement_job_applications pja
+      JOIN placement_job_postings jp ON jp.job_id = pja.job_id
+      JOIN users u ON u.user_id = pja.student_user_id
+      LEFT JOIN departments d ON d.dept_id = u.dept_id
+      WHERE jp.ctc_lpa IS NOT NULL
+      GROUP BY u.tenant_id, d.dept_name
+    $mv$;
+  ELSE
+    EXECUTE $mv$
+      CREATE MATERIALIZED VIEW iqac_mv_placement_stats AS
+      SELECT
+        t.tenant_id,
+        'University-wide'::varchar AS dept_name,
+        0::int AS total_placed,
+        0::numeric AS average_package,
+        0::numeric AS highest_package
+      FROM tenants t
+      WHERE false
+    $mv$;
+  END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_iqac_mv_placement_stats
   ON iqac_mv_placement_stats(tenant_id, dept_name);
@@ -55,12 +96,10 @@ SELECT
     WHERE r.role_name IN ('Faculty', 'HOD', 'Dean')
       AND (hp.designation ILIKE '%phd%' OR hp.designation ILIKE '%doctor%')
   )::int AS phd_faculty,
-  COALESCE(SUM(frp.grant_amount), 0)::numeric(14,2) AS total_research_grants
+  0::numeric(14,2) AS total_research_grants
 FROM users u
 JOIN roles r ON r.role_id = u.role_id
 LEFT JOIN hr_employee_profiles hp ON hp.user_id = u.user_id AND hp.tenant_id = u.tenant_id
-LEFT JOIN faculty_research_projects frp ON frp.principal_investigator_user_id = u.user_id
-  AND frp.tenant_id = u.tenant_id AND frp.status IN ('ONGOING', 'COMPLETED')
 WHERE u.is_active = true
 GROUP BY u.tenant_id;
 

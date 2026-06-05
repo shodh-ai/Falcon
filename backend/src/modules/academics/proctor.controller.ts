@@ -81,6 +81,22 @@ export class ProctorController {
     return this.proctor.sendMessage(req.user.user_id, dto.message);
   }
 
+  @Get('messages/inbox')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  messageInbox(@Req() req: { user: AuthUser }) {
+    return this.proctor.listMessageInbox(req.user.user_id);
+  }
+
+  @Post('messages/:interactionId/reply')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  replyToMessage(
+    @Param('interactionId') interactionId: string,
+    @Req() req: { user: AuthUser },
+    @Body() dto: { reply: string },
+  ) {
+    return this.proctor.replyToMessage(req.user.user_id, interactionId, dto.reply);
+  }
+
   @Post('leave-requests')
   @Roles('Student')
   submitLeaveRequest(@Req() req: { user: AuthUser }, @Body() dto: SubmitMentorLeaveRequestDto) {

@@ -66,7 +66,7 @@ export class HrRulesService {
       `SELECT shift_id, shift_name, start_time::text, end_time::text, grace_period_mins,
               half_day_min_hours, full_day_min_hours, entity_id
        FROM hr_shifts
-       WHERE entity_id = $1 OR entity_id IS NULL
+       WHERE entity_id = $1
        ORDER BY shift_name`,
       [entityId],
     );

@@ -10,7 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type HrPageKind =
   | 'dashboard'
@@ -129,7 +130,8 @@ function rowsFrom(data: unknown, dataKey?: string) {
 
 export function HrmsPage({ kind }: { kind: HrPageKind }) {
   const config = configs[kind];
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -149,7 +151,7 @@ export function HrmsPage({ kind }: { kind: HrPageKind }) {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.endpoint]);
+  }, [config.endpoint, entityId]);
 
   const rows = useMemo(() => {
     const all = rowsFrom(data, config.dataKey);

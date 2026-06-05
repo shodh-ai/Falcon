@@ -3,6 +3,9 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { LmsExtendedService } from './lms-extended.service';
+import { CreateLiveClassDto } from './dto/create-live-class.dto';
+import { CreateForumThreadDto } from './dto/create-forum-thread.dto';
+import { CreateForumReplyDto } from './dto/create-forum-reply.dto';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
@@ -41,8 +44,8 @@ export class LmsExtendedController {
 
   @Post('live-classes')
   @Roles('Faculty', 'SuperAdmin')
-  createLive(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.lms.createLiveClass(this.tenant(req), req.user.user_id, dto as never);
+  createLive(@Req() req: { user: AuthUser }, @Body() dto: CreateLiveClassDto) {
+    return this.lms.createLiveClass(this.tenant(req), req.user.user_id, dto);
   }
 
   @Get('courses/:courseId/live-classes')
@@ -59,7 +62,7 @@ export class LmsExtendedController {
 
   @Post('forums/threads')
   @Roles('Faculty', 'Student', 'SuperAdmin')
-  createThread(@Req() req: { user: AuthUser }, @Body() dto: { course_id: string; title: string; body: string }) {
+  createThread(@Req() req: { user: AuthUser }, @Body() dto: CreateForumThreadDto) {
     return this.lms.createThread(this.tenant(req), req.user.user_id, dto);
   }
 
@@ -71,7 +74,11 @@ export class LmsExtendedController {
 
   @Post('forums/threads/:threadId/replies')
   @Roles('Faculty', 'Student', 'SuperAdmin')
-  reply(@Req() req: { user: AuthUser }, @Param('threadId') threadId: string, @Body() dto: { body: string }) {
+  reply(
+    @Req() req: { user: AuthUser },
+    @Param('threadId') threadId: string,
+    @Body() dto: CreateForumReplyDto,
+  ) {
     return this.lms.replyToThread(threadId, req.user.user_id, dto.body);
   }
 

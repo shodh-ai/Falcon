@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, MoreThanOrEqual } from 'typeorm';
+import { Repository, MoreThanOrEqual } from 'typeorm';
 import { HrHoliday } from '../../entities/hr-holiday.entity';
 import { HrDailyAttendance } from '../../entities/hr-daily-attendance.entity';
 import { StaffLeaveRequest, StaffRequestType } from '../../entities/staff-leave-request.entity';
@@ -12,6 +12,8 @@ import { NotificationEmitterService } from '../../core/notifications/notificatio
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
+import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
+import { assertNoPendingRow } from '../../common/validators/pending-request.util';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -38,6 +40,7 @@ export class HrWorkforceService {
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly attendanceCalc: AttendanceCalculationService,
+    private readonly hrWorkflow: HrWorkflowRoutingService,
   ) {}
 
   async getTodayWidget(userId: string) {
@@ -138,6 +141,21 @@ export class HrWorkforceService {
       if (!startDate || !endDate) throw new BadRequestException('start_date and end_date are required');
     }
 
+    await assertNoPendingRow(this.requests, {
+      tenant_id: tenantId,
+      staff_user_id: staffUserId,
+      request_type: requestType,
+      status: 'PENDING',
+    });
+
+    const entityId = await this.resolveEmployeeEntityId(tenantId, staffUserId);
+    const routing = await this.hrWorkflow.initializeRequest(
+      tenantId,
+      entityId,
+      requestType,
+      staffUserId,
+    );
+
     const row = this.requests.create({
       tenant_id: tenantId,
       staff_user_id: staffUserId,
@@ -148,24 +166,21 @@ export class HrWorkforceService {
       reason: dto.reason?.trim() ?? null,
       regularization_date: dto.regularization_date ?? null,
       missed_punch_type: dto.missed_punch_type ?? null,
-      status: 'PENDING',
+      status: routing.is_final ? 'HR_APPROVED' : 'PENDING',
+      entity_id: entityId,
+      workflow_id: routing.workflow_id,
+      current_step_order: routing.step_order,
+      current_approver_user_id: routing.approver_user_id,
     });
     const saved = await this.requests.save(row);
 
-    try {
-      const approver = await this.workflowRouting.getReportingOfficer(staffUserId);
-      const label = this.requestTypeLabel(requestType);
-      this.workflowNotify.notifyApprover({
-        tenantId,
-        approver,
-        title: `${label} pending your approval`,
-        message: `${staff.name} submitted ${label} (${startDate}${endDate !== startDate ? ` – ${endDate}` : ''}).`,
-        actionLink: '/faculty/team-requests',
-        category: 'HR',
-        requesterName: staff.name,
-      });
-    } catch {
-      /* no reporting officer configured */
+    if (routing.is_final) {
+      await this.applyApprovalSideEffects(saved);
+      return saved;
+    }
+
+    if (routing.approver_user_id) {
+      await this.notifyWorkflowApprover(tenantId, staff, saved, routing.approver_user_id);
     }
 
     return saved;
@@ -179,15 +194,9 @@ export class HrWorkforceService {
   }
 
   async listTeamPending(reportingOfficerId: string, tenantId: string, requestType?: StaffRequestType) {
-    const reportees = await this.users.find({
-      where: { tenant_id: tenantId, reporting_officer_id: reportingOfficerId, is_active: true },
-    });
-    const ids = reportees.map((u) => u.user_id);
-    if (ids.length === 0) return [];
-
     const where: Record<string, unknown> = {
       tenant_id: tenantId,
-      staff_user_id: In(ids),
+      current_approver_user_id: reportingOfficerId,
       status: 'PENDING',
     };
     if (requestType) where.request_type = requestType;
@@ -231,26 +240,46 @@ export class HrWorkforceService {
     if (!row) throw new NotFoundException('Request not found');
 
     const staff = row.staff ?? (await this.users.findOne({ where: { user_id: row.staff_user_id } }));
-    if (staff?.reporting_officer_id !== reportingOfficerId) {
-      throw new ForbiddenException('Only the assigned reporting officer can act on this request');
-    }
+    this.hrWorkflow.assertActorIsCurrentApprover(reportingOfficerId, row.current_approver_user_id);
+
     if (row.status !== 'PENDING') {
       throw new BadRequestException('Request has already been processed');
     }
 
     if (action === 'REJECT') {
       row.status = 'REJECTED';
+      row.current_approver_user_id = null;
       const saved = await this.requests.save(row);
-      this.notifyEmployeeDecision(staff, row, false, comment);
+      this.notifyEmployeeDecision(staff!, row, false, comment);
       return saved;
     }
 
-    row.status = 'HR_APPROVED';
+    const entityId = row.entity_id ?? (await this.resolveEmployeeEntityId(tenantId, row.staff_user_id));
+    const next = await this.hrWorkflow.advanceAfterApproval(
+      tenantId,
+      entityId,
+      row.request_type,
+      row.staff_user_id,
+      row.current_step_order,
+    );
+
+    if (next.is_final) {
+      row.status = 'HR_APPROVED';
+      row.current_approver_user_id = null;
+      const saved = await this.requests.save(row);
+      await this.applyApprovalSideEffects(saved);
+      this.notifyEmployeeDecision(staff!, saved, true, comment);
+      return saved;
+    }
+
+    row.current_step_order = next.step_order;
+    row.current_approver_user_id = next.approver_user_id;
     const saved = await this.requests.save(row);
 
-    await this.applyApprovalSideEffects(saved);
+    if (next.approver_user_id) {
+      await this.notifyWorkflowApprover(tenantId, staff!, saved, next.approver_user_id);
+    }
 
-    this.notifyEmployeeDecision(staff, saved, true, comment);
     return saved;
   }
 
@@ -348,6 +377,40 @@ export class HrWorkforceService {
     await this.legacyAttendance.save(leg);
 
     return row;
+  }
+
+  private async resolveEmployeeEntityId(tenantId: string, userId: string): Promise<number> {
+    const profile = await this.users.manager.query(
+      `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [userId, tenantId],
+    );
+    if (!profile[0]?.entity_id) throw new BadRequestException('Employee entity not configured');
+    return Number(profile[0].entity_id);
+  }
+
+  private async notifyWorkflowApprover(
+    tenantId: string,
+    staff: User,
+    row: StaffLeaveRequest,
+    approverUserId: string,
+  ) {
+    const approver = await this.users.findOne({ where: { user_id: approverUserId } });
+    if (!approver) return;
+    const label = this.requestTypeLabel(row.request_type);
+    this.workflowNotify.notifyApprover({
+      tenantId,
+      approver: {
+        userId: approver.user_id,
+        email: approver.email,
+        name: approver.name,
+        routeReason: `HR workflow step ${row.current_step_order}`,
+      },
+      title: `${label} pending your approval (Step ${row.current_step_order})`,
+      message: `${staff.name} submitted ${label} (${row.start_date}${row.end_date !== row.start_date ? ` – ${row.end_date}` : ''}).`,
+      actionLink: '/faculty/team-requests',
+      category: 'HR',
+      requesterName: staff.name,
+    });
   }
 
   private async applyApprovalSideEffects(row: StaffLeaveRequest) {

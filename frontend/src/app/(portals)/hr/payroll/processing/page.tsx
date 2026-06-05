@@ -6,7 +6,8 @@ import { Play } from 'lucide-react';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type Payslip = {
   payslip_id: string;
@@ -18,7 +19,8 @@ type Payslip = {
 };
 
 export default function HrPayrollProcessingPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [payslips, setPayslips] = useState<Payslip[]>([]);
   const [running, setRunning] = useState(false);
@@ -29,7 +31,7 @@ export default function HrPayrollProcessingPage() {
 
   useEffect(() => {
     load();
-  }, [api, month]);
+  }, [api, entityId, month]);
 
   async function runPayroll() {
     setRunning(true);

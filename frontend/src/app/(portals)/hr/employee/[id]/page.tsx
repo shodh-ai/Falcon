@@ -9,7 +9,8 @@ import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type Profile360 = {
   user_id: string;
@@ -21,6 +22,8 @@ type Profile360 = {
   designation: string;
   joining_date: string;
   reporting_officer_name: string | null;
+  org_unit_id: string | null;
+  org_unit_name: string | null;
   kyc: {
     pan_masked: string;
     aadhaar_masked: string;
@@ -35,24 +38,41 @@ type Profile360 = {
 function EmployeeProfileContent() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [profile, setProfile] = useState<Profile360 | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'overview' | 'kyc'>('overview');
   const [revealed, setRevealed] = useState(false);
   const [revealing, setRevealing] = useState(false);
+  const [orgUnits, setOrgUnits] = useState<{ unit_id: string; unit_name: string; unit_type: string }[]>([]);
+  const [orgUnitId, setOrgUnitId] = useState('');
 
   useEffect(() => {
     if (searchParams.get('tab') === 'kyc') setTab('kyc');
   }, [searchParams]);
 
   useEffect(() => {
+    setLoading(true);
     void api
       .get<Profile360>(`/api/hr/employees/${id}/360`)
-      .then(setProfile)
+      .then((p) => {
+        setProfile(p);
+        setOrgUnitId(p.org_unit_id ?? '');
+      })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Load failed'))
       .finally(() => setLoading(false));
-  }, [api, id]);
+    void api.get<{ unit_id: string; unit_name: string; unit_type: string }[]>('/api/hr/org-units').then(setOrgUnits);
+  }, [api, entityId, id]);
+
+  async function saveOrgUnit() {
+    try {
+      await api.patch(`/api/hr/employees/${id}/master`, { org_unit_id: orgUnitId || null });
+      toast.success('Org unit updated');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Save failed');
+    }
+  }
 
   async function reveal() {
     setRevealing(true);
@@ -106,6 +126,27 @@ function EmployeeProfileContent() {
                 <span className="text-muted-foreground">Reporting officer:</span>{' '}
                 {profile.reporting_officer_name ?? '—'}
               </p>
+              <p>
+                <span className="text-muted-foreground">Org unit:</span>{' '}
+                {profile.org_unit_name ?? '—'}
+              </p>
+              <div className="flex gap-2 pt-2">
+                <select
+                  className="flex-1 rounded-md border px-2 py-1 text-sm"
+                  value={orgUnitId}
+                  onChange={(e) => setOrgUnitId(e.target.value)}
+                >
+                  <option value="">— Select org unit —</option>
+                  {orgUnits.map((u) => (
+                    <option key={u.unit_id} value={u.unit_id}>
+                      {u.unit_name} ({u.unit_type})
+                    </option>
+                  ))}
+                </select>
+                <Button size="sm" variant="outline" onClick={() => void saveOrgUnit()}>
+                  Save
+                </Button>
+              </div>
               <Badge>{profile.role}</Badge>
             </CardContent>
           </Card>

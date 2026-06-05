@@ -10,6 +10,8 @@ import { AuthModule } from '../../auth/auth.module';
 import { SuperAdminController } from './super-admin.controller';
 import { SuperAdminService } from './super-admin.service';
 import { ImpersonationService } from './impersonation.service';
+import { OrgEntityService } from './org-entity.service';
+import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
 
 @Module({
   imports: [
@@ -18,7 +20,7 @@ import { ImpersonationService } from './impersonation.service';
     AuthModule,
   ],
   controllers: [SuperAdminController],
-  providers: [SuperAdminService, ImpersonationService],
-  exports: [SuperAdminService, ImpersonationService],
+  providers: [SuperAdminService, ImpersonationService, OrgEntityService, EntityCreatorGuard],
+  exports: [SuperAdminService, ImpersonationService, OrgEntityService],
 })
 export class SuperAdminModule {}

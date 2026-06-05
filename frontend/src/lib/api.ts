@@ -5,6 +5,13 @@ import { getSubdomainFromClient } from '@/lib/tenant';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+function wrapFetchError(err: unknown, path: string): Error {
+  if (err instanceof TypeError && err.message === 'Failed to fetch') {
+    return new Error(`Cannot reach API at ${API_URL}${path}. Start the backend with: cd backend && npm run start:dev`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 function tenantHeaders(): Record<string, string> {
   return { 'x-tenant-subdomain': getSubdomainFromClient() };
 }
@@ -18,15 +25,20 @@ async function request<T>(
   method: Method = 'GET',
   body?: unknown,
 ): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: {
-      ...tenantHeaders(),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? (body instanceof FormData ? body : JSON.stringify(body)) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: {
+        ...tenantHeaders(),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(body && !(body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? (body instanceof FormData ? body : JSON.stringify(body)) : undefined,
+    });
+  } catch (err) {
+    throw wrapFetchError(err, path);
+  }
 
   if (response.status === 401) {
     if (typeof window !== 'undefined') {

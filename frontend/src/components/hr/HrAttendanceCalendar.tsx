@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
+import { useOptionalHrEntity } from '@/context/HrEntityContext';
 import {
   ATTENDANCE_LEGEND,
   attendanceCircleStyle,
@@ -45,7 +46,15 @@ function monthMeta(month: string) {
 }
 
 export function HrAttendanceCalendar(props: Props) {
-  const api = useAuthedApi();
+  const authedApi = useAuthedApi();
+  const hrEntity = useOptionalHrEntity();
+  const entityId = hrEntity?.entityId ?? null;
+  const api = useMemo(
+    () => ({
+      get: (path: string) => authedApi.get(hrEntity ? hrEntity.withEntityQuery(path) : path),
+    }),
+    [authedApi, hrEntity],
+  );
   const [internalMonth, setInternalMonth] = useState(new Date().toISOString().slice(0, 7));
   const month = props.month ?? internalMonth;
   const showMonthPicker = props.month === undefined;
@@ -57,16 +66,16 @@ export function HrAttendanceCalendar(props: Props) {
     setLoading(true);
     if (props.mode === 'self') {
       void api
-        .get<CalendarPayload>(`/api/hr/attendance/calendar?month=${month}`)
-        .then(setSelfData)
+        .get(`/api/hr/attendance/calendar?month=${month}`)
+        .then((data) => setSelfData(data as CalendarPayload))
         .finally(() => setLoading(false));
     } else {
       void api
-        .get<MatrixPayload>(`/api/hr/attendance/matrix?month=${month}`)
-        .then(setMatrixData)
+        .get(`/api/hr/attendance/matrix?month=${month}`)
+        .then((data) => setMatrixData(data as MatrixPayload))
         .finally(() => setLoading(false));
     }
-  }, [api, month, props.mode]);
+  }, [api, entityId, month, props.mode]);
 
   const { year, monthNum, daysInMonth, leading } = monthMeta(month);
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

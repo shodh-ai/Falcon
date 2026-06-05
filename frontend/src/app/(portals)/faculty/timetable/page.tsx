@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Eye, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
@@ -8,8 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useAuthedApi } from '@/lib/api';
-import { useEffect } from 'react';
 
 const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -45,20 +51,35 @@ export default function FacultyTimetablePage() {
     new_date: '',
     reason: '',
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [viewAdjustment, setViewAdjustment] = useState<Adjustment | null>(null);
+
+  async function loadAdjustments() {
+    setAdjustments(await api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'));
+  }
 
   useEffect(() => {
     void api.get<TimetableRow[]>('/api/academics/faculty/workspaces/timetable').then(setSchedule);
-    void api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments').then(setAdjustments);
+    void loadAdjustments();
   }, [api]);
+
+  const pendingAdjustments = useMemo(
+    () => adjustments.filter((a) => a.status.includes('PENDING')),
+    [adjustments],
+  );
 
   async function submitAdjustment(e: FormEvent) {
     e.preventDefault();
+    setIsSubmitting(true);
     try {
       await api.post('/api/academics/faculty/workspaces/adjustments', form);
       toast.success('Request sent to HoD for approval. Students will be notified after approval.');
-      setAdjustments(await api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'));
+      setForm({ course_id: '', adjustment_type: 'EXTRA_CLASS', new_date: '', reason: '' });
+      await loadAdjustments();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Request failed');
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -127,8 +148,8 @@ export default function FacultyTimetablePage() {
               value={form.reason}
               onChange={(e) => setForm({ ...form, reason: e.target.value })}
             />
-            <Button type="submit" className="md:col-span-2">
-              Submit for HoD approval
+            <Button type="submit" className="md:col-span-2" disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit for HoD approval'}
             </Button>
           </form>
         </CardContent>
@@ -136,19 +157,65 @@ export default function FacultyTimetablePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Recent requests</CardTitle>
+          <CardTitle className="text-base">My Pending Requests</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
-          {adjustments.map((a) => (
-            <div key={a.adjustment_id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
-              <span>
-                {a.course_code} — {a.adjustment_type.replace('_', ' ')}
-              </span>
-              <Badge variant="outline">{a.status}</Badge>
+        <CardContent>
+          {pendingAdjustments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No pending adjustment requests.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-2 pr-3">Requested Date</th>
+                    <th className="py-2 pr-3">Course</th>
+                    <th className="py-2 pr-3">Type</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2">View</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingAdjustments.map((a) => (
+                    <tr key={a.adjustment_id} className="border-b">
+                      <td className="py-2 pr-3">
+                        {a.new_date ? new Date(a.new_date).toLocaleString() : '—'}
+                      </td>
+                      <td className="py-2 pr-3">{a.course_code}</td>
+                      <td className="py-2 pr-3">{a.adjustment_type.replace('_', ' ')}</td>
+                      <td className="py-2 pr-3">
+                        <Badge variant="outline">{a.status}</Badge>
+                      </td>
+                      <td className="py-2">
+                        <Button size="sm" variant="ghost" onClick={() => setViewAdjustment(a)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
+          )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!viewAdjustment} onOpenChange={(open) => !open && setViewAdjustment(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request details</DialogTitle>
+          </DialogHeader>
+          {viewAdjustment && (
+            <div className="space-y-2 text-sm">
+              <p><span className="font-medium">Course:</span> {viewAdjustment.course_code} — {viewAdjustment.course_name}</p>
+              <p><span className="font-medium">Type:</span> {viewAdjustment.adjustment_type.replace('_', ' ')}</p>
+              <p><span className="font-medium">Status:</span> {viewAdjustment.status}</p>
+              <p><span className="font-medium">Original date:</span> {viewAdjustment.original_date ? new Date(viewAdjustment.original_date).toLocaleString() : '—'}</p>
+              <p><span className="font-medium">Requested date:</span> {viewAdjustment.new_date ? new Date(viewAdjustment.new_date).toLocaleString() : '—'}</p>
+              <p><span className="font-medium">Reason:</span> {viewAdjustment.reason ?? '—'}</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

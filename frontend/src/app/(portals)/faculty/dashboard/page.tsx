@@ -26,7 +26,11 @@ type HrSummary = {
 
 type PendingApprovals = {
   certificates: unknown[];
+  meetings?: unknown[];
+  leave_requests?: unknown[];
 };
+
+type LeaveBalance = { leave_type: string; entitled: string | number; used: string | number };
 
 type GatePassApproval = {
   pass_id: string;
@@ -42,6 +46,7 @@ export default function FacultyDashboardPage() {
   const [hrSummary, setHrSummary] = useState<HrSummary | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovals>({ certificates: [] });
   const [gatePassApprovals, setGatePassApprovals] = useState<GatePassApproval[]>([]);
+  const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,17 +56,19 @@ export default function FacultyDashboardPage() {
       try {
         setLoading(true);
         setError(null);
-        const [classData, hrData, approvalData, gatePassData] = await Promise.all([
+        const [classData, hrData, approvalData, gatePassData, balanceData] = await Promise.all([
           api.get<FacultyClass[]>('/api/academics/faculty/timetable/today'),
           api.get<HrSummary>('/api/hr/workforce/today').catch(() => api.get<HrSummary>('/api/hr/attendance/my-summary')),
           api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
           api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals'),
+          api.get<LeaveBalance[]>('/api/hr/leaves/my-balances').catch(() => []),
         ]);
         if (!cancelled) {
           setClasses(classData);
           setHrSummary(hrData);
           setPendingApprovals(approvalData);
           setGatePassApprovals(gatePassData);
+          setLeaveBalances(balanceData);
         }
       } catch (e) {
         if (!cancelled) {
@@ -86,6 +93,17 @@ export default function FacultyDashboardPage() {
     await api.patch(`/api/hr/gate-passes/${passId}/action`, { status });
     setGatePassApprovals((prev) => prev.filter((pass) => pass.pass_id !== passId));
   }
+
+  const pendingCerts = pendingApprovals.certificates.length;
+  const pendingMeetings = pendingApprovals.meetings?.length ?? 0;
+  const pendingLeaves = pendingApprovals.leave_requests?.length ?? 0;
+  const totalPending = pendingCerts + pendingMeetings + pendingLeaves;
+
+  const balanceRemaining = (type: string) => {
+    const row = leaveBalances.find((b) => b.leave_type === type);
+    if (!row) return '—';
+    return Math.max(0, Number(row.entitled) - Number(row.used));
+  };
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -166,8 +184,12 @@ export default function FacultyDashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-black text-sgvu-navy">{pendingApprovals.certificates.length} pending</p>
-              <p className="text-sm text-muted-foreground">Extracurricular certificates from mentees</p>
+              <p className="text-2xl font-black text-sgvu-navy">{totalPending} pending</p>
+              <p className="text-sm text-muted-foreground">
+                {pendingCerts} cert{pendingCerts !== 1 ? 's' : ''}, {pendingMeetings} meeting
+                {pendingMeetings !== 1 ? 's' : ''}, {pendingLeaves} leave
+                {pendingLeaves !== 1 ? 's' : ''}
+              </p>
               <Button asChild className="mt-4 w-full" variant="secondary">
                 <Link href="/faculty/mentorship">Open queue</Link>
               </Button>
@@ -183,15 +205,15 @@ export default function FacultyDashboardPage() {
             </CardHeader>
             <CardContent className="grid grid-cols-3 gap-2 text-center text-sm">
               <div className="rounded-xl bg-muted p-3">
-                <p className="font-bold text-sgvu-navy">4</p>
+                <p className="font-bold text-sgvu-navy">{balanceRemaining('CL')}</p>
                 <p className="text-xs text-muted-foreground">CL</p>
               </div>
               <div className="rounded-xl bg-muted p-3">
-                <p className="font-bold text-sgvu-navy">6</p>
+                <p className="font-bold text-sgvu-navy">{balanceRemaining('SL')}</p>
                 <p className="text-xs text-muted-foreground">SL</p>
               </div>
               <div className="rounded-xl bg-muted p-3">
-                <p className="font-bold text-sgvu-navy">12</p>
+                <p className="font-bold text-sgvu-navy">{balanceRemaining('EL')}</p>
                 <p className="text-xs text-muted-foreground">EL</p>
               </div>
             </CardContent>

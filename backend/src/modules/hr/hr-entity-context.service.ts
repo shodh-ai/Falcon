@@ -27,6 +27,9 @@ export type HrAccessLevel = 'none' | 'read' | 'write';
 export type HrCapabilities = Partial<Record<HrModuleKey, HrAccessLevel>>;
 
 const MASTER_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'HR', 'President']);
+const UNIVERSAL_ENTITY_ROLES = new Set(['SuperAdmin']);
+
+export type AllowedEntity = { id: number; name: string; code: string };
 
 @Injectable()
 export class HrEntityContextService {
@@ -45,6 +48,55 @@ export class HrEntityContextService {
        ORDER BY entity_id ASC`,
       [tenantId],
     );
+  }
+
+  async listAllowedEntities(tenantId: string, userId: string, roles: string[] = []) {
+    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+      return this.listEntities(tenantId);
+    }
+
+    return this.dataSource.query(
+      `SELECT oe.entity_id, oe.entity_code, oe.entity_name, oe.is_active
+       FROM org_entities oe
+       INNER JOIN user_entity_access uea ON uea.entity_id = oe.entity_id
+       WHERE oe.tenant_id = $1 AND uea.user_id = $2 AND oe.is_active = true
+       ORDER BY oe.entity_id ASC`,
+      [tenantId, userId],
+    );
+  }
+
+  formatAllowedEntities(
+    rows: Array<{ entity_id: number; entity_name: string; entity_code: string }>,
+  ): AllowedEntity[] {
+    return rows.map((row) => ({
+      id: row.entity_id,
+      name: row.entity_name,
+      code: row.entity_code,
+    }));
+  }
+
+  async assertEntityAccess(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    entityId: number,
+  ): Promise<void> {
+    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+      await this.resolveEntityId(tenantId, entityId);
+      return;
+    }
+
+    const rows = await this.dataSource.query(
+      `SELECT 1
+       FROM user_entity_access uea
+       INNER JOIN org_entities oe ON oe.entity_id = uea.entity_id
+       WHERE uea.user_id = $1 AND uea.entity_id = $2
+         AND oe.tenant_id = $3 AND oe.is_active = true`,
+      [userId, entityId, tenantId],
+    );
+    if (!rows[0]) {
+      throw new ForbiddenException('You do not have access to this entity');
+    }
   }
 
   async resolveEntityId(tenantId: string, entityIdRaw?: string | number): Promise<number> {
@@ -175,5 +227,20 @@ export class HrEntityContextService {
     if (!caps) return false;
     const access = caps[module] ?? 'none';
     return access !== 'none';
+  }
+
+  capabilitiesToPermissionList(caps: HrCapabilities | null | undefined): string[] {
+    if (!caps) return [];
+    return Object.entries(caps)
+      .filter(([, level]) => level && level !== 'none')
+      .map(([module, level]) => `${module}:${level}`);
+  }
+
+  hasPermission(permissions: string[], module: HrModuleKey, minLevel: 'read' | 'write' = 'read'): boolean {
+    const required = minLevel === 'write' ? ['write'] : ['read', 'write'];
+    return permissions.some((p) => {
+      const [mod, level] = p.split(':');
+      return mod === module && required.includes(level);
+    });
   }
 }

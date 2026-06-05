@@ -1,28 +1,62 @@
 -- Master Requirements final sweep: placement drives, admin events, timetable, policy vault, permissions
 
--- Placement drives (ATS eligibility)
-CREATE TABLE IF NOT EXISTS placement_drives (
-  drive_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
-  company_id UUID NOT NULL REFERENCES placement_companies(company_id) ON DELETE CASCADE,
-  job_profile VARCHAR(255) NOT NULL,
-  package_details_lpa NUMERIC(5,2) NULL,
-  min_cgpa NUMERIC(3,2) NOT NULL DEFAULT 6.00,
-  max_backlogs INT NOT NULL DEFAULT 0,
-  drive_date DATE NULL,
-  status VARCHAR(30) NOT NULL DEFAULT 'OPEN',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- Placement drives (ATS eligibility) — use alternate table names when legacy placement_drives exists.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'placement_drives' AND column_name = 'placement_drive_id'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'placement_drives' AND column_name = 'drive_id'
+  ) THEN
+    CREATE TABLE IF NOT EXISTS placement_ats_drives (
+      drive_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
+      company_id UUID NOT NULL REFERENCES placement_companies(company_id) ON DELETE CASCADE,
+      job_profile VARCHAR(255) NOT NULL,
+      package_details_lpa NUMERIC(5,2) NULL,
+      min_cgpa NUMERIC(3,2) NOT NULL DEFAULT 6.00,
+      max_backlogs INT NOT NULL DEFAULT 0,
+      drive_date DATE NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'OPEN',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
 
-CREATE TABLE IF NOT EXISTS placement_drive_applications (
-  application_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
-  drive_id UUID NOT NULL REFERENCES placement_drives(drive_id) ON DELETE CASCADE,
-  student_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-  eligibility_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
-  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (drive_id, student_user_id)
-);
+    CREATE TABLE IF NOT EXISTS placement_ats_drive_applications (
+      application_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
+      drive_id UUID NOT NULL REFERENCES placement_ats_drives(drive_id) ON DELETE CASCADE,
+      student_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      eligibility_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (drive_id, student_user_id)
+    );
+  ELSE
+    CREATE TABLE IF NOT EXISTS placement_drives (
+      drive_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
+      company_id UUID NOT NULL REFERENCES placement_companies(company_id) ON DELETE CASCADE,
+      job_profile VARCHAR(255) NOT NULL,
+      package_details_lpa NUMERIC(5,2) NULL,
+      min_cgpa NUMERIC(3,2) NOT NULL DEFAULT 6.00,
+      max_backlogs INT NOT NULL DEFAULT 0,
+      drive_date DATE NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'OPEN',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS placement_drive_applications (
+      application_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
+      drive_id UUID NOT NULL REFERENCES placement_drives(drive_id) ON DELETE CASCADE,
+      student_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      eligibility_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (drive_id, student_user_id)
+    );
+  END IF;
+END $$;
 
 ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS hr_contacts JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS industry VARCHAR(100) NULL;

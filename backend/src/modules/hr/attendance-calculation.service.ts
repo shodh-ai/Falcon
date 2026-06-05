@@ -6,7 +6,7 @@ import { HrDailyAttendance, CalculatedAttendanceStatus } from '../../entities/hr
 import { HrHoliday } from '../../entities/hr-holiday.entity';
 import { HrShift } from '../../entities/hr-shift.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
-import { HrRulesService } from './hr-rules.service';
+import { HrRulesService, type AttendanceRulesDto } from './hr-rules.service';
 import { HrDynamicRulesService } from './hr-dynamic-rules.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
@@ -46,65 +46,80 @@ export class AttendanceCalculationService {
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  async getEmployeeShift(userId: string): Promise<ShiftContext> {
-    const rows = await this.dataSource.query<
-      Array<{
-        shift_id: string;
-        shift_name: string;
-        start_time: string;
-        end_time: string;
-        grace_period_mins: number;
-        half_day_min_hours: string;
-        full_day_min_hours: string;
-        week_off_day: number;
-      }>
+  private async loadAttendanceContext(userId: string) {
+    const profile = await this.dataSource.query<
+      Array<{ tenant_id: string; entity_id: number }>
     >(
-      `SELECT s.shift_id, s.shift_name, s.start_time::text, s.end_time::text,
-              s.grace_period_mins, s.half_day_min_hours, s.full_day_min_hours,
-              COALESCE(ep.week_off_day, 0) AS week_off_day
-       FROM hr_employee_profiles ep
-       LEFT JOIN hr_shifts s ON s.shift_id = ep.shift_id
-       WHERE ep.user_id = $1
-       LIMIT 1`,
+      `SELECT tenant_id, entity_id FROM hr_employee_profiles WHERE user_id = $1 LIMIT 1`,
       [userId],
     );
+    if (!profile[0]?.tenant_id || profile[0].entity_id == null) return null;
 
-    if (rows[0]?.shift_id) {
-      return {
-        shift_id: rows[0].shift_id,
-        shift_name: rows[0].shift_name,
-        start_time: this.normalizeTime(rows[0].start_time),
-        end_time: this.normalizeTime(rows[0].end_time),
-        grace_period_mins: Number(rows[0].grace_period_mins),
-        half_day_min_hours: Number(rows[0].half_day_min_hours),
-        full_day_min_hours: Number(rows[0].full_day_min_hours),
-        week_off_day: Number(rows[0].week_off_day),
-      };
+    const tenantId = profile[0].tenant_id;
+    const entityId = Number(profile[0].entity_id);
+    const shiftRow = await this.rules.getShiftForUser(tenantId, entityId, userId);
+    let entityRules: Record<string, unknown> | null = null;
+    try {
+      entityRules = await this.rules.getRules(tenantId, entityId);
+    } catch {
+      entityRules = null;
+    }
+    return { tenantId, entityId, shiftRow, entityRules };
+  }
+
+  async getEmployeeShift(userId: string): Promise<ShiftContext> {
+    const ctx = await this.loadAttendanceContext(userId);
+    if (ctx?.shiftRow?.shift_id) {
+      return this.shiftFromRow(ctx.shiftRow, ctx.entityRules);
     }
 
-    const fallback = await this.shifts.findOne({ where: { shift_name: 'General 9-5' } });
-    if (!fallback) {
-      return {
+    if (ctx?.entityId) {
+      const entityShift = await this.dataSource.query(
+        `SELECT shift_id, shift_name, start_time::text, end_time::text,
+                grace_period_mins, half_day_min_hours, full_day_min_hours, 0 AS week_off_day
+         FROM hr_shifts WHERE entity_id = $1 ORDER BY shift_name LIMIT 1`,
+        [ctx.entityId],
+      );
+      if (entityShift[0]) return this.shiftFromRow(entityShift[0], ctx.entityRules);
+    }
+
+    return this.shiftFromRow(
+      {
         shift_id: '',
         shift_name: 'Default',
         start_time: '09:00:00',
         end_time: '17:00:00',
-        grace_period_mins: 15,
+        grace_period_mins: ctx?.entityRules?.late_coming_max_mins ?? 15,
         half_day_min_hours: 4,
         full_day_min_hours: 8,
         week_off_day: 0,
-      };
-    }
+      },
+      ctx?.entityRules ?? null,
+    );
+  }
 
+  private shiftFromRow(
+    row: {
+      shift_id: string;
+      shift_name: string;
+      start_time: string;
+      end_time: string;
+      grace_period_mins: unknown;
+      half_day_min_hours: unknown;
+      full_day_min_hours: unknown;
+      week_off_day: unknown;
+    },
+    entityRules: Record<string, unknown> | null,
+  ): ShiftContext {
     return {
-      shift_id: fallback.shift_id,
-      shift_name: fallback.shift_name,
-      start_time: this.normalizeTime(fallback.start_time),
-      end_time: this.normalizeTime(fallback.end_time),
-      grace_period_mins: fallback.grace_period_mins,
-      half_day_min_hours: Number(fallback.half_day_min_hours),
-      full_day_min_hours: Number(fallback.full_day_min_hours),
-      week_off_day: 0,
+      shift_id: row.shift_id,
+      shift_name: row.shift_name,
+      start_time: this.normalizeTime(row.start_time),
+      end_time: this.normalizeTime(row.end_time),
+      grace_period_mins: Number(entityRules?.late_coming_max_mins ?? row.grace_period_mins ?? 15),
+      half_day_min_hours: Number(row.half_day_min_hours ?? 4),
+      full_day_min_hours: Number(row.full_day_min_hours ?? 8),
+      week_off_day: Number(row.week_off_day ?? 0),
     };
   }
 
@@ -143,6 +158,8 @@ export class AttendanceCalculationService {
     row?: HrDailyAttendance | null,
   ): Promise<DayCalculationResult> {
     const shiftCtx = shift ?? (await this.getEmployeeShift(userId));
+    const ctx = await this.loadAttendanceContext(userId);
+    const earlyMaxMins = Number(ctx?.entityRules?.early_going_max_mins ?? 0);
     const attendance = row ?? (await this.daily.findOne({ where: { user_id: userId, date } }));
 
     const dow = new Date(`${date}T12:00:00`).getDay();
@@ -173,7 +190,7 @@ export class AttendanceCalculationService {
     const hours = this.hoursBetween(attendance.first_in_time, attendance.last_out_time);
     const late = this.isLate(attendance.first_in_time, date, shiftCtx);
     const early = attendance.last_out_time
-      ? this.isEarly(attendance.last_out_time, date, shiftCtx)
+      ? this.isEarly(attendance.last_out_time, date, shiftCtx, earlyMaxMins)
       : false;
 
     let status: CalculatedAttendanceStatus;
@@ -323,9 +340,10 @@ export class AttendanceCalculationService {
     return firstIn.getTime() > graceEnd.getTime();
   }
 
-  private isEarly(lastOut: Date, date: string, shift: ShiftContext): boolean {
+  private isEarly(lastOut: Date, date: string, shift: ShiftContext, earlyMaxMins = 0): boolean {
     const shiftEnd = this.shiftDateTime(date, shift.end_time, 0);
-    return lastOut.getTime() < shiftEnd.getTime();
+    const earliestAllowed = new Date(shiftEnd.getTime() - earlyMaxMins * 60 * 1000);
+    return lastOut.getTime() < earliestAllowed.getTime();
   }
 
   private shiftDateTime(date: string, time: string, addMinutes: number) {

@@ -36,10 +36,12 @@ import { CourseLmsService } from './course-lms.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
+import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 
 @Module({
   imports: [
     StorageModule,
+    HelpdeskModule,
     TypeOrmModule.forFeature([
       Subject,
       Batch,

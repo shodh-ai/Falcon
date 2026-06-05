@@ -22,6 +22,13 @@ import { TenantService } from '../tenant/tenant.service';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { LocalLoginDto } from './dto/local-login.dto';
 
+type AuthProfileUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
+
 @Controller(['auth', 'api/auth'])
 export class AuthController {
   constructor(
@@ -48,12 +55,42 @@ export class AuthController {
 
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
-  async getProfile(@Req() req: Request & { user: { user_id: string; tenant_id?: string } }) {
-    const user = req.user;
+  async getProfile(@Req() req: Request & { user: AuthProfileUser }) {
+    return this.buildProfilePayload(req.user);
+  }
+
+  @Get('me')
+  @UseGuards(AuthGuard('jwt'))
+  async getMe(@Req() req: Request & { user: AuthProfileUser }) {
+    return this.buildProfilePayload(req.user);
+  }
+
+  @Get('me/permissions')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyPermissions(@Req() req: Request & { user: AuthProfileUser }) {
+    const payload = await this.buildProfilePayload(req.user);
+    return {
+      permissions: payload.permissions,
+      hr_capabilities: payload.hr_capabilities,
+      allowed_entities: payload.allowed_entities,
+    };
+  }
+
+  private async buildProfilePayload(user: AuthProfileUser) {
     const caps = user.tenant_id
       ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
       : null;
-    return { ...user, hr_capabilities: caps ?? {} };
+    const permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
+    const roles = user.roles?.length ? user.roles : user.role ? [user.role] : [];
+    const allowedRows = user.tenant_id
+      ? await this.hrEntityCtx.listAllowedEntities(user.tenant_id, user.user_id, roles)
+      : [];
+    return {
+      ...user,
+      hr_capabilities: caps ?? {},
+      permissions,
+      allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
+    };
   }
 
   @Public()

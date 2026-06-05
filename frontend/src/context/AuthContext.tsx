@@ -2,6 +2,8 @@
 
 import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
 
+export type AllowedEntity = { id: number; name: string; code: string };
+
 interface User {
   user_id: string;
   email: string;
@@ -15,6 +17,9 @@ interface User {
   tenant_id?: string;
   tenant_schema?: string;
   features?: string[];
+  hr_capabilities?: Record<string, 'none' | 'read' | 'write'>;
+  permissions?: string[];
+  allowed_entities?: AllowedEntity[];
 }
 
 interface AuthContextType {
@@ -46,14 +51,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const api = process.env.NEXT_PUBLIC_API_URL;
           if (api) {
             const { getSubdomainFromClient } = await import('@/lib/tenant');
-            const res = await fetch(`${api}/auth/profile`, {
-              headers: {
-                Authorization: `Bearer ${storedToken}`,
-                'x-tenant-subdomain': getSubdomainFromClient(),
-              },
-            });
-            if (res.ok) {
-              const fresh = await res.json();
+            const headers = {
+              Authorization: `Bearer ${storedToken}`,
+              'x-tenant-subdomain': getSubdomainFromClient(),
+            };
+            const [profileRes, permsRes] = await Promise.all([
+              fetch(`${api}/api/auth/me`, { headers }).catch(() => fetch(`${api}/auth/profile`, { headers })),
+              fetch(`${api}/api/auth/me/permissions`, { headers }),
+            ]);
+            if (profileRes.ok) {
+              const fresh = await profileRes.json();
+              if (permsRes.ok) {
+                const perms = await permsRes.json();
+                fresh.permissions = perms.permissions ?? fresh.permissions;
+                fresh.hr_capabilities = perms.hr_capabilities ?? fresh.hr_capabilities;
+                fresh.allowed_entities = perms.allowed_entities ?? fresh.allowed_entities;
+              }
               setUser(fresh);
               localStorage.setItem('user', JSON.stringify(fresh));
             }
@@ -86,16 +99,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!activeToken) return null;
 
     const { getSubdomainFromClient } = await import('@/lib/tenant');
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/profile`, {
-      headers: {
-        Authorization: `Bearer ${activeToken}`,
-        'x-tenant-subdomain': getSubdomainFromClient(),
-      },
-    });
+    const headers = {
+      Authorization: `Bearer ${activeToken}`,
+      'x-tenant-subdomain': getSubdomainFromClient(),
+    };
+    const api = process.env.NEXT_PUBLIC_API_URL;
+    const [response, permsRes] = await Promise.all([
+      fetch(`${api}/api/auth/me`, { headers }).catch(() => fetch(`${api}/auth/profile`, { headers })),
+      fetch(`${api}/api/auth/me/permissions`, { headers }),
+    ]);
 
     if (!response.ok) return null;
 
     const freshUser = await response.json();
+    if (permsRes.ok) {
+      const perms = await permsRes.json();
+      freshUser.permissions = perms.permissions ?? freshUser.permissions;
+      freshUser.hr_capabilities = perms.hr_capabilities ?? freshUser.hr_capabilities;
+      freshUser.allowed_entities = perms.allowed_entities ?? freshUser.allowed_entities;
+    }
     setUser(freshUser);
     localStorage.setItem('user', JSON.stringify(freshUser));
     return freshUser;

@@ -29,6 +29,8 @@ import { HrChecklistService } from './hr-checklist.service';
 import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
 import { HrDashboardService } from './hr-dashboard.service';
 import { HrReportsService } from './hr-reports.service';
+import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
+import { HrEntityScopeInterceptor } from '../../common/interceptors/hr-entity-scope.interceptor';
 
 @Module({
   imports: [
@@ -65,6 +67,8 @@ import { HrReportsService } from './hr-reports.service';
     HrPermissionGuard,
     HrDashboardService,
     HrReportsService,
+    HrWorkflowRoutingService,
+    HrEntityScopeInterceptor,
   ],
   exports: [
     HrService,
@@ -82,6 +86,7 @@ import { HrReportsService } from './hr-reports.service';
     HrChecklistService,
     HrDashboardService,
     HrReportsService,
+    HrWorkflowRoutingService,
   ],
 })
 export class HrModule {}

@@ -3,25 +3,34 @@
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import type { PortalConfig } from '@/lib/navigation';
-import { LayoutDashboard, Network, UserCog } from 'lucide-react';
+import { Building2, LayoutDashboard, Network, UserCog } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
-const superAdminPortal: PortalConfig = {
-  personaLabel: 'Master Admin',
-  personaTitle: 'God-mode governance',
-  homeHref: '/super-admin/dashboard',
-  navGroups: [
-    {
-      title: 'Control',
-      items: [
-        { label: 'Dashboard', href: '/super-admin/dashboard', icon: LayoutDashboard },
-        { label: 'Hierarchy', href: '/super-admin/hierarchy', icon: Network },
-        { label: 'Impersonation', href: '/super-admin/impersonation', icon: UserCog },
-      ],
-    },
-  ],
-  commandItems: [],
-};
+const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
 
 export function SuperAdminShell({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const isEntityCreator = (user?.email ?? '').trim().toLowerCase() === ENTITY_CREATOR_EMAIL;
+
+  const superAdminPortal: PortalConfig = {
+    personaLabel: 'Master Admin',
+    personaTitle: 'God-mode governance',
+    homeHref: '/super-admin/dashboard',
+    navGroups: [
+      {
+        title: 'Control',
+        items: [
+          { label: 'Dashboard', href: '/super-admin/dashboard', icon: LayoutDashboard },
+          ...(isEntityCreator
+            ? [{ label: 'Entities', href: '/super-admin/entities', icon: Building2 }]
+            : []),
+          { label: 'Hierarchy', href: '/super-admin/hierarchy', icon: Network },
+          { label: 'Impersonation', href: '/super-admin/impersonation', icon: UserCog },
+        ],
+      },
+    ],
+    commandItems: [],
+  };
+
   return <AppShell config={superAdminPortal}>{children}</AppShell>;
 }

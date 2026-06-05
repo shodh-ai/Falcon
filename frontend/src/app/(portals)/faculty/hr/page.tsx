@@ -50,6 +50,7 @@ export default function FacultyHrHubPage() {
     missed_punch_type: 'BOTH' as 'IN' | 'OUT' | 'BOTH',
     reason: '',
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function load() {
     if (!user?.user_id) return;
@@ -57,7 +58,7 @@ export default function FacultyHrHubPage() {
     try {
       const [widget, balanceData, holidayData, reqData] = await Promise.all([
         api.get<TodayWidget>('/api/hr/workforce/today'),
-        api.get<Balance[]>(`/hr/balances/${user.user_id}`),
+        api.get<Balance[]>('/api/hr/leaves/my-balances'),
         api.get<{ mandatory: Holiday[]; restricted: Holiday[] }>('/api/hr/holidays'),
         api.get<WorkforceRequest[]>('/api/hr/workforce/my-requests'),
       ]);
@@ -79,6 +80,7 @@ export default function FacultyHrHubPage() {
   async function submitRequest(e: FormEvent) {
     e.preventDefault();
     if (!modal) return;
+    setIsSubmitting(true);
     try {
       await api.post('/api/hr/workforce/requests', {
         request_type: modal,
@@ -95,6 +97,8 @@ export default function FacultyHrHubPage() {
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -300,8 +304,10 @@ export default function FacultyHrHubPage() {
                   onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
                 />
                 <div className="flex gap-2">
-                  <Button type="submit">Submit</Button>
-                  <Button type="button" variant="outline" onClick={() => setModal(null)}>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit'}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setModal(null)} disabled={isSubmitting}>
                     Cancel
                   </Button>
                 </div>

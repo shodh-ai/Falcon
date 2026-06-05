@@ -15,6 +15,7 @@ import {
 } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { User } from '../../entities/user.entity';
+import { assertNoPendingRow } from '../../common/validators/pending-request.util';
 
 @Injectable()
 export class TicketService {
@@ -32,6 +33,14 @@ export class TicketService {
   async createTicket(studentUserId: string, dto: CreateTicketDto) {
     const student = await this.users.findOne({ where: { user_id: studentUserId } });
     const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+
+    if (dto.category !== 'MENTORSHIP') {
+      await assertNoPendingRow(this.tickets, {
+        student_user_id: studentUserId,
+        category: dto.category,
+        status: 'PENDING',
+      });
+    }
 
     const assignee: RoutedApprover = dto.assigned_to_user_id
       ? {

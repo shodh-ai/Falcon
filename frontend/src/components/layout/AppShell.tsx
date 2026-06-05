@@ -18,9 +18,10 @@ interface AppShellProps {
   config: PortalConfig;
   children: ReactNode;
   profileHref?: string;
+  headerExtra?: ReactNode;
 }
 
-export function AppShell({ config, children, profileHref }: AppShellProps) {
+export function AppShell({ config, children, profileHref, headerExtra }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -79,6 +80,7 @@ export function AppShell({ config, children, profileHref }: AppShellProps) {
               <div className="hidden md:block">
                 <CommandMenu items={config.commandItems} />
               </div>
+              {headerExtra}
               <WorkspaceSwitcher />
               <LiveNotificationBell />
               <ProfileMenu profileHref={profileHref ?? config.homeHref.replace('/dashboard', '/profile')} />

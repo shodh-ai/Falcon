@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { assertNoPendingSql } from '../../common/validators/pending-request.util';
 
 const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM', 'INTERNAL', 'ASSIGNMENT'] as const;
 type ExamType = (typeof EXAM_TYPES)[number];
@@ -235,6 +236,15 @@ export class FacultyWorkspacesService {
     },
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
+
+    await assertNoPendingSql(
+      this.dataSource,
+      `SELECT COUNT(*)::text AS count FROM class_adjustments
+       WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3
+         AND status = 'PENDING_HOD_APPROVAL'`,
+      [tenantId, facultyUserId, dto.course_id],
+    );
+
     const rows = await this.dataSource.query(
       `INSERT INTO class_adjustments (
          tenant_id, course_id, faculty_user_id, adjustment_type, original_date, new_date, reason

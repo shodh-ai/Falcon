@@ -8,7 +8,8 @@ import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type EmployeeRow = {
   user_id: string;
@@ -24,14 +25,16 @@ type EmployeeRow = {
 };
 
 export default function HrDirectoryPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [rows, setRows] = useState<EmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
 
   useEffect(() => {
+    setLoading(true);
     void api.get<EmployeeRow[]>('/api/hr/directory').then(setRows).finally(() => setLoading(false));
-  }, [api]);
+  }, [api, entityId]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();

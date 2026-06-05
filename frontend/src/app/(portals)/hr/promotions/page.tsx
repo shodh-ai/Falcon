@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type Candidate = {
   user_id: string;
@@ -19,12 +20,13 @@ type Candidate = {
 };
 
 export default function HrPromotionsPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [rows, setRows] = useState<Candidate[]>([]);
 
   useEffect(() => {
     void api.get<Candidate[]>('/api/hr/promotions/candidates').then(setRows);
-  }, [api]);
+  }, [api, entityId]);
 
   const eligible = rows.filter((r) => r.promotion_eligibility === 'ELIGIBLE');
 

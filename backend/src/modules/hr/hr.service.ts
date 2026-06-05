@@ -15,6 +15,8 @@ import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.ser
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { HrLeavePolicyService } from './hr-leave-policy.service';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
+import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
+import { assertNoPendingRow } from '../../common/validators/pending-request.util';
 
 /** HOD (reporting officer) first, then HR admin — no generic HR inbox on create. */
 const APPROVAL_FLOW: Partial<Record<LeaveRequestStatus, LeaveRequestStatus>> = {
@@ -39,6 +41,7 @@ export class HrService {
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly leavePolicies: HrLeavePolicyService,
     private readonly workflowBuilder: HrWorkflowBuilderService,
+    private readonly hrWorkflow: HrWorkflowRoutingService,
   ) {}
 
   async createLeaveRequest(dto: CreateLeaveRequestDto) {
@@ -249,6 +252,20 @@ export class HrService {
     const entityId = Number(profile[0]?.entity_id ?? 1);
     await this.leavePolicies.validateLeaveApplication(tenantId, entityId, staffUserId, dto);
 
+    await assertNoPendingRow(this.staffLeaveRequests, {
+      tenant_id: tenantId,
+      staff_user_id: staffUserId,
+      request_type: 'LEAVE',
+      status: 'PENDING',
+    });
+
+    const routing = await this.hrWorkflow.initializeRequest(
+      tenantId,
+      entityId,
+      'LEAVE',
+      staffUserId,
+    );
+
     const row = this.staffLeaveRequests.create({
       tenant_id: tenantId,
       staff_user_id: staffUserId,
@@ -256,7 +273,12 @@ export class HrService {
       start_date: dto.start_date,
       end_date: dto.end_date,
       reason: dto.reason ?? null,
-      status: 'PENDING',
+      status: routing.is_final ? 'HR_APPROVED' : 'PENDING',
+      request_type: 'LEAVE',
+      entity_id: entityId,
+      workflow_id: routing.workflow_id,
+      current_step_order: routing.step_order,
+      current_approver_user_id: routing.approver_user_id,
     });
     return this.staffLeaveRequests.save(row);
   }
@@ -280,6 +302,12 @@ export class HrService {
     tenantId: string,
     dto: { out_time: string; expected_in_time: string; reason: string },
   ) {
+    await assertNoPendingRow(this.gatePasses, {
+      tenant_id: tenantId,
+      staff_user_id: staffUserId,
+      status: 'PENDING',
+    });
+
     const user = await this.users.findOne({ where: { user_id: staffUserId } });
     const reportingOfficerId = user?.reporting_officer_id ?? null;
     const row = this.gatePasses.create({
@@ -956,19 +984,35 @@ export class HrService {
       `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2`,
       [leave.staff_user_id, tenantId],
     );
-    const entityId = Number(profile[0]?.entity_id ?? 1);
-    const next = await this.workflowBuilder.resolveNextApprover(
+    const entityId = Number(profile[0]?.entity_id ?? leave.entity_id ?? 1);
+
+    if (status === 'REJECTED') {
+      leave.status = 'REJECTED';
+      leave.current_approver_user_id = null;
+      return this.staffLeaveRequests.save(leave);
+    }
+
+    if (leave.current_approver_user_id && actor?.user_id) {
+      this.hrWorkflow.assertActorIsCurrentApprover(actor.user_id, leave.current_approver_user_id);
+    }
+
+    const next = await this.hrWorkflow.advanceAfterApproval(
       tenantId,
       entityId,
-      'LEAVE',
+      leave.request_type ?? 'LEAVE',
       leave.staff_user_id,
-      status === 'HOD_APPROVED' ? 0 : 99,
+      leave.current_step_order,
     );
-    if (next && status === 'HOD_APPROVED' && !next.approver_user_id) {
+
+    if (next.is_final) {
       leave.status = 'HR_APPROVED';
+      leave.current_approver_user_id = null;
     } else {
-      leave.status = status;
+      leave.status = 'PENDING';
+      leave.current_step_order = next.step_order;
+      leave.current_approver_user_id = next.approver_user_id;
     }
+
     return this.staffLeaveRequests.save(leave);
   }
 

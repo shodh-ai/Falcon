@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
@@ -46,6 +47,7 @@ function MarkAttendanceContent() {
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const selectedClass = useMemo(
     () => classes.find((c) => c.course_id === selectedCourseId) ?? null,
@@ -155,7 +157,20 @@ function MarkAttendanceContent() {
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
             />
-            {students.map((s) => (
+            <Input
+              type="search"
+              placeholder="Search by name or roll number…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {students
+              .filter(
+                (s) =>
+                  !searchQuery.trim() ||
+                  s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  s.roll_number?.includes(searchQuery),
+              )
+              .map((s) => (
               <div key={s.student_id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
                 <span>
                   {s.name} <span className="text-muted-foreground">({s.roll_number})</span>
@@ -180,6 +195,15 @@ function MarkAttendanceContent() {
                 </div>
               </div>
             ))}
+            {students.length > 0 &&
+              students.filter(
+                (s) =>
+                  !searchQuery.trim() ||
+                  s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  s.roll_number?.includes(searchQuery),
+              ).length === 0 && (
+                <p className="text-sm text-muted-foreground">No students match &ldquo;{searchQuery}&rdquo;.</p>
+              )}
             <Button disabled={locked || saving} onClick={() => void save()}>
               {saving ? 'Saving…' : 'Save attendance'}
             </Button>

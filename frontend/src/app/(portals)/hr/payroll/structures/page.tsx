@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Card, CardContent } from '@/components/ui/card';
-import { useAuthedApi } from '@/lib/api';
+import { useHrApi } from '@/lib/api/use-hr-api';
+import { useHrEntity } from '@/context/HrEntityContext';
 
 type PayPackage = {
   package_id: string;
@@ -18,12 +19,13 @@ type PayPackage = {
 };
 
 export default function HrSalaryStructuresPage() {
-  const api = useAuthedApi();
+  const api = useHrApi();
+  const { entityId } = useHrEntity();
   const [packages, setPackages] = useState<PayPackage[]>([]);
 
   useEffect(() => {
     void api.get<PayPackage[]>('/api/hr/payroll/packages').then(setPackages);
-  }, [api]);
+  }, [api, entityId]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">

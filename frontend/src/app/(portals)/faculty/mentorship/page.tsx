@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getSubdomainFromClient } from '@/lib/tenant';
+import { StudentInboxPanel } from '@/components/mentorship/StudentInboxPanel';
 
 interface StudentInfo {
   mentorship_id: string;
@@ -56,14 +57,12 @@ export default function FacultyMentorshipPage() {
     Promise.all([
       api.get<StudentInfo[]>('/api/academics/proctor/my-students'),
       api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
-      api.get<PendingMeeting[]>('/api/academics/proctor/meetings/pending'),
-      api.get<PendingLeaveRequest[]>('/api/academics/proctor/leave-requests/pending'),
     ])
-      .then(([studentsData, approvals, meetings, leaves]) => {
+      .then(([studentsData, approvals]) => {
         setStudents(studentsData);
         setPendingCertificates(approvals.certificates);
-        setPendingMeetings(meetings);
-        setPendingLeaveRequests(leaves.length ? leaves : approvals.leave_requests ?? []);
+        setPendingMeetings(approvals.meetings ?? []);
+        setPendingLeaveRequests(approvals.leave_requests ?? []);
         setLoading(false);
       })
       .catch(err => {
@@ -122,6 +121,8 @@ export default function FacultyMentorshipPage() {
       </section>
 
       {loading && <FalconLoader label="Loading mentorship roster…" />}
+
+      {!loading && <StudentInboxPanel />}
 
       {!loading && (
         <PendingMeetingRequests meetings={pendingMeetings} onUpdated={loadWorkspace} />

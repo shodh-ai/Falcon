@@ -1,10 +1,15 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { EntityCreatorOnly } from '../../common/decorators/entity-creator.decorator';
 import { AllowImpersonationWrite } from '../../common/decorators/allow-impersonation-write.decorator';
 import { SuperAdminService } from './super-admin.service';
 import { ImpersonationService } from './impersonation.service';
+import { OrgEntityService } from './org-entity.service';
+import { CreateOrgEntityDto } from './dto/create-org-entity.dto';
+import { GrantEntityAccessDto } from './dto/grant-entity-access.dto';
 
 type AuthUser = {
   user_id: string;
@@ -15,13 +20,66 @@ type AuthUser = {
 };
 
 @Controller('api/super-admin')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, EntityCreatorGuard)
 @Roles('SuperAdmin')
 export class SuperAdminController {
   constructor(
     private readonly superAdmin: SuperAdminService,
     private readonly impersonation: ImpersonationService,
+    private readonly orgEntities: OrgEntityService,
   ) {}
+
+  @Get('entities')
+  @EntityCreatorOnly()
+  listEntities(@Req() req: { user: AuthUser }) {
+    return this.orgEntities.listEntitiesWithStats(this.tenant(req));
+  }
+
+  @Post('entities')
+  @EntityCreatorOnly()
+  createEntity(@Req() req: { user: AuthUser }, @Body() dto: CreateOrgEntityDto) {
+    return this.orgEntities.createEntity(this.tenant(req), req.user.user_id, dto);
+  }
+
+  @Get('entities/grantable-users')
+  @EntityCreatorOnly()
+  grantableUsers(@Req() req: { user: AuthUser }, @Query('q') q?: string) {
+    return this.orgEntities.listGrantableUsers(this.tenant(req), q);
+  }
+
+  @Get('entities/:entityId/access')
+  @EntityCreatorOnly()
+  listEntityAccess(
+    @Req() req: { user: AuthUser },
+    @Param('entityId', ParseIntPipe) entityId: number,
+  ) {
+    return this.orgEntities.listEntityAccess(this.tenant(req), entityId);
+  }
+
+  @Post('entities/:entityId/access')
+  @EntityCreatorOnly()
+  grantEntityAccess(
+    @Req() req: { user: AuthUser },
+    @Param('entityId', ParseIntPipe) entityId: number,
+    @Body() dto: GrantEntityAccessDto,
+  ) {
+    return this.orgEntities.grantAccess(
+      this.tenant(req),
+      entityId,
+      dto.user_id,
+      req.user.user_id,
+    );
+  }
+
+  @Delete('entities/:entityId/access/:userId')
+  @EntityCreatorOnly()
+  revokeEntityAccess(
+    @Req() req: { user: AuthUser },
+    @Param('entityId', ParseIntPipe) entityId: number,
+    @Param('userId') userId: string,
+  ) {
+    return this.orgEntities.revokeAccess(this.tenant(req), entityId, userId);
+  }
 
   @Get('hierarchy')
   hierarchy(@Req() req: { user: AuthUser }) {

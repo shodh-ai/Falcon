@@ -56,36 +56,27 @@ ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT
 
 DO $$
 BEGIN
+  -- Legacy permissions.permission_id is INTEGER; never assign UUID into that column.
   IF EXISTS (
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'permissions'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'role_permissions' AND column_name = 'module_key'
   ) THEN
-    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS permission_id UUID DEFAULT gen_random_uuid();
-    UPDATE permissions SET permission_id = gen_random_uuid() WHERE permission_id IS NULL;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.tables WHERE table_name = 'permissions'
-  ) THEN
-    IF EXISTS (
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'permissions' AND column_name = 'permission_id'
-    ) THEN
-      UPDATE role_permissions rp
-      SET
-        module_key = COALESCE(rp.module_key, split_part(p.permission_key, '_', 3), 'legacy'),
-        resource_key = COALESCE(rp.resource_key, p.permission_key)
-      FROM permissions p
-      WHERE rp.permission_id::text = p.permission_id::text
-        AND (rp.module_key IS NULL OR rp.resource_key IS NULL);
-    ELSE
-      UPDATE role_permissions
-      SET
-        module_key = COALESCE(module_key, 'legacy'),
-        resource_key = COALESCE(resource_key, 'legacy_permission_' || permission_id::text)
-      WHERE module_key IS NULL OR resource_key IS NULL;
-    END IF;
+    UPDATE role_permissions rp
+    SET
+      module_key = COALESCE(rp.module_key, split_part(p.permission_key, '_', 3), 'legacy'),
+      resource_key = COALESCE(rp.resource_key, p.permission_key)
+    FROM permissions p
+    WHERE rp.permission_id = p.permission_id
+      AND (rp.module_key IS NULL OR rp.resource_key IS NULL);
+  ELSE
+    UPDATE role_permissions
+    SET
+      module_key = COALESCE(module_key, 'legacy'),
+      resource_key = COALESCE(resource_key, 'legacy_permission_' || permission_id::text)
+    WHERE module_key IS NULL OR resource_key IS NULL;
   END IF;
 END $$;
 

@@ -16,7 +16,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/student/dashboard';
   }
 
-  if (r === 'hr') {
+  if (r === 'hr' || r === 'hradmin') {
     return '/hr/dashboard';
   }
 
@@ -79,7 +79,7 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'student' || r === 'applicant') return 'Student Workspace';
   if (r === 'faculty') return 'Faculty Workspace';
   if (r === 'hod' || r === 'dean') return 'HOD Workspace';
-  if (r === 'hr') return 'HR Workspace';
+  if (r === 'hr' || r === 'hradmin') return 'HR Workspace';
   if (r === 'warden') return 'Hostel Workspace';
   if (r === 'accountant') return 'Finance Workspace';
   if (r === 'iqac') return 'IQAC Workspace';
@@ -97,7 +97,7 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'student' || r === 'applicant') return 'Student';
   if (r === 'faculty') return 'Faculty';
   if (r === 'hod' || r === 'dean') return 'HOD';
-  if (r === 'hr') return 'HR';
+  if (r === 'hr' || r === 'hradmin') return 'HR';
   if (r === 'warden') return 'Hostel';
   if (r === 'accountant') return 'Finance';
   if (r === 'iqac') return 'IQAC';
@@ -109,11 +109,72 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   return role;
 }
 
+export type HrCapabilities = Partial<Record<string, 'none' | 'read' | 'write'>>;
+
+const hrPathModules: Array<{ prefix: string; module: string }> = [
+  { prefix: '/hr/admin', module: '__admin__' },
+  { prefix: '/hr/reports', module: 'reports' },
+  { prefix: '/hr/dashboard', module: 'dashboard' },
+  { prefix: '/hr/recruitment', module: 'recruitment' },
+  { prefix: '/hr/directory', module: 'directory' },
+  { prefix: '/hr/employee', module: 'directory' },
+  { prefix: '/hr/kyc', module: 'documents' },
+  { prefix: '/hr/attendance', module: 'attendance' },
+  { prefix: '/hr/leaves', module: 'leaves' },
+  { prefix: '/hr/payroll', module: 'payroll' },
+  { prefix: '/hr/onboarding', module: 'onboarding' },
+  { prefix: '/hr/offboarding', module: 'offboarding' },
+  { prefix: '/hr/policies', module: 'policies' },
+  { prefix: '/hr/appraisals', module: 'directory' },
+  { prefix: '/hr/promotions', module: 'directory' },
+];
+
+function hasAnyHrCapability(caps?: HrCapabilities | null): boolean {
+  if (!caps) return false;
+  return Object.values(caps).some((v) => v && v !== 'none');
+}
+
+function hasHrPermissionList(
+  permissions: string[] | undefined,
+  module: string,
+  minLevel: 'read' | 'write' = 'read',
+): boolean {
+  if (!permissions?.length) return false;
+  const levels = minLevel === 'write' ? ['write'] : ['read', 'write'];
+  return permissions.some((p) => {
+    const [mod, level] = p.split(':');
+    return mod === module && levels.includes(level);
+  });
+}
+
+function canAccessHrPath(
+  roles: string[],
+  pathname: string,
+  caps?: HrCapabilities | null,
+  permissions?: string[],
+): boolean {
+  if (roles.some((r) => ['hradmin', 'superadmin', 'hr', 'president'].includes(r))) return true;
+
+  if (pathname.startsWith('/hr/admin')) {
+    return roles.some((r) => ['hradmin', 'superadmin'].includes(r));
+  }
+
+  const match = [...hrPathModules]
+    .sort((a, b) => b.prefix.length - a.prefix.length)
+    .find((p) => pathname === p.prefix || pathname.startsWith(`${p.prefix}/`));
+
+  if (!match) return hasAnyHrCapability(caps) || Boolean(permissions?.length);
+  if (permissions?.length) return hasHrPermissionList(permissions, match.module, 'read');
+  const access = caps?.[match.module] ?? 'none';
+  return access !== 'none';
+}
+
 const portalRoles: Record<string, string[]> = {
   '/student': ['student', 'applicant'],
   '/faculty': ['faculty'],
   '/hod': ['hod', 'dean'],
-  '/hr': ['hr', 'superadmin'],
+  '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
+  '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],
   '/finance': ['accountant', 'superadmin'],
   '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
@@ -133,17 +194,35 @@ const portalRoles: Record<string, string[]> = {
   '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
 };
 
+const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
+
 export function canRoleAccessPath(
   roleOrRoles: string | string[] | undefined | null,
   pathname: string,
+  hrCapabilities?: HrCapabilities | null,
+  permissions?: string[],
+  email?: string,
 ): boolean {
   const roles = (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles])
     .filter((role): role is string => Boolean(role))
     .map((role) => role.trim().toLowerCase());
+
+  if (pathname === '/super-admin/entities' || pathname.startsWith('/super-admin/entities/')) {
+    return (
+      roles.includes('superadmin') &&
+      (email ?? '').trim().toLowerCase() === ENTITY_CREATOR_EMAIL
+    );
+  }
+
   const portal = Object.keys(portalRoles)
     .sort((a, b) => b.length - a.length)
     .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
   if (!portal) return true;
+  if (portal === '/hr') {
+    const inPortalRoles = roles.some((role) => portalRoles[portal].includes(role));
+    if (!inPortalRoles && !hasAnyHrCapability(hrCapabilities) && !permissions?.length) return false;
+    return canAccessHrPath(roles, pathname, hrCapabilities, permissions);
+  }
   return roles.some((role) => portalRoles[portal].includes(role));
 }
