@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { BED_LOCK_TTL_SEC } from '../../common/constants/hostel-tatkal.constants';
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
@@ -20,13 +21,12 @@ export class RedisService implements OnModuleDestroy {
   }
 
   bedLockKey(bedId: string) {
-    return `hostel:tatkal:bed:${bedId}`;
+    return `bed_lock:${bedId}`;
   }
 
-  /** SET NX EX 300 — returns true if lock acquired */
-  async acquireBedLock(bedId: string, studentUserId: string, holdId: string, ttlSec = 300) {
-    const value = `${studentUserId}:${holdId}`;
-    const result = await this.client.set(this.bedLockKey(bedId), value, 'EX', ttlSec, 'NX');
+  /** SET NX EX — value is student_user_id only. Returns true if lock acquired. */
+  async acquireBedLock(bedId: string, studentUserId: string, ttlSec = BED_LOCK_TTL_SEC) {
+    const result = await this.client.set(this.bedLockKey(bedId), studentUserId, 'EX', ttlSec, 'NX');
     return result === 'OK';
   }
 
@@ -34,10 +34,9 @@ export class RedisService implements OnModuleDestroy {
     return this.client.get(this.bedLockKey(bedId));
   }
 
-  /** Release only if owner matches (Lua) */
-  async releaseBedLock(bedId: string, studentUserId: string, holdId: string) {
+  /** Release only if the lock is owned by this student. */
+  async releaseBedLock(bedId: string, studentUserId: string) {
     const key = this.bedLockKey(bedId);
-    const expected = `${studentUserId}:${holdId}`;
     const script = `
       if redis.call("get", KEYS[1]) == ARGV[1] then
         return redis.call("del", KEYS[1])
@@ -45,7 +44,7 @@ export class RedisService implements OnModuleDestroy {
         return 0
       end
     `;
-    return this.client.eval(script, 1, key, expected);
+    return this.client.eval(script, 1, key, studentUserId);
   }
 
   busLocationKey(routeId: string) {
@@ -74,9 +73,27 @@ export class RedisService implements OnModuleDestroy {
     return `transport:geofence:${allocationId}`;
   }
 
-  /** Returns true if alert was newly set (not recently sent). */
   async markGeofenceAlert(allocationId: string, ttlSec = 1800) {
     const result = await this.client.set(this.geofenceAlertKey(allocationId), '1', 'EX', ttlSec, 'NX');
     return result === 'OK';
+  }
+
+  eventPayLockKey(eventId: string, studentUserId: string) {
+    return `event_pay_lock:${eventId}:${studentUserId}`;
+  }
+
+  async acquireEventPayLock(eventId: string, studentUserId: string, ttlSec = BED_LOCK_TTL_SEC) {
+    const result = await this.client.set(
+      this.eventPayLockKey(eventId, studentUserId),
+      '1',
+      'EX',
+      ttlSec,
+      'NX',
+    );
+    return result === 'OK';
+  }
+
+  async releaseEventPayLock(eventId: string, studentUserId: string) {
+    await this.client.del(this.eventPayLockKey(eventId, studentUserId));
   }
 }

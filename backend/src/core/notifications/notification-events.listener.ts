@@ -27,6 +27,8 @@ import {
   type TimetableChangedPayload,
   type TransportBusApproachingPayload,
   type WorkflowApprovalRequiredPayload,
+  type EventProposedPayload,
+  type EventTierPayload,
 } from './notification.events';
 
 @Injectable()
@@ -317,6 +319,48 @@ export class NotificationEventsListener {
         payload.message ||
         `🚌 Your bus is about ${payload.etaMinutes} minutes away from ${payload.stopName}!`,
       actionLink: payload.actionLink ?? '/student/transport',
+    });
+  }
+
+  @OnEvent(NotificationEvents.EVENT_PROPOSED)
+  async onEventProposed(payload: EventProposedPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'OPERATIONS',
+      title: payload.title || 'Club event pending approval',
+      message:
+        payload.message ||
+        `${payload.clubName} proposed "${payload.eventTitle}" for your review.`,
+      actionLink: payload.actionLink ?? '/faculty/event-approvals',
+    });
+  }
+
+  @OnEvent(NotificationEvents.EVENT_PENDING_ESTATE)
+  async onEventPendingEstate(payload: EventTierPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'OPERATIONS',
+      title: payload.title || 'Venue approval required',
+      message:
+        payload.message ||
+        `"${payload.eventTitle}" passed faculty review — confirm venue and security.`,
+      actionLink: payload.actionLink ?? '/admin-ops/events',
+    });
+  }
+
+  @OnEvent(NotificationEvents.EVENT_PENDING_FINANCE)
+  async onEventPendingFinance(payload: EventTierPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'FINANCE',
+      title: payload.title || 'Paid event — ledger approval',
+      message:
+        payload.message ||
+        `"${payload.eventTitle}" needs finance sign-off before tickets go live.`,
+      actionLink: payload.actionLink ?? '/finance/events',
     });
   }
 

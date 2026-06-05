@@ -1,0 +1,175 @@
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { HostelAdminService } from './hostel-admin.service';
+
+type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
+
+@Controller('api/hostel-admin')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('Warden', 'SuperAdmin', 'Registrar')
+export class HostelAdminController {
+  constructor(private readonly hostelAdmin: HostelAdminService) {}
+
+  private ctx(req: { user: AuthUser }) {
+    return {
+      userId: req.user.user_id,
+      tenantId: req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
+      roles: req.user.roles ?? [],
+    };
+  }
+
+  @Get('hostels')
+  listHostels(@Req() req: { user: AuthUser }) {
+    return this.hostelAdmin.listHostels(this.ctx(req));
+  }
+
+  @Get('dashboard')
+  dashboard(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId?: string) {
+    return this.hostelAdmin.getDashboard(this.ctx(req), hostelId);
+  }
+
+  @Get('hostels/:hostelId')
+  hostelDetail(@Req() req: { user: AuthUser }, @Param('hostelId') hostelId: string) {
+    return this.hostelAdmin.getHostelDetail(this.ctx(req), hostelId);
+  }
+
+  @Get('students')
+  students(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.hostelAdmin.listStudents(this.ctx(req), { hostelId, status });
+  }
+
+  @Post('students/transfer')
+  transfer(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.transferStudent(this.ctx(req), dto as Parameters<HostelAdminService['transferStudent']>[1]);
+  }
+
+  @Post('students/:studentUserId/evict')
+  evict(@Req() req: { user: AuthUser }, @Param('studentUserId') studentUserId: string) {
+    return this.hostelAdmin.evictStudent(this.ctx(req), studentUserId);
+  }
+
+  @Post('roll-call')
+  markRollCall(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.markRollCall(this.ctx(req), dto as Parameters<HostelAdminService['markRollCall']>[1]);
+  }
+
+  @Get('roll-call')
+  listRollCall(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId: string,
+    @Query('date') date: string,
+  ) {
+    return this.hostelAdmin.listRollCall(this.ctx(req), hostelId, date ?? new Date().toISOString().slice(0, 10));
+  }
+
+  @Get('leaves/stats')
+  leaveStats(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId?: string) {
+    return this.hostelAdmin.leaveStats(this.ctx(req), hostelId);
+  }
+
+  @Get('leaves')
+  leaves(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.hostelAdmin.listLeaves(this.ctx(req), hostelId, status);
+  }
+
+  @Patch('leaves/:leaveId')
+  updateLeave(
+    @Req() req: { user: AuthUser },
+    @Param('leaveId') leaveId: string,
+    @Body() dto: { status: 'APPROVED' | 'REJECTED' },
+  ) {
+    return this.hostelAdmin.updateLeaveStatus(this.ctx(req), leaveId, dto.status);
+  }
+
+  @Post('leaves')
+  createLeave(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.createLeave(this.ctx(req), dto as Parameters<HostelAdminService['createLeave']>[1]);
+  }
+
+  @Get('gate-passes')
+  gatePasses(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId?: string) {
+    return this.hostelAdmin.listGatePasses(this.ctx(req), hostelId);
+  }
+
+  @Patch('requests/:requestId/approve')
+  approveRequest(@Req() req: { user: AuthUser }, @Param('requestId') requestId: string) {
+    return this.hostelAdmin.approveHostelRequest(this.ctx(req), requestId);
+  }
+
+  @Get('visitors')
+  visitors(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId: string) {
+    return this.hostelAdmin.listVisitorsInside(this.ctx(req), hostelId);
+  }
+
+  @Post('visitors/scan')
+  visitorScan(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.processVisitorScan(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['processVisitorScan']>[1],
+    );
+  }
+
+  @Get('tickets')
+  tickets(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId?: string,
+    @Query('priority') priority?: string,
+  ) {
+    return this.hostelAdmin.listTickets(this.ctx(req), hostelId, priority);
+  }
+
+  @Get('fines')
+  fines(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId?: string) {
+    return this.hostelAdmin.listFines(this.ctx(req), hostelId);
+  }
+
+  @Post('fines')
+  createFine(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.createFine(this.ctx(req), dto as Parameters<HostelAdminService['createFine']>[1]);
+  }
+
+  @Get('mess/menu')
+  messMenu(@Req() req: { user: AuthUser }) {
+    return this.hostelAdmin.getMessMenu(this.ctx(req));
+  }
+
+  @Post('mess/menu')
+  saveMessMenu(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.saveMessMenu(this.ctx(req), dto as Parameters<HostelAdminService['saveMessMenu']>[1]);
+  }
+
+  @Post('broadcasts')
+  broadcast(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.sendBroadcast(this.ctx(req), dto as Parameters<HostelAdminService['sendBroadcast']>[1]);
+  }
+
+  @Get('master-data')
+  masterData(@Req() req: { user: AuthUser }, @Query('category') category?: string) {
+    return this.hostelAdmin.listMasterData(this.ctx(req), category);
+  }
+
+  @Post('master-data')
+  upsertMaster(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.upsertMasterData(this.ctx(req), dto as Parameters<HostelAdminService['upsertMasterData']>[1]);
+  }
+
+  @Get('permissions')
+  permissions(@Req() req: { user: AuthUser }) {
+    return this.hostelAdmin.listRolePermissions(this.ctx(req));
+  }
+
+  @Post('permissions')
+  setPermission(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.hostelAdmin.setRolePermission(this.ctx(req), dto as Parameters<HostelAdminService['setRolePermission']>[1]);
+  }
+}

@@ -23,6 +23,14 @@ function analyticsRowKey(r: AnalyticsRow) {
   return `${r.student_user_id}:${r.course_id}`;
 }
 
+function dedupeAnalyticsRows(rows: AnalyticsRow[]) {
+  const byKey = new Map<string, AnalyticsRow>();
+  for (const row of rows) {
+    byKey.set(analyticsRowKey(row), row);
+  }
+  return [...byKey.values()];
+}
+
 export default function FacultyAnalyticsPage() {
   const api = useAuthedApi();
   const { courses } = useFacultyCourses();
@@ -35,7 +43,7 @@ export default function FacultyAnalyticsPage() {
     void api.get<AnalyticsRow[]>(`/api/academics/faculty/workspaces/analytics${q}`).then(setRows);
   }, [api, courseId]);
 
-  const atRisk = rows.filter(
+  const atRisk = dedupeAnalyticsRows(rows).filter(
     (r) => Number(r.attendance_percent) < 75 || Number(r.internal_avg_percent) < 40,
   );
 

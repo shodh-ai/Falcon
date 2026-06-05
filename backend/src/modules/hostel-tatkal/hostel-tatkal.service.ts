@@ -1,9 +1,18 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { BED_LOCK_GRACE_SEC, BED_LOCK_TTL_SEC } from '../../common/constants/hostel-tatkal.constants';
 import { RedisService } from '../../core/redis/redis.service';
 import { HostelTatkalGateway } from './hostel-tatkal.gateway';
+
+const HOSTEL_BOOKING_FEE_INR = 5000;
 
 @Injectable()
 export class HostelTatkalService {
@@ -15,6 +24,15 @@ export class HostelTatkalService {
     private readonly gateway: HostelTatkalGateway,
   ) {}
 
+  private broadcastBed(tenantId: string, bedId: string, status: string) {
+    this.gateway.broadcastBedEvent(tenantId, {
+      bedId,
+      bed_id: bedId,
+      status,
+      display_status: status,
+    });
+  }
+
   async getActiveSale(tenantId: string) {
     const rows = await this.dataSource.query(
       `SELECT * FROM hostel_tatkal_sales
@@ -25,21 +43,54 @@ export class HostelTatkalService {
     return rows[0] ?? null;
   }
 
+  async getBookingCatalog(tenantId: string) {
+    const beds = await this.getSaleMap(tenantId);
+    const tree: Record<
+      string,
+      {
+        hostel_block: string;
+        floors: Record<string, { floor: string; rooms: Record<string, { room_number: string; beds: typeof beds }> }>;
+      }
+    > = {};
+
+    for (const bed of beds) {
+      const block = bed.hostel_block ?? 'Hostel';
+      const floor = bed.floor ?? 'Ground Floor';
+      const room = bed.room_number ?? '—';
+      if (!tree[block]) tree[block] = { hostel_block: block, floors: {} };
+      if (!tree[block].floors[floor]) tree[block].floors[floor] = { floor, rooms: {} };
+      if (!tree[block].floors[floor].rooms[room]) {
+        tree[block].floors[floor].rooms[room] = { room_number: room, beds: [] };
+      }
+      tree[block].floors[floor].rooms[room].beds.push(bed);
+    }
+
+    return Object.values(tree).map((h) => ({
+      hostel_block: h.hostel_block,
+      floors: Object.values(h.floors).map((f) => ({
+        floor: f.floor,
+        rooms: Object.values(f.rooms),
+      })),
+    }));
+  }
+
   async getSaleMap(tenantId: string) {
     const beds = await this.dataSource.query(
-      `SELECT b.bed_id, b.bed_number, b.is_premium, b.status, r.room_id, r.hostel_block, r.room_number
+      `SELECT b.bed_id, b.bed_number, b.is_premium, b.status, r.room_id, r.hostel_block, r.room_number,
+              COALESCE(r.floor, 'Ground Floor') AS floor, h.hostel_name
        FROM hostel_beds b
        JOIN operations_hostel_rooms r ON r.room_id = b.room_id
+       LEFT JOIN operations_hostels h ON h.hostel_id = r.hostel_id
        WHERE b.tenant_id = $1
-       ORDER BY r.hostel_block, r.room_number, b.bed_number`,
+       ORDER BY r.hostel_block, r.floor, r.room_number, b.bed_number`,
       [tenantId],
     );
 
     const enriched = await Promise.all(
       beds.map(async (bed: { bed_id: string; status: string }) => {
-        const lock = await this.redis.getBedLock(bed.bed_id);
+        const lockOwner = await this.redis.getBedLock(bed.bed_id);
         let displayStatus = bed.status;
-        if (lock) displayStatus = 'IN_CART';
+        if (lockOwner) displayStatus = 'IN_CART';
         else if (bed.status === 'BOOKED') displayStatus = 'BOOKED';
         else displayStatus = 'AVAILABLE';
         return { ...bed, display_status: displayStatus };
@@ -60,40 +111,162 @@ export class HostelTatkalService {
       throw new BadRequestException('Bed is not available');
     }
 
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-    const holdRows = await this.dataSource.query(
-      `INSERT INTO hostel_booking_holds (tenant_id, sale_id, bed_id, student_user_id, status, expires_at)
-       VALUES ($1, $2, $3, $4, 'PENDING', $5) RETURNING *`,
-      [tenantId, sale.sale_id, bedId, studentUserId, expiresAt.toISOString()],
-    );
-    const hold = holdRows[0];
-
-    const acquired = await this.redis.acquireBedLock(bedId, studentUserId, hold.hold_id, 300);
-    if (!acquired) {
-      await this.dataSource.query(`DELETE FROM hostel_booking_holds WHERE hold_id = $1`, [hold.hold_id]);
-      throw new BadRequestException('Bed was just selected by another student');
+    const existingLock = await this.redis.getBedLock(bedId);
+    if (existingLock && existingLock !== studentUserId) {
+      throw new ConflictException('This bed is currently in checkout by another student.');
     }
 
-    this.gateway.broadcastBedEvent(tenantId, { type: 'bed.locked', bed_id: bedId, display_status: 'IN_CART' });
+    const serverNow = new Date();
+    const expiresAt = new Date(serverNow.getTime() + BED_LOCK_TTL_SEC * 1000);
+
+    const acquired = await this.redis.acquireBedLock(bedId, studentUserId, BED_LOCK_TTL_SEC);
+    if (!acquired) {
+      throw new ConflictException('This bed is currently in checkout by another student.');
+    }
+
+    let hold: { hold_id: string };
+    try {
+      const holdRows = await this.dataSource.query(
+        `INSERT INTO hostel_booking_holds (tenant_id, sale_id, bed_id, student_user_id, status, expires_at)
+         VALUES ($1, $2, $3, $4, 'PENDING', $5) RETURNING *`,
+        [tenantId, sale.sale_id, bedId, studentUserId, expiresAt.toISOString()],
+      );
+      hold = holdRows[0];
+    } catch (e) {
+      await this.redis.releaseBedLock(bedId, studentUserId);
+      throw e;
+    }
+
+    this.broadcastBed(tenantId, bedId, 'IN_CART');
     return {
       hold_id: hold.hold_id,
       bed_id: bedId,
-      expires_at: expiresAt,
+      expires_at: expiresAt.toISOString(),
+      server_now: serverNow.toISOString(),
+      lock_ttl_seconds: BED_LOCK_TTL_SEC,
       payment_required: true,
     };
   }
 
-  async confirmPayment(tenantId: string, studentUserId: string, holdId: string, paymentRef: string) {
+  async getHold(tenantId: string, studentUserId: string, holdId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT h.*, b.bed_number, b.is_premium, r.hostel_block, r.room_number, r.floor, oh.hostel_name
+       FROM hostel_booking_holds h
+       JOIN hostel_beds b ON b.bed_id = h.bed_id
+       JOIN operations_hostel_rooms r ON r.room_id = b.room_id
+       LEFT JOIN operations_hostels oh ON oh.hostel_id = r.hostel_id
+       WHERE h.hold_id = $1 AND h.tenant_id = $2 AND h.student_user_id = $3`,
+      [holdId, tenantId, studentUserId],
+    );
+    const hold = rows[0];
+    if (!hold) throw new NotFoundException('Hold not found');
+
+    const lockOwner = await this.redis.getBedLock(hold.bed_id);
+    const expiresMs = new Date(hold.expires_at).getTime();
+    const remaining = Math.max(0, Math.floor((expiresMs - Date.now()) / 1000));
+
+    return {
+      ...hold,
+      lock_active: lockOwner === studentUserId,
+      remaining_seconds: remaining,
+      lock_ttl_seconds: BED_LOCK_TTL_SEC,
+      server_now: new Date().toISOString(),
+    };
+  }
+
+  async releaseHold(tenantId: string, studentUserId: string, holdId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT * FROM hostel_booking_holds
+       WHERE hold_id = $1 AND tenant_id = $2 AND student_user_id = $3 AND status = 'PENDING'`,
+      [holdId, tenantId, studentUserId],
+    );
+    const hold = rows[0];
+    if (!hold) return { released: false, reason: 'not_found_or_not_pending' };
+
+    await this.redis.releaseBedLock(hold.bed_id, studentUserId);
+    await this.dataSource.query(
+      `UPDATE hostel_booking_holds SET status = 'EXPIRED' WHERE hold_id = $1`,
+      [holdId],
+    );
+    this.broadcastBed(tenantId, hold.bed_id, 'AVAILABLE');
+    return { released: true, bed_id: hold.bed_id };
+  }
+
+  async createPaymentOrder(tenantId: string, studentUserId: string, holdId: string) {
+    const hold = await this.getHold(tenantId, studentUserId, holdId);
+    if (hold.status !== 'PENDING') {
+      throw new BadRequestException('Hold is no longer active');
+    }
+    const expiresMs = new Date(hold.expires_at).getTime();
+    const inWindow = Date.now() <= expiresMs + BED_LOCK_GRACE_SEC * 1000;
+    if (!inWindow) {
+      throw new ConflictException('Checkout session expired. Please select the bed again.');
+    }
+
+    const orderId = `hostel_${holdId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+    await this.dataSource.query(
+      `UPDATE hostel_booking_holds SET gateway_order_id = $2 WHERE hold_id = $1`,
+      [holdId, orderId],
+    );
+
+    return {
+      order_id: orderId,
+      hold_id: holdId,
+      amount_inr: HOSTEL_BOOKING_FEE_INR,
+      amount_paise: HOSTEL_BOOKING_FEE_INR * 100,
+      currency: 'INR',
+      fee_head: 'HOSTEL_BOOKING',
+      razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
+      mock: true,
+      notes: {
+        hold_id: holdId,
+        fee_head: 'HOSTEL_BOOKING',
+        student_user_id: studentUserId,
+        tenant_id: tenantId,
+      },
+    };
+  }
+
+  private async assertCanFinalize(
+    hold: { bed_id: string; student_user_id: string; expires_at: string; status: string },
+    studentUserId: string,
+  ) {
+    if (hold.status === 'CONFIRMED') return { alreadyConfirmed: true };
+    if (hold.status !== 'PENDING') {
+      throw new BadRequestException('Hold not found or expired');
+    }
+
+    const lockOwner = await this.redis.getBedLock(hold.bed_id);
+    if (lockOwner === studentUserId) {
+      return { alreadyConfirmed: false };
+    }
+
+    const expiresMs = new Date(hold.expires_at).getTime();
+    const graceEnd = expiresMs + BED_LOCK_GRACE_SEC * 1000;
+    if (Date.now() <= graceEnd) {
+      return { alreadyConfirmed: false, grace: true };
+    }
+
+    throw new ConflictException('Bed lock expired — please select again');
+  }
+
+  async finalizeBooking(
+    tenantId: string,
+    studentUserId: string,
+    holdId: string,
+    paymentRef: string,
+  ) {
     const holdRows = await this.dataSource.query(
       `SELECT * FROM hostel_booking_holds WHERE hold_id = $1 AND student_user_id = $2 AND tenant_id = $3`,
       [holdId, studentUserId, tenantId],
     );
     const hold = holdRows[0];
-    if (!hold || hold.status !== 'PENDING') throw new BadRequestException('Hold not found or expired');
+    if (!hold) throw new NotFoundException('Hold not found');
 
-    const lock = await this.redis.getBedLock(hold.bed_id);
-    const expected = `${studentUserId}:${holdId}`;
-    if (lock !== expected) throw new BadRequestException('Bed lock expired — please select again');
+    const check = await this.assertCanFinalize(hold, studentUserId);
+    if (check.alreadyConfirmed) {
+      return { confirmed: true, hold_id: holdId, duplicate: true };
+    }
 
     await this.dataSource.query('BEGIN');
     try {
@@ -115,18 +288,42 @@ export class HostelTatkalService {
          ON CONFLICT (student_user_id) DO UPDATE SET room_id = EXCLUDED.room_id, bed_number = EXCLUDED.bed_number`,
         [studentUserId, bedInfo[0].room_id, bedInfo[0].bed_number],
       );
+      await this.dataSource.query(
+        `UPDATE operations_hostel_beds ob SET status = 'OCCUPIED'
+         FROM operations_hostel_rooms r
+         WHERE ob.room_id = r.room_id AND r.room_id = $1 AND ob.bed_label ILIKE '%' || $2 || '%'`,
+        [bedInfo[0].room_id, bedInfo[0].bed_number],
+      ).catch(() => undefined);
+      await this.dataSource.query(
+        `UPDATE operations_hostel_rooms SET occupied = LEAST(capacity, occupied + 1) WHERE room_id = $1`,
+        [bedInfo[0].room_id],
+      );
       await this.dataSource.query('COMMIT');
     } catch (e) {
       await this.dataSource.query('ROLLBACK');
       throw e;
     }
 
-    await this.redis.releaseBedLock(hold.bed_id, studentUserId, holdId);
-    this.gateway.broadcastBedEvent(tenantId, { type: 'bed.booked', bed_id: hold.bed_id, display_status: 'BOOKED' });
+    await this.redis.releaseBedLock(hold.bed_id, studentUserId);
+    this.broadcastBed(tenantId, hold.bed_id, 'BOOKED');
     return { confirmed: true, hold_id: holdId };
   }
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  async confirmPayment(tenantId: string, studentUserId: string, holdId: string, paymentRef: string) {
+    return this.finalizeBooking(tenantId, studentUserId, holdId, paymentRef);
+  }
+
+  /** Finalize from gateway webhook (notes carry hold_id / student_user_id). */
+  async finalizeFromWebhook(
+    tenantId: string,
+    studentUserId: string,
+    holdId: string,
+    paymentId: string,
+  ) {
+    return this.finalizeBooking(tenantId, studentUserId, holdId, paymentId);
+  }
+
+  @Interval(30_000)
   async expireStaleHolds() {
     const expired = await this.dataSource.query(
       `UPDATE hostel_booking_holds SET status = 'EXPIRED'
@@ -134,12 +331,8 @@ export class HostelTatkalService {
        RETURNING hold_id, bed_id, student_user_id, tenant_id`,
     );
     for (const row of expired) {
-      await this.redis.releaseBedLock(row.bed_id, row.student_user_id, row.hold_id);
-      this.gateway.broadcastBedEvent(row.tenant_id, {
-        type: 'bed.released',
-        bed_id: row.bed_id,
-        display_status: 'AVAILABLE',
-      });
+      await this.redis.releaseBedLock(row.bed_id, row.student_user_id);
+      this.broadcastBed(row.tenant_id, row.bed_id, 'AVAILABLE');
     }
     if (expired.length) this.logger.debug(`Expired ${expired.length} hostel hold(s)`);
   }

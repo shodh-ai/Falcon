@@ -15,6 +15,9 @@ export const NotificationEvents = {
   OPERATIONS_LIBRARY_RESERVATION_READY: 'operations.library_reservation_ready',
   OPERATIONS_TRANSPORT_BUS_APPROACHING: 'operations.transport_bus_approaching',
   WORKFLOW_APPROVAL_REQUIRED: 'workflow.approval_required',
+  EVENT_PROPOSED: 'event.proposed',
+  EVENT_PENDING_ESTATE: 'event.pending_estate',
+  EVENT_PENDING_FINANCE: 'event.pending_finance',
 } as const;
 
 export type NotificationEventName =
@@ -106,4 +109,17 @@ export type WorkflowApprovalRequiredPayload = BaseNotificationPayload & {
   requestType?: string;
   requesterName?: string;
   routeReason?: string;
+};
+
+export type EventProposedPayload = BaseNotificationPayload & {
+  eventId: string;
+  clubId: string;
+  eventTitle: string;
+  clubName: string;
+};
+
+export type EventTierPayload = BaseNotificationPayload & {
+  eventId: string;
+  eventTitle: string;
+  clubName?: string;
 };

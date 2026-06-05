@@ -42,6 +42,8 @@ import { HostelTatkalModule } from './modules/hostel-tatkal/hostel-tatkal.module
 import { CampusWalletModule } from './modules/campus-wallet/campus-wallet.module';
 import { TransportModule } from './modules/transport/transport.module';
 import { LibraryModule } from './modules/library/library.module';
+import { HostelAdminModule } from './modules/hostel-admin/hostel-admin.module';
+import { CampusEventsModule } from './modules/campus-events/campus-events.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -125,6 +127,8 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
     CampusWalletModule,
     TransportModule,
     LibraryModule,
+    HostelAdminModule,
+    CampusEventsModule,
   ],
   controllers: [AppController],
   providers: [

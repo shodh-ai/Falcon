@@ -49,6 +49,13 @@ import {
   Landmark,
   BookMarked,
   FileSpreadsheet,
+  Ticket,
+  UtensilsCrossed,
+  Bell,
+  QrCode,
+  BedDouble,
+  PartyPopper,
+  ClipboardPen,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -116,9 +123,11 @@ export const studentPortal: PortalConfig = {
       items: [
         { label: 'My Financial Ledger', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
         { label: 'Hostel & Mess', href: '/student/hostel', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'room'] },
+        { label: 'Hostel Bed Booking', href: '/student/hostel-booking', icon: BedDouble, keywords: ['tatkal', 'bed', 'allocation'] },
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
         { label: 'Extra-Curriculars', href: '/student/extracurriculars', icon: Medal, keywords: ['ncc', 'nss', 'sodeca', 'credits'] },
+        { label: 'Falcon Events', href: '/student/events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'workshop', 'dj'] },
       ],
     },
     {
@@ -140,6 +149,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
     { label: 'Financial Ledger', href: '/student/finance', icon: Wallet },
     { label: 'Hostel', href: '/student/hostel', icon: Bus },
+    { label: 'Falcon Events', href: '/student/events', icon: PartyPopper },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
 };
@@ -187,6 +197,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'HR & Employee Hub', href: '/faculty/hr', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'od', 'regularization'] },
         { label: 'Team requests', href: '/faculty/team-requests', icon: ClipboardCheck, keywords: ['approve', 'hod', 'pending on me'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
+        { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
       ],
     },
   ],
@@ -299,19 +310,48 @@ export const hostelAdminPortal: PortalConfig = {
   homeHref: '/hostel-admin/dashboard',
   navGroups: [
     {
-      title: 'Hostel Ops',
+      title: 'Overview',
       items: [
-        { label: 'Allocations', href: '/hostel-admin/allocations', icon: Users, keywords: ['block', 'room', 'mess'] },
-        { label: 'Gate Pass Desk', href: '/hostel-admin/gate-passes', icon: ClipboardCheck, keywords: ['approve', 'reject', 'student'] },
-        { label: 'Out-of-Campus Logs', href: '/hostel-admin/logs', icon: ClipboardList, keywords: ['live', 'out', 'campus'] },
+        { label: 'Dashboard', href: '/hostel-admin/dashboard', icon: LayoutDashboard, keywords: ['metrics', 'occupancy'] },
+        { label: 'Hostel Management', href: '/hostel-admin/hostels', icon: Building2, keywords: ['rooms', 'beds', 'facilities'] },
+        { label: 'Student Management', href: '/hostel-admin/students', icon: Users, keywords: ['allocation', 'transfer', 'evict'] },
+      ],
+    },
+    {
+      title: 'Daily Operations',
+      items: [
+        { label: 'Attendance (Roll Call)', href: '/hostel-admin/attendance', icon: CalendarDays, keywords: ['curfew', 'present', 'absent'] },
+        { label: 'Leave & Gate Passes', href: '/hostel-admin/gate-passes', icon: ClipboardCheck, keywords: ['approve', 'checkout'] },
+        { label: 'Visitor Management', href: '/hostel-admin/visitors', icon: Shield, keywords: ['entry', 'exit', 'qr'] },
+      ],
+    },
+    {
+      title: 'Services',
+      items: [
+        { label: 'Tickets & Fines', href: '/hostel-admin/tickets', icon: Ticket, keywords: ['damage', 'maintenance'] },
+        { label: 'Mess Management', href: '/hostel-admin/mess', icon: UtensilsCrossed, keywords: ['menu', 'weekly'] },
+        { label: 'Notifications', href: '/hostel-admin/notifications', icon: Bell, keywords: ['broadcast', 'sms', 'email'] },
+        { label: 'Mess Scanner', href: '/hostel-admin/scanner', icon: QrCode, keywords: ['wallet', 'meal'] },
+      ],
+    },
+    {
+      title: 'Configuration',
+      items: [
+        { label: 'System & Master Data', href: '/hostel-admin/settings', icon: Settings, keywords: ['room types', 'permissions'] },
       ],
     },
   ],
   commandItems: [
     { label: 'Hostel Dashboard', href: '/hostel-admin/dashboard', icon: LayoutDashboard },
-    { label: 'Allocations', href: '/hostel-admin/allocations', icon: Users },
-    { label: 'Gate Pass Desk', href: '/hostel-admin/gate-passes', icon: ClipboardCheck },
-    { label: 'Out Logs', href: '/hostel-admin/logs', icon: ClipboardList },
+    { label: 'Hostel Management', href: '/hostel-admin/hostels', icon: Building2 },
+    { label: 'Students', href: '/hostel-admin/students', icon: Users },
+    { label: 'Roll Call', href: '/hostel-admin/attendance', icon: CalendarDays },
+    { label: 'Gate Passes', href: '/hostel-admin/gate-passes', icon: ClipboardCheck },
+    { label: 'Visitors', href: '/hostel-admin/visitors', icon: Shield },
+    { label: 'Tickets & Fines', href: '/hostel-admin/tickets', icon: Ticket },
+    { label: 'Mess Menu', href: '/hostel-admin/mess', icon: UtensilsCrossed },
+    { label: 'Notifications', href: '/hostel-admin/notifications', icon: Bell },
+    { label: 'Master Data', href: '/hostel-admin/settings', icon: Settings },
   ],
 };
 
@@ -331,6 +371,7 @@ export const financePortal: PortalConfig = {
       items: [
         { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
         { label: 'Collections & Receipts', href: '/finance/collections', icon: Banknote, keywords: ['razorpay', 'payu', 'gateway'] },
+        { label: 'Club Event Approvals', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'ledger'] },
         { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
       ],
     },
@@ -552,7 +593,8 @@ export const adminOpsPortal: PortalConfig = {
         { label: 'Inventory & Assets', href: '/admin-ops/assets', icon: Archive },
         { label: 'Fleet & Transport', href: '/admin-ops/fleet', icon: Bus },
         { label: 'Transport Hub', href: '/admin-ops/transport', icon: BusFront },
-        { label: 'Event Management', href: '/admin-ops/events', icon: Calendar },
+        { label: 'Master Academic Calendar', href: '/admin-ops/calendar', icon: Calendar },
+        { label: 'Event Venue Approvals', href: '/admin-ops/events', icon: Ticket },
         { label: 'Master Timetable', href: '/admin-ops/timetable', icon: CalendarClock },
       ],
     },

@@ -7,4 +7,6 @@ export * from './api.exams';
 export * from './api.hr';
 export * from './api.iqac';
 export * from './api.operations';
+export * from './api.hostel-admin';
+export * from './api.campus-events';
 export * from './api.settings';

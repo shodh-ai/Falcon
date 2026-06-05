@@ -1,15 +1,145 @@
-import { FeatureMatrixDashboard } from '@/components/portal/FeatureMatrixDashboard';
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { useAuthedApi } from '@/lib/api';
+import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
+
+type Dashboard = {
+  metrics: {
+    total_hostels: number;
+    total_students: number;
+    available_beds: number;
+    occupied_percent: number;
+    pending_tickets: number;
+  };
+  occupancy_trend: Array<{ label: string; occupancy_pct: string }>;
+  alerts: Array<{ title: string; time: string; type: string }>;
+  pending_ticket_banner: boolean;
+};
 
 export default function HostelAdminDashboardPage() {
+  const api = useAuthedApi();
+  const [hostelId, setHostelId] = useState('');
+  const [data, setData] = useState<Dashboard | null>(null);
+  const [dismissBanner, setDismissBanner] = useState(false);
+
+  useEffect(() => {
+    const q = hostelId ? `?hostelId=${hostelId}` : '';
+    void api.get<Dashboard>(`/api/hostel-admin/dashboard${q}`).then(setData);
+  }, [api, hostelId]);
+
+  const m = data?.metrics;
+  const chartData = (data?.occupancy_trend ?? []).map((r) => ({
+    month: r.label,
+    occupancy: Number(r.occupancy_pct ?? 0),
+  }));
+
   return (
-    <FeatureMatrixDashboard
-      title="Hostel Admin Dashboard"
-      subtitle="Residential administration for allocations, gate passes, and campus movement logs."
-      features={[
-        { title: 'Allocations', items: ['Map students to blocks', 'Assign rooms and beds', 'Maintain mess plan'] },
-        { title: 'Gate Pass Desk', items: ['Live student gate pass queue', 'Approve or reject requests', 'Track return windows'] },
-        { title: 'Logs', items: ['Live out-of-campus list', 'Return status tracking', 'Warden audit trail'] },
-      ]}
-    />
+    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-sgvu-navy">Hostel Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Residential operations — occupancy, roll call, and alerts</p>
+        </div>
+        <HostelScopeBar value={hostelId} onChange={setHostelId} />
+      </div>
+
+      {data?.pending_ticket_banner && !dismissBanner && (
+        <div className="flex items-center justify-between rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>
+            <strong>{m?.pending_tickets ?? 0}</strong> pending hostel support tickets need attention.
+          </span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/hostel-admin/tickets">View tickets</Link>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setDismissBanner(true)}>
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: 'Total Hostels', value: m?.total_hostels },
+          { label: 'Total Students', value: m?.total_students },
+          {
+            label: 'Available Beds',
+            value: m?.available_beds,
+            sub: m ? `${m.occupied_percent}% occupied` : undefined,
+          },
+          { label: 'Pending Tickets', value: m?.pending_tickets, alert: (m?.pending_tickets ?? 0) > 0 },
+        ].map((t) => (
+          <Card key={t.label} className={t.alert ? 'border-amber-300' : ''}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">{t.label}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-black text-sgvu-navy">{t.value ?? '—'}</p>
+              {t.sub && <p className="text-xs text-muted-foreground">{t.sub}</p>}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Monthly Hostel Occupancy Trends</CardTitle>
+          </CardHeader>
+          <CardContent className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis domain={[0, 100]} unit="%" />
+                <Tooltip />
+                <Line type="monotone" dataKey="occupancy" stroke="#1e3a5f" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Today&apos;s Schedule &amp; Alerts</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(data?.alerts ?? []).map((a) => (
+              <div key={a.title} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                <span className="font-medium">{a.title}</span>
+                <Badge variant="outline">{a.time}</Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button asChild className="bg-sgvu-navy">
+          <Link href="/hostel-admin/attendance">Mark Today&apos;s Attendance</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/hostel-admin/students">Student list</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/hostel-admin/gate-passes">Gate pass desk</Link>
+        </Button>
+      </div>
+    </div>
   );
 }

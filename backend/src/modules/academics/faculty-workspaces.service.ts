@@ -368,8 +368,12 @@ export class FacultyWorkspacesService {
        FROM student_course_enrollments e
        INNER JOIN users u ON u.user_id = e.student_user_id
        INNER JOIN academic_courses c ON c.course_id = e.course_id
-       INNER JOIN academic_timetables t ON t.course_id = c.course_id AND t.faculty_user_id = $2
-       WHERE e.tenant_id = $1 AND e.status = 'ENROLLED' ${courseFilter}
+       WHERE e.tenant_id = $1 AND e.status = 'ENROLLED'
+         AND EXISTS (
+           SELECT 1 FROM academic_timetables t
+           WHERE t.course_id = c.course_id AND t.faculty_user_id = $2 AND t.tenant_id = e.tenant_id
+         )
+         ${courseFilter}
        ORDER BY e.attendance_percent ASC, internal_avg_percent ASC`,
       params,
     );

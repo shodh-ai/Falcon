@@ -11,9 +11,13 @@ import { OperationsController } from './operations.controller';
 import { OperationsService } from './operations.service';
 import { HostelController } from './hostel.controller';
 import { HostelService } from './hostel.service';
+import { HostelAdminModule } from '../hostel-admin/hostel-admin.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([HostelRoom, GatePass, LibraryBook, TransportRoute, HostelAllocation, HostelRequest, User])],
+  imports: [
+    TypeOrmModule.forFeature([HostelRoom, GatePass, LibraryBook, TransportRoute, HostelAllocation, HostelRequest, User]),
+    HostelAdminModule,
+  ],
   controllers: [OperationsController, HostelController],
   providers: [OperationsService, HostelService],
   exports: [OperationsService, HostelService],

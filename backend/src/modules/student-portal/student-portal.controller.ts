@@ -77,12 +77,20 @@ export class StudentPortalController {
     return this.portal.getFinanceLedger(req.user.user_id);
   }
 
-  @Post('finance/pay')
-  payFee(
+  @Post('finance/pay/order')
+  createPayOrder(
     @Req() req: { user: AuthUser },
     @Body() body: { demand_id: string },
   ) {
-    return this.portal.payDemandMock(req.user.user_id, body.demand_id);
+    return this.portal.createPaymentOrder(req.user.user_id, body.demand_id);
+  }
+
+  @Post('finance/pay')
+  payFee(
+    @Req() req: { user: AuthUser },
+    @Body() body: { demand_id: string; payment_id?: string },
+  ) {
+    return this.portal.payDemandMock(req.user.user_id, body.demand_id, body.payment_id);
   }
 
   @Get('placements')

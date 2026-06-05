@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Download, IndianRupee, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { Download, IndianRupee, Lock, Unlock, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { formatInr } from '@/components/finance/FinancePageHeader';
+import { RazorpayMockCheckout, type PaymentOrder } from '@/components/finance/RazorpayMockCheckout';
 
 type FeeDemand = {
   demand_id: string;
@@ -35,12 +37,18 @@ type Ledger = {
   pending_demands: FeeDemand[];
   payment_history: PaymentRow[];
   total_outstanding: number;
+  gates: {
+    admit_card_locked: boolean;
+    no_dues_blocked: boolean;
+    hostel_fines_pending: number;
+    message: string;
+  };
 };
 
 export default function StudentFinancePage() {
   const api = useAuthedApi();
   const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [payingId, setPayingId] = useState<string | null>(null);
+  const [checkout, setCheckout] = useState<{ order: PaymentOrder; demandId: string } | null>(null);
 
   const load = useCallback(() => {
     void api.get<Ledger>('/api/student/finance').then(setLedger);
@@ -50,19 +58,37 @@ export default function StudentFinancePage() {
     load();
   }, [load]);
 
-  async function payNow(demandId: string) {
-    setPayingId(demandId);
+  async function startPay(demandId: string) {
     try {
-      const res = await api.post<{ message: string; receipt_url?: string }>('/api/student/finance/pay', {
+      const order = await api.post<PaymentOrder & { demand_id: string }>('/api/student/finance/pay/order', {
         demand_id: demandId,
       });
-      toast.success(res.message ?? 'Payment successful');
-      load();
+      setCheckout({
+        demandId,
+        order: {
+          order_id: order.order_id,
+          amount_inr: order.amount_inr,
+          fee_head: order.fee_head,
+          razorpay_key: order.razorpay_key,
+        },
+      });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Payment failed');
-    } finally {
-      setPayingId(null);
+      toast.error(e instanceof Error ? e.message : 'Could not start checkout');
     }
+  }
+
+  async function confirmPayment(paymentId: string) {
+    if (!checkout) return;
+    const res = await api.post<{ message: string; gates: Ledger['gates'] }>('/api/student/finance/pay', {
+      demand_id: checkout.demandId,
+      payment_id: paymentId,
+    });
+    toast.success(res.message ?? 'Payment successful');
+    if (res.gates && !res.gates.admit_card_locked) {
+      toast.success('Admit card & no-dues unlocked');
+    }
+    setCheckout(null);
+    load();
   }
 
   function downloadReceipt(row: PaymentRow) {
@@ -76,24 +102,48 @@ export default function StudentFinancePage() {
   const outstanding = (d: FeeDemand) =>
     Math.max(0, Number(d.total_amount) - Number(d.paid_amount ?? 0));
 
+  const locked = ledger?.gates?.admit_card_locked ?? false;
+
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
       <StudentPageHeader
         title="My Financial Ledger"
-        description="View pending fee demands, pay online, and download payment receipts."
+        description="Pay hostel fines, tuition, and other demands via secure Razorpay checkout."
       />
 
+      <Card className={locked ? 'border-amber-300 bg-amber-50/60' : 'border-emerald-300 bg-emerald-50/40'}>
+        <CardContent className="flex flex-wrap items-center gap-4 pt-6">
+          {locked ? (
+            <Lock className="h-10 w-10 text-amber-700" />
+          ) : (
+            <Unlock className="h-10 w-10 text-emerald-700" />
+          )}
+          <div className="flex-1">
+            <p className="font-semibold text-sgvu-navy">
+              {locked ? 'Admit card & no-dues locked' : 'Admit card & no-dues unlocked'}
+            </p>
+            <p className="text-sm text-muted-foreground">{ledger?.gates?.message}</p>
+            {(ledger?.gates?.hostel_fines_pending ?? 0) > 0 && (
+              <p className="mt-1 text-sm text-amber-800">
+                {ledger?.gates?.hostel_fines_pending} hostel damage fine(s) pending payment.
+              </p>
+            )}
+          </div>
+          {locked && (
+            <Button asChild variant="outline" size="sm">
+              <Link href="/student/exams">Exam desk</Link>
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
       {ledger && ledger.total_outstanding > 0 && (
-        <Card className="border-amber-300 bg-amber-50/80">
-          <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-6">
-            <div className="flex items-center gap-3">
-              <Wallet className="h-8 w-8 text-sgvu-gold" />
-              <div>
-                <p className="text-sm font-medium text-amber-900">Total outstanding</p>
-                <p className="text-3xl font-black text-sgvu-navy">
-                  {formatInr(ledger.total_outstanding)}
-                </p>
-              </div>
+        <Card className="border-sgvu-gold/30">
+          <CardContent className="flex items-center gap-3 pt-6">
+            <Wallet className="h-8 w-8 text-sgvu-gold" />
+            <div>
+              <p className="text-sm text-muted-foreground">Total outstanding</p>
+              <p className="text-3xl font-black text-sgvu-navy">{formatInr(ledger.total_outstanding)}</p>
             </div>
           </CardContent>
         </Card>
@@ -109,23 +159,22 @@ export default function StudentFinancePage() {
           )}
           {(ledger?.pending_demands ?? []).map((d) => {
             const due = outstanding(d);
+            const isHostelFine = d.fee_head === 'HOSTEL_DAMAGE';
             return (
               <div
                 key={d.demand_id}
-                className="flex flex-col gap-4 rounded-xl border border-sgvu-gold/30 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="space-y-1">
-                  <p className="text-lg font-bold text-sgvu-navy">{d.fee_head}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-lg font-bold text-sgvu-navy">{d.fee_head.replace(/_/g, ' ')}</p>
+                    {isHostelFine && <Badge variant="secondary">Hostel</Badge>}
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     {d.academic_year}
-                    {d.semester != null ? ` · Semester ${d.semester}` : ''}
+                    {d.semester != null ? ` · Sem ${d.semester}` : ''}
                   </p>
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <Badge variant={d.status === 'OVERDUE' ? 'destructive' : 'secondary'}>{d.status}</Badge>
-                    <span className="text-sm">
-                      Due <strong>{new Date(d.due_date).toLocaleDateString('en-IN')}</strong>
-                    </span>
-                  </div>
+                  <Badge variant={d.status === 'OVERDUE' ? 'destructive' : 'outline'}>{d.status}</Badge>
                   <p className="flex items-center gap-1 text-2xl font-black text-sgvu-navy">
                     <IndianRupee className="h-6 w-6" />
                     {due.toLocaleString('en-IN')}
@@ -133,11 +182,11 @@ export default function StudentFinancePage() {
                 </div>
                 <Button
                   size="lg"
-                  className="w-full shrink-0 bg-sgvu-navy sm:w-auto"
-                  disabled={payingId === d.demand_id || due <= 0}
-                  onClick={() => void payNow(d.demand_id)}
+                  className="w-full bg-sgvu-navy sm:w-auto"
+                  disabled={due <= 0}
+                  onClick={() => void startPay(d.demand_id)}
                 >
-                  {payingId === d.demand_id ? 'Processing…' : 'Pay Now'}
+                  Pay Now
                 </Button>
               </div>
             );
@@ -156,34 +205,36 @@ export default function StudentFinancePage() {
                 <th className="py-2 pr-4">Date</th>
                 <th className="py-2 pr-4">Fee head</th>
                 <th className="py-2 pr-4">Amount</th>
-                <th className="py-2 pr-4">Mode</th>
                 <th className="py-2">Receipt</th>
               </tr>
             </thead>
             <tbody>
               {(ledger?.payment_history ?? []).map((row) => (
                 <tr key={row.transaction_id} className="border-b">
-                  <td className="py-3 pr-4 whitespace-nowrap">
-                    {new Date(row.created_at).toLocaleDateString('en-IN')}
-                  </td>
+                  <td className="py-3 pr-4">{new Date(row.created_at).toLocaleDateString('en-IN')}</td>
                   <td className="py-3 pr-4">{row.fee_head ?? '—'}</td>
                   <td className="py-3 pr-4 font-semibold">{formatInr(row.amount)}</td>
-                  <td className="py-3 pr-4">{row.payment_mode ?? '—'}</td>
                   <td className="py-3">
                     <Button size="sm" variant="outline" onClick={() => downloadReceipt(row)}>
                       <Download className="mr-1 h-4 w-4" />
-                      Download
+                      Receipt
                     </Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {!ledger?.payment_history?.length && (
-            <p className="py-6 text-center text-sm text-muted-foreground">No payments recorded yet.</p>
-          )}
         </CardContent>
       </Card>
+
+      {checkout && (
+        <RazorpayMockCheckout
+          open
+          order={checkout.order}
+          onClose={() => setCheckout(null)}
+          onSuccess={confirmPayment}
+        />
+      )}
     </div>
   );
 }

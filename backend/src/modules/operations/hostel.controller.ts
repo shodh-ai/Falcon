@@ -5,6 +5,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { HostelService } from './hostel.service';
 import { CreateHostelRequestDto } from './dto/create-hostel-request.dto';
+import { CreateHostelLeaveDto } from './dto/create-hostel-leave.dto';
 
 type AuthUser = { user_id: string; role?: string };
 
@@ -30,5 +31,17 @@ export class HostelController {
   @Roles('Student')
   listRequests(@Req() req: { user: AuthUser }) {
     return this.hostel.listMyRequests(req.user.user_id);
+  }
+
+  @Post('leaves')
+  @Roles('Student')
+  createLeave(@Req() req: { user: AuthUser }, @Body() dto: CreateHostelLeaveDto) {
+    return this.hostel.createLeave(req.user.user_id, dto);
+  }
+
+  @Get('leaves')
+  @Roles('Student')
+  listLeaves(@Req() req: { user: AuthUser }) {
+    return this.hostel.listMyLeaves(req.user.user_id);
   }
 }

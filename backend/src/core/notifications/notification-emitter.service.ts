@@ -18,6 +18,8 @@ import {
   type TimetableChangedPayload,
   type TransportBusApproachingPayload,
   type WorkflowApprovalRequiredPayload,
+  type EventProposedPayload,
+  type EventTierPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -87,5 +89,17 @@ export class NotificationEmitterService {
 
   approvalRequired(payload: WorkflowApprovalRequiredPayload) {
     this.events.emit(NotificationEvents.WORKFLOW_APPROVAL_REQUIRED, payload);
+  }
+
+  eventProposed(payload: EventProposedPayload) {
+    this.events.emit(NotificationEvents.EVENT_PROPOSED, payload);
+  }
+
+  eventPendingEstate(payload: EventTierPayload) {
+    this.events.emit(NotificationEvents.EVENT_PENDING_ESTATE, payload);
+  }
+
+  eventPendingFinance(payload: EventTierPayload) {
+    this.events.emit(NotificationEvents.EVENT_PENDING_FINANCE, payload);
   }
 }

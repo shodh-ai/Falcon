@@ -40,6 +40,11 @@ export class FinanceWebhookService {
     const notes = (paymentEntity?.notes as Record<string, unknown>) ?? {};
     const studentUserId = String(notes.student_user_id ?? notes.studentUserId ?? '');
     const demandId = String(notes.demand_id ?? notes.demandId ?? '');
+    const feeHead = String(notes.fee_head ?? notes.feeHead ?? '');
+    const holdId = String(notes.hold_id ?? notes.holdId ?? '');
+    const eventId = String(notes.event_id ?? notes.eventId ?? '');
+    const registrationId = String(notes.registration_id ?? notes.registrationId ?? '');
+    const tenantIdFromNotes = String(notes.tenant_id ?? notes.tenantId ?? '');
 
     if (!paymentId) {
       return { received: true, processed: false, reason: 'missing_payment_id' };
@@ -76,6 +81,53 @@ export class FinanceWebhookService {
     txn.status = 'SUCCESS';
     txn.gateway_payload = dto.payload;
     await this.transactions.save(txn);
+
+    if (feeHead === 'EVENTS_CLUB' && registrationId && studentUserId) {
+      const tenantRows = await this.dataSource.query(`SELECT tenant_id FROM users WHERE user_id = $1`, [
+        studentUserId,
+      ]);
+      const tenantId =
+        tenantIdFromNotes ||
+        (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
+        'a0000000-0000-4000-8000-000000000001';
+      this.events.emit('event.registration.paid', {
+        tenantId,
+        studentUserId,
+        registrationId,
+        eventId: eventId || undefined,
+        paymentId,
+        feeHead: 'EVENTS_CLUB',
+      });
+      return {
+        received: true,
+        processed: true,
+        event_registration: true,
+        transaction_id: txn.transaction_id,
+      };
+    }
+
+    if (feeHead === 'HOSTEL_BOOKING' && holdId && studentUserId) {
+      const tenantRows = await this.dataSource.query(`SELECT tenant_id FROM users WHERE user_id = $1`, [
+        studentUserId,
+      ]);
+      const tenantId =
+        tenantIdFromNotes ||
+        (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
+        'a0000000-0000-4000-8000-000000000001';
+      this.events.emit('hostel.booking.payment_captured', {
+        tenantId,
+        studentUserId,
+        holdId,
+        paymentId,
+        feeHead: 'HOSTEL_BOOKING',
+      });
+      return {
+        received: true,
+        processed: true,
+        hostel_booking: true,
+        transaction_id: txn.transaction_id,
+      };
+    }
 
     if (demandId) {
       const demand = await this.demands.findOne({ where: { demand_id: demandId } });

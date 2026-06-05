@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { AlumniConversionService } from '../alumni/alumni-conversion.service';
@@ -10,6 +11,7 @@ export class StudentPortalService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly crypto: HrFieldEncryptionService,
     private readonly alumniConversion: AlumniConversionService,
+    private readonly events: EventEmitter2,
   ) {}
 
   private maskEncrypted(value: string | null, maskFn: (v: string) => string) {
@@ -570,10 +572,63 @@ export class StudentPortalService {
       0,
     );
 
-    return { pending_demands, payment_history, total_outstanding };
+    const hostelFinesPending = await this.dataSource.query<Array<{ count: string }>>(
+      `SELECT COUNT(*)::text AS count FROM operations_hostel_fines
+       WHERE student_user_id = $1 AND status = 'PENDING'`,
+      [userId],
+    ).catch(() => [{ count: '0' }]);
+
+    const hasOpenDemands = total_outstanding > 0;
+    const hostelFineCount = Number(hostelFinesPending[0]?.count ?? 0);
+
+    return {
+      pending_demands,
+      payment_history,
+      total_outstanding,
+      gates: {
+        admit_card_locked: hasOpenDemands,
+        no_dues_blocked: hasOpenDemands,
+        hostel_fines_pending: hostelFineCount,
+        message: hasOpenDemands
+          ? 'Clear outstanding fee demands to unlock your admit card and no-dues certificate.'
+          : 'All fee demands cleared — admit card and no-dues are unlocked.',
+      },
+    };
   }
 
-  async payDemandMock(userId: string, demandId: string) {
+  async createPaymentOrder(userId: string, demandId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT demand_id, fee_head, total_amount, paid_amount, status
+       FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
+      [demandId, userId],
+    );
+    const demand = rows[0] as {
+      demand_id: string;
+      fee_head: string;
+      total_amount: string;
+      paid_amount: string;
+      status: string;
+    } | undefined;
+    if (!demand) throw new NotFoundException('Fee demand not found');
+    if (demand.status === 'PAID') throw new BadRequestException('This demand is already paid');
+
+    const outstanding = Math.max(0, Number(demand.total_amount) - Number(demand.paid_amount ?? 0));
+    if (outstanding <= 0) throw new BadRequestException('Nothing due on this demand');
+
+    const orderId = `order_${demandId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+    return {
+      order_id: orderId,
+      demand_id: demandId,
+      amount_inr: outstanding,
+      amount_paise: Math.round(outstanding * 100),
+      currency: 'INR',
+      fee_head: demand.fee_head,
+      razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
+      mock: true,
+    };
+  }
+
+  async payDemandMock(userId: string, demandId: string, gatewayPaymentId?: string) {
     const rows = await this.dataSource.query(
       `SELECT * FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
       [demandId, userId],
@@ -596,20 +651,23 @@ export class StudentPortalService {
       throw new BadRequestException('Nothing due on this demand');
     }
 
-    const paymentId = `MOCK-${Date.now()}`;
+    const paymentId = gatewayPaymentId ?? `pay_${Date.now()}`;
+    const demandMeta = await this.dataSource.query<Array<{ fee_head: string; tenant_id: string }>>(
+      `SELECT d.fee_head, u.tenant_id FROM finance_fee_demands d
+       JOIN users u ON u.user_id = d.student_user_id
+       WHERE d.demand_id = $1`,
+      [demandId],
+    );
+    const feeHead = demandMeta[0]?.fee_head ?? 'FEE';
+    const tenantId = demandMeta[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+
     const txnRows = await this.dataSource.query(
       `INSERT INTO finance_transactions (
          student_user_id, demand_id, gateway, gateway_payment_id, gateway_reference,
          amount, status, payment_mode, receipt_url
        ) VALUES ($1, $2, 'RAZORPAY', $3, $3, $4, 'SUCCESS', 'UPI', $5)
        RETURNING *`,
-      [
-        userId,
-        demandId,
-        paymentId,
-        outstanding,
-        `/receipts/${paymentId}.pdf`,
-      ],
+      [userId, demandId, paymentId, outstanding, `/receipts/${paymentId}.pdf`],
     );
 
     await this.dataSource.query(
@@ -619,11 +677,38 @@ export class StudentPortalService {
       [demandId],
     );
 
+    await this.dataSource.query(
+      `UPDATE operations_hostel_fines SET status = 'PAID'
+       WHERE finance_demand_id = $1 AND student_user_id = $2`,
+      [demandId, userId],
+    ).catch(() => undefined);
+
+    await this.dataSource.query(
+      `UPDATE student_profiles SET no_dues_status = 'CLEARED'
+       WHERE user_id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM finance_fee_demands fd
+           WHERE fd.student_user_id = $1 AND fd.status NOT IN ('PAID', 'WAIVED')
+         )`,
+      [userId],
+    ).catch(() => undefined);
+
+    this.events.emit('finance.demand_paid', {
+      tenantId,
+      studentUserId: userId,
+      demandId,
+      amount: outstanding,
+      feeHead,
+    });
+
+    const ledger = await this.getFinanceLedger(userId);
+
     return {
       success: true,
       transaction: txnRows[0],
       receipt_url: txnRows[0]?.receipt_url,
       message: `Payment of ₹${outstanding} recorded successfully`,
+      gates: ledger.gates,
     };
   }
 }
