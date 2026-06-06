@@ -260,7 +260,8 @@ export default function StudentMarksPage() {
         <CardContent className="space-y-2">
           {!componentSemesterData?.subjects?.length && (
             <p className="text-sm text-muted-foreground">
-              No subjects for this semester, or marks have not been published yet.
+              No subjects for this semester, or marks have not been published yet. Faculty must click
+              &ldquo;Publish to students&rdquo; after saving draft marks — draft marks are not visible here.
             </p>
           )}
           {(componentSemesterData?.subjects ?? []).map((sub) => {

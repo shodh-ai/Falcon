@@ -89,6 +89,12 @@ export default function StudentHostelPage() {
     void loadHostelData();
   }, []);
 
+  useEffect(() => {
+    if (!loading && !allocation && tab === 'gate') {
+      setTab('leave');
+    }
+  }, [loading, allocation, tab]);
+
   async function submitGatePass() {
     if (!gatePass.out_date || !gatePass.in_date || !gatePass.reason.trim() || !gatePass.destination.trim()) {
       toast.error('Please fill out all gate pass fields.');
@@ -167,16 +173,22 @@ export default function StudentHostelPage() {
         )}
       </StudentSectionCard>
 
+      {!loading && !allocation && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          You are not currently allocated a hostel room. Day scholars cannot request hostel gate passes!
+        </div>
+      )}
+
       <StudentTabBar
         tabs={[
-          { id: 'gate' as const, label: 'Gate pass' },
+          ...(allocation ? [{ id: 'gate' as const, label: 'Gate pass' }] : []),
           { id: 'leave' as const, label: 'Leave' },
         ]}
         active={tab}
         onChange={setTab}
       />
 
-      {tab === 'gate' ? (
+      {tab === 'gate' && allocation ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Request gate pass</CardTitle>

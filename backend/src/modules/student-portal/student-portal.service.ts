@@ -2,8 +2,17 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { extname, resolve } from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { AlumniConversionService } from '../alumni/alumni-conversion.service';
+import { TicketService } from '../helpdesk/ticket.service';
+import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
+import { ObjectStorageService } from '../../storage/object-storage.service';
+
+const EXTRA_CERT_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
 
 @Injectable()
 export class StudentPortalService {
@@ -12,6 +21,10 @@ export class StudentPortalService {
     private readonly crypto: HrFieldEncryptionService,
     private readonly alumniConversion: AlumniConversionService,
     private readonly events: EventEmitter2,
+    private readonly tickets: TicketService,
+    private readonly workflowRouting: WorkflowRoutingService,
+    private readonly workflowNotify: WorkflowNotificationService,
+    private readonly objectStorage: ObjectStorageService,
   ) {}
 
   private maskEncrypted(value: string | null, maskFn: (v: string) => string) {
@@ -27,7 +40,7 @@ export class StudentPortalService {
   async getMasterProfile(tenantId: string, userId: string) {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email,
-              sp.enrollment_no, sp.batch, sp.category, sp.gender, sp.date_of_birth,
+              sp.enrollment_number, sp.enrollment_no, sp.batch, sp.category, sp.gender, sp.date_of_birth,
               sp.nationality, sp.parent_info, sp.admission_type, sp.admission_number,
               sp.admission_status, sp.aadhaar_encrypted, sp.passport_encrypted,
               d.dept_name AS department,
@@ -44,8 +57,8 @@ export class StudentPortalService {
     if (!rows[0]) throw new NotFoundException('Student not found');
     const row = rows[0];
     return {
-      student_id: row.enrollment_no ?? row.user_id,
-      enrollment_no: row.enrollment_no,
+      student_id: row.enrollment_number ?? row.admission_number ?? row.enrollment_no ?? row.user_id,
+      enrollment_no: row.enrollment_number ?? row.admission_number ?? row.enrollment_no,
       name: row.name,
       email: row.email,
       mobile: row.parent_info?.student_mobile ?? row.parent_info?.mobile ?? null,
@@ -341,7 +354,8 @@ export class StudentPortalService {
 
   async getExtracurriculars(tenantId: string, userId: string) {
     const records = await this.dataSource.query(
-      `SELECT record_id, activity_type, details, credits_awarded, event_date, created_at
+      `SELECT record_id, activity_type, details, credits_awarded, event_date,
+              verification_status, certificate_file_path, created_at
        FROM student_extracurriculars
        WHERE tenant_id = $1 AND student_user_id = $2
        ORDER BY event_date DESC NULLS LAST, created_at DESC`,
@@ -468,17 +482,79 @@ export class StudentPortalService {
     if (!dto.subject?.trim() || !dto.description?.trim()) {
       throw new BadRequestException('Subject and description are required');
     }
+    const description = `${dto.description.trim()}${dto.fields_requested?.length ? `\n\nFields: ${dto.fields_requested.join(', ')}` : ''}`;
+    const ticket = await this.tickets.createTicket(userId, {
+      category: 'STUDENT_PROFILE',
+      subject: dto.subject.trim(),
+      description,
+    });
+    return { ticket_id: ticket.ticket_id, message: 'Profile correction submitted to Academic Admin.' };
+  }
+
+  async logExtracurricular(
+    tenantId: string,
+    userId: string,
+    dto: { activity_type: string; description: string; event_date: string },
+    file?: Express.Multer.File,
+  ) {
+    const activityType = dto.activity_type?.trim().toUpperCase();
+    if (!['NCC', 'NSS', 'SODECA', 'OTHER'].includes(activityType)) {
+      throw new BadRequestException('Invalid activity type');
+    }
+    if (!dto.description?.trim() || !dto.event_date) {
+      throw new BadRequestException('Description and date are required');
+    }
+    if (!file) throw new BadRequestException('Certificate PDF is required');
+    if (!EXTRA_CERT_MIME.includes(file.mimetype)) {
+      throw new BadRequestException('Only PDF, JPG, and PNG files are allowed');
+    }
+
+    const filePath = await this.persistExtracurricularFile(tenantId, file);
     const rows = await this.dataSource.query(
-      `INSERT INTO helpdesk_tickets (student_user_id, category, subject, description, status)
-       VALUES ($1, 'ACADEMICS', $2, $3, 'PENDING')
-       RETURNING ticket_id`,
-      [
-        userId,
-        dto.subject.trim(),
-        `${dto.description.trim()}${dto.fields_requested?.length ? `\n\nFields: ${dto.fields_requested.join(', ')}` : ''}`,
-      ],
+      `INSERT INTO student_extracurriculars (
+         tenant_id, student_user_id, activity_type, details, credits_awarded,
+         event_date, verification_status, certificate_file_path
+       ) VALUES ($1, $2, $3, $4, 0, $5::date, 'PENDING_VERIFICATION', $6)
+       RETURNING record_id`,
+      [tenantId, userId, activityType, dto.description.trim(), dto.event_date, filePath],
     );
-    return { ticket_id: rows[0].ticket_id, message: 'Profile update request submitted to Admin.' };
+
+    const student = await this.dataSource.query<Array<{ name: string }>>(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [userId],
+    );
+    try {
+      const proctor = await this.workflowRouting.getStudentProctor(userId);
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver: proctor,
+        title: 'Extracurricular activity pending verification',
+        message: `${student[0]?.name ?? 'A student'} logged ${activityType} activity for review.`,
+        actionLink: '/iqac/student-achievements',
+        category: 'ACADEMICS',
+        requesterName: student[0]?.name,
+      });
+    } catch {
+      // Proctor not assigned — IQAC admins poll the verification queue separately.
+    }
+
+    return { record_id: rows[0].record_id, status: 'PENDING_VERIFICATION' };
+  }
+
+  private async persistExtracurricularFile(tenantId: string, file: Express.Multer.File): Promise<string> {
+    const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
+    if (this.objectStorage.isEnabled()) {
+      const key = this.objectStorage.buildKey(tenantId, uniqueName);
+      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      return stored.url;
+    }
+    const uploadPath = process.env.UPLOAD_PATH || './uploads';
+    const date = new Date();
+    const dir = resolve(uploadPath, tenantId, `${date.getFullYear()}`, `${date.getMonth() + 1}`);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const fullPath = resolve(dir, uniqueName);
+    writeFileSync(fullPath, file.buffer);
+    return fullPath;
   }
 
   async getLibrary(tenantId: string, userId: string) {

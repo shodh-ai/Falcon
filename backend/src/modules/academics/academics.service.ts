@@ -298,6 +298,11 @@ export class AcademicsService {
           )
         : 0;
 
+    const profileCorrectionRows = await this.users.manager.query(
+      `SELECT COUNT(*)::int AS count FROM helpdesk_tickets
+       WHERE category IN ('ACADEMICS', 'STUDENT_PROFILE') AND status = 'PENDING'`,
+    );
+
     return {
       faculty_present_today: facultyPresentToday,
       total_faculty: faculty.length,
@@ -305,6 +310,7 @@ export class AcademicsService {
       average_department_attendance: averageAttendance,
       pending_leave_approvals: pendingLeaves.length,
       pending_gate_pass_approvals: pendingGatePasses.length,
+      pending_profile_corrections: profileCorrectionRows[0]?.count ?? 0,
     };
   }
 

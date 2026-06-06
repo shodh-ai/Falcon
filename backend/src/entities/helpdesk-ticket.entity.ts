@@ -1,6 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
-export type HelpdeskTicketCategory = 'FINANCE' | 'ACADEMICS' | 'IT' | 'HOSTEL' | 'MENTORSHIP';
+export type HelpdeskTicketCategory =
+  | 'FINANCE'
+  | 'ACADEMICS'
+  | 'IT'
+  | 'HOSTEL'
+  | 'MENTORSHIP'
+  | 'STUDENT_PROFILE';
 export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
 
 @Entity('helpdesk_tickets')

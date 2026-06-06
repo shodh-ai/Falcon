@@ -335,6 +335,31 @@ export class AcademicsController {
     return this.academics.listHodGatePassApprovals(this.resolveTenantId(req.user), req.user.user_id);
   }
 
+  @Get('hod/approvals/extra-classes')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodExtraClassApprovals(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listHodPendingAdjustments(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Patch('hod/approvals/extra-classes/:adjustmentId')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  actOnExtraClass(
+    @Param('adjustmentId') adjustmentId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { action: 'APPROVE' | 'REJECT'; remarks?: string },
+  ) {
+    return this.facultyWorkspaces.actOnClassAdjustment(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      adjustmentId,
+      body.action,
+      body.remarks,
+    );
+  }
+
   @Get('courses/available-electives')
   @Roles('Student')
   availableElectives(@Req() req: { user: AuthUser }) {
@@ -559,6 +584,15 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       body as Parameters<FacultyWorkspacesService['createLogbookEntry']>[2],
+    );
+  }
+
+  @Get('faculty/workspaces/remedial')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listRemedial(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listRemedialActions(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
     );
   }
 

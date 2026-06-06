@@ -1,9 +1,9 @@
 'use client';
 
 import { CreditCard, LogOut, Settings, User } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { getWorkspaceLabelForRole } from '@/lib/auth-routing';
+import { getActiveWorkspaceRoleFromPath, getWorkspaceLabelForRole } from '@/lib/auth-routing';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,6 +22,10 @@ interface ProfileMenuProps {
 export function ProfileMenu({ profileHref = '/student/profile' }: ProfileMenuProps) {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const roles = user?.roles?.length ? user.roles : user?.role ? [user.role] : [];
+  const pathRole = getActiveWorkspaceRoleFromPath(pathname, roles);
+  const workspaceRole = pathRole ?? user?.primaryRole ?? user?.role ?? 'Student';
 
   const handleLogout = () => {
     logout();
@@ -44,7 +48,7 @@ export function ProfileMenu({ profileHref = '/student/profile' }: ProfileMenuPro
         <DropdownMenuLabel>
           <p className="font-semibold">{user?.name ?? 'Guest'}</p>
           <p className="text-xs font-normal text-muted-foreground">
-            {getWorkspaceLabelForRole(user?.primaryRole ?? user?.role ?? 'Student')}
+            {getWorkspaceLabelForRole(workspaceRole)}
           </p>
           {user?.roles && user.roles.length > 1 && (
             <p className="mt-1 text-[11px] font-normal text-muted-foreground">

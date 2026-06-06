@@ -1016,6 +1016,138 @@ export class HrService {
     return this.staffLeaveRequests.save(leave);
   }
 
+  async hodApproveStaffLeave(
+    leaveId: string,
+    tenantId: string,
+    actor: { user_id: string; role?: string; roles?: string[]; dept_id?: number },
+  ) {
+    const leave = await this.staffLeaveRequests.findOne({
+      where: { leave_id: leaveId, tenant_id: tenantId },
+      relations: ['staff'],
+    });
+    if (!leave) throw new NotFoundException('Leave request not found');
+    if (leave.status !== 'PENDING') {
+      throw new BadRequestException('Leave request has already been processed');
+    }
+
+    const actorRoles = actor.roles ?? (actor.role ? [actor.role] : []);
+    if (actorRoles.includes('HOD') && !actorRoles.includes('HR') && !actorRoles.includes('SuperAdmin')) {
+      const hodDepartments = await this.users.manager.query(
+        `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+        [actor.user_id],
+      );
+      const allowedDeptIds = new Set<number>([
+        ...hodDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...(actor.dept_id ? [actor.dept_id] : []),
+      ]);
+      if (!leave.staff?.dept_id || !allowedDeptIds.has(leave.staff.dept_id)) {
+        throw new ForbiddenException('HOD can act only on faculty from their department');
+      }
+    }
+
+    const profile = await this.users.manager.query(
+      `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2`,
+      [leave.staff_user_id, tenantId],
+    );
+    const entityId = Number(profile[0]?.entity_id ?? leave.entity_id ?? 1);
+
+    if (leave.current_approver_user_id && actor.user_id) {
+      this.hrWorkflow.assertActorIsCurrentApprover(actor.user_id, leave.current_approver_user_id);
+    }
+
+    const next = await this.hrWorkflow.advanceAfterApproval(
+      tenantId,
+      entityId,
+      leave.request_type ?? 'LEAVE',
+      leave.staff_user_id,
+      leave.current_step_order,
+    );
+
+    if (next.is_final) {
+      leave.status = 'HR_APPROVED';
+      leave.current_approver_user_id = null;
+    } else {
+      leave.status = 'HOD_APPROVED';
+      leave.current_step_order = next.step_order;
+      leave.current_approver_user_id = next.approver_user_id;
+    }
+
+    const saved = await this.staffLeaveRequests.save(leave);
+    const staff = leave.staff ?? (await this.users.findOne({ where: { user_id: leave.staff_user_id } }));
+    if (staff?.tenant_id) {
+      this.notify.leaveApproved({
+        tenantId: staff.tenant_id,
+        userId: leave.staff_user_id,
+        title: 'Leave approved by HOD',
+        message: 'Your leave request was approved by your HOD and forwarded for final processing.',
+        actionLink: '/faculty/hr',
+      });
+    }
+    if (next.approver_user_id && staff) {
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver: { userId: next.approver_user_id, email: '', name: 'Approver', routeReason: 'HR_LEAVE' },
+        title: 'Leave awaiting HR approval',
+        message: `${staff.name} leave was HOD-approved and needs HR sign-off.`,
+        actionLink: '/hr/leaves',
+        category: 'HR',
+        requesterName: staff.name,
+      });
+    }
+    return saved;
+  }
+
+  async hodRejectStaffLeave(
+    leaveId: string,
+    tenantId: string,
+    actor: { user_id: string; role?: string; roles?: string[]; dept_id?: number },
+    remarks: string,
+  ) {
+    if (!remarks?.trim()) {
+      throw new BadRequestException('Rejection remarks are required');
+    }
+    const leave = await this.staffLeaveRequests.findOne({
+      where: { leave_id: leaveId, tenant_id: tenantId },
+      relations: ['staff'],
+    });
+    if (!leave) throw new NotFoundException('Leave request not found');
+    if (leave.status !== 'PENDING') {
+      throw new BadRequestException('Leave request has already been processed');
+    }
+
+    const actorRoles = actor.roles ?? (actor.role ? [actor.role] : []);
+    if (actorRoles.includes('HOD') && !actorRoles.includes('HR') && !actorRoles.includes('SuperAdmin')) {
+      const hodDepartments = await this.users.manager.query(
+        `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+        [actor.user_id],
+      );
+      const allowedDeptIds = new Set<number>([
+        ...hodDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...(actor.dept_id ? [actor.dept_id] : []),
+      ]);
+      if (!leave.staff?.dept_id || !allowedDeptIds.has(leave.staff.dept_id)) {
+        throw new ForbiddenException('HOD can act only on faculty from their department');
+      }
+    }
+
+    leave.status = 'REJECTED';
+    leave.approver_remarks = remarks.trim();
+    leave.current_approver_user_id = null;
+    const saved = await this.staffLeaveRequests.save(leave);
+
+    const staff = leave.staff ?? (await this.users.findOne({ where: { user_id: leave.staff_user_id } }));
+    if (staff?.tenant_id) {
+      this.notify.leaveApproved({
+        tenantId: staff.tenant_id,
+        userId: leave.staff_user_id,
+        title: 'Leave rejected',
+        message: `Your leave request was rejected. Reason: ${remarks.trim()}`,
+        actionLink: '/faculty/hr',
+      });
+    }
+    return saved;
+  }
+
   async listSalaryStructures(tenantId: string, entityId: number) {
     return this.users.manager.query(
       `SELECT s.*, u.name AS employee_name, u.official_email AS employee_email

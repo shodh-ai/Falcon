@@ -55,6 +55,9 @@ export class StaffLeaveRequest extends BaseTenantEntity {
   @Column({ type: 'uuid', nullable: true })
   current_approver_user_id: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  approver_remarks: string | null;
+
   @CreateDateColumn()
   applied_at: Date;
 }

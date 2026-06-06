@@ -60,13 +60,17 @@ export class HostelService {
     const student = await this.users.findOne({ where: { user_id: studentUserId } });
     const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
 
-    let wardenUserId: string | null = null;
-    try {
-      const warden = await this.workflowRouting.getWardenForStudent(studentUserId);
-      wardenUserId = warden.userId;
-    } catch {
-      wardenUserId = null;
+    if (isGatePass) {
+      const allocation = await this.allocations.findOne({
+        where: { student_user_id: studentUserId, status: 'ACTIVE' },
+      });
+      if (!allocation) {
+        throw new BadRequestException('No active hostel allocation found.');
+      }
     }
+
+    const warden = await this.workflowRouting.getWardenForStudent(studentUserId);
+    const wardenUserId = warden.userId;
 
     const saved = await this.requests.save(
       this.requests.create({

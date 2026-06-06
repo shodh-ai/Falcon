@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
+import { ProfileCorrectionWidget } from '@/components/hod/ProfileCorrectionWidget';
 
 const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
 
@@ -56,6 +57,7 @@ export default function SuperAdminDashboardPage() {
           </CardContent>
         </Card>
       </div>
+      <ProfileCorrectionWidget />
     </div>
   );
 }

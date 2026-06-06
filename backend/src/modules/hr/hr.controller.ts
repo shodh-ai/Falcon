@@ -699,6 +699,24 @@ export class HrController {
     return this.hr.actOnStaffLeave(leaveId, this.resolveTenantId(req.user), status, req.user);
   }
 
+  @Patch('leaves/:leaveId/approve')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  @HrPermission('leaves', 'write')
+  hodApproveLeave(@Param('leaveId') leaveId: string, @Req() req: { user: AuthUser }) {
+    return this.hr.hodApproveStaffLeave(leaveId, this.resolveTenantId(req.user), req.user);
+  }
+
+  @Patch('leaves/:leaveId/reject')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  @HrPermission('leaves', 'write')
+  hodRejectLeave(
+    @Param('leaveId') leaveId: string,
+    @Req() req: { user: AuthUser },
+    @Body('remarks') remarks: string,
+  ) {
+    return this.hr.hodRejectStaffLeave(leaveId, this.resolveTenantId(req.user), req.user, remarks);
+  }
+
   @Post('payroll/run')
   @HttpCode(HttpStatus.ACCEPTED)
   @Roles('HR', 'HRAdmin', 'SuperAdmin')

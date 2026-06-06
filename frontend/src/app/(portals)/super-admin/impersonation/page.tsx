@@ -43,6 +43,7 @@ export default function SuperAdminImpersonationPage() {
         role: res.target.role,
       });
       toast.success(`Now viewing as ${res.target.name} (${res.target.role}) — read-only mode`);
+      window.location.href = '/';
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Impersonation failed');
     }

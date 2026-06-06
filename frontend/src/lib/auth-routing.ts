@@ -194,6 +194,21 @@ const portalRoles: Record<string, string[]> = {
   '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
 };
 
+/** Derive the active workspace role from the current pathname (for multi-role users). */
+export function getActiveWorkspaceRoleFromPath(
+  pathname: string,
+  userRoles: string[],
+): string | null {
+  const normalized = userRoles.map((r) => r.trim().toLowerCase());
+  const portal = Object.keys(portalRoles)
+    .sort((a, b) => b.length - a.length)
+    .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  if (!portal) return null;
+  const allowed = portalRoles[portal];
+  const match = normalized.find((r) => allowed.includes(r));
+  return match ? userRoles[normalized.indexOf(match)] ?? match : null;
+}
+
 const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
 
 export function canRoleAccessPath(

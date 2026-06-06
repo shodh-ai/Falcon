@@ -46,17 +46,20 @@ export class ImpersonationService {
     const target = await this.authService.findById(targetUserId, tenantId);
     if (!target) throw new NotFoundException('Target user not found');
 
-    const roleClaims = this.authService.getRoleClaims(target);
+    await this.authService.ensurePrimaryRoleMapping(target);
+    const refreshed = await this.authService.findById(targetUserId, tenantId);
+    const tokenUser = refreshed ?? target;
+    const roleClaims = this.authService.getRoleClaims(tokenUser);
+    if (!roleClaims.primaryRole) {
+      throw new ForbiddenException('Target user has no assignable role for impersonation');
+    }
+
+    const baseToken = this.authService.signToken(tokenUser, tenantId, tenantSchema);
+    const decoded = this.jwt.decode(baseToken) as Record<string, unknown>;
     const token = this.jwt.sign(
       {
-        sub: targetUserId,
-        email: target.email,
-        name: target.name,
-        role: roleClaims.primaryRole,
-        roles: roleClaims.roles,
-        primaryRole: roleClaims.primaryRole,
-        tenantId,
-        tenantSchema,
+        ...decoded,
+        impersonator: impersonatorUserId,
         impersonator_user_id: impersonatorUserId,
         read_only_impersonation: true,
         impersonation_session_id: sessionRows[0].session_id,
@@ -67,7 +70,12 @@ export class ImpersonationService {
     return {
       token,
       session_id: sessionRows[0].session_id,
-      target: { user_id: targetUserId, name: target.name, email: target.email, role: roleClaims.primaryRole },
+      target: {
+        user_id: targetUserId,
+        name: tokenUser.name,
+        email: tokenUser.email,
+        role: roleClaims.primaryRole,
+      },
       read_only: true,
     };
   }

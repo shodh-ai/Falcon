@@ -7,6 +7,9 @@ import { assertNoPendingSql } from '../../common/validators/pending-request.util
 const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM', 'INTERNAL', 'ASSIGNMENT'] as const;
 type ExamType = (typeof EXAM_TYPES)[number];
 
+/** Canonical roll-number expression aligned with student profile schema. */
+const ROLL_NUMBER_SQL = `COALESCE(sp.enrollment_number, sp.admission_number, sp.enrollment_no, u.user_id::text)`;
+
 @Injectable()
 export class FacultyWorkspacesService {
   constructor(
@@ -15,11 +18,21 @@ export class FacultyWorkspacesService {
   ) {}
 
   async listFacultyCourses(facultyUserId: string, tenantId: string) {
-    return this.dataSource.query(
+    const fromTimetable = await this.dataSource.query(
       `SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.credits
        FROM academic_courses c
        INNER JOIN academic_timetables t ON t.course_id = c.course_id AND t.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1 AND t.faculty_user_id = $2
+       ORDER BY c.course_code`,
+      [tenantId, facultyUserId],
+    );
+    if (fromTimetable.length) return fromTimetable;
+
+    return this.dataSource.query(
+      `SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.credits
+       FROM academic_courses c
+       INNER JOIN academic_marks m ON m.course_id = c.course_id AND m.tenant_id = c.tenant_id
+       WHERE c.tenant_id = $1 AND m.uploaded_by = $2
        ORDER BY c.course_code`,
       [tenantId, facultyUserId],
     );
@@ -48,7 +61,7 @@ export class FacultyWorkspacesService {
       `SELECT
          u.user_id AS student_user_id,
          u.name,
-         COALESCE(sp.enrollment_no, u.user_id::text) AS roll_number,
+         ${ROLL_NUMBER_SQL} AS roll_number,
          m.mark_id,
          m.marks_obtained,
          m.max_marks,
@@ -187,7 +200,13 @@ export class FacultyWorkspacesService {
       });
     }
 
-    return { published: result.length };
+    const publishedCount = result.length;
+    if (publishedCount === 0) {
+      throw new BadRequestException(
+        'No draft marks found to publish. Save draft marks first for this course and exam type.',
+      );
+    }
+    return { published: publishedCount };
   }
 
   async listCoPoMappings(tenantId: string, courseId: string) {
@@ -281,6 +300,108 @@ export class FacultyWorkspacesService {
       ],
     );
     return rows[0];
+  }
+
+  async listHodPendingAdjustments(hodUserId: string, tenantId: string) {
+    const deptRows = await this.dataSource.query(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+      [hodUserId],
+    );
+    const hod = await this.dataSource.query<Array<{ dept_id: number | null }>>(
+      `SELECT dept_id FROM users WHERE user_id = $1`,
+      [hodUserId],
+    );
+    const deptIds = Array.from(
+      new Set<number>([
+        ...deptRows.map((r: { dept_id: number }) => Number(r.dept_id)),
+        ...(hod[0]?.dept_id ? [hod[0].dept_id] : []),
+      ]),
+    );
+    if (!deptIds.length) return [];
+
+    return this.dataSource.query(
+      `SELECT a.adjustment_id, a.adjustment_type, a.original_date, a.new_date, a.reason, a.status,
+              c.course_code, c.course_name, u.name AS faculty_name, u.official_email AS faculty_email
+       FROM class_adjustments a
+       INNER JOIN academic_courses c ON c.course_id = a.course_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1 AND a.status = 'PENDING_HOD_APPROVAL'
+         AND u.dept_id = ANY($2::int[])
+       ORDER BY a.created_at ASC`,
+      [tenantId, deptIds],
+    );
+  }
+
+  async actOnClassAdjustment(
+    hodUserId: string,
+    tenantId: string,
+    adjustmentId: string,
+    action: 'APPROVE' | 'REJECT',
+    remarks?: string,
+  ) {
+    const rows = await this.dataSource.query(
+      `SELECT a.*, u.dept_id AS faculty_dept_id
+       FROM class_adjustments a
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.adjustment_id = $1 AND a.tenant_id = $2`,
+      [adjustmentId, tenantId],
+    );
+    const row = rows[0];
+    if (!row) throw new NotFoundException('Class adjustment not found');
+    if (row.status !== 'PENDING_HOD_APPROVAL') {
+      throw new BadRequestException('Adjustment has already been processed');
+    }
+
+    const deptRows = await this.dataSource.query(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+      [hodUserId],
+    );
+    const hod = await this.dataSource.query<Array<{ dept_id: number | null }>>(
+      `SELECT dept_id FROM users WHERE user_id = $1`,
+      [hodUserId],
+    );
+    const deptIds = new Set<number>([
+      ...deptRows.map((r: { dept_id: number }) => Number(r.dept_id)),
+      ...(hod[0]?.dept_id ? [hod[0].dept_id] : []),
+    ]);
+    if (!deptIds.has(Number(row.faculty_dept_id))) {
+      throw new ForbiddenException('HOD can act only on adjustments from their department');
+    }
+
+    if (action === 'REJECT') {
+      if (!remarks?.trim()) throw new BadRequestException('Rejection remarks are required');
+      await this.dataSource.query(
+        `UPDATE class_adjustments SET status = 'REJECTED', hod_remarks = $3 WHERE adjustment_id = $1 AND tenant_id = $2`,
+        [adjustmentId, tenantId, remarks.trim()],
+      );
+    } else {
+      await this.dataSource.query(
+        `UPDATE class_adjustments SET status = 'APPROVED' WHERE adjustment_id = $1 AND tenant_id = $2`,
+        [adjustmentId, tenantId],
+      );
+    }
+
+    const faculty = await this.dataSource.query<Array<{ user_id: string; tenant_id: string; name: string }>>(
+      `SELECT user_id, tenant_id, name FROM users WHERE user_id = $1`,
+      [row.faculty_user_id],
+    );
+    if (faculty[0]) {
+      this.notify.leaveApproved({
+        tenantId: faculty[0].tenant_id,
+        userId: faculty[0].user_id,
+        title: action === 'APPROVE' ? 'Extra class approved' : 'Extra class rejected',
+        message:
+          action === 'APPROVE'
+            ? 'Your extra class request was approved by your HOD.'
+            : `Your extra class request was rejected.${remarks ? ` Reason: ${remarks}` : ''}`,
+        actionLink: '/faculty/timetable',
+      });
+    }
+
+    const updated = await this.dataSource.query(`SELECT * FROM class_adjustments WHERE adjustment_id = $1`, [
+      adjustmentId,
+    ]);
+    return updated[0];
   }
 
   async listResearchLogs(facultyUserId: string, tenantId: string) {
@@ -441,6 +562,21 @@ export class FacultyWorkspacesService {
       [tenantId, dto.course_id, facultyUserId, dto.class_date, dto.topic_summary],
     );
     return rows[0];
+  }
+
+  async listRemedialActions(facultyUserId: string, tenantId: string, limit = 50) {
+    return this.dataSource.query(
+      `SELECT r.remedial_id, r.student_user_id, r.course_id, r.reason, r.action_taken,
+              r.scheduled_at, r.status, r.created_at,
+              u.name AS student_name, c.course_code, c.course_name
+       FROM faculty_remedial_actions r
+       INNER JOIN users u ON u.user_id = r.student_user_id
+       LEFT JOIN academic_courses c ON c.course_id = r.course_id
+       WHERE r.tenant_id = $1 AND r.faculty_user_id = $2
+       ORDER BY r.created_at DESC
+       LIMIT $3`,
+      [tenantId, facultyUserId, limit],
+    );
   }
 
   async createRemedialAction(

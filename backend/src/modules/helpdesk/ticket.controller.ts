@@ -9,7 +9,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 import { AddTicketMessageDto } from './dto/add-ticket-message.dto';
 
-type AuthUser = { user_id: string; role?: string };
+type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
 @Controller('api/helpdesk/tickets')
 @UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
@@ -39,6 +39,16 @@ export class TicketController {
   @Roles('SuperAdmin', 'Registrar', 'Accountant', 'Warden', 'HOD', 'Dean', 'Faculty')
   listAssigned(@Req() req: { user: AuthUser }) {
     return this.tickets.listTicketsForAssignee(req.user.user_id);
+  }
+
+  @Get('profile-corrections')
+  @Roles('SuperAdmin', 'Registrar', 'HOD', 'Dean', 'Admin')
+  listProfileCorrections(@Req() req: { user: AuthUser }) {
+    return this.tickets.listProfileCorrectionTickets(this.tenant(req));
+  }
+
+  private tenant(req: { user: AuthUser }) {
+    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
 
   @Patch(':ticketId/status')

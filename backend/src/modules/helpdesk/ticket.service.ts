@@ -83,6 +83,21 @@ export class TicketService {
     return this.ticketProvider.listTicketsForAssignee(assigneeUserId);
   }
 
+  async listProfileCorrectionTickets(tenantId: string, limit = 20) {
+    return this.tickets
+      .createQueryBuilder('t')
+      .innerJoin('users', 'u', 'u.user_id = t.student_user_id')
+      .where('t.status = :status', { status: 'PENDING' })
+      .andWhere('u.tenant_id = :tenantId', { tenantId })
+      .andWhere(
+        `(t.category = 'STUDENT_PROFILE' OR (t.category = 'ACADEMICS' AND t.subject ILIKE :profileHint))`,
+        { profileHint: '%profile%' },
+      )
+      .orderBy('t.created_at', 'DESC')
+      .take(limit)
+      .getMany();
+  }
+
   updateStatus(ticketId: string, dto: UpdateTicketStatusDto) {
     return this.ticketProvider.updateStatus(ticketId, dto);
   }

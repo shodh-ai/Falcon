@@ -95,6 +95,20 @@ export interface PortalConfig {
   commandItems: NavItem[];
 }
 
+/** Build command palette items from sidebar nav so search keywords stay in sync. */
+export function flattenNavToCommandItems(navGroups: NavGroup[]): NavItem[] {
+  const seen = new Set<string>();
+  const items: NavItem[] = [];
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      if (seen.has(item.href)) continue;
+      seen.add(item.href);
+      items.push(item);
+    }
+  }
+  return items;
+}
+
 export function filterPortalConfigForRole(config: PortalConfig, role: string | undefined | null): PortalConfig {
   const normalizedRole = (role ?? '').trim();
   const navGroups = config.navGroups
@@ -270,24 +284,50 @@ export const facultyPortal: PortalConfig = {
       ],
     },
   ],
-  commandItems: [
-    { label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard },
-    { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock },
-    { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck },
-    { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen },
-    { label: 'Digital Assignments', href: '/faculty/assignments', icon: FileText },
-    { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine },
-    { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap },
-    { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake },
-    { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope },
-    { label: 'Exam Invigilation', href: '/faculty/invigilation', icon: Eye },
-    { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical },
-    { label: 'Library OPAC', href: '/faculty/library', icon: Library },
-    { label: 'HR & Employee Hub', href: '/faculty/leaves', icon: CalendarDays },
-    { label: 'Falcon Core Tasks', href: '/faculty/iqac', icon: ListChecks },
-    { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart },
-    { label: 'Class Logbook', href: '/faculty/logbook', icon: NotebookPen },
-  ],
+  commandItems: flattenNavToCommandItems([
+    {
+      title: 'Home',
+      items: [{ label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard }],
+    },
+    {
+      title: 'Academics & Teaching',
+      items: [
+        { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp', 'extra'] },
+        { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
+        { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt'] },
+        { label: 'Digital Assignments (DA)', href: '/faculty/assignments', icon: FileText, keywords: ['da', 'submission', 'deadline'] },
+        { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
+        { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
+        { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
+        { label: 'Digital Class Logbook', href: '/faculty/logbook', icon: NotebookPen, keywords: ['lecture', 'topic', 'log'] },
+      ],
+    },
+    {
+      title: 'Students & Mentoring',
+      items: [
+        { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
+        { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
+      ],
+    },
+    {
+      title: 'Research & Duties',
+      items: [
+        { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
+        { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
+        { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
+      ],
+    },
+    {
+      title: 'Administration',
+      items: [
+        { label: 'HR & Employee Hub', href: '/faculty/hr', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'od', 'regularization'] },
+        { label: 'Employee Self Service (ESS)', href: '/ess/calendar', icon: UserRoundCog, keywords: ['ess', 'calendar', 'documents', 'policies'] },
+        { label: 'Team requests', href: '/faculty/team-requests', icon: ClipboardCheck, keywords: ['approve', 'hod', 'pending on me', 'team'] },
+        { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
+        { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
+      ],
+    },
+  ]),
 };
 
 export const hrPortal: PortalConfig = {
@@ -417,17 +457,31 @@ export const hodPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Faculty Leaves', href: '/hod/approvals/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'leave approval'] },
+        { label: 'Extra Classes', href: '/hod/approvals/extra-classes', icon: CalendarDays, keywords: ['timetable', 'adjustment', 'extra class'] },
         { label: 'Gate Passes', href: '/hod/approvals/gate-passes', icon: ClipboardCheck, keywords: ['mid duty', 'exit pass'] },
+        { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: UserCog, keywords: ['student profile', 'master data', 'correction'] },
       ],
     },
   ],
-  commandItems: [
-    { label: 'HOD Dashboard', href: '/hod/dashboard', icon: LayoutDashboard },
-    { label: 'Faculty Roster', href: '/hod/faculty-roster', icon: Users },
-    { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap },
-    { label: 'Faculty Leaves', href: '/hod/approvals/leaves', icon: CalendarDays },
-    { label: 'Gate Passes', href: '/hod/approvals/gate-passes', icon: ClipboardCheck },
-  ],
+  commandItems: flattenNavToCommandItems([
+    {
+      title: 'Department Health',
+      items: [
+        { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['snapshot', 'attendance'] },
+        { label: 'Faculty Roster', href: '/hod/faculty-roster', icon: Users, keywords: ['faculty', 'course allocation', 'timetable'] },
+        { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'low attendance'] },
+      ],
+    },
+    {
+      title: 'Approvals',
+      items: [
+        { label: 'Faculty Leaves', href: '/hod/approvals/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'leave approval'] },
+        { label: 'Extra Classes', href: '/hod/approvals/extra-classes', icon: CalendarDays, keywords: ['timetable', 'adjustment', 'extra class'] },
+        { label: 'Gate Passes', href: '/hod/approvals/gate-passes', icon: ClipboardCheck, keywords: ['mid duty', 'exit pass'] },
+        { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: UserCog, keywords: ['student profile', 'master data', 'correction'] },
+      ],
+    },
+  ]),
 };
 
 export const hostelAdminPortal: PortalConfig = {

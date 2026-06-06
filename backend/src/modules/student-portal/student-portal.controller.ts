@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -45,6 +47,27 @@ export class StudentPortalController {
   @Get('extracurriculars')
   extracurriculars(@Req() req: { user: AuthUser }) {
     return this.portal.getExtracurriculars(this.tenant(req), req.user.user_id);
+  }
+
+  @Post('extracurriculars')
+  @UseInterceptors(
+    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } }),
+  )
+  logExtracurricular(
+    @Req() req: { user: AuthUser },
+    @Body() body: { activity_type?: string; description?: string; event_date?: string },
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.portal.logExtracurricular(
+      this.tenant(req),
+      req.user.user_id,
+      {
+        activity_type: body.activity_type ?? 'OTHER',
+        description: body.description ?? '',
+        event_date: body.event_date ?? '',
+      },
+      file,
+    );
   }
 
   @Get('discipline')

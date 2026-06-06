@@ -77,7 +77,7 @@ export function AppShell({ config, children, profileHref, headerExtra }: AppShel
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
-              <div className="hidden md:block">
+              <div className="hidden min-w-[200px] shrink-0 md:block">
                 <CommandMenu items={config.commandItems} />
               </div>
               {headerExtra}

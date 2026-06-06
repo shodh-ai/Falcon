@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { mkdirSync, writeFileSync } from 'fs';
@@ -33,6 +33,15 @@ export interface ClassStudentDto {
 }
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const ROLL_NUMBER_SQL = `COALESCE(sp.enrollment_number, sp.admission_number, sp.enrollment_no, u.user_id::text)`;
+
+function localDateString(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 @Injectable()
 export class AcademicsFacultyService {
@@ -132,7 +141,7 @@ export class AcademicsFacultyService {
       SELECT
         sp.user_id AS student_id,
         u.name,
-        COALESCE(sp.enrollment_no, sp.batch, '—') AS roll_number,
+        COALESCE(sp.enrollment_number, sp.admission_number, sp.enrollment_no, sp.batch, '—') AS roll_number,
         NULL::text AS photo_url
       FROM course_offerings co
       INNER JOIN semesters sem ON sem.semester_id = co.semester_id
@@ -232,10 +241,24 @@ export class AcademicsFacultyService {
       order: { student_user_id: 'ASC' },
     });
 
+    const rollById = new Map<string, string>();
+    if (rows.length) {
+      const profileRows = await this.dataSource.query<
+        Array<{ user_id: string; roll_number: string }>
+      >(
+        `SELECT u.user_id, ${ROLL_NUMBER_SQL} AS roll_number
+         FROM users u
+         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+         WHERE u.user_id = ANY($1::uuid[])`,
+        [rows.map((r) => r.student_user_id)],
+      );
+      for (const p of profileRows) rollById.set(p.user_id, p.roll_number);
+    }
+
     return rows.map((row) => ({
       student_id: row.student_user_id,
       name: row.student?.name ?? 'Student',
-      roll_number: row.student?.email ?? row.student_user_id,
+      roll_number: rollById.get(row.student_user_id) ?? row.student_user_id,
       email: row.student?.email ?? null,
     }));
   }
@@ -244,7 +267,7 @@ export class AcademicsFacultyService {
     courseId: string,
     facultyUserId: string,
     tenantId: string,
-    date = new Date().toISOString().slice(0, 10),
+    date = localDateString(),
   ) {
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
     const log = await this.courseAttendanceLogs.findOne({
@@ -274,11 +297,14 @@ export class AcademicsFacultyService {
     },
   ) {
     await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
-    const date = dto.date ?? new Date().toISOString().slice(0, 10);
+    const date = dto.date ?? localDateString();
     if (this.isAttendanceLocked(date)) {
       throw new ForbiddenException(
         'Attendance locked. Contact Admin to modify records older than 3 days.',
       );
+    }
+    if (!dto.attendance_data?.length) {
+      throw new BadRequestException('Attendance data cannot be empty');
     }
 
     await this.dataSource.query(
@@ -290,6 +316,12 @@ export class AcademicsFacultyService {
     );
 
     const updated = await this.recalculateCourseAttendancePercents(tenantId, dto.course_id);
+
+    if (dto.attendance_data.length > 0 && updated.length === 0) {
+      throw new BadRequestException(
+        'Attendance saved but no enrolled students were updated. Check that student IDs match course enrollments.',
+      );
+    }
 
     return { saved: dto.attendance_data.length, date, attendance_updated: updated };
   }

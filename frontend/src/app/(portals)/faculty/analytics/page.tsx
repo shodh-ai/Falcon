@@ -98,14 +98,24 @@ export default function FacultyAnalyticsPage() {
   const { courses } = useFacultyCourses();
   const [courseId, setCourseId] = useState('');
   const [rows, setRows] = useState<AnalyticsRow[]>([]);
+  const [remedialLogs, setRemedialLogs] = useState<
+    { remedial_id: string; student_name: string; course_code: string | null; action_taken: string; created_at: string }[]
+  >([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     const q = courseId ? `?courseId=${encodeURIComponent(courseId)}` : '';
-    void api
-      .get<AnalyticsRow[]>(`/api/academics/faculty/workspaces/analytics${q}`)
-      .then(setRows)
+    void Promise.all([
+      api.get<AnalyticsRow[]>(`/api/academics/faculty/workspaces/analytics${q}`),
+      api.get<
+        { remedial_id: string; student_name: string; course_code: string | null; action_taken: string; created_at: string }[]
+      >('/api/academics/faculty/workspaces/remedial'),
+    ])
+      .then(([analytics, logs]) => {
+        setRows(analytics);
+        setRemedialLogs(logs);
+      })
       .catch((e) => {
         toast.error(e instanceof Error ? e.message : 'Failed to load analytics');
         setRows([]);
@@ -124,7 +134,11 @@ export default function FacultyAnalyticsPage() {
         reason: Number(row.attendance_percent) < 75 ? 'LOW_ATTENDANCE' : 'LOW_INTERNALS',
         action_taken: actionTaken,
       });
-      toast.success('Remedial class logged');
+      toast.success('Remedial class logged to faculty_remedial_actions');
+      const logs = await api.get<
+        { remedial_id: string; student_name: string; course_code: string | null; action_taken: string; created_at: string }[]
+      >('/api/academics/faculty/workspaces/remedial');
+      setRemedialLogs(logs);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to log remedial action');
       throw e;
@@ -169,6 +183,27 @@ export default function FacultyAnalyticsPage() {
             {atRisk.length === 0 ? (
               <p className="text-sm text-muted-foreground">No at-risk students in this filter.</p>
             ) : null}
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Recent remedial logs — {remedialLogs.length}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {remedialLogs.length === 0 ? (
+              <p className="text-muted-foreground">No remedial actions logged yet. Entries are saved to faculty_remedial_actions.</p>
+            ) : (
+              remedialLogs.slice(0, 10).map((log) => (
+                <div key={log.remedial_id} className="rounded-lg border p-3">
+                  <p className="font-medium">{log.student_name} · {log.course_code ?? 'General'}</p>
+                  <p className="text-muted-foreground">{log.action_taken}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{new Date(log.created_at).toLocaleString()}</p>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
       )}

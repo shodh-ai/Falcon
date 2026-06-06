@@ -15,6 +15,7 @@ export const hodPages = {
       { label: 'Total Students', value: count(data, 'total_students') },
       { label: 'Average Attendance', value: `${count(data, 'average_department_attendance')}%` },
       { label: 'Pending Approvals', value: count(data, 'pending_leave_approvals') + count(data, 'pending_gate_pass_approvals') },
+      { label: 'Profile Corrections', value: count(data, 'pending_profile_corrections') },
     ],
   },
   facultyRoster: {

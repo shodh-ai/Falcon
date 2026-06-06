@@ -41,7 +41,7 @@ export default function FacultyHrHubPage() {
     restricted: [],
   });
   const [requests, setRequests] = useState<WorkforceRequest[]>([]);
-  const [modal, setModal] = useState<'LEAVE' | 'ON_DUTY' | 'REGULARIZATION' | 'COMP_OFF_CREDIT' | null>(null);
+  const [modal, setModal] = useState<'LEAVE' | 'ON_DUTY' | 'REGULARIZATION' | 'COMP_OFF_CREDIT' | 'GATE_PASS' | null>(null);
   const [form, setForm] = useState({
     leave_type: 'CL',
     start_date: '',
@@ -49,6 +49,9 @@ export default function FacultyHrHubPage() {
     regularization_date: '',
     missed_punch_type: 'BOTH' as 'IN' | 'OUT' | 'BOTH',
     reason: '',
+    out_time: '',
+    expected_in_time: '',
+    gate_purpose: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -82,18 +85,37 @@ export default function FacultyHrHubPage() {
     if (!modal) return;
     setIsSubmitting(true);
     try {
-      await api.post('/api/hr/workforce/requests', {
-        request_type: modal,
-        leave_type: form.leave_type,
-        start_date: form.start_date || form.regularization_date,
-        end_date: form.end_date || form.regularization_date,
-        regularization_date: modal === 'REGULARIZATION' ? form.regularization_date : undefined,
-        missed_punch_type: modal === 'REGULARIZATION' ? form.missed_punch_type : undefined,
-        reason: form.reason,
-      });
-      toast.success('Request submitted to your reporting officer');
+      if (modal === 'GATE_PASS') {
+        await api.post('/api/hr/gate-passes', {
+          out_time: form.out_time,
+          expected_in_time: form.expected_in_time,
+          reason: form.gate_purpose.trim(),
+        });
+        toast.success('Gate pass submitted to your HOD');
+      } else {
+        await api.post('/api/hr/workforce/requests', {
+          request_type: modal,
+          leave_type: form.leave_type,
+          start_date: form.start_date || form.regularization_date,
+          end_date: form.end_date || form.regularization_date,
+          regularization_date: modal === 'REGULARIZATION' ? form.regularization_date : undefined,
+          missed_punch_type: modal === 'REGULARIZATION' ? form.missed_punch_type : undefined,
+          reason: form.reason,
+        });
+        toast.success('Request submitted to your reporting officer');
+      }
       setModal(null);
-      setForm({ leave_type: 'CL', start_date: '', end_date: '', regularization_date: '', missed_punch_type: 'BOTH', reason: '' });
+      setForm({
+        leave_type: 'CL',
+        start_date: '',
+        end_date: '',
+        regularization_date: '',
+        missed_punch_type: 'BOTH',
+        reason: '',
+        out_time: '',
+        expected_in_time: '',
+        gate_purpose: '',
+      });
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
@@ -145,6 +167,9 @@ export default function FacultyHrHubPage() {
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             <Button onClick={() => setModal('LEAVE')}>Apply leave</Button>
+            <Button variant="outline" onClick={() => setModal('GATE_PASS')}>
+              Request Gate Pass (Mid-Duty Exit)
+            </Button>
             <Button variant="outline" onClick={() => setModal('ON_DUTY')}>
               Apply OD (on duty)
             </Button>
@@ -241,6 +266,7 @@ export default function FacultyHrHubPage() {
             <CardHeader>
               <CardTitle className="text-base">
                 {modal === 'LEAVE' && 'Apply leave'}
+                {modal === 'GATE_PASS' && 'Request gate pass (mid-duty exit)'}
                 {modal === 'ON_DUTY' && 'Apply on duty (OD)'}
                 {modal === 'REGULARIZATION' && 'Regularize attendance'}
                 {modal === 'COMP_OFF_CREDIT' && 'Request comp-off credit'}
@@ -248,6 +274,34 @@ export default function FacultyHrHubPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={submitRequest} className="space-y-3">
+                {modal === 'GATE_PASS' && (
+                  <>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Out time</label>
+                      <Input
+                        type="datetime-local"
+                        required
+                        value={form.out_time}
+                        onChange={(e) => setForm((f) => ({ ...f, out_time: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Expected in time</label>
+                      <Input
+                        type="datetime-local"
+                        required
+                        value={form.expected_in_time}
+                        onChange={(e) => setForm((f) => ({ ...f, expected_in_time: e.target.value }))}
+                      />
+                    </div>
+                    <Input
+                      placeholder="Purpose"
+                      required
+                      value={form.gate_purpose}
+                      onChange={(e) => setForm((f) => ({ ...f, gate_purpose: e.target.value }))}
+                    />
+                  </>
+                )}
                 {modal === 'LEAVE' && (
                   <select
                     className="w-full rounded-md border px-2 py-2 text-sm"
@@ -279,7 +333,7 @@ export default function FacultyHrHubPage() {
                       <option value="BOTH">Missed both</option>
                     </select>
                   </>
-                ) : (
+                ) : modal !== 'GATE_PASS' ? (
                   <>
                     <Input
                       type="date"
@@ -296,13 +350,15 @@ export default function FacultyHrHubPage() {
                       />
                     )}
                   </>
+                ) : null}
+                {modal !== 'GATE_PASS' && (
+                  <Input
+                    placeholder="Reason"
+                    required
+                    value={form.reason}
+                    onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
+                  />
                 )}
-                <Input
-                  placeholder="Reason"
-                  required
-                  value={form.reason}
-                  onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-                />
                 <div className="flex gap-2">
                   <Button type="submit" disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit'}
