@@ -1,4 +1,5 @@
-import type { ComponentType, ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 export function HrEmptyState({
@@ -8,7 +9,7 @@ export function HrEmptyState({
   action,
   className,
 }: {
-  icon?: ComponentType<{ className?: string }>;
+  icon?: LucideIcon;
   title: string;
   description?: string;
   action?: ReactNode;
