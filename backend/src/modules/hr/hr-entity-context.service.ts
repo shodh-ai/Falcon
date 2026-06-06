@@ -114,6 +114,38 @@ export class HrEntityContextService {
     }
   }
 
+  /**
+   * Resolve entity for an incoming HR request. Master HR roles may omit entity_id
+   * when multiple entities exist — we default to the first allowed entity.
+   */
+  async resolveRequestEntityId(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    entityIdRaw?: string | number | null,
+  ): Promise<number> {
+    if (entityIdRaw != null && entityIdRaw !== '') {
+      const entityId = await this.resolveEntityId(tenantId, entityIdRaw);
+      await this.assertEntityAccess(tenantId, userId, roles, entityId);
+      return entityId;
+    }
+
+    const allowed = await this.listAllowedEntities(tenantId, userId, roles);
+    if (!allowed.length) {
+      throw new ForbiddenException('No organization entity assigned to your account.');
+    }
+    if (allowed.length === 1) {
+      return Number(allowed[0].entity_id);
+    }
+    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+      return Number(allowed[0].entity_id);
+    }
+
+    throw new ForbiddenException(
+      'Organization entity required. Send x-entity-id header or entity_id query param.',
+    );
+  }
+
   async resolveEntityId(tenantId: string, entityIdRaw?: string | number): Promise<number> {
     const fromContext = EntityScopeContext.getEntityId();
     if (fromContext && (entityIdRaw == null || entityIdRaw === '')) {

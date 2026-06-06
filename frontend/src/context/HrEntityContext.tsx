@@ -89,15 +89,21 @@ export function HrEntityProvider({ children }: { children: React.ReactNode }) {
         },
       });
       if (res.ok) {
-        applyEntityList(mapApiEntities((await res.json()) as OrgEntity[]));
-        return;
+        const list = mapApiEntities((await res.json()) as OrgEntity[]);
+        if (list.length > 0) {
+          applyEntityList(list);
+          return;
+        }
       }
     } catch {
       /* fall through to auth payload */
     }
     if (authAllowed.length) {
       applyEntityList(authAllowed);
+      return;
     }
+    setEntities([]);
+    setEntityIdState(null);
   }, [token, authAllowed, applyEntityList]);
 
   useEffect(() => {

@@ -56,38 +56,16 @@ export class EntityScopeGuard implements CanActivate {
         ? [req.user.role]
         : [];
 
+    if (req[HR_ENTITY_ID_KEY] != null) return true;
+
     const raw = req.headers?.['x-entity-id'] ?? req.query?.entity_id;
-    let entityId = req[HR_ENTITY_ID_KEY];
-
-    if (entityId == null && raw != null && raw !== '') {
-      entityId = await this.entityCtx.resolveEntityId(tenantId, raw);
-      await this.entityCtx.assertEntityAccess(tenantId, req.user.user_id, roles, entityId);
-      req[HR_ENTITY_ID_KEY] = entityId;
-      return true;
-    }
-
-    if (entityId != null) return true;
-
-    const allowed = await this.entityCtx.listAllowedEntities(tenantId, req.user.user_id, roles);
-    const allowedIds = allowed.map((row: { entity_id: number }) => Number(row.entity_id));
-
-    if (allowedIds.length === 1) {
-      entityId = allowedIds[0];
-      req[HR_ENTITY_ID_KEY] = entityId;
-      return true;
-    }
-
-    if (raw == null || raw === '') {
-      throw new ForbiddenException(
-        'Organization entity required. Send x-entity-id header or entity_id query param.',
-      );
-    }
-
-    const requested = Number(raw);
-    if (!allowedIds.includes(requested)) {
-      throw new ForbiddenException('You do not have access to this Organization Entity.');
-    }
-
+    const entityId = await this.entityCtx.resolveRequestEntityId(
+      tenantId,
+      req.user.user_id,
+      roles,
+      raw,
+    );
+    req[HR_ENTITY_ID_KEY] = entityId;
     return true;
   }
 

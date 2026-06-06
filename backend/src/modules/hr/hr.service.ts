@@ -1067,6 +1067,7 @@ export class HrService {
        FROM hr_applicants a
        LEFT JOIN hr_job_postings j ON j.job_id = a.job_id
        WHERE a.tenant_id = $1 AND a.entity_id = $2
+         AND a.hired_user_id IS NULL
        ORDER BY a.created_at ASC`,
       [tenantId, entityId],
     );

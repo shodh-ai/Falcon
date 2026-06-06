@@ -158,13 +158,15 @@ export class HrAdminService {
     const pan = dto.pan_number !== undefined ? this.crypto.encrypt(dto.pan_number) : undefined;
     const aadhaar = dto.aadhaar_number !== undefined ? this.crypto.encrypt(dto.aadhaar_number) : undefined;
     const bank = dto.bank_account_no !== undefined ? this.crypto.encrypt(dto.bank_account_no) : undefined;
+    const employeeId =
+      dto.employee_id ?? `SGVU-${userId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
 
     const rows = await this.dataSource.query(
       `INSERT INTO hr_employee_profiles (
          tenant_id, user_id, employee_id, designation, joining_date,
          pan_encrypted, aadhaar_encrypted, bank_account_encrypted, ifsc_code, pf_uan,
          org_unit_id, entity_id, updated_at
-       ) VALUES ($1,$2,COALESCE($3, 'SGVU-' || substr($2::text, 1, 8)), $4, COALESCE($5::date, CURRENT_DATE),
+       ) VALUES ($1,$2::uuid,$3,$4,COALESCE($5::date, CURRENT_DATE),
          $6,$7,$8,$9,$10,$11,$12, NOW())
        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
          employee_id = COALESCE(EXCLUDED.employee_id, hr_employee_profiles.employee_id),
@@ -182,7 +184,7 @@ export class HrAdminService {
       [
         tenantId,
         userId,
-        dto.employee_id ?? null,
+        employeeId,
         dto.designation ?? null,
         dto.joining_date ?? null,
         pan ?? null,

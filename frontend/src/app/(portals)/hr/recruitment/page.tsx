@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { KanbanBoard, type KanbanColumn } from '@/components/workspaces/KanbanBoard';
@@ -22,6 +23,7 @@ type PipelineResponse = {
 };
 
 export default function HrRecruitmentPage() {
+  const router = useRouter();
   const api = useHrApi();
   const { entityId } = useHrEntity();
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
@@ -59,13 +61,17 @@ export default function HrRecruitmentPage() {
       onboarding_triggered?: boolean;
       already_hired?: boolean;
     }>(`/api/hr/recruitment/applicants/${applicantId}/hire`, {});
-    toast.success(
-      result.onboarding_triggered
-        ? `Onboarding checklist ready for ${result.email}`
-        : result.already_hired
-          ? `${result.email} is already provisioned`
-          : `User provisioned: ${result.email}`,
-    );
+    if (result.onboarding_triggered || result.already_hired) {
+      toast.success(`${result.email} moved to Onboarding`, {
+        description: 'They are no longer shown in the ATS pipeline.',
+        action: {
+          label: 'Open Onboarding',
+          onClick: () => router.push('/hr/onboarding'),
+        },
+      });
+    } else {
+      toast.success(`User provisioned: ${result.email}`);
+    }
     load();
   }
 
@@ -92,7 +98,7 @@ export default function HrRecruitmentPage() {
     <>
       <HrPageHeader
         title="Recruitment (ATS)"
-        description="Kanban hiring pipeline. Moving to Hired provisions the user row and IT onboarding tasks."
+        description="Active candidates only — once you click Start onboarding, they leave ATS and appear under Onboarding."
       />
 
       <KanbanBoard
