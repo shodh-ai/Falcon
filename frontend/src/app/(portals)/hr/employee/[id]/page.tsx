@@ -92,7 +92,7 @@ function EmployeeProfileContent() {
   if (!profile) return null;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader title={profile.name} description={`${profile.email} · ${profile.employee_id}`} />
 
       <div className="flex gap-2">
@@ -174,7 +174,7 @@ function EmployeeProfileContent() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </>
   );
 }
 

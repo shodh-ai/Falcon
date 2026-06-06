@@ -53,15 +53,34 @@ export default function HrRecruitmentPage() {
     load();
   }, [api, entityId]);
 
+  async function provisionHire(applicantId: string) {
+    const result = await api.post<{
+      email: string;
+      onboarding_triggered?: boolean;
+      already_hired?: boolean;
+    }>(`/api/hr/recruitment/applicants/${applicantId}/hire`, {});
+    toast.success(
+      result.onboarding_triggered
+        ? `Onboarding checklist ready for ${result.email}`
+        : result.already_hired
+          ? `${result.email} is already provisioned`
+          : `User provisioned: ${result.email}`,
+    );
+    load();
+  }
+
   async function moveCard(applicantId: string, stage: string) {
     try {
       await api.patch(`/api/hr/recruitment/applicants/${applicantId}/stage`, { stage });
-      if (
-        stage === 'HIRED' &&
-        window.confirm('Provision employee account and IT onboarding (@mygyanvihar.com)?')
-      ) {
-        const result = await api.post<{ email: string }>(`/api/hr/recruitment/applicants/${applicantId}/hire`, {});
-        toast.success(`User provisioned: ${result.email}`);
+      if (stage === 'HIRED') {
+        const proceed = window.confirm(
+          'Provision employee account and generate the onboarding workflow checklist?',
+        );
+        if (proceed) {
+          await provisionHire(applicantId);
+          return;
+        }
+        toast.message('Candidate marked Hired — use "Start onboarding" on the card when ready.');
       }
       load();
     } catch (e) {
@@ -70,13 +89,18 @@ export default function HrRecruitmentPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[95vw] space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Recruitment (ATS)"
         description="Kanban hiring pipeline. Moving to Hired provisions the user row and IT onboarding tasks."
       />
 
-      <KanbanBoard columns={columns} onMove={(itemId, toColumnId) => void moveCard(itemId, toColumnId)} />
-    </div>
+      <KanbanBoard
+        columns={columns}
+        onMove={(itemId, toColumnId) => void moveCard(itemId, toColumnId)}
+        onColumnAction={(itemId) => void provisionHire(itemId).catch((e) => toast.error(e instanceof Error ? e.message : 'Provision failed'))}
+        columnActionLabel={{ HIRED: 'Start onboarding' }}
+      />
+    </>
   );
 }

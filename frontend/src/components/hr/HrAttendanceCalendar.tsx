@@ -5,9 +5,14 @@ import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
 import { useOptionalHrEntity } from '@/context/HrEntityContext';
+import { HrPersonCell } from '@/components/hr/HrAvatar';
+import { HrEmptyState } from '@/components/hr/HrEmptyState';
+import { Users } from 'lucide-react';
 import {
   ATTENDANCE_LEGEND,
+  HEATMAP_LEGEND,
   attendanceCircleStyle,
+  attendanceHeatmapColor,
   type CalculatedAttendanceStatus,
 } from '@/lib/hr-attendance-status';
 
@@ -81,8 +86,8 @@ export function HrAttendanceCalendar(props: Props) {
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <Card className="border-gray-100 shadow-sm">
+      <CardHeader className="flex flex-col gap-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle className="text-base">{props.title ?? 'Attendance calendar'}</CardTitle>
           {selfData?.shift && (
@@ -101,11 +106,14 @@ export function HrAttendanceCalendar(props: Props) {
               onChange={(e) => setInternalMonth(e.target.value)}
             />
           )}
-          <div className="max-w-xs space-y-1 text-[10px]">
-            {ATTENDANCE_LEGEND.map((item) => (
-              <div key={item.status} className="flex items-center gap-1.5">
+          <div className="flex flex-wrap gap-3 text-[11px] font-medium text-muted-foreground">
+            {(props.mode === 'matrix' ? HEATMAP_LEGEND : ATTENDANCE_LEGEND).map((item) => (
+              <div
+                key={'status' in item ? item.status : item.label}
+                className="flex items-center gap-1.5"
+              >
                 <span
-                  className="inline-block h-3 w-3 rounded-full"
+                  className="inline-block h-3 w-3 rounded-full ring-1 ring-black/5"
                   style={{ backgroundColor: item.color }}
                 />
                 <span>{item.label}</span>
@@ -148,39 +156,50 @@ export function HrAttendanceCalendar(props: Props) {
         )}
 
         {!loading && props.mode === 'matrix' && matrixData && (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-lg border border-gray-100">
             {matrixData.employees.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No employees found.</p>
+              <HrEmptyState
+                icon={Users}
+                title="No attendance matrix data"
+                description="Employee attendance will appear once biometric records are synced."
+              />
             ) : (
               <table className="min-w-full text-xs">
                 <thead>
-                  <tr className="border-b">
-                    <th className="sticky left-0 bg-background p-2 text-left">Employee</th>
+                  <tr className="border-b border-gray-100 bg-gray-50/80">
+                    <th className="sticky left-0 z-10 bg-gray-50/95 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Employee
+                    </th>
                     {Array.from({ length: daysInMonth }, (_, i) => {
                       const d = i + 1;
                       const date = `${year}-${String(monthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                       return (
-                        <th key={date} className="p-0.5 text-center font-normal" title={date}>
+                        <th
+                          key={date}
+                          className="px-0.5 py-2 text-center text-[10px] font-medium text-muted-foreground"
+                          title={date}
+                        >
                           {d}
                         </th>
                       );
                     })}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-gray-100">
                   {matrixData.employees.map((emp) => (
-                    <tr key={emp.user_id} className="border-b">
-                      <td className="sticky left-0 bg-background p-2 font-medium whitespace-nowrap">
-                        {emp.name}
+                    <tr key={emp.user_id} className="transition-colors hover:bg-gray-50">
+                      <td className="sticky left-0 z-10 bg-white px-3 py-2 whitespace-nowrap">
+                        <HrPersonCell name={emp.name} />
                       </td>
                       {emp.days.map((day) => {
-                        const style = attendanceCircleStyle(day.calculated_status);
+                        const color = attendanceHeatmapColor(day.calculated_status);
                         return (
-                          <td key={day.date} className="p-0.5 text-center">
+                          <td key={day.date} className="px-0.5 py-1.5 text-center">
                             <span
-                              className="inline-block h-5 w-5 rounded-full"
-                              style={style}
+                              className="mx-auto inline-block h-6 w-6 rounded-md ring-1 ring-black/5 transition-transform hover:scale-110"
+                              style={{ backgroundColor: color }}
                               title={day.tooltip}
+                              aria-label={day.tooltip}
                             />
                           </td>
                         );

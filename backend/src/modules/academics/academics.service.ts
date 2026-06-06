@@ -157,8 +157,7 @@ export class AcademicsService {
     const courseIds = enrolled.map((row) => row.course_id);
     if (courseIds.length === 0) return [];
 
-    const day = new Date().getDay();
-    const isoDay = day === 0 ? 7 : day;
+    const isoDay = this.getIstDayOfWeek();
     const rows = await this.timetables.find({
       where: {
         course_id: In(courseIds),
@@ -168,18 +167,29 @@ export class AcademicsService {
       order: { start_time: 'ASC' },
     });
 
-    return rows.map((row) => ({
-      timetable_id: row.timetable_id,
-      course_id: row.course_id,
-      course_code: row.course.course_code,
-      course_name: row.course.course_name,
-      credits: row.course.credits,
-      room: row.room,
-      faculty_name: row.faculty?.name ?? null,
-      start_time: row.start_time,
-      end_time: row.end_time,
-      status: this.getSlotStatus(row.start_time, row.end_time),
-    }));
+    const liveByCourse = await this.fetchActiveLiveClasses(courseIds);
+
+    return rows.map((row) => {
+      const startTime = this.normalizeTime(row.start_time);
+      const endTime = this.normalizeTime(row.end_time);
+      const liveJoinUrl = liveByCourse.get(row.course_id) ?? null;
+      const isVirtual = Boolean(liveJoinUrl) || this.isVirtualRoom(row.room);
+
+      return {
+        timetable_id: row.timetable_id,
+        course_id: row.course_id,
+        course_code: row.course.course_code,
+        course_name: row.course.course_name,
+        credits: row.course.credits,
+        room: row.room,
+        faculty_name: row.faculty?.name ?? null,
+        start_time: startTime,
+        end_time: endTime,
+        status: this.getSlotStatus(startTime, endTime),
+        is_virtual: isVirtual,
+        live_join_url: liveJoinUrl,
+      };
+    });
   }
 
   async listMyCourseEnrollments(studentUserId: string) {
@@ -487,18 +497,78 @@ export class AcademicsService {
   }
 
   private getSlotStatus(startTime: string, endTime: string) {
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const now = this.getIstMinutesNow();
     const startMinutes = this.toMinutes(startTime);
     const endMinutes = this.toMinutes(endTime);
-    if (currentMinutes < startMinutes) return 'upcoming';
-    if (currentMinutes > endMinutes) return 'done';
-    return 'ongoing';
+    if (Number.isNaN(startMinutes) || Number.isNaN(endMinutes)) return 'upcoming';
+    if (now < startMinutes) return 'upcoming';
+    if (now > endMinutes) return 'done';
+    if (now >= startMinutes && now <= endMinutes) return 'ongoing';
+    return 'upcoming';
   }
 
   private toMinutes(time: string) {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
+    const normalized = this.normalizeTime(time);
+    const [hours, minutes = '0'] = normalized.split(':');
+    const h = Number(hours);
+    const m = Number(minutes);
+    if (Number.isNaN(h) || Number.isNaN(m)) return Number.NaN;
+    return h * 60 + m;
+  }
+
+  private normalizeTime(time: string | Date) {
+    if (time instanceof Date) return time.toISOString().slice(11, 16);
+    const value = String(time);
+    if (value.includes('T')) return value.slice(11, 16);
+    return value.slice(0, 5);
+  }
+
+  private getIstMinutesNow() {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+    return hour * 60 + minute;
+  }
+
+  private getIstDayOfWeek() {
+    const weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      weekday: 'short',
+    }).format(new Date());
+    const map: Record<string, number> = {
+      Sun: 7,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    return map[weekday] ?? 1;
+  }
+
+  private isVirtualRoom(room: string | null) {
+    if (!room) return false;
+    return /zoom|meet|online|virtual|teams|webex|google|hangout|vtop-virtual/i.test(room);
+  }
+
+  private async fetchActiveLiveClasses(courseIds: string[]) {
+    if (courseIds.length === 0) return new Map<string, string>();
+    const rows = await this.timetables.manager.query<Array<{ course_id: string; meeting_url: string }>>(
+      `SELECT DISTINCT ON (course_id) course_id, meeting_url
+       FROM lms_live_classes
+       WHERE course_id = ANY($1::uuid[])
+         AND starts_at <= NOW()
+         AND ends_at >= NOW()
+       ORDER BY course_id, starts_at ASC`,
+      [courseIds],
+    );
+    return new Map(rows.map((row) => [row.course_id, row.meeting_url]));
   }
 
   private async resolveHodDepartmentIds(hodUserId: string) {

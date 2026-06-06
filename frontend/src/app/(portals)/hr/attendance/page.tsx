@@ -29,7 +29,7 @@ export default function HrAttendancePage() {
   }
 
   return (
-    <div className="mx-auto max-w-[95vw] space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Attendance matrix"
         description="Color-coded daily status from assigned shifts, biometric punches, holidays, and pending requests."
@@ -54,6 +54,6 @@ export default function HrAttendancePage() {
         month={month}
         title={`Master matrix — ${month}`}
       />
-    </div>
+    </>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Search } from 'lucide-react';
+import { FalconLoader } from '@/components/brand/FalconLoader';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -38,8 +39,9 @@ type PermRow = {
 
 export default function HrPermissionsPage() {
   const api = useHrApi();
-  const { entityId } = useHrEntity();
+  const { entityReady, loading: entityLoading, entities } = useHrEntity();
   const [rows, setRows] = useState<PermRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [savingCell, setSavingCell] = useState<string | null>(null);
@@ -51,11 +53,17 @@ export default function HrPermissionsPage() {
   }, [query]);
 
   useEffect(() => {
+    if (entityLoading) return;
     const path = debouncedQ
       ? `/api/hr/admin/permissions?q=${encodeURIComponent(debouncedQ)}&limit=100`
       : '/api/hr/admin/permissions?limit=100';
-    void api.get<PermRow[]>(path).then(setRows);
-  }, [api, entityId, debouncedQ]);
+    setLoading(true);
+    void api
+      .get<PermRow[]>(path)
+      .then(setRows)
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [api, entityLoading, debouncedQ]);
 
   useEffect(() => {
     const timers = saveTimers.current;
@@ -102,8 +110,27 @@ export default function HrPermissionsPage() {
     return Object.values(row.capabilities).some((v) => v && v !== 'none');
   }
 
+  if (entityLoading || loading) {
+    return <FalconLoader label="Loading HR access matrix…" />;
+  }
+
+  if (!entityReady && entities.length === 0) {
+    return (
+      <>
+        <HrPageHeader
+          title="HR Access Matrix"
+          description="Grant Read, Write, or None per module — changes save automatically when you change a dropdown."
+        />
+        <p className="text-sm text-muted-foreground">
+          No organization entity is assigned to your account. Contact your Super Admin or select an entity from the
+          header switcher.
+        </p>
+      </>
+    );
+  }
+
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="HR Access Matrix"
         description="Grant Read, Write, or None per module — changes save automatically when you change a dropdown."
@@ -183,6 +210,6 @@ export default function HrPermissionsPage() {
           </table>
         </CardContent>
       </Card>
-    </div>
+    </>
   );
 }

@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus } from 'lucide-react';
+import { Plus, Scale } from 'lucide-react';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
+import { HrStatusBadge } from '@/components/hr/HrStatusBadge';
+import { HrEmptyState } from '@/components/hr/HrEmptyState';
+import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
 
@@ -40,18 +42,21 @@ const emptyForm = {
 
 export default function HrRulesPage() {
   const api = useHrApi();
-  const { entityId } = useHrEntity();
+  const { entityId, entityReady } = useHrEntity();
   const [rules, setRules] = useState<DynamicRule[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<DynamicRule | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
-  const load = () => void api.get<DynamicRule[]>('/api/hr/admin/rules').then(setRules);
+  const load = () => {
+    if (!entityReady) return;
+    void api.get<DynamicRule[]>('/api/hr/admin/rules').then(setRules);
+  };
 
   useEffect(() => {
     load();
-  }, [api, entityId]);
+  }, [api, entityId, entityReady]);
 
   function openCreate() {
     setEditing(null);
@@ -113,7 +118,7 @@ export default function HrRulesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Attendance Rules Engine"
         description="Unlimited IF/THEN rules evaluated nightly — late punch-in, early exit, missed punch, occurrence penalties."
@@ -125,38 +130,46 @@ export default function HrRulesPage() {
         }
       />
 
-      <Card>
-        <CardContent className="overflow-x-auto p-0">
-          <table className="w-full min-w-[900px] text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-left">
-                <th className="p-3">Name</th>
-                <th className="p-3">Condition</th>
-                <th className="p-3">Threshold</th>
-                <th className="p-3">Action</th>
-                <th className="p-3">Priority</th>
-                <th className="p-3">Active</th>
-                <th className="p-3" />
-              </tr>
-            </thead>
-            <tbody>
+      {rules.length === 0 ? (
+        <HrEmptyState
+          icon={Scale}
+          title="No rules configured"
+          description="Create your first attendance rule to automate penalties and compliance."
+          action={
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" />
+              Add New Rule
+            </Button>
+          }
+        />
+      ) : (
+        <HrDataTable>
+          <HrTable minWidth="900px">
+            <HrTableHead>
+              <HrTh>Name</HrTh>
+              <HrTh>Condition</HrTh>
+              <HrTh>Threshold</HrTh>
+              <HrTh>Action</HrTh>
+              <HrTh>Priority</HrTh>
+              <HrTh>Status</HrTh>
+              <HrTh className="text-right">Actions</HrTh>
+            </HrTableHead>
+            <HrTableBody>
               {rules.map((rule) => (
-                <tr key={rule.rule_id} className="border-b">
-                  <td className="p-3 font-medium">{rule.rule_name}</td>
-                  <td className="p-3 text-xs text-muted-foreground">
-                    {rule.condition_type} {rule.operator}
-                  </td>
-                  <td className="p-3">
+                <HrTr key={rule.rule_id}>
+                  <HrTd className="font-semibold text-gray-900">{rule.rule_name}</HrTd>
+                  <HrTd className="text-xs text-muted-foreground">
+                    {rule.condition_type.replace(/_/g, ' ')} {rule.operator}
+                  </HrTd>
+                  <HrTd>
                     {rule.threshold_value} {rule.threshold_unit}
-                  </td>
-                  <td className="p-3 text-xs">{rule.action_type.replace(/_/g, ' ')}</td>
-                  <td className="p-3">{rule.priority}</td>
-                  <td className="p-3">
-                    <Badge variant={rule.is_active ? 'default' : 'secondary'}>
-                      {rule.is_active ? 'On' : 'Off'}
-                    </Badge>
-                  </td>
-                  <td className="p-3 text-right">
+                  </HrTd>
+                  <HrTd className="text-xs">{rule.action_type.replace(/_/g, ' ')}</HrTd>
+                  <HrTd>{rule.priority}</HrTd>
+                  <HrTd>
+                    <HrStatusBadge status={rule.is_active ? 'ON' : 'OFF'} />
+                  </HrTd>
+                  <HrTd className="text-right">
                     <div className="flex justify-end gap-1">
                       <Button size="sm" variant="outline" onClick={() => openEdit(rule)}>
                         Edit
@@ -168,30 +181,23 @@ export default function HrRulesPage() {
                         Delete
                       </Button>
                     </div>
-                  </td>
-                </tr>
+                  </HrTd>
+                </HrTr>
               ))}
-              {!rules.length && (
-                <tr>
-                  <td colSpan={7} className="p-6 text-muted-foreground">
-                    No rules yet. Add a rule to get started.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
+            </HrTableBody>
+          </HrTable>
+        </HrDataTable>
+      )}
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <Card className="w-full max-w-lg">
+          <Card className="w-full max-w-lg border-gray-100 shadow-xl">
             <CardContent className="space-y-4 p-6">
-              <h3 className="text-lg font-semibold">{editing ? 'Edit Rule' : 'New Rule'}</h3>
+              <h3 className="text-lg font-bold text-sgvu-navy">{editing ? 'Edit Rule' : 'New Rule'}</h3>
               <label className="block text-sm">
                 Rule Name
                 <Input
-                  className="mt-1"
+                  className="mt-1 border-gray-200"
                   value={form.rule_name}
                   onChange={(e) => setForm({ ...form, rule_name: e.target.value })}
                 />
@@ -199,7 +205,7 @@ export default function HrRulesPage() {
               <label className="block text-sm">
                 Condition If
                 <select
-                  className="mt-1 w-full rounded-md border px-2 py-2 text-sm"
+                  className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                   value={form.condition_type}
                   onChange={(e) =>
                     setForm({ ...form, condition_type: e.target.value as (typeof CONDITIONS)[number] })
@@ -216,7 +222,7 @@ export default function HrRulesPage() {
                 <label className="text-sm">
                   Operator
                   <select
-                    className="mt-1 w-full rounded-md border px-2 py-2 text-sm"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                     value={form.operator}
                     onChange={(e) =>
                       setForm({ ...form, operator: e.target.value as (typeof OPERATORS)[number] })
@@ -233,7 +239,7 @@ export default function HrRulesPage() {
                   Threshold
                   <Input
                     type="number"
-                    className="mt-1"
+                    className="mt-1 border-gray-200"
                     value={form.threshold_value}
                     onChange={(e) => setForm({ ...form, threshold_value: Number(e.target.value) })}
                   />
@@ -241,7 +247,7 @@ export default function HrRulesPage() {
                 <label className="text-sm">
                   Unit
                   <select
-                    className="mt-1 w-full rounded-md border px-2 py-2 text-sm"
+                    className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                     value={form.threshold_unit}
                     onChange={(e) =>
                       setForm({ ...form, threshold_unit: e.target.value as (typeof UNITS)[number] })
@@ -258,7 +264,7 @@ export default function HrRulesPage() {
               <label className="block text-sm">
                 Action Then
                 <select
-                  className="mt-1 w-full rounded-md border px-2 py-2 text-sm"
+                  className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                   value={form.action_type}
                   onChange={(e) =>
                     setForm({ ...form, action_type: e.target.value as (typeof ACTIONS)[number] })
@@ -275,7 +281,7 @@ export default function HrRulesPage() {
                 Priority (lower runs first)
                 <Input
                   type="number"
-                  className="mt-1"
+                  className="mt-1 border-gray-200"
                   value={form.priority}
                   onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
                 />
@@ -292,6 +298,6 @@ export default function HrRulesPage() {
           </Card>
         </div>
       )}
-    </div>
+    </>
   );
 }

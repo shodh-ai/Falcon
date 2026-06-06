@@ -55,7 +55,7 @@ export default function HrOrgStructurePage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader title="Organization Structure" description="Zone → Location → Branch → Department hierarchy per entity." />
 
       <Card>
@@ -88,6 +88,6 @@ export default function HrOrgStructurePage() {
       <Card>
         <CardContent className="p-4">{tree.map((n) => renderNode(n))}</CardContent>
       </Card>
-    </div>
+    </>
   );
 }

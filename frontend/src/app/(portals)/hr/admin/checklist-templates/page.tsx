@@ -1,94 +1,191 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { GripVertical, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
+import { HrTabBar } from '@/components/hr/HrTabBar';
+import { ONBOARDING_STAGE_TABS } from '@/components/hr/OnboardingWorkflowPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
 
-type Template = {
+type WorkflowTemplate = {
   template_id: string;
   workflow_type: string;
+  stage_name: string;
   task_name: string;
-  assigned_to_role: string;
   is_mandatory: boolean;
-  sort_order: number;
+  step_order: number;
 };
 
-export default function HrChecklistTemplatesPage() {
+export default function HrWorkflowTemplatesPage() {
   const api = useHrApi();
-  const { entityId } = useHrEntity();
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [form, setForm] = useState({
-    workflow_type: 'ONBOARDING',
-    task_name: '',
-    assigned_to_role: 'HR',
-    sort_order: 0,
-  });
+  const { entityReady, loading: entityLoading } = useHrEntity();
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [activeStage, setActiveStage] = useState<string>(ONBOARDING_STAGE_TABS[0].id);
+  const [newTaskName, setNewTaskName] = useState('');
+  const [dragId, setDragId] = useState<string | null>(null);
 
-  const load = () => void api.get<Template[]>('/api/hr/admin/checklist-templates').then(setTemplates);
+  const load = useCallback(() => {
+    if (!entityReady) return;
+    void api.get<WorkflowTemplate[]>('/api/hr/admin/workflow-templates?workflow_type=ONBOARDING').then(setTemplates);
+  }, [api, entityReady]);
 
   useEffect(() => {
     load();
-  }, [api, entityId]);
+  }, [load]);
 
-  async function create() {
+  const stageTemplates = useMemo(
+    () =>
+      templates
+        .filter((t) => t.stage_name === activeStage)
+        .sort((a, b) => a.step_order - b.step_order),
+    [templates, activeStage],
+  );
+
+  async function addTask() {
+    const task = newTaskName.trim();
+    if (!task) return;
     try {
-      await api.post('/api/hr/admin/checklist-templates', form);
-      toast.success('Template added');
-      setForm({ workflow_type: 'ONBOARDING', task_name: '', assigned_to_role: 'HR', sort_order: 0 });
+      await api.post('/api/hr/admin/workflow-templates', {
+        workflow_type: 'ONBOARDING',
+        stage_name: activeStage,
+        task_name: task,
+        is_mandatory: true,
+      });
+      setNewTaskName('');
+      toast.success('Task added');
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed');
+      toast.error(e instanceof Error ? e.message : 'Failed to add task');
     }
   }
 
+  async function toggleMandatory(template: WorkflowTemplate) {
+    try {
+      await api.patch(`/api/hr/admin/workflow-templates/${template.template_id}`, {
+        is_mandatory: !template.is_mandatory,
+      });
+      setTemplates((prev) =>
+        prev.map((t) =>
+          t.template_id === template.template_id ? { ...t, is_mandatory: !t.is_mandatory } : t,
+        ),
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    }
+  }
+
+  async function deleteTask(templateId: string) {
+    try {
+      await api.post(`/api/hr/admin/workflow-templates/${templateId}/delete`, {});
+      toast.success('Task removed');
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed');
+    }
+  }
+
+  async function persistOrder(ordered: WorkflowTemplate[]) {
+    try {
+      await api.patch('/api/hr/admin/workflow-templates/reorder', {
+        stage_name: activeStage,
+        ordered_template_ids: ordered.map((t) => t.template_id),
+      });
+      setTemplates((prev) => {
+        const others = prev.filter((t) => t.stage_name !== activeStage);
+        const reindexed = ordered.map((t, i) => ({ ...t, step_order: i + 1 }));
+        return [...others, ...reindexed];
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reorder failed');
+      load();
+    }
+  }
+
+  function onDrop(targetId: string) {
+    if (!dragId || dragId === targetId) return;
+    const items = [...stageTemplates];
+    const from = items.findIndex((t) => t.template_id === dragId);
+    const to = items.findIndex((t) => t.template_id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = items.splice(from, 1);
+    items.splice(to, 0, moved);
+    setDragId(null);
+    void persistOrder(items);
+  }
+
+  if (entityLoading) {
+    return <p className="text-sm text-muted-foreground">Loading entity context…</p>;
+  }
+
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
-      <HrPageHeader title="Checklist Templates" description="Onboarding and offboarding task templates spawned on hire or resignation." />
+    <>
+      <HrPageHeader
+        title="Onboarding Workflow Templates"
+        description="Configure the Default Workflow — three stages, drag-and-drop task order, and mandatory flags (Zimyo-style)."
+      />
 
-      <Card>
-        <CardContent className="grid gap-2 p-4 sm:grid-cols-2">
-          <select className="rounded-md border px-2 py-2 text-sm" value={form.workflow_type} onChange={(e) => setForm({ ...form, workflow_type: e.target.value })}>
-            <option value="ONBOARDING">ONBOARDING</option>
-            <option value="OFFBOARDING">OFFBOARDING</option>
-          </select>
-          <Input placeholder="Task name" value={form.task_name} onChange={(e) => setForm({ ...form, task_name: e.target.value })} />
-          <Input placeholder="Assigned role (HR, IT…)" value={form.assigned_to_role} onChange={(e) => setForm({ ...form, assigned_to_role: e.target.value })} />
-          <Input type="number" placeholder="Sort order" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
-          <Button size="sm" onClick={() => void create()} disabled={!form.task_name.trim()}>
-            Add template
-          </Button>
+      <Card className="border-gray-100 shadow-sm">
+        <CardContent className="p-0">
+          <div className="border-b px-4 pt-4">
+            <HrTabBar tabs={[...ONBOARDING_STAGE_TABS]} active={activeStage} onChange={setActiveStage} />
+          </div>
+
+          <div className="divide-y">
+            {stageTemplates.map((template) => (
+              <div
+                key={template.template_id}
+                draggable
+                onDragStart={() => setDragId(template.template_id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => onDrop(template.template_id)}
+                className="flex items-center gap-3 px-4 py-3.5"
+              >
+                <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing" />
+                <span className="flex-1 text-sm font-medium text-sgvu-navy">{template.task_name}</span>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={template.is_mandatory}
+                    onChange={() => void toggleMandatory(template)}
+                    className="h-3.5 w-3.5 rounded border-gray-300"
+                  />
+                  Mandatory
+                </label>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-muted-foreground hover:text-red-600"
+                  onClick={() => void deleteTask(template.template_id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            {stageTemplates.length === 0 ? (
+              <p className="p-6 text-sm text-muted-foreground">No tasks in this stage yet.</p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 border-t bg-muted/20 p-4">
+            <Input
+              className="max-w-sm"
+              placeholder="New task name…"
+              value={newTaskName}
+              onChange={(e) => setNewTaskName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void addTask()}
+            />
+            <Button size="sm" onClick={() => void addTask()} disabled={!newTaskName.trim()}>
+              <Plus className="mr-1 h-4 w-4" />
+              Add task
+            </Button>
+          </div>
         </CardContent>
       </Card>
-
-      <Card>
-        <CardContent className="overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-left">
-                <th className="p-3">Type</th>
-                <th className="p-3">Task</th>
-                <th className="p-3">Role</th>
-                <th className="p-3">Order</th>
-              </tr>
-            </thead>
-            <tbody>
-              {templates.map((t) => (
-                <tr key={t.template_id} className="border-b">
-                  <td className="p-3">{t.workflow_type}</td>
-                  <td className="p-3">{t.task_name}</td>
-                  <td className="p-3">{t.assigned_to_role}</td>
-                  <td className="p-3">{t.sort_order}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
-    </div>
+    </>
   );
 }

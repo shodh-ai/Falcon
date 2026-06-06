@@ -14,6 +14,8 @@ export type OrgEntity = {
 type HrEntityContextValue = {
   entities: OrgEntity[];
   entityId: number | null;
+  /** True when entity list has loaded and a valid entity is selected. */
+  entityReady: boolean;
   entityVersion: number;
   setEntityId: (id: number) => void;
   withEntityQuery: (path: string) => string;
@@ -36,18 +38,21 @@ function mapAllowedEntities(
   }));
 }
 
-function mapApiEntities(rows: OrgEntity[]): OrgEntity[] {
+function mapApiEntities(
+  rows: Array<Partial<OrgEntity> & { id?: number; name?: string; code?: string }>,
+): OrgEntity[] {
   return rows.map((e) => ({
-    entity_id: Number(e.entity_id),
-    entity_code: e.entity_code,
-    entity_name: e.entity_name,
+    entity_id: Number(e.entity_id ?? e.id),
+    entity_code: e.entity_code ?? e.code ?? '',
+    entity_name: e.entity_name ?? e.name ?? '',
   }));
 }
 
 function intersectWithAllowed(list: OrgEntity[], allowed: OrgEntity[]): OrgEntity[] {
   if (allowed.length === 0) return list;
   const allowedIds = new Set(allowed.map((e) => e.entity_id));
-  return list.filter((e) => allowedIds.has(e.entity_id));
+  const scoped = list.filter((e) => allowedIds.has(e.entity_id));
+  return scoped.length > 0 ? scoped : list;
 }
 
 export function HrEntityProvider({ children }: { children: React.ReactNode }) {
@@ -127,10 +132,13 @@ export function HrEntityProvider({ children }: { children: React.ReactNode }) {
     return entityId ? { 'x-entity-id': String(entityId) } : {};
   }, [entityId]);
 
+  const entityReady = !loading && entityId != null;
+
   const value = useMemo(
     () => ({
       entities,
       entityId,
+      entityReady,
       entityVersion,
       setEntityId,
       withEntityQuery,
@@ -138,7 +146,7 @@ export function HrEntityProvider({ children }: { children: React.ReactNode }) {
       loading,
       refreshEntities,
     }),
-    [entities, entityId, entityVersion, setEntityId, withEntityQuery, entityHeaders, loading, refreshEntities],
+    [entities, entityId, entityReady, entityVersion, setEntityId, withEntityQuery, entityHeaders, loading, refreshEntities],
   );
 
   return <HrEntityContext.Provider value={value}>{children}</HrEntityContext.Provider>;

@@ -29,12 +29,15 @@ type Alert = {
 
 type TimetableResponse = {
   timetable_id: string;
+  course_id: string;
   course_name: string;
   room: string | null;
   faculty_name: string | null;
   start_time: string;
   end_time: string;
   status: 'upcoming' | 'ongoing' | 'done';
+  is_virtual?: boolean;
+  live_join_url?: string | null;
 };
 
 function greeting() {
@@ -69,11 +72,14 @@ export default function StudentDashboardPage() {
         setTimetable(
           timetableRows.map((slot) => ({
             id: slot.timetable_id,
+            courseId: slot.course_id,
             subject: slot.course_name,
             room: `${slot.room ?? 'Room TBA'}${slot.faculty_name ? ` · ${slot.faculty_name}` : ''}`,
             start: slot.start_time.slice(0, 5),
             end: slot.end_time.slice(0, 5),
             status: slot.status,
+            liveJoinUrl: slot.live_join_url ?? null,
+            isVirtual: slot.is_virtual ?? false,
           })),
         );
       } catch (error) {

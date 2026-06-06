@@ -19,9 +19,14 @@ export type KanbanColumn = {
 export function KanbanBoard({
   columns,
   onMove,
+  onColumnAction,
+  columnActionLabel,
 }: {
   columns: KanbanColumn[];
   onMove?: (cardId: string, nextStage: string) => void;
+  /** Extra action on cards in a specific column (e.g. HIRED → provision onboarding). */
+  onColumnAction?: (cardId: string, columnId: string) => void;
+  columnActionLabel?: Record<string, string>;
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-5">
@@ -48,6 +53,15 @@ export function KanbanBoard({
                       onClick={() => onMove(card.id, nextColumn.id)}
                     >
                       Move to {nextColumn.title}
+                    </Button>
+                  )}
+                  {onColumnAction && columnActionLabel?.[column.id] && (
+                    <Button
+                      size="sm"
+                      className="mt-3 w-full"
+                      onClick={() => onColumnAction(card.id, column.id)}
+                    >
+                      {columnActionLabel[column.id]}
                     </Button>
                   )}
                 </article>

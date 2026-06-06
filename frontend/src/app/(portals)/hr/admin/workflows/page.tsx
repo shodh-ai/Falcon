@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { HrPageHeader } from '@/components/hr/HrPageHeader';
-import { Button } from '@/components/ui/button';
+import { HrPageHeader } from '@/components/hr';
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
@@ -52,7 +52,7 @@ export default function HrWorkflowsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader title="Approval Workflows" description="Ordered approval chains for leave, resignation, comp-off, and CTC updates." />
 
       <Card>
@@ -123,6 +123,6 @@ export default function HrWorkflowsPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </>
   );
 }

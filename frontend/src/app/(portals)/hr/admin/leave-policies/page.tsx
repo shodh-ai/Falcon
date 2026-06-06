@@ -52,7 +52,7 @@ export default function HrLeavePoliciesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader title="Leave Policy Builder" description="Custom leave types with clubbing and sandwich rules per entity." />
 
       <Card>
@@ -114,6 +114,6 @@ export default function HrLeavePoliciesPage() {
           </table>
         </CardContent>
       </Card>
-    </div>
+    </>
   );
 }

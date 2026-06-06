@@ -1,11 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { CalendarOff, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
+import { HrTabBar } from '@/components/hr/HrTabBar';
+import { HrPersonCell } from '@/components/hr/HrAvatar';
+import { HrStatusBadge } from '@/components/hr/HrStatusBadge';
+import { HrEmptyState } from '@/components/hr/HrEmptyState';
+import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
@@ -18,7 +23,7 @@ type LeaveRequest = {
   end_date: string;
   reason: string;
   status: string;
-  staff?: { name?: string };
+  staff?: { name?: string; email?: string };
 };
 
 type BalanceRow = {
@@ -33,19 +38,20 @@ type BalanceRow = {
 
 export default function HrLeavesPage() {
   const api = useHrApi();
-  const { entityId } = useHrEntity();
+  const { entityId, entityReady } = useHrEntity();
   const [tab, setTab] = useState<'approvals' | 'balances'>('approvals');
   const [pending, setPending] = useState<LeaveRequest[]>([]);
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const year = new Date().getFullYear();
 
   useEffect(() => {
+    if (!entityReady) return;
     if (tab === 'approvals') {
       void api.get<LeaveRequest[]>('/api/hr/leaves/all?status=HOD_APPROVED').then(setPending);
     } else {
       void api.get<BalanceRow[]>(`/api/hr/leaves/balances-grid?year=${year}`).then(setBalances);
     }
-  }, [api, entityId, tab, year]);
+  }, [api, entityId, entityReady, tab, year]);
 
   async function hrApprove(leaveId: string, status: 'HR_APPROVED' | 'REJECTED') {
     try {
@@ -68,93 +74,111 @@ export default function HrLeavesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Leave Management & Balances"
         description="Final HR sign-off on HoD-approved requests and organization-wide leave balance grid."
       />
 
-      <div className="flex gap-2">
-        <Button variant={tab === 'approvals' ? 'default' : 'outline'} size="sm" onClick={() => setTab('approvals')}>
-          Pending approvals
-        </Button>
-        <Button variant={tab === 'balances' ? 'default' : 'outline'} size="sm" onClick={() => setTab('balances')}>
-          Leave balances
-        </Button>
-      </div>
+      <HrTabBar
+        tabs={[
+          { id: 'approvals', label: 'Pending approvals' },
+          { id: 'balances', label: 'Leave balances' },
+        ]}
+        active={tab}
+        onChange={(id) => setTab(id as 'approvals' | 'balances')}
+      />
 
       {tab === 'approvals' ? (
-        <div className="space-y-3">
-          {pending.map((l) => {
-            const leaveId = l.leave_id ?? l.staff_leave_id ?? '';
-            return (
-            <Card key={leaveId}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base">{l.staff?.name ?? 'Staff'}</CardTitle>
-                <Badge>{l.status}</Badge>
-              </CardHeader>
-              <CardContent className="text-sm">
-                <p>
-                  {l.leave_type}: {l.start_date} → {l.end_date}
-                </p>
-                <p className="text-muted-foreground">{l.reason}</p>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={() => void hrApprove(leaveId, 'HR_APPROVED')}>
-                    HR Approve
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => void hrApprove(leaveId, 'REJECTED')}>
-                    Reject
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-          })}
-          {pending.length === 0 ? <p className="text-sm text-muted-foreground">No HoD-approved leaves pending HR.</p> : null}
-        </div>
-      ) : (
-        <Card>
-          <CardContent className="overflow-x-auto p-0">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left">
-                  <th className="p-3">Employee</th>
-                  <th className="p-3">CL</th>
-                  <th className="p-3">SL</th>
-                  <th className="p-3">EL</th>
-                  <th className="p-3">Maternity</th>
-                  <th className="p-3">Adjust CL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {balances.map((b) => (
-                  <tr key={b.user_id} className="border-b">
-                    <td className="p-3">
-                      {b.name}
-                      <span className="block text-xs text-muted-foreground">{b.employee_id}</span>
-                    </td>
-                    <td className="p-3">{b.cl_balance ?? '—'}</td>
-                    <td className="p-3">{b.sl_balance ?? '—'}</td>
-                    <td className="p-3">{b.el_balance ?? '—'}</td>
-                    <td className="p-3">{b.maternity_balance ?? '—'}</td>
-                    <td className="p-3">
-                      <Input
-                        type="number"
-                        className="h-8 w-20"
-                        placeholder="+/-"
-                        onBlur={(e) => {
-                          const v = Number(e.target.value);
-                          if (v) void adjust(b.user_id, 'CL', v);
-                        }}
+        <div className="space-y-3 pt-2">
+          {pending.length === 0 ? (
+            <HrEmptyState
+              icon={Inbox}
+              title="No pending leaves"
+              description="You're all caught up — no HoD-approved requests awaiting HR sign-off."
+            />
+          ) : (
+            pending.map((l) => {
+              const leaveId = l.leave_id ?? l.staff_leave_id ?? '';
+              return (
+                <Card
+                  key={leaveId}
+                  className="border-gray-100 shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 flex-1 items-start gap-4">
+                      <HrPersonCell
+                        name={l.staff?.name ?? 'Staff member'}
+                        subtitle={l.staff?.email ?? `${l.leave_type} · ${l.start_date} → ${l.end_date}`}
                       />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+                      <div className="hidden sm:block">
+                        <HrStatusBadge status={l.status} />
+                      </div>
+                    </div>
+                    <div className="space-y-2 sm:text-right">
+                      <p className="text-sm text-muted-foreground sm:hidden">
+                        <HrStatusBadge status={l.status} />
+                      </p>
+                      <p className="text-sm text-muted-foreground">{l.reason}</p>
+                      <div className="flex gap-2 sm:justify-end">
+                        <Button size="sm" onClick={() => void hrApprove(leaveId, 'HR_APPROVED')}>
+                          HR Approve
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => void hrApprove(leaveId, 'REJECTED')}>
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })
+          )}
+        </div>
+      ) : balances.length === 0 ? (
+        <HrEmptyState
+          icon={CalendarOff}
+          title="No balance records"
+          description="Leave balances will appear once employees are assigned entitlements."
+        />
+      ) : (
+        <HrDataTable>
+          <HrTable minWidth="720px">
+            <HrTableHead>
+              <HrTh>Employee</HrTh>
+              <HrTh>CL</HrTh>
+              <HrTh>SL</HrTh>
+              <HrTh>EL</HrTh>
+              <HrTh>Maternity</HrTh>
+              <HrTh>Adjust CL</HrTh>
+            </HrTableHead>
+            <HrTableBody>
+              {balances.map((b) => (
+                <HrTr key={b.user_id}>
+                  <HrTd>
+                    <HrPersonCell name={b.name} subtitle={b.employee_id} />
+                  </HrTd>
+                  <HrTd className="font-medium">{b.cl_balance ?? '—'}</HrTd>
+                  <HrTd className="font-medium">{b.sl_balance ?? '—'}</HrTd>
+                  <HrTd className="font-medium">{b.el_balance ?? '—'}</HrTd>
+                  <HrTd className="font-medium">{b.maternity_balance ?? '—'}</HrTd>
+                  <HrTd>
+                    <Input
+                      type="number"
+                      className="h-8 w-20 border-gray-200"
+                      placeholder="+/-"
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v) void adjust(b.user_id, 'CL', v);
+                      }}
+                    />
+                  </HrTd>
+                </HrTr>
+              ))}
+            </HrTableBody>
+          </HrTable>
+        </HrDataTable>
       )}
-    </div>
+    </>
   );
 }

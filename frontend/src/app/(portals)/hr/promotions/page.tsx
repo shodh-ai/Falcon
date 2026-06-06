@@ -31,7 +31,7 @@ export default function HrPromotionsPage() {
   const eligible = rows.filter((r) => r.promotion_eligibility === 'ELIGIBLE');
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Promotions & Workflows"
         description="Assistant Professor → Associate Professor → Professor. Flags faculty meeting API score and service years."
@@ -59,6 +59,6 @@ export default function HrPromotionsPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </>
   );
 }

@@ -36,7 +36,7 @@ export default function HrPoliciesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader title="Company Policies CMS" description="Upload PDFs for employees to read and acknowledge." />
 
       <Card>
@@ -70,6 +70,6 @@ export default function HrPoliciesPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </>
   );
 }

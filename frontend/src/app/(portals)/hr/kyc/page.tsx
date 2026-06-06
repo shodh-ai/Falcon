@@ -29,7 +29,7 @@ export default function HrKycVaultPage() {
   if (loading) return <FalconLoader label="Loading KYC vault index…" />;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="KYC & Document Vault"
         description="PAN, Aadhaar, and bank details are AES-256 encrypted. Reveal actions are audit-logged per employee profile."
@@ -53,6 +53,6 @@ export default function HrKycVaultPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </>
   );
 }

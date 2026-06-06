@@ -36,6 +36,7 @@ import { HrOrgStructureService } from './hr-org-structure.service';
 import { HrLeavePolicyService } from './hr-leave-policy.service';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import { HrChecklistService } from './hr-checklist.service';
+import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
 import { HrDashboardService } from './hr-dashboard.service';
 import { HrReportsService } from './hr-reports.service';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
@@ -63,6 +64,7 @@ export class HrController {
     private readonly leavePolicies: HrLeavePolicyService,
     private readonly workflowBuilder: HrWorkflowBuilderService,
     private readonly checklists: HrChecklistService,
+    private readonly onboardingWorkflow: HrOnboardingWorkflowService,
     private readonly dashboard: HrDashboardService,
     private readonly reports: HrReportsService,
   ) {}
@@ -302,7 +304,7 @@ export class HrController {
 
   @Get('entities')
   @SkipEntityScope()
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'Faculty', 'HOD', 'Dean')
   listEntities(@Req() req: { user: AuthUser }) {
     const roles = req.user.roles?.length ? req.user.roles : req.user.role ? [req.user.role] : [];
     return this.entityCtx.listAllowedEntities(
@@ -329,6 +331,7 @@ export class HrController {
   }
 
   @Put('admin/permissions')
+  @SkipEntityScope()
   @Roles('HRAdmin', 'SuperAdmin')
   updatePermissionMatrix(
     @Req() req: { user: AuthUser },
@@ -342,6 +345,7 @@ export class HrController {
   }
 
   @Patch('admin/permissions/:userId')
+  @SkipEntityScope()
   @Roles('HRAdmin', 'SuperAdmin')
   patchUserPermission(
     @Req() req: { user: AuthUser },
@@ -768,16 +772,112 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('stage') stage: string,
   ) {
-    return this.hr.moveApplicant(this.resolveTenantId(req.user), applicantId, stage);
+    const tenantId = this.resolveTenantId(req.user);
+    const result = await this.hr.moveApplicant(tenantId, applicantId, stage);
+    if (stage === 'HIRED') {
+      const spawn = await this.onboardingWorkflow.triggerOnHired(tenantId, applicantId);
+      return { ...result, onboarding_spawn: spawn };
+    }
+    return result;
   }
 
   @Get('onboarding')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('onboarding', 'read')
-  async onboarding(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listOnboardingNewHires(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.ess.listOnboardingKanban(tenantId, entity);
+    return this.onboardingWorkflow.listNewHires(tenantId, entity);
+  }
+
+  @Get('onboarding/:userId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('onboarding', 'read')
+  async getOnboardingWorkflow(
+    @Param('userId') userId: string,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.onboardingWorkflow.getEmployeeWorkflow(tenantId, entity, userId);
+  }
+
+  @Patch('onboarding/tasks/:taskId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('onboarding', 'write')
+  async updateOnboardingTask(
+    @Param('taskId') taskId: string,
+    @Req() req: { user: AuthUser },
+    @Body('completed') completed: boolean,
+  ) {
+    return this.onboardingWorkflow.setTaskStatus(taskId, req.user.user_id, completed !== false);
+  }
+
+  @Get('admin/workflow-templates')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async listWorkflowTemplates(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+    @Query('workflow_type') workflowType?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.onboardingWorkflow.listTemplates(tenantId, entity, workflowType ?? 'ONBOARDING');
+  }
+
+  @Post('admin/workflow-templates')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async createWorkflowTemplate(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.onboardingWorkflow.createTemplate(tenantId, entity, body as Parameters<HrOnboardingWorkflowService['createTemplate']>[2]);
+  }
+
+  @Patch('admin/workflow-templates/reorder')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async reorderWorkflowTemplates(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body() body: { stage_name: string; ordered_template_ids: string[] },
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.onboardingWorkflow.reorderTemplates(
+      tenantId,
+      entity,
+      body.stage_name,
+      body.ordered_template_ids ?? [],
+    );
+  }
+
+  @Patch('admin/workflow-templates/:templateId')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async updateWorkflowTemplate(
+    @Param('templateId') templateId: string,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.onboardingWorkflow.updateTemplate(tenantId, entity, templateId, body as Parameters<HrOnboardingWorkflowService['updateTemplate']>[3]);
+  }
+
+  @Post('admin/workflow-templates/:templateId/delete')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async deleteWorkflowTemplate(
+    @Param('templateId') templateId: string,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.onboardingWorkflow.deleteTemplate(tenantId, entity, templateId);
   }
 
   @Get('offboarding')

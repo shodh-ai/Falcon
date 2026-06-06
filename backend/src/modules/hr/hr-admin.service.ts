@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { HrEntityContextService } from './hr-entity-context.service';
 import { HrChecklistService } from './hr-checklist.service';
+import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
 
 const API_POINTS: Record<string, number> = {
   JOURNAL: 10,
@@ -29,6 +30,7 @@ export class HrAdminService {
     private readonly config: ConfigService,
     private readonly entityCtx: HrEntityContextService,
     private readonly checklists: HrChecklistService,
+    private readonly onboardingWorkflow: HrOnboardingWorkflowService,
   ) {}
 
   async listDirectory(tenantId: string, entityId: number) {
@@ -123,6 +125,19 @@ export class HrAdminService {
     return this.getEmployee360(tenantId, targetUserId, true);
   }
 
+  private async resolveEntityId(tenantId: string, preferred?: number | null): Promise<number> {
+    if (preferred != null) return preferred;
+    const rows = await this.dataSource.query<Array<{ entity_id: number }>>(
+      `SELECT entity_id FROM org_entities WHERE tenant_id = $1 AND is_active = true ORDER BY entity_id LIMIT 1`,
+      [tenantId],
+    );
+    const entityId = rows[0]?.entity_id;
+    if (!entityId) {
+      throw new BadRequestException('No organization entity configured for this tenant');
+    }
+    return entityId;
+  }
+
   async upsertEmployeeProfile(
     tenantId: string,
     userId: string,
@@ -139,6 +154,7 @@ export class HrAdminService {
       entity_id?: number;
     },
   ) {
+    const entityId = await this.resolveEntityId(tenantId, dto.entity_id);
     const pan = dto.pan_number !== undefined ? this.crypto.encrypt(dto.pan_number) : undefined;
     const aadhaar = dto.aadhaar_number !== undefined ? this.crypto.encrypt(dto.aadhaar_number) : undefined;
     const bank = dto.bank_account_no !== undefined ? this.crypto.encrypt(dto.bank_account_no) : undefined;
@@ -175,8 +191,12 @@ export class HrAdminService {
         dto.ifsc_code ?? null,
         dto.pf_uan ?? null,
         dto.org_unit_id ?? null,
-        dto.entity_id ?? null,
+        entityId,
       ],
+    );
+    await this.dataSource.query(
+      `UPDATE users SET entity_id = $2 WHERE user_id = $1 AND (entity_id IS NULL OR entity_id IS DISTINCT FROM $2)`,
+      [userId, entityId],
     );
     return rows[0];
   }
@@ -423,7 +443,7 @@ export class HrAdminService {
     );
   }
 
-  async hireApplicant(tenantId: string, applicantId: string, hrUserId: string) {
+  async hireApplicant(tenantId: string, applicantId: string, _hrUserId: string) {
     const applicant = await this.dataSource.query(
       `SELECT * FROM hr_applicants WHERE applicant_id = $1 AND tenant_id = $2`,
       [applicantId, tenantId],
@@ -434,63 +454,56 @@ export class HrAdminService {
       throw new BadRequestException('Move candidate to OFFERED or HIRED first');
     }
 
+    const entityId = await this.resolveEntityId(tenantId, a.entity_id as number | null);
+    const email = String(a.email).toLowerCase();
+
+    if (a.hired_user_id) {
+      const spawn = await this.onboardingWorkflow.spawnTasksForEmployee(
+        tenantId,
+        entityId,
+        a.hired_user_id,
+      );
+      return {
+        user_id: a.hired_user_id,
+        email,
+        onboarding_triggered: spawn.spawned > 0,
+        already_hired: true,
+        onboarding_spawn: spawn,
+      };
+    }
+
     const role = await this.dataSource.query(
       `SELECT role_id FROM roles WHERE role_name = 'Faculty' LIMIT 1`,
     );
     const passwordHash = await bcrypt.hash('Welcome@123', 10);
-    const email = a.email.toLowerCase();
     const userRows = await this.dataSource.query(
-      `INSERT INTO users (tenant_id, name, official_email, role_id, password_hash, is_active)
-       VALUES ($1, $2, $3, $4, $5, true)
-       ON CONFLICT (tenant_id, official_email) DO UPDATE SET name = EXCLUDED.name, is_active = true
+      `INSERT INTO users (tenant_id, name, official_email, role_id, password_hash, is_active, entity_id)
+       VALUES ($1, $2, $3, $4, $5, true, $6)
+       ON CONFLICT (tenant_id, official_email) DO UPDATE SET
+         name = EXCLUDED.name,
+         is_active = true,
+         entity_id = COALESCE(users.entity_id, EXCLUDED.entity_id)
        RETURNING user_id`,
-      [tenantId, a.name, email, role[0]?.role_id ?? 2, passwordHash],
+      [tenantId, a.name, email, role[0]?.role_id ?? 2, passwordHash, entityId],
     );
     const userId = userRows[0].user_id;
     await this.upsertEmployeeProfile(tenantId, userId, {
-      employee_id: `SGVU-${applicantId.slice(0, 8).toUpperCase()}`,
+      employee_id: `SGVU-${applicantId.replace(/-/g, '').slice(0, 8).toUpperCase()}`,
       designation: 'Assistant Professor',
       joining_date: new Date().toISOString().slice(0, 10),
+      entity_id: entityId,
     });
     await this.dataSource.query(
       `UPDATE hr_applicants SET stage = 'HIRED', hired_user_id = $2, updated_at = NOW() WHERE applicant_id = $1`,
       [applicantId, userId],
     );
-    const entityRows = await this.dataSource.query(
-      `SELECT entity_id FROM org_entities WHERE tenant_id = $1 ORDER BY entity_id LIMIT 1`,
-      [tenantId],
-    );
-    const entityId = entityRows[0]?.entity_id ?? null;
-    await this.dataSource.query(
-      `INSERT INTO hr_clearance_tasks (tenant_id, entity_id, applicant_id, lifecycle_type, department_owner, task_name, status, due_date)
-       VALUES ($1, $3, $2, 'ONBOARDING', 'IT', 'Create @mygyanvihar.com email', 'PENDING', CURRENT_DATE + 3),
-              ($1, $3, $2, 'ONBOARDING', 'HR', 'Print employee ID card', 'PENDING', CURRENT_DATE + 5)`,
-      [tenantId, applicantId, entityId],
-    );
-    const pipelineRows = await this.dataSource.query(
-      `INSERT INTO hr_onboarding_pipelines (tenant_id, entity_id, applicant_id, user_id, stage, progress_percent)
-       VALUES ($1, $2, $3, $4, 'DOCUMENTS', 0)
-       RETURNING pipeline_id`,
-      [tenantId, entityId, applicantId, userId],
-    );
-    const pipelineId = pipelineRows[0]?.pipeline_id;
-    if (pipelineId && entityId) {
-      await this.checklists.spawnOnboardingInstances(tenantId, entityId, userId, pipelineId);
-      const steps = [
-        ['PAN_UPLOAD', 'Upload PAN', 1],
-        ['OFFER_LETTER', 'Sign Offer Letter', 2],
-        ['POLICIES', 'Read Policies', 3],
-        ['ID_CARD_PHOTO', 'ID Card Photo', 4],
-      ];
-      for (const [key, label, order] of steps) {
-        await this.dataSource.query(
-          `INSERT INTO hr_onboarding_steps (pipeline_id, step_key, step_label, sort_order)
-           VALUES ($1,$2,$3,$4) ON CONFLICT (pipeline_id, step_key) DO NOTHING`,
-          [pipelineId, key, label, order],
-        );
-      }
-    }
-    return { user_id: userId, email, onboarding_triggered: true };
+    const spawn = await this.onboardingWorkflow.spawnTasksForEmployee(tenantId, entityId, userId);
+    return {
+      user_id: userId,
+      email,
+      onboarding_triggered: spawn.spawned > 0,
+      onboarding_spawn: spawn,
+    };
   }
 
   validateBiometricWebhook(secret?: string) {

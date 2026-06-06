@@ -28,7 +28,7 @@ export default function HrSalaryStructuresPage() {
   }, [api, entityId]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Salary Structures"
         description="Per-employee pay breakdown: Basic, DA, HRA, PF, and TDS components."
@@ -70,6 +70,6 @@ export default function HrSalaryStructuresPage() {
           ) : null}
         </CardContent>
       </Card>
-    </div>
+    </>
   );
 }

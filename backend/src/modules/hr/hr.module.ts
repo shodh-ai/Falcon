@@ -26,6 +26,7 @@ import { HrOrgStructureService } from './hr-org-structure.service';
 import { HrLeavePolicyService } from './hr-leave-policy.service';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import { HrChecklistService } from './hr-checklist.service';
+import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
 import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
 import { HrDashboardService } from './hr-dashboard.service';
 import { HrReportsService } from './hr-reports.service';
@@ -65,6 +66,7 @@ import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
     HrLeavePolicyService,
     HrWorkflowBuilderService,
     HrChecklistService,
+    HrOnboardingWorkflowService,
     HrPermissionGuard,
     HrDashboardService,
     HrReportsService,
@@ -86,6 +88,7 @@ import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
     HrLeavePolicyService,
     HrWorkflowBuilderService,
     HrChecklistService,
+    HrOnboardingWorkflowService,
     HrDashboardService,
     HrReportsService,
     HrWorkflowRoutingService,

@@ -177,7 +177,7 @@ export function HrmsPage({ kind }: { kind: HrPageKind }) {
   const metrics = data as Record<string, number> | null;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <>
       <section>
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-sgvu-gold">Falcon HRMS</p>
         <h2 className="mt-1 text-2xl font-black text-sgvu-navy sm:text-3xl">{config.title}</h2>
@@ -324,6 +324,6 @@ export function HrmsPage({ kind }: { kind: HrPageKind }) {
           </CardContent>
         </Card>
       )}
-    </div>
+    </>
   );
 }
