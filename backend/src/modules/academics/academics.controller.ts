@@ -409,6 +409,21 @@ export class AcademicsController {
     );
   }
 
+  @Get('grading/roster')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  gradingRoster(
+    @Req() req: { user: AuthUser },
+    @Query('courseId') courseId: string,
+    @Query('examType') examType: string,
+  ) {
+    return this.facultyWorkspaces.listMarks(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      examType ?? 'CAT1',
+    );
+  }
+
   @Post('faculty/workspaces/marks/draft')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   saveMarksDraft(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {

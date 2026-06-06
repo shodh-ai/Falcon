@@ -58,7 +58,9 @@ export class HrWorkforceService {
     const formatTime = (d: Date | null | undefined) =>
       d ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '--';
 
-    const hours = calc.total_hours ?? 0;
+    const hours = calc.first_in_time
+      ? this.computeHours(calc.first_in_time, calc.last_out_time)
+      : 0;
 
     return {
       date: today,
@@ -73,7 +75,7 @@ export class HrWorkforceService {
       display: {
         in_time: formatTime(calc.first_in_time),
         out_time: formatTime(calc.last_out_time),
-        hours_worked_today: hours > 0 ? this.formatHours(hours) : calc.first_in_time ? this.formatHours(hours) : '0:00',
+        hours_worked_today: calc.first_in_time ? this.formatHours(hours) : '0:00',
       },
       calculated_status: calc.calculated_status,
       status: calc.calculated_status,

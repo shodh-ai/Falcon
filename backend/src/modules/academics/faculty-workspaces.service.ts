@@ -44,43 +44,63 @@ export class FacultyWorkspacesService {
     examType: string,
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
-    const students = await this.dataSource.query(
-      `SELECT u.user_id AS student_user_id, u.name, sp.student_profile_id,
-              COALESCE(sp.enrollment_no, u.user_id::text) AS roll_number
+    const rows = await this.dataSource.query(
+      `SELECT
+         u.user_id AS student_user_id,
+         u.name,
+         COALESCE(sp.enrollment_no, u.user_id::text) AS roll_number,
+         m.mark_id,
+         m.marks_obtained,
+         m.max_marks,
+         m.co_mapped,
+         m.status AS mark_status
        FROM student_course_enrollments e
        INNER JOIN users u ON u.user_id = e.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-       WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.status = 'ENROLLED'
+       LEFT JOIN academic_marks m
+         ON m.tenant_id = e.tenant_id
+        AND m.student_user_id = e.student_user_id
+        AND m.course_id = e.course_id
+        AND m.exam_type = $3
+       WHERE e.tenant_id = $1
+         AND e.course_id = $2
+         AND e.status = 'ENROLLED'
        ORDER BY u.name`,
-      [tenantId, courseId],
-    );
-    const marks = await this.dataSource.query(
-      `SELECT mark_id, student_user_id, marks_obtained, max_marks, co_mapped, status
-       FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3`,
       [tenantId, courseId, examType],
     );
-    const markByStudent = new Map(marks.map((m: { student_user_id: string }) => [m.student_user_id, m]));
+
+    const maxMarksDefault =
+      rows.find((r: { max_marks: number | null }) => r.max_marks != null)?.max_marks ?? 50;
+    const publishStatus = rows.some((r: { mark_status: string | null }) => r.mark_status === 'PUBLISHED')
+      ? 'PUBLISHED'
+      : 'DRAFT';
+
     return {
       exam_type: examType,
       course_id: courseId,
-      max_marks_default: marks[0]?.max_marks ?? 50,
-      publish_status: marks.some((m: { status: string }) => m.status === 'PUBLISHED') ? 'PUBLISHED' : 'DRAFT',
-      rows: students.map((s: { student_user_id: string; name: string; roll_number: string }) => {
-        const existing = markByStudent.get(s.student_user_id) as
-          | { mark_id: string; marks_obtained: string; max_marks: number; co_mapped: string | null; status: string }
-          | undefined;
-        return {
+      max_marks_default: maxMarksDefault,
+      publish_status: publishStatus,
+      rows: rows.map(
+        (s: {
+          student_user_id: string;
+          name: string;
+          roll_number: string;
+          mark_id: string | null;
+          marks_obtained: string | null;
+          max_marks: number | null;
+          co_mapped: string | null;
+          mark_status: string | null;
+        }) => ({
           student_user_id: s.student_user_id,
           name: s.name,
           roll_number: s.roll_number,
-          mark_id: existing?.mark_id ?? null,
-          marks_obtained: existing ? Number(existing.marks_obtained) : null,
-          max_marks: existing?.max_marks ?? 50,
-          co_mapped: existing?.co_mapped ?? null,
-          status: existing?.status ?? 'DRAFT',
-        };
-      }),
+          mark_id: s.mark_id ?? null,
+          marks_obtained: s.marks_obtained != null ? Number(s.marks_obtained) : null,
+          max_marks: s.max_marks ?? maxMarksDefault,
+          co_mapped: s.co_mapped ?? null,
+          status: s.mark_status ?? 'DRAFT',
+        }),
+      ),
     };
   }
 

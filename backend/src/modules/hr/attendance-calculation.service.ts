@@ -141,7 +141,13 @@ export class AttendanceCalculationService {
     row.calculated_status = result.calculated_status;
     if (result.first_in_time) row.first_in_time = result.first_in_time;
     if (result.last_out_time) row.last_out_time = result.last_out_time;
-    if (result.total_hours != null) row.total_hours = result.total_hours.toFixed(2);
+    if (result.first_in_time) {
+      const liveHours = this.hoursBetween(result.first_in_time, result.last_out_time);
+      row.total_hours = liveHours.toFixed(2);
+      result.total_hours = liveHours;
+    } else if (result.total_hours != null) {
+      row.total_hours = result.total_hours.toFixed(2);
+    }
 
     if (row.is_regularized && result.calculated_status === 'ABSENT') {
       row.calculated_status = 'FULL_DAY';

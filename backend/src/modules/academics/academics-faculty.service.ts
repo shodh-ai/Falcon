@@ -281,18 +281,53 @@ export class AcademicsFacultyService {
       );
     }
 
-    await this.courseAttendanceLogs.upsert(
-      {
-        tenant_id: tenantId,
-        course_id: dto.course_id,
-        faculty_user_id: facultyUserId,
-        date,
-        attendance_data: dto.attendance_data,
-      },
-      ['tenant_id', 'course_id', 'faculty_user_id', 'date'],
+    await this.dataSource.query(
+      `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, attendance_data)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       ON CONFLICT (tenant_id, course_id, faculty_user_id, date) DO UPDATE SET
+         attendance_data = EXCLUDED.attendance_data`,
+      [tenantId, dto.course_id, facultyUserId, date, JSON.stringify(dto.attendance_data)],
     );
 
-    return { saved: dto.attendance_data.length, date };
+    const updated = await this.recalculateCourseAttendancePercents(tenantId, dto.course_id);
+
+    return { saved: dto.attendance_data.length, date, attendance_updated: updated };
+  }
+
+  private async recalculateCourseAttendancePercents(tenantId: string, courseId: string) {
+    const rows = await this.dataSource.query<Array<{ student_user_id: string; attendance_percent: string }>>(
+      `WITH session_data AS (
+         SELECT elem.value AS entry
+         FROM course_attendance_logs cal
+         CROSS JOIN LATERAL jsonb_array_elements(cal.attendance_data) AS elem
+         WHERE cal.tenant_id = $1 AND cal.course_id = $2
+       ),
+       student_stats AS (
+         SELECT
+           entry->>'student_id' AS student_id,
+           COUNT(*)::int AS total_sessions,
+           SUM(
+             CASE WHEN entry->>'status' IN ('PRESENT', 'LATE', 'EXCUSED') THEN 1 ELSE 0 END
+           )::int AS present_sessions
+         FROM session_data
+         GROUP BY entry->>'student_id'
+       ),
+       updated AS (
+         UPDATE student_course_enrollments e
+         SET attendance_percent = ROUND(
+           (s.present_sessions::numeric / NULLIF(s.total_sessions, 0)) * 100,
+           2
+         )
+         FROM student_stats s
+         WHERE e.tenant_id = $1
+           AND e.course_id = $2
+           AND e.student_user_id::text = s.student_id
+         RETURNING e.student_user_id, e.attendance_percent
+       )
+       SELECT student_user_id, attendance_percent::text FROM updated`,
+      [tenantId, courseId],
+    );
+    return rows;
   }
 
   async uploadCourseMaterial(

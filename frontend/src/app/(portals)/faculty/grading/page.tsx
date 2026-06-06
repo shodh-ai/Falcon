@@ -212,6 +212,10 @@ export default function FacultyGradingPage() {
             </div>
           ) : !courseId ? (
             <p className="py-8 text-center text-sm text-muted-foreground">Select a course to load the class roster.</p>
+          ) : rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No enrolled students found for this course. Check enrollments in Academics admin.
+            </p>
           ) : (
             <table className="w-full min-w-[640px] text-sm">
               <thead>

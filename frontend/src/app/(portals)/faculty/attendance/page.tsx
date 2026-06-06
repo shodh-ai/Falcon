@@ -91,13 +91,20 @@ function MarkAttendanceContent() {
     if (!selectedCourseId) return;
     setSaving(true);
     try {
-      await api.post('/api/academics/faculty/attendance', {
-        course_id: selectedCourseId,
-        date: selectedDate,
-        attendance_data: Object.entries(attendance).map(([student_id, status]) => ({ student_id, status })),
-      });
-      toast.success('Attendance saved');
-      setLocked(true);
+      const result = await api.post<{ saved: number; attendance_updated?: { attendance_percent: string }[] }>(
+        '/api/academics/faculty/attendance',
+        {
+          course_id: selectedCourseId,
+          date: selectedDate,
+          attendance_data: Object.entries(attendance).map(([student_id, status]) => ({ student_id, status })),
+        },
+      );
+      const state = await api.get<{ locked: boolean }>(
+        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
+      );
+      setLocked(state.locked);
+      const updatedCount = result.attendance_updated?.length ?? result.saved;
+      toast.success(`Attendance saved · ${updatedCount} student${updatedCount === 1 ? '' : 's'} synced`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
