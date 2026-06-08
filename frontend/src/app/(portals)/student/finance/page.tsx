@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { formatInr } from '@/components/finance/FinancePageHeader';
-import { RazorpayMockCheckout, type PaymentOrder } from '@/components/finance/RazorpayMockCheckout';
+import { RazorpayCheckout, type PaymentOrder } from '@/components/finance/RazorpayCheckout';
 
 type FeeDemand = {
   demand_id: string;
@@ -222,7 +222,7 @@ export default function StudentFinancePage() {
       </StudentSectionCard>
 
       {checkout && (
-        <RazorpayMockCheckout
+        <RazorpayCheckout
           open
           order={checkout.order}
           onClose={() => setCheckout(null)}
