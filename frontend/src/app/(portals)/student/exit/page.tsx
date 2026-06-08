@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { Award, GraduationCap, ShieldCheck, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
+import { z } from 'zod';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
@@ -25,11 +28,26 @@ type ExitData = {
   clearance_tasks: { task_name: string; owner_department: string; status: string }[];
 };
 
+const alumniSchema = z.object({
+  linkedin_url: z
+    .string()
+    .min(1, 'LinkedIn profile URL is required')
+    .url('Enter a valid URL')
+    .refine((v) => v.includes('linkedin.com'), { message: 'Must be a LinkedIn URL' }),
+  organization: z.string().optional(),
+});
+
+type AlumniFormValues = z.infer<typeof alumniSchema>;
+
 export default function StudentExitPage() {
   const api = useAuthedApi();
   const [data, setData] = useState<ExitData | null>(null);
-  const [linkedin, setLinkedin] = useState('');
-  const [org, setOrg] = useState('');
+
+  const form = useForm<AlumniFormValues>({
+    resolver: zodResolver(alumniSchema),
+    defaultValues: { linkedin_url: '', organization: '' },
+    mode: 'onTouched',
+  });
 
   const load = () => void api.get<ExitData>('/api/student/exit').then(setData);
 
@@ -37,10 +55,14 @@ export default function StudentExitPage() {
     load();
   }, [api]);
 
-  async function registerAlumni() {
+  async function registerAlumni(values: AlumniFormValues) {
     try {
-      await api.post('/api/alumni/register', { linkedin_url: linkedin, placement_organization: org });
+      await api.post('/api/alumni/register', {
+        linkedin_url: values.linkedin_url,
+        placement_organization: values.organization || null,
+      });
       toast.success('Alumni portal registration submitted');
+      form.reset();
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Registration failed');
@@ -48,6 +70,7 @@ export default function StudentExitPage() {
   }
 
   const progress = data?.progress_percent ?? 0;
+  const { errors, isValid, isSubmitting } = form.formState;
 
   return (
     <StudentPageShell width="5xl">
@@ -102,14 +125,19 @@ export default function StudentExitPage() {
             You are registered for the Alumni Portal.
           </p>
         ) : (
-          <div className="space-y-3">
-            <Input placeholder="LinkedIn profile URL" value={linkedin} onChange={(e) => setLinkedin(e.target.value)} />
-            <Input placeholder="Placement organization" value={org} onChange={(e) => setOrg(e.target.value)} />
-            <Button onClick={() => void registerAlumni()}>
+          <form className="space-y-3" onSubmit={form.handleSubmit(registerAlumni)}>
+            <div>
+              <Input placeholder="LinkedIn profile URL" {...form.register('linkedin_url')} />
+              {errors.linkedin_url && <p className="mt-1 text-xs text-destructive">{errors.linkedin_url.message}</p>}
+            </div>
+            <div>
+              <Input placeholder="Organization / Occupation (optional)" {...form.register('organization')} />
+            </div>
+            <Button type="submit" disabled={!isValid || isSubmitting}>
               <UserPlus className="h-4 w-4" />
               Register for Alumni Portal
             </Button>
-          </div>
+          </form>
         )}
       </StudentSectionCard>
     </StudentPageShell>
