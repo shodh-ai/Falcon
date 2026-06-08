@@ -27,12 +27,12 @@ type Thread = {
 };
 
 const liveClassSchema = z.object({
-  meetingLink: z.string().url('Enter a valid meeting URL'),
+  meetingLink: z.string().trim().url('Enter a valid meeting URL'),
 });
 
 const forumThreadSchema = z.object({
-  title: z.string().min(3, 'Title must be at least 3 characters'),
-  content: z.string().min(10, 'Post must be at least 10 characters'),
+  title: z.string().trim().min(3, 'Title must be at least 3 characters'),
+  content: z.string().trim().min(10, 'Post must be at least 10 characters'),
 });
 
 type LiveClassForm = z.infer<typeof liveClassSchema>;
