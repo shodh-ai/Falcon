@@ -47,8 +47,8 @@ type MarksHistory = {
   semesters: SemesterRow[];
   component_marks_by_semester: { semester_number: number; subjects: ComponentSubject[] }[];
   backlogs: {
-    uncleared: { course_id: string; course_code: string; course_name: string }[];
-    cleared: { course_code: string; course_name: string }[];
+    uncleared: { course_id: string; course_code: string; course_name: string; semester: number }[];
+    cleared: { course_code: string; course_name: string; semester: number }[];
   };
 };
 
@@ -326,41 +326,75 @@ export default function StudentMarksPage() {
         <CardHeader>
           <CardTitle className="text-base">Backlog (ATKT)</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4 text-sm">
+        <CardContent className="space-y-6 text-sm">
           <div>
-            <p className="mb-2 font-medium">
+            <p className="mb-3 font-medium">
               Uncleared: {(data?.backlogs?.uncleared ?? []).length}
             </p>
-            {(data?.backlogs?.uncleared ?? []).length === 0 && (
+            {(data?.backlogs?.uncleared ?? []).length === 0 ? (
               <p className="text-muted-foreground">No active backlogs — you are clear for progression.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="py-2 pr-3 font-medium">Semester</th>
+                      <th className="py-2 pr-3 font-medium">Course Code</th>
+                      <th className="py-2 pr-3 font-medium">Subject Name</th>
+                      <th className="py-2 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data?.backlogs?.uncleared ?? []).map((b) => (
+                      <tr key={b.course_id} className="border-b border-border/60 last:border-0">
+                        <td className="py-2.5 pr-3 font-semibold">Sem {b.semester}</td>
+                        <td className="py-2.5 pr-3 font-mono text-xs text-destructive">{b.course_code}</td>
+                        <td className="py-2.5 pr-3 text-destructive">{b.course_name}</td>
+                        <td className="py-2.5">
+                          <span className="flex flex-wrap gap-2">
+                            <Button size="sm" variant="outline" asChild>
+                              <Link href="/student/exams?intent=revaluation">Re-evaluation</Link>
+                            </Button>
+                            <Button size="sm" variant="default" asChild>
+                              <Link href="/student/finance?intent=arrear">Arrear Exam</Link>
+                            </Button>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
-            <ul className="space-y-2">
-              {(data?.backlogs?.uncleared ?? []).map((b) => (
-                <li key={b.course_id} className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-destructive">
-                    {b.course_code} — {b.course_name}
-                  </span>
-                  <span className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" asChild>
-                      <Link href="/student/exams?intent=revaluation">Apply for Re-evaluation</Link>
-                    </Button>
-                    <Button size="sm" variant="default" asChild>
-                      <Link href="/student/finance?intent=arrear">Register for Arrear Exam</Link>
-                    </Button>
-                  </span>
-                </li>
-              ))}
-            </ul>
           </div>
           <div>
-            <p className="mb-2 font-medium text-emerald-700">
+            <p className="mb-3 font-medium text-emerald-700">
               Cleared: {(data?.backlogs?.cleared ?? []).length}
             </p>
-            {(data?.backlogs?.cleared ?? []).map((b) => (
-              <p key={b.course_code} className="text-muted-foreground">
-                {b.course_code} — {b.course_name}
-              </p>
-            ))}
+            {(data?.backlogs?.cleared ?? []).length === 0 ? (
+              <p className="text-muted-foreground">No previously cleared backlogs.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[480px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="py-2 pr-3 font-medium">Semester</th>
+                      <th className="py-2 pr-3 font-medium">Course Code</th>
+                      <th className="py-2 font-medium">Subject Name</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data?.backlogs?.cleared ?? []).map((b) => (
+                      <tr key={`${b.course_code}-${b.semester}`} className="border-b border-border/60 last:border-0">
+                        <td className="py-2.5 pr-3 font-semibold">Sem {b.semester}</td>
+                        <td className="py-2.5 pr-3 font-mono text-xs">{b.course_code}</td>
+                        <td className="py-2.5 text-muted-foreground">{b.course_name}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
