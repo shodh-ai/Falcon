@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
+import { workforceDateInputProps, workforceMinDate } from '@/lib/workforce-dates';
 
 type TodayWidget = {
   shift: { start: string; end: string; progress_percent: number };
@@ -318,6 +319,7 @@ export default function FacultyHrHubPage() {
                     <Input
                       type="date"
                       required
+                      min={workforceMinDate()}
                       value={form.regularization_date}
                       onChange={(e) => setForm((f) => ({ ...f, regularization_date: e.target.value }))}
                     />
@@ -338,6 +340,7 @@ export default function FacultyHrHubPage() {
                     <Input
                       type="date"
                       required
+                      {...workforceDateInputProps(modal)}
                       value={form.start_date}
                       onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
                     />
@@ -345,6 +348,7 @@ export default function FacultyHrHubPage() {
                       <Input
                         type="date"
                         required
+                        {...workforceDateInputProps(modal)}
                         value={form.end_date}
                         onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))}
                       />

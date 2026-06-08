@@ -58,6 +58,7 @@ import {
   PartyPopper,
   ClipboardPen,
 } from 'lucide-react';
+import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
   | 'onboarding'
@@ -97,6 +98,40 @@ export interface PortalConfig {
 }
 
 /** Build command palette items from sidebar nav so search keywords stay in sync. */
+/** Self-service links embedded in Faculty / HOD / HR sidebars (formerly ESS portal). */
+export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
+  const p = selfServicePaths(prefix);
+  return {
+    title: 'My HR & Operations',
+    items: [
+      {
+        label: 'My Profile & Documents',
+        href: p.documents,
+        icon: FolderLock,
+        keywords: ['profile', 'kyc', 'aadhaar', 'pan', 'vault'],
+      },
+      {
+        label: 'My Leaves & Attendance',
+        href: p.workforce,
+        icon: CalendarDays,
+        keywords: ['leave', 'cl', 'sl', 'attendance', 'calendar', 'regularize'],
+      },
+      {
+        label: 'My Payslips & Tax',
+        href: p.payslips,
+        icon: Banknote,
+        keywords: ['payslip', 'salary', 'form 16', 'tax'],
+      },
+      {
+        label: 'My Helpdesk Tickets',
+        href: p.tickets,
+        icon: Ticket,
+        keywords: ['it', 'ticket', 'support', 'grievance'],
+      },
+    ],
+  };
+}
+
 export function flattenNavToCommandItems(navGroups: NavGroup[]): NavItem[] {
   const seen = new Set<string>();
   const items: NavItem[] = [];
@@ -277,13 +312,12 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Administration',
       items: [
-        { label: 'HR & Employee Hub', href: '/faculty/hr', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'od', 'regularization'] },
-        { label: 'Employee Self Service (ESS)', href: '/ess/calendar', icon: UserRoundCog, keywords: ['ess', 'calendar', 'documents', 'policies'] },
-        { label: 'Team requests', href: '/faculty/team-requests', icon: ClipboardCheck, keywords: ['approve', 'hod', 'pending on me'] },
+        { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
       ],
     },
+    myHrOperationsNavGroup('faculty'),
   ],
   commandItems: flattenNavToCommandItems([
     {
@@ -321,13 +355,12 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Administration',
       items: [
-        { label: 'HR & Employee Hub', href: '/faculty/hr', icon: CalendarDays, keywords: ['leave', 'cl', 'sl', 'payslip', 'od', 'regularization'] },
-        { label: 'Employee Self Service (ESS)', href: '/ess/calendar', icon: UserRoundCog, keywords: ['ess', 'calendar', 'documents', 'policies'] },
-        { label: 'Team requests', href: '/faculty/team-requests', icon: ClipboardCheck, keywords: ['approve', 'hod', 'pending on me', 'team'] },
+        { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
       ],
     },
+    myHrOperationsNavGroup('faculty'),
   ]),
 };
 
@@ -386,6 +419,7 @@ export const hrPortal: PortalConfig = {
         { label: 'Bulk Document Export', href: '/hr/reports/documents', icon: Archive, keywords: ['zip', 'aadhaar', 'vault', 'bulk'], hrModule: 'reports' },
       ],
     },
+    myHrOperationsNavGroup('hr'),
   ],
   commandItems: [
     { label: 'HR Dashboard', href: '/hr/dashboard', icon: LayoutDashboard, hrModule: 'dashboard' },
@@ -404,72 +438,7 @@ export const hrPortal: PortalConfig = {
     { label: 'Bulk Document Export', href: '/hr/reports/documents', icon: Archive, hrModule: 'reports' },
     { label: 'Access Control', href: '/hr/admin/permissions', icon: Shield, roles: ['HRAdmin', 'SuperAdmin'] },
     { label: 'Attendance Rules', href: '/hr/admin/rules', icon: Settings, roles: ['HRAdmin', 'SuperAdmin'] },
-  ],
-};
-
-export const essPortal: PortalConfig = {
-  personaLabel: 'Employee Self Service',
-  personaTitle: 'ESS Portal',
-  homeHref: '/ess/calendar',
-  navGroups: [
-    {
-      title: 'My Work',
-      items: [
-        { label: 'My Calendar', href: '/ess/calendar', icon: Calendar, keywords: ['shift', 'holiday', 'attendance'] },
-        { label: 'Leaves', href: '/ess/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'comp-off'] },
-      ],
-    },
-    {
-      title: 'Team',
-      items: [
-        {
-          label: 'Manager Dashboard',
-          href: '/ess/team/dashboard',
-          icon: LayoutDashboard,
-          keywords: ['hod', 'manager', 'team', 'leaderboard'],
-          roles: ['Faculty', 'HOD', 'Dean'],
-        },
-        {
-          label: 'Team Attendance',
-          href: '/ess/team/attendance',
-          icon: CalendarRange,
-          keywords: ['matrix', 'punch', 'muster'],
-          roles: ['Faculty', 'HOD', 'Dean'],
-        },
-        {
-          label: 'Pending on Me',
-          href: '/ess/team/requests',
-          icon: Inbox,
-          keywords: ['approve', 'leave', 'regularization', 'on duty'],
-          roles: ['Faculty', 'HOD', 'Dean'],
-        },
-      ],
-    },
-    {
-      title: 'Documents & Policies',
-      items: [
-        { label: 'Document Vault', href: '/ess/documents', icon: FolderLock, keywords: ['payslip', 'form 16', 'appraisal'] },
-        { label: 'Company Policies', href: '/ess/policies', icon: FileText, keywords: ['posh', 'acknowledge', 'policy'] },
-      ],
-    },
-    {
-      title: 'Lifecycle',
-      items: [
-        { label: 'Onboarding', href: '/ess/onboarding', icon: Kanban, keywords: ['new hire', 'pan', 'offer'] },
-        { label: 'Resignation', href: '/ess/offboarding', icon: DoorOpen, keywords: ['exit', 'notice', 'resign'] },
-      ],
-    },
-  ],
-  commandItems: [
-    { label: 'My Calendar', href: '/ess/calendar', icon: Calendar },
-    { label: 'Leaves', href: '/ess/leaves', icon: CalendarDays },
-    { label: 'Team Dashboard', href: '/ess/team/dashboard', icon: LayoutDashboard },
-    { label: 'Team Attendance', href: '/ess/team/attendance', icon: CalendarRange },
-    { label: 'Pending on Me', href: '/ess/team/requests', icon: Inbox },
-    { label: 'Documents', href: '/ess/documents', icon: FolderLock },
-    { label: 'Policies', href: '/ess/policies', icon: FileText },
-    { label: 'Onboarding', href: '/ess/onboarding', icon: Kanban },
-    { label: 'Resignation', href: '/ess/offboarding', icon: DoorOpen },
+    ...myHrOperationsNavGroup('hr').items,
   ],
 };
 
@@ -481,39 +450,69 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Department Health',
       items: [
-        { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['snapshot', 'attendance'] },
-        { label: 'Faculty Roster', href: '/hod/faculty-roster', icon: Users, keywords: ['faculty', 'course allocation', 'timetable'] },
-        { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'low attendance'] },
+        { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['command center', 'metrics', 'attendance'] },
+        { label: 'Department Timetable', href: '/hod/department-timetable', icon: CalendarClock, keywords: ['schedule', 'rooms', 'master'] },
       ],
     },
     {
-      title: 'Approvals',
+      title: 'Academic Management',
       items: [
-        { label: 'Faculty Leaves', href: '/hod/approvals/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'leave approval'] },
-        { label: 'Extra Classes', href: '/hod/approvals/extra-classes', icon: CalendarDays, keywords: ['timetable', 'adjustment', 'extra class'] },
-        { label: 'Gate Passes', href: '/hod/approvals/gate-passes', icon: ClipboardCheck, keywords: ['mid duty', 'exit pass'] },
-        { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: UserCog, keywords: ['student profile', 'master data', 'correction'] },
+        { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
+        { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
+        { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
       ],
     },
+    {
+      title: 'Faculty & Staff',
+      items: [
+        { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
+        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation'] },
+        { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
+      ],
+    },
+    {
+      title: 'Student Affairs',
+      items: [
+        { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
+        { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades', 'remedial'] },
+        { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
+      ],
+    },
+    myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
     {
       title: 'Department Health',
       items: [
-        { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['snapshot', 'attendance'] },
-        { label: 'Faculty Roster', href: '/hod/faculty-roster', icon: Users, keywords: ['faculty', 'course allocation', 'timetable'] },
-        { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'low attendance'] },
+        { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['command center', 'metrics'] },
+        { label: 'Department Timetable', href: '/hod/department-timetable', icon: CalendarClock, keywords: ['schedule'] },
       ],
     },
     {
-      title: 'Approvals',
+      title: 'Academic Management',
       items: [
-        { label: 'Faculty Leaves', href: '/hod/approvals/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'leave approval'] },
-        { label: 'Extra Classes', href: '/hod/approvals/extra-classes', icon: CalendarDays, keywords: ['timetable', 'adjustment', 'extra class'] },
-        { label: 'Gate Passes', href: '/hod/approvals/gate-passes', icon: ClipboardCheck, keywords: ['mid duty', 'exit pass'] },
-        { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: UserCog, keywords: ['student profile', 'master data', 'correction'] },
+        { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
+        { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
+        { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
       ],
     },
+    {
+      title: 'Faculty & Staff',
+      items: [
+        { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },
+        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['approve'] },
+        { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['api'] },
+      ],
+    },
+    {
+      title: 'Student Affairs',
+      items: [
+        { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students'] },
+        { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['defaulters'] },
+        { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
+      ],
+    },
+    myHrOperationsNavGroup('hod'),
   ]),
 };
 

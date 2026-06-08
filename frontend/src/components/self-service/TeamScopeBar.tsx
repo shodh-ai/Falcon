@@ -11,11 +11,17 @@ const SCOPES = [
 
 export type TeamScope = (typeof SCOPES)[number]['id'];
 
-export function TeamScopeBar() {
+type Props = {
+  defaultScope?: TeamScope;
+};
+
+export function TeamScopeBar({ defaultScope = 'direct' }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const active = (searchParams.get('scope') as TeamScope) || 'direct';
+  const raw = searchParams.get('scope') as TeamScope | null;
+  const active =
+    raw === 'indirect' || raw === 'dept' || raw === 'direct' ? raw : defaultScope;
 
   function setScope(scope: TeamScope) {
     const params = new URLSearchParams(searchParams.toString());
@@ -42,9 +48,10 @@ export function TeamScopeBar() {
   );
 }
 
-export function useTeamScope(): TeamScope {
+export function useTeamScope(defaultScope: TeamScope = 'direct'): TeamScope {
   const searchParams = useSearchParams();
   const raw = searchParams.get('scope');
   if (raw === 'indirect' || raw === 'dept') return raw;
-  return 'direct';
+  if (raw === 'direct') return 'direct';
+  return defaultScope;
 }

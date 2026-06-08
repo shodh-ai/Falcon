@@ -55,16 +55,13 @@ export function HrAttendanceCalendar(props: Props) {
   const hrEntity = useOptionalHrEntity();
   const entityId = hrEntity?.entityId ?? null;
   const entityReady = hrEntity?.entityReady ?? false;
-  const api = useMemo(
+  const matrixApi = useMemo(
     () => ({
       get: (path: string) => {
         if (!hrEntity?.entityId) {
           return Promise.reject(new Error('Organization entity required'));
         }
-        return authedApi.get(
-          hrEntity.withEntityQuery(path),
-          hrEntity.entityHeaders,
-        );
+        return authedApi.get(hrEntity.withEntityQuery(path), hrEntity.entityHeaders);
       },
     }),
     [authedApi, hrEntity],
@@ -77,20 +74,20 @@ export function HrAttendanceCalendar(props: Props) {
   const [matrixData, setMatrixData] = useState<MatrixPayload | null>(null);
 
   useEffect(() => {
-    if (!entityReady) return;
     setLoading(true);
     if (props.mode === 'self') {
-      void api
-        .get(`/api/hr/attendance/calendar?month=${month}`)
-        .then((data) => setSelfData(data as CalendarPayload))
+      void authedApi
+        .get<CalendarPayload>(`/api/hr/attendance/calendar?month=${month}`)
+        .then(setSelfData)
         .finally(() => setLoading(false));
-    } else {
-      void api
-        .get(`/api/hr/attendance/matrix?month=${month}`)
-        .then((data) => setMatrixData(data as MatrixPayload))
-        .finally(() => setLoading(false));
+      return;
     }
-  }, [api, entityId, entityReady, month, props.mode]);
+    if (!entityReady) return;
+    void matrixApi
+      .get(`/api/hr/attendance/matrix?month=${month}`)
+      .then((data) => setMatrixData(data as MatrixPayload))
+      .finally(() => setLoading(false));
+  }, [authedApi, entityId, entityReady, matrixApi, month, props.mode]);
 
   const { year, monthNum, daysInMonth, leading } = monthMeta(month);
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

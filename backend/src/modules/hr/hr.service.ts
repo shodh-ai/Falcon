@@ -17,6 +17,10 @@ import { HrLeavePolicyService } from './hr-leave-policy.service';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
 import { assertNoPendingRow } from '../../common/validators/pending-request.util';
+import {
+  assertNoOverlappingWorkforceDates,
+  assertRetroactiveWorkforceLimit,
+} from '../../common/validators/workforce-request.validator';
 
 /** HOD (reporting officer) first, then HR admin — no generic HR inbox on create. */
 const APPROVAL_FLOW: Partial<Record<LeaveRequestStatus, LeaveRequestStatus>> = {
@@ -244,6 +248,7 @@ export class HrService {
       end_date: string;
       reason?: string;
     },
+    actorRoles: string[] = [],
   ) {
     const profile = await this.users.manager.query(
       `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2`,
@@ -252,12 +257,15 @@ export class HrService {
     const entityId = Number(profile[0]?.entity_id ?? 1);
     await this.leavePolicies.validateLeaveApplication(tenantId, entityId, staffUserId, dto);
 
-    await assertNoPendingRow(this.staffLeaveRequests, {
-      tenant_id: tenantId,
-      staff_user_id: staffUserId,
-      request_type: 'LEAVE',
-      status: 'PENDING',
-    });
+    assertRetroactiveWorkforceLimit('LEAVE', dto.start_date, dto.end_date, actorRoles);
+    await assertNoOverlappingWorkforceDates(
+      this.users.manager.connection,
+      tenantId,
+      staffUserId,
+      dto.start_date,
+      dto.end_date,
+      'LEAVE',
+    );
 
     const routing = await this.hrWorkflow.initializeRequest(
       tenantId,

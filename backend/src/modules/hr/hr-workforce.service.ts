@@ -14,7 +14,10 @@ import { WorkflowNotificationService } from '../../core/workflow/workflow-notifi
 import { AttendanceCalculationService } from './attendance-calculation.service';
 import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
 import { HrAccessControlService } from './hr-access-control.service';
-import { assertNoPendingRow } from '../../common/validators/pending-request.util';
+import {
+  assertNoOverlappingWorkforceDates,
+  assertRetroactiveWorkforceLimit,
+} from '../../common/validators/workforce-request.validator';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -118,7 +121,12 @@ export class HrWorkforceService {
     };
   }
 
-  async applyRequest(staffUserId: string, tenantId: string, dto: ApplyWorkforceRequestDto) {
+  async applyRequest(
+    staffUserId: string,
+    tenantId: string,
+    dto: ApplyWorkforceRequestDto,
+    options?: { actorRoles?: string[] },
+  ) {
     const staff = await this.users.findOne({ where: { user_id: staffUserId } });
     if (!staff) throw new NotFoundException('Employee not found');
 
@@ -145,12 +153,25 @@ export class HrWorkforceService {
       if (!startDate || !endDate) throw new BadRequestException('start_date and end_date are required');
     }
 
-    await assertNoPendingRow(this.requests, {
-      tenant_id: tenantId,
-      staff_user_id: staffUserId,
-      request_type: requestType,
-      status: 'PENDING',
-    });
+    const actorRoles = options?.actorRoles ?? [];
+
+    assertRetroactiveWorkforceLimit(
+      requestType,
+      startDate!,
+      endDate!,
+      actorRoles,
+      dto.regularization_date,
+    );
+
+    await assertNoOverlappingWorkforceDates(
+      this.dataSource,
+      tenantId,
+      staffUserId,
+      startDate!,
+      endDate!,
+      requestType,
+      dto.regularization_date,
+    );
 
     const entityId = await this.resolveEmployeeEntityId(tenantId, staffUserId);
     const routing = await this.hrWorkflow.initializeRequest(
