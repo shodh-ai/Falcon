@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -14,11 +15,16 @@ import {
   StreamableFile,
   UseGuards,
   UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
+import { HrPowerGuard } from '../../common/guards/hr-power.guard';
+import { HrAccessControlService, HR_DELEGATION_MODULES } from './hr-access-control.service';
 import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
 import { SkipEntityScope } from '../../common/decorators/skip-entity-scope.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -28,7 +34,10 @@ import { HrService } from './hr.service';
 import { HrAdminService } from './hr-admin.service';
 import { HrWorkforceService } from './hr-workforce.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
-import { HrEntityContextService } from './hr-entity-context.service';
+import {
+  HrEntityContextService,
+  type HrAccessLevel,
+} from './hr-entity-context.service';
 import { HrRulesService } from './hr-rules.service';
 import { HrEssService } from './hr-ess.service';
 import { HrDynamicRulesService } from './hr-dynamic-rules.service';
@@ -39,6 +48,11 @@ import { HrChecklistService } from './hr-checklist.service';
 import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
 import { HrDashboardService } from './hr-dashboard.service';
 import { HrReportsService } from './hr-reports.service';
+import { HrDocumentVaultService } from './hr-document-vault.service';
+import { HrEmployeeBulkService } from './hr-employee-bulk.service';
+import { HrDocumentExportService } from './hr-document-export.service';
+import { HrTeamService } from './hr-team.service';
+import { HR_DOCUMENT_CATEGORIES } from './hr-document.constants';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
 import { LeaveActionDto } from './dto/leave-action.dto';
@@ -49,7 +63,7 @@ import type { StaffLeaveStatus } from '../../entities/staff-leave-request.entity
 type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[]; dept_id?: number };
 
 @Controller(['hr', 'api/hr'])
-@UseGuards(JwtAuthGuard, RolesGuard, HrPermissionGuard, EntityScopeGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, HrPermissionGuard, HrPowerGuard, EntityScopeGuard)
 export class HrController {
   constructor(
     private readonly hr: HrService,
@@ -67,7 +81,21 @@ export class HrController {
     private readonly onboardingWorkflow: HrOnboardingWorkflowService,
     private readonly dashboard: HrDashboardService,
     private readonly reports: HrReportsService,
+    private readonly documentVault: HrDocumentVaultService,
+    private readonly employeeBulk: HrEmployeeBulkService,
+    private readonly documentExport: HrDocumentExportService,
+    private readonly accessControl: HrAccessControlService,
+    private readonly team: HrTeamService,
   ) {}
+
+  private resolveRoles(user: AuthUser): string[] {
+    return user.roles?.length ? user.roles : user.role ? [user.role] : [];
+  }
+
+  private isHrRole(user: AuthUser): boolean {
+    const roles = user.roles?.length ? user.roles : user.role ? [user.role] : [];
+    return roles.some((r) => ['HR', 'HRAdmin', 'SuperAdmin'].includes(r));
+  }
 
   @Post('leaves')
   createLeave(@Body() dto: CreateLeaveRequestDto) {
@@ -323,7 +351,7 @@ export class HrController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    return this.entityCtx.listPermissionMatrix(this.resolveTenantId(req.user), {
+    return this.accessControl.listAccessMatrix(this.resolveTenantId(req.user), {
       q,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
@@ -344,20 +372,98 @@ export class HrController {
     );
   }
 
+  @Get('admin/delegation')
+  @SkipEntityScope()
+  @Roles('HRAdmin', 'SuperAdmin')
+  delegationMatrix(
+    @Req() req: { user: AuthUser },
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.accessControl.listAccessMatrix(this.resolveTenantId(req.user), {
+      q,
+      limit: limit ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('admin/delegation/modules')
+  @SkipEntityScope()
+  @Roles('HRAdmin', 'SuperAdmin')
+  delegationModules() {
+    return { modules: HR_DELEGATION_MODULES };
+  }
+
+  @Patch('admin/delegation/:userId')
+  @SkipEntityScope()
+  @Roles('HRAdmin', 'SuperAdmin')
+  patchDelegation(
+    @Req() req: { user: AuthUser },
+    @Param('userId') userId: string,
+    @Body()
+    body: {
+      module: string;
+      can_view?: boolean;
+      can_edit?: boolean;
+      can_approve?: boolean;
+      can_delete?: boolean;
+      department_scope?: number[] | null;
+      entity_scope?: number[] | null;
+    },
+  ) {
+    const { module, ...powers } = body;
+    return this.accessControl.patchModuleAccess(
+      this.resolveTenantId(req.user),
+      userId,
+      module,
+      powers,
+      req.user.user_id,
+    );
+  }
+
+  @Get('inbox/pending')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  pendingInbox(@Req() req: { user: AuthUser }) {
+    return this.workforce.listPendingInbox(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      this.resolveRoles(req.user),
+    );
+  }
+
   @Patch('admin/permissions/:userId')
   @SkipEntityScope()
   @Roles('HRAdmin', 'SuperAdmin')
   patchUserPermission(
     @Req() req: { user: AuthUser },
     @Param('userId') userId: string,
-    @Body() body: { module: string; level: string },
+    @Body()
+    body: {
+      module: string;
+      level?: HrAccessLevel;
+      can_view?: boolean;
+      can_edit?: boolean;
+      can_approve?: boolean;
+      can_delete?: boolean;
+      department_scope?: number[] | null;
+      entity_scope?: number[] | null;
+    },
   ) {
-    return this.entityCtx.patchUserPermission(
+    const { module, ...powers } = body;
+    if (powers.level != null) {
+      return this.entityCtx.patchUserPermission(
+        this.resolveTenantId(req.user),
+        userId,
+        req.user.user_id,
+        module,
+        powers.level,
+      );
+    }
+    return this.accessControl.patchModuleAccess(
       this.resolveTenantId(req.user),
       userId,
+      module,
+      powers,
       req.user.user_id,
-      body.module,
-      body.level,
     );
   }
 
@@ -445,7 +551,12 @@ export class HrController {
   async listEmployees(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.hrAdmin.listDirectory(tenantId, entity);
+    return this.hrAdmin.listDirectory(
+      tenantId,
+      entity,
+      req.user.user_id,
+      this.resolveRoles(req.user),
+    );
   }
 
   @Get('directory')
@@ -454,7 +565,12 @@ export class HrController {
   async directory(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.hrAdmin.listDirectory(tenantId, entity);
+    return this.hrAdmin.listDirectory(
+      tenantId,
+      entity,
+      req.user.user_id,
+      this.resolveRoles(req.user),
+    );
   }
 
   @Get('employees/:userId/360')
@@ -974,24 +1090,380 @@ export class HrController {
     );
   }
 
+  @Get('ess/team/dashboard')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamDashboard(
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.team.getDashboard(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      scope,
+      month,
+    );
+  }
+
+  @Get('ess/team/attendance')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamAttendance(
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.team.getAttendanceMatrix(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      scope,
+      month,
+    );
+  }
+
+  @Get('ess/team/attendance/export')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  async teamAttendanceExport(
+    @Req() req: { user: AuthUser },
+    @Res({ passthrough: true }) res: Response,
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
+  ) {
+    const monthKey = month ?? new Date().toISOString().slice(0, 7);
+    const buf = await this.team.exportAttendanceExcel(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      scope,
+      monthKey,
+    );
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="team-attendance-${monthKey}.xlsx"`,
+    });
+    return new StreamableFile(buf);
+  }
+
+  @Get('ess/team/requests')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamRequests(
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+    @Query('tab') tab?: string,
+  ) {
+    return this.team.listTeamRequests(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      scope,
+      tab,
+      this.resolveRoles(req.user),
+    );
+  }
+
+  @Patch('ess/team/requests/bulk')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamBulkRequests(
+    @Req() req: { user: AuthUser },
+    @Body() body: { ids: string[]; action: 'APPROVE' | 'REJECT'; comment?: string; tab?: string },
+  ) {
+    return this.team.bulkActOnRequests(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body.ids,
+      body.action,
+      body.comment,
+      body.tab,
+    );
+  }
+
+  @Post('ess/team/attention')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamAttention(
+    @Req() req: { user: AuthUser },
+    @Body()
+    body: {
+      user_id: string;
+      action: 'WARNING_EMAIL' | 'SCHEDULE_1ON1';
+      message?: string;
+    },
+  ) {
+    return this.team.sendAttentionAction(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body.user_id,
+      body.action,
+      body.message,
+    );
+  }
+
+  @Get('admin/pending-requests')
+  @SkipEntityScope()
+  @Roles('HRAdmin', 'SuperAdmin', 'HR')
+  @HrPermission('leaves', 'read')
+  adminAllPending(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    return this.entityCtx.resolveEntityId(tenantId, entityId).then((entity) =>
+      this.team.listAllPendingForAdmin(tenantId, entity),
+    );
+  }
+
+  @Patch('admin/requests/:leaveId/override')
+  @SkipEntityScope()
+  @Roles('HRAdmin', 'SuperAdmin', 'HR')
+  @HrPermission('leaves', 'write')
+  adminOverrideRequest(
+    @Param('leaveId') leaveId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { action: 'APPROVE' | 'REJECT'; comment?: string },
+  ) {
+    return this.team.adminOverrideRequest(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      leaveId,
+      body.action,
+      body.comment,
+    );
+  }
+
+  @Get('employees/:userId/documents')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'read')
+  async listEmployeeDocuments(
+    @Param('userId') userId: string,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.documentVault.listDocuments(tenantId, userId, entity);
+  }
+
+  @Post('employees/:userId/documents')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'write')
+  async uploadEmployeeDocument(
+    @Param('userId') userId: string,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body() body: { document_type: string; file_url: string; file_name?: string },
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.documentVault.uploadDocument(
+      tenantId,
+      entity,
+      userId,
+      req.user.user_id,
+      body,
+      { autoVerify: false },
+    );
+  }
+
+  @Patch('documents/:docId/verify')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('documents', 'write')
+  async verifyDocument(
+    @Param('docId') docId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { status: 'VERIFIED' | 'REJECTED' },
+  ) {
+    return this.documentVault.verifyDocument(
+      this.resolveTenantId(req.user),
+      docId,
+      body.status,
+      req.user.user_id,
+    );
+  }
+
+  @Get('documents/:docId/download')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  async downloadDocument(
+    @Param('docId') docId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.documentVault.getSecureDownloadUrl(
+      this.resolveTenantId(req.user),
+      docId,
+      req.user.user_id,
+      this.isHrRole(req.user),
+    );
+  }
+
+  @Get('documents/:docId/file')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  async streamDocumentFile(
+    @Param('docId') docId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    await this.documentVault.pipeDocumentFile(
+      this.resolveTenantId(req.user),
+      docId,
+      req.user.user_id,
+      this.isHrRole(req.user),
+      res,
+    );
+  }
+
+  @Post('employees/manual')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'write')
+  async createManualEmployee(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body()
+    body: {
+      name: string;
+      official_email: string;
+      phone?: string;
+      role?: string;
+      department?: string;
+      employee_id?: string;
+      designation?: string;
+      joining_date?: string;
+    },
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.employeeBulk.createManualEmployee(tenantId, entity, req.user.user_id, body);
+  }
+
+  @Post('employees/bulk-upload')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'write')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async bulkUploadEmployees(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.employeeBulk.processBulkUpload(
+      tenantId,
+      entity,
+      req.user.user_id,
+      file.buffer,
+      file.originalname,
+    );
+  }
+
+  @Get('employees/bulk-upload/template')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('directory', 'read')
+  async bulkUploadTemplate(@Res({ passthrough: true }) res: Response) {
+    const buffer = await this.employeeBulk.buildTemplateBuffer();
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="employee-bulk-upload-template.xlsx"',
+    });
+    return new StreamableFile(buffer);
+  }
+
+  @Post('documents/bulk-export')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('reports', 'read')
+  async bulkExportDocuments(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body()
+    body: { document_type: string; dept_id?: number; role_id?: number },
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.documentExport.createExportJob(tenantId, entity, req.user.user_id, {
+      document_type: body.document_type,
+      dept_id: body.dept_id,
+      role_id: body.role_id,
+    });
+  }
+
+  @Get('documents/export-jobs/:jobId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('reports', 'read')
+  async getExportJob(
+    @Param('jobId') jobId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.documentExport.getExportJob(
+      this.resolveTenantId(req.user),
+      jobId,
+      req.user.user_id,
+    );
+  }
+
+  @Get('documents/export-jobs/:jobId/download')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('reports', 'read')
+  async downloadExportJob(
+    @Param('jobId') jobId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    await this.documentExport.pipeExportDownload(
+      this.resolveTenantId(req.user),
+      jobId,
+      req.user.user_id,
+      res,
+    );
+  }
+
+  @Get('documents/categories')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  listDocumentCategories() {
+    return HR_DOCUMENT_CATEGORIES;
+  }
+
+  @Get('metadata/roles-departments')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  async listRolesAndDepartments(@Req() req: { user: AuthUser }) {
+    const tenantId = this.resolveTenantId(req.user);
+    const [roles, departments] = await Promise.all([
+      this.hrAdmin.listRoles(tenantId),
+      this.hrAdmin.listDepartments(tenantId),
+    ]);
+    return { roles, departments };
+  }
+
   @Get('ess/documents')
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   async essDocuments(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.ess.listEmployeeDocuments(tenantId, entity, req.user.user_id);
+    return this.documentVault.listDocuments(tenantId, req.user.user_id, entity);
   }
 
   @Post('ess/documents')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   async uploadEssDocument(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
-    @Body() body: { user_id: string; document_type: string; file_url: string },
+    @Body() body: { document_type: string; file_url: string; file_name?: string },
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.ess.uploadEmployeeDocument(tenantId, entity, body.user_id, body);
+    return this.documentVault.uploadDocument(
+      tenantId,
+      entity,
+      req.user.user_id,
+      req.user.user_id,
+      body,
+      { autoVerify: false },
+    );
   }
 
   @Get('ess/policies')
@@ -1080,7 +1552,12 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Query('type') type?: StaffRequestType,
   ) {
-    return this.workforce.listTeamPending(req.user.user_id, this.resolveTenantId(req.user), type);
+    return this.workforce.listTeamPending(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      type,
+      this.resolveRoles(req.user),
+    );
   }
 
   @Patch('workforce/team/:leaveId/action')

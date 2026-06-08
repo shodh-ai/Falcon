@@ -33,6 +33,7 @@ import {
   Timer,
   ArrowUpCircle,
   Briefcase,
+  Inbox,
   Archive,
   DoorOpen,
   Medal,
@@ -350,6 +351,7 @@ export const hrPortal: PortalConfig = {
       title: 'Time & Leaves',
       items: [
         { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'], hrModule: 'attendance' },
+        { label: 'Pending on Me', href: '/hr/inbox', icon: Inbox, keywords: ['approve', 'inbox', 'pending', 'workflow'], roles: ['HR', 'HRAdmin', 'Faculty', 'HOD', 'Dean', 'SuperAdmin'] },
         { label: 'Leave Management & Balances', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval'], hrModule: 'leaves' },
       ],
     },
@@ -373,7 +375,7 @@ export const hrPortal: PortalConfig = {
     {
       title: 'Administration',
       items: [
-        { label: 'HR Permissions Matrix', href: '/hr/admin/permissions', icon: Shield, keywords: ['access', 'roles', 'matrix'], roles: ['HRAdmin', 'SuperAdmin'] },
+        { label: 'Access Control Matrix', href: '/hr/admin/permissions', icon: Shield, keywords: ['access', 'roles', 'matrix', 'delegate', 'approve', 'permissions'], roles: ['HRAdmin', 'SuperAdmin'] },
         { label: 'Attendance Rules Engine', href: '/hr/admin/rules', icon: Settings, keywords: ['grace', 'penalty', 'shifts'], roles: ['HRAdmin', 'SuperAdmin'] },
         { label: 'Org Structure', href: '/hr/admin/org-structure', icon: Network, keywords: ['zone', 'branch', 'department'], roles: ['HRAdmin', 'SuperAdmin'] },
         { label: 'Leave Policies', href: '/hr/admin/leave-policies', icon: CalendarDays, keywords: ['clubbing', 'sandwich', 'accrual'], roles: ['HRAdmin', 'SuperAdmin'] },
@@ -381,6 +383,7 @@ export const hrPortal: PortalConfig = {
         { label: 'Checklist Templates', href: '/hr/admin/checklist-templates', icon: ClipboardList, keywords: ['onboarding', 'offboarding', 'tasks'], roles: ['HRAdmin', 'SuperAdmin'] },
         { label: 'Company Policies', href: '/hr/policies', icon: FileText, keywords: ['posh', 'leave policy', 'cms'], hrModule: 'policies' },
         { label: 'Analytics & Reports', href: '/hr/reports', icon: FileSpreadsheet, keywords: ['export', 'muster', 'ugc', 'naac', 'excel'], hrModule: 'reports' },
+        { label: 'Bulk Document Export', href: '/hr/reports/documents', icon: Archive, keywords: ['zip', 'aadhaar', 'vault', 'bulk'], hrModule: 'reports' },
       ],
     },
   ],
@@ -398,7 +401,8 @@ export const hrPortal: PortalConfig = {
     { label: 'Onboarding', href: '/hr/onboarding', icon: Kanban, hrModule: 'onboarding' },
     { label: 'Offboarding', href: '/hr/offboarding', icon: DoorOpen, hrModule: 'offboarding' },
     { label: 'Analytics & Reports', href: '/hr/reports', icon: FileSpreadsheet, hrModule: 'reports' },
-    { label: 'HR Permissions', href: '/hr/admin/permissions', icon: Shield, roles: ['HRAdmin', 'SuperAdmin'] },
+    { label: 'Bulk Document Export', href: '/hr/reports/documents', icon: Archive, hrModule: 'reports' },
+    { label: 'Access Control', href: '/hr/admin/permissions', icon: Shield, roles: ['HRAdmin', 'SuperAdmin'] },
     { label: 'Attendance Rules', href: '/hr/admin/rules', icon: Settings, roles: ['HRAdmin', 'SuperAdmin'] },
   ],
 };
@@ -413,6 +417,32 @@ export const essPortal: PortalConfig = {
       items: [
         { label: 'My Calendar', href: '/ess/calendar', icon: Calendar, keywords: ['shift', 'holiday', 'attendance'] },
         { label: 'Leaves', href: '/ess/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'comp-off'] },
+      ],
+    },
+    {
+      title: 'Team',
+      items: [
+        {
+          label: 'Manager Dashboard',
+          href: '/ess/team/dashboard',
+          icon: LayoutDashboard,
+          keywords: ['hod', 'manager', 'team', 'leaderboard'],
+          roles: ['Faculty', 'HOD', 'Dean'],
+        },
+        {
+          label: 'Team Attendance',
+          href: '/ess/team/attendance',
+          icon: CalendarRange,
+          keywords: ['matrix', 'punch', 'muster'],
+          roles: ['Faculty', 'HOD', 'Dean'],
+        },
+        {
+          label: 'Pending on Me',
+          href: '/ess/team/requests',
+          icon: Inbox,
+          keywords: ['approve', 'leave', 'regularization', 'on duty'],
+          roles: ['Faculty', 'HOD', 'Dean'],
+        },
       ],
     },
     {
@@ -433,6 +463,9 @@ export const essPortal: PortalConfig = {
   commandItems: [
     { label: 'My Calendar', href: '/ess/calendar', icon: Calendar },
     { label: 'Leaves', href: '/ess/leaves', icon: CalendarDays },
+    { label: 'Team Dashboard', href: '/ess/team/dashboard', icon: LayoutDashboard },
+    { label: 'Team Attendance', href: '/ess/team/attendance', icon: CalendarRange },
+    { label: 'Pending on Me', href: '/ess/team/requests', icon: Inbox },
     { label: 'Documents', href: '/ess/documents', icon: FolderLock },
     { label: 'Policies', href: '/ess/policies', icon: FileText },
     { label: 'Onboarding', href: '/ess/onboarding', icon: Kanban },

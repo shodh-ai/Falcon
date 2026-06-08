@@ -7,6 +7,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EntityScopeContext } from '../../common/entity-scope/entity-scope.context';
+import { HrAccessControlService, LEGACY_TO_CONTROL_MODULE } from './hr-access-control.service';
 
 export type HrModuleKey =
   | 'onboarding'
@@ -35,7 +36,10 @@ export type AllowedEntity = { id: number; name: string; code: string };
 
 @Injectable()
 export class HrEntityContextService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly accessControl: HrAccessControlService,
+  ) {}
 
   /** Strict entity filter — uses request scope when entityId omitted. */
   entityFilterSql(alias: string, paramIndex: number, entityId?: number): string {
@@ -173,11 +177,7 @@ export class HrEntityContextService {
   }
 
   async getPermissions(tenantId: string, userId: string): Promise<HrCapabilities | null> {
-    const rows = await this.dataSource.query(
-      `SELECT capabilities FROM hr_permissions WHERE tenant_id = $1 AND user_id = $2`,
-      [tenantId, userId],
-    );
-    return (rows[0]?.capabilities as HrCapabilities) ?? null;
+    return this.accessControl.getCapabilitiesForUser(tenantId, userId);
   }
 
   async assertModuleAccess(
@@ -238,17 +238,20 @@ export class HrEntityContextService {
     rows: { user_id: string; capabilities: HrCapabilities }[],
   ) {
     for (const row of rows) {
-      await this.dataSource.query(
-        `INSERT INTO hr_permissions (tenant_id, user_id, capabilities, updated_by_user_id, updated_at)
-         VALUES ($1, $2, $3::jsonb, $4, NOW())
-         ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-           capabilities = EXCLUDED.capabilities,
-           updated_by_user_id = EXCLUDED.updated_by_user_id,
-           updated_at = NOW()`,
-        [tenantId, row.user_id, JSON.stringify(row.capabilities), updatedByUserId],
-      );
+      for (const [module, level] of Object.entries(row.capabilities)) {
+        if (!level || level === 'none') continue;
+        const controlModule = LEGACY_TO_CONTROL_MODULE[module as HrModuleKey];
+        if (!controlModule) continue;
+        await this.accessControl.patchModuleAccess(
+          tenantId,
+          row.user_id,
+          controlModule,
+          { level: level as HrAccessLevel },
+          updatedByUserId,
+        );
+      }
     }
-    return this.listPermissionMatrix(tenantId, { limit: 200 });
+    return this.accessControl.listAccessMatrix(tenantId, { limit: 200 });
   }
 
   async patchUserPermission(
@@ -258,18 +261,14 @@ export class HrEntityContextService {
     module: string,
     level: string,
   ) {
-    const existing = (await this.getPermissions(tenantId, targetUserId)) ?? {};
-    const capabilities = { ...existing, [module]: level };
-    await this.dataSource.query(
-      `INSERT INTO hr_permissions (tenant_id, user_id, capabilities, updated_by_user_id, updated_at)
-       VALUES ($1, $2, $3::jsonb, $4, NOW())
-       ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-         capabilities = EXCLUDED.capabilities,
-         updated_by_user_id = EXCLUDED.updated_by_user_id,
-         updated_at = NOW()`,
-      [tenantId, targetUserId, JSON.stringify(capabilities), updatedByUserId],
+    const result = await this.accessControl.patchModuleAccess(
+      tenantId,
+      targetUserId,
+      module,
+      { level: level as HrAccessLevel },
+      updatedByUserId,
     );
-    return { user_id: targetUserId, capabilities };
+    return { user_id: targetUserId, capabilities: result.capabilities };
   }
 
   canAccessModule(caps: HrCapabilities | null | undefined, module: HrModuleKey): boolean {

@@ -13,6 +13,7 @@ import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.ser
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
 import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
+import { HrAccessControlService } from './hr-access-control.service';
 import { assertNoPendingRow } from '../../common/validators/pending-request.util';
 
 export type ApplyWorkforceRequestDto = {
@@ -41,6 +42,7 @@ export class HrWorkforceService {
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly attendanceCalc: AttendanceCalculationService,
     private readonly hrWorkflow: HrWorkflowRoutingService,
+    private readonly accessControl: HrAccessControlService,
   ) {}
 
   async getTodayWidget(userId: string) {
@@ -195,19 +197,60 @@ export class HrWorkforceService {
     });
   }
 
-  async listTeamPending(reportingOfficerId: string, tenantId: string, requestType?: StaffRequestType) {
-    const where: Record<string, unknown> = {
-      tenant_id: tenantId,
-      current_approver_user_id: reportingOfficerId,
-      status: 'PENDING',
-    };
-    if (requestType) where.request_type = requestType;
+  async listTeamPending(
+    approverUserId: string,
+    tenantId: string,
+    requestType?: StaffRequestType,
+    roles: string[] = [],
+  ) {
+    const queryParams: unknown[] = [tenantId, approverUserId];
+    let paramIdx = 3;
+    const typeClause = requestType ? ` AND r.request_type = $${paramIdx++}` : '';
+    if (requestType) queryParams.push(requestType);
 
-    const rows = await this.requests.find({
-      where,
-      relations: ['staff'],
-      order: { applied_at: 'ASC' },
-    });
+    const { clause, params: scopeParams } = await this.accessControl.departmentScopeClause(
+      tenantId,
+      approverUserId,
+      roles,
+      'u',
+      paramIdx,
+    );
+    queryParams.push(...scopeParams);
+
+    const rows = await this.dataSource.query<
+      Array<{
+        leave_id: string;
+        request_type: StaffRequestType;
+        leave_type: string | null;
+        start_date: string;
+        end_date: string;
+        regularization_date: string | null;
+        missed_punch_type: string | null;
+        reason: string | null;
+        status: string;
+        applied_at: Date;
+        staff_user_id: string;
+        current_step_order: number | null;
+        employee_name: string;
+        employee_email: string | null;
+        employee_dept: string | null;
+      }>
+    >(
+      `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
+              r.regularization_date, r.missed_punch_type, r.reason, r.status, r.applied_at,
+              r.staff_user_id, r.current_step_order,
+              u.name AS employee_name, u.official_email AS employee_email, d.dept_name AS employee_dept
+       FROM staff_leave_requests r
+       JOIN users u ON u.user_id = r.staff_user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE r.tenant_id = $1
+         AND r.status = 'PENDING'
+         AND r.current_approver_user_id = $2
+         ${typeClause}
+         ${clause}
+       ORDER BY r.applied_at ASC`,
+      queryParams,
+    );
 
     return rows.map((r) => ({
       leave_id: r.leave_id,
@@ -220,12 +263,31 @@ export class HrWorkforceService {
       reason: r.reason,
       status: r.status,
       applied_at: r.applied_at,
+      current_step_order: r.current_step_order,
       employee: {
         user_id: r.staff_user_id,
-        name: r.staff?.name ?? 'Employee',
-        email: r.staff?.email ?? null,
+        name: r.employee_name ?? 'Employee',
+        email: r.employee_email ?? null,
+        department: r.employee_dept,
       },
     }));
+  }
+
+  private get dataSource() {
+    return this.users.manager.connection;
+  }
+
+  async listPendingInbox(userId: string, tenantId: string, roles: string[] = []) {
+    const pending = await this.listTeamPending(userId, tenantId, undefined, roles);
+    return {
+      count: pending.length,
+      items: pending.map((p) => ({
+        ...p,
+        inbox_type: 'WORKFLOW_APPROVAL',
+        title: `${p.request_type.replace(/_/g, ' ')} — ${p.employee.name}`,
+        action_link: '/hr/inbox',
+      })),
+    };
   }
 
   async actOnTeamRequest(
@@ -234,6 +296,7 @@ export class HrWorkforceService {
     leaveId: string,
     action: 'APPROVE' | 'REJECT',
     comment?: string,
+    options?: { adminOverride?: boolean },
   ) {
     const row = await this.requests.findOne({
       where: { leave_id: leaveId, tenant_id: tenantId },
@@ -242,7 +305,31 @@ export class HrWorkforceService {
     if (!row) throw new NotFoundException('Request not found');
 
     const staff = row.staff ?? (await this.users.findOne({ where: { user_id: row.staff_user_id } }));
-    this.hrWorkflow.assertActorIsCurrentApprover(reportingOfficerId, row.current_approver_user_id);
+    const roles = (await this.users.manager.query(
+      `SELECT r.role_name FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id WHERE ur.user_id = $1
+       UNION SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1`,
+      [reportingOfficerId],
+    )) as Array<{ role_name: string }>;
+    const roleNames = roles.map((r) => r.role_name);
+
+    const adminOverride =
+      options?.adminOverride === true &&
+      roleNames.some((r) => ['HRAdmin', 'SuperAdmin', 'HR'].includes(r));
+
+    if (!adminOverride) {
+      this.hrWorkflow.assertActorIsCurrentApprover(reportingOfficerId, row.current_approver_user_id);
+    }
+
+    if (action === 'APPROVE' && !adminOverride) {
+      const stepType = await this.resolveCurrentStepApproverType(tenantId, row);
+      await this.accessControl.assertWorkflowApproverPower(
+        tenantId,
+        reportingOfficerId,
+        roleNames,
+        stepType,
+        row.request_type,
+      );
+    }
 
     if (row.status !== 'PENDING') {
       throw new BadRequestException('Request has already been processed');
@@ -409,7 +496,7 @@ export class HrWorkforceService {
       },
       title: `${label} pending your approval (Step ${row.current_step_order})`,
       message: `${staff.name} submitted ${label} (${row.start_date}${row.end_date !== row.start_date ? ` – ${row.end_date}` : ''}).`,
-      actionLink: '/faculty/team-requests',
+      actionLink: row.current_approver_user_id ? '/hr/inbox' : '/faculty/team-requests',
       category: 'HR',
       requesterName: staff.name,
     });
@@ -541,6 +628,19 @@ export class HrWorkforceService {
       startDate: row.start_date,
       endDate: row.end_date,
     });
+  }
+
+  private async resolveCurrentStepApproverType(
+    tenantId: string,
+    row: StaffLeaveRequest,
+  ): Promise<string | null> {
+    if (!row.workflow_id || !row.current_step_order) return null;
+    const steps = await this.users.manager.query(
+      `SELECT approver_type FROM hr_approval_workflow_steps
+       WHERE workflow_id = $1 AND step_order = $2`,
+      [row.workflow_id, row.current_step_order],
+    );
+    return (steps[0] as { approver_type: string } | undefined)?.approver_type ?? null;
   }
 
   private requestTypeLabel(type: StaffRequestType) {

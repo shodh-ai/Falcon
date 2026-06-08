@@ -20,6 +20,9 @@ import {
   type WorkflowApprovalRequiredPayload,
   type EventProposedPayload,
   type EventTierPayload,
+  type OnboardingCredentialsPayload,
+  type HrExportReadyPayload,
+  type HrExportFailedPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -105,5 +108,17 @@ export class NotificationEmitterService {
 
   eventPendingFinance(payload: EventTierPayload) {
     this.events.emit(NotificationEvents.EVENT_PENDING_FINANCE, payload);
+  }
+
+  onboardingCredentials(payload: OnboardingCredentialsPayload) {
+    this.events.emit(NotificationEvents.HR_ONBOARDING_CREDENTIALS, payload);
+  }
+
+  exportReady(payload: HrExportReadyPayload) {
+    this.events.emit(NotificationEvents.HR_EXPORT_READY, payload);
+  }
+
+  exportFailed(payload: HrExportFailedPayload) {
+    this.events.emit(NotificationEvents.HR_EXPORT_FAILED, payload);
   }
 }

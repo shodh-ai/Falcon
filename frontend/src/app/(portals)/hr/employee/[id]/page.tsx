@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
+import { DocumentVaultGrid } from '@/components/hr/DocumentVaultGrid';
 
 type Profile360 = {
   user_id: string;
@@ -42,14 +43,15 @@ function EmployeeProfileContent() {
   const { entityId } = useHrEntity();
   const [profile, setProfile] = useState<Profile360 | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'kyc'>('overview');
+  const [tab, setTab] = useState<'overview' | 'kyc' | 'documents'>('overview');
   const [revealed, setRevealed] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [orgUnits, setOrgUnits] = useState<{ unit_id: string; unit_name: string; unit_type: string }[]>([]);
   const [orgUnitId, setOrgUnitId] = useState('');
 
   useEffect(() => {
-    if (searchParams.get('tab') === 'kyc') setTab('kyc');
+    const t = searchParams.get('tab');
+    if (t === 'kyc' || t === 'documents') setTab(t);
   }, [searchParams]);
 
   useEffect(() => {
@@ -103,9 +105,14 @@ function EmployeeProfileContent() {
           <Lock className="mr-1 h-4 w-4" />
           Secured KYC
         </Button>
+        <Button variant={tab === 'documents' ? 'default' : 'outline'} size="sm" onClick={() => setTab('documents')}>
+          Documents
+        </Button>
       </div>
 
-      {tab === 'overview' ? (
+      {tab === 'documents' ? (
+        <DocumentVaultGrid userId={id} mode="hr" />
+      ) : tab === 'overview' ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <CardHeader>

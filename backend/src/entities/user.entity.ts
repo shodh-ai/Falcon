@@ -54,6 +54,12 @@ export class User extends BaseTenantEntity {
   @Column({ default: true })
   is_active: boolean;
 
+  @Column({ type: 'varchar', length: 50, default: 'ACTIVE' })
+  onboarding_status: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phone: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 

@@ -7,6 +7,8 @@ import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { HrStatusBadge } from '@/components/hr/HrStatusBadge';
 import { HrEmptyState } from '@/components/hr/HrEmptyState';
+import { AddEmployeeDialog } from '@/components/hr/AddEmployeeDialog';
+import { BulkDocumentExportDialog } from '@/components/hr/BulkDocumentExportDialog';
 import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Input } from '@/components/ui/input';
 import { useHrApi } from '@/lib/api/use-hr-api';
@@ -32,10 +34,14 @@ export default function HrDirectoryPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
 
-  useEffect(() => {
+  const loadDirectory = () => {
     if (!entityReady) return;
     setLoading(true);
     void api.get<EmployeeRow[]>('/api/hr/directory').then(setRows).finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadDirectory();
   }, [api, entityId, entityReady]);
 
   const filtered = useMemo(() => {
@@ -52,10 +58,16 @@ export default function HrDirectoryPage() {
 
   return (
     <>
-      <HrPageHeader
-        title="Employee Directory"
-        description="Master roster of all staff — open any profile for the full 360° view."
-      />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <HrPageHeader
+          title="Employee Directory"
+          description="Master roster of all staff — open any profile for the full 360° view."
+        />
+        <div className="flex flex-wrap gap-2">
+          <BulkDocumentExportDialog />
+          <AddEmployeeDialog onCreated={loadDirectory} />
+        </div>
+      </div>
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />

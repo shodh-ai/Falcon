@@ -11,7 +11,9 @@ import {
   toAppNotification,
   categoryToUiType,
 } from '@/hooks/useNotifications';
+import { toast } from 'sonner';
 import { notificationsApi } from '@/lib/api/notifications';
+import { handleNotificationAction } from '@/lib/notifications/notification-actions';
 import { cn } from '@/lib/utils';
 
 const typeStyles = {
@@ -49,13 +51,15 @@ export default function NotificationsPage() {
 
   const openNotification = async (id: string, actionLink: string | null | undefined, unread: boolean) => {
     if (!token) return;
+    try {
+      await handleNotificationAction(token, actionLink, router);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+      return;
+    }
     if (unread) {
       await notificationsApi.markRead(token, id).catch(() => undefined);
       await refresh();
-    }
-    if (actionLink) {
-      const path = actionLink.startsWith('/') ? actionLink : `/${actionLink}`;
-      router.push(path === '/student/fees' ? '/student/finance' : path);
     }
   };
 

@@ -33,9 +33,45 @@ export class HrAdminService {
     private readonly onboardingWorkflow: HrOnboardingWorkflowService,
   ) {}
 
-  async listDirectory(tenantId: string, entityId: number) {
+  async listRoles(_tenantId: string) {
+    return this.dataSource.query(
+      `SELECT role_id, role_name FROM roles
+       WHERE role_name NOT IN ('Student', 'Applicant', 'Parent')
+       ORDER BY role_name`,
+    );
+  }
+
+  async listDepartments(_tenantId: string) {
+    return this.dataSource.query(
+      `SELECT dept_id, dept_name FROM departments ORDER BY dept_name`,
+    );
+  }
+
+  async listDirectory(
+    tenantId: string,
+    entityId: number,
+    viewerUserId?: string,
+    viewerRoles: string[] = [],
+  ) {
     const params: unknown[] = [tenantId, entityId];
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
+    let deptClause = '';
+    if (viewerUserId) {
+      const scope = await this.dataSource.query<Array<{ department_scope: number[] | null }>>(
+        `SELECT department_scope FROM hr_access_controls
+         WHERE tenant_id = $1 AND user_id = $2 AND department_scope IS NOT NULL
+         LIMIT 1`,
+        [tenantId, viewerUserId],
+      );
+      const isMaster = viewerRoles.some((r) =>
+        ['HRAdmin', 'SuperAdmin', 'HR', 'President'].includes(r),
+      );
+      const deptIds = scope[0]?.department_scope;
+      if (!isMaster && deptIds?.length) {
+        params.push(deptIds);
+        deptClause = ` AND u.dept_id = ANY($${params.length})`;
+      }
+    }
     return this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.is_active,
               r.role_name AS role, d.dept_name AS department,
@@ -49,7 +85,7 @@ export class HrAdminService {
        LEFT JOIN org_entities oe ON oe.entity_id = p.entity_id
        LEFT JOIN users ro ON ro.user_id = u.reporting_officer_id
        WHERE u.tenant_id = $1
-         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
+         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}${deptClause}
        ORDER BY u.name ASC`,
       params,
     );
@@ -78,8 +114,12 @@ export class HrAdminService {
     const bank = includeSensitive ? this.crypto.decrypt(row.bank_account_encrypted) : null;
 
     const documents = await this.dataSource.query(
-      `SELECT document_id, document_type, file_url, verification_status, uploaded_at
-       FROM hr_employee_documents WHERE tenant_id = $1 AND user_id = $2 ORDER BY uploaded_at DESC`,
+      `SELECT d.document_id, d.document_type, d.file_name, d.verification_status, d.uploaded_at,
+              uploader.name AS uploaded_by_name
+       FROM hr_employee_documents d
+       LEFT JOIN users uploader ON uploader.user_id = d.uploaded_by
+       WHERE d.tenant_id = $1 AND d.user_id = $2
+       ORDER BY d.uploaded_at DESC`,
       [tenantId, userId],
     );
 
@@ -479,12 +519,13 @@ export class HrAdminService {
     );
     const passwordHash = await bcrypt.hash('Welcome@123', 10);
     const userRows = await this.dataSource.query(
-      `INSERT INTO users (tenant_id, name, official_email, role_id, password_hash, is_active, entity_id)
-       VALUES ($1, $2, $3, $4, $5, true, $6)
+      `INSERT INTO users (tenant_id, name, official_email, role_id, password_hash, is_active, entity_id, onboarding_status)
+       VALUES ($1, $2, $3, $4, $5, true, $6, 'PENDING_ONBOARDING')
        ON CONFLICT (tenant_id, official_email) DO UPDATE SET
          name = EXCLUDED.name,
          is_active = true,
-         entity_id = COALESCE(users.entity_id, EXCLUDED.entity_id)
+         entity_id = COALESCE(users.entity_id, EXCLUDED.entity_id),
+         onboarding_status = 'PENDING_ONBOARDING'
        RETURNING user_id`,
       [tenantId, a.name, email, role[0]?.role_id ?? 2, passwordHash, entityId],
     );

@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { HrAccessControlService } from './hr-access-control.service';
 
 @Injectable()
 export class HrWorkflowBuilderService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly accessControl: HrAccessControlService,
+  ) {}
 
   listWorkflows(tenantId: string, entityId: number) {
     return this.dataSource.query(
@@ -147,6 +151,16 @@ export class HrWorkflowBuilderService {
         [tenantId, step.approver_ref],
       );
       approverUserId = roleUser[0]?.user_id ?? null;
+    } else if (step.approver_type === 'HR_EXECUTIVE') {
+      const module = this.accessControl.moduleForActionType(actionType);
+      approverUserId = await this.accessControl.resolveHrExecutiveApprover(
+        tenantId,
+        requesterUserId,
+        module,
+        step.approver_ref,
+      );
+    } else if (step.approver_type === 'HR_ADMIN') {
+      approverUserId = await this.accessControl.resolveHrAdminApprover(tenantId);
     }
 
     return {

@@ -77,7 +77,7 @@ export default function HrWorkflowsPage() {
                   setForm({ ...form, steps });
                 }}
               >
-                {['REPORTING_MANAGER', 'DEPT_HEAD', 'ROLE', 'SPECIFIC_USER'].map((t) => (
+                {['REPORTING_MANAGER', 'DEPT_HEAD', 'HR_EXECUTIVE', 'HR_ADMIN', 'ROLE', 'SPECIFIC_USER'].map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>

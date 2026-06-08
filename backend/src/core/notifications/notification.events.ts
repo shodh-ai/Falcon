@@ -19,6 +19,9 @@ export const NotificationEvents = {
   EVENT_PROPOSED: 'event.proposed',
   EVENT_PENDING_ESTATE: 'event.pending_estate',
   EVENT_PENDING_FINANCE: 'event.pending_finance',
+  HR_ONBOARDING_CREDENTIALS: 'hr.onboarding_credentials',
+  HR_EXPORT_READY: 'hr.export_ready',
+  HR_EXPORT_FAILED: 'hr.export_failed',
 } as const;
 
 export type NotificationEventName =
@@ -123,4 +126,21 @@ export type EventTierPayload = BaseNotificationPayload & {
   eventId: string;
   eventTitle: string;
   clubName?: string;
+};
+
+export type OnboardingCredentialsPayload = BaseNotificationPayload & {
+  email: string;
+  tempPassword: string;
+};
+
+export type HrExportReadyPayload = BaseNotificationPayload & {
+  jobId: string;
+  label: string;
+  zipUrl: string;
+};
+
+export type HrExportFailedPayload = BaseNotificationPayload & {
+  jobId: string;
+  label: string;
+  errorMessage: string;
 };

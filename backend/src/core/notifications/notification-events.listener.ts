@@ -29,6 +29,9 @@ import {
   type WorkflowApprovalRequiredPayload,
   type EventProposedPayload,
   type EventTierPayload,
+  type OnboardingCredentialsPayload,
+  type HrExportReadyPayload,
+  type HrExportFailedPayload,
 } from './notification.events';
 
 @Injectable()
@@ -373,6 +376,48 @@ export class NotificationEventsListener {
         payload.message ||
         `"${payload.eventTitle}" needs finance sign-off before tickets go live.`,
       actionLink: payload.actionLink ?? '/finance/events',
+    });
+  }
+
+  @OnEvent(NotificationEvents.HR_ONBOARDING_CREDENTIALS)
+  async onOnboardingCredentials(payload: OnboardingCredentialsPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'HR',
+      title: payload.title || 'Welcome — your login credentials',
+      message:
+        payload.message ||
+        `Email: ${payload.email}. Temporary password: ${payload.tempPassword}. Please log in and complete onboarding.`,
+      actionLink: payload.actionLink ?? '/login',
+    });
+  }
+
+  @OnEvent(NotificationEvents.HR_EXPORT_READY)
+  async onExportReady(payload: HrExportReadyPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'HR',
+      title: payload.title || 'Bulk document export ready',
+      message:
+        payload.message ||
+        `Your ${payload.label} archive is ready for download.`,
+      actionLink: payload.actionLink ?? payload.zipUrl,
+    });
+  }
+
+  @OnEvent(NotificationEvents.HR_EXPORT_FAILED)
+  async onExportFailed(payload: HrExportFailedPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'HR',
+      title: payload.title || 'Bulk document export failed',
+      message:
+        payload.message ||
+        `Could not build your ${payload.label} archive: ${payload.errorMessage}`,
+      actionLink: payload.actionLink ?? '/hr/directory',
     });
   }
 
