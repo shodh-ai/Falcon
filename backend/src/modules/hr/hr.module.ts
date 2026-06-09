@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HR_DOCUMENT_EXPORT_QUEUE } from '../../common/constants/hr-export-queue.constants';
+import { HR_PAYROLL_QUEUE } from '../../common/constants/hr-payroll-queue.constants';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { LeaveRequest } from '../../entities/leave-request.entity';
 import { LeaveBalance } from '../../entities/leave-balance.entity';
@@ -41,6 +42,7 @@ import { HrDocumentVaultService } from './hr-document-vault.service';
 import { HrEmployeeBulkService } from './hr-employee-bulk.service';
 import { HrDocumentExportService } from './hr-document-export.service';
 import { HrDocumentExportProcessor } from './hr-document-export.processor';
+import { HrPayrollProcessor } from './hr-payroll.processor';
 import { HrTeamScopeService } from './hr-team-scope.service';
 import { HrTeamService } from './hr-team.service';
 
@@ -48,6 +50,7 @@ import { HrTeamService } from './hr-team.service';
   imports: [
     ConfigModule,
     BullModule.registerQueue({ name: HR_DOCUMENT_EXPORT_QUEUE }),
+    BullModule.registerQueue({ name: HR_PAYROLL_QUEUE }),
     TypeOrmModule.forFeature([
       LeaveRequest,
       LeaveBalance,
@@ -90,6 +93,7 @@ import { HrTeamService } from './hr-team.service';
     HrEmployeeBulkService,
     HrDocumentExportService,
     HrDocumentExportProcessor,
+    HrPayrollProcessor,
     HrTeamScopeService,
     HrTeamService,
   ],

@@ -45,8 +45,15 @@ export class HostelAdminController {
     @Req() req: { user: AuthUser },
     @Query('hostelId') hostelId?: string,
     @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
-    return this.hostelAdmin.listStudents(this.ctx(req), { hostelId, status });
+    return this.hostelAdmin.listStudents(this.ctx(req), {
+      hostelId,
+      status,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
   }
 
   @Post('students/transfer')

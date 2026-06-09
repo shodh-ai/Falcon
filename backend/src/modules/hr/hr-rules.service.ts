@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { CacheService } from '../../core/redis/cache.service';
 
 export type AttendanceRulesDto = {
   allowed_early_goings?: number;
@@ -13,7 +14,10 @@ export type AttendanceRulesDto = {
 
 @Injectable()
 export class HrRulesService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly cache: CacheService,
+  ) {}
 
   async getRules(tenantId: string, entityId: number) {
     const rows = await this.dataSource.query(
@@ -62,13 +66,16 @@ export class HrRulesService {
   }
 
   async listShifts(tenantId: string, entityId: number) {
-    return this.dataSource.query(
-      `SELECT shift_id, shift_name, start_time::text, end_time::text, grace_period_mins,
-              half_day_min_hours, full_day_min_hours, entity_id
-       FROM hr_shifts
-       WHERE entity_id = $1
-       ORDER BY shift_name`,
-      [entityId],
+    const cacheKey = `hr_shifts:${tenantId}:${entityId}`;
+    return this.cache.getOrSet(cacheKey, () =>
+      this.dataSource.query(
+        `SELECT shift_id, shift_name, start_time::text, end_time::text, grace_period_mins,
+                half_day_min_hours, full_day_min_hours, entity_id
+         FROM hr_shifts
+         WHERE entity_id = $1
+         ORDER BY shift_name`,
+        [entityId],
+      ),
     );
   }
 

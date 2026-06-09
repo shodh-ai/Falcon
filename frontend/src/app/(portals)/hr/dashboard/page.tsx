@@ -1,20 +1,17 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from 'recharts';
+
+const HrAttendanceDonutChart = dynamic(
+  () => import('@/components/hr/HrDashboardCharts').then((m) => m.HrAttendanceDonutChart),
+  { ssr: false, loading: () => <div className="h-full animate-pulse rounded-xl bg-muted" /> },
+);
+const HrAttritionLineChart = dynamic(
+  () => import('@/components/hr/HrDashboardCharts').then((m) => m.HrAttritionLineChart),
+  { ssr: false, loading: () => <div className="h-full animate-pulse rounded-xl bg-muted" /> },
+);
 import { UserMinus, UserPlus, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -195,47 +192,7 @@ export default function HrMasterDashboardPage() {
                   No attendance data recorded yet today.
                 </div>
               ) : (
-                <>
-                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                    <p className="text-3xl font-black text-sgvu-navy">{att?.present_pct ?? 0}%</p>
-                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Present</p>
-                  </div>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={att?.chart ?? []}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="58%"
-                        outerRadius="82%"
-                        paddingAngle={3}
-                        stroke="none"
-                      >
-                        {(att?.chart ?? []).map((entry) => (
-                          <Cell key={entry.name} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: '1px solid #e2e8f0',
-                          boxShadow: '0 4px 12px rgba(8,35,74,0.08)',
-                        }}
-                        formatter={(v: number, name: string, props: { payload?: { pct?: number } }) => [
-                          `${v} staff · ${props.payload?.pct ?? 0}%`,
-                          name,
-                        ]}
-                      />
-                      <Legend
-                        verticalAlign="bottom"
-                        iconType="circle"
-                        wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </>
+                <HrAttendanceDonutChart data={att?.chart ?? []} presentPct={att?.present_pct ?? 0} />
               )}
             </div>
           </CardContent>
@@ -274,15 +231,7 @@ export default function HrMasterDashboardPage() {
           <CardTitle>Attrition Rate — Last 12 Months</CardTitle>
         </CardHeader>
         <CardContent className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data?.attrition_trend ?? []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis unit="%" tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(v: number) => [`${v}%`, 'Turnover']} />
-              <Line type="monotone" dataKey="turnover_pct" stroke="#1e3a5f" strokeWidth={2} dot={{ r: 3 }} />
-            </LineChart>
-          </ResponsiveContainer>
+          <HrAttritionLineChart data={data?.attrition_trend ?? []} />
         </CardContent>
       </Card>
     </>

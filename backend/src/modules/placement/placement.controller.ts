@@ -43,8 +43,16 @@ export class PlacementController {
 
   @Get('drives')
   @Roles('SuperAdmin', 'PlacementCell', 'Student')
-  drives(@Req() req: { user: AuthUser }, @Query('active') active?: string) {
-    return this.placement.drives(this.tenant(req), active === 'true');
+  drives(
+    @Req() req: { user: AuthUser },
+    @Query('active') active?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.placement.drives(this.tenant(req), active === 'true', {
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
   }
 
   @Get('drives/:driveId')

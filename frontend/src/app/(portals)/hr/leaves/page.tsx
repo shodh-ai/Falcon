@@ -79,7 +79,9 @@ export default function HrLeavesPage() {
 
   useEffect(() => {
     if (!entityReady) return;
-    void api.get<DirectoryRow[]>('/api/hr/directory').then(setStaff);
+    void api
+      .get<{ data: DirectoryRow[] }>('/api/hr/directory?limit=100&offset=0')
+      .then((res) => setStaff(res.data));
   }, [api, entityId, entityReady]);
 
   async function submitOnBehalf(e: FormEvent) {

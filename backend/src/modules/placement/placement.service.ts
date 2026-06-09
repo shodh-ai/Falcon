@@ -13,6 +13,11 @@ import {
   type PlacementPipelineStage,
 } from './placement.constants';
 import {
+  DEFAULT_PAGE_LIMIT,
+  type PaginatedResponse,
+  parsePageParams,
+} from '../../common/utils/pagination';
+import {
   resolvePlacementSchema,
   driveRoleExpr,
   drivePackageExpr,
@@ -142,19 +147,37 @@ export class PlacementService {
     );
   }
 
-  async drives(tenantId?: string, activeOnly = false) {
+  async drives(
+    tenantId?: string,
+    activeOnly = false,
+    options?: { limit?: number; offset?: number },
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    const { limit, offset } = parsePageParams(options?.limit, options?.offset, DEFAULT_PAGE_LIMIT);
     const s = await this.schema();
     const d = this.driveSelect(s);
     const statusFilter = activeOnly ? `AND ${this.activeFilter()}` : '';
     const tenantFilter = s.tenantScoped ? `WHERE d.tenant_id = $1 ${statusFilter}` : `WHERE TRUE ${statusFilter}`;
+    const baseParams = s.tenantScoped ? [this.tenant(tenantId)] : [];
 
-    return this.db.query(
+    const countRows = await this.db.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::text AS total FROM ${d.from} ${tenantFilter}`,
+      baseParams,
+    );
+    const total = Number(countRows[0]?.total ?? 0);
+
+    const params = [...baseParams, limit, offset];
+    const limitIdx = params.length - 1;
+    const offsetIdx = params.length;
+    const data = await this.db.query(
       `SELECT ${d.select}
        FROM ${d.from}
        ${tenantFilter}
-       ORDER BY d.created_at DESC`,
-      s.tenantScoped ? [this.tenant(tenantId)] : [],
+       ORDER BY d.created_at DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      params,
     );
+
+    return { data, total, limit, offset };
   }
 
   async getDrive(tenantId: string, driveId: string) {
@@ -486,7 +509,8 @@ export class PlacementService {
 
   async getStudentPlacementsHub(tenantId: string, studentUserId: string) {
     const s = await this.schema();
-    const openDrives = await this.drives(tenantId, true);
+    const openDrivesPage = await this.drives(tenantId, true, { limit: 100, offset: 0 });
+    const openDrives = openDrivesPage.data;
     const d = this.driveSelect(s);
 
     let applications: unknown[];

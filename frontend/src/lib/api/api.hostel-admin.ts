@@ -13,12 +13,17 @@ export const hostelAdminApi = {
   hostelDetail: (token: string, hostelId: string) =>
     apiFetch<unknown>(token, { url: `${API_URL}/hostel-admin/hostels/${hostelId}`, headers: {} }),
 
-  students: (token: string, params?: { hostelId?: string; status?: string }) => {
+  students: (
+    token: string,
+    params?: { hostelId?: string; status?: string; limit?: number; offset?: number },
+  ) => {
     const q = new URLSearchParams();
     if (params?.hostelId) q.set('hostelId', params.hostelId);
     if (params?.status) q.set('status', params.status);
+    if (params?.limit != null) q.set('limit', String(params.limit));
+    if (params?.offset != null) q.set('offset', String(params.offset));
     const qs = q.toString();
-    return apiFetch<unknown[]>(token, {
+    return apiFetch<{ data: unknown[]; total: number; limit: number; offset: number }>(token, {
       url: `${API_URL}/hostel-admin/students${qs ? `?${qs}` : ''}`,
       headers: {},
     });

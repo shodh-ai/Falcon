@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import useSWR from 'swr';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,39 +28,29 @@ type LeaveRow = {
 
 export default function HodLeaveApprovalsPage() {
   const api = useAuthedApi();
-  const [rows, setRows] = useState<LeaveRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState('');
   const [acting, setActing] = useState(false);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await api.get<LeaveRow[]>('/api/academics/hod/approvals/leaves');
-      setRows(data);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load leave inbox');
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, [api]);
+  const { data: rows = [], isLoading, mutate } = useSWR<LeaveRow[]>(
+    'hod-leave-approvals',
+    () => api.get<LeaveRow[]>('/api/academics/hod/approvals/leaves'),
+    { revalidateOnFocus: true },
+  );
 
   async function approve(leaveId: string) {
-    setActing(true);
+    const previous = rows;
+    await mutate(
+      rows.filter((r) => r.leave_id !== leaveId),
+      { revalidate: false },
+    );
     try {
       await api.patch(`/api/hr/leaves/${leaveId}/approve`, {});
       toast.success('Leave approved');
-      await load();
+      void mutate();
     } catch (e) {
+      await mutate(previous, { revalidate: false });
       toast.error(e instanceof Error ? e.message : 'Approval failed');
-    } finally {
-      setActing(false);
     }
   }
 
@@ -68,14 +59,21 @@ export default function HodLeaveApprovalsPage() {
       toast.error('Enter a reason for rejection (3+ characters)');
       return;
     }
+    const previous = rows;
+    const rejectingId = rejectId;
     setActing(true);
+    await mutate(
+      rows.filter((r) => r.leave_id !== rejectingId),
+      { revalidate: false },
+    );
     try {
-      await api.patch(`/api/hr/leaves/${rejectId}/reject`, { remarks: remarks.trim() });
+      await api.patch(`/api/hr/leaves/${rejectingId}/reject`, { remarks: remarks.trim() });
       toast.success('Leave rejected');
       setRejectId(null);
       setRemarks('');
-      await load();
+      void mutate();
     } catch (e) {
+      await mutate(previous, { revalidate: false });
       toast.error(e instanceof Error ? e.message : 'Rejection failed');
     } finally {
       setActing(false);
@@ -94,11 +92,11 @@ export default function HodLeaveApprovalsPage() {
           <CardTitle className="text-base">Pending leave requests</CardTitle>
         </CardHeader>
         <CardContent>
-          {loading && <Loader2 className="mx-auto h-6 w-6 animate-spin" />}
-          {!loading && rows.length === 0 && (
+          {isLoading && <Loader2 className="mx-auto h-6 w-6 animate-spin" />}
+          {!isLoading && rows.length === 0 && (
             <p className="text-sm text-muted-foreground">No pending leave requests.</p>
           )}
-          {!loading && rows.length > 0 && (
+          {!isLoading && rows.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

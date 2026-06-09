@@ -25,12 +25,14 @@ export default function PlacementsDashboardPage() {
   useEffect(() => {
     void Promise.all([
       api.get<unknown[]>('/api/placement/companies'),
-      api.get<Array<{ status: string }>>('/api/placement/drives'),
+      api.get<{ data: Array<{ status: string }>; total: number }>('/api/placement/drives?limit=100&offset=0'),
     ])
-      .then(([companies, drives]) => {
+      .then(([companies, drivesPage]) => {
         setCompanyCount(companies.length);
-        setDriveCount(drives.length);
-        setActiveDrives(drives.filter((d) => d.status === 'ACTIVE' || d.status === 'OPEN').length);
+        setDriveCount(drivesPage.total);
+        setActiveDrives(
+          drivesPage.data.filter((d) => d.status === 'ACTIVE' || d.status === 'OPEN').length,
+        );
       })
       .catch(() => {});
   }, [api]);

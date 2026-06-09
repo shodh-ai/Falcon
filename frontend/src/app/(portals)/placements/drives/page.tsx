@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import useSWR from 'swr';
 import { Briefcase, Calendar, IndianRupee, Kanban, Loader2, Pencil, Plus, Target, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,8 @@ import { PlacementFormField, selectClassName, textareaClassName } from '@/compon
 import { PlacementPageHeader } from '@/components/placement/PlacementPageHeader';
 import { PlacementPageShell } from '@/components/placement/PlacementPageShell';
 import { useAuthedApi } from '@/lib/api';
+import { DEFAULT_PAGE_SIZE, type PaginatedResponse } from '@/lib/api/pagination';
+import { PaginationBar } from '@/components/ui/PaginationBar';
 
 type Drive = {
   drive_id: string;
@@ -48,9 +51,8 @@ const EMPTY_FORM = {
 
 export default function PlacementDrivesPage() {
   const api = useAuthedApi();
-  const [rows, setRows] = useState<Drive[]>([]);
+  const [offset, setOffset] = useState(0);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editDrive, setEditDrive] = useState<Drive | null>(null);
   const [saving, setSaving] = useState(false);
@@ -58,17 +60,22 @@ export default function PlacementDrivesPage() {
 
   const [editFields, setEditFields] = useState({ min_cgpa: '0', max_backlogs: '0', package_lpa: '6' });
 
-  const load = () => {
-    setLoading(true);
-    void api
-      .get<Drive[]>('/api/placement/drives')
-      .then(setRows)
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false));
-  };
+  const { data, isLoading, mutate } = useSWR<PaginatedResponse<Drive>>(
+    ['placement-drives', offset],
+    () => {
+      const q = new URLSearchParams({
+        limit: String(DEFAULT_PAGE_SIZE),
+        offset: String(offset),
+      });
+      return api.get<PaginatedResponse<Drive>>(`/api/placement/drives?${q}`);
+    },
+    { revalidateOnFocus: true, keepPreviousData: true },
+  );
+
+  const rows = data?.data ?? [];
+  const loading = isLoading && !data;
 
   useEffect(() => {
-    load();
     void api.get<Company[]>('/api/placement/companies').then(setCompanies).catch(() => setCompanies([]));
   }, [api]);
 
@@ -93,7 +100,7 @@ export default function PlacementDrivesPage() {
       });
       toast.success('Drive criteria updated — students see changes immediately');
       setEditDrive(null);
-      load();
+      await mutate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Update failed');
     } finally {
@@ -105,7 +112,7 @@ export default function PlacementDrivesPage() {
     try {
       await api.patch(`/api/placement/drives/${drive.drive_id}`, { status: 'CLOSED' });
       toast.success('Drive closed — hidden from students');
-      load();
+      await mutate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Close failed');
     }
@@ -128,7 +135,8 @@ export default function PlacementDrivesPage() {
       toast.success('Drive published — students notified');
       setDialogOpen(false);
       setForm(EMPTY_FORM);
-      load();
+      setOffset(0);
+      await mutate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Create failed');
     } finally {
@@ -228,6 +236,10 @@ export default function PlacementDrivesPage() {
           })}
         </div>
       )}
+
+      {data ? (
+        <PaginationBar total={data.total} limit={data.limit} offset={data.offset} onPageChange={setOffset} />
+      ) : null}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl rounded-2xl">

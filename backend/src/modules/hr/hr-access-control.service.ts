@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { CacheService } from '../../core/redis/cache.service';
 import type { HrPowerAction } from '../../common/decorators/require-hr-power.decorator';
 import type { HrAccessLevel, HrCapabilities, HrModuleKey } from './hr-entity-context.service';
 
@@ -65,7 +66,10 @@ export const LEGACY_TO_CONTROL_MODULE: Record<HrModuleKey, HrDelegationModule> =
 
 @Injectable()
 export class HrAccessControlService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly cache: CacheService,
+  ) {}
 
   legacyModuleKey(module: string): HrModuleKey {
     return module.trim().toLowerCase() as HrModuleKey;
@@ -102,21 +106,24 @@ export class HrAccessControlService {
 
   /** Single source of truth: hr_access_controls, with legacy JSONB fallback. */
   async getCapabilitiesForUser(tenantId: string, userId: string): Promise<HrCapabilities | null> {
-    const rows = await this.dataSource.query<AccessControlRow[]>(
-      `SELECT module_name, can_view, can_edit, can_approve, can_delete,
-              department_scope, entity_scope, access_id, user_id
-       FROM hr_access_controls WHERE tenant_id = $1 AND user_id = $2`,
-      [tenantId, userId],
-    );
-    if (rows.length) {
-      return this.buildCapabilitiesFromControls(rows);
-    }
+    const cacheKey = `hr_caps:${tenantId}:${userId}`;
+    return this.cache.getOrSet(cacheKey, async () => {
+      const rows = await this.dataSource.query<AccessControlRow[]>(
+        `SELECT module_name, can_view, can_edit, can_approve, can_delete,
+                department_scope, entity_scope, access_id, user_id
+         FROM hr_access_controls WHERE tenant_id = $1 AND user_id = $2`,
+        [tenantId, userId],
+      );
+      if (rows.length) {
+        return this.buildCapabilitiesFromControls(rows);
+      }
 
-    const legacy = await this.dataSource.query(
-      `SELECT capabilities FROM hr_permissions WHERE tenant_id = $1 AND user_id = $2`,
-      [tenantId, userId],
-    );
-    return (legacy[0]?.capabilities as HrCapabilities) ?? null;
+      const legacy = await this.dataSource.query(
+        `SELECT capabilities FROM hr_permissions WHERE tenant_id = $1 AND user_id = $2`,
+        [tenantId, userId],
+      );
+      return (legacy[0]?.capabilities as HrCapabilities) ?? null;
+    });
   }
 
   async syncHrPermissionsJsonb(
@@ -371,6 +378,7 @@ export class HrAccessControlService {
         powers.entity_scope ?? null,
       ],
     );
+    await this.cache.del(`hr_caps:${tenantId}:${userId}`);
     return rows[0];
   }
 

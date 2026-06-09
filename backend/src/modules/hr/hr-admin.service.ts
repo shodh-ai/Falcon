@@ -12,6 +12,11 @@ import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryptio
 import { HrEntityContextService } from './hr-entity-context.service';
 import { HrChecklistService } from './hr-checklist.service';
 import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
+import {
+  DEFAULT_PAGE_LIMIT,
+  type PaginatedResponse,
+  parsePageParams,
+} from '../../common/utils/pagination';
 
 const API_POINTS: Record<string, number> = {
   JOURNAL: 10,
@@ -52,7 +57,9 @@ export class HrAdminService {
     entityId: number,
     viewerUserId?: string,
     viewerRoles: string[] = [],
-  ) {
+    options?: { limit?: number; offset?: number; q?: string },
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    const { limit, offset } = parsePageParams(options?.limit, options?.offset, DEFAULT_PAGE_LIMIT);
     const params: unknown[] = [tenantId, entityId];
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     let deptClause = '';
@@ -72,12 +79,20 @@ export class HrAdminService {
         deptClause = ` AND u.dept_id = ANY($${params.length})`;
       }
     }
-    return this.dataSource.query(
-      `SELECT u.user_id, u.name, u.official_email AS email, u.is_active,
-              r.role_name AS role, d.dept_name AS department,
-              p.employee_id, p.designation, p.joining_date, p.entity_id,
-              oe.entity_name,
-              ro.name AS reporting_officer_name
+    let searchClause = '';
+    if (options?.q?.trim()) {
+      params.push(`%${options.q.trim().toLowerCase()}%`);
+      const idx = params.length;
+      searchClause = ` AND (
+        LOWER(u.name) LIKE $${idx}
+        OR LOWER(u.official_email) LIKE $${idx}
+        OR LOWER(p.employee_id) LIKE $${idx}
+        OR LOWER(d.dept_name) LIKE $${idx}
+        OR LOWER(p.designation) LIKE $${idx}
+      )`;
+    }
+
+    const baseFrom = `
        FROM users u
        LEFT JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
@@ -85,10 +100,28 @@ export class HrAdminService {
        LEFT JOIN org_entities oe ON oe.entity_id = p.entity_id
        LEFT JOIN users ro ON ro.user_id = u.reporting_officer_id
        WHERE u.tenant_id = $1
-         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}${deptClause}
-       ORDER BY u.name ASC`,
+         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}${deptClause}${searchClause}`;
+
+    const countRows = await this.dataSource.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::text AS total ${baseFrom}`,
       params,
     );
+    const total = Number(countRows[0]?.total ?? 0);
+
+    params.push(limit, offset);
+    const data = await this.dataSource.query(
+      `SELECT u.user_id, u.name, u.official_email AS email, u.is_active,
+              r.role_name AS role, d.dept_name AS department,
+              p.employee_id, p.designation, p.joining_date, p.entity_id,
+              oe.entity_name,
+              ro.name AS reporting_officer_name
+       ${baseFrom}
+       ORDER BY u.name ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+
+    return { data, total, limit, offset };
   }
 
   async getEmployee360(tenantId: string, userId: string, includeSensitive = false) {

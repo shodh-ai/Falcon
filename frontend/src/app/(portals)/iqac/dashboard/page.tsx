@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { IqacPageHeader } from '@/components/iqac/IqacPageHeader';
-import { IqacGauge } from '@/components/iqac/IqacCharts';
+import dynamic from 'next/dynamic';
+
+const IqacGauge = dynamic(
+  () => import('@/components/iqac/IqacCharts').then((m) => m.IqacGauge),
+  { ssr: false, loading: () => <div className="h-24 animate-pulse rounded-xl bg-muted" /> },
+);
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';

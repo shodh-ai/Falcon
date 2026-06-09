@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { FinanceService } from '../finance/finance.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { IsbnLookupService } from './isbn-lookup.service';
+import { CacheService } from '../../core/redis/cache.service';
 
 const RENEWAL_DAYS_STUDENT = 7;
 const RENEWAL_DAYS_FACULTY = 30;
@@ -32,6 +33,7 @@ export class LibraryService {
     private readonly finance: FinanceService,
     private readonly notify: NotificationEmitterService,
     private readonly isbnLookup: IsbnLookupService,
+    private readonly cache: CacheService,
   ) {}
 
   /** Resolve role from primary role_id; map teaching roles to Faculty rules when needed. */
@@ -53,15 +55,18 @@ export class LibraryService {
   async getBorrowingRulesForUser(userId: string): Promise<BorrowingRule> {
     const roleName = await this.getPatronRoleName(userId);
     const key = this.ruleRoleKey(roleName);
-    const rows = await this.dataSource.query<BorrowingRule[]>(
-      `SELECT * FROM lib_borrowing_rules WHERE role_name = $1`,
-      [key],
-    );
-    if (rows[0]) return rows[0];
-    const fallback = await this.dataSource.query<BorrowingRule[]>(
-      `SELECT * FROM lib_borrowing_rules WHERE role_name = 'Student'`,
-    );
-    return fallback[0] ?? { ...DEFAULT_RULE, rule_id: '' };
+    const cacheKey = `lib_borrowing_rules:${key}`;
+    return this.cache.getOrSet(cacheKey, async () => {
+      const rows = await this.dataSource.query<BorrowingRule[]>(
+        `SELECT * FROM lib_borrowing_rules WHERE role_name = $1`,
+        [key],
+      );
+      if (rows[0]) return rows[0];
+      const fallback = await this.dataSource.query<BorrowingRule[]>(
+        `SELECT * FROM lib_borrowing_rules WHERE role_name = 'Student'`,
+      );
+      return fallback[0] ?? { ...DEFAULT_RULE, rule_id: '' };
+    });
   }
 
   async getDashboardMetrics(tenantId: string) {

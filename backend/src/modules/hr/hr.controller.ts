@@ -562,7 +562,13 @@ export class HrController {
   @Get('directory')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean', 'President')
   @HrPermission('directory', 'read')
-  async directory(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async directory(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('q') q?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hrAdmin.listDirectory(
@@ -570,6 +576,11 @@ export class HrController {
       entity,
       req.user.user_id,
       this.resolveRoles(req.user),
+      {
+        limit: limit ? Number(limit) : undefined,
+        offset: offset ? Number(offset) : undefined,
+        q,
+      },
     );
   }
 

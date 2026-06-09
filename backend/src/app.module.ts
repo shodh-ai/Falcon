@@ -86,7 +86,11 @@ import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscr
         entities: Object.values(entities).filter((e) => typeof e === 'function'),
         subscribers: [EntityScopeSubscriber],
         synchronize: configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
-        logging: configService.get('NODE_ENV') === 'development',
+        logging:
+          configService.get('TYPEORM_LOGGING', 'true') === 'true'
+            ? ['query', 'error', 'warn']
+            : configService.get('NODE_ENV') === 'development',
+        maxQueryExecutionTime: Number(configService.get('TYPEORM_SLOW_MS', '200')),
       }),
       inject: [ConfigService],
     }),

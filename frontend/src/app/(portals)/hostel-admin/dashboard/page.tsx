@@ -1,16 +1,13 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
+
+const HostelOccupancyChart = dynamic(
+  () => import('@/components/hostel/HostelOccupancyChart'),
+  { ssr: false, loading: () => <div className="h-full animate-pulse rounded-xl bg-muted" /> },
+);
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -115,15 +112,7 @@ export default function HostelAdminDashboardPage() {
             <CardTitle className="text-base">Monthly Hostel Occupancy Trends</CardTitle>
           </CardHeader>
           <CardContent className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis domain={[0, 100]} unit="%" />
-                <Tooltip />
-                <Line type="monotone" dataKey="occupancy" stroke="#1e3a5f" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+            <HostelOccupancyChart data={chartData} />
           </CardContent>
         </Card>
 

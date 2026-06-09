@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DataTable } from '@/components/ui/DataTable';
 import { useAuthedApi } from '@/lib/api';
+import { fetchAllPages } from '@/lib/api/fetch-all-pages';
+import type { PaginatedResponse } from '@/lib/api/pagination';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
 import { toast } from 'sonner';
 
@@ -26,9 +28,15 @@ export default function HostelAttendancePage() {
 
   useEffect(() => {
     if (!hostelId) return;
-    void api
-      .get<StudentRow[]>(`/api/hostel-admin/students?hostelId=${hostelId}&status=ACTIVE`)
-      .then(setStudents);
+    void fetchAllPages<StudentRow>((offset, limit) => {
+      const q = new URLSearchParams({
+        hostelId,
+        status: 'ACTIVE',
+        limit: String(limit),
+        offset: String(offset),
+      });
+      return api.get<PaginatedResponse<StudentRow>>(`/api/hostel-admin/students?${q}`);
+    }).then(setStudents);
     void api
       .get<RollRow[]>(`/api/hostel-admin/roll-call?hostelId=${hostelId}&date=${date}`)
       .then(setRecords);

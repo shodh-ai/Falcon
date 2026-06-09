@@ -23,7 +23,10 @@ export default function HrKycVaultPage() {
 
   useEffect(() => {
     setLoading(true);
-    void api.get<EmployeeRow[]>('/api/hr/directory').then(setRows).finally(() => setLoading(false));
+    void api
+      .get<{ data: EmployeeRow[] }>('/api/hr/directory?limit=100&offset=0')
+      .then((res) => setRows(res.data))
+      .finally(() => setLoading(false));
   }, [api, entityId]);
 
   if (loading) return <FalconLoader label="Loading KYC vault index…" />;

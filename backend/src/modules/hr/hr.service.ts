@@ -1,6 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { Repository, In } from 'typeorm';
+import { HR_PAYROLL_QUEUE } from '../../common/constants/hr-payroll-queue.constants';
 import { LeaveRequest, LeaveRequestStatus } from '../../entities/leave-request.entity';
 import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
@@ -46,6 +49,7 @@ export class HrService {
     private readonly leavePolicies: HrLeavePolicyService,
     private readonly workflowBuilder: HrWorkflowBuilderService,
     private readonly hrWorkflow: HrWorkflowRoutingService,
+    @InjectQueue(HR_PAYROLL_QUEUE) private readonly payrollQueue: Queue,
   ) {}
 
   async createLeaveRequest(dto: CreateLeaveRequestDto) {
@@ -796,6 +800,59 @@ export class HrService {
       .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
       .getMany();
 
+    const eligibleStaff = staffUsers.filter((s) => Number(s.salary_base ?? 0) > 0);
+    const staffUserIds = eligibleStaff.map((s) => s.user_id);
+
+    const presentCounts =
+      staffUserIds.length > 0
+        ? await this.staffAttendance
+            .createQueryBuilder('attendance')
+            .select('attendance.user_id', 'user_id')
+            .addSelect('COUNT(*)', 'count')
+            .where('attendance.user_id IN (:...ids)', { ids: staffUserIds })
+            .andWhere('attendance.work_date BETWEEN :monthStart AND :monthEnd', {
+              monthStart,
+              monthEnd,
+            })
+            .andWhere('attendance.check_in_at IS NOT NULL')
+            .groupBy('attendance.user_id')
+            .getRawMany<{ user_id: string; count: string }>()
+        : [];
+    const presentByUser = new Map(presentCounts.map((r) => [r.user_id, Number(r.count)]));
+
+    const approvedLeaves =
+      staffUserIds.length > 0
+        ? await this.staffLeaveRequests
+            .createQueryBuilder('leave')
+            .where('leave.tenant_id = :tenantId', { tenantId })
+            .andWhere('leave.staff_user_id IN (:...ids)', { ids: staffUserIds })
+            .andWhere('leave.status = :status', { status: 'HR_APPROVED' })
+            .andWhere('leave.start_date <= :monthEnd AND leave.end_date >= :monthStart', {
+              monthStart,
+              monthEnd,
+            })
+            .getMany()
+        : [];
+    const leavesByUser = new Map<string, typeof approvedLeaves>();
+    for (const leave of approvedLeaves) {
+      const list = leavesByUser.get(leave.staff_user_id) ?? [];
+      list.push(leave);
+      leavesByUser.set(leave.staff_user_id, list);
+    }
+
+    const existingPayslips =
+      staffUserIds.length > 0
+        ? await this.payslips.find({
+            where: {
+              tenant_id: tenantId,
+              staff_user_id: In(staffUserIds),
+              month: monthName,
+              year,
+            },
+          })
+        : [];
+    const payslipByUser = new Map(existingPayslips.map((p) => [p.staff_user_id, p]));
+
     const results: Array<{
       payslip_id: string;
       staff_user_id: string;
@@ -808,34 +865,15 @@ export class HrService {
       lwp_days: string | null;
       is_published: boolean;
     }> = [];
+    const toSave: StaffPayslip[] = [];
 
-    for (const staff of staffUsers) {
+    for (const staff of eligibleStaff) {
       const salaryBase = Number(staff.salary_base ?? 0);
-      if (!salaryBase) continue;
-
-      const presentDays = await this.staffAttendance
-        .createQueryBuilder('attendance')
-        .where('attendance.user_id = :userId', { userId: staff.user_id })
-        .andWhere('attendance.work_date BETWEEN :monthStart AND :monthEnd', {
-          monthStart,
-          monthEnd,
-        })
-        .andWhere('attendance.check_in_at IS NOT NULL')
-        .getCount();
-
-      const approvedLeaves = await this.staffLeaveRequests
-        .createQueryBuilder('leave')
-        .where('leave.tenant_id = :tenantId', { tenantId })
-        .andWhere('leave.staff_user_id = :userId', { userId: staff.user_id })
-        .andWhere('leave.status = :status', { status: 'HR_APPROVED' })
-        .andWhere('leave.start_date <= :monthEnd AND leave.end_date >= :monthStart', {
-          monthStart,
-          monthEnd,
-        })
-        .getMany();
+      const presentDays = presentByUser.get(staff.user_id) ?? 0;
+      const staffLeaves = leavesByUser.get(staff.user_id) ?? [];
 
       let paidLeaveDays = 0;
-      for (const leave of approvedLeaves) {
+      for (const leave of staffLeaves) {
         const dates = this.expandDateRange(leave.start_date, leave.end_date).filter((date) => {
           const d = new Date(date);
           return (
@@ -851,18 +889,9 @@ export class HrService {
       const lwpDays = Math.max(0, workingDays - presentDays - paidLeaveDays);
       const dailyRate = salaryBase / workingDays;
       const netPay = Number((salaryBase - dailyRate * lwpDays).toFixed(2));
-
-      let payslip = await this.payslips.findOne({
-        where: {
-          tenant_id: tenantId,
-          staff_user_id: staff.user_id,
-          month: monthName,
-          year,
-        },
-      });
-
       const filePath = `/uploads/payslips/${staff.user_id}-${monthKey}.pdf`;
 
+      let payslip = payslipByUser.get(staff.user_id);
       if (payslip) {
         payslip.gross_pay = salaryBase.toFixed(2);
         payslip.net_pay = netPay.toFixed(2);
@@ -883,19 +912,23 @@ export class HrService {
           is_published: false,
         });
       }
+      toSave.push(payslip);
+    }
 
-      const saved = await this.payslips.save(payslip);
+    const saved = toSave.length ? await this.payslips.save(toSave) : [];
+    for (const slip of saved) {
+      const staff = eligibleStaff.find((s) => s.user_id === slip.staff_user_id);
       results.push({
-        payslip_id: saved.payslip_id,
-        staff_user_id: staff.user_id,
-        staff_name: staff.name,
+        payslip_id: slip.payslip_id,
+        staff_user_id: slip.staff_user_id,
+        staff_name: staff?.name ?? '',
         month: monthName,
         year,
-        gross_pay: saved.gross_pay,
-        net_pay: saved.net_pay,
-        working_days: saved.working_days,
-        lwp_days: saved.lwp_days,
-        is_published: saved.is_published,
+        gross_pay: slip.gross_pay,
+        net_pay: slip.net_pay,
+        working_days: slip.working_days,
+        lwp_days: slip.lwp_days,
+        is_published: slip.is_published,
       });
     }
 
@@ -915,10 +948,16 @@ export class HrService {
       .andWhere('user.is_active = true')
       .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
       .getCount();
+    const jobId = `payroll-${monthKey}-${Date.now()}`;
+    await this.payrollQueue.add(
+      'run',
+      { jobId, tenantId, monthKey, startedByUserId },
+      { jobId, removeOnComplete: 100, removeOnFail: 50 },
+    );
     return {
       statusCode: 202,
       queued: true,
-      job_id: `payroll-${monthKey}-${Date.now()}`,
+      job_id: jobId,
       month: monthKey,
       total_staff: staffCount,
       processed_staff: 0,

@@ -143,6 +143,25 @@ export function HodCommandCenter() {
 
   async function actOnInbox(row: InboxRow, action: 'APPROVE' | 'REJECT') {
     setActingId(row.id);
+    const previous = data;
+    if (previous) {
+      setData({
+        ...previous,
+        pending_inbox: previous.pending_inbox.filter((item) => item.id !== row.id),
+        health_metrics: {
+          ...previous.health_metrics,
+          pending_inbox_total: Math.max(0, previous.health_metrics.pending_inbox_total - 1),
+          pending_leave_count:
+            row.type === 'LEAVE'
+              ? Math.max(0, previous.health_metrics.pending_leave_count - 1)
+              : previous.health_metrics.pending_leave_count,
+          pending_gate_pass_count:
+            row.type === 'GATE_PASS'
+              ? Math.max(0, previous.health_metrics.pending_gate_pass_count - 1)
+              : previous.health_metrics.pending_gate_pass_count,
+        },
+      });
+    }
     try {
       if (row.type === 'LEAVE') {
         if (action === 'APPROVE') {
@@ -161,8 +180,9 @@ export function HodCommandCenter() {
         });
       }
       toast.success(action === 'APPROVE' ? 'Approved' : 'Rejected');
-      await load(true);
+      void load(true);
     } catch (e) {
+      if (previous) setData(previous);
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
       setActingId(null);

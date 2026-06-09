@@ -147,11 +147,23 @@ export class FacultyWorkspacesService {
       if (entry.marks_obtained < 0) {
         throw new BadRequestException('Marks cannot be negative');
       }
+    }
+
+    if (dto.entries.length > 0) {
+      const valuePlaceholders: string[] = [];
+      const params: unknown[] = [tenantId, dto.course_id, dto.exam_type, maxMarks, facultyUserId];
+      let paramIdx = 6;
+      for (const entry of dto.entries) {
+        valuePlaceholders.push(
+          `($1, $${paramIdx++}, $2, $3, $${paramIdx++}, $4, $${paramIdx++}, 'DRAFT', $5, NOW())`,
+        );
+        params.push(entry.student_user_id, entry.marks_obtained, entry.co_mapped ?? null);
+      }
       await this.dataSource.query(
         `INSERT INTO academic_marks (
            tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks,
            co_mapped, status, uploaded_by, updated_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'DRAFT',$8,NOW())
+         ) VALUES ${valuePlaceholders.join(', ')}
          ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
            marks_obtained = EXCLUDED.marks_obtained,
            max_marks = EXCLUDED.max_marks,
@@ -159,16 +171,7 @@ export class FacultyWorkspacesService {
            status = 'DRAFT',
            uploaded_by = EXCLUDED.uploaded_by,
            updated_at = NOW()`,
-        [
-          tenantId,
-          entry.student_user_id,
-          dto.course_id,
-          dto.exam_type,
-          entry.marks_obtained,
-          maxMarks,
-          entry.co_mapped ?? null,
-          facultyUserId,
-        ],
+        params,
       );
     }
     return { saved: dto.entries.length, status: 'DRAFT' };

@@ -1,10 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { CacheService } from '../../core/redis/cache.service';
 
 @Injectable()
 export class AdminOpsService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly cache: CacheService,
+  ) {}
 
   private tenant(tenantId?: string) {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
@@ -120,13 +124,18 @@ export class AdminOpsService {
   }
 
   listTimetable(tenantId?: string, academicYear?: string) {
-    return this.db.query(
-      `SELECT s.*, u.name AS faculty_name
-       FROM admin_timetable_slots s
-       LEFT JOIN users u ON u.user_id = s.faculty_user_id
-       WHERE s.tenant_id = $1 AND ($2::text IS NULL OR s.academic_year = $2)
-       ORDER BY s.day_of_week, s.start_time`,
-      [this.tenant(tenantId), academicYear ?? null],
+    const tid = this.tenant(tenantId);
+    const yearKey = academicYear ?? 'all';
+    const cacheKey = `timetable:${tid}:${yearKey}`;
+    return this.cache.getOrSet(cacheKey, () =>
+      this.db.query(
+        `SELECT s.*, u.name AS faculty_name
+         FROM admin_timetable_slots s
+         LEFT JOIN users u ON u.user_id = s.faculty_user_id
+         WHERE s.tenant_id = $1 AND ($2::text IS NULL OR s.academic_year = $2)
+         ORDER BY s.day_of_week, s.start_time`,
+        [tid, academicYear ?? null],
+      ),
     );
   }
 
@@ -151,13 +160,14 @@ export class AdminOpsService {
         `Room ${dto.room_code} already booked (${(conflicts[0] as { course_code: string }).course_code})`,
       );
     }
-    return this.db.query(
+    const tid = this.tenant(tenantId);
+    const result = await this.db.query(
       `INSERT INTO admin_timetable_slots
          (tenant_id, room_code, day_of_week, start_time, end_time, course_code, faculty_user_id, academic_year)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
-        this.tenant(tenantId),
+        tid,
         dto.room_code,
         dto.day_of_week,
         dto.start_time,
@@ -167,6 +177,8 @@ export class AdminOpsService {
         dto.academic_year,
       ],
     );
+    await this.cache.delByPrefix(`timetable:${tid}:`);
+    return result;
   }
 
   transportZones(tenantId?: string) {
