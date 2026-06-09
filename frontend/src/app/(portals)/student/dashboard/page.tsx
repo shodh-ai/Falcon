@@ -9,7 +9,8 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Bell, CalendarClock, CreditCard, GraduationCap, Sparkles, UserRoundCheck } from 'lucide-react';
+import Link from 'next/link';
+import { Bell, Briefcase, CalendarClock, ChevronRight, CreditCard, GraduationCap, Sparkles, UserRoundCheck } from 'lucide-react';
 import type { TimetableSlot } from '@/lib/mock/student-dashboard';
 import { useAuthedApi } from '@/lib/api';
 
@@ -25,6 +26,15 @@ type Alert = {
   title: string;
   message: string | null;
   is_read: boolean;
+};
+
+type OpenDrive = {
+  drive_id: string;
+  job_title?: string;
+  job_role?: string;
+  company_name: string;
+  package_lpa?: string | number;
+  min_cgpa: string | number;
 };
 
 type TimetableResponse = {
@@ -54,19 +64,25 @@ export default function StudentDashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
+  const [openDrives, setOpenDrives] = useState<OpenDrive[]>([]);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [metricsResult, alertsResult, timetableResult] = await Promise.allSettled([
+        const [metricsResult, alertsResult, timetableResult, placementsResult] = await Promise.allSettled([
           api.get<Summary>('/api/academics/dashboard/metrics'),
           api.get<Alert[]>('/api/notifications?limit=10'),
           api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
+          api.get<{ open_drives?: OpenDrive[]; open_jobs?: OpenDrive[] }>('/api/placement/student/hub'),
         ]);
 
         if (metricsResult.status === 'fulfilled') setSummary(metricsResult.value);
         if (alertsResult.status === 'fulfilled') setAlerts(alertsResult.value);
         else setAlerts([]);
+        if (placementsResult.status === 'fulfilled') {
+          const hub = placementsResult.value;
+          setOpenDrives((hub.open_drives ?? hub.open_jobs ?? []).slice(0, 3));
+        }
 
         const timetableRows = timetableResult.status === 'fulfilled' ? timetableResult.value : [];
         setTimetable(
@@ -187,6 +203,43 @@ export default function StudentDashboardPage() {
           </div>
         </StudentSectionCard>
       </div>
+
+      <StudentSectionCard
+        title="Open positions"
+        description="Campus recruitment drives — apply from the Placements Hub"
+        icon={Briefcase}
+        action={
+          <Link href="/student/placements" className="text-xs font-semibold text-sgvu-navy hover:underline">
+            View all
+          </Link>
+        }
+      >
+        {openDrives.length === 0 ? (
+          <StudentEmptyState
+            icon={Briefcase}
+            title="No open drives"
+            description="New placement opportunities will appear here when announced."
+          />
+        ) : (
+          <div className="space-y-3">
+            {openDrives.map((drive) => (
+              <Link
+                key={drive.drive_id}
+                href={`/student/placements?drive=${drive.drive_id}`}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-gold/40"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-sgvu-navy">{drive.job_role ?? drive.job_title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {drive.company_name} · ₹{Number(drive.package_lpa ?? 0).toFixed(1)} LPA · Min CGPA {drive.min_cgpa}
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </Link>
+            ))}
+          </div>
+        )}
+      </StudentSectionCard>
 
       <TimetableWidget slots={timetable} />
     </StudentPageShell>

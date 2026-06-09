@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { CommandMenu } from '@/components/layout/CommandMenu';
 import { LiveNotificationBell } from '@/components/layout/LiveNotificationBell';
+import { QuickActionMenu } from '@/components/layout/QuickActionMenu';
 import { ProfileMenu } from '@/components/layout/ProfileMenu';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher';
@@ -82,6 +83,7 @@ export function AppShell({ config, children, profileHref, headerExtra }: AppShel
               </div>
               {headerExtra}
               <WorkspaceSwitcher />
+              <QuickActionMenu />
               <LiveNotificationBell />
               <ProfileMenu profileHref={profileHref ?? config.homeHref.replace('/dashboard', '/profile')} />
             </div>

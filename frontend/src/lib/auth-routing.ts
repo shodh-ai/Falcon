@@ -109,6 +109,76 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   return role;
 }
 
+export type EssParentWorkspace = {
+  label: string;
+  shortLabel: string;
+  href: string;
+};
+
+type EssUserLike =
+  | {
+      role?: string;
+      roles?: string[];
+      primaryRole?: string;
+    }
+  | null
+  | undefined;
+
+/** Parent workspace when viewing ESS (Faculty, HOD, HR, etc.). */
+export function getEssParentWorkspace(user: EssUserLike): EssParentWorkspace {
+  const role = user?.primaryRole ?? user?.role ?? user?.roles?.[0] ?? 'Faculty';
+  return {
+    label: getWorkspaceLabelForRole(role),
+    shortLabel: getWorkspaceShortLabelForRole(role),
+    href: getDashboardPathForRole(role),
+  };
+}
+
+const ESS_RETURN_KEY = 'ess_return_to';
+
+/** Resolve back link: ?from= query, then sessionStorage, then role dashboard. */
+export function resolveEssBackHref(fromQuery: string | null, parent: EssParentWorkspace): string {
+  if (fromQuery && fromQuery.startsWith('/') && !fromQuery.startsWith('//')) {
+    return fromQuery;
+  }
+  if (typeof window !== 'undefined') {
+    const stored = sessionStorage.getItem(ESS_RETURN_KEY);
+    if (stored?.startsWith('/') && !stored.startsWith('//')) {
+      return stored;
+    }
+  }
+  return parent.href;
+}
+
+export function persistEssReturnTo(href: string) {
+  if (typeof window !== 'undefined' && href.startsWith('/') && !href.startsWith('//')) {
+    sessionStorage.setItem(ESS_RETURN_KEY, href);
+  }
+}
+
+const ESS_BREADCRUMB_LEAVES: Array<{ prefix: string; label: string }> = [
+  { prefix: '/ess/team/dashboard', label: 'Team Dashboard' },
+  { prefix: '/ess/team/attendance', label: 'Team Attendance' },
+  { prefix: '/ess/team/requests', label: 'Pending on Me' },
+  { prefix: '/ess/calendar', label: 'My Calendar' },
+  { prefix: '/ess/leaves', label: 'Leaves' },
+  { prefix: '/ess/documents', label: 'Document Vault' },
+  { prefix: '/ess/policies', label: 'Company Policies' },
+  { prefix: '/ess/onboarding', label: 'Onboarding' },
+  { prefix: '/ess/offboarding', label: 'Resignation' },
+];
+
+export function isEssTeamPath(pathname: string): boolean {
+  return pathname === '/ess/team' || pathname.startsWith('/ess/team/');
+}
+
+export function getEssBreadcrumbLeaf(pathname: string): string {
+  const match = [...ESS_BREADCRUMB_LEAVES]
+    .sort((a, b) => b.prefix.length - a.prefix.length)
+    .find((p) => pathname === p.prefix || pathname.startsWith(`${p.prefix}/`));
+  return match?.label ?? 'Employee Self-Service';
+}
+
 export type HrCapabilities = Partial<Record<string, 'none' | 'read' | 'write'>>;
 
 const hrPathModules: Array<{ prefix: string; module: string }> = [

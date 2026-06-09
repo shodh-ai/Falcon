@@ -45,10 +45,14 @@ export class HostelAdminService {
 
   async assertHostelAccess(ctx: AuthCtx, hostelId: string | null | undefined) {
     if (!hostelId) {
-      if (!this.isGlobalAdmin(ctx.roles)) {
-        throw new ForbiddenException('All-hostels view requires Hostel Admin or Super Admin role.');
-      }
-      return;
+      if (this.isGlobalAdmin(ctx.roles)) return;
+      const allowed = await this.getAccessibleHostelIds(ctx);
+      if (allowed?.length) return;
+      throw new ForbiddenException(
+        allowed?.length === 0
+          ? 'No hostel is assigned to your account. Contact administration.'
+          : 'All-hostels view requires Hostel Admin or Super Admin role.',
+      );
     }
     const allowed = await this.getAccessibleHostelIds(ctx);
     if (allowed === null) return;
@@ -197,10 +201,10 @@ export class HostelAdminService {
 
     return this.db.query(
       `SELECT a.allocation_id, a.status, a.bed_number, a.mess_plan,
-              u.user_id AS student_user_id, u.name, u.email,
-              COALESCE(sp.enrollment_no, u.official_email) AS student_id,
+              u.user_id AS student_user_id, u.name, u.official_email AS email,
+              COALESCE(sp.enrollment_number, sp.admission_number, u.official_email) AS student_id,
               h.hostel_name, h.hostel_code, r.room_number, r.floor, r.room_type,
-              sp.batch AS program_name, d.dept_name,
+              COALESCE(sp.admission_number, sp.enrollment_number) AS program_name, d.dept_name,
               COALESCE(
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
                 1
@@ -235,7 +239,7 @@ export class HostelAdminService {
   async listRollCall(ctx: AuthCtx, hostelId: string, date: string) {
     await this.assertHostelAccess(ctx, hostelId);
     return this.db.query(
-      `SELECT rc.*, u.name AS student_name, u.email, m.name AS marked_by_name
+      `SELECT rc.*, u.name AS student_name, u.official_email AS email, m.name AS marked_by_name
        FROM operations_hostel_roll_call rc
        JOIN users u ON u.user_id = rc.student_user_id
        JOIN users m ON m.user_id = rc.marked_by_user_id

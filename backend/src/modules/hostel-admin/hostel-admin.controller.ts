@@ -4,7 +4,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { HostelAdminService } from './hostel-admin.service';
 
-type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
+type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
 
 @Controller('api/hostel-admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -13,10 +13,15 @@ export class HostelAdminController {
   constructor(private readonly hostelAdmin: HostelAdminService) {}
 
   private ctx(req: { user: AuthUser }) {
+    const roles = req.user.roles?.length
+      ? req.user.roles
+      : req.user.role
+        ? [req.user.role]
+        : [];
     return {
       userId: req.user.user_id,
       tenantId: req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
-      roles: req.user.roles ?? [],
+      roles,
     };
   }
 

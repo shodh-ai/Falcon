@@ -1145,6 +1145,20 @@ export class HrController {
     return new StreamableFile(buf);
   }
 
+  @Get('team/pending-counts')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamPendingCounts(
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+  ) {
+    return this.team.getPendingCounts(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      scope,
+    );
+  }
+
   @Get('ess/team/requests')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
@@ -1529,6 +1543,7 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body() dto: {
       request_type: StaffRequestType;
+      staff_user_id?: string;
       leave_type?: string;
       start_date?: string;
       end_date?: string;
@@ -1537,7 +1552,16 @@ export class HrController {
       reason?: string;
     },
   ) {
-    return this.workforce.applyRequest(req.user.user_id, this.resolveTenantId(req.user), dto);
+    const roles = this.resolveRoles(req.user);
+    const canApplyForOthers = roles.some((r) => ['HRAdmin', 'SuperAdmin', 'HR'].includes(r));
+    const targetUserId =
+      dto.staff_user_id && canApplyForOthers ? dto.staff_user_id : req.user.user_id;
+    return this.workforce.applyRequest(
+      targetUserId,
+      this.resolveTenantId(req.user),
+      dto,
+      { actorRoles: roles },
+    );
   }
 
   @Get('workforce/my-requests')

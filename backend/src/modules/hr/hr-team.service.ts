@@ -323,6 +323,72 @@ export class HrTeamService {
     return Buffer.from(buf);
   }
 
+  async getPendingCounts(
+    managerId: string,
+    tenantId: string,
+    scopeRaw?: string,
+  ) {
+    const scope = parseTeamScope(scopeRaw);
+    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    const userIds = members.map((m) => m.user_id);
+
+    const empty = {
+      leaves: 0,
+      regularization: 0,
+      onDuty: 0,
+      compOff: 0,
+      documents: 0,
+      appraisals: 0,
+    };
+
+    if (!userIds.length) {
+      return { scope, ...empty };
+    }
+
+    const workflowRows = await this.dataSource.query<Array<{ request_type: string; count: string }>>(
+      `SELECT r.request_type, COUNT(*)::text AS count
+       FROM staff_leave_requests r
+       WHERE r.tenant_id = $1
+         AND r.status = 'PENDING'
+         AND r.current_approver_user_id = $2
+         AND r.staff_user_id = ANY($3::uuid[])
+       GROUP BY r.request_type`,
+      [tenantId, managerId, userIds],
+    );
+
+    const { clause, params } = this.scope.scopeUserFilterSql(managerId, tenantId, scope, 'u', 2);
+
+    const [docRow] = await this.dataSource.query<Array<{ count: string }>>(
+      `SELECT COUNT(*)::text AS count
+       FROM hr_employee_documents d
+       WHERE d.tenant_id = $1
+         AND d.verification_status = 'PENDING'
+         AND d.user_id IN (SELECT u.user_id FROM users u WHERE 1=1 ${clause})`,
+      [tenantId, ...params],
+    );
+
+    const [appraisalRow] = await this.dataSource.query<Array<{ count: string }>>(
+      `SELECT COUNT(*)::text AS count
+       FROM hr_employee_appraisals a
+       WHERE a.tenant_id = $1
+         AND a.hr_final_status = 'HOD_REVIEW'
+         AND a.user_id IN (SELECT u.user_id FROM users u WHERE 1=1 ${clause})`,
+      [tenantId, ...params],
+    );
+
+    const byType = Object.fromEntries(workflowRows.map((r) => [r.request_type, Number(r.count)]));
+
+    return {
+      scope,
+      leaves: byType.LEAVE ?? 0,
+      regularization: byType.REGULARIZATION ?? 0,
+      onDuty: byType.ON_DUTY ?? 0,
+      compOff: byType.COMP_OFF_CREDIT ?? 0,
+      documents: Number(docRow?.count ?? 0),
+      appraisals: Number(appraisalRow?.count ?? 0),
+    };
+  }
+
   async listTeamRequests(
     managerId: string,
     tenantId: string,

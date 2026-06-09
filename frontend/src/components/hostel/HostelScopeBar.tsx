@@ -20,9 +20,13 @@ export function HostelScopeBar({
   useEffect(() => {
     void api.get<Hostel[]>('/api/hostel-admin/hostels').then((list) => {
       setHostels(list);
-      if (!value && list[0]) onChange(list[0].hostel_id);
+      if (!value && list.length === 1) {
+        onChange(list[0].hostel_id);
+      } else if (!value && !allowAll && list[0]) {
+        onChange(list[0].hostel_id);
+      }
     });
-  }, [api]);
+  }, [api, allowAll, onChange, value]);
 
   return (
     <select

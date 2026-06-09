@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
+import { useAuthedApi } from '@/lib/api';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import type { VaultDocument, VaultResponse } from '@/lib/api/api.hr-documents';
@@ -18,14 +19,19 @@ type Props = {
   onRefresh?: () => void;
 };
 
+type VaultApi = {
+  get: <T>(path: string) => Promise<T>;
+  post: <T>(path: string, body?: unknown) => Promise<T>;
+  patch: <T>(path: string, body?: unknown) => Promise<T>;
+};
+
 function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'VERIFIED') return 'default';
   if (status === 'REJECTED') return 'destructive';
   return 'secondary';
 }
 
-export function DocumentVaultGrid({ userId, mode }: Props) {
-  const api = useHrApi();
+function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }) {
   const { token } = useAuth();
   const [vault, setVault] = useState<VaultResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -228,4 +234,21 @@ export function DocumentVaultGrid({ userId, mode }: Props) {
       )}
     </div>
   );
+}
+
+function EssDocumentVaultGrid() {
+  const api = useAuthedApi();
+  return <DocumentVaultGridInner mode="ess" api={api} />;
+}
+
+function HrEmployeeDocumentVaultGrid({ userId }: { userId?: string }) {
+  const api = useHrApi();
+  return <DocumentVaultGridInner mode="hr" userId={userId} api={api} />;
+}
+
+export function DocumentVaultGrid({ userId, mode }: Props) {
+  if (mode === 'ess') {
+    return <EssDocumentVaultGrid />;
+  }
+  return <HrEmployeeDocumentVaultGrid userId={userId} />;
 }

@@ -16,6 +16,7 @@ import {
   type FeeGeneratedPayload,
   type GatePassUpdatedPayload,
   type JobPostedPayload,
+  type PlacementStageUpdatedPayload,
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
@@ -166,6 +167,20 @@ export class NotificationEventsListener {
     });
   }
 
+  @OnEvent(NotificationEvents.EXAM_RESULTS_PUBLISHED)
+  async onExamResultsPublished(payload: MarksPublishedPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'ACADEMICS',
+      title: payload.title || 'Results Declared 🔔',
+      message:
+        payload.message ||
+        `Your End-Semester results for ${payload.courseName} have been declared!`,
+      actionLink: payload.actionLink ?? '/student/marks',
+    });
+  }
+
   @OnEvent(NotificationEvents.OPERATIONS_GATE_PASS_UPDATED)
   async onGatePassUpdated(payload: GatePassUpdatedPayload) {
     const approved = payload.status === 'APPROVED';
@@ -253,6 +268,18 @@ export class NotificationEventsListener {
       message:
         payload.message ||
         `${payload.companyName} is hiring for ${payload.roleTitle}. Apply before the deadline.`,
+      actionLink: payload.actionLink ?? '/student/placements',
+    });
+  }
+
+  @OnEvent(NotificationEvents.PLACEMENT_STAGE_UPDATED)
+  async onPlacementStageUpdated(payload: PlacementStageUpdatedPayload) {
+    await this.persistAndQueue({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'PLACEMENT',
+      title: payload.title || 'Placement Update',
+      message: payload.message || `Your application at ${payload.companyName} was updated.`,
       actionLink: payload.actionLink ?? '/student/placements',
     });
   }

@@ -29,11 +29,22 @@ export default function HostelStudentsPage() {
   const [rows, setRows] = useState<StudentRow[]>([]);
 
   async function load() {
-    const q = new URLSearchParams();
-    if (hostelId) q.set('hostelId', hostelId);
-    if (status) q.set('status', status);
-    const data = await api.get<StudentRow[]>(`/api/hostel-admin/students?${q}`);
-    setRows(data);
+    try {
+      const q = new URLSearchParams();
+      if (hostelId) q.set('hostelId', hostelId);
+      if (status) q.set('status', status);
+      const data = await api.get<StudentRow[]>(`/api/hostel-admin/students?${q}`);
+      setRows(data);
+    } catch (e) {
+      setRows([]);
+      const raw = e instanceof Error ? e.message : 'Failed to load students';
+      try {
+        const parsed = JSON.parse(raw) as { message?: string };
+        toast.error(parsed.message ?? raw);
+      } catch {
+        toast.error(raw);
+      }
+    }
   }
 
   useEffect(() => {
