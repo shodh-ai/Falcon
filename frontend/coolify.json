@@ -1,0 +1,13 @@
+{
+  "$schema": "https://cdn.coollabs.io/coolify/coolify.schema.json",
+  "name": "falcon-frontend",
+  "build": {
+    "build_pack": "dockerfile",
+    "dockerfile_location": "Dockerfile"
+  },
+  "network": {
+    "ports": {
+      "expose": "3000"
+    }
+  }
+}
