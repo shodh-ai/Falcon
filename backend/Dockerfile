@@ -1,5 +1,7 @@
 # Build stage — force devDependencies even when Coolify injects NODE_ENV=production at build time
-FROM node:20-alpine AS builder
+# Override NODE_IMAGE in Coolify if Docker Hub times out, e.g. public.ecr.aws/docker/library/node:20-alpine
+ARG NODE_IMAGE=node:20-alpine
+FROM ${NODE_IMAGE} AS builder
 
 WORKDIR /app
 
@@ -13,7 +15,8 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 
 # Production stage — reuse pruned node_modules from builder (avoids a second full npm ci)
-FROM node:20-alpine AS production
+ARG NODE_IMAGE=node:20-alpine
+FROM ${NODE_IMAGE} AS production
 
 WORKDIR /app
 
