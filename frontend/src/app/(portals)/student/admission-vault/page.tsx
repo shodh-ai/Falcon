@@ -82,8 +82,8 @@ export default function StudentAdmissionVaultPage() {
         )}
       </StudentSectionCard>
 
-      <StudentSectionCard title="Documents & receipts" description="Verified certificates and fee payment records" icon={Receipt}>
-        {(data?.documents ?? []).length === 0 && (data?.admission_fee_receipts ?? []).length === 0 ? (
+      <StudentSectionCard title="Admission documents" description="Verified certificates uploaded at the time of admission" icon={FileCheck2}>
+        {(data?.documents ?? []).length === 0 ? (
           <StudentEmptyState title="No documents on file" description="Uploaded admission documents will appear here." />
         ) : (
           <div className="space-y-3 text-sm">
@@ -93,6 +93,15 @@ export default function StudentAdmissionVaultPage() {
                 <Badge variant="outline">{String(doc.verification_status)}</Badge>
               </div>
             ))}
+          </div>
+        )}
+      </StudentSectionCard>
+
+      <StudentSectionCard title="Fee payment receipts" description="Admission fee payment records and transaction history" icon={Receipt}>
+        {(data?.admission_fee_receipts ?? []).length === 0 ? (
+          <StudentEmptyState title="No fee receipts" description="Fee payment records will appear here once processed." />
+        ) : (
+          <div className="space-y-3 text-sm">
             {(data?.admission_fee_receipts ?? []).map((r) => (
               <div key={String(r.demand_id)} className="rounded-2xl border border-border/70 bg-white p-3">
                 <p className="font-medium text-sgvu-navy">{String(r.fee_head)}</p>
