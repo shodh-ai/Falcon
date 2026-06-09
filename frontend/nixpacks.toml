@@ -1,0 +1,14 @@
+# Coolify Nixpacks — Base Directory: frontend, Build Pack: Nixpacks
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+NODE_OPTIONS = "--max-old-space-size=4096"
+NPM_CONFIG_PRODUCTION = "false"
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["NODE_ENV=production npm run build"]
+
+[start]
+cmd = "npm start"
