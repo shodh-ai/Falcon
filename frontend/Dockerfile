@@ -7,6 +7,7 @@ WORKDIR /app
 
 ENV NODE_ENV=development
 ENV npm_config_production=false
+ENV NODE_OPTIONS=--max-old-space-size=4096
 
 COPY package*.json ./
 RUN npm ci
@@ -14,7 +15,7 @@ RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-# Production stage
+# Production stage — Next.js standalone output (no full node_modules copy)
 ARG NODE_IMAGE=public.ecr.aws/docker/library/node:20-alpine
 FROM ${NODE_IMAGE} AS production
 
@@ -22,13 +23,12 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
-COPY package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
-COPY next.config.js ./
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
