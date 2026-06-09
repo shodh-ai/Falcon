@@ -13,5 +13,6 @@ import { AdmitCardPdfService } from './pdf/admit-card-pdf.service';
   imports: [TypeOrmModule.forFeature([ExamSchedule, ExamApplication, AttendanceRecord, User]), FinanceModule],
   controllers: [ExamsController],
   providers: [ExamsService, AdmitCardPdfService],
+  exports: [ExamsService, AdmitCardPdfService],
 })
 export class ExamsModule {}

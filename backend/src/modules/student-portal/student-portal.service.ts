@@ -11,6 +11,7 @@ import { TicketService } from '../helpdesk/ticket.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { resolvePlacementSchema } from '../placement/placement-schema';
 
 const EXTRA_CERT_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
 
@@ -602,26 +603,57 @@ export class StudentPortalService {
   }
 
   async getPlacements(tenantId: string, userId: string) {
-    const jobs = await this.dataSource.query(
-      `SELECT j.jd_id, j.title AS job_title, j.min_cgpa, j.application_deadline, c.company_name, j.job_profile
-       FROM placement_job_descriptions j
-       JOIN placement_companies c ON c.company_id = j.company_id
-       WHERE j.tenant_id = $1 AND j.status = 'OPEN'
-       ORDER BY j.created_at DESC`,
-      [tenantId],
+    const s = await resolvePlacementSchema(this.dataSource).catch(() => null);
+
+    if (s?.drivesTable === 'placement_ats_drives') {
+      const drives = await this.dataSource.query(
+        `SELECT d.drive_id, COALESCE(d.job_role, d.job_profile) AS job_title, d.min_cgpa,
+                COALESCE(d.deadline, d.drive_date::timestamptz) AS application_deadline,
+                COALESCE(d.package_lpa, d.package_details_lpa) AS package_lpa,
+                c.company_name, d.description
+         FROM placement_ats_drives d
+         JOIN placement_companies c ON c.company_id = d.company_id
+         WHERE d.tenant_id = $1 AND d.status IN ('ACTIVE', 'OPEN')
+         ORDER BY d.created_at DESC`,
+        [tenantId],
+      ).catch(() => []);
+
+      const applications = await this.dataSource.query(
+        `SELECT a.application_id, a.pipeline_stage AS status, a.rejected_at_stage,
+                a.applied_at, COALESCE(d.job_role, d.job_profile) AS job_title,
+                c.company_name, d.drive_id
+         FROM placement_ats_drive_applications a
+         JOIN placement_ats_drives d ON d.drive_id = a.drive_id
+         JOIN placement_companies c ON c.company_id = d.company_id
+         WHERE a.student_user_id = $1
+         ORDER BY a.applied_at DESC`,
+        [userId],
+      ).catch(() => []);
+
+      return { open_jobs: drives, my_applications: applications };
+    }
+
+    const drives = await this.dataSource.query(
+      `SELECT d.placement_drive_id AS drive_id,
+              COALESCE(d.job_role, d.role_title) AS job_title, d.min_cgpa,
+              d.deadline AS application_deadline, d.package_lpa, d.company_name, d.description
+       FROM placement_drives d
+       WHERE d.status IN ('ACTIVE', 'OPEN')
+       ORDER BY d.created_at DESC`,
     ).catch(() => []);
 
     const applications = await this.dataSource.query(
-      `SELECT pa.application_id, pa.status, pa.applied_at, j.title AS job_title, c.company_name
-       FROM placement_applications pa
-       JOIN placement_job_descriptions j ON j.jd_id = pa.jd_id
-       JOIN placement_companies c ON c.company_id = j.company_id
-       WHERE pa.student_user_id = $1
-       ORDER BY pa.applied_at DESC`,
+      `SELECT a.application_id, COALESCE(a.status, 'APPLIED') AS status,
+              a.applied_at, COALESCE(d.job_role, d.role_title) AS job_title,
+              d.company_name, d.placement_drive_id AS drive_id
+       FROM placement_applications a
+       JOIN placement_drives d ON d.placement_drive_id = a.placement_drive_id
+       WHERE a.student_user_id = $1
+       ORDER BY a.applied_at DESC NULLS LAST`,
       [userId],
     ).catch(() => []);
 
-    return { open_jobs: jobs, my_applications: applications };
+    return { open_jobs: drives, my_applications: applications };
   }
 
   async getFinanceLedger(userId: string) {

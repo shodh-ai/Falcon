@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -17,6 +17,12 @@ export class CampusWalletController {
     return this.wallet.getOrCreateWallet(this.tenant(req), req.user.user_id);
   }
 
+  @Get('ledger')
+  @Roles('Student')
+  ledger(@Req() req: { user: AuthUser }) {
+    return this.wallet.getLedger(this.tenant(req), req.user.user_id);
+  }
+
   @Post('top-up')
   @Roles('Student', 'SuperAdmin')
   topUp(@Req() req: { user: AuthUser }, @Body() dto: { amount: number; reference_id: string }) {
@@ -29,10 +35,41 @@ export class CampusWalletController {
     return this.wallet.listCatalog(this.tenant(req));
   }
 
+  @Get('mess/daily-menu')
+  @Roles('Student')
+  dailyMenu(@Req() req: { user: AuthUser }, @Query('date') date?: string) {
+    const orderDate = date ?? new Date().toISOString().slice(0, 10);
+    return this.wallet.getDailyMenu(this.tenant(req), orderDate);
+  }
+
+  @Get('mess/order-window')
+  @Roles('Student')
+  orderWindow() {
+    return this.wallet.getOrderWindow();
+  }
+
   @Post('mess/pre-order')
   @Roles('Student')
-  preOrder(@Req() req: { user: AuthUser }, @Body() dto: { item_id: string; order_date: string; meal_type: string }) {
+  preOrder(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { item_id: string; order_date: string; meal_type: string },
+  ) {
     return this.wallet.preOrderAddon(this.tenant(req), req.user.user_id, dto);
+  }
+
+  @Post('mess/order')
+  @Roles('Student')
+  placeOrder(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { order_date: string; items: { item_id: string; meal_type: string; quantity?: number }[] },
+  ) {
+    return this.wallet.placeOrder(this.tenant(req), req.user.user_id, dto);
+  }
+
+  @Get('mess/my-orders')
+  @Roles('Student')
+  myOrders(@Req() req: { user: AuthUser }, @Query('all') all?: string) {
+    return this.wallet.listMyOrders(this.tenant(req), req.user.user_id, all !== 'true');
   }
 
   @Get('mess/qr')

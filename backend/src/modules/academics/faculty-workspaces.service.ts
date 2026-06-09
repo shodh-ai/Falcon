@@ -131,6 +131,14 @@ export class FacultyWorkspacesService {
       throw new BadRequestException('Invalid exam_type');
     }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
+    const locked = await this.dataSource.query(
+      `SELECT 1 FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PUBLISHED' LIMIT 1`,
+      [tenantId, dto.course_id, dto.exam_type],
+    );
+    if (locked[0]) {
+      throw new ForbiddenException('Marks are COE-published and locked. Contact Exam Cell for changes.');
+    }
     const maxMarks = dto.max_marks;
     for (const entry of dto.entries) {
       if (entry.marks_obtained > maxMarks) {
@@ -175,8 +183,8 @@ export class FacultyWorkspacesService {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
     const result = await this.dataSource.query(
       `UPDATE academic_marks
-       SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW()
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4
+       SET status = 'PENDING_COE', updated_at = NOW()
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4 AND status = 'DRAFT'
        RETURNING mark_id`,
       [tenantId, courseId, examType, facultyUserId],
     );
@@ -186,27 +194,14 @@ export class FacultyWorkspacesService {
       [courseId, tenantId],
     );
     const courseName = courseRows[0]?.course_name ?? 'your course';
-    const students = await this.dataSource.query<Array<{ student_user_id: string }>>(
-      `SELECT student_user_id FROM student_course_enrollments
-       WHERE course_id = $1 AND tenant_id = $2`,
-      [courseId, tenantId],
-    );
-    for (const row of students) {
-      this.notify.marksPublished({
-        tenantId,
-        userId: row.student_user_id,
-        courseName,
-        examType,
-      });
-    }
 
     const publishedCount = result.length;
     if (publishedCount === 0) {
       throw new BadRequestException(
-        'No draft marks found to publish. Save draft marks first for this course and exam type.',
+        'No draft marks found to submit. Save draft marks first for this course and exam type.',
       );
     }
-    return { published: publishedCount };
+    return { published: publishedCount, status: 'PENDING_COE', course_name: courseName };
   }
 
   async listCoPoMappings(tenantId: string, courseId: string) {

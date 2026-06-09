@@ -5,6 +5,7 @@ import { FINANCE_BULK_DEMAND_QUEUE } from '../../common/constants/finance-queue.
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
 import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
+import { CampusWalletModule } from '../campus-wallet/campus-wallet.module';
 import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
 import { FinanceWebhookService } from './finance-webhook.service';
@@ -17,6 +18,7 @@ import { FinanceBulkDemandProcessor } from './finance-bulk-demand.processor';
   imports: [
     BullModule.registerQueue({ name: FINANCE_BULK_DEMAND_QUEUE }),
     TypeOrmModule.forFeature([FeeDemand, Transaction, LateFinePolicy]),
+    CampusWalletModule,
   ],
   controllers: [FinanceController],
   providers: [

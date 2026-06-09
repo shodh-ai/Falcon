@@ -4,6 +4,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Transaction } from '../../entities/transaction.entity';
 import { FeeDemand } from '../../entities/fee-demand.entity';
+import { CampusWalletService } from '../campus-wallet/campus-wallet.service';
 import { GatewayWebhookDto } from './dto/gateway-webhook.dto';
 import { FinanceReceiptService } from './finance-receipt.service';
 import { FinanceLedgerService } from './finance-ledger.service';
@@ -19,6 +20,7 @@ export class FinanceWebhookService {
     private readonly receipts: FinanceReceiptService,
     private readonly ledger: FinanceLedgerService,
     private readonly events: EventEmitter2,
+    private readonly campusWallet: CampusWalletService,
   ) {}
 
   /**
@@ -125,6 +127,23 @@ export class FinanceWebhookService {
         received: true,
         processed: true,
         hostel_booking: true,
+        transaction_id: txn.transaction_id,
+      };
+    }
+
+    if (feeHead === 'WALLET_TOPUP' && studentUserId) {
+      const tenantRows = await this.dataSource.query(`SELECT tenant_id FROM users WHERE user_id = $1`, [
+        studentUserId,
+      ]);
+      const tenantId =
+        tenantIdFromNotes ||
+        (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
+        'a0000000-0000-4000-8000-000000000001';
+      await this.campusWallet.topUp(tenantId, studentUserId, amount, paymentId);
+      return {
+        received: true,
+        processed: true,
+        wallet_topup: true,
         transaction_id: txn.transaction_id,
       };
     }

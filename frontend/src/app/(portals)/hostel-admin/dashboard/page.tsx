@@ -14,6 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
 
@@ -38,7 +39,19 @@ export default function HostelAdminDashboardPage() {
 
   useEffect(() => {
     const q = hostelId ? `?hostelId=${hostelId}` : '';
-    void api.get<Dashboard>(`/api/hostel-admin/dashboard${q}`).then(setData);
+    void api
+      .get<Dashboard>(`/api/hostel-admin/dashboard${q}`)
+      .then(setData)
+      .catch((err) => {
+        setData(null);
+        const raw = err instanceof Error ? err.message : 'Failed to load dashboard';
+        try {
+          const parsed = JSON.parse(raw) as { message?: string };
+          toast.error(parsed.message ?? raw);
+        } catch {
+          toast.error(raw);
+        }
+      });
   }, [api, hostelId]);
 
   const m = data?.metrics;

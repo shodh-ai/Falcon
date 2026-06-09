@@ -2,7 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 
 
 export type ExamApplicationType = 'RE_EVALUATION' | 'BACKLOG';
 export type ExamApplicationFeeStatus = 'PENDING' | 'PAID' | 'WAIVED';
-export type ExamApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ExamApplicationStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
 @Entity('exam_applications')
 @Index(['student_user_id'])

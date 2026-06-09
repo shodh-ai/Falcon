@@ -241,6 +241,7 @@ export const studentPortal: PortalConfig = {
       items: [
         { label: 'My Financial Ledger', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
         { label: 'Hostel & Mess', href: '/student/hostel', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'room'] },
+        { label: 'Smart Mess & Wallet', href: '/student/dining', icon: UtensilsCrossed, keywords: ['dining', 'mess', 'wallet', 'add-on', 'qr', 'falcon pay'] },
         { label: 'Hostel Bed Booking', href: '/student/hostel-booking', icon: BedDouble, keywords: ['tatkal', 'bed', 'allocation'] },
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
@@ -267,6 +268,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
     { label: 'Financial Ledger', href: '/student/finance', icon: Wallet },
     { label: 'Hostel', href: '/student/hostel', icon: Bus },
+    { label: 'Smart Mess', href: '/student/dining', icon: UtensilsCrossed },
     { label: 'Falcon Events', href: '/student/events', icon: PartyPopper },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
@@ -719,25 +721,36 @@ export const parentPortal: PortalConfig = {
 };
 
 export const examCellPortal: PortalConfig = {
-  personaLabel: 'Exam Cell',
-  personaTitle: 'Assessment Control',
+  personaLabel: 'Falcon Exam OS',
+  personaTitle: 'Controller of Examinations',
   homeHref: '/exam-cell/dashboard',
   navGroups: [
     {
-      title: 'Exam Operations',
+      title: 'Pre-Exam Operations',
       items: [
-        { label: 'Dashboard', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['exam cell'] },
-        { label: 'Seating Plans', href: '/exam-cell/seating-plans', icon: ClipboardList, keywords: ['seating', 'rooms'] },
-        { label: 'Grade Cards', href: '/exam-cell/grade-cards', icon: Award, keywords: ['grade cards'] },
-        { label: 'UFM Cases', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
+        { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'exam cell'] },
+        { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term'] },
+        { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
+        { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms'] },
+        { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty'] },
+      ],
+    },
+    {
+      title: 'Post-Exam Operations',
+      items: [
+        { label: 'Result Processing', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve'] },
+        { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
+        { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
+        { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
       ],
     },
   ],
   commandItems: [
-    { label: 'Exam Cell Dashboard', href: '/exam-cell/dashboard', icon: LayoutDashboard },
-    { label: 'Seating Plans', href: '/exam-cell/seating-plans', icon: ClipboardList },
-    { label: 'Grade Cards', href: '/exam-cell/grade-cards', icon: Award },
-    { label: 'UFM Cases', href: '/exam-cell/ufm-cases', icon: Shield },
+    { label: 'Exam OS Dashboard', href: '/exam-cell/dashboard', icon: LayoutDashboard },
+    { label: 'Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays },
+    { label: 'Admit Cards', href: '/exam-cell/admit-cards', icon: Ticket },
+    { label: 'Publish Results', href: '/exam-cell/results', icon: TrendingUp },
+    { label: 'UFM Desk', href: '/exam-cell/ufm-cases', icon: Shield },
   ],
 };
 
@@ -828,7 +841,7 @@ export const placementPortal: PortalConfig = {
       items: [
         { label: 'Dashboard', href: '/placements/dashboard', icon: LayoutDashboard },
         { label: 'Company Master', href: '/placements/companies', icon: Building2 },
-        { label: 'Placement Drives', href: '/placements/drives', icon: Briefcase },
+        { label: 'Placement Drives & ATS', href: '/placements/drives', icon: Kanban },
         { label: 'Skill & Training', href: '/placements/training', icon: GraduationCap },
         { label: 'Mock Interviews', href: '/placements/mock-interviews', icon: Users },
         { label: 'Resume Builder', href: '/placements/resumes', icon: FileText },

@@ -7,10 +7,12 @@ import {
   type FeeGeneratedPayload,
   type GatePassUpdatedPayload,
   type JobPostedPayload,
+  type PlacementStageUpdatedPayload,
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
+  type ExamResultsPublishedPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
@@ -50,6 +52,10 @@ export class NotificationEmitterService {
     this.events.emit(NotificationEvents.ACADEMICS_MARKS_PUBLISHED, payload);
   }
 
+  examResultsPublished(payload: ExamResultsPublishedPayload) {
+    this.events.emit(NotificationEvents.EXAM_RESULTS_PUBLISHED, payload);
+  }
+
   courseMaterialAdded(payload: CourseMaterialAddedPayload) {
     this.events.emit(NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED, payload);
   }
@@ -76,6 +82,10 @@ export class NotificationEmitterService {
 
   jobPosted(payload: JobPostedPayload) {
     this.events.emit(NotificationEvents.PLACEMENT_JOB_POSTED, payload);
+  }
+
+  placementStageUpdated(payload: PlacementStageUpdatedPayload) {
+    this.events.emit(NotificationEvents.PLACEMENT_STAGE_UPDATED, payload);
   }
 
   ticketReply(payload: TicketReplyPayload) {
