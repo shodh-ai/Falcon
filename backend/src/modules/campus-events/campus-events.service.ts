@@ -1031,15 +1031,102 @@ export class CampusEventsService {
 
   @Interval(30_000)
   async expireStalePaymentHolds() {
-    const expired = await this.dataSource.query(
-      `UPDATE event_registrations r
-       SET status = 'EXPIRED', payment_status = 'EXPIRED'
-       FROM campus_events e
-       WHERE r.event_id = e.event_id
-         AND r.status = 'PENDING_PAYMENT'
-         AND r.hold_expires_at < NOW()
-       RETURNING r.registration_id, r.event_id, r.student_user_id, e.tenant_id`,
-    );
+    // #region agent log
+    const dsOpts = this.dataSource.options as {
+      host?: string;
+      port?: number;
+      database?: string;
+      username?: string;
+    };
+    let tableExists = false;
+    try {
+      const check = await this.dataSource.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_tables
+           WHERE schemaname = 'public' AND tablename = 'event_registrations'
+         ) AS exists`,
+      );
+      tableExists = Boolean(check[0]?.exists);
+    } catch {
+      tableExists = false;
+    }
+    fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
+      body: JSON.stringify({
+        sessionId: 'f13440',
+        runId: 'pre-fix',
+        hypothesisId: 'H1-H3',
+        location: 'campus-events.service.ts:expireStalePaymentHolds',
+        message: 'scheduler db context',
+        data: {
+          host: dsOpts.host,
+          port: dsOpts.port,
+          database: dsOpts.database,
+          username: dsOpts.username,
+          tableExists,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    let expired: Array<{
+      registration_id: string;
+      event_id: string;
+      student_user_id: string;
+      tenant_id: string;
+    }>;
+    try {
+      const updateResult = await this.dataSource.query(
+        `UPDATE event_registrations r
+         SET status = 'EXPIRED', payment_status = 'EXPIRED'
+         FROM campus_events e
+         WHERE r.event_id = e.event_id
+           AND r.status = 'PENDING_PAYMENT'
+           AND r.hold_expires_at < NOW()
+         RETURNING r.registration_id, r.event_id, r.student_user_id, e.tenant_id`,
+      );
+      expired = Array.isArray(updateResult?.[0]) ? updateResult[0] : updateResult;
+      // #region agent log
+      fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
+        body: JSON.stringify({
+          sessionId: 'f13440',
+          runId: 'post-fix',
+          hypothesisId: 'H6',
+          location: 'campus-events.service.ts:expireStalePaymentHolds',
+          message: 'update result normalized',
+          data: {
+            rawLength: Array.isArray(updateResult) ? updateResult.length : null,
+            expiredCount: expired.length,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    } catch (err: unknown) {
+      // #region agent log
+      fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
+        body: JSON.stringify({
+          sessionId: 'f13440',
+          runId: 'pre-fix',
+          hypothesisId: 'H1-H4',
+          location: 'campus-events.service.ts:expireStalePaymentHolds',
+          message: 'scheduler query failed',
+          data: {
+            code: (err as { code?: string })?.code,
+            message: err instanceof Error ? err.message : String(err),
+            tableExists,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      throw err;
+    }
     for (const row of expired) {
       await this.redis.releaseEventPayLock(row.event_id, row.student_user_id);
       await this.dataSource.query(

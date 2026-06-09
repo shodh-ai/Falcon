@@ -24,6 +24,7 @@ import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { User } from '../../entities/user.entity';
+import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
 import { AcademicsController } from './academics.controller';
 import { AcademicsService } from './academics.service';
 import { AcademicsFacultyService } from './academics-faculty.service';
@@ -70,6 +71,7 @@ import { HelpdeskModule } from '../helpdesk/helpdesk.module';
       StaffLeaveRequest,
       StaffGatePass,
       User,
+      HelpdeskTicket,
     ]),
   ],
   controllers: [AcademicsController, ProctorController, CertificatesController],

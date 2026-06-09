@@ -81,13 +81,32 @@ async function run() {
   const client = new Client(dbConfig());
   await client.connect();
 
+  let ok = 0;
+  let failed = 0;
+  const failures = [];
+
   try {
     for (const file of files) {
       const sql = fs.readFileSync(file, 'utf8');
-      console.log(`>>> ${path.basename(file)}`);
-      await client.query(sql);
+      const base = path.basename(file);
+      console.log(`>>> ${base}`);
+      try {
+        await client.query(sql);
+        ok += 1;
+      } catch (err) {
+        failed += 1;
+        failures.push({ file: base, message: err.message });
+        console.error(`!!! ${base} failed: ${err.message}`);
+      }
     }
-    console.log(seedOnly ? 'Seed complete.' : 'Migrations complete.');
+    console.log(
+      seedOnly
+        ? `Seed complete (${ok} ok, ${failed} failed).`
+        : `Migrations complete (${ok} ok, ${failed} failed).`,
+    );
+    if (failures.length) {
+      console.error('Failures:', JSON.stringify(failures.slice(0, 10), null, 2));
+    }
   } finally {
     await client.end();
   }

@@ -10,6 +10,7 @@ export type CourseAttendanceEntry = {
 
 @Entity('course_attendance_logs')
 @Index(['tenant_id', 'course_id', 'date'])
+@Index(['tenant_id', 'course_id', 'faculty_user_id', 'date'], { unique: true })
 export class CourseAttendanceLog extends BaseTenantEntity {
   @PrimaryGeneratedColumn('uuid')
   log_id: string;
