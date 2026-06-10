@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -128,18 +129,21 @@ export class HrController {
   }
 
   @Post('attendance/web-punch')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   webPunch(@Req() req: { user: AuthUser }, @Body('action') action?: 'IN' | 'OUT') {
     return this.hr.webPunch(req.user.user_id, action);
   }
 
   @Get('attendance/my-summary')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myAttendanceSummary(@Req() req: { user: AuthUser }) {
     return this.hr.getAttendanceSummary(req.user.user_id);
   }
 
   @Get('attendance/my-calendar')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myAttendanceCalendar(@Req() req: { user: AuthUser }, @Query('month') month: string) {
     return this.hr.listAttendanceCalendar(
@@ -149,6 +153,7 @@ export class HrController {
   }
 
   @Post('leaves/apply')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   applyLeave(
     @Req() req: { user: AuthUser },
@@ -162,24 +167,28 @@ export class HrController {
   }
 
   @Get('leaves/my-requests')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myStaffLeaves(@Req() req: { user: AuthUser }) {
     return this.hr.listMyStaffLeaves(req.user.user_id, this.resolveTenantId(req.user));
   }
 
   @Get('leaves/my-balances')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myLeaveBalances(@Req() req: { user: AuthUser }) {
     return this.hr.listBalances(req.user.user_id);
   }
 
   @Get('payslips/my-payslips')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myPayslips(@Req() req: { user: AuthUser }) {
     return this.hr.listMyPayslips(req.user.user_id, this.resolveTenantId(req.user));
   }
 
   @Post('gate-passes')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   createGatePass(
     @Req() req: { user: AuthUser },
@@ -189,6 +198,7 @@ export class HrController {
   }
 
   @Get('gate-passes/my')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myGatePasses(@Req() req: { user: AuthUser }) {
     return this.hr.listMyGatePasses(req.user.user_id, this.resolveTenantId(req.user));
@@ -781,6 +791,7 @@ export class HrController {
   }
 
   @Get('attendance/calendar')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   attendanceCalendar(@Req() req: { user: AuthUser }, @Query('month') month?: string) {
     return this.attendanceCalc.getMonthCalendar(
@@ -803,6 +814,7 @@ export class HrController {
   }
 
   @Get('holidays')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   holidays() {
     return this.workforce.listHolidaysGrouped();
@@ -1530,6 +1542,41 @@ export class HrController {
     return this.ess.upsertPolicy(tenantId, entity, req.user.user_id, body);
   }
 
+  @Get('policies/archived')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('policies', 'read')
+  async listArchivedPolicies(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.ess.listArchivedPolicies(tenantId, entity);
+  }
+
+  @Delete('policies/:policyId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('policies', 'write')
+  async deletePolicy(
+    @Req() req: { user: AuthUser },
+    @Param('policyId') policyId: string,
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.ess.deletePolicy(tenantId, entity, policyId);
+  }
+
+  @Put('policies/:policyId/restore')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('policies', 'write')
+  async restorePolicy(
+    @Req() req: { user: AuthUser },
+    @Param('policyId') policyId: string,
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.ess.restorePolicy(tenantId, entity, policyId);
+  }
+
   @Get('pms/appraisals')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   appraisalCycles(@Req() req: { user: AuthUser }) {
@@ -1549,6 +1596,7 @@ export class HrController {
   }
 
   @Post('workforce/requests')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   workforceApply(
     @Req() req: { user: AuthUser },
@@ -1576,6 +1624,7 @@ export class HrController {
   }
 
   @Get('workforce/my-requests')
+  @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   workforceMyRequests(@Req() req: { user: AuthUser }) {
     return this.workforce.listMyRequests(req.user.user_id, this.resolveTenantId(req.user));
@@ -1657,6 +1706,18 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.orgStructure.updateUnit(tenantId, entity, unitId, body as Parameters<HrOrgStructureService['updateUnit']>[3]);
+  }
+
+  @Delete('admin/org-structure/:unitId')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async deleteOrgUnit(
+    @Req() req: { user: AuthUser },
+    @Param('unitId') unitId: string,
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.orgStructure.deleteUnit(tenantId, entity, unitId);
   }
 
   @Get('admin/leave-policies')
