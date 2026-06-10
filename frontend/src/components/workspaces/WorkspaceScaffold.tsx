@@ -21,6 +21,12 @@ export type WorkspacePageConfig = {
   dataKey?: string;
   summary?: (data: unknown) => SummaryCard[];
   columns?: TableColumn[];
+  filters?: Array<{
+    key: string;
+    label: string;
+    options?: Array<{ label: string; value: string }>;
+    dynamicOptions?: (data: unknown) => Array<{ label: string; value: string }>;
+  }>;
   chart?: (data: unknown) => Array<{ label: string; value: number; tone?: 'navy' | 'gold' | 'green' | 'red' }>;
   action?: ActionKind;
 };
@@ -99,6 +105,7 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
   const [query, setQuery] = useState('');
   const [acting, setActing] = useState(false);
   const [studentId, setStudentId] = useState('');
+  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
 
   if (!config) {
     return (
@@ -128,11 +135,21 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
   }, [config.endpoint]);
 
   const rows = useMemo(() => {
-    const all = rowsFromData(data, config.dataKey);
+    let all = rowsFromData(data, config.dataKey);
+
+    if (config.filters) {
+      for (const filter of config.filters) {
+        const val = filterValues[filter.key];
+        if (val) {
+          all = all.filter((row) => String(valueAt(row, filter.key)) === val);
+        }
+      }
+    }
+
     if (!query.trim()) return all;
     const needle = query.toLowerCase();
     return all.filter((row) => JSON.stringify(row).toLowerCase().includes(needle));
-  }, [config.dataKey, data, query]);
+  }, [config.dataKey, config.filters, data, query, filterValues]);
 
   const summary = config.summary?.(data) ?? [];
   const chart = config.chart?.(data) ?? [];
@@ -262,9 +279,28 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
               <CardTitle>Data Table</CardTitle>
               <CardDescription>{rows.length} records</CardDescription>
             </div>
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" placeholder="Filter table..." value={query} onChange={(event) => setQuery(event.target.value)} />
+            <div className="flex w-full flex-col gap-3 sm:max-w-md sm:flex-row sm:items-center sm:justify-end">
+              {config.filters?.map((filter) => {
+                const options = filter.dynamicOptions ? filter.dynamicOptions(data) : filter.options ?? [];
+                return (
+                  <select
+                    key={filter.key}
+                    className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    value={filterValues[filter.key] ?? ''}
+                    onChange={(e) => setFilterValues((prev) => ({ ...prev, [filter.key]: e.target.value }))}
+                  >
+                    {options.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                );
+              })}
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" placeholder="Filter table..." value={query} onChange={(event) => setQuery(event.target.value)} />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="overflow-x-auto">

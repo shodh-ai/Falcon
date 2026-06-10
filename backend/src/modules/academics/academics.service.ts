@@ -907,6 +907,11 @@ export class AcademicsService {
           rows.length > 0
             ? Number((rows.reduce((sum, row) => sum + Number(row.attendance_percent), 0) / rows.length).toFixed(2))
             : 0;
+        const completed = rows.filter((row) => row.status === 'COMPLETED' && row.grade_points !== null);
+        const weightedGradePoints = completed.reduce((sum, row) => sum + Number(row.grade_points) * row.course.credits, 0);
+        const creditsCompleted = completed.reduce((sum, row) => sum + row.course.credits, 0);
+        const cgpa = creditsCompleted > 0 ? Number((weightedGradePoints / creditsCompleted).toFixed(2)) : 0;
+
         return {
           user_id: student.user_id,
           name: student.name,
@@ -915,6 +920,8 @@ export class AcademicsService {
           average_attendance: attendance,
           course_count: rows.length,
           low_attendance: attendance < 75,
+          cgpa,
+          enrollment_year: student.created_at ? new Date(student.created_at).getFullYear() : new Date().getFullYear(),
         };
       })
       .filter((student) => !lowAttendance || student.low_attendance);
@@ -934,7 +941,7 @@ export class AcademicsService {
   }
 
   async listHodGatePassApprovals(tenantId: string, hodUserId: string) {
-    return this.staffGatePasses.find({
+    const passes = await this.staffGatePasses.find({
       where: {
         tenant_id: tenantId,
         reporting_officer_id: hodUserId,
@@ -942,6 +949,17 @@ export class AcademicsService {
       },
       relations: ['staff'],
       order: { out_time: 'ASC' },
+    });
+
+    return passes.map((pass) => {
+      const outDate = new Date(pass.out_time);
+      const inDate = new Date(pass.expected_in_time);
+      return {
+        ...pass,
+        date: outDate.toISOString().slice(0, 10),
+        out_time_display: outDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
+        expected_in_display: inDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
+      };
     });
   }
 
