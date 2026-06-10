@@ -16,6 +16,7 @@ type StudentRow = {
   student_id: string;
   name: string;
   email: string;
+  phone: string | null;
   status: string;
   hostel_name: string;
   room_number: string;
@@ -96,6 +97,7 @@ export default function HostelStudentsPage() {
               </div>
             ),
           },
+          { key: 'phone', header: 'Phone No.', render: (r) => r.phone ?? '—' },
           {
             key: 'course',
             header: 'Course',

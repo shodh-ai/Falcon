@@ -38,8 +38,12 @@ export function PendingMeetingRequests({ meetings, onUpdated }: Props) {
   async function respond(status: 'APPROVED' | 'REJECTED') {
     const target = status === 'APPROVED' ? approveTarget : declineTarget;
     if (!target) return;
-    if (status === 'REJECTED' && remarks.trim().length < 3) {
-      toast.error('Please enter a short reason for the mentee');
+    if (remarks.trim().length < 3) {
+      toast.error(
+        status === 'APPROVED'
+          ? 'Please enter the meeting link or room number'
+          : 'Please enter a short reason for the mentee',
+      );
       return;
     }
     setSubmitting(true);
@@ -123,7 +127,7 @@ export function PendingMeetingRequests({ meetings, onUpdated }: Props) {
             <DialogTitle>Approve meeting</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Optional: add a Google Meet link, Zoom URL, or room (e.g. Cabin 402).
+            Required: add a Google Meet link, Zoom URL, or room (e.g. Cabin 402).
           </p>
           <Input
             placeholder="Meet link or room number"
@@ -134,7 +138,7 @@ export function PendingMeetingRequests({ meetings, onUpdated }: Props) {
             <Button variant="outline" onClick={() => setApproveTarget(null)}>
               Cancel
             </Button>
-            <Button disabled={submitting} onClick={() => void respond('APPROVED')}>
+            <Button disabled={submitting || remarks.trim().length < 3} onClick={() => void respond('APPROVED')}>
               Confirm approval
             </Button>
           </div>

@@ -299,6 +299,32 @@ export class HrEssService {
     return rows[0];
   }
 
+  async deletePolicy(tenantId: string, entityId: number, policyId: string) {
+    await this.dataSource.query(
+      `UPDATE hr_policy_documents SET is_active = false WHERE tenant_id = $1 AND entity_id = $2 AND policy_id = $3`,
+      [tenantId, entityId, policyId],
+    );
+    return { deleted: true };
+  }
+
+  async listArchivedPolicies(tenantId: string, entityId: number) {
+    return this.dataSource.query(
+      `SELECT p.*, false AS acknowledged
+       FROM hr_policy_documents p
+       WHERE p.tenant_id = $1 AND p.entity_id = $2 AND p.is_active = false
+       ORDER BY p.category, p.title`,
+      [tenantId, entityId],
+    );
+  }
+
+  async restorePolicy(tenantId: string, entityId: number, policyId: string) {
+    await this.dataSource.query(
+      `UPDATE hr_policy_documents SET is_active = true WHERE tenant_id = $1 AND entity_id = $2 AND policy_id = $3`,
+      [tenantId, entityId, policyId],
+    );
+    return { restored: true };
+  }
+
   async getEmployeeCalendar(
     tenantId: string,
     entityId: number,

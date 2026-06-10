@@ -40,6 +40,21 @@ export const hodPages = {
       { key: 'department', label: 'Department' },
       { key: 'average_attendance', label: 'Avg Attendance %' },
       { key: 'course_count', label: 'Courses' },
+      { key: 'cgpa', label: 'CGPA' },
+    ],
+    filters: [
+      {
+        key: 'enrollment_year',
+        label: 'Enrollment Year',
+        dynamicOptions: (data) => {
+          if (!Array.isArray(data)) return [{ label: 'All Years', value: '' }];
+          const years = Array.from(new Set(data.map((row) => row.enrollment_year))).filter(Boolean).sort().reverse();
+          return [
+            { label: 'All Years', value: '' },
+            ...years.map((y) => ({ label: String(y), value: String(y) })),
+          ];
+        },
+      },
     ],
   },
   leaveApprovals: {
@@ -60,8 +75,9 @@ export const hodPages = {
     endpoint: '/api/academics/hod/approvals/gate-passes',
     columns: [
       { key: 'staff.name', label: 'Faculty' },
-      { key: 'out_time', label: 'Out Time' },
-      { key: 'expected_in_time', label: 'Expected In' },
+      { key: 'date', label: 'Date' },
+      { key: 'out_time_display', label: 'Out Time' },
+      { key: 'expected_in_display', label: 'Expected In' },
       { key: 'reason', label: 'Reason' },
     ],
   },
