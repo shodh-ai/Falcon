@@ -1520,6 +1520,16 @@ export class HrController {
     return this.ess.acknowledgePolicy(this.resolveTenantId(req.user), policyId, req.user.user_id);
   }
 
+  @Post('ess/policies/:policyId/vote')
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  submitPolicyVote(
+    @Param('policyId') policyId: string,
+    @Body('vote') vote: 'YES' | 'NO',
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.ess.submitPolicyVote(this.resolveTenantId(req.user), policyId, req.user.user_id, vote);
+  }
+
   @Get('policies')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('policies', 'read')
