@@ -153,6 +153,17 @@ export class AuthService {
     }
   }
 
+  /** Resolve guardian mobile for Parent-role users (password login → parent portal APIs). */
+  async resolveParentMobile(tenantId: string, email: string): Promise<string | null> {
+    const rows = await this.dataSource.query<Array<{ parent_mobile: string }>>(
+      `SELECT parent_mobile FROM parent_student_links
+       WHERE tenant_id = $1 AND LOWER(COALESCE(parent_email, '')) = LOWER($2)
+       LIMIT 1`,
+      [tenantId, email],
+    );
+    return rows[0]?.parent_mobile ?? null;
+  }
+
   getRoleClaims(user: User): { roles: string[]; primaryRole?: string } {
     const mapped = (user.userRoles ?? [])
       .filter((row) => row.role?.role_name)

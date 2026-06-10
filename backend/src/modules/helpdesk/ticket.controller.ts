@@ -11,6 +11,20 @@ import { AddTicketMessageDto } from './dto/add-ticket-message.dto';
 
 type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
+/** Users who can raise tickets and list tickets they filed (ESS / student helpdesk). */
+const HELPDESK_REQUESTER_ROLES = [
+  'Student',
+  'Faculty',
+  'HOD',
+  'Dean',
+  'HR',
+  'HRAdmin',
+  'SuperAdmin',
+  'Registrar',
+  'Accountant',
+  'Warden',
+] as const;
+
 @Controller('api/helpdesk/tickets')
 @UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
 @RequiresFeature('helpdesk')
@@ -18,19 +32,19 @@ export class TicketController {
   constructor(private readonly tickets: TicketService) {}
 
   @Post()
-  @Roles('Student')
+  @Roles(...HELPDESK_REQUESTER_ROLES)
   create(@Req() req: { user: AuthUser }, @Body() dto: CreateTicketDto) {
     return this.tickets.createTicket(req.user.user_id, dto);
   }
 
   @Get('my')
-  @Roles('Student')
+  @Roles(...HELPDESK_REQUESTER_ROLES)
   listMine(@Req() req: { user: AuthUser }) {
     return this.tickets.listMyTickets(req.user.user_id);
   }
 
   @Get('my-tickets')
-  @Roles('Student')
+  @Roles(...HELPDESK_REQUESTER_ROLES)
   listMyTickets(@Req() req: { user: AuthUser }) {
     return this.tickets.listMyTickets(req.user.user_id);
   }
