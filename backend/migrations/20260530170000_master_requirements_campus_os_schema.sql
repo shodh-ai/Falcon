@@ -1297,6 +1297,7 @@ CREATE INDEX IF NOT EXISTS idx_dms_documents_category ON dms_documents(tenant_id
 -- ---------------------------------------------------------------------------
 -- SGVU smoke/catalog seeds
 -- ---------------------------------------------------------------------------
+/*
 INSERT INTO permissions (permission_key, description)
 VALUES
   ('matrix_exams_marks', 'Exam marks view/edit/approve matrix permission'),
@@ -1341,6 +1342,7 @@ ON CONFLICT (tenant_id, role_id, module_key, resource_key) DO UPDATE SET
   can_approve = EXCLUDED.can_approve,
   scope = EXCLUDED.scope,
   updated_at = NOW();
+*/
 
 WITH tenant AS (
   SELECT tenant_id FROM public.tenants WHERE subdomain = 'sgvu' LIMIT 1
