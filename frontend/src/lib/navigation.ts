@@ -57,6 +57,7 @@ import {
   BedDouble,
   PartyPopper,
   ClipboardPen,
+  MapPin,
 } from 'lucide-react';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
@@ -701,22 +702,20 @@ export const parentPortal: PortalConfig = {
   homeHref: '/parent/dashboard',
   navGroups: [
     {
-      title: 'Child Overview',
+      title: 'Guardian App',
       items: [
-        { label: 'Dashboard', href: '/parent/dashboard', icon: LayoutDashboard, keywords: ['child', 'overview'] },
-        { label: 'Attendance', href: '/parent/attendance', icon: CalendarRange, keywords: ['attendance'] },
-        { label: 'Marks', href: '/parent/marks', icon: GraduationCap, keywords: ['mid term', 'end term', 'grade'] },
-        { label: 'Fee Dues', href: '/parent/fees', icon: Wallet, keywords: ['dues', 'fees'] },
-        { label: 'Discipline', href: '/parent/discipline', icon: Shield, keywords: ['discipline', 'records'] },
+        { label: 'Home', href: '/parent/dashboard', icon: LayoutDashboard, keywords: ['feed', 'child', 'overview'] },
+        { label: 'Academics', href: '/parent/academics', icon: GraduationCap, keywords: ['marks', 'sgpa', 'proctor'] },
+        { label: 'Finance', href: '/parent/finance', icon: Wallet, keywords: ['dues', 'fees', '80c', 'tax'] },
+        { label: 'Tracking', href: '/parent/tracking', icon: MapPin, keywords: ['hostel', 'bus', 'safety'] },
       ],
     },
   ],
   commandItems: [
-    { label: 'Parent Dashboard', href: '/parent/dashboard', icon: LayoutDashboard },
-    { label: 'Attendance', href: '/parent/attendance', icon: CalendarRange },
-    { label: 'Marks', href: '/parent/marks', icon: GraduationCap },
-    { label: 'Fee Dues', href: '/parent/fees', icon: Wallet },
-    { label: 'Discipline', href: '/parent/discipline', icon: Shield },
+    { label: 'Home', href: '/parent/dashboard', icon: LayoutDashboard },
+    { label: 'Academics', href: '/parent/academics', icon: GraduationCap },
+    { label: 'Finance', href: '/parent/finance', icon: Wallet },
+    { label: 'Tracking', href: '/parent/tracking', icon: MapPin },
   ],
 };
 

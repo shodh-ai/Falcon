@@ -73,6 +73,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       };
     }
 
+    if (roleClaims.roles.some((r) => r.toLowerCase() === 'parent')) {
+      const parentMobile = await this.authService.resolveParentMobile(
+        payload.tenantId,
+        user.email,
+      );
+      if (parentMobile) {
+        return { ...baseUser, auth_type: 'parent', parent_mobile: parentMobile };
+      }
+    }
+
     return baseUser;
   }
 }
