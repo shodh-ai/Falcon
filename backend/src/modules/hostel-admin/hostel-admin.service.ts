@@ -25,7 +25,7 @@ export class HostelAdminService {
     private readonly finance: FinanceService,
     private readonly falconNotify: FalconNotificationsService,
     private readonly gateway: HostelAdminGateway,
-  ) {}
+  ) { }
 
   private isGlobalAdmin(roles: string[]) {
     return roles.some((r) => ['SuperAdmin', 'Registrar'].includes(r));
@@ -208,8 +208,7 @@ export class HostelAdminService {
       params.push(filters.status);
     }
 
-    const baseFrom = `
-       FROM hostel_allocations a
+    const baseFrom = `FROM hostel_allocations a
        JOIN users u ON u.user_id = a.student_user_id
        JOIN operations_hostel_rooms r ON r.room_id = a.room_id
        LEFT JOIN operations_hostels h ON h.hostel_id = r.hostel_id
@@ -231,10 +230,11 @@ export class HostelAdminService {
     params.push(limit, offset);
     const data = await this.db.query(
       `SELECT a.allocation_id, a.status, a.bed_number, a.mess_plan,
-              u.user_id AS student_user_id, u.name, u.official_email AS email,
-              COALESCE(sp.enrollment_number, sp.admission_number, u.official_email) AS student_id,
+              u.user_id AS student_user_id, u.name, u.email,
+              COALESCE(sp.enrollment_no, u.official_email) AS student_id,
+              sp.phone,
               h.hostel_name, h.hostel_code, r.room_number, r.floor, r.room_type,
-              COALESCE(sp.admission_number, sp.enrollment_number) AS program_name, d.dept_name,
+              sp.batch AS program_name, d.dept_name,
               COALESCE(enroll.max_semester, 1) AS year_of_study
        ${baseFrom}
        ORDER BY u.name

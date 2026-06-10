@@ -24,6 +24,9 @@ export class StudentProfile {
   @Column({ length: 20, default: 'ACTIVE' })
   status: string;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phone: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 
