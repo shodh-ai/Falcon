@@ -1,12 +1,18 @@
 'use client';
 
-import { Suspense } from 'react';
-import { EssLegacyRedirect } from '@/components/self-service/EssLegacyRedirect';
+import { HrPageHeader } from '@/components/hr/HrPageHeader';
+import { MyPoliciesPanel } from '@/components/self-service/MyPoliciesPanel';
 
-export default function EssPoliciesRedirectPage() {
+export default function EssPoliciesPage() {
   return (
-    <Suspense fallback={null}>
-      <EssLegacyRedirect />
-    </Suspense>
+    <>
+      <HrPageHeader 
+        title="Company Policies" 
+        description="Review active company policies, acknowledge them, and participate in anonymous policy polls." 
+      />
+      <div className="mt-6">
+        <MyPoliciesPanel />
+      </div>
+    </>
   );
 }

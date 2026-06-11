@@ -126,6 +126,12 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
         keywords: ['payslip', 'salary', 'form 16', 'tax'],
       },
       {
+        label: 'Company Policies',
+        href: p.policies,
+        icon: FileText,
+        keywords: ['policies', 'posh', 'leave policy', 'cms', 'vote'],
+      },
+      {
         label: 'My Helpdesk Tickets',
         href: p.tickets,
         icon: Ticket,

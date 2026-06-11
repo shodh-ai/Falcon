@@ -234,6 +234,8 @@ export class HrEssService {
   async listPolicies(tenantId: string, entityId: number) {
     return this.dataSource.query(
       `SELECT p.*,
+              (SELECT COUNT(*) FROM hr_policy_polls WHERE policy_id = p.policy_id AND vote = 'YES')::int AS favour_count,
+              (SELECT COUNT(*) FROM hr_policy_polls WHERE policy_id = p.policy_id AND vote = 'NO')::int AS against_count,
               EXISTS (
                 SELECT 1 FROM hr_policy_acknowledgements a
                 WHERE a.policy_id = p.policy_id AND a.user_id = $3
@@ -248,6 +250,7 @@ export class HrEssService {
   async listPoliciesForUser(tenantId: string, entityId: number, userId: string) {
     return this.dataSource.query(
       `SELECT p.*,
+              (SELECT vote FROM hr_policy_polls WHERE policy_id = p.policy_id AND user_id = $3) AS user_vote,
               EXISTS (
                 SELECT 1 FROM hr_policy_acknowledgements a
                 WHERE a.policy_id = p.policy_id AND a.user_id = $3
@@ -257,6 +260,23 @@ export class HrEssService {
        ORDER BY p.category, p.title`,
       [tenantId, entityId, userId],
     );
+  }
+
+  async submitPolicyVote(
+    tenantId: string,
+    policyId: string,
+    userId: string,
+    vote: 'YES' | 'NO',
+  ) {
+    const rows = await this.dataSource.query(
+      `INSERT INTO hr_policy_polls (policy_id, user_id, vote, created_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (policy_id, user_id) 
+       DO UPDATE SET vote = EXCLUDED.vote, created_at = NOW()
+       RETURNING *`,
+      [policyId, userId, vote],
+    );
+    return rows[0];
   }
 
   async acknowledgePolicy(
