@@ -157,8 +157,42 @@ export class AdminOpsService {
     );
     if (conflicts.length) {
       throw new BadRequestException(
-        `Room ${dto.room_code} already booked (${(conflicts[0] as { course_code: string }).course_code})`,
+        `Clash Detected: Room ${dto.room_code} already booked (${(conflicts[0] as { course_code: string }).course_code})`,
       );
+    }
+    if (dto.faculty_user_id) {
+      const facultyClash = await this.db.query(
+        `SELECT slot_id, course_code, room_code
+         FROM admin_timetable_slots
+         WHERE tenant_id = $1 AND faculty_user_id = $2 AND day_of_week = $3
+           AND academic_year = $4
+           AND start_time < $6::time AND end_time > $5::time`,
+        [
+          this.tenant(tenantId),
+          dto.faculty_user_id,
+          dto.day_of_week,
+          dto.academic_year,
+          dto.start_time,
+          dto.end_time,
+        ],
+      );
+      if (facultyClash.length) {
+        throw new BadRequestException(
+          `Clash Detected: Faculty already assigned to ${(facultyClash[0] as { course_code: string }).course_code} in room ${(facultyClash[0] as { room_code: string }).room_code}`,
+        );
+      }
+      const workload = await this.checkFacultyWorkload(
+        this.tenant(tenantId),
+        String(dto.faculty_user_id),
+        String(dto.academic_year),
+        dto.start_time as string,
+        dto.end_time as string,
+      );
+      if (workload.exceeds_limit) {
+        throw new BadRequestException(
+          `Workload Enforcer: ${workload.faculty_name} would exceed UGC limit of 16 hrs/week (projected ${workload.weekly_hours}h)`,
+        );
+      }
     }
     const tid = this.tenant(tenantId);
     const result = await this.db.query(
@@ -183,5 +217,37 @@ export class AdminOpsService {
 
   transportZones(tenantId?: string) {
     return this.db.query(`SELECT * FROM admin_transport_zones WHERE tenant_id = $1`, [this.tenant(tenantId)]);
+  }
+
+  private async checkFacultyWorkload(
+    tenantId: string,
+    facultyUserId: string,
+    academicYear: string,
+    newStart: string,
+    newEnd: string,
+  ) {
+    const slots = await this.db.query(
+      `SELECT start_time, end_time FROM admin_timetable_slots
+       WHERE tenant_id = $1 AND faculty_user_id = $2 AND academic_year = $3`,
+      [tenantId, facultyUserId, academicYear],
+    );
+    const toHours = (start: string, end: string) => {
+      const [sh, sm] = start.split(':').map(Number);
+      const [eh, em] = end.split(':').map(Number);
+      return (eh * 60 + em - (sh * 60 + sm)) / 60;
+    };
+    let weeklyHours = toHours(newStart, newEnd);
+    for (const slot of slots as Array<{ start_time: string; end_time: string }>) {
+      weeklyHours += toHours(slot.start_time, slot.end_time);
+    }
+    const facultyRows = await this.db.query(
+      `SELECT name FROM users WHERE user_id = $1 LIMIT 1`,
+      [facultyUserId],
+    );
+    return {
+      faculty_name: (facultyRows[0] as { name?: string })?.name ?? 'Faculty',
+      weekly_hours: Math.round(weeklyHours * 10) / 10,
+      exceeds_limit: weeklyHours > 16,
+    };
   }
 }

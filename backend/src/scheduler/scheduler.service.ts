@@ -9,6 +9,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { wrapFalconEmailHtml } from '../common/email/falcon-email.template';
+import { LeadershipService } from '../modules/leadership/leadership.service';
 
 @Injectable()
 export class SchedulerService {
@@ -22,8 +23,33 @@ export class SchedulerService {
     private userRepository: Repository<User>,
     private tasksService: TasksService,
     private configService: ConfigService,
+    private leadershipService: LeadershipService,
   ) {
     this.initializeEmailTransporter();
+  }
+
+  /** Nightly SLA escalation scan — midnight */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async processHelpdeskSlaEscalations() {
+    this.logger.log('Processing helpdesk SLA escalations…');
+    try {
+      await this.leadershipService.processSlaEscalations();
+    } catch (error) {
+      this.logger.error('SLA escalation job failed', error);
+    }
+  }
+
+  /** Nightly executive analytics refresh — 2:00 AM */
+  @Cron('0 2 * * *')
+  async refreshExecutiveMaterializedViews() {
+    this.logger.log('Refreshing executive materialized views…');
+    try {
+      await this.leadershipService.refreshMaterializedViews();
+      await this.leadershipService.seedLiveMetrics();
+      this.logger.log('Executive materialized views refreshed');
+    } catch (error) {
+      this.logger.error('Executive MV refresh failed', error);
+    }
   }
 
   private initializeEmailTransporter() {

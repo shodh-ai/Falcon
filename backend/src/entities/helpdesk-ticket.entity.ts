@@ -44,6 +44,27 @@ export class HelpdeskTicket {
     sent_at: string;
   }> | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  ticket_ref: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  sla_deadline: Date | null;
+
+  @Column({ type: 'int', default: 0 })
+  escalation_level: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  resolved_by: string | null;
+
+  @Column({ type: 'numeric', precision: 5, scale: 2, nullable: true })
+  resolution_time_hours: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  resolved_at: Date | null;
+
   @CreateDateColumn()
   created_at: Date;
 

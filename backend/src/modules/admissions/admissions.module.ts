@@ -7,6 +7,7 @@ import { DocumentVerification } from '../../entities/document-verification.entit
 import { AdmissionsController } from './admissions.controller';
 import { AdmissionsCrmController } from './admissions-crm.controller';
 import { AdmissionsService } from './admissions.service';
+import { CounselingService } from './counseling.service';
 import { LeadScoringService, LEAD_SCORING_QUEUE } from './lead-scoring.service';
 import { LeadScoringProcessor } from './lead-scoring.processor';
 
@@ -16,7 +17,7 @@ import { LeadScoringProcessor } from './lead-scoring.processor';
     TypeOrmModule.forFeature([Lead, Application, DocumentVerification]),
   ],
   controllers: [AdmissionsController, AdmissionsCrmController],
-  providers: [AdmissionsService, LeadScoringService, LeadScoringProcessor],
-  exports: [AdmissionsService, LeadScoringService],
+  providers: [AdmissionsService, LeadScoringService, LeadScoringProcessor, CounselingService],
+  exports: [AdmissionsService, LeadScoringService, CounselingService],
 })
 export class AdmissionsModule {}

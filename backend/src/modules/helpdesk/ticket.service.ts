@@ -53,13 +53,18 @@ export class TicketService {
 
     const { assigned_to_user_id: _omit, ...ticketFields } = dto;
 
+    const ticketRef = await this.nextTicketRef();
+
     const ticket = await this.tickets.save(
       this.tickets.create({
         student_user_id: studentUserId,
         ...ticketFields,
         assigned_to_user_id: assignee.userId,
         status: 'PENDING',
-      }),
+        tenant_id: tenantId,
+        ticket_ref: ticketRef,
+        sla_deadline: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      } as Partial<HelpdeskTicket>),
     );
 
     this.workflowNotify.notifyApprover({
@@ -73,6 +78,64 @@ export class TicketService {
     });
 
     return ticket;
+  }
+
+  private async nextTicketRef(): Promise<string> {
+    const rows = await this.tickets.manager.query<Array<{ n: string }>>(
+      `SELECT COALESCE(MAX(CAST(SUBSTRING(ticket_ref FROM 5) AS INT)), 0) + 1 AS n
+       FROM helpdesk_tickets
+       WHERE ticket_ref ~ '^TKT-[0-9]+$'`,
+    );
+    const seq = Number(rows[0]?.n ?? 1);
+    return `TKT-${String(seq).padStart(4, '0')}`;
+  }
+
+  async getTicketByRef(
+    ticketRef: string,
+    actorUserId: string,
+    actorRole: string,
+    tenantId: string,
+  ) {
+    const rows = await this.tickets.manager.query<Array<Record<string, unknown>>>(
+      `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
+              t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
+              su.name AS student_name, au.name AS assigned_to_name
+       FROM helpdesk_tickets t
+       JOIN users su ON su.user_id = t.student_user_id
+       LEFT JOIN users au ON au.user_id = t.assigned_to_user_id
+       WHERE UPPER(t.ticket_ref) = UPPER($1)
+         AND COALESCE(t.tenant_id, su.tenant_id) = $2
+       LIMIT 1`,
+      [ticketRef, tenantId],
+    );
+    if (!rows.length) throw new NotFoundException('Ticket not found');
+
+    const t = rows[0];
+    const role = actorRole.trim().toLowerCase();
+    const isOwner = t.student_user_id === actorUserId;
+    const isAssignee = t.assigned_to_user_id === actorUserId;
+    const isAdmin = [
+      'superadmin',
+      'registrar',
+      'accountant',
+      'warden',
+      'hod',
+      'dean',
+      'faculty',
+      'chairman',
+      'president',
+      'hr',
+      'hradmin',
+    ].includes(role);
+
+    if (['student', 'applicant'].includes(role) && !isOwner) {
+      throw new ForbiddenException('You can only view your own tickets');
+    }
+    if (!isOwner && !isAssignee && !isAdmin) {
+      throw new ForbiddenException('You are not allowed to view this ticket');
+    }
+
+    return t;
   }
 
   listMyTickets(studentUserId: string) {

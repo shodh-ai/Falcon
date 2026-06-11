@@ -58,6 +58,8 @@ import {
   PartyPopper,
   ClipboardPen,
   MapPin,
+  AlertTriangle,
+  Contact,
 } from 'lucide-react';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
@@ -778,6 +780,35 @@ export const presidentPortal: PortalConfig = {
   ],
 };
 
+export const leadershipPortal: PortalConfig = {
+  personaLabel: 'Chairman / Executive Board',
+  personaTitle: 'Executive Command Center',
+  homeHref: '/leadership/overview',
+  navGroups: [
+    {
+      title: 'Global Command Center',
+      items: [
+        { label: 'Overview', href: '/leadership/overview', icon: LayoutDashboard, keywords: ['tickers', 'students', 'revenue', 'attendance'] },
+        { label: 'Financial Health', href: '/leadership/finance', icon: Wallet, keywords: ['revenue', 'expenses', 'defaulters'] },
+        { label: 'Academics & Brand', href: '/leadership/academics', icon: GraduationCap, keywords: ['cgpa', 'naac', 'iqac', 'research'] },
+        { label: 'Corporate Relations', href: '/leadership/placements', icon: Briefcase, keywords: ['lpa', 'placement', 'recruiters'] },
+        { label: 'HR & Operations', href: '/leadership/hr-ops', icon: Users, keywords: ['nirf', 'hostel', 'grievances', 'attrition'] },
+        { label: 'Issue Command Center', href: '/leadership/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'helpdesk', 'escalation'] },
+        { label: 'University Directory', href: '/directory', icon: Contact, keywords: ['students', 'faculty', 'browse', 'export', '360'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Executive Overview', href: '/leadership/overview', icon: LayoutDashboard },
+    { label: 'Finance', href: '/leadership/finance', icon: Wallet },
+    { label: 'Academics', href: '/leadership/academics', icon: GraduationCap },
+    { label: 'Placements', href: '/leadership/placements', icon: Briefcase },
+    { label: 'HR & Ops', href: '/leadership/hr-ops', icon: Users },
+    { label: 'Issue Command Center', href: '/leadership/issues', icon: AlertTriangle },
+    { label: 'University Directory', href: '/directory', icon: Contact },
+  ],
+};
+
 export const alumniPortal: PortalConfig = {
   personaLabel: 'Falcon Alumni Network',
   personaTitle: 'Graduate Portal',
@@ -820,6 +851,8 @@ export const adminOpsPortal: PortalConfig = {
         { label: 'Master Academic Calendar', href: '/admin-ops/calendar', icon: Calendar },
         { label: 'Event Venue Approvals', href: '/admin-ops/events', icon: Ticket },
         { label: 'Master Timetable', href: '/admin-ops/timetable', icon: CalendarClock },
+        { label: 'Timetable Builder', href: '/admin-ops/timetable-builder', icon: CalendarClock, keywords: ['clash', 'scheduling', 'rooms'] },
+        { label: 'University Directory', href: '/directory', icon: Contact, keywords: ['students', 'faculty', 'browse', 'export'] },
       ],
     },
   ],
@@ -827,6 +860,7 @@ export const adminOpsPortal: PortalConfig = {
     { label: 'Assets', href: '/admin-ops/assets', icon: Archive },
     { label: 'Fleet', href: '/admin-ops/fleet', icon: Bus },
     { label: 'Timetable', href: '/admin-ops/timetable', icon: CalendarClock },
+    { label: 'University Directory', href: '/directory', icon: Contact },
   ],
 };
 
@@ -882,12 +916,14 @@ export const adminPortal: PortalConfig = {
         { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },
         { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
         { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['SuperAdmin'] },
+        { label: 'University Directory', href: '/directory', icon: Contact, roles: ['SuperAdmin', 'Registrar', 'President'] },
       ],
     },
   ],
   commandItems: [
     { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
     { label: 'Pending Approvals', href: '/admin/dashboard', icon: ListChecks },
+    { label: 'University Directory', href: '/directory', icon: Contact },
     { label: 'Export Reports', href: '/admin/dashboard', icon: BarChart3, roles: ['SuperAdmin', 'President', 'IQAC'] },
   ],
 };
