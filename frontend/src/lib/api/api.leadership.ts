@@ -29,6 +29,19 @@ export type DrillNode = {
   alert: boolean;
 };
 
+export type LeadershipPlacements = {
+  placement_pct: number;
+  lpa_trends: Array<{
+    year: number;
+    avg_lpa: number;
+    highest_lpa: number;
+  }>;
+  top_recruiters: Array<{
+    company: string;
+    hires: number;
+  }>;
+};
+
 export function useLeadershipApi() {
   const api = useAuthedApi();
 
@@ -37,7 +50,7 @@ export function useLeadershipApi() {
       overview: () => api.get<LeadershipOverview>('/api/leadership/overview'),
       finance: () => api.get<Record<string, unknown>>('/api/leadership/finance'),
       academics: () => api.get<Record<string, unknown>>('/api/leadership/academics'),
-      placements: () => api.get<Record<string, unknown>>('/api/leadership/placements'),
+      placements: () => api.get<LeadershipPlacements>('/api/leadership/placements'),
       hrOps: () => api.get<Record<string, unknown>>('/api/leadership/hr-ops'),
       drilldown: (level: string, parentKey?: string) =>
         api.get<DrillNode[]>(

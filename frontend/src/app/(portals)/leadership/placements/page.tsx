@@ -3,18 +3,18 @@
 import { useEffect, useState } from 'react';
 import { GOLD, NAVY, LeadershipLineChart } from '@/components/leadership/LeadershipCharts';
 import { LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
-import { useLeadershipApi } from '@/lib/api/api.leadership';
+import { useLeadershipApi, type LeadershipPlacements } from '@/lib/api/api.leadership';
 
 export default function LeadershipPlacementsPage() {
   const api = useLeadershipApi();
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [data, setData] = useState<LeadershipPlacements | null>(null);
 
   useEffect(() => {
     void api.placements().then(setData).catch(() => setData(null));
   }, [api]);
 
-  const trends = (data?.lpa_trends as Record<string, unknown>[]) ?? [];
-  const recruiters = (data?.top_recruiters as Array<{ company: string; hires: number }>) ?? [];
+  const trends = data?.lpa_trends ?? [];
+  const recruiters = data?.top_recruiters ?? [];
 
   return (
     <div className="space-y-6 p-6">
