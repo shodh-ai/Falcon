@@ -31,6 +31,10 @@ import { ExamsModule } from './modules/exams/exams.module';
 import { HrModule } from './modules/hr/hr.module';
 import { IqacModule } from './modules/iqac/iqac.module';
 import { PresidentModule } from './modules/president/president.module';
+import { LeadershipModule } from './modules/leadership/leadership.module';
+import { ResearchModule } from './modules/research/research.module';
+import { ClinicModule } from './modules/clinic/clinic.module';
+import { SearchModule } from './modules/search/search.module';
 import { OperationsModule } from './modules/operations/operations.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
@@ -123,6 +127,10 @@ import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscr
     HrModule,
     IqacModule,
     PresidentModule,
+    LeadershipModule,
+    ResearchModule,
+    ClinicModule,
+    SearchModule,
     OperationsModule,
     SettingsModule,
     HelpdeskModule,

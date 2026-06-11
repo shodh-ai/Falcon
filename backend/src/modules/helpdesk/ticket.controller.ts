@@ -55,6 +55,17 @@ export class TicketController {
     return this.tickets.listTicketsForAssignee(req.user.user_id);
   }
 
+  @Get('ref/:ticketRef')
+  @Roles(...HELPDESK_REQUESTER_ROLES, 'Chairman', 'President')
+  getByRef(@Req() req: { user: AuthUser }, @Param('ticketRef') ticketRef: string) {
+    return this.tickets.getTicketByRef(
+      ticketRef,
+      req.user.user_id,
+      req.user.role ?? 'UNKNOWN',
+      this.tenant(req),
+    );
+  }
+
   @Get('profile-corrections')
   @Roles('SuperAdmin', 'Registrar', 'HOD', 'Dean', 'Admin')
   listProfileCorrections(@Req() req: { user: AuthUser }) {

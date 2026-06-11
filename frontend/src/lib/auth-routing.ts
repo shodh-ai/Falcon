@@ -40,6 +40,10 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/president/executive-summary';
   }
 
+  if (r === 'chairman') {
+    return '/leadership/overview';
+  }
+
   if (r === 'parent') {
     return '/parent/dashboard';
   }
@@ -85,6 +89,7 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'iqac') return 'IQAC Workspace';
   if (r === 'librarian') return 'Library Workspace';
   if (r === 'president') return 'Executive Workspace';
+  if (r === 'chairman') return 'Executive Command Center';
   if (r === 'parent') return 'Parent Workspace';
   if (r === 'alumni') return 'Alumni Network';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell Workspace';
@@ -103,6 +108,7 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'iqac') return 'IQAC';
   if (r === 'librarian') return 'Library';
   if (r === 'president') return 'Executive';
+  if (r === 'chairman') return 'Chairman';
   if (r === 'parent') return 'Parent';
   if (r === 'alumni') return 'Alumni';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell';
@@ -251,6 +257,7 @@ const portalRoles: Record<string, string[]> = {
   '/library': ['librarian', 'superadmin'],
   '/library-admin': ['librarian', 'superadmin'],
   '/president': ['president', 'superadmin'],
+  '/leadership': ['chairman', 'president', 'superadmin', 'registrar'],
   '/parent': ['parent', 'superadmin'],
   '/exam-cell': ['examcell', 'superadmin'],
   '/alumni': ['alumni'],
@@ -262,6 +269,8 @@ const portalRoles: Record<string, string[]> = {
   '/admin': ['superadmin', 'registrar'],
   '/super-admin': ['superadmin'],
   '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
+  '/clinic-admin': ['registrar', 'superadmin'],
+  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin'],
 };
 
 /** Derive the active workspace role from the current pathname (for multi-role users). */
@@ -296,6 +305,18 @@ export function canRoleAccessPath(
     return (
       roles.includes('superadmin') &&
       (email ?? '').trim().toLowerCase() === ENTITY_CREATOR_EMAIL
+    );
+  }
+
+  if (pathname === '/directory' || pathname === '/directory/') {
+    return roles.some((role) =>
+      ['chairman', 'president', 'superadmin', 'registrar', 'hradmin', 'hr', 'hod', 'dean', 'warden', 'faculty'].includes(role),
+    );
+  }
+
+  if (pathname.startsWith('/admin-ops/directory') || pathname.startsWith('/directory/')) {
+    return roles.some((role) =>
+      ['chairman', 'president', 'superadmin', 'registrar', 'hod', 'dean', 'warden', 'faculty', 'hr', 'hradmin', 'student', 'applicant'].includes(role),
     );
   }
 
