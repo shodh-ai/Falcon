@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { useOptionalHrEntity } from '@/context/HrEntityContext';
 import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { HrEmptyState } from '@/components/hr/HrEmptyState';
-import { Users } from 'lucide-react';
+import { Users, Download } from 'lucide-react';
 import {
   ATTENDANCE_LEGEND,
   HEATMAP_LEGEND,
@@ -194,9 +195,36 @@ export function HrAttendanceCalendar(props: Props) {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {matrixData.employees.map((emp) => (
-                    <tr key={emp.user_id} className="transition-colors hover:bg-gray-50">
+                    <tr key={emp.user_id} className="group transition-colors hover:bg-gray-50">
                       <td className="sticky left-0 z-10 bg-white px-3 py-2 whitespace-nowrap">
-                        <HrPersonCell name={emp.name} />
+                        <div className="flex items-center justify-between gap-2">
+                          <HrPersonCell name={emp.name} />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-sgvu-navy"
+                            onClick={() => {
+                              const token = document.cookie.replace(/(?:(?:^|.*;\s*)access_token\s*=\s*([^;]*).*$)|^.*$/, "$1");
+                              const url = new URL(`${window.location.origin}/api/hr/reports/attendance/export/${emp.user_id}`);
+                              url.searchParams.set('month', month);
+                              if (entityId) url.searchParams.set('entity_id', String(entityId));
+                              
+                              fetch(url.toString(), {
+                                headers: { Authorization: `Bearer ${token}` }
+                              })
+                              .then(res => res.blob())
+                              .then(blob => {
+                                const a = document.createElement('a');
+                                a.href = URL.createObjectURL(blob);
+                                a.download = `attendance-${emp.name.replace(/ /g, '_')}-${month}.xlsx`;
+                                a.click();
+                              });
+                            }}
+                            title="Export Attendance"
+                          >
+                            <Download className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </td>
                       {emp.days.map((day) => {
                         const color = attendanceHeatmapColor(day.calculated_status);

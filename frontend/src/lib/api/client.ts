@@ -39,6 +39,7 @@ export const jsonHeaders = (token: string): Record<string, string> => ({
 export async function apiFetch<T>(token: string | null, req: ApiRequest): Promise<T> {
   const init: RequestInit = {
     method: req.method ?? 'GET',
+    cache: 'no-store',
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(req.data && !(req.data instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
