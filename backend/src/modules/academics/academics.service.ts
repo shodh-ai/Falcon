@@ -927,6 +927,65 @@ export class AcademicsService {
       .filter((student) => !lowAttendance || student.low_attendance);
   }
 
+  async getHodStudentDetail(tenantId: string, hodUserId: string, studentUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId, tenant_id: tenantId },
+      relations: ['department', 'role'],
+    });
+
+    if (!student || student.role?.role_name !== 'Student') {
+      throw new NotFoundException('Student not found');
+    }
+    if (deptIds.length && !deptIds.includes(student.dept_id)) {
+      throw new NotFoundException('Student is not in your department scope');
+    }
+
+    const historyRows = await this.users.manager.query(
+      `SELECT semester,
+              AVG(attendance_percent)::numeric(5,2) AS attendance,
+              SUM(grade_points * c.credits) / NULLIF(SUM(c.credits), 0) AS cgpa
+       FROM student_course_enrollments e
+       JOIN academic_courses c ON c.course_id = e.course_id
+       WHERE e.student_user_id = $1 AND e.tenant_id = $2
+         AND e.status IN ('COMPLETED', 'PASS', 'FAILED')
+       GROUP BY semester
+       ORDER BY semester ASC`,
+      [studentUserId, tenantId],
+    );
+
+    const backlogsRes = await this.users.manager.query(
+      `SELECT COUNT(*)::int AS count
+       FROM student_course_enrollments e
+       WHERE e.student_user_id = $1 AND e.tenant_id = $2
+         AND (e.grade_points < 4 OR e.status = 'FAILED')`,
+      [studentUserId, tenantId],
+    );
+
+    const placementRes = await this.users.manager.query(
+      `SELECT p.company_name, a.status
+       FROM placement_job_applications a
+       JOIN placement_job_postings p ON p.job_id = a.job_id
+       WHERE a.student_user_id = $1
+         AND a.status IN ('OFFERED', 'ACCEPTED')
+       LIMIT 1`,
+      [studentUserId],
+    );
+
+    return {
+      student_name: student.name,
+      student_email: student.official_email,
+      department: student.department?.dept_name,
+      semester_history: historyRows.map((r: Record<string, unknown>) => ({
+        semester: Number(r.semester),
+        cgpa: r.cgpa ? Number(Number(r.cgpa).toFixed(2)) : 0,
+        attendance: r.attendance ? Number(Number(r.attendance).toFixed(2)) : 0,
+      })),
+      active_backlogs: Number(backlogsRes[0]?.count ?? 0),
+      placement: placementRes[0] ? { status: placementRes[0].status, company_name: placementRes[0].company_name } : null,
+    };
+  }
+
   async listHodLeaveApprovals(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     return this.staffLeaveRequests
