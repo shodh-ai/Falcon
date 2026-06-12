@@ -73,3 +73,4 @@ export { LibraryBook } from './library-book.entity';
 export { TransportRoute } from './transport-route.entity';
 export { SystemAlert } from './system-alert.entity';
 export { FalconNotification } from './falcon-notification.entity';
+export { HrOverrideLog } from './hr-override-log.entity';

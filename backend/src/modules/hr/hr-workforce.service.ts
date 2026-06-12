@@ -410,6 +410,28 @@ export class HrWorkforceService {
       throw new BadRequestException('Request has already been processed');
     }
 
+    if (adminOverride) {
+      const approverDesignationRow = row.current_approver_user_id ? await this.users.manager.query(
+        `SELECT r.role_name FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.user_id = $1`, [row.current_approver_user_id]
+      ) : [{ role_name: 'Unknown' }];
+      const assignedApproverDesignation = approverDesignationRow[0]?.role_name || 'Unknown';
+
+      const employeeIdRow = await this.users.manager.query(
+        `SELECT employee_id FROM hr_employee_profiles WHERE user_id = $1`, [row.staff_user_id]
+      );
+      const employeeId = employeeIdRow[0]?.employee_id || row.staff_user_id;
+
+      const bypassedByDesignation = roleNames.find(r => ['HRAdmin', 'SuperAdmin', 'HR'].includes(r)) || 'HR Admin';
+      const actionType = action === 'APPROVE' ? 'Bypass Approve' : 'Force Reject';
+      const requestType = row.request_type === 'LEAVE' ? (row.leave_type || 'LEAVE') : row.request_type;
+
+      await this.users.manager.query(
+        `INSERT INTO hr_override_logs (tenant_id, employee_id, assigned_approver, bypassed_by, type_of_action, type_of_request, date_and_time)
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+         [tenantId, employeeId, assignedApproverDesignation, bypassedByDesignation, actionType, requestType]
+      );
+    }
+
     if (action === 'REJECT') {
       row.status = 'REJECTED';
       row.current_approver_user_id = null;

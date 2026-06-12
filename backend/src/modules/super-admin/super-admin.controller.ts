@@ -152,4 +152,9 @@ export class SuperAdminController {
   private tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
+
+  @Get('override-logs')
+  listOverrideLogs(@Req() req: { user: AuthUser }) {
+    return this.superAdmin.listHrOverrideLogs(this.tenant(req));
+  }
 }
