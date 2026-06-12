@@ -53,25 +53,35 @@ export class HrOrgStructureService {
     unitId: string,
     dto: { parent_id?: string | null; unit_type?: string; unit_name?: string; sort_order?: number; is_active?: boolean },
   ) {
+    const updates: string[] = [];
+    const params: any[] = [tenantId, entityId, unitId];
+
+    if ('parent_id' in dto) {
+      params.push(dto.parent_id);
+      updates.push(`parent_id = $${params.length}`);
+    }
+    if (dto.unit_type !== undefined) {
+      params.push(dto.unit_type);
+      updates.push(`unit_type = $${params.length}`);
+    }
+    if (dto.unit_name !== undefined) {
+      params.push(dto.unit_name);
+      updates.push(`unit_name = $${params.length}`);
+    }
+    if (dto.sort_order !== undefined) {
+      params.push(dto.sort_order);
+      updates.push(`sort_order = $${params.length}`);
+    }
+    if (dto.is_active !== undefined) {
+      params.push(dto.is_active);
+      updates.push(`is_active = $${params.length}`);
+    }
+
+    if (updates.length === 0) return null;
+
     const rows = await this.dataSource.query(
-      `UPDATE hr_org_units SET
-         parent_id = COALESCE($4, parent_id),
-         unit_type = COALESCE($5, unit_type),
-         unit_name = COALESCE($6, unit_name),
-         sort_order = COALESCE($7, sort_order),
-         is_active = COALESCE($8, is_active)
-       WHERE tenant_id = $1 AND entity_id = $2 AND unit_id = $3
-       RETURNING *`,
-      [
-        tenantId,
-        entityId,
-        unitId,
-        dto.parent_id ?? null,
-        dto.unit_type ?? null,
-        dto.unit_name ?? null,
-        dto.sort_order ?? null,
-        dto.is_active ?? null,
-      ],
+      `UPDATE hr_org_units SET ${updates.join(', ')} WHERE tenant_id = $1 AND entity_id = $2 AND unit_id = $3 RETURNING *`,
+      params,
     );
     if (!rows[0]) throw new NotFoundException('Org unit not found');
     return rows[0];

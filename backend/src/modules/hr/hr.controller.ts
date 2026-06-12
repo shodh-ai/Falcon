@@ -264,6 +264,27 @@ export class HrController {
     return new StreamableFile(buffer);
   }
 
+  @Get('reports/attendance/export/:userId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('reports', 'read')
+  async exportEmployeeAttendance(
+    @Req() req: { user: AuthUser },
+    @Res({ passthrough: true }) res: Response,
+    @Param('userId') userId: string,
+    @Query('month') month?: string,
+    @Query('entity_id') entityId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    const monthKey = month ?? new Date().toISOString().slice(0, 7);
+    const buffer = await this.reports.buildEmployeeAttendance(tenantId, entity, monthKey, userId);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="attendance-${userId}-${monthKey}.xlsx"`,
+    });
+    return new StreamableFile(buffer);
+  }
+
   @Get('reports/leave-balances')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('reports', 'read')
@@ -1168,6 +1189,62 @@ export class HrController {
     return new StreamableFile(buf);
   }
 
+  // ---------------------------------------------------------
+  // ADMIN HOLIDAY CALENDARS
+  // ---------------------------------------------------------
+
+  @Get('admin/holidays')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async listAdminHolidays(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.listAdminHolidays(tenantId, entity);
+  }
+
+  @Post('admin/holidays')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async createHoliday(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId: string | undefined,
+    @Body() body: any,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.createHoliday(tenantId, entity, body);
+  }
+
+  @Put('admin/holidays/:id')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async updateHoliday(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Query('entity_id') entityId: string | undefined,
+    @Body() body: any,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.updateHoliday(tenantId, entity, id, body);
+  }
+
+  @Delete('admin/holidays/:id')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async deleteHoliday(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workforce.deleteHoliday(tenantId, entity, id);
+  }
+
+  // ---------------------------------------------------------
+  // ORGANIZATION STRUCTURE
+  // ---------------------------------------------------------
+
   @Get('team/pending-counts')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
@@ -1763,6 +1840,18 @@ export class HrController {
     return this.leavePolicies.updatePolicy(tenantId, entity, policyId, body);
   }
 
+  @Delete('admin/leave-policies/:policyId')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async deleteLeavePolicy(
+    @Req() req: { user: AuthUser },
+    @Param('policyId') policyId: string,
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.leavePolicies.deletePolicy(tenantId, entity, policyId);
+  }
+
   @Get('admin/workflows')
   @Roles('HRAdmin', 'SuperAdmin')
   async listWorkflows(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
@@ -1794,6 +1883,18 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.workflowBuilder.updateWorkflow(tenantId, entity, workflowId, body as Parameters<HrWorkflowBuilderService['updateWorkflow']>[3]);
+  }
+
+  @Delete('admin/workflows/:workflowId')
+  @Roles('HRAdmin', 'SuperAdmin')
+  async deleteWorkflow(
+    @Req() req: { user: AuthUser },
+    @Param('workflowId') workflowId: string,
+    @Query('entity_id') entityId: string | undefined,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.workflowBuilder.deleteWorkflow(tenantId, entity, workflowId);
   }
 
   @Get('admin/checklist-templates')
