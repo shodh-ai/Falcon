@@ -1,8 +1,9 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('student_profiles')
 @Index(['user_id'], { unique: true })
-export class StudentProfile {
+export class StudentProfile extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   student_profile_id: string;
 

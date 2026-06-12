@@ -1,7 +1,8 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('alumni_events')
-export class AlumniEvent {
+export class AlumniEvent extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   event_id: string;
 

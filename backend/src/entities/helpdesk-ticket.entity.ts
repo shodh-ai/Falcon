@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type HelpdeskTicketCategory =
   | 'FINANCE'
@@ -14,7 +15,7 @@ export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
 @Index(['assigned_to_user_id'])
 @Index(['category'])
 @Index(['status'])
-export class HelpdeskTicket {
+export class HelpdeskTicket extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   ticket_id: string;
 

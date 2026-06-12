@@ -24,6 +24,7 @@ import {
   assertNoOverlappingWorkforceDates,
   assertRetroactiveWorkforceLimit,
 } from '../../common/validators/workforce-request.validator';
+import { FinanceLedgerService } from '../finance/finance-ledger.service';
 
 /** HOD (reporting officer) first, then HR admin — no generic HR inbox on create. */
 const APPROVAL_FLOW: Partial<Record<LeaveRequestStatus, LeaveRequestStatus>> = {
@@ -50,6 +51,7 @@ export class HrService {
     private readonly workflowBuilder: HrWorkflowBuilderService,
     private readonly hrWorkflow: HrWorkflowRoutingService,
     @InjectQueue(HR_PAYROLL_QUEUE) private readonly payrollQueue: Queue,
+    private readonly financeLedger: FinanceLedgerService,
   ) {}
 
   async createLeaveRequest(dto: CreateLeaveRequestDto) {
@@ -916,6 +918,9 @@ export class HrService {
     }
 
     const saved = toSave.length ? await this.payslips.save(toSave) : [];
+
+    const payrollTotal = saved.reduce((sum, slip) => sum + Number(slip.net_pay ?? 0), 0);
+    await this.financeLedger.postPayrollDisbursement(tenantId, monthKey, payrollTotal);
     for (const slip of saved) {
       const staff = eligibleStaff.find((s) => s.user_id === slip.staff_user_id);
       results.push({

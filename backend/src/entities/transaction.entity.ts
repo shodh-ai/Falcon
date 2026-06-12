@@ -1,14 +1,16 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { FeeDemand } from './fee-demand.entity';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type TransactionStatus = 'INITIATED' | 'SUCCESS' | 'FAILED' | 'REFUNDED';
 export type PaymentGateway = 'RAZORPAY' | 'PAYU' | 'CASH' | 'CHEQUE' | 'NEFT' | 'OTHER';
+export type TransactionDirection = 'IN' | 'OUT';
 
 @Entity('finance_transactions')
 @Index(['gateway_reference'])
 @Index(['status'])
 @Index(['demand_id'])
-export class Transaction {
+export class Transaction extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   transaction_id: string;
 
@@ -42,6 +44,15 @@ export class Transaction {
 
   @Column({ type: 'numeric', precision: 12, scale: 2 })
   amount: number;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  ledger_category: string | null;
+
+  @Column({ type: 'varchar', length: 3, nullable: true })
+  direction: TransactionDirection | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  txn_kind: string | null;
 
   @Column({ type: 'varchar', length: 20, default: 'INITIATED' })
   status: TransactionStatus;

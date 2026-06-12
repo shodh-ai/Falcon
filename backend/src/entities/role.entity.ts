@@ -1,7 +1,8 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('roles')
-export class Role {
+export class Role extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   role_id: number;
 

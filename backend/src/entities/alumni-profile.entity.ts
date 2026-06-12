@@ -5,10 +5,11 @@ import {
   CreateDateColumn,
   Index,
 } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('alumni_profiles')
 @Index(['tenant_id', 'student_user_id'], { unique: true })
-export class AlumniProfile {
+export class AlumniProfile extends BaseSoftDeleteEntity {
   @PrimaryColumn('uuid')
   alumni_id: string;
 

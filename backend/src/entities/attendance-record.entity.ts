@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
 
@@ -6,7 +7,7 @@ export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
 @Index(['student_user_id', 'session_date'])
 @Index(['subject_id', 'session_date'])
 @Index(['batch_id', 'session_date'])
-export class AttendanceRecord {
+export class AttendanceRecord extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   attendance_id: string;
 

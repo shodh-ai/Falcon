@@ -1,8 +1,9 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, JoinColumn, ManyToOne } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
 @Entity('departments')
-export class Department {
+export class Department extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   dept_id: number;
 

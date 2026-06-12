@@ -1,10 +1,11 @@
 import { Column, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 /**
  * Mixin columns for row-level tenant isolation (defense-in-depth alongside schema-per-tenant).
  * Extend this class on every tenant-scoped entity.
  */
-export abstract class BaseTenantEntity {
+export abstract class BaseTenantEntity extends BaseSoftDeleteEntity {
   @Column({ type: 'uuid', name: 'tenant_id' })
   @Index()
   tenant_id: string;

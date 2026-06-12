@@ -1,8 +1,9 @@
 import { Entity, PrimaryGeneratedColumn, Column, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('hr_leave_balances')
 @Index(['user_id', 'leave_type', 'year'], { unique: true })
-export class LeaveBalance {
+export class LeaveBalance extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   balance_id: string;
 

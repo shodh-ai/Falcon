@@ -21,6 +21,8 @@ import { FinanceService } from './finance.service';
 import { FinanceWebhookService } from './finance-webhook.service';
 import { FinanceAccountsService } from './finance-accounts.service';
 import { FinanceLedgerService } from './finance-ledger.service';
+import { BudgetFpaService } from '../leadership/budget-fpa.service';
+import { FinanceApprovalsService } from './finance-approvals.service';
 import { CreateFeeDemandDto } from './dto/create-fee-demand.dto';
 import { GatewayWebhookDto } from './dto/gateway-webhook.dto';
 
@@ -34,6 +36,8 @@ export class FinanceController {
     private readonly webhookService: FinanceWebhookService,
     private readonly accounts: FinanceAccountsService,
     private readonly ledger: FinanceLedgerService,
+    private readonly budgetFpa: BudgetFpaService,
+    private readonly approvals: FinanceApprovalsService,
     @InjectQueue(FINANCE_BULK_DEMAND_QUEUE) private readonly bulkQueue: Queue,
   ) {}
 
@@ -154,6 +158,26 @@ export class FinanceController {
     return this.accounts.createExpense(this.tenant(req), dto as Parameters<FinanceAccountsService['createExpense']>[1]);
   }
 
+  @Post('approvals/:approvalId/request-otp')
+  @Roles('SuperAdmin', 'Accountant', 'President', 'Chairman')
+  requestApprovalOtp(@Req() req: { user: AuthUser }, @Param('approvalId') approvalId: string) {
+    return this.approvals.requestOtp(req.user as { user_id: string; tenant_id?: string; role_name?: string }, approvalId);
+  }
+
+  @Post('approvals/:approvalId/verify-otp')
+  @Roles('SuperAdmin', 'President', 'Chairman')
+  verifyApprovalOtp(
+    @Req() req: { user: AuthUser },
+    @Param('approvalId') approvalId: string,
+    @Body() body: { otp?: string },
+  ) {
+    return this.approvals.verifyOtp(
+      req.user as { user_id: string; tenant_id?: string; role_name?: string },
+      approvalId,
+      String(body?.otp ?? ''),
+    );
+  }
+
   @Get('salary-processing')
   @Roles('SuperAdmin', 'Accountant')
   salarySummary(@Req() req: { user: AuthUser }, @Query('month') month?: string) {
@@ -184,6 +208,29 @@ export class FinanceController {
   @Roles('SuperAdmin', 'Accountant')
   upsertBudget(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
     return this.accounts.upsertBudget(this.tenant(req), dto as Parameters<FinanceAccountsService['upsertBudget']>[1]);
+  }
+
+  @Post('purchase-orders')
+  @Roles('SuperAdmin', 'Accountant', 'HOD', 'Faculty')
+  createPurchaseOrder(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.budgetFpa.createPurchaseOrder(this.tenant(req), req.user.user_id, dto as {
+      program_id?: string;
+      budget_id?: string;
+      vendor_id?: string;
+      description: string;
+      amount: number;
+    });
+  }
+
+  @Post('budget-expansion')
+  @Roles('SuperAdmin', 'Accountant', 'HOD', 'Faculty')
+  requestBudgetExpansion(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+    return this.budgetFpa.requestBudgetExpansion(this.tenant(req), req.user.user_id, dto as {
+      budget_id?: string;
+      program_id?: string;
+      requested_amount: number;
+      reason?: string;
+    });
   }
 
   @Get('ledger-accounts')
