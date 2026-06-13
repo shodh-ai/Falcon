@@ -974,7 +974,7 @@ export class AcademicsService {
 
     return {
       student_name: student.name,
-      student_email: student.official_email,
+      student_email: student.email,
       department: student.department?.dept_name,
       semester_history: historyRows.map((r: Record<string, unknown>) => ({
         semester: Number(r.semester),
