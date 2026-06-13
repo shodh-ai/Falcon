@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
-import { Building, Building2, Briefcase, Globe, MapPin, Users, Trash2 } from 'lucide-react';
+import { Building, Building2, Briefcase, Globe, MapPin, Users, Trash2, Pencil } from 'lucide-react';
 
 type OrgNode = {
   unit_id: string;
@@ -22,6 +22,7 @@ export default function HrOrgStructurePage() {
   const api = useHrApi();
   const { entityId } = useHrEntity();
   const [tree, setTree] = useState<OrgNode[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ unit_type: 'DEPARTMENT', unit_name: '', parent_id: '' });
 
   const load = () => void api.get<OrgNode[]>('/api/hr/admin/org-structure').then(setTree);
@@ -30,15 +31,23 @@ export default function HrOrgStructurePage() {
     load();
   }, [api, entityId]);
 
-  async function addUnit() {
+  async function saveUnit() {
     try {
-      await api.post('/api/hr/admin/org-structure', {
+      const payload = {
         unit_type: form.unit_type,
         unit_name: form.unit_name,
-        parent_id: form.parent_id || undefined,
-      });
-      toast.success('Org unit created');
+        parent_id: form.parent_id || null, // send null if empty string
+      };
+
+      if (editingId) {
+        await api.put(`/api/hr/admin/org-structure/${editingId}`, payload);
+        toast.success('Org unit updated');
+      } else {
+        await api.post('/api/hr/admin/org-structure', payload);
+        toast.success('Org unit created');
+      }
       setForm({ unit_type: 'DEPARTMENT', unit_name: '', parent_id: '' });
+      setEditingId(null);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
@@ -50,6 +59,10 @@ export default function HrOrgStructurePage() {
     try {
       await api.del(`/api/hr/admin/org-structure/${unitId}`);
       toast.success('Org unit deleted');
+      if (editingId === unitId) {
+        setEditingId(null);
+        setForm({ unit_type: 'DEPARTMENT', unit_name: '', parent_id: '' });
+      }
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
@@ -84,10 +97,11 @@ export default function HrOrgStructurePage() {
   function renderNode(node: OrgNode, depth = 0) {
     const styles = getTypeStyles(node.unit_type);
     const Icon = styles.icon;
+    const isEditingThis = editingId === node.unit_id;
 
     return (
       <div key={node.unit_id} className="relative">
-        <div className={`group flex items-center justify-between rounded-md py-2 px-3 hover:bg-slate-50 transition-colors ${depth > 0 ? 'mt-1' : ''}`}>
+        <div className={`group flex items-center justify-between rounded-md py-2 px-3 transition-colors ${isEditingThis ? 'bg-sgvu-gold/10 ring-1 ring-sgvu-gold/50' : 'hover:bg-slate-50'} ${depth > 0 ? 'mt-1' : ''}`}>
           <div className="flex items-center gap-3">
             <div className={`p-1.5 rounded-md ${styles.iconBg} ${styles.text}`}>
               <Icon className="h-4 w-4" />
@@ -97,14 +111,29 @@ export default function HrOrgStructurePage() {
               {node.unit_type}
             </span>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-600 hover:bg-red-50"
-            onClick={() => void removeUnit(node.unit_id)}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-slate-400 hover:text-sgvu-navy hover:bg-slate-100"
+              onClick={() => {
+                setEditingId(node.unit_id);
+                setForm({ unit_type: node.unit_type, unit_name: node.unit_name, parent_id: node.parent_id || '' });
+              }}
+              title="Edit unit"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50"
+              onClick={() => void removeUnit(node.unit_id)}
+              title="Delete unit"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         {node.children && node.children.length > 0 && (
           <div className="ml-5 pl-4 border-l-2 border-slate-100 mt-1 space-y-1">
@@ -141,13 +170,26 @@ export default function HrOrgStructurePage() {
             >
               <option value="">No parent (Top level)</option>
               {allUnits.map(u => (
-                <option key={u.unit_id} value={u.unit_id}>{u.unit_name} ({u.unit_type})</option>
+                // Prevent selecting itself as a parent
+                u.unit_id !== editingId && (
+                  <option key={u.unit_id} value={u.unit_id}>{u.unit_name} ({u.unit_type})</option>
+                )
               ))}
             </select>
           </div>
-          <Button size="sm" onClick={() => void addUnit()} disabled={!form.unit_name.trim()}>
-            Add unit
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => void saveUnit()} disabled={!form.unit_name.trim()}>
+              {editingId ? 'Update unit' : 'Create unit'}
+            </Button>
+            {editingId && (
+              <Button size="sm" variant="ghost" onClick={() => {
+                setEditingId(null);
+                setForm({ unit_type: 'DEPARTMENT', unit_name: '', parent_id: '' });
+              }}>
+                Cancel
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
 

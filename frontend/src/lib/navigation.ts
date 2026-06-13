@@ -114,10 +114,10 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
         keywords: ['profile', 'kyc', 'aadhaar', 'pan', 'vault'],
       },
       {
-        label: 'My Leaves & Attendance',
-        href: p.workforce,
+        label: 'Attendance & Holidays Calendar',
+        href: '/hr/me/attendance-holidays',
         icon: CalendarDays,
-        keywords: ['leave', 'cl', 'sl', 'attendance', 'calendar', 'regularize'],
+        keywords: ['leave', 'cl', 'sl', 'attendance', 'calendar', 'holidays', 'regularize'],
       },
       {
         label: 'My Payslips & Tax',

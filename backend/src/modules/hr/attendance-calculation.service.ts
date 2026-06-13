@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, In, IsNull } from 'typeorm';
 import { HrDailyAttendance, CalculatedAttendanceStatus } from '../../entities/hr-daily-attendance.entity';
 import { HrHoliday } from '../../entities/hr-holiday.entity';
 import { HrShift } from '../../entities/hr-shift.entity';
@@ -173,7 +173,12 @@ export class AttendanceCalculationService {
       return this.buildResult(date, 'WEEK_OFF', attendance, shiftCtx);
     }
 
-    const holiday = await this.holidays.findOne({ where: { date } });
+    const holiday = await this.holidays.findOne({
+      where: [
+        { date, entity_id: ctx?.entityId ? ctx.entityId : IsNull(), applicable_to: In(['ALL', 'STAFF']) },
+        { date, entity_id: IsNull(), applicable_to: In(['ALL', 'STAFF']) },
+      ],
+    });
     if (holiday) {
       const status: CalculatedAttendanceStatus =
         holiday.type === 'RESTRICTED' ? 'RESTRICTED_HOLIDAY' : 'HOLIDAY';
@@ -221,9 +226,10 @@ export class AttendanceCalculationService {
     const start = `${year}-${String(monthNum).padStart(2, '0')}-01`;
     const end = `${year}-${String(monthNum).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
-    const [shift, ctx, attendanceRows, holidayRows, pendingRequests] = await Promise.all([
-      this.getEmployeeShift(userId),
-      this.loadAttendanceContext(userId),
+    const ctx = await this.loadAttendanceContext(userId);
+    const shift = await this.getEmployeeShift(userId);
+
+    const [attendanceRows, holidayRows, pendingRequests] = await Promise.all([
       this.daily
         .createQueryBuilder('d')
         .where('d.user_id = :userId', { userId })
@@ -232,6 +238,8 @@ export class AttendanceCalculationService {
       this.holidays
         .createQueryBuilder('h')
         .where('h.date BETWEEN :start AND :end', { start, end })
+        .andWhere('h.applicable_to IN (:...applicableTo)', { applicableTo: ['ALL', 'STAFF'] })
+        .andWhere('(h.entity_id = :entityId OR h.entity_id IS NULL)', { entityId: ctx?.entityId ?? null })
         .getMany(),
       this.requests
         .createQueryBuilder('r')

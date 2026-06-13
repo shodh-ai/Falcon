@@ -121,6 +121,60 @@ export class HrWorkforceService {
     };
   }
 
+  async listAdminHolidays(tenantId: string, entityId: number) {
+    return this.dataSource.query(
+      `SELECT * FROM hr_holidays WHERE entity_id = $1 OR entity_id IS NULL ORDER BY date ASC`,
+      [entityId]
+    );
+  }
+
+  async createHoliday(
+    tenantId: string,
+    entityId: number,
+    dto: { title: string; date: string; type: string; description?: string; applicable_to?: string }
+  ) {
+    const rows = await this.dataSource.query(
+      `INSERT INTO hr_holidays (entity_id, title, date, type, description, applicable_to)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [entityId, dto.title, dto.date, dto.type, dto.description || null, dto.applicable_to || 'ALL']
+    );
+    return rows[0];
+  }
+
+  async updateHoliday(
+    tenantId: string,
+    entityId: number,
+    holidayId: string,
+    dto: { title?: string; date?: string; type?: string; description?: string; applicable_to?: string }
+  ) {
+    const updates: string[] = [];
+    const params: any[] = [entityId, holidayId];
+
+    if (dto.title !== undefined) { params.push(dto.title); updates.push(`title = $${params.length}`); }
+    if (dto.date !== undefined) { params.push(dto.date); updates.push(`date = $${params.length}`); }
+    if (dto.type !== undefined) { params.push(dto.type); updates.push(`type = $${params.length}`); }
+    if (dto.description !== undefined) { params.push(dto.description); updates.push(`description = $${params.length}`); }
+    if (dto.applicable_to !== undefined) { params.push(dto.applicable_to); updates.push(`applicable_to = $${params.length}`); }
+
+    if (updates.length === 0) return null;
+
+    const rows = await this.dataSource.query(
+      `UPDATE hr_holidays SET ${updates.join(', ')} WHERE holiday_id = $2 AND (entity_id = $1 OR entity_id IS NULL) RETURNING *`,
+      params
+    );
+    if (!rows[0]) throw new NotFoundException('Holiday not found');
+    return rows[0];
+  }
+
+  async deleteHoliday(tenantId: string, entityId: number, holidayId: string) {
+    const rows = await this.dataSource.query(
+      `DELETE FROM hr_holidays WHERE holiday_id = $2 AND (entity_id = $1 OR entity_id IS NULL) RETURNING *`,
+      [entityId, holidayId]
+    );
+    if (!rows[0]) throw new NotFoundException('Holiday not found');
+    return rows[0];
+  }
+
   async applyRequest(
     staffUserId: string,
     tenantId: string,

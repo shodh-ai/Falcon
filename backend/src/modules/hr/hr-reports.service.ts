@@ -52,6 +52,38 @@ export class HrReportsService {
     return Buffer.from(buf);
   }
 
+  async buildEmployeeAttendance(tenantId: string, entityId: number, month: string, userId: string): Promise<Buffer> {
+    const matrix = await this.attendanceCalc.getMatrixMonth(tenantId, month, entityId);
+    const emp = matrix.employees.find(e => e.user_id === userId);
+    
+    const wb = new ExcelJS.Workbook();
+    const sheet = wb.addWorksheet('Attendance');
+    if (!emp) {
+        sheet.addRow(['No data found for employee']);
+        const buf = await wb.xlsx.writeBuffer();
+        return Buffer.from(buf);
+    }
+    
+    sheet.addRow(['Employee ID', emp.user_id]);
+    sheet.addRow(['Name', emp.name]);
+    sheet.addRow(['Month', month]);
+    sheet.addRow([]);
+    
+    sheet.addRow(['Date', 'Status', 'Details']);
+    sheet.getRow(5).font = { bold: true };
+    
+    for (const day of emp.days) {
+      sheet.addRow([day.date, this.statusCode(day.calculated_status), day.tooltip || '']);
+    }
+    
+    sheet.getColumn(1).width = 15;
+    sheet.getColumn(2).width = 10;
+    sheet.getColumn(3).width = 40;
+    
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
+
   async buildLeaveBalanceRegister(tenantId: string, entityId: number, year: number): Promise<Buffer> {
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     const rows = await this.dataSource.query(

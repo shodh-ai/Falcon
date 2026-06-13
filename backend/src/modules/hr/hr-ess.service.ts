@@ -241,7 +241,7 @@ export class HrEssService {
                 WHERE a.policy_id = p.policy_id AND a.user_id = $3
               ) AS acknowledged
        FROM hr_policy_documents p
-       WHERE p.tenant_id = $1 AND p.entity_id = $2 AND p.is_active = true
+       WHERE p.tenant_id = $1 AND (p.entity_id = $2 OR p.entity_id IS NULL) AND p.is_active = true
        ORDER BY p.category, p.title`,
       [tenantId, entityId, '00000000-0000-0000-0000-000000000000'],
     );
@@ -256,7 +256,7 @@ export class HrEssService {
                 WHERE a.policy_id = p.policy_id AND a.user_id = $3
               ) AS acknowledged
        FROM hr_policy_documents p
-       WHERE p.tenant_id = $1 AND p.entity_id = $2 AND p.is_active = true
+       WHERE p.tenant_id = $1 AND (p.entity_id = $2 OR p.entity_id IS NULL) AND p.is_active = true
        ORDER BY p.category, p.title`,
       [tenantId, entityId, userId],
     );
@@ -364,7 +364,8 @@ export class HrEssService {
       ),
       this.dataSource.query(
         `SELECT holiday_id, title, date, type FROM hr_holidays
-         WHERE date BETWEEN $1 AND $2 AND (entity_id = $3 OR entity_id IS NULL)`,
+         WHERE date BETWEEN $1 AND $2 AND (entity_id = $3 OR entity_id IS NULL)
+           AND applicable_to IN ('ALL', 'STAFF')`,
         [start, end, entityId],
       ),
       this.dataSource.query(

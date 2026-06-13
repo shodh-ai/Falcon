@@ -106,6 +106,15 @@ export class HrWorkflowBuilderService {
     return this.getWorkflow(tenantId, entityId, workflowId);
   }
 
+  async deleteWorkflow(tenantId: string, entityId: number, workflowId: string) {
+    await this.dataSource.query(`DELETE FROM hr_approval_workflow_steps WHERE workflow_id = $1`, [workflowId]);
+    await this.dataSource.query(
+      `DELETE FROM hr_approval_workflows WHERE tenant_id = $1 AND entity_id = $2 AND workflow_id = $3`,
+      [tenantId, entityId, workflowId]
+    );
+    return { success: true };
+  }
+
   async resolveNextApprover(
     tenantId: string,
     entityId: number,
