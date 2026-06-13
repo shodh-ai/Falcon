@@ -235,6 +235,10 @@ function canAccessHrPath(
     return roles.some((r) => ['hradmin', 'superadmin'].includes(r));
   }
 
+  if (pathname.startsWith('/hr/me/attendance-holidays')) {
+    return true; // Accessible to all roles permitted into the /hr portal
+  }
+
   const match = [...hrPathModules]
     .sort((a, b) => b.prefix.length - a.prefix.length)
     .find((p) => pathname === p.prefix || pathname.startsWith(`${p.prefix}/`));

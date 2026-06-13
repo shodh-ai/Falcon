@@ -392,6 +392,18 @@ export class AcademicsController {
     );
   }
 
+  @Get('hod/student-monitor/:studentId/detail')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodStudentMonitorDetail(
+    @Param('studentId') studentId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.academics.getHodStudentDetail(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      studentId,
+    );
+  }
   @Get('hod/approvals/leaves')
   @Roles('HOD', 'Dean', 'SuperAdmin')
   hodLeaveApprovals(@Req() req: { user: AuthUser }) {

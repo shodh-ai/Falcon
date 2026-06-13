@@ -28,6 +28,12 @@ export class StudentProfile extends BaseSoftDeleteEntity {
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  profile_photo_url: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  bank_details: Record<string, unknown> | null;
+
   @CreateDateColumn()
   created_at: Date;
 

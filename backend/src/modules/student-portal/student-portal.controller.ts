@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Post, Patch, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -17,6 +17,14 @@ export class StudentPortalController {
   @Get('profile')
   profile(@Req() req: { user: AuthUser }) {
     return this.portal.getMasterProfile(this.tenant(req), req.user.user_id);
+  }
+
+  @Patch('profile')
+  updateProfile(
+    @Req() req: { user: AuthUser },
+    @Body() body: { profile_photo_url?: string; bank_details?: Record<string, any> },
+  ) {
+    return this.portal.updateProfile(this.tenant(req), req.user.user_id, body);
   }
 
   @Get('admission-vault')

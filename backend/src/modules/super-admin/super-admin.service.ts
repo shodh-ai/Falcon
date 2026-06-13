@@ -135,4 +135,14 @@ export class SuperAdminService {
       [tenantId],
     );
   }
+
+  listHrOverrideLogs(tenantId: string) {
+    return this.dataSource.query(
+      `SELECT log_id, employee_id, assigned_approver, bypassed_by, type_of_action, type_of_request, date_and_time 
+       FROM hr_override_logs 
+       WHERE tenant_id = $1 
+       ORDER BY date_and_time DESC LIMIT 500`,
+      [tenantId]
+    );
+  }
 }

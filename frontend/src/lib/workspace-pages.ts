@@ -38,9 +38,9 @@ export const hodPages = {
       { key: 'name', label: 'Student' },
       { key: 'email', label: 'Email' },
       { key: 'department', label: 'Department' },
-      { key: 'average_attendance', label: 'Avg Attendance %' },
+      { key: 'average_attendance', label: 'Avg Attendance %', sortable: true },
       { key: 'course_count', label: 'Courses' },
-      { key: 'cgpa', label: 'CGPA' },
+      { key: 'cgpa', label: 'CGPA', sortable: true },
     ],
     filters: [
       {
@@ -56,6 +56,7 @@ export const hodPages = {
         },
       },
     ],
+    rowAction: 'student-details' as any,
   },
   leaveApprovals: {
     title: 'Faculty Leave Approvals',

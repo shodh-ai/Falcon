@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CalendarDays,
   CheckCircle2,
+  CreditCard,
   FileCheck2,
   GraduationCap,
   IdCard,
   LockKeyhole,
   Mail,
+  Pen,
   Phone,
   Send,
   ShieldCheck,
@@ -44,6 +46,12 @@ type MasterProfile = {
   address: unknown;
   aadhaar_masked: string | null;
   passport_masked: string | null;
+  profile_photo_url: string | null;
+  bank_details: {
+    bank_name?: string;
+    account_number?: string;
+    ifsc_code?: string;
+  } | null;
 };
 
 function displayValue(value: unknown) {
@@ -73,10 +81,52 @@ export default function StudentProfilePage() {
   const [profile, setProfile] = useState<MasterProfile | null>(null);
   const [requestNote, setRequestNote] = useState('');
   const [loading, setLoading] = useState(true);
+  const [editingBank, setEditingBank] = useState(false);
+  const [bankData, setBankData] = useState({ bank_name: '', account_number: '', ifsc_code: '' });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void api.get<MasterProfile>('/api/student/profile').then(setProfile).finally(() => setLoading(false));
+    void api.get<MasterProfile>('/api/student/profile').then((data) => {
+      setProfile(data);
+      if (data.bank_details) {
+        setBankData({
+          bank_name: data.bank_details.bank_name ?? '',
+          account_number: data.bank_details.account_number ?? '',
+          ifsc_code: data.bank_details.ifsc_code ?? '',
+        });
+      }
+    }).finally(() => setLoading(false));
   }, [api]);
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64String = event.target?.result as string;
+      try {
+        await api.patch('/api/student/profile', { profile_photo_url: base64String });
+        setProfile((prev) => (prev ? { ...prev, profile_photo_url: base64String } : null));
+        toast.success('Profile photo updated successfully!');
+      } catch (err) {
+        toast.error('Failed to update photo');
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function saveBankDetails() {
+    try {
+      await api.patch('/api/student/profile', { bank_details: bankData });
+      setProfile((prev) => (prev ? { ...prev, bank_details: bankData } : null));
+      setEditingBank(false);
+      toast.success('Bank details saved successfully!');
+    } catch (e) {
+      toast.error('Failed to save bank details');
+    }
+  }
 
   async function submitUpdateRequest() {
     if (requestNote.trim().length < 10) {
@@ -123,8 +173,25 @@ export default function StudentProfilePage() {
           <div className="absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
           <div className="relative grid gap-6 lg:grid-cols-[1.3fr_0.7fr] lg:items-end">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl border border-white/20 bg-white/15 text-3xl font-black shadow-inner">
-                {profile.name?.slice(0, 1).toUpperCase() ?? 'S'}
+              <div className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-white/20 bg-white/15 text-3xl font-black shadow-inner">
+                {profile.profile_photo_url ? (
+                  <img src={profile.profile_photo_url} alt="Profile" className="h-full w-full object-cover" />
+                ) : (
+                  profile.name?.slice(0, 1).toUpperCase() ?? 'S'
+                )}
+                <div
+                  className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Pen className="h-5 w-5 text-white" />
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
               </div>
               <div>
                 <div className="mb-3 flex flex-wrap gap-2">
@@ -199,6 +266,67 @@ export default function StudentProfilePage() {
         </Card>
 
         <div className="space-y-6">
+          <Card className="mt-6 overflow-hidden border-sgvu-navy/10 bg-white shadow-lg shadow-slate-200/60">
+            <CardHeader className="border-b border-border/70 bg-slate-50/50 pb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-100 text-blue-700">
+                    <CreditCard className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Bank details</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">Used for fee refunds and scholarships.</p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => (editingBank ? void saveBankDetails() : setEditingBank(true))}
+                >
+                  {editingBank ? 'Save' : 'Edit'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-4 pt-5 sm:grid-cols-2">
+              {editingBank ? (
+                <>
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Bank Name</label>
+                    <input
+                      className="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
+                      value={bankData.bank_name}
+                      onChange={(e) => setBankData({ ...bankData, bank_name: e.target.value })}
+                      placeholder="e.g. HDFC Bank"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">Account Number</label>
+                    <input
+                      className="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
+                      value={bankData.account_number}
+                      onChange={(e) => setBankData({ ...bankData, account_number: e.target.value })}
+                      placeholder="Account No"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">IFSC Code</label>
+                    <input
+                      className="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
+                      value={bankData.ifsc_code}
+                      onChange={(e) => setBankData({ ...bankData, ifsc_code: e.target.value })}
+                      placeholder="IFSC Code"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <StudentInfoTile label="Bank Name" value={profile.bank_details?.bank_name} icon={FileCheck2} />
+                  <StudentInfoTile label="Account Number" value={profile.bank_details?.account_number} icon={FileCheck2} />
+                  <StudentInfoTile label="IFSC Code" value={profile.bank_details?.ifsc_code} icon={FileCheck2} />
+                </>
+              )}
+            </CardContent>
+          </Card>
           <Card className="border-emerald-200/70 bg-emerald-50/60 shadow-lg shadow-emerald-100/50">
             <CardHeader className="pb-4">
               <div className="flex items-start gap-3">

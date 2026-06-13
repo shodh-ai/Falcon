@@ -6,7 +6,8 @@ import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { useHrApi } from '@/lib/api/use-hr-api';
+import { useAuthedApi } from '@/lib/api';
+import { useOptionalHrEntity } from '@/context/HrEntityContext';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Trash2, Pencil, Users, Briefcase, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -46,7 +47,9 @@ export default function AttendanceHolidaysCalendarPage() {
     description: '',
   });
 
-  const api = useHrApi();
+  const api = useAuthedApi();
+  const hrEntityCtx = useOptionalHrEntity();
+  const entityId = hrEntityCtx?.entityId;
 
   const getLocalYYYYMMDD = (isoString: string) => {
     const d = new Date(isoString);
@@ -63,8 +66,16 @@ export default function AttendanceHolidaysCalendarPage() {
   const fetchHolidays = async () => {
     try {
       setLoading(true);
-      const data = await api.get('/api/hr/admin/holidays');
-      setHolidays(data || []);
+      let list: any[] = [];
+      if (isAdmin && entityId) {
+        list = await api.get(`/api/hr/admin/holidays?entity_id=${entityId}`);
+      } else if (isAdmin) {
+        list = await api.get('/api/hr/admin/holidays');
+      } else {
+        const data = await api.get<any>('/api/hr/holidays');
+        list = [...(data?.mandatory || []), ...(data?.restricted || [])];
+      }
+      setHolidays(list || []);
     } catch (err: any) {
       toast.error('Failed to load holidays');
     } finally {
@@ -75,11 +86,14 @@ export default function AttendanceHolidaysCalendarPage() {
   const handleSave = async () => {
     if (!form.title || !form.date) return toast.error('Title and Date are required');
     try {
+      const payload = form;
+      const headers = entityId ? { 'x-entity-id': String(entityId) } : undefined;
+
       if (form.id) {
-        await api.put(`/api/hr/admin/holidays/${form.id}`, form);
+        await api.put(`/api/hr/admin/holidays/${form.id}`, payload, headers);
         toast.success('Holiday updated');
       } else {
-        await api.post('/api/hr/admin/holidays', form);
+        await api.post('/api/hr/admin/holidays', payload, headers);
         toast.success('Holiday created');
       }
       setForm({ title: '', date: '', type: 'MANDATORY', applicable_to: 'ALL', description: '' });
@@ -92,7 +106,8 @@ export default function AttendanceHolidaysCalendarPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this holiday?')) return;
     try {
-      await api.del(`/api/hr/admin/holidays/${id}`);
+      const headers = entityId ? { 'x-entity-id': String(entityId) } : undefined;
+      await api.del(`/api/hr/admin/holidays/${id}`, headers);
       toast.success('Holiday deleted');
       fetchHolidays();
     } catch (err: any) {

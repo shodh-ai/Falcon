@@ -44,6 +44,7 @@ export class StudentPortalService {
               sp.enrollment_number, sp.enrollment_no, sp.batch, sp.category, sp.gender, sp.date_of_birth,
               sp.nationality, sp.parent_info, sp.admission_type, sp.admission_number,
               sp.admission_status, sp.aadhaar_encrypted, sp.passport_encrypted,
+              sp.profile_photo_url, sp.bank_details,
               d.dept_name AS department,
               COALESCE(
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
@@ -78,7 +79,33 @@ export class StudentPortalService {
       passport_masked: this.maskEncrypted(row.passport_encrypted, (v) => `••••${v.slice(-4)}`),
       admission_type: row.admission_type,
       admission_status: row.admission_status,
+      profile_photo_url: row.profile_photo_url,
+      bank_details: row.bank_details,
     };
+  }
+
+  async updateProfile(tenantId: string, userId: string, dto: { profile_photo_url?: string; bank_details?: Record<string, any> }) {
+    const setChunks: string[] = [];
+    const values: any[] = [];
+    let queryIdx = 1;
+
+    if (dto.profile_photo_url !== undefined) {
+      setChunks.push(`profile_photo_url = $${queryIdx++}`);
+      values.push(dto.profile_photo_url);
+    }
+    if (dto.bank_details !== undefined) {
+      setChunks.push(`bank_details = $${queryIdx++}`);
+      values.push(dto.bank_details);
+    }
+
+    if (setChunks.length === 0) return { success: true };
+
+    values.push(userId);
+    await this.dataSource.query(
+      `UPDATE student_profiles SET ${setChunks.join(', ')} WHERE user_id = $${queryIdx}`,
+      values,
+    );
+    return { success: true };
   }
 
   async getAdmissionVault(tenantId: string, userId: string) {
