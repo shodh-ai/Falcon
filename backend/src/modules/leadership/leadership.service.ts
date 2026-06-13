@@ -24,6 +24,48 @@ export class LeadershipService {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
   }
 
+  async getAdmissionsFunnel(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [leads, applications, enrolled] = await Promise.all([
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total
+           FROM admissions_leads
+           WHERE tenant_id = $1 AND deleted_at IS NULL`,
+          [tid],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total
+           FROM admissions_applications
+           WHERE tenant_id = $1 AND deleted_at IS NULL`,
+          [tid],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT COALESCE(COUNT(*), 0)::int AS total
+           FROM finance_transactions t
+           JOIN users u ON u.user_id = t.student_user_id
+           WHERE u.tenant_id = $1
+             AND t.deleted_at IS NULL
+             AND t.status = 'SUCCESS'
+             AND t.created_at >= NOW() - INTERVAL '12 months'`,
+          [tid],
+        )
+        .catch(() => [{ total: 0 }]),
+    ]);
+
+    return {
+      funnel: [
+        { stage: 'Inquiries', count: Number(leads[0]?.total ?? 0) },
+        { stage: 'Applications', count: Number(applications[0]?.total ?? 0) },
+        { stage: 'Fees Paid', count: Number(enrolled[0]?.total ?? 0) },
+      ],
+    };
+  }
+
   private liveKey(tenantId: string, metric: string) {
     return `exec:live:${tenantId}:${metric}`;
   }

@@ -7,11 +7,12 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { HrShift } from './hr-shift.entity';
 import { User } from './user.entity';
 
 @Entity('hr_employee_profiles')
-export class HrEmployeeProfile {
+export class HrEmployeeProfile extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   profile_id: string;
 

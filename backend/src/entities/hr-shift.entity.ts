@@ -1,7 +1,8 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('hr_shifts')
-export class HrShift {
+export class HrShift extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   shift_id: string;
 

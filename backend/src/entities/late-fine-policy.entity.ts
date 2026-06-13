@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 /**
  * Late-fee escalation table the cron job evaluates against each `FeeDemand`
@@ -7,7 +8,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
  * changes.
  */
 @Entity('finance_late_fine_policies')
-export class LateFinePolicy {
+export class LateFinePolicy extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   policy_id: number;
 

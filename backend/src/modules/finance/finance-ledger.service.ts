@@ -6,6 +6,10 @@ import { DataSource } from 'typeorm';
 export class FinanceLedgerService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
+  private q(tx?: Pick<DataSource, 'query'>) {
+    return tx ?? this.dataSource;
+  }
+
   listAccounts(tenantId: string) {
     return this.dataSource.query(
       `SELECT ledger_account_id, account_code, account_name, account_type, is_active
@@ -16,7 +20,63 @@ export class FinanceLedgerService {
     );
   }
 
-  async postFeePayment(tenantId: string, transactionId: string, amount: number) {
+  async postPayrollDisbursement(tenantId: string, payrollRunKey: string, amount: number) {
+    if (!amount || amount <= 0) return;
+
+    const existing = await this.dataSource.query(
+      `SELECT journal_entry_id
+       FROM finance_journal_entries
+       WHERE tenant_id = $1 AND source_type = 'PAYROLL' AND source_id = $2
+       LIMIT 1`,
+      [tenantId, payrollRunKey],
+    );
+    if (existing.length) return;
+
+    const accounts = await this.dataSource.query(
+      `SELECT ledger_account_id, account_code FROM finance_ledger_accounts
+       WHERE tenant_id = $1 AND account_code IN ('1000', '5000')`,
+      [tenantId],
+    );
+    const bank = (accounts as Array<{ ledger_account_id: string; account_code: string }>).find(
+      (a) => a.account_code === '1000',
+    );
+    const salary = (accounts as Array<{ ledger_account_id: string; account_code: string }>).find(
+      (a) => a.account_code === '5000',
+    );
+    if (!bank || !salary) return;
+
+    const entry = await this.dataSource.query(
+      `INSERT INTO finance_journal_entries (tenant_id, narration, source_type, source_id)
+       VALUES ($1, $2, 'PAYROLL', $3)
+       RETURNING journal_entry_id`,
+      [tenantId, `Payroll disbursement ${payrollRunKey}`, payrollRunKey],
+    );
+    const journalEntryId = (entry[0] as { journal_entry_id: string }).journal_entry_id;
+
+    await this.dataSource.query(
+      `INSERT INTO finance_journal_lines (journal_entry_id, ledger_account_id, debit_amount, credit_amount, ledger_category)
+       VALUES
+         ($1, $2, $3, 0, 'PAYROLL_TOTAL'),
+         ($1, $4, 0, $3, 'BANK_OUT')`,
+      [journalEntryId, salary.ledger_account_id, amount, bank.ledger_account_id],
+    );
+  }
+
+  async postFeePayment(
+    tenantId: string,
+    transactionId: string,
+    amount: number,
+    ctx?: { feeHead?: string; programCode?: string | null; templateId?: string | null },
+  ) {
+    const existing = await this.dataSource.query(
+      `SELECT journal_entry_id
+       FROM finance_journal_entries
+       WHERE tenant_id = $1 AND source_type = 'FEE_PAYMENT' AND source_id = $2
+       LIMIT 1`,
+      [tenantId, transactionId],
+    );
+    if (existing.length) return;
+
     const accounts = await this.dataSource.query(
       `SELECT ledger_account_id, account_code FROM finance_ledger_accounts
        WHERE tenant_id = $1 AND account_code IN ('1000', '4000')`,
@@ -30,6 +90,46 @@ export class FinanceLedgerService {
     );
     if (!bank || !income) return;
 
+    const feeHead = ctx?.feeHead ?? 'TUITION';
+    const rules = await this.dataSource.query(
+      `SELECT ledger_category, weight
+       FROM finance_allocation_rules
+       WHERE tenant_id = $1
+         AND fee_head = $2
+         AND is_active = TRUE
+         AND ($3::text IS NULL OR program_code = $3)
+         AND ($4::uuid IS NULL OR template_id = $4::uuid)
+       ORDER BY weight DESC, ledger_category ASC`,
+      [tenantId, feeHead, ctx?.programCode ?? null, ctx?.templateId ?? null],
+    );
+
+    const allocations = (rules as Array<{ ledger_category: string; weight: string | number }>)
+      .filter((r) => Number(r.weight) > 0)
+      .map((r) => ({ ledger_category: r.ledger_category, weight: Number(r.weight) }));
+
+    const split = allocations.length
+      ? allocations
+      : [{ ledger_category: 'TUITION_GENERAL', weight: 1 }];
+
+    const totalWeight = split.reduce((s, r) => s + r.weight, 0);
+    const rounded = (value: number) => Math.round(value * 100) / 100;
+    const amounts = split.map((r) => ({
+      ledger_category: r.ledger_category,
+      amount: 0,
+      weight: r.weight,
+    }));
+
+    let remaining = rounded(amount);
+    for (let i = 0; i < amounts.length; i += 1) {
+      if (i === amounts.length - 1) {
+        amounts[i].amount = remaining;
+      } else {
+        const part = rounded((amount * amounts[i].weight) / (totalWeight || 1));
+        amounts[i].amount = part;
+        remaining = rounded(remaining - part);
+      }
+    }
+
     const entry = await this.dataSource.query(
       `INSERT INTO finance_journal_entries (tenant_id, narration, source_type, source_id)
        VALUES ($1, $2, 'FEE_PAYMENT', $3)
@@ -37,16 +137,49 @@ export class FinanceLedgerService {
       [tenantId, `Fee collection txn ${transactionId}`, transactionId],
     );
     const journalEntryId = (entry[0] as { journal_entry_id: string }).journal_entry_id;
+
+    const values: string[] = [];
+    const params: unknown[] = [journalEntryId];
+    let idx = 2;
+
+    values.push(`($1, $${idx}, $${idx + 1}, 0, $${idx + 2})`);
+    params.push(bank.ledger_account_id, amount, 'BANK_IN');
+    idx += 3;
+
+    for (const row of amounts) {
+      values.push(`($1, $${idx}, 0, $${idx + 1}, $${idx + 2})`);
+      params.push(income.ledger_account_id, row.amount, row.ledger_category);
+      idx += 3;
+    }
+
     await this.dataSource.query(
-      `INSERT INTO finance_journal_lines (journal_entry_id, ledger_account_id, debit_amount, credit_amount)
-       VALUES ($1, $2, $3, 0), ($1, $4, 0, $3)`,
-      [journalEntryId, bank.ledger_account_id, amount, income.ledger_account_id],
+      `INSERT INTO finance_journal_lines (journal_entry_id, ledger_account_id, debit_amount, credit_amount, ledger_category)
+       VALUES ${values.join(', ')}`,
+      params,
     );
   }
 
-  async postExpense(tenantId: string, invoiceId: string, netPayable: number, gstCredit: number, tds: number) {
+  async postExpense(
+    tenantId: string,
+    invoiceId: string,
+    netPayable: number,
+    gstCredit: number,
+    tds: number,
+    tx?: Pick<DataSource, 'query'>,
+  ) {
+    const db = this.q(tx);
+
+    const existing = await db.query(
+      `SELECT journal_entry_id
+       FROM finance_journal_entries
+       WHERE tenant_id = $1 AND source_type = 'EXPENSE' AND source_id = $2
+       LIMIT 1`,
+      [tenantId, invoiceId],
+    );
+    if (existing.length) return;
+
     const codes = ['1000', '5100', '5200', '5300'];
-    const accounts = await this.dataSource.query(
+    const accounts = await db.query(
       `SELECT ledger_account_id, account_code FROM finance_ledger_accounts
        WHERE tenant_id = $1 AND account_code = ANY($2)`,
       [tenantId, codes],
@@ -62,15 +195,15 @@ export class FinanceLedgerService {
     if (!bank || !expense) return;
 
     const grossExpense = netPayable + tds - gstCredit;
-    const entry = await this.dataSource.query(
+    const entry = await db.query(
       `INSERT INTO finance_journal_entries (tenant_id, narration, source_type, source_id)
        VALUES ($1, $2, 'EXPENSE', $3) RETURNING journal_entry_id`,
       [tenantId, `Vendor invoice ${invoiceId}`, invoiceId],
     );
     const journalEntryId = (entry[0] as { journal_entry_id: string }).journal_entry_id;
-    await this.dataSource.query(
-      `INSERT INTO finance_journal_lines (journal_entry_id, ledger_account_id, debit_amount, credit_amount)
-       VALUES ($1, $2, $3, 0), ($1, $4, 0, $3)`,
+    await db.query(
+      `INSERT INTO finance_journal_lines (journal_entry_id, ledger_account_id, debit_amount, credit_amount, ledger_category)
+       VALUES ($1, $2, $3, 0, 'OPERATIONS_GENERAL'), ($1, $4, 0, $3, 'BANK_OUT')`,
       [journalEntryId, expense, grossExpense, bank, netPayable],
     );
   }

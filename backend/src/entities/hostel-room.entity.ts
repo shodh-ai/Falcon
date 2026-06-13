@@ -1,9 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, JoinColumn, ManyToOne } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
 @Entity('operations_hostel_rooms')
 @Index(['hostel_block', 'room_number'], { unique: true })
-export class HostelRoom {
+export class HostelRoom extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   room_id: number;
 

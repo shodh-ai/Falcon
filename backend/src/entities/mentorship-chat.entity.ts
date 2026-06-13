@@ -1,10 +1,11 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type MentorshipChatSender = 'STUDENT' | 'FACULTY';
 
 @Entity('mentorship_chats')
 @Index(['student_user_id', 'proctor_user_id', 'sent_at'])
-export class MentorshipChat {
+export class MentorshipChat extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   message_id: string;
 

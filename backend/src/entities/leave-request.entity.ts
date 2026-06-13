@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type LeaveRequestStatus =
   | 'DRAFT'
@@ -14,7 +15,7 @@ export type LeaveType = 'CASUAL' | 'SICK' | 'EARNED' | 'MATERNITY' | 'PATERNITY'
 @Entity('hr_leave_requests')
 @Index(['requester_user_id'])
 @Index(['status'])
-export class LeaveRequest {
+export class LeaveRequest extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   leave_request_id: string;
 

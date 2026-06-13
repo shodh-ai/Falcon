@@ -5,6 +5,22 @@ import { getSubdomainFromClient } from '@/lib/tenant';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+let authRedirectInFlight = false;
+
+function scheduleAuthRedirect(router: ReturnType<typeof useRouter>) {
+  if (typeof window === 'undefined' || authRedirectInFlight) return;
+  authRedirectInFlight = true;
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  window.setTimeout(() => {
+    try {
+      router.replace('/login');
+    } catch {
+      window.location.assign('/login');
+    }
+  }, 0);
+}
+
 function wrapFetchError(err: unknown, path: string): Error {
   if (err instanceof TypeError && err.message === 'Failed to fetch') {
     return new Error(`Cannot reach API at ${API_URL}${path}. Start the backend with: cd backend && npm run start:dev`);
@@ -43,11 +59,7 @@ async function request<T>(
   }
 
   if (response.status === 401) {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-    }
-    router.replace('/login');
+    scheduleAuthRedirect(router);
     throw new Error('Unauthorized');
   }
 

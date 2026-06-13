@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FINANCE_BULK_DEMAND_QUEUE } from '../../common/constants/finance-queue.constants';
+import { LEADERSHIP_ANOMALY_QUEUE } from '../../common/constants/leadership-queue.constants';
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
 import { LateFinePolicy } from '../../entities/late-fine-policy.entity';
@@ -12,13 +13,17 @@ import { FinanceWebhookService } from './finance-webhook.service';
 import { FinanceReceiptService } from './finance-receipt.service';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { FinanceAccountsService } from './finance-accounts.service';
+import { FinanceApprovalsService } from './finance-approvals.service';
 import { FinanceBulkDemandProcessor } from './finance-bulk-demand.processor';
+import { BudgetFpaModule } from '../leadership/budget-fpa.module';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: FINANCE_BULK_DEMAND_QUEUE }),
+    BullModule.registerQueue({ name: LEADERSHIP_ANOMALY_QUEUE }),
     TypeOrmModule.forFeature([FeeDemand, Transaction, LateFinePolicy]),
     CampusWalletModule,
+    BudgetFpaModule,
   ],
   controllers: [FinanceController],
   providers: [
@@ -27,8 +32,9 @@ import { FinanceBulkDemandProcessor } from './finance-bulk-demand.processor';
     FinanceReceiptService,
     FinanceLedgerService,
     FinanceAccountsService,
+    FinanceApprovalsService,
     FinanceBulkDemandProcessor,
   ],
-  exports: [FinanceService],
+  exports: [FinanceService, FinanceLedgerService],
 })
 export class FinanceModule {}

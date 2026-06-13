@@ -67,6 +67,16 @@ export class FinanceWebhookService {
         gateway_order_id: orderId || null,
         gateway_reference: paymentId,
         amount,
+        direction: 'IN',
+        txn_kind: feeHead ? `FEE_${feeHead}` : 'FEE_PAYMENT',
+        ledger_category:
+          feeHead === 'HOSTEL_BOOKING'
+            ? 'HOSTEL_GENERAL'
+            : feeHead === 'EVENTS_CLUB'
+              ? 'EVENTS_GENERAL'
+              : feeHead === 'WALLET_TOPUP'
+                ? 'WALLET_IN'
+                : 'TUITION_GENERAL',
         status: 'INITIATED',
         student_user_id: studentUserId || null,
         demand_id: demandId || null,
@@ -82,6 +92,17 @@ export class FinanceWebhookService {
 
     txn.status = 'SUCCESS';
     txn.gateway_payload = dto.payload;
+    txn.direction = txn.direction ?? 'IN';
+    txn.txn_kind = txn.txn_kind ?? (feeHead ? `FEE_${feeHead}` : 'FEE_PAYMENT');
+    txn.ledger_category =
+      txn.ledger_category ??
+      (feeHead === 'HOSTEL_BOOKING'
+        ? 'HOSTEL_GENERAL'
+        : feeHead === 'EVENTS_CLUB'
+          ? 'EVENTS_GENERAL'
+          : feeHead === 'WALLET_TOPUP'
+            ? 'WALLET_IN'
+            : 'TUITION_GENERAL');
     await this.transactions.save(txn);
 
     if (feeHead === 'EVENTS_CLUB' && registrationId && studentUserId) {
@@ -158,10 +179,19 @@ export class FinanceWebhookService {
         await this.demands.save(demand);
 
         if (demand.status === 'PAID') {
+          const tenantRows = await this.dataSource.query(
+            `SELECT tenant_id FROM users WHERE user_id = $1`,
+            [demand.student_user_id],
+          );
+          const tenantId =
+            (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ??
+            'a0000000-0000-4000-8000-000000000001';
           this.events.emit('finance.demand_paid', {
             demandId: demand.demand_id,
             feeHead: demand.fee_head,
             studentUserId: demand.student_user_id,
+            amount,
+            tenantId,
           });
         }
       }
@@ -192,7 +222,7 @@ export class FinanceWebhookService {
       await this.receipts.emailReceipt(receiptStudentId, receiptUrl, amount);
     }
 
-    await this.ledger.postFeePayment(tenantId, txn.transaction_id, amount);
+    await this.ledger.postFeePayment(tenantId, txn.transaction_id, amount, { feeHead: feeHead || undefined });
 
     return { received: true, processed: true, transaction_id: txn.transaction_id, receipt_url: receiptUrl };
   }

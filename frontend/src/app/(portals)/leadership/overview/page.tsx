@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { AttendanceDrillDown } from '@/components/leadership/AttendanceDrillDown';
 import { LiveTickerRow } from '@/components/leadership/LiveTicker';
+import { LeadershipMiniTicker } from '@/components/leadership/intelligence/LeadershipAlertBadge';
 import { LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
 import { useLeadershipApi, type LeadershipOverview } from '@/lib/api/api.leadership';
 
@@ -26,7 +28,17 @@ export default function LeadershipOverviewPage() {
             ? `Read-only analytics · Materialized views refreshed nightly at 2:00 AM · Last sync: ${new Date(data.refreshed_at).toLocaleString()}`
             : 'Read-only analytics · Materialized views refreshed nightly at 2:00 AM'
         }
+        action={
+          <Link
+            href="/leadership/intelligence"
+            className="rounded-lg bg-sgvu-navy px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-sgvu-navy/90"
+          >
+            Financial Intelligence →
+          </Link>
+        }
       />
+
+      <LeadershipMiniTicker />
 
       <LiveTickerRow
         items={[
