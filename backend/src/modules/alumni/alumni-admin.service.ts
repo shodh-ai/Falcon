@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AlumniEvent } from '../../entities/alumni-event.entity';
+import { AlumniConversionService } from './alumni-conversion.service';
 
 /** Resolve alumni row id across legacy (alumni_profile_id) and new (alumni_id) columns. */
 const ALUMNI_ID = `COALESCE(p.alumni_id, p.alumni_profile_id)`;
@@ -11,6 +12,7 @@ export class AlumniAdminService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(AlumniEvent) private readonly events: Repository<AlumniEvent>,
+    private readonly conversion: AlumniConversionService,
   ) {}
 
   private async safeQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
@@ -34,18 +36,47 @@ export class AlumniAdminService {
   }
 
   verificationQueue(tenantId: string) {
-    return this.dataSource.query(
-      `SELECT ${ALUMNI_ID} AS alumni_id, p.student_user_id, p.user_id, p.name, p.email,
-              p.enrollment_number, p.batch_year,
-              p.current_organization, p.designation, p.linkedin_url,
-              p.verification_status, p.created_at,
-              sp.enrollment_no AS student_enrollment
+    return this.listConversionVerifications(tenantId);
+  }
+
+  async listConversionVerifications(tenantId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT ${ALUMNI_ID} AS alumni_id, p.student_user_id, p.user_id, p.name,
+              COALESCE(p.personal_email, c.personal_email) AS personal_email,
+              p.enrollment_number, p.batch_year, p.program_name,
+              p.current_organization, p.linkedin_url, p.higher_education_details,
+              p.verification_status, p.created_at, c.conversion_requested_at,
+              sp.enrollment_no AS student_enrollment,
+              c.library_cleared, c.hostel_cleared, c.dept_cleared, c.finance_cleared
        FROM alumni_profiles p
+       LEFT JOIN student_exit_clearances c
+         ON c.tenant_id = p.tenant_id AND c.student_user_id = p.student_user_id
        LEFT JOIN student_profiles sp ON sp.user_id = p.student_user_id
        WHERE p.tenant_id = $1 AND p.verification_status = 'PENDING'
-       ORDER BY p.created_at ASC`,
+       ORDER BY COALESCE(c.conversion_requested_at, p.created_at) ASC`,
       [tenantId],
     );
+
+    return rows.map((row: Record<string, unknown>) => {
+      const library = Boolean(row.library_cleared);
+      const hostel = Boolean(row.hostel_cleared);
+      const dept = Boolean(row.dept_cleared);
+      const finance = Boolean(row.finance_cleared);
+      return {
+        ...row,
+        clearance: {
+          library,
+          hostel,
+          dept,
+          finance,
+          all_cleared: library && hostel && dept && finance,
+        },
+      };
+    });
+  }
+
+  async approveConversion(tenantId: string, alumniId: string, adminUserId: string) {
+    return this.conversion.approveAndConvert(tenantId, alumniId, adminUserId);
   }
 
   async verifyProfile(
@@ -54,6 +85,10 @@ export class AlumniAdminService {
     adminUserId: string,
     dto: { action: 'approve' | 'reject' },
   ) {
+    if (dto.action === 'approve') {
+      return this.approveConversion(tenantId, alumniId, adminUserId);
+    }
+
     const rows = await this.dataSource.query(
       `SELECT student_user_id, ${ALUMNI_ID} AS alumni_id
        FROM alumni_profiles p
@@ -62,23 +97,12 @@ export class AlumniAdminService {
     );
     if (!rows[0]) throw new NotFoundException('Alumni profile not found');
 
-    const status = dto.action === 'approve' ? 'VERIFIED' : 'REJECTED';
     await this.dataSource.query(
-      `UPDATE alumni_profiles p SET verification_status = $3, approved_at = NOW()
+      `UPDATE alumni_profiles p SET verification_status = 'REJECTED', approved_at = NOW()
        WHERE p.tenant_id = $1 AND (${ALUMNI_ID} = $2 OR p.alumni_profile_id = $2)`,
-      [tenantId, alumniId, status],
+      [tenantId, alumniId],
     );
-
-    if (dto.action === 'approve' && rows[0].student_user_id) {
-      const role = await this.dataSource.query(`SELECT role_id FROM roles WHERE role_name = 'Alumni' LIMIT 1`);
-      if (role[0]?.role_id) {
-        await this.dataSource.query(`UPDATE users SET role_id = $1 WHERE user_id = $2`, [
-          role[0].role_id,
-          rows[0].student_user_id,
-        ]);
-      }
-    }
-    return { alumni_id: rows[0].alumni_id, verification_status: status };
+    return { alumni_id: rows[0].alumni_id, verification_status: 'REJECTED' };
   }
 
   donationLedger(tenantId: string) {

@@ -1,6 +1,6 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
@@ -24,6 +24,7 @@ export class TicketService {
     private readonly ticketProvider: ITicketProvider,
     @InjectRepository(HelpdeskTicket)
     private tickets: Repository<HelpdeskTicket>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
@@ -161,8 +162,53 @@ export class TicketService {
       .getMany();
   }
 
-  updateStatus(ticketId: string, dto: UpdateTicketStatusDto) {
-    return this.ticketProvider.updateStatus(ticketId, dto);
+  async updateStatus(ticketId: string, dto: UpdateTicketStatusDto) {
+    if (dto.status === 'REJECTED' && !dto.rejection_reason?.trim()) {
+      throw new BadRequestException('rejection_reason is required when rejecting a ticket');
+    }
+
+    const ticket = await this.tickets.findOne({ where: { ticket_id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    ticket.status = dto.status;
+    if (dto.assigned_to_user_id !== undefined) {
+      ticket.assigned_to_user_id = dto.assigned_to_user_id;
+    }
+    if (dto.status === 'REJECTED') {
+      ticket.rejection_reason = dto.rejection_reason!.trim();
+      ticket.resolved_at = new Date();
+    }
+    if (dto.status === 'RESOLVED') {
+      ticket.resolved_at = new Date();
+      ticket.rejection_reason = null;
+    }
+
+    const saved = await this.tickets.save(ticket);
+
+    if (dto.status === 'RESOLVED' && ticket.category === 'STUDENT_PROFILE') {
+      await this.dataSource.query(
+        `UPDATE student_profiles
+         SET profile_unlocked_until = NOW() + INTERVAL '15 minutes'
+         WHERE user_id = $1`,
+        [ticket.student_user_id],
+      );
+    }
+
+    if (dto.status === 'REJECTED') {
+      const student = await this.users.findOne({ where: { user_id: ticket.student_user_id } });
+      const tenantId = student?.tenant_id ?? ticket.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+      this.notify.ticketReply({
+        tenantId,
+        userId: ticket.student_user_id,
+        ticketId: ticket.ticket_id,
+        subject: ticket.subject,
+        title: 'Helpdesk request rejected',
+        message: dto.rejection_reason!.trim(),
+        actionLink: '/student/helpdesk',
+      });
+    }
+
+    return saved;
   }
 
   async addMessage(ticketId: string, actorUserId: string, actorRole: string, message: string) {

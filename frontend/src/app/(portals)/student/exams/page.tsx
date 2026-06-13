@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
-import { AlertTriangle, FileDown, ListChecks, RefreshCcw } from 'lucide-react';
+import { AlertTriangle, FileDown, ListChecks, Lock, RefreshCcw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,7 +23,15 @@ function formatTime(hhmmss: string) {
 
 type ExamDesk = {
   ufm_cases: { description: string; penalty_applied?: string; incident_type?: string }[];
-  seating: { exam_name: string; block: string; room: string; seat: string; exam_date: string }[];
+  seating: {
+    exam_name: string;
+    block: string | null;
+    room: string | null;
+    seat: string | null;
+    exam_date: string;
+    seat_revealed?: boolean;
+    seat_reveal_message?: string | null;
+  }[];
 };
 
 export default function StudentExamsPage() {
@@ -164,12 +172,24 @@ export default function StudentExamsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Seating plan</CardTitle>
+            <CardDescription>Room and seat numbers unlock 24 hours before each exam</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
+          <CardContent className="space-y-3 text-sm">
             {examDesk.seating.map((s, i) => (
-              <p key={i}>
-                <strong>{s.exam_name}</strong> ({s.exam_date}): Block {s.block}, Room {s.room}, Seat {s.seat}
-              </p>
+              <div key={i} className="rounded-xl border p-3">
+                <p className="font-semibold text-sgvu-navy">{s.exam_name}</p>
+                <p className="text-muted-foreground">{s.exam_date}</p>
+                {s.seat_revealed ? (
+                  <p className="mt-2">
+                    Block {s.block}, Room {s.room}, Seat {s.seat}
+                  </p>
+                ) : (
+                  <p className="mt-2 flex items-center gap-2 text-amber-800">
+                    <Lock className="h-4 w-4" />
+                    🔒 {s.seat_reveal_message ?? 'Will be revealed 24 hours prior to exam'}
+                  </p>
+                )}
+              </div>
             ))}
           </CardContent>
         </Card>

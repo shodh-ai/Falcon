@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
@@ -216,14 +216,41 @@ export class AcademicsService {
   async registerCourses(studentUserId: string, tenantId: string, courseIds: string[]) {
     const uniqueCourseIds = [...new Set(courseIds)].filter(Boolean);
     if (uniqueCourseIds.length === 0) return [];
+    if (uniqueCourseIds.length > 2) {
+      throw new BadRequestException('You may register at most 2 electives per semester');
+    }
+
+    const semesterRows = await this.courseEnrollments.manager.query<Array<{ semester: number }>>(
+      `SELECT COALESCE(MAX(semester), 1) AS semester FROM student_course_enrollments WHERE student_user_id = $1`,
+      [studentUserId],
+    );
+    const semester = Number(semesterRows[0]?.semester ?? 1);
+
+    const electiveRows = await this.courseEnrollments
+      .createQueryBuilder('e')
+      .innerJoin('academic_courses', 'c', 'c.course_id = e.course_id')
+      .where('e.student_user_id = :studentUserId', { studentUserId })
+      .andWhere('e.tenant_id = :tenantId', { tenantId })
+      .andWhere('e.semester = :semester', { semester })
+      .andWhere(`COALESCE(c.course_type, CASE WHEN c.is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'ELECTIVE'`)
+      .getCount();
+    if (electiveRows + uniqueCourseIds.length > 2) {
+      throw new BadRequestException('Maximum 2 electives allowed per semester');
+    }
 
     const courses = await this.courses.find({
       where: {
         tenant_id: tenantId,
         course_id: In(uniqueCourseIds),
-        is_elective: true,
       },
     });
+
+    const invalid = courses.filter(
+      (c) => (c as { course_type?: string }).course_type !== 'ELECTIVE' && c.is_elective !== true,
+    );
+    if (invalid.length > 0) {
+      throw new BadRequestException('Only ELECTIVE courses can be self-registered');
+    }
 
     const existing = await this.courseEnrollments.find({
       where: {
@@ -241,7 +268,7 @@ export class AcademicsService {
           tenant_id: tenantId,
           student_user_id: studentUserId,
           course_id: course.course_id,
-          semester: 5,
+          semester,
           status: 'ENROLLED',
           attendance_percent: '0.00',
         }),

@@ -8,7 +8,7 @@ export type HelpdeskTicketCategory =
   | 'HOSTEL'
   | 'MENTORSHIP'
   | 'STUDENT_PROFILE';
-export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
+export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'REJECTED';
 
 @Entity('helpdesk_tickets')
 @Index(['student_user_id'])
@@ -65,6 +65,9 @@ export class HelpdeskTicket extends BaseSoftDeleteEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   resolved_at: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  rejection_reason: string | null;
 
   @CreateDateColumn()
   created_at: Date;

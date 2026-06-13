@@ -17,6 +17,7 @@ import {
   type PaginatedResponse,
   parsePageParams,
 } from '../../common/utils/pagination';
+import { CacheService } from '../../core/redis/cache.service';
 
 const API_POINTS: Record<string, number> = {
   JOURNAL: 10,
@@ -36,6 +37,7 @@ export class HrAdminService {
     private readonly entityCtx: HrEntityContextService,
     private readonly checklists: HrChecklistService,
     private readonly onboardingWorkflow: HrOnboardingWorkflowService,
+    private readonly cache: CacheService,
   ) {}
 
   async listRoles(_tenantId: string) {
@@ -60,6 +62,27 @@ export class HrAdminService {
     options?: { limit?: number; offset?: number; q?: string },
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { limit, offset } = parsePageParams(options?.limit, options?.offset, DEFAULT_PAGE_LIMIT);
+    const roleKey = [...viewerRoles].sort().join(',');
+    const cacheKey = `hr_dir:${tenantId}:${entityId}:${viewerUserId ?? 'all'}:${roleKey}:${limit}:${offset}:${options?.q?.trim().toLowerCase() ?? ''}`;
+    return this.cache.getOrSet(cacheKey, () =>
+      this.fetchDirectoryPage(
+        tenantId,
+        entityId,
+        { limit, offset, q: options?.q },
+        viewerUserId,
+        viewerRoles,
+      ),
+    900);
+  }
+
+  private async fetchDirectoryPage(
+    tenantId: string,
+    entityId: number,
+    options: { limit: number; offset: number; q?: string },
+    viewerUserId?: string,
+    viewerRoles: string[] = [],
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    const { limit, offset } = options;
     const params: unknown[] = [tenantId, entityId];
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     let deptClause = '';

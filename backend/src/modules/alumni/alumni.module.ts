@@ -12,6 +12,7 @@ import { AlumniPortalService } from './alumni-portal.service';
 import { AlumniAdminService } from './alumni-admin.service';
 import { AlumniConversionService } from './alumni-conversion.service';
 import { AlumniConversionProcessor } from './alumni-conversion.processor';
+import { AlumniWelcomeEmailListener } from './alumni-welcome-email.listener';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AlumniConversionProcessor } from './alumni-conversion.processor';
     AlumniAdminService,
     AlumniConversionService,
     AlumniConversionProcessor,
+    AlumniWelcomeEmailListener,
   ],
   exports: [AlumniConversionService, AlumniPortalService, AlumniAdminService],
 })

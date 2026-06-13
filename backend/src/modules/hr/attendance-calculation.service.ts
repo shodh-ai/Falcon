@@ -9,6 +9,7 @@ import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
 import { HrRulesService, type AttendanceRulesDto } from './hr-rules.service';
 import { HrDynamicRulesService } from './hr-dynamic-rules.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { CacheService } from '../../core/redis/cache.service';
 
 export type ShiftContext = {
   shift_id: string;
@@ -44,7 +45,16 @@ export class AttendanceCalculationService {
     private readonly rules: HrRulesService,
     private readonly dynamicRules: HrDynamicRulesService,
     private readonly notify: NotificationEmitterService,
+    private readonly cache: CacheService,
   ) {}
+
+  private parseMonth(month: string) {
+    const [year, monthNum] = month.split('-').map(Number);
+    const daysInMonth = new Date(year, monthNum, 0).getDate();
+    const start = `${year}-${String(monthNum).padStart(2, '0')}-01`;
+    const end = `${year}-${String(monthNum).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+    return { year, monthNum, daysInMonth, start, end };
+  }
 
   private async loadAttendanceContext(userId: string) {
     const profile = await this.dataSource.query<
@@ -221,29 +231,69 @@ export class AttendanceCalculationService {
   }
 
   async getMonthCalendar(userId: string, month: string) {
-    const [year, monthNum] = month.split('-').map(Number);
-    const daysInMonth = new Date(year, monthNum, 0).getDate();
-    const start = `${year}-${String(monthNum).padStart(2, '0')}-01`;
-    const end = `${year}-${String(monthNum).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
-
     const ctx = await this.loadAttendanceContext(userId);
-    const shift = await this.getEmployeeShift(userId);
+    if (!ctx) {
+      const shift = await this.getEmployeeShift(userId);
+      return { month, shift, days: [] as DayCalculationResult[] };
+    }
+    const batch = await this.buildMonthCalendarsBatch(
+      [userId],
+      month,
+      ctx.tenantId,
+      ctx.entityId,
+    );
+    return batch.get(userId) ?? { month, shift: await this.getEmployeeShift(userId), days: [] };
+  }
+
+  /** Fetch month calendars for many users with batched SQL (fixes N+1 in matrix endpoints). */
+  async buildMonthCalendarsBatch(
+    userIds: string[],
+    month: string,
+    tenantId: string,
+    entityId: number,
+  ): Promise<Map<string, { month: string; shift: ShiftContext; days: DayCalculationResult[] }>> {
+    const result = new Map<string, { month: string; shift: ShiftContext; days: DayCalculationResult[] }>();
+    if (!userIds.length) return result;
+
+    const { year, monthNum, daysInMonth, start, end } = this.parseMonth(month);
+
+    let entityRules: Record<string, unknown> | null = null;
+    try {
+      entityRules = await this.rules.getRules(tenantId, entityId);
+    } catch {
+      entityRules = null;
+    }
+
+    const shiftRows = await this.rules.getShiftsForUsers(tenantId, entityId, userIds);
+    const defaultShift = this.shiftFromRow(
+      {
+        shift_id: '',
+        shift_name: 'Default',
+        start_time: '09:00:00',
+        end_time: '17:00:00',
+        grace_period_mins: entityRules?.late_coming_max_mins ?? 15,
+        half_day_min_hours: 4,
+        full_day_min_hours: 8,
+        week_off_day: 0,
+      },
+      entityRules,
+    );
 
     const [attendanceRows, holidayRows, pendingRequests] = await Promise.all([
       this.daily
         .createQueryBuilder('d')
-        .where('d.user_id = :userId', { userId })
+        .where('d.user_id IN (:...userIds)', { userIds })
         .andWhere('d.date BETWEEN :start AND :end', { start, end })
         .getMany(),
       this.holidays
         .createQueryBuilder('h')
         .where('h.date BETWEEN :start AND :end', { start, end })
         .andWhere('h.applicable_to IN (:...applicableTo)', { applicableTo: ['ALL', 'STAFF'] })
-        .andWhere('(h.entity_id = :entityId OR h.entity_id IS NULL)', { entityId: ctx?.entityId ?? null })
+        .andWhere('(h.entity_id = :entityId OR h.entity_id IS NULL)', { entityId })
         .getMany(),
       this.requests
         .createQueryBuilder('r')
-        .where('r.staff_user_id = :userId', { userId })
+        .where('r.staff_user_id IN (:...userIds)', { userIds })
         .andWhere('r.status = :status', { status: 'PENDING' })
         .andWhere(
           '(r.regularization_date BETWEEN :start AND :end OR (r.start_date <= :end AND r.end_date >= :start))',
@@ -252,58 +302,104 @@ export class AttendanceCalculationService {
         .getMany(),
     ]);
 
-    const attendanceByDate = new Map(attendanceRows.map((row) => [row.date, row]));
-    const holidayByDate = new Map(holidayRows.map((holiday) => [holiday.date, holiday]));
-    const pendingDates = this.buildPendingDatesSet(pendingRequests, start, end);
-    const earlyMaxMins = Number(ctx?.entityRules?.early_going_max_mins ?? 0);
-
-    const days: DayCalculationResult[] = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      const date = `${year}-${String(monthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      days.push(
-        this.calculateDayCached(
-          date,
-          shift,
-          attendanceByDate.get(date) ?? null,
-          holidayByDate.get(date),
-          pendingDates.has(date),
-          earlyMaxMins,
-        ),
-      );
+    const attendanceByUserDate = new Map<string, Map<string, HrDailyAttendance>>();
+    for (const row of attendanceRows) {
+      if (!attendanceByUserDate.has(row.user_id)) {
+        attendanceByUserDate.set(row.user_id, new Map());
+      }
+      attendanceByUserDate.get(row.user_id)!.set(row.date, row);
     }
 
-    return { month, shift, days };
+    const holidayByDate = new Map(holidayRows.map((holiday) => [holiday.date, holiday]));
+    const pendingByUser = new Map<string, Set<string>>();
+    for (const userId of userIds) pendingByUser.set(userId, new Set());
+    for (const req of pendingRequests) {
+      const dates = this.buildPendingDatesSet([req], start, end);
+      const existing = pendingByUser.get(req.staff_user_id) ?? new Set<string>();
+      dates.forEach((d) => existing.add(d));
+      pendingByUser.set(req.staff_user_id, existing);
+    }
+
+    const earlyMaxMins = Number(entityRules?.early_going_max_mins ?? 0);
+
+    for (const userId of userIds) {
+      const shiftRow = shiftRows.get(userId);
+      const shift = shiftRow?.shift_id
+        ? this.shiftFromRow(
+            shiftRow as {
+              shift_id: string;
+              shift_name: string;
+              start_time: string;
+              end_time: string;
+              grace_period_mins: unknown;
+              half_day_min_hours: unknown;
+              full_day_min_hours: unknown;
+              week_off_day: unknown;
+            },
+            entityRules,
+          )
+        : defaultShift;
+      const attendanceByDate = attendanceByUserDate.get(userId) ?? new Map<string, HrDailyAttendance>();
+      const pendingDates = pendingByUser.get(userId) ?? new Set<string>();
+      const days: DayCalculationResult[] = [];
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const date = `${year}-${String(monthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        days.push(
+          this.calculateDayCached(
+            date,
+            shift,
+            attendanceByDate.get(date) ?? null,
+            holidayByDate.get(date),
+            pendingDates.has(date),
+            earlyMaxMins,
+          ),
+        );
+      }
+
+      result.set(userId, { month, shift, days });
+    }
+
+    return result;
   }
 
   async getMatrixMonth(tenantId: string, month: string, entityId: number) {
-    const params: unknown[] = [tenantId, entityId];
-    const entityFilter = ` AND p.entity_id = $2`;
-    const staff = await this.dataSource.query<Array<{ user_id: string; name: string }>>(
-      `SELECT u.user_id, u.name FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
-       WHERE u.tenant_id = $1 AND u.is_active = true
-         AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
-       ORDER BY u.name`,
-      params,
-    );
+    const cacheKey = `hr_att_matrix:${tenantId}:${entityId}:${month}`;
+    return this.cache.getOrSet(
+      cacheKey,
+      async () => {
+        const params: unknown[] = [tenantId, entityId];
+        const entityFilter = ` AND p.entity_id = $2`;
+        const staff = await this.dataSource.query<Array<{ user_id: string; name: string }>>(
+          `SELECT u.user_id, u.name FROM users u
+           JOIN roles r ON r.role_id = u.role_id
+           LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
+           WHERE u.tenant_id = $1 AND u.is_active = true
+             AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
+           ORDER BY u.name`,
+          params,
+        );
 
-    const employees = await Promise.all(
-      staff.map(async (s) => {
-        const cal = await this.getMonthCalendar(s.user_id, month);
-        return {
-          user_id: s.user_id,
-          name: s.name,
-          days: cal.days.map((d) => ({
-            date: d.date,
-            calculated_status: d.calculated_status,
-            tooltip: d.tooltip,
-          })),
-        };
-      }),
-    );
+        const userIds = staff.map((s) => s.user_id);
+        const calendars = await this.buildMonthCalendarsBatch(userIds, month, tenantId, entityId);
 
-    return { month, employees };
+        const employees = staff.map((s) => {
+          const cal = calendars.get(s.user_id);
+          return {
+            user_id: s.user_id,
+            name: s.name,
+            days: (cal?.days ?? []).map((d) => ({
+              date: d.date,
+              calculated_status: d.calculated_status,
+              tooltip: d.tooltip,
+            })),
+          };
+        });
+
+        return { month, employees };
+      },
+      600,
+    );
   }
 
   @Cron('0 2 * * *')

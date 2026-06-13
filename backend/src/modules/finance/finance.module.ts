@@ -35,6 +35,6 @@ import { BudgetFpaModule } from '../leadership/budget-fpa.module';
     FinanceApprovalsService,
     FinanceBulkDemandProcessor,
   ],
-  exports: [FinanceService, FinanceLedgerService],
+  exports: [FinanceService, FinanceLedgerService, FinanceReceiptService],
 })
 export class FinanceModule {}

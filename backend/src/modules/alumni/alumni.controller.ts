@@ -122,18 +122,35 @@ export class AlumniController {
     return this.portal.createServiceRequest(req.user.user_id, dto);
   }
 
+  @Get('conversion-eligibility')
+  @Roles('Student')
+  conversionEligibility(@Req() req: { user: AuthUser }) {
+    return this.conversion.getConversionEligibility(this.tenant(req), req.user.user_id);
+  }
+
   @Post('register')
   @Roles('Student')
   registerFromExit(
     @Req() req: { user: AuthUser },
-    @Body() dto: { linkedin_url?: string; placement_organization?: string },
+    @Body()
+    dto: {
+      linkedin_url: string;
+      placement_organization?: string;
+      organization?: string;
+      higher_education_details?: Record<string, unknown>;
+      higher_ed?: string;
+      personal_email?: string;
+    },
   ) {
-    return this.conversion.enqueueConversion({
-      tenantId: this.tenant(req),
-      studentUserId: req.user.user_id,
-      autoVerify: false,
-      linkedinUrl: dto.linkedin_url,
-      placementOrganization: dto.placement_organization,
+    const higherEd =
+      dto.higher_education_details ??
+      (dto.higher_ed?.trim() ? { pursuing: dto.higher_ed.trim() } : undefined);
+
+    return this.conversion.submitConversionRequest(this.tenant(req), req.user.user_id, {
+      linkedin_url: dto.linkedin_url,
+      organization: dto.placement_organization ?? dto.organization,
+      higher_education_details: higherEd,
+      personal_email: dto.personal_email,
     });
   }
 

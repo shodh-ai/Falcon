@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BookMarked, CheckSquare, GraduationCap } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,21 +16,17 @@ type RegistrationData = {
   current_semester: number;
   credits_earned: number;
   credits_required: number;
-  enrollments: {
-    course_id: string;
-    course_code: string;
-    course_name: string;
-    credits: number;
-    semester: number;
-    status: string;
-  }[];
+  electives_needed: number;
+  electives_max: number;
+  core_enrollments: { course_code: string; course_name: string; credits: number; semester: number; course_type?: string }[];
+  elective_enrollments: { course_code: string; course_name: string; credits: number; semester: number }[];
   available_electives: { course_id: string; course_code: string; course_name: string; credits: number }[];
 };
 
 export default function StudentRegistrationPage() {
   const api = useAuthedApi();
   const [data, setData] = useState<RegistrationData | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selectedElectives, setSelectedElectives] = useState<string[]>([]);
   const [registering, setRegistering] = useState(false);
 
   const load = () => void api.get<RegistrationData>('/api/student/registration').then(setData);
@@ -41,18 +36,29 @@ export default function StudentRegistrationPage() {
   }, [api]);
 
   async function register() {
-    if (!selected.length) return;
+    if (selectedElectives.length === 0 || selectedElectives.length > 2) return;
     setRegistering(true);
     try {
-      await api.post('/api/academics/courses/register', { course_ids: selected });
-      toast.success('Subjects registered for upcoming semester');
-      setSelected([]);
+      await api.post('/api/academics/courses/register', { course_ids: selectedElectives });
+      toast.success('Electives registered for this semester');
+      setSelectedElectives([]);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Registration failed');
     } finally {
       setRegistering(false);
     }
+  }
+
+  function toggleElective(id: string) {
+    setSelectedElectives((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= (data?.electives_max ?? 2)) {
+        toast.error('Pick at most 2 electives');
+        return prev;
+      }
+      return [...prev, id];
+    });
   }
 
   const progress = data ? Math.min(100, (data.credits_earned / data.credits_required) * 100) : 0;
@@ -79,53 +85,74 @@ export default function StudentRegistrationPage() {
         <Progress value={progress} className="h-3" />
       </StudentSectionCard>
 
-      <StudentSectionCard title="Current enrollments" description="Subjects registered across semesters" icon={BookMarked}>
-        {(data?.enrollments ?? []).length === 0 ? (
-          <StudentEmptyState title="No enrollments" description="Registered subjects will appear here." />
+      <StudentSectionCard title="Core subjects (auto-enrolled)" description="Registered automatically at semester start" icon={BookMarked}>
+        {(data?.core_enrollments ?? []).length === 0 ? (
+          <StudentEmptyState title="No core enrollments" description="Core subjects appear when the semester begins." />
         ) : (
-          <div className="space-y-3">
-            {(data?.enrollments ?? []).map((e) => (
-              <div
-                key={`${e.course_code}-${e.semester}`}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/70 bg-white p-4 text-sm"
-              >
-                <p className="font-medium text-sgvu-navy">
-                  {e.course_code} — {e.course_name} ({e.credits} cr) · Sem {e.semester} · {e.status}
-                </p>
-                <Link href={`/student/courses/${e.course_id}`} className="shrink-0 text-sm font-semibold text-sgvu-navy underline">
-                  Open course
-                </Link>
+          <div className="space-y-2">
+            {(data?.core_enrollments ?? []).map((e) => (
+              <div key={e.course_code} className="rounded-2xl border bg-white p-4 text-sm font-medium text-sgvu-navy">
+                {e.course_code} — {e.course_name} ({e.credits} cr) · Sem {e.semester} · CORE
               </div>
             ))}
           </div>
         )}
       </StudentSectionCard>
 
-      <StudentSectionCard title="Available electives" description="Select subjects to register for the upcoming semester" icon={CheckSquare}>
-        {(data?.available_electives ?? []).length === 0 ? (
+      <StudentSectionCard
+        title={`Pick your electives (${data?.electives_needed ?? 2} remaining)`}
+        description="Select up to 2 electives from the dropdown"
+        icon={CheckSquare}
+      >
+        {(data?.available_electives ?? []).length === 0 && (data?.elective_enrollments ?? []).length >= 2 ? (
+          <StudentEmptyState title="Electives complete" description="You have registered 2 electives this semester." />
+        ) : (data?.available_electives ?? []).length === 0 ? (
           <StudentEmptyState title="No electives available" description="Elective options will appear when registration opens." />
         ) : (
           <div className="space-y-3">
-            {(data?.available_electives ?? []).map((c) => (
-              <label
-                key={c.course_id}
-                className="flex cursor-pointer items-center gap-3 rounded-2xl border border-border/70 bg-white p-4 text-sm transition hover:border-sgvu-gold/40"
-              >
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border accent-sgvu-navy"
-                  checked={selected.includes(c.course_id)}
-                  onChange={(e) =>
-                    setSelected((prev) => (e.target.checked ? [...prev, c.course_id] : prev.filter((id) => id !== c.course_id)))
-                  }
-                />
-                <span className="font-medium text-sgvu-navy">
-                  {c.course_code} — {c.course_name} ({c.credits} credits)
-                </span>
-              </label>
+            <select
+              className="w-full rounded-xl border px-4 py-3 text-sm"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) toggleElective(e.target.value);
+              }}
+            >
+              <option value="">Choose an elective…</option>
+              {(data?.available_electives ?? [])
+                .filter((c) => !selectedElectives.includes(c.course_id))
+                .map((c) => (
+                  <option key={c.course_id} value={c.course_id}>
+                    {c.course_code} — {c.course_name} ({c.credits} cr)
+                  </option>
+                ))}
+            </select>
+            {selectedElectives.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedElectives.map((id) => {
+                  const c = data?.available_electives.find((x) => x.course_id === id);
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => toggleElective(id)}
+                      className="rounded-full bg-sgvu-navy px-3 py-1 text-xs font-semibold text-white"
+                    >
+                      {c?.course_code ?? id} ×
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {(data?.elective_enrollments ?? []).map((e) => (
+              <div key={e.course_code} className="rounded-2xl border border-sgvu-gold/30 bg-sgvu-gold/5 p-4 text-sm">
+                ✓ {e.course_code} — {e.course_name} (registered)
+              </div>
             ))}
-            <Button disabled={registering || !selected.length} onClick={() => void register()} className="mt-2">
-              {registering ? 'Registering…' : `Register ${selected.length || ''} selected subject${selected.length === 1 ? '' : 's'}`}
+            <Button
+              disabled={registering || selectedElectives.length === 0 || selectedElectives.length > 2}
+              onClick={() => void register()}
+            >
+              {registering ? 'Registering…' : `Register ${selectedElectives.length} elective(s)`}
             </Button>
           </div>
         )}
