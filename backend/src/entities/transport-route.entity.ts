@@ -1,7 +1,8 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('operations_transport_routes')
-export class TransportRoute {
+export class TransportRoute extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   route_id: number;
 

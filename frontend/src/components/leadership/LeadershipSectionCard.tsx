@@ -5,18 +5,23 @@ export function LeadershipPageHeader({
   eyebrow,
   title,
   description,
+  action,
 }: {
   eyebrow: string;
   title: string;
   description?: string;
+  action?: ReactNode;
 }) {
   return (
     <div className="relative overflow-hidden rounded-[1.75rem] border border-sgvu-navy/10 bg-white p-5 shadow-sm md:p-6">
       <div className="absolute right-0 top-0 h-32 w-32 rounded-full bg-sgvu-gold/15 blur-2xl" />
-      <div className="relative">
-        <p className="text-xs font-bold uppercase tracking-[0.22em] text-sgvu-gold">{eyebrow}</p>
-        <h1 className="mt-1 text-2xl font-black tracking-tight text-sgvu-navy sm:text-3xl">{title}</h1>
-        {description ? <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p> : null}
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-sgvu-gold">{eyebrow}</p>
+          <h1 className="mt-1 text-2xl font-black tracking-tight text-sgvu-navy sm:text-3xl">{title}</h1>
+          {description ? <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p> : null}
+        </div>
+        {action}
       </div>
     </div>
   );
@@ -28,15 +33,17 @@ export function LeadershipSectionCard({
   action,
   children,
   className,
+  id,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  id?: string;
 }) {
   return (
-    <section className={cn('rounded-[1.25rem] border border-sgvu-navy/10 bg-white p-5 shadow-sm', className)}>
+    <section id={id} className={cn('rounded-[1.25rem] border border-sgvu-navy/10 bg-white p-5 shadow-sm', className)}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-sgvu-navy">{title}</h2>

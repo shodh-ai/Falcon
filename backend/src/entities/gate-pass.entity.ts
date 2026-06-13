@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type GatePassStatus =
   | 'PENDING'
@@ -12,7 +13,7 @@ export type GatePassStatus =
 @Index(['student_user_id'])
 @Index(['status'])
 @Index(['qr_token'], { unique: true })
-export class GatePass {
+export class GatePass extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   pass_id: string;
 

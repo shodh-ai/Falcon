@@ -8,6 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
 export type HrDailyAttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'MISSED_PUNCH';
@@ -26,7 +27,7 @@ export type CalculatedAttendanceStatus =
 
 @Entity('hr_daily_attendance')
 @Index(['user_id', 'date'], { unique: true })
-export class HrDailyAttendance {
+export class HrDailyAttendance extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   record_id: string;
 

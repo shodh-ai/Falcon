@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 /**
  * Dynamic grading rules so the registrar can change SGPA/CGPA thresholds
@@ -9,7 +10,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 @Entity('academic_grading_policies')
 @Index(['program_id'])
 @Index(['effective_from'])
-export class GradingPolicy {
+export class GradingPolicy extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   policy_id: number;
 

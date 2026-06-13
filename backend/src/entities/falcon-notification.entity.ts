@@ -7,6 +7,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
 export type FalconNotificationCategory =
@@ -21,7 +22,7 @@ export type FalconNotificationCategory =
 
 @Entity('falcon_notifications')
 @Index(['user_id', 'created_at'])
-export class FalconNotification {
+export class FalconNotification extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   notification_id: string;
 

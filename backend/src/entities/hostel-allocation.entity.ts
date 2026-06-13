@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type HostelAllocationStatus = 'ACTIVE' | 'VACATED';
 
@@ -6,7 +7,7 @@ export type HostelAllocationStatus = 'ACTIVE' | 'VACATED';
 @Index(['student_user_id'], { unique: true })
 @Index(['room_id'])
 @Index(['status'])
-export class HostelAllocation {
+export class HostelAllocation extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   allocation_id: string;
 

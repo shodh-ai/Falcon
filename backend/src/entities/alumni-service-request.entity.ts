@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type AlumniServiceType =
   | 'TRANSCRIPT'
@@ -18,7 +19,7 @@ export type AlumniRequestStatus =
 @Entity('alumni_service_requests')
 @Index(['alumni_user_id'])
 @Index(['status'])
-export class AlumniServiceRequest {
+export class AlumniServiceRequest extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   request_id: string;
 

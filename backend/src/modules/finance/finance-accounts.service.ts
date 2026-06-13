@@ -1,15 +1,25 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
+import { LEADERSHIP_ANOMALY_QUEUE, LeadershipAnomalyJob } from '../../common/constants/leadership-queue.constants';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { BudgetFpaService } from '../leadership/budget-fpa.service';
+import { FinanceApprovalsService } from './finance-approvals.service';
 
 @Injectable()
 export class FinanceAccountsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly ledger: FinanceLedgerService,
+    private readonly approvals: FinanceApprovalsService,
     private readonly notify: NotificationEmitterService,
+    private readonly events: EventEmitter2,
+    private readonly budgetFpa: BudgetFpaService,
+    @InjectQueue(LEADERSHIP_ANOMALY_QUEUE) private readonly anomalyQueue: Queue<LeadershipAnomalyJob>,
   ) {}
 
   listTemplates(tenantId: string) {
@@ -235,115 +245,245 @@ export class FinanceAccountsService {
       taxable_amount: number;
       gst_rate?: number;
       department_id?: number;
+      program_id?: string;
+      dept_budget_id?: string;
+      po_id?: string;
+      approved_by?: string;
     },
   ) {
-    const vendors = await this.dataSource.query(
-      `SELECT default_tds_rate FROM fin_vendors WHERE vendor_id = $1 AND tenant_id = $2`,
-      [dto.vendor_id, tenantId],
-    );
-    if (!vendors[0]) throw new NotFoundException('Vendor not found');
-
-    const budget = await this.checkBudget(tenantId, dto.department_id, Number(dto.taxable_amount));
-    if (!budget.allowed) {
-      throw new BadRequestException(budget.message ?? 'Department budget exceeded');
-    }
-
-    const tdsRate = Number((vendors[0] as { default_tds_rate: string }).default_tds_rate ?? 0);
-    const gstRate = Number(dto.gst_rate ?? 18);
-    const taxable = Number(dto.taxable_amount);
-    const gstAmount = Number(((taxable * gstRate) / 100).toFixed(2));
-    const tdsAmount = Number(((taxable * tdsRate) / 100).toFixed(2));
-    const totalAmount = Number((taxable + gstAmount).toFixed(2));
-    const netPayable = Number((totalAmount - tdsAmount).toFixed(2));
-
-    const rows = await this.dataSource.query(
-      `INSERT INTO fin_vendor_invoices
-         (tenant_id, vendor_id, invoice_number, invoice_date, expense_head_id,
-          taxable_amount, gst_amount, tds_amount, total_amount, net_payable, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'APPROVED')
-       RETURNING invoice_id`,
-      [
-        tenantId,
-        dto.vendor_id,
-        dto.invoice_number,
-        dto.invoice_date,
-        dto.expense_head_id,
-        taxable,
-        gstAmount,
-        tdsAmount,
-        totalAmount,
-        netPayable,
-      ],
-    );
-    const invoiceId = (rows[0] as { invoice_id: string }).invoice_id;
-
-    const period = dto.invoice_date.slice(0, 7);
-    await this.dataSource.query(
-      `INSERT INTO finance_gst_tds_tracking
-         (tenant_id, source_type, source_id, vendor_id, gst_amount, tds_amount, tax_period)
-       VALUES ($1, 'VENDOR', $2, $3, $4, $5, $6)`,
-      [tenantId, invoiceId, dto.vendor_id, gstAmount, tdsAmount, period],
-    );
-
-    if (dto.department_id) {
-      await this.dataSource.query(
-        `UPDATE fin_budgets SET utilized_amount = utilized_amount + $3
-         WHERE tenant_id = $1 AND department_id = $2
-           AND financial_year = (
-             CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE) >= 4
-               THEN EXTRACT(YEAR FROM CURRENT_DATE)::text || '-' || (EXTRACT(YEAR FROM CURRENT_DATE) + 1)::text
-               ELSE (EXTRACT(YEAR FROM CURRENT_DATE) - 1)::text || '-' || EXTRACT(YEAR FROM CURRENT_DATE)::text
-             END
-           )`,
-        [tenantId, dto.department_id, netPayable],
+    return this.dataSource.transaction(async (tx) => {
+      const vendors = await tx.query(
+        `SELECT default_tds_rate, business_name FROM fin_vendors WHERE vendor_id = $1 AND tenant_id = $2`,
+        [dto.vendor_id, tenantId],
       );
-    }
+      if (!vendors[0]) throw new NotFoundException('Vendor not found');
 
-    await this.ledger.postExpense(tenantId, invoiceId, netPayable, gstAmount, tdsAmount);
+      let deptBudgetId = dto.dept_budget_id;
+      if (!deptBudgetId && dto.department_id) {
+        const fyRows = await tx.query(
+          `SELECT budget_id FROM fin_dept_budgets
+           WHERE tenant_id = $1 AND department_id = $2 AND deleted_at IS NULL
+           ORDER BY created_at DESC LIMIT 1`,
+          [tenantId, dto.department_id],
+        );
+        deptBudgetId = (fyRows[0] as { budget_id: string } | undefined)?.budget_id;
+      }
 
-    return {
-      invoice_id: invoiceId,
-      taxable_amount: taxable,
-      gst_amount: gstAmount,
-      tds_amount: tdsAmount,
-      total_amount: totalAmount,
-      net_payable: netPayable,
-    };
+      const tdsRate = Number((vendors[0] as { default_tds_rate: string }).default_tds_rate ?? 0);
+      const gstRate = Number(dto.gst_rate ?? 18);
+      const taxable = Number(dto.taxable_amount);
+      const gstAmount = Number(((taxable * gstRate) / 100).toFixed(2));
+      const tdsAmount = Number(((taxable * tdsRate) / 100).toFixed(2));
+      const totalAmount = Number((taxable + gstAmount).toFixed(2));
+      const netPayable = Number((totalAmount - tdsAmount).toFixed(2));
+
+      if (!dto.po_id) {
+        await this.budgetFpa.checkEncumbrance({
+          tenantId,
+          programId: dto.program_id,
+          budgetId: deptBudgetId,
+          amount: netPayable,
+        });
+      }
+
+      const budget = await this.checkBudget(tenantId, dto.department_id, netPayable, deptBudgetId);
+      if (!budget.allowed) {
+        throw new BadRequestException(budget.message ?? 'Department budget exceeded');
+      }
+
+      const requiresBoard = netPayable >= 100000;
+      const status = requiresBoard ? 'PENDING_BOARD_APPROVAL' : 'APPROVED';
+
+      const rows = await tx.query(
+        `INSERT INTO fin_vendor_invoices
+           (tenant_id, vendor_id, invoice_number, invoice_date, expense_head_id,
+            taxable_amount, gst_amount, tds_amount, total_amount, net_payable, status,
+            department_id, program_id, dept_budget_id, po_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         RETURNING invoice_id`,
+        [
+          tenantId,
+          dto.vendor_id,
+          dto.invoice_number,
+          dto.invoice_date,
+          dto.expense_head_id,
+          taxable,
+          gstAmount,
+          tdsAmount,
+          totalAmount,
+          netPayable,
+          status,
+          dto.department_id ?? null,
+          dto.program_id ?? null,
+          deptBudgetId ?? null,
+          dto.po_id ?? null,
+        ],
+      );
+      const invoiceId = (rows[0] as { invoice_id: string }).invoice_id;
+
+      if (requiresBoard) {
+        await this.approvals.createApprovalRequest({
+          tenantId,
+          entityType: 'VENDOR_INVOICE',
+          entityId: invoiceId,
+          requestedBy: String(dto.approved_by ?? 'SYSTEM'),
+          amount: netPayable,
+        });
+      }
+
+      const period = dto.invoice_date.slice(0, 7);
+      await tx.query(
+        `INSERT INTO finance_gst_tds_tracking
+           (tenant_id, source_type, source_id, vendor_id, gst_amount, tds_amount, tax_period)
+         VALUES ($1, 'VENDOR', $2, $3, $4, $5, $6)`,
+        [tenantId, invoiceId, dto.vendor_id, gstAmount, tdsAmount, period],
+      );
+
+      await this.budgetFpa.recordExpenseFromInvoice(tenantId, {
+        program_id: dto.program_id,
+        budget_id: deptBudgetId,
+        po_id: dto.po_id,
+        vendor_id: dto.vendor_id,
+        invoice_id: invoiceId,
+        expense_head_id: dto.expense_head_id,
+        description: `Invoice ${dto.invoice_number} - ${(vendors[0] as { business_name: string }).business_name}`,
+        amount: netPayable,
+        approved_by: !requiresBoard ? dto.approved_by : undefined,
+        expense_date: dto.invoice_date,
+      });
+
+      if (dto.department_id && !deptBudgetId) {
+        await tx.query(
+          `UPDATE fin_budgets SET utilized_amount = utilized_amount + $3
+           WHERE tenant_id = $1 AND department_id = $2
+             AND financial_year = (
+               CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE) >= 4
+                 THEN EXTRACT(YEAR FROM CURRENT_DATE)::text || '-' || (EXTRACT(YEAR FROM CURRENT_DATE) + 1)::text
+                 ELSE (EXTRACT(YEAR FROM CURRENT_DATE) - 1)::text || '-' || EXTRACT(YEAR FROM CURRENT_DATE)::text
+               END
+             )`,
+          [tenantId, dto.department_id, netPayable],
+        );
+      }
+
+      if (!requiresBoard) {
+        await this.ledger.postExpense(tenantId, invoiceId, netPayable, gstAmount, tdsAmount, tx);
+      }
+
+      const vendorName = (vendors[0] as { business_name: string }).business_name ?? 'Vendor';
+      this.events.emit('leadership.expense_created', {
+        tenantId,
+        invoiceId,
+        label: `Vendor Expense - ${vendorName}`,
+        amount: netPayable,
+      });
+
+      if (dto.department_id) {
+        const budgetAfter = await this.checkBudget(tenantId, dto.department_id, 0);
+        if (budgetAfter.utilization_percent && budgetAfter.utilization_percent >= 80) {
+          void this.anomalyQueue.add('budget_check', {
+            type: 'budget_check',
+            tenantId,
+            departmentId: dto.department_id,
+            utilizationPct: budgetAfter.utilization_percent,
+          });
+        }
+      }
+
+      void this.anomalyQueue.add('invoice_created', {
+        type: 'invoice_created',
+        tenantId,
+        invoiceId,
+      });
+
+      return {
+        invoice_id: invoiceId,
+        taxable_amount: taxable,
+        gst_amount: gstAmount,
+        tds_amount: tdsAmount,
+        total_amount: totalAmount,
+        net_payable: netPayable,
+        status,
+      };
+    });
   }
 
-  async checkBudget(tenantId: string, departmentId: number | undefined, amount: number) {
+  async checkBudget(
+    tenantId: string,
+    departmentId: number | undefined,
+    amount: number,
+    deptBudgetId?: string,
+  ) {
+    if (deptBudgetId) {
+      const rows = await this.dataSource.query(
+        `SELECT allocated_amount, utilized_amount, encumbered_amount FROM fin_dept_budgets
+         WHERE budget_id = $1 AND tenant_id = $2`,
+        [deptBudgetId, tenantId],
+      );
+      if (!rows[0]) return { allowed: true };
+      const r = rows[0] as { allocated_amount: string; utilized_amount: string; encumbered_amount: string };
+      const allocated = Number(r.allocated_amount);
+      const committed = Number(r.utilized_amount) + Number(r.encumbered_amount);
+      if (committed + amount > allocated) {
+        return {
+          allowed: false,
+          message: `Budget cap reached (committed ₹${committed + amount} > allocated ₹${allocated})`,
+          utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 100,
+        };
+      }
+      return {
+        allowed: true,
+        utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 0,
+      };
+    }
+
     if (!departmentId) return { allowed: true };
     const rows = await this.dataSource.query(
-      `SELECT allocated_amount, utilized_amount FROM fin_budgets
-       WHERE tenant_id = $1 AND department_id = $2
+      `SELECT allocated_amount, utilized_amount, encumbered_amount FROM fin_dept_budgets
+       WHERE tenant_id = $1 AND department_id = $2 AND deleted_at IS NULL
        ORDER BY created_at DESC LIMIT 1`,
       [tenantId, departmentId],
     );
-    if (!rows[0]) return { allowed: true };
-    const allocated = Number((rows[0] as { allocated_amount: string }).allocated_amount);
-    const utilized = Number((rows[0] as { utilized_amount: string }).utilized_amount);
-    if (utilized + amount > allocated) {
+    if (!rows[0]) {
+      const legacy = await this.dataSource.query(
+        `SELECT allocated_amount, utilized_amount FROM fin_budgets
+         WHERE tenant_id = $1 AND department_id = $2 ORDER BY created_at DESC LIMIT 1`,
+        [tenantId, departmentId],
+      );
+      if (!legacy[0]) return { allowed: true };
+      const allocated = Number((legacy[0] as { allocated_amount: string }).allocated_amount);
+      const utilized = Number((legacy[0] as { utilized_amount: string }).utilized_amount);
+      if (utilized + amount > allocated) {
+        return { allowed: false, message: `Budget cap reached`, utilization_percent: 100 };
+      }
+      return { allowed: true, utilization_percent: allocated ? Math.round(((utilized + amount) / allocated) * 100) : 0 };
+    }
+    const r = rows[0] as { allocated_amount: string; utilized_amount: string; encumbered_amount: string };
+    const allocated = Number(r.allocated_amount);
+    const committed = Number(r.utilized_amount) + Number(r.encumbered_amount);
+    if (committed + amount > allocated) {
       return {
         allowed: false,
-        message: `Budget cap reached (${utilized + amount} > ${allocated})`,
-        utilization_percent: allocated ? Math.round((utilized / allocated) * 100) : 100,
+        message: `Budget cap reached (${committed + amount} > ${allocated})`,
+        utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 100,
       };
     }
     return {
       allowed: true,
-      utilization_percent: allocated ? Math.round(((utilized + amount) / allocated) * 100) : 0,
+      utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 0,
     };
   }
 
   listBudgets(tenantId: string) {
     return this.dataSource.query(
-      `SELECT b.*, d.dept_name AS department_name,
+      `SELECT b.budget_id, b.financial_year, b.department_id, b.allocated_amount,
+              b.utilized_amount, b.encumbered_amount, d.dept_name AS department_name,
               CASE WHEN b.allocated_amount > 0
-                THEN ROUND((b.utilized_amount / b.allocated_amount) * 100, 1)
+                THEN ROUND(((b.utilized_amount + b.encumbered_amount) / b.allocated_amount) * 100, 1)
                 ELSE 0 END AS utilization_percent
-       FROM fin_budgets b
+       FROM fin_dept_budgets b
        LEFT JOIN departments d ON d.dept_id = b.department_id
-       WHERE b.tenant_id = $1
+       WHERE b.tenant_id = $1 AND b.deleted_at IS NULL
        ORDER BY d.dept_name`,
       [tenantId],
     );

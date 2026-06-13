@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type LeadStage =
   | 'INQUIRY'
@@ -16,7 +17,7 @@ export type LeadStage =
 @Index(['stage'])
 @Index(['email'])
 @Index(['phone'])
-export class Lead {
+export class Lead extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   lead_id: string;
 

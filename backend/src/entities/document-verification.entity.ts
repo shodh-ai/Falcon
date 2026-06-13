@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { Application } from './application.entity';
 
 export type DocVerificationStatus =
@@ -20,7 +21,7 @@ export type DocumentKind =
 @Entity('admissions_document_verifications')
 @Index(['application_id'])
 @Index(['status'])
-export class DocumentVerification {
+export class DocumentVerification extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   doc_verification_id: string;
 
