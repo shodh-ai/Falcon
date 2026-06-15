@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { FinancePageHeader, formatInr } from '@/components/finance/FinancePageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
 
 type Row = {
@@ -23,6 +25,8 @@ export default function FinanceCollectionsPage() {
   const api = useAuthedApi();
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingTransactionId, setUploadingTransactionId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -31,6 +35,30 @@ export default function FinanceCollectionsPage() {
     return () => clearTimeout(timer);
   }, [api, q]);
 
+  function handleUploadReceipt(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingTransactionId) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    api.post<{ path: string }>('/api/uploads/single', formData)
+      .then((res) => {
+        return api.patch(`/finance/transactions/${uploadingTransactionId}/receipt`, {
+          receipt_url: res.path,
+        });
+      })
+      .then(() => {
+        toast.success('Receipt uploaded successfully');
+        return api.get<Row[]>(`/finance/collections?q=${encodeURIComponent(q)}`).then(setRows);
+      })
+      .catch(() => toast.error('Failed to upload receipt'))
+      .finally(() => {
+        setUploadingTransactionId(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      });
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
       <FinancePageHeader
@@ -38,6 +66,7 @@ export default function FinanceCollectionsPage() {
         description="Payment gateway hub — search by Razorpay ID or enrollment number to resolve disputes."
       />
       <Input placeholder="Search transaction / enrollment / name" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input type="file" accept="application/pdf,image/*" className="hidden" ref={fileInputRef} onChange={handleUploadReceipt} />
       <Card>
         <CardContent className="overflow-x-auto p-0">
           <table className="w-full text-sm">
@@ -64,11 +93,16 @@ export default function FinanceCollectionsPage() {
                   <td className="p-3">{r.status}</td>
                   <td className="p-3">
                     {r.receipt_url ? (
-                      <a className="text-sgvu-navy underline" href={r.receipt_url} target="_blank" rel="noreferrer">
+                      <a className="text-sgvu-navy underline" href={`/api/uploads/download?path=${encodeURIComponent(r.receipt_url)}`} target="_blank" rel="noreferrer">
                         PDF
                       </a>
                     ) : (
-                      '—'
+                      <Button variant="outline" size="sm" onClick={() => {
+                        setUploadingTransactionId(r.transaction_id);
+                        fileInputRef.current?.click();
+                      }}>
+                        Upload
+                      </Button>
                     )}
                   </td>
                 </tr>

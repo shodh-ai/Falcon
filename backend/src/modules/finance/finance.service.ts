@@ -169,6 +169,12 @@ export class FinanceService {
     return this.transactions.find({ order: { created_at: 'DESC' } });
   }
 
+  async uploadReceipt(transactionId: string, receiptUrl: string) {
+    const result = await this.transactions.update({ transaction_id: transactionId }, { receipt_url: receiptUrl });
+    if (result.affected === 0) throw new BadRequestException('Transaction not found');
+    return { success: true };
+  }
+
   async listDefaulters() {
     const rows = await this.demands.find({
       where: [

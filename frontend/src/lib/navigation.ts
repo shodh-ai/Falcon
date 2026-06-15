@@ -547,8 +547,9 @@ export const hostelAdminPortal: PortalConfig = {
     {
       title: 'Services',
       items: [
-        { label: 'Tickets & Fines', href: '/hostel-admin/tickets', icon: Ticket, keywords: ['damage', 'maintenance'] },
+        { label: 'Fines & Damages', href: '/hostel-admin/tickets', icon: Ticket, keywords: ['damage', 'maintenance'] },
         { label: 'Mess Management', href: '/hostel-admin/mess', icon: UtensilsCrossed, keywords: ['menu', 'weekly'] },
+        { label: 'Grievance Escalations', href: '/hostel-admin/grievances', icon: LifeBuoy, keywords: ['maintenance', 'ticket', 'escalation'] },
         { label: 'Notifications', href: '/hostel-admin/notifications', icon: Bell, keywords: ['broadcast', 'sms', 'email'] },
         { label: 'Mess Scanner', href: '/hostel-admin/scanner', icon: QrCode, keywords: ['wallet', 'meal'] },
       ],
@@ -589,7 +590,8 @@ export const financePortal: PortalConfig = {
       title: 'Receivables (Student Revenue)',
       items: [
         { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
-        { label: 'Collections & Receipts', href: '/finance/collections', icon: Banknote, keywords: ['razorpay', 'payu', 'gateway'] },
+        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
+        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
         { label: 'Club Event Approvals', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'ledger'] },
         { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
       ],
