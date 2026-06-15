@@ -14,15 +14,22 @@ export function useFacultyCourses() {
   const api = useAuthedApi();
   const [courses, setCourses] = useState<FacultyCourse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const data = await api.get<FacultyCourse[]>('/api/academics/faculty/workspaces/courses');
-        if (!cancelled) setCourses(data);
-      } catch {
-        if (!cancelled) setCourses([]);
+        if (!cancelled) {
+          setCourses(data);
+          setError(data.length === 0 ? 'No courses allocated to your timetable yet.' : null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setCourses([]);
+          setError(e instanceof Error ? e.message : 'Failed to load courses');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -32,5 +39,5 @@ export function useFacultyCourses() {
     };
   }, [api]);
 
-  return { courses, loading };
+  return { courses, loading, error };
 }

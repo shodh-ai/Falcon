@@ -69,6 +69,15 @@ export class HrLeavePolicyService {
     return rows[0];
   }
 
+  async deletePolicy(tenantId: string, entityId: number, policyId: string) {
+    const res = await this.dataSource.query(
+      `DELETE FROM hr_leave_policies WHERE tenant_id = $1 AND entity_id = $2 AND policy_id = $3 RETURNING *`,
+      [tenantId, entityId, policyId],
+    );
+    if (!res[0]) throw new NotFoundException('Leave policy not found');
+    return { success: true };
+  }
+
   async validateLeaveApplication(
     tenantId: string,
     entityId: number,

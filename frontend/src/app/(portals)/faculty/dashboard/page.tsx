@@ -57,10 +57,10 @@ export default function FacultyDashboardPage() {
         setLoading(true);
         setError(null);
         const [classData, hrData, approvalData, gatePassData, balanceData] = await Promise.all([
-          api.get<FacultyClass[]>('/api/academics/faculty/timetable/today'),
-          api.get<HrSummary>('/api/hr/workforce/today').catch(() => api.get<HrSummary>('/api/hr/attendance/my-summary')),
-          api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
-          api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals'),
+          api.get<FacultyClass[]>('/api/academics/faculty/timetable/today').catch(() => []),
+          api.get<HrSummary>('/api/hr/workforce/today').catch(() => api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null)),
+          api.get<PendingApprovals>('/api/academics/proctor/pending-approvals').catch(() => ({ certificates: [] })),
+          api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals').catch(() => []),
           api.get<LeaveBalance[]>('/api/hr/leaves/my-balances').catch(() => []),
         ]);
         if (!cancelled) {

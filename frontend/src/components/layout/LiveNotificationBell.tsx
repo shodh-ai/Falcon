@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import {
   NotificationBell,
@@ -12,6 +14,7 @@ import {
   toAppNotification,
 } from '@/hooks/useNotifications';
 import { notificationsApi } from '@/lib/api/notifications';
+import { handleNotificationAction } from '@/lib/notifications/notification-actions';
 
 export function LiveNotificationBell() {
   const router = useRouter();
@@ -21,19 +24,25 @@ export function LiveNotificationBell() {
 
   const items: AppNotification[] = notifications.map(toAppNotification);
 
+  useEffect(() => {
+    const onRefresh = () => {
+      void Promise.all([refreshCount(), refreshList()]);
+    };
+    window.addEventListener('falcon:notifications-refresh', onRefresh);
+    return () => window.removeEventListener('falcon:notifications-refresh', onRefresh);
+  }, [refreshCount, refreshList]);
+
   const handleSelect = async (n: AppNotification) => {
     if (!token) return;
+    try {
+      await handleNotificationAction(token, n.actionLink, router);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+      return;
+    }
     if (n.unread) {
       await notificationsApi.markRead(token, n.id).catch(() => undefined);
       await Promise.all([refreshCount(), refreshList()]);
-    }
-    if (n.actionLink) {
-      let path = n.actionLink.startsWith('/') ? n.actionLink : `/${n.actionLink}`;
-      const legacyHelpdesk = path.match(/^\/student\/helpdesk\/([^/?#]+)$/);
-      if (legacyHelpdesk) {
-        path = `/student/helpdesk?ticket=${encodeURIComponent(legacyHelpdesk[1])}`;
-      }
-      router.push(path === '/student/fees' ? '/student/finance' : path);
     }
   };
 

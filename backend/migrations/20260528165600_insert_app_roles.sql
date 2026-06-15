@@ -13,6 +13,7 @@ VALUES
   ('Registrar', 'Application role for Registrar portal access'),
   ('SuperAdmin', 'Application role for SuperAdmin portal access'),
   ('TransportOfficer', 'Application role for TransportOfficer portal access'),
-  ('Warden', 'Application role for Warden portal access')
+  ('Warden', 'Application role for Warden portal access'),
+  ('Chairman', 'Executive read-only analytics for Chairman and Directors')
 ON CONFLICT (role_name) DO UPDATE
 SET description = EXCLUDED.description;

@@ -137,10 +137,11 @@ export class MarksHistoryService {
 
     const uncleared = enrollments
       .filter((r: { status: string }) => r.status === 'FAILED')
-      .map((r: { course_id: string; course_code: string; course_name: string }) => ({
+      .map((r: { course_id: string; course_code: string; course_name: string; semester: number }) => ({
         course_id: r.course_id,
         course_code: r.course_code,
         course_name: r.course_name,
+        semester: Number(r.semester),
       }));
 
     const failedCodes = new Set(uncleared.map((b) => b.course_code));
@@ -149,9 +150,10 @@ export class MarksHistoryService {
         (r: { status: string; course_code: string }) =>
           r.status === 'COMPLETED' && failedCodes.has(r.course_code),
       )
-      .map((r: { course_code: string; course_name: string }) => ({
+      .map((r: { course_code: string; course_name: string; semester: number }) => ({
         course_code: r.course_code,
         course_name: r.course_name,
+        semester: Number(r.semester),
       }));
 
     return {

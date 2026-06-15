@@ -27,7 +27,7 @@ export default function HrAppraisalsPage() {
   }, [api, entityId, year]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Appraisals & API Scores"
         description="UGC-style Academic Performance Indicator auto-calculated from faculty research logs (Scopus +10, book chapter +5, etc.)."
@@ -62,6 +62,6 @@ export default function HrAppraisalsPage() {
         ))}
         {rows.length === 0 ? <p className="text-sm text-muted-foreground">No faculty appraisal records for this year.</p> : null}
       </div>
-    </div>
+    </>
   );
 }

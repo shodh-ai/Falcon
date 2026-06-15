@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { JobPosting } from './job-posting.entity';
 
 export type JobApplicationStatus =
@@ -14,7 +15,7 @@ export type JobApplicationStatus =
 @Index(['job_id'])
 @Index(['student_user_id'])
 @Index(['status'])
-export class JobApplication {
+export class JobApplication extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   application_id: string;
 

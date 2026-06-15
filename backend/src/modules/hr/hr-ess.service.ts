@@ -234,12 +234,14 @@ export class HrEssService {
   async listPolicies(tenantId: string, entityId: number) {
     return this.dataSource.query(
       `SELECT p.*,
+              (SELECT COUNT(*) FROM hr_policy_polls WHERE policy_id = p.policy_id AND vote = 'YES')::int AS favour_count,
+              (SELECT COUNT(*) FROM hr_policy_polls WHERE policy_id = p.policy_id AND vote = 'NO')::int AS against_count,
               EXISTS (
                 SELECT 1 FROM hr_policy_acknowledgements a
                 WHERE a.policy_id = p.policy_id AND a.user_id = $3
               ) AS acknowledged
        FROM hr_policy_documents p
-       WHERE p.tenant_id = $1 AND p.entity_id = $2 AND p.is_active = true
+       WHERE p.tenant_id = $1 AND (p.entity_id = $2 OR p.entity_id IS NULL) AND p.is_active = true
        ORDER BY p.category, p.title`,
       [tenantId, entityId, '00000000-0000-0000-0000-000000000000'],
     );
@@ -248,15 +250,33 @@ export class HrEssService {
   async listPoliciesForUser(tenantId: string, entityId: number, userId: string) {
     return this.dataSource.query(
       `SELECT p.*,
+              (SELECT vote FROM hr_policy_polls WHERE policy_id = p.policy_id AND user_id = $3) AS user_vote,
               EXISTS (
                 SELECT 1 FROM hr_policy_acknowledgements a
                 WHERE a.policy_id = p.policy_id AND a.user_id = $3
               ) AS acknowledged
        FROM hr_policy_documents p
-       WHERE p.tenant_id = $1 AND p.entity_id = $2 AND p.is_active = true
+       WHERE p.tenant_id = $1 AND (p.entity_id = $2 OR p.entity_id IS NULL) AND p.is_active = true
        ORDER BY p.category, p.title`,
       [tenantId, entityId, userId],
     );
+  }
+
+  async submitPolicyVote(
+    tenantId: string,
+    policyId: string,
+    userId: string,
+    vote: 'YES' | 'NO',
+  ) {
+    const rows = await this.dataSource.query(
+      `INSERT INTO hr_policy_polls (policy_id, user_id, vote, created_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (policy_id, user_id) 
+       DO UPDATE SET vote = EXCLUDED.vote, created_at = NOW()
+       RETURNING *`,
+      [policyId, userId, vote],
+    );
+    return rows[0];
   }
 
   async acknowledgePolicy(
@@ -299,6 +319,32 @@ export class HrEssService {
     return rows[0];
   }
 
+  async deletePolicy(tenantId: string, entityId: number, policyId: string) {
+    await this.dataSource.query(
+      `UPDATE hr_policy_documents SET is_active = false WHERE tenant_id = $1 AND entity_id = $2 AND policy_id = $3`,
+      [tenantId, entityId, policyId],
+    );
+    return { deleted: true };
+  }
+
+  async listArchivedPolicies(tenantId: string, entityId: number) {
+    return this.dataSource.query(
+      `SELECT p.*, false AS acknowledged
+       FROM hr_policy_documents p
+       WHERE p.tenant_id = $1 AND p.entity_id = $2 AND p.is_active = false
+       ORDER BY p.category, p.title`,
+      [tenantId, entityId],
+    );
+  }
+
+  async restorePolicy(tenantId: string, entityId: number, policyId: string) {
+    await this.dataSource.query(
+      `UPDATE hr_policy_documents SET is_active = true WHERE tenant_id = $1 AND entity_id = $2 AND policy_id = $3`,
+      [tenantId, entityId, policyId],
+    );
+    return { restored: true };
+  }
+
   async getEmployeeCalendar(
     tenantId: string,
     entityId: number,
@@ -318,7 +364,8 @@ export class HrEssService {
       ),
       this.dataSource.query(
         `SELECT holiday_id, title, date, type FROM hr_holidays
-         WHERE date BETWEEN $1 AND $2 AND (entity_id = $3 OR entity_id IS NULL)`,
+         WHERE date BETWEEN $1 AND $2 AND (entity_id = $3 OR entity_id IS NULL)
+           AND applicable_to IN ('ALL', 'STAFF')`,
         [start, end, entityId],
       ),
       this.dataSource.query(

@@ -41,15 +41,18 @@ export default function FacultyGradingPage() {
   const [publishStatus, setPublishStatus] = useState('DRAFT');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!courseId) {
       setRows([]);
+      setRosterError(null);
       return;
     }
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setRosterError(null);
       try {
         const data = await api.get<MarksPayload>(
           `/api/academics/faculty/workspaces/marks?courseId=${encodeURIComponent(courseId)}&examType=${examType}`,
@@ -60,7 +63,12 @@ export default function FacultyGradingPage() {
           setPublishStatus(data.publish_status);
         }
       } catch (e) {
-        if (!cancelled) toast.error(e instanceof Error ? e.message : 'Failed to load marks');
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : 'Failed to load marks';
+          setRosterError(msg);
+          setRows([]);
+          toast.error(msg);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -84,26 +92,33 @@ export default function FacultyGradingPage() {
     );
   }
 
-  async function saveDraft() {
-    if (!courseId) return;
+  async function saveDraft(): Promise<boolean> {
+    if (!courseId) return false;
+    const entries = rows
+      .filter((r) => r.marks_obtained !== null)
+      .map((r) => ({
+        student_user_id: r.student_user_id,
+        marks_obtained: r.marks_obtained,
+        co_mapped: r.co_mapped,
+      }));
+    if (entries.length === 0) {
+      toast.error('Enter marks for at least one student before saving.');
+      return false;
+    }
     setSaving(true);
     try {
       await api.post('/api/academics/faculty/workspaces/marks/draft', {
         course_id: courseId,
         exam_type: examType,
         max_marks: maxMarks,
-        entries: rows
-          .filter((r) => r.marks_obtained !== null)
-          .map((r) => ({
-            student_user_id: r.student_user_id,
-            marks_obtained: r.marks_obtained,
-            co_mapped: r.co_mapped,
-          })),
+        entries,
       });
       toast.success('Draft saved');
       setPublishStatus('DRAFT');
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -113,12 +128,17 @@ export default function FacultyGradingPage() {
     if (!courseId) return;
     setSaving(true);
     try {
-      await saveDraft();
-      await api.post('/api/academics/faculty/workspaces/marks/publish', {
+      const draftOk = await saveDraft();
+      if (!draftOk) return;
+      const result = await api.post<{ published: number }>('/api/academics/faculty/workspaces/marks/publish', {
         course_id: courseId,
         exam_type: examType,
       });
-      toast.success('Marks published to students');
+      if ((result.published ?? 0) === 0) {
+        toast.warning('No draft marks were published. Save draft marks first.');
+        return;
+      }
+      toast.success(`Marks published to ${result.published} student${result.published === 1 ? '' : 's'}`);
       setPublishStatus('PUBLISHED');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Publish failed');
@@ -212,6 +232,8 @@ export default function FacultyGradingPage() {
             </div>
           ) : !courseId ? (
             <p className="py-8 text-center text-sm text-muted-foreground">Select a course to load the class roster.</p>
+          ) : rosterError ? (
+            <p className="py-8 text-center text-sm text-destructive">{rosterError}</p>
           ) : rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No enrolled students found for this course. Check enrollments in Academics admin.

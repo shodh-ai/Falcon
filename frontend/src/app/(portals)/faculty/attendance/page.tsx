@@ -32,7 +32,11 @@ type Student = {
 type UiStatus = 'PRESENT' | 'ABSENT';
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function MarkAttendanceContent() {
@@ -89,6 +93,15 @@ function MarkAttendanceContent() {
 
   async function save() {
     if (!selectedCourseId) return;
+    if (students.length === 0) {
+      toast.error('No students on the roster — cannot save attendance.');
+      return;
+    }
+    const payload = Object.entries(attendance).map(([student_id, status]) => ({ student_id, status }));
+    if (payload.length === 0) {
+      toast.error('Mark at least one student before saving.');
+      return;
+    }
     setSaving(true);
     try {
       const result = await api.post<{ saved: number; attendance_updated?: { attendance_percent: string }[] }>(
@@ -96,15 +109,19 @@ function MarkAttendanceContent() {
         {
           course_id: selectedCourseId,
           date: selectedDate,
-          attendance_data: Object.entries(attendance).map(([student_id, status]) => ({ student_id, status })),
+          attendance_data: payload,
         },
       );
       const state = await api.get<{ locked: boolean }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
       );
       setLocked(state.locked);
-      const updatedCount = result.attendance_updated?.length ?? result.saved;
-      toast.success(`Attendance saved · ${updatedCount} student${updatedCount === 1 ? '' : 's'} synced`);
+      const synced = result.attendance_updated?.length ?? 0;
+      if (synced === 0) {
+        toast.warning('Attendance saved to session log but no enrollment percentages were updated. Check student IDs.');
+      } else {
+        toast.success(`Attendance saved · ${synced} student${synced === 1 ? '' : 's'} synced to enrollment %`);
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -211,7 +228,7 @@ function MarkAttendanceContent() {
               ).length === 0 && (
                 <p className="text-sm text-muted-foreground">No students match &ldquo;{searchQuery}&rdquo;.</p>
               )}
-            <Button disabled={locked || saving} onClick={() => void save()}>
+            <Button disabled={locked || saving || students.length === 0} onClick={() => void save()}>
               {saving ? 'Saving…' : 'Save attendance'}
             </Button>
           </CardContent>

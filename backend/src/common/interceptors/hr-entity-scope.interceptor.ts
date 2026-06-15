@@ -56,28 +56,12 @@ export class HrEntityScopeInterceptor implements NestInterceptor {
         : [];
 
     const raw = req.headers?.['x-entity-id'] ?? req.query?.entity_id;
-    let entityId: number | undefined;
-
-    if (raw != null && raw !== '') {
-      entityId = await this.entityCtx.resolveEntityId(tenantId, raw);
-      await this.entityCtx.assertEntityAccess(tenantId, req.user.user_id, roles, entityId);
-    } else {
-      const allowed = await this.entityCtx.listAllowedEntities(tenantId, req.user.user_id, roles);
-      const allowedIds = allowed.map((row: { entity_id: number }) => Number(row.entity_id));
-      if (allowedIds.length === 1) {
-        entityId = allowedIds[0];
-      } else if (allowedIds.length === 0) {
-        throw new ForbiddenException('No organization entity assigned to your account.');
-      } else {
-        throw new ForbiddenException(
-          'Organization entity required. Send x-entity-id header or entity_id query param.',
-        );
-      }
-    }
-
-    if (entityId == null) {
-      throw new ForbiddenException('Organization entity could not be resolved for this request.');
-    }
+    const entityId = await this.entityCtx.resolveRequestEntityId(
+      tenantId,
+      req.user.user_id,
+      roles,
+      raw,
+    );
 
     req[HR_ENTITY_ID_KEY] = entityId;
 

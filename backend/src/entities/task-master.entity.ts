@@ -1,9 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { Role } from './role.entity';
 
 @Entity('task_master')
 @Index(['month', 'role_id'])
-export class TaskMaster {
+export class TaskMaster extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   task_id: number;
 

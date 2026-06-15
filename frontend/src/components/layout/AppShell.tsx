@@ -7,8 +7,9 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { CommandMenu } from '@/components/layout/CommandMenu';
+import { UniversalSearchOmnibar } from '@/components/layout/UniversalSearchOmnibar';
 import { LiveNotificationBell } from '@/components/layout/LiveNotificationBell';
+import { QuickActionMenu } from '@/components/layout/QuickActionMenu';
 import { ProfileMenu } from '@/components/layout/ProfileMenu';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { WorkspaceSwitcher } from '@/components/layout/WorkspaceSwitcher';
@@ -50,7 +51,7 @@ export function AppShell({ config, children, profileHref, headerExtra }: AppShel
         )}
       >
         <header className="sticky top-0 z-20 border-b border-border/80 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="flex h-16 items-center gap-3 px-4 sm:gap-4 sm:px-6">
+          <div className="flex h-14 items-center gap-2 px-4 sm:gap-3 sm:px-6">
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" size="icon" className="lg:hidden shrink-0">
@@ -70,24 +71,20 @@ export function AppShell({ config, children, profileHref, headerExtra }: AppShel
               </SheetContent>
             </Sheet>
 
-            <div className="hidden min-w-0 sm:block">
+            <div className="min-w-0 flex-1 sm:max-w-[280px]">
               <p className="text-[10px] font-bold uppercase tracking-widest text-sgvu-gold">Falcon</p>
               <h1 className="truncate text-base font-black text-sgvu-navy sm:text-lg">{config.personaTitle}</h1>
               <p className="truncate text-[11px] font-medium text-muted-foreground">{config.personaLabel}</p>
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
-              <div className="hidden md:block">
-                <CommandMenu items={config.commandItems} />
-              </div>
               {headerExtra}
               <WorkspaceSwitcher />
+              <UniversalSearchOmnibar />
+              <QuickActionMenu />
               <LiveNotificationBell />
               <ProfileMenu profileHref={profileHref ?? config.homeHref.replace('/dashboard', '/profile')} />
             </div>
-          </div>
-          <div className="border-t border-border/60 px-4 pb-3 md:hidden">
-            <CommandMenu items={config.commandItems} />
           </div>
         </header>
 

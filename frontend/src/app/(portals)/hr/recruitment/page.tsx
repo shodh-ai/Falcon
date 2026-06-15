@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { KanbanBoard, type KanbanColumn } from '@/components/workspaces/KanbanBoard';
@@ -22,6 +23,7 @@ type PipelineResponse = {
 };
 
 export default function HrRecruitmentPage() {
+  const router = useRouter();
   const api = useHrApi();
   const { entityId } = useHrEntity();
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
@@ -53,15 +55,38 @@ export default function HrRecruitmentPage() {
     load();
   }, [api, entityId]);
 
+  async function provisionHire(applicantId: string) {
+    const result = await api.post<{
+      email: string;
+      onboarding_triggered?: boolean;
+      already_hired?: boolean;
+    }>(`/api/hr/recruitment/applicants/${applicantId}/hire`, {});
+    if (result.onboarding_triggered || result.already_hired) {
+      toast.success(`${result.email} moved to Onboarding`, {
+        description: 'They are no longer shown in the ATS pipeline.',
+        action: {
+          label: 'Open Onboarding',
+          onClick: () => router.push('/hr/onboarding'),
+        },
+      });
+    } else {
+      toast.success(`User provisioned: ${result.email}`);
+    }
+    load();
+  }
+
   async function moveCard(applicantId: string, stage: string) {
     try {
       await api.patch(`/api/hr/recruitment/applicants/${applicantId}/stage`, { stage });
-      if (
-        stage === 'HIRED' &&
-        window.confirm('Provision employee account and IT onboarding (@mygyanvihar.com)?')
-      ) {
-        const result = await api.post<{ email: string }>(`/api/hr/recruitment/applicants/${applicantId}/hire`, {});
-        toast.success(`User provisioned: ${result.email}`);
+      if (stage === 'HIRED') {
+        const proceed = window.confirm(
+          'Provision employee account and generate the onboarding workflow checklist?',
+        );
+        if (proceed) {
+          await provisionHire(applicantId);
+          return;
+        }
+        toast.message('Candidate marked Hired — use "Start onboarding" on the card when ready.');
       }
       load();
     } catch (e) {
@@ -70,13 +95,18 @@ export default function HrRecruitmentPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[95vw] space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Recruitment (ATS)"
-        description="Kanban hiring pipeline. Moving to Hired provisions the user row and IT onboarding tasks."
+        description="Active candidates only — once you click Start onboarding, they leave ATS and appear under Onboarding."
       />
 
-      <KanbanBoard columns={columns} onMove={(itemId, toColumnId) => void moveCard(itemId, toColumnId)} />
-    </div>
+      <KanbanBoard
+        columns={columns}
+        onMove={(itemId, toColumnId) => void moveCard(itemId, toColumnId)}
+        onColumnAction={(itemId) => void provisionHire(itemId).catch((e) => toast.error(e instanceof Error ? e.message : 'Provision failed'))}
+        columnActionLabel={{ HIRED: 'Start onboarding' }}
+      />
+    </>
   );
 }

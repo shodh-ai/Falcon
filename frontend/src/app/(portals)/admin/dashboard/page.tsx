@@ -6,6 +6,7 @@ import { Users, Wallet, ClipboardList, Check, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ProfileCorrectionWidget } from '@/components/hod/ProfileCorrectionWidget';
 
 const approvals = [
   { id: '1', type: 'Leave', who: 'Dr. Mehta', detail: 'CL · 2 days', status: 'pending' },
@@ -94,6 +95,8 @@ export default function AdminDashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      <ProfileCorrectionWidget limit={10} />
     </div>
   );
 }

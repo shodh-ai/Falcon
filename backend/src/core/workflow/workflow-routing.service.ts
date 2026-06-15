@@ -29,6 +29,8 @@ export class WorkflowRoutingService {
     process.env.WORKFLOW_IT_ADMIN_EMAIL ?? 'iqac@mygyanvihar.com';
   private readonly fallbackHodEmail =
     process.env.WORKFLOW_HOD_FALLBACK_EMAIL ?? 'hod@mygyanvihar.com';
+  private readonly fallbackRegistrarEmail =
+    process.env.WORKFLOW_REGISTRAR_EMAIL ?? 'registrar@mygyanvihar.com';
 
   constructor(
     @InjectRepository(AcademicMentorship)
@@ -163,6 +165,20 @@ export class WorkflowRoutingService {
             this.fallbackHodEmail,
             tenantId,
             'ACADEMICS_HOD_FALLBACK',
+          );
+        }
+      case 'STUDENT_PROFILE':
+        try {
+          return await this.resolveUserByEmail(
+            this.fallbackRegistrarEmail,
+            tenantId,
+            'STUDENT_PROFILE_REGISTRAR',
+          );
+        } catch {
+          return this.resolveUserByEmail(
+            this.fallbackHodEmail,
+            tenantId,
+            'STUDENT_PROFILE_HOD_FALLBACK',
           );
         }
       default:

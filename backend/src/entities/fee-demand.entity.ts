@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type FeeDemandStatus = 'PENDING' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'WAIVED';
 
@@ -6,7 +7,7 @@ export type FeeDemandStatus = 'PENDING' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' 
 @Index(['student_user_id'])
 @Index(['status'])
 @Index(['due_date'])
-export class FeeDemand {
+export class FeeDemand extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   demand_id: string;
 

@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { HR_DOCUMENT_EXPORT_QUEUE } from '../../common/constants/hr-export-queue.constants';
+import { HR_PAYROLL_QUEUE } from '../../common/constants/hr-payroll-queue.constants';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { LeaveRequest } from '../../entities/leave-request.entity';
 import { LeaveBalance } from '../../entities/leave-balance.entity';
@@ -26,16 +29,30 @@ import { HrOrgStructureService } from './hr-org-structure.service';
 import { HrLeavePolicyService } from './hr-leave-policy.service';
 import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import { HrChecklistService } from './hr-checklist.service';
+import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
 import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
+import { HrPowerGuard } from '../../common/guards/hr-power.guard';
+import { HrAccessControlService } from './hr-access-control.service';
 import { HrDashboardService } from './hr-dashboard.service';
 import { HrReportsService } from './hr-reports.service';
 import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
 import { HrEntityScopeInterceptor } from '../../common/interceptors/hr-entity-scope.interceptor';
 import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
+import { HrDocumentVaultService } from './hr-document-vault.service';
+import { HrEmployeeBulkService } from './hr-employee-bulk.service';
+import { HrDocumentExportService } from './hr-document-export.service';
+import { HrDocumentExportProcessor } from './hr-document-export.processor';
+import { HrPayrollProcessor } from './hr-payroll.processor';
+import { HrTeamScopeService } from './hr-team-scope.service';
+import { HrTeamService } from './hr-team.service';
+import { FinanceModule } from '../finance/finance.module';
 
 @Module({
   imports: [
     ConfigModule,
+    FinanceModule,
+    BullModule.registerQueue({ name: HR_DOCUMENT_EXPORT_QUEUE }),
+    BullModule.registerQueue({ name: HR_PAYROLL_QUEUE }),
     TypeOrmModule.forFeature([
       LeaveRequest,
       LeaveBalance,
@@ -65,12 +82,22 @@ import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
     HrLeavePolicyService,
     HrWorkflowBuilderService,
     HrChecklistService,
+    HrOnboardingWorkflowService,
     HrPermissionGuard,
+    HrPowerGuard,
+    HrAccessControlService,
     HrDashboardService,
     HrReportsService,
     HrWorkflowRoutingService,
     HrEntityScopeInterceptor,
     EntityScopeGuard,
+    HrDocumentVaultService,
+    HrEmployeeBulkService,
+    HrDocumentExportService,
+    HrDocumentExportProcessor,
+    HrPayrollProcessor,
+    HrTeamScopeService,
+    HrTeamService,
   ],
   exports: [
     HrService,
@@ -86,9 +113,16 @@ import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
     HrLeavePolicyService,
     HrWorkflowBuilderService,
     HrChecklistService,
+    HrOnboardingWorkflowService,
     HrDashboardService,
     HrReportsService,
     HrWorkflowRoutingService,
+    HrDocumentVaultService,
+    HrEmployeeBulkService,
+    HrDocumentExportService,
+    HrAccessControlService,
+    HrTeamScopeService,
+    HrTeamService,
   ],
 })
 export class HrModule {}

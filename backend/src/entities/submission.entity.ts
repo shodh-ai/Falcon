@@ -1,11 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { TaskAssignment } from './task-assignment.entity';
 import { AiSubmissionStatus } from '../common/enums/ai-submission-status.enum';
 
 @Entity('submissions')
 @Index(['assignment_id'])
 @Index(['ai_status'])
-export class Submission {
+export class Submission extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   submission_id: string;
 

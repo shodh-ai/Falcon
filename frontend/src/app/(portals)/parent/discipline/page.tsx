@@ -1,5 +1,5 @@
-import { GapWorkspaceRoutePage } from '@/components/workspaces/GapWorkspaceRoutePage';
+import { redirect } from 'next/navigation';
 
-export default function ParentDisciplinePage() {
-  return <GapWorkspaceRoutePage portal="parent" page="discipline" />;
+export default function ParentDisciplineRedirect() {
+  redirect('/parent/academics');
 }

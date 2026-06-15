@@ -1,8 +1,9 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
 @Entity('handover_log')
-export class HandoverLog {
+export class HandoverLog extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   handover_id: string;
 

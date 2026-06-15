@@ -1,15 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { Search } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Search, Users } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
+import { HrPersonCell } from '@/components/hr/HrAvatar';
+import { HrStatusBadge } from '@/components/hr/HrStatusBadge';
+import { HrEmptyState } from '@/components/hr/HrEmptyState';
+import { AddEmployeeDialog } from '@/components/hr/AddEmployeeDialog';
+import { BulkDocumentExportDialog } from '@/components/hr/BulkDocumentExportDialog';
+import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { PaginationBar } from '@/components/ui/PaginationBar';
+import useSWR from 'swr';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
+import { DEFAULT_PAGE_SIZE, type PaginatedResponse } from '@/lib/api/pagination';
 
 type EmployeeRow = {
   user_id: string;
@@ -26,77 +32,105 @@ type EmployeeRow = {
 
 export default function HrDirectoryPage() {
   const api = useHrApi();
-  const { entityId } = useHrEntity();
-  const [rows, setRows] = useState<EmployeeRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { entityId, entityReady } = useHrEntity();
   const [query, setQuery] = useState('');
+  const [offset, setOffset] = useState(0);
 
-  useEffect(() => {
-    setLoading(true);
-    void api.get<EmployeeRow[]>('/api/hr/directory').then(setRows).finally(() => setLoading(false));
-  }, [api, entityId]);
+  const { data, isLoading, mutate } = useSWR<PaginatedResponse<EmployeeRow>>(
+    entityReady ? ['hr-directory', entityId, offset, query] : null,
+    () => {
+      const q = new URLSearchParams({
+        limit: String(DEFAULT_PAGE_SIZE),
+        offset: String(offset),
+      });
+      if (query.trim()) q.set('q', query.trim());
+      return api.get<PaginatedResponse<EmployeeRow>>(`/api/hr/directory?${q}`);
+    },
+    { keepPreviousData: true, revalidateOnFocus: true },
+  );
 
-  const filtered = useMemo(() => {
-    const q = query.toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.name, r.email, r.employee_id, r.department, r.designation].some((v) =>
-        String(v ?? '').toLowerCase().includes(q),
-      ),
-    );
-  }, [rows, query]);
+  const rows = data?.data ?? [];
 
-  if (loading) return <FalconLoader label="Loading employee directory…" />;
+  const filtered = useMemo(() => rows, [rows]);
+
+  if (!entityReady || (isLoading && !data)) return <FalconLoader label="Loading employee directory…" />;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
-      <HrPageHeader
-        title="Employee Directory"
-        description="Master roster of all staff — open any profile for the full 360° view."
-      />
+    <>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <HrPageHeader
+          title="Employee Directory"
+          description="Master roster of all staff — open any profile for the full 360° view."
+        />
+        <div className="flex flex-wrap gap-2">
+          <BulkDocumentExportDialog />
+          <AddEmployeeDialog onCreated={() => void mutate()} />
+        </div>
+      </div>
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input className="pl-9" placeholder="Search name, ID, department…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <Input
+          className="border-gray-200 bg-white pl-9 shadow-sm"
+          placeholder="Search name, ID, department…"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOffset(0);
+          }}
+        />
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left text-muted-foreground">
-                  <th className="p-3">Employee ID</th>
-                  <th className="p-3">Name</th>
-                  <th className="p-3">Designation</th>
-                  <th className="p-3">Department</th>
-                  <th className="p-3">Reporting Officer</th>
-                  <th className="p-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
+      {filtered.length === 0 ? (
+        <HrEmptyState
+          icon={Users}
+          title={query ? 'No matching employees' : 'Directory is empty'}
+          description={query ? 'Try a different search term.' : 'Staff records will appear once employees are onboarded.'}
+        />
+      ) : (
+        <>
+          <HrDataTable>
+            <HrTable>
+              <HrTableHead>
+                <HrTh>Employee</HrTh>
+                <HrTh>ID</HrTh>
+                <HrTh>Designation</HrTh>
+                <HrTh>Department</HrTh>
+                <HrTh>Reporting Officer</HrTh>
+                <HrTh>Status</HrTh>
+              </HrTableHead>
+              <HrTableBody>
                 {filtered.map((r) => (
-                  <tr key={r.user_id} className="border-b border-border/40 hover:bg-muted/30">
-                    <td className="p-3 font-mono text-xs">{r.employee_id ?? '—'}</td>
-                    <td className="p-3">
-                      <Link href={`/hr/employee/${r.user_id}`} className="font-medium text-sgvu-navy hover:underline">
-                        {r.name}
-                      </Link>
-                      <p className="text-xs text-muted-foreground">{r.email}</p>
-                    </td>
-                    <td className="p-3">{r.designation ?? r.role ?? '—'}</td>
-                    <td className="p-3">{r.department ?? '—'}</td>
-                    <td className="p-3">{r.reporting_officer_name ?? '—'}</td>
-                    <td className="p-3">
-                      <Badge variant={r.is_active ? 'default' : 'secondary'}>{r.is_active ? 'Active' : 'Inactive'}</Badge>
-                    </td>
-                  </tr>
+                  <HrTr key={r.user_id}>
+                    <HrTd>
+                      <HrPersonCell
+                        name={r.name}
+                        subtitle={r.email}
+                        href={`/hr/employee/${r.user_id}`}
+                      />
+                    </HrTd>
+                    <HrTd className="font-mono text-xs text-muted-foreground">{r.employee_id ?? '—'}</HrTd>
+                    <HrTd>{r.designation ?? r.role ?? '—'}</HrTd>
+                    <HrTd>{r.department ?? '—'}</HrTd>
+                    <HrTd>{r.reporting_officer_name ?? '—'}</HrTd>
+                    <HrTd>
+                      <HrStatusBadge status={r.is_active ? 'ACTIVE' : 'INACTIVE'} />
+                    </HrTd>
+                  </HrTr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+              </HrTableBody>
+            </HrTable>
+          </HrDataTable>
+          {data ? (
+            <PaginationBar
+              total={data.total}
+              limit={data.limit}
+              offset={data.offset}
+              onPageChange={setOffset}
+            />
+          ) : null}
+        </>
+      )}
+    </>
   );
 }

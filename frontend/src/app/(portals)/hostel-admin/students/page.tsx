@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import useSWR from 'swr';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/DataTable';
+import { PaginationBar } from '@/components/ui/PaginationBar';
 import { useAuthedApi } from '@/lib/api';
+import { DEFAULT_PAGE_SIZE, type PaginatedResponse } from '@/lib/api/pagination';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
 import { toast } from 'sonner';
 
@@ -13,6 +16,7 @@ type StudentRow = {
   student_id: string;
   name: string;
   email: string;
+  phone: string | null;
   status: string;
   hostel_name: string;
   room_number: string;
@@ -26,26 +30,30 @@ export default function HostelStudentsPage() {
   const api = useAuthedApi();
   const [hostelId, setHostelId] = useState('');
   const [status, setStatus] = useState('ACTIVE');
-  const [rows, setRows] = useState<StudentRow[]>([]);
+  const [offset, setOffset] = useState(0);
 
-  async function load() {
-    const q = new URLSearchParams();
-    if (hostelId) q.set('hostelId', hostelId);
-    if (status) q.set('status', status);
-    const data = await api.get<StudentRow[]>(`/api/hostel-admin/students?${q}`);
-    setRows(data);
-  }
+  const { data, mutate } = useSWR<PaginatedResponse<StudentRow>>(
+    ['hostel-students', hostelId, status, offset],
+    async () => {
+      const q = new URLSearchParams({
+        limit: String(DEFAULT_PAGE_SIZE),
+        offset: String(offset),
+      });
+      if (hostelId) q.set('hostelId', hostelId);
+      if (status) q.set('status', status);
+      return api.get<PaginatedResponse<StudentRow>>(`/api/hostel-admin/students?${q}`);
+    },
+    { revalidateOnFocus: true, keepPreviousData: true },
+  );
 
-  useEffect(() => {
-    void load();
-  }, [api, hostelId, status]);
+  const rows = data?.data ?? [];
 
   async function evict(studentUserId: string) {
     if (!confirm('Evict this student from the hostel?')) return;
     try {
       await api.post(`/api/hostel-admin/students/${studentUserId}/evict`, {});
       toast.success('Student evicted');
-      await load();
+      await mutate();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
     }
@@ -55,11 +63,20 @@ export default function HostelStudentsPage() {
     <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
       <h1 className="text-2xl font-bold text-sgvu-navy">Student Management</h1>
       <div className="flex flex-wrap gap-3">
-        <HostelScopeBar value={hostelId} onChange={setHostelId} />
+        <HostelScopeBar
+          value={hostelId}
+          onChange={(id) => {
+            setHostelId(id);
+            setOffset(0);
+          }}
+        />
         <select
           className="rounded-lg border px-3 py-2 text-sm"
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setOffset(0);
+          }}
         >
           <option value="ACTIVE">Active</option>
           <option value="VACATED">Vacated</option>
@@ -80,6 +97,7 @@ export default function HostelStudentsPage() {
               </div>
             ),
           },
+          { key: 'phone', header: 'Phone No.', render: (r) => r.phone ?? '—' },
           {
             key: 'course',
             header: 'Course',
@@ -119,6 +137,10 @@ export default function HostelStudentsPage() {
         rows={rows}
         rowKey={(r) => r.student_user_id}
       />
+
+      {data ? (
+        <PaginationBar total={data.total} limit={data.limit} offset={data.offset} onPageChange={setOffset} />
+      ) : null}
     </div>
   );
 }

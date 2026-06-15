@@ -7,10 +7,12 @@ import {
   type FeeGeneratedPayload,
   type GatePassUpdatedPayload,
   type JobPostedPayload,
+  type PlacementStageUpdatedPayload,
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
+  type ExamResultsPublishedPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
@@ -20,6 +22,9 @@ import {
   type WorkflowApprovalRequiredPayload,
   type EventProposedPayload,
   type EventTierPayload,
+  type OnboardingCredentialsPayload,
+  type HrExportReadyPayload,
+  type HrExportFailedPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -45,6 +50,10 @@ export class NotificationEmitterService {
 
   marksPublished(payload: MarksPublishedPayload) {
     this.events.emit(NotificationEvents.ACADEMICS_MARKS_PUBLISHED, payload);
+  }
+
+  examResultsPublished(payload: ExamResultsPublishedPayload) {
+    this.events.emit(NotificationEvents.EXAM_RESULTS_PUBLISHED, payload);
   }
 
   courseMaterialAdded(payload: CourseMaterialAddedPayload) {
@@ -73,6 +82,10 @@ export class NotificationEmitterService {
 
   jobPosted(payload: JobPostedPayload) {
     this.events.emit(NotificationEvents.PLACEMENT_JOB_POSTED, payload);
+  }
+
+  placementStageUpdated(payload: PlacementStageUpdatedPayload) {
+    this.events.emit(NotificationEvents.PLACEMENT_STAGE_UPDATED, payload);
   }
 
   ticketReply(payload: TicketReplyPayload) {
@@ -105,5 +118,17 @@ export class NotificationEmitterService {
 
   eventPendingFinance(payload: EventTierPayload) {
     this.events.emit(NotificationEvents.EVENT_PENDING_FINANCE, payload);
+  }
+
+  onboardingCredentials(payload: OnboardingCredentialsPayload) {
+    this.events.emit(NotificationEvents.HR_ONBOARDING_CREDENTIALS, payload);
+  }
+
+  exportReady(payload: HrExportReadyPayload) {
+    this.events.emit(NotificationEvents.HR_EXPORT_READY, payload);
+  }
+
+  exportFailed(payload: HrExportFailedPayload) {
+    this.events.emit(NotificationEvents.HR_EXPORT_FAILED, payload);
   }
 }

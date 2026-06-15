@@ -73,3 +73,21 @@ export { LibraryBook } from './library-book.entity';
 export { TransportRoute } from './transport-route.entity';
 export { SystemAlert } from './system-alert.entity';
 export { FalconNotification } from './falcon-notification.entity';
+export { HrOverrideLog } from './hr-override-log.entity';
+
+export { FinVendor } from './fin-vendor.entity';
+export { FinBudget } from './fin-budget.entity';
+export { FinVendorInvoice } from './fin-vendor-invoice.entity';
+export { FinanceJournalEntry } from './finance-journal-entry.entity';
+export { FinanceJournalLine } from './finance-journal-line.entity';
+export { FinanceExpenseHead } from './finance-expense-head.entity';
+export { LeadershipFeedEvent } from './leadership-feed-event.entity';
+export { FinAnomalyFlag } from './fin-anomaly-flag.entity';
+export { DeptFinancialScore } from './dept-financial-score.entity';
+export { CashFlowForecast } from './cash-flow-forecast.entity';
+export { SystemAuditLog } from './system-audit-log.entity';
+
+export { FinanceAllocationRule } from './finance-allocation-rule.entity';
+export { BankBalanceSnapshot } from './bank-balance-snapshot.entity';
+export { OwnerAccess } from './owner-access.entity';
+export { OwnerDailyBrief } from './owner-daily-brief.entity';

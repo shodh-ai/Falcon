@@ -1,9 +1,10 @@
 import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { Role } from './role.entity';
 import { User } from './user.entity';
 
 @Entity('user_roles')
-export class UserRole {
+export class UserRole extends BaseSoftDeleteEntity {
   @PrimaryColumn({ type: 'uuid' })
   user_id: string;
 

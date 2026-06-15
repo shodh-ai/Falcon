@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { HrAccessControlService } from './hr-access-control.service';
 
 @Injectable()
 export class HrWorkflowBuilderService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly accessControl: HrAccessControlService,
+  ) {}
 
   listWorkflows(tenantId: string, entityId: number) {
     return this.dataSource.query(
@@ -102,6 +106,15 @@ export class HrWorkflowBuilderService {
     return this.getWorkflow(tenantId, entityId, workflowId);
   }
 
+  async deleteWorkflow(tenantId: string, entityId: number, workflowId: string) {
+    await this.dataSource.query(`DELETE FROM hr_approval_workflow_steps WHERE workflow_id = $1`, [workflowId]);
+    await this.dataSource.query(
+      `DELETE FROM hr_approval_workflows WHERE tenant_id = $1 AND entity_id = $2 AND workflow_id = $3`,
+      [tenantId, entityId, workflowId]
+    );
+    return { success: true };
+  }
+
   async resolveNextApprover(
     tenantId: string,
     entityId: number,
@@ -147,6 +160,16 @@ export class HrWorkflowBuilderService {
         [tenantId, step.approver_ref],
       );
       approverUserId = roleUser[0]?.user_id ?? null;
+    } else if (step.approver_type === 'HR_EXECUTIVE') {
+      const module = this.accessControl.moduleForActionType(actionType);
+      approverUserId = await this.accessControl.resolveHrExecutiveApprover(
+        tenantId,
+        requesterUserId,
+        module,
+        step.approver_ref,
+      );
+    } else if (step.approver_type === 'HR_ADMIN') {
+      approverUserId = await this.accessControl.resolveHrAdminApprover(tenantId);
     }
 
     return {

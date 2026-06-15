@@ -104,7 +104,7 @@ export default function HrReportsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Analytics & Reports Hub"
         description="UGC/NAAC audit-ready exports — one-click Excel downloads for HR and Finance."
@@ -145,6 +145,6 @@ export default function HrReportsPage() {
           </Card>
         ))}
       </div>
-    </div>
+    </>
   );
 }

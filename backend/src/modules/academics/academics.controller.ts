@@ -278,6 +278,75 @@ export class AcademicsController {
     return this.academics.getHodDashboard(this.resolveTenantId(req.user), req.user.user_id);
   }
 
+  @Get('hod/command-center')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodCommandCenter(@Req() req: { user: AuthUser }) {
+    return this.academics.getHodCommandCenter(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/faculty-workload')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodFacultyWorkload(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodFacultyWorkload(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/department-timetable')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodDepartmentTimetable(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodDepartmentTimetable(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/course-allocation-slots')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodCourseAllocationSlots(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodCourseAllocationSlots(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/syllabus-coverage')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodSyllabusCoverage(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodSyllabusCoverage(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/result-analytics')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodResultAnalytics(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodResultAnalytics(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/grievances')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodGrievances(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodGrievances(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/slow-learners')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodSlowLearners(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodSlowLearners(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/appraisals')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodAppraisals(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodAppraisals(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Patch('hod/appraisals/:appraisalId/rating')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodAppraisalRating(
+    @Req() req: { user: AuthUser },
+    @Param('appraisalId') appraisalId: string,
+    @Body() body: { hod_rating: number },
+  ) {
+    return this.academics.submitHodAppraisalRating(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      appraisalId,
+      body.hod_rating,
+    );
+  }
+
   @Get('hod/faculty-roster')
   @Roles('HOD', 'Dean', 'SuperAdmin')
   hodFacultyRoster(@Req() req: { user: AuthUser }) {
@@ -323,6 +392,18 @@ export class AcademicsController {
     );
   }
 
+  @Get('hod/student-monitor/:studentId/detail')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodStudentMonitorDetail(
+    @Param('studentId') studentId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.academics.getHodStudentDetail(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      studentId,
+    );
+  }
   @Get('hod/approvals/leaves')
   @Roles('HOD', 'Dean', 'SuperAdmin')
   hodLeaveApprovals(@Req() req: { user: AuthUser }) {
@@ -333,6 +414,31 @@ export class AcademicsController {
   @Roles('HOD', 'Dean', 'SuperAdmin')
   hodGatePassApprovals(@Req() req: { user: AuthUser }) {
     return this.academics.listHodGatePassApprovals(this.resolveTenantId(req.user), req.user.user_id);
+  }
+
+  @Get('hod/approvals/extra-classes')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodExtraClassApprovals(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listHodPendingAdjustments(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Patch('hod/approvals/extra-classes/:adjustmentId')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  actOnExtraClass(
+    @Param('adjustmentId') adjustmentId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { action: 'APPROVE' | 'REJECT'; remarks?: string },
+  ) {
+    return this.facultyWorkspaces.actOnClassAdjustment(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      adjustmentId,
+      body.action,
+      body.remarks,
+    );
   }
 
   @Get('courses/available-electives')
@@ -559,6 +665,15 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       body as Parameters<FacultyWorkspacesService['createLogbookEntry']>[2],
+    );
+  }
+
+  @Get('faculty/workspaces/remedial')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listRemedial(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listRemedialActions(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
     );
   }
 

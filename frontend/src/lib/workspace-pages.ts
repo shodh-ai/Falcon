@@ -15,6 +15,7 @@ export const hodPages = {
       { label: 'Total Students', value: count(data, 'total_students') },
       { label: 'Average Attendance', value: `${count(data, 'average_department_attendance')}%` },
       { label: 'Pending Approvals', value: count(data, 'pending_leave_approvals') + count(data, 'pending_gate_pass_approvals') },
+      { label: 'Profile Corrections', value: count(data, 'pending_profile_corrections') },
     ],
   },
   facultyRoster: {
@@ -37,9 +38,25 @@ export const hodPages = {
       { key: 'name', label: 'Student' },
       { key: 'email', label: 'Email' },
       { key: 'department', label: 'Department' },
-      { key: 'average_attendance', label: 'Avg Attendance %' },
+      { key: 'average_attendance', label: 'Avg Attendance %', sortable: true },
       { key: 'course_count', label: 'Courses' },
+      { key: 'cgpa', label: 'CGPA', sortable: true },
     ],
+    filters: [
+      {
+        key: 'enrollment_year',
+        label: 'Enrollment Year',
+        dynamicOptions: (data) => {
+          if (!Array.isArray(data)) return [{ label: 'All Years', value: '' }];
+          const years = Array.from(new Set(data.map((row) => row.enrollment_year))).filter(Boolean).sort().reverse();
+          return [
+            { label: 'All Years', value: '' },
+            ...years.map((y) => ({ label: String(y), value: String(y) })),
+          ];
+        },
+      },
+    ],
+    rowAction: 'student-details' as any,
   },
   leaveApprovals: {
     title: 'Faculty Leave Approvals',
@@ -59,8 +76,9 @@ export const hodPages = {
     endpoint: '/api/academics/hod/approvals/gate-passes',
     columns: [
       { key: 'staff.name', label: 'Faculty' },
-      { key: 'out_time', label: 'Out Time' },
-      { key: 'expected_in_time', label: 'Expected In' },
+      { key: 'date', label: 'Date' },
+      { key: 'out_time_display', label: 'Out Time' },
+      { key: 'expected_in_display', label: 'Expected In' },
       { key: 'reason', label: 'Reason' },
     ],
   },

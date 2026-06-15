@@ -2,8 +2,18 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { extname, resolve } from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { AlumniConversionService } from '../alumni/alumni-conversion.service';
+import { TicketService } from '../helpdesk/ticket.service';
+import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
+import { ObjectStorageService } from '../../storage/object-storage.service';
+import { resolvePlacementSchema } from '../placement/placement-schema';
+
+const EXTRA_CERT_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
 
 @Injectable()
 export class StudentPortalService {
@@ -12,6 +22,10 @@ export class StudentPortalService {
     private readonly crypto: HrFieldEncryptionService,
     private readonly alumniConversion: AlumniConversionService,
     private readonly events: EventEmitter2,
+    private readonly tickets: TicketService,
+    private readonly workflowRouting: WorkflowRoutingService,
+    private readonly workflowNotify: WorkflowNotificationService,
+    private readonly objectStorage: ObjectStorageService,
   ) {}
 
   private maskEncrypted(value: string | null, maskFn: (v: string) => string) {
@@ -27,9 +41,10 @@ export class StudentPortalService {
   async getMasterProfile(tenantId: string, userId: string) {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email,
-              sp.enrollment_no, sp.batch, sp.category, sp.gender, sp.date_of_birth,
+              sp.enrollment_number, sp.enrollment_no, sp.batch, sp.category, sp.gender, sp.date_of_birth,
               sp.nationality, sp.parent_info, sp.admission_type, sp.admission_number,
               sp.admission_status, sp.aadhaar_encrypted, sp.passport_encrypted,
+              sp.profile_photo_url, sp.bank_details,
               d.dept_name AS department,
               COALESCE(
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
@@ -44,8 +59,8 @@ export class StudentPortalService {
     if (!rows[0]) throw new NotFoundException('Student not found');
     const row = rows[0];
     return {
-      student_id: row.enrollment_no ?? row.user_id,
-      enrollment_no: row.enrollment_no,
+      student_id: row.enrollment_number ?? row.admission_number ?? row.enrollment_no ?? row.user_id,
+      enrollment_no: row.enrollment_number ?? row.admission_number ?? row.enrollment_no,
       name: row.name,
       email: row.email,
       mobile: row.parent_info?.student_mobile ?? row.parent_info?.mobile ?? null,
@@ -64,7 +79,33 @@ export class StudentPortalService {
       passport_masked: this.maskEncrypted(row.passport_encrypted, (v) => `••••${v.slice(-4)}`),
       admission_type: row.admission_type,
       admission_status: row.admission_status,
+      profile_photo_url: row.profile_photo_url,
+      bank_details: row.bank_details,
     };
+  }
+
+  async updateProfile(tenantId: string, userId: string, dto: { profile_photo_url?: string; bank_details?: Record<string, any> }) {
+    const setChunks: string[] = [];
+    const values: any[] = [];
+    let queryIdx = 1;
+
+    if (dto.profile_photo_url !== undefined) {
+      setChunks.push(`profile_photo_url = $${queryIdx++}`);
+      values.push(dto.profile_photo_url);
+    }
+    if (dto.bank_details !== undefined) {
+      setChunks.push(`bank_details = $${queryIdx++}`);
+      values.push(dto.bank_details);
+    }
+
+    if (setChunks.length === 0) return { success: true };
+
+    values.push(userId);
+    await this.dataSource.query(
+      `UPDATE student_profiles SET ${setChunks.join(', ')} WHERE user_id = $${queryIdx}`,
+      values,
+    );
+    return { success: true };
   }
 
   async getAdmissionVault(tenantId: string, userId: string) {
@@ -341,7 +382,8 @@ export class StudentPortalService {
 
   async getExtracurriculars(tenantId: string, userId: string) {
     const records = await this.dataSource.query(
-      `SELECT record_id, activity_type, details, credits_awarded, event_date, created_at
+      `SELECT record_id, activity_type, details, credits_awarded, event_date,
+              verification_status, certificate_file_path, created_at
        FROM student_extracurriculars
        WHERE tenant_id = $1 AND student_user_id = $2
        ORDER BY event_date DESC NULLS LAST, created_at DESC`,
@@ -468,17 +510,79 @@ export class StudentPortalService {
     if (!dto.subject?.trim() || !dto.description?.trim()) {
       throw new BadRequestException('Subject and description are required');
     }
+    const description = `${dto.description.trim()}${dto.fields_requested?.length ? `\n\nFields: ${dto.fields_requested.join(', ')}` : ''}`;
+    const ticket = await this.tickets.createTicket(userId, {
+      category: 'STUDENT_PROFILE',
+      subject: dto.subject.trim(),
+      description,
+    });
+    return { ticket_id: ticket.ticket_id, message: 'Profile correction submitted to Academic Admin.' };
+  }
+
+  async logExtracurricular(
+    tenantId: string,
+    userId: string,
+    dto: { activity_type: string; description: string; event_date: string },
+    file?: Express.Multer.File,
+  ) {
+    const activityType = dto.activity_type?.trim().toUpperCase();
+    if (!['NCC', 'NSS', 'SODECA', 'OTHER'].includes(activityType)) {
+      throw new BadRequestException('Invalid activity type');
+    }
+    if (!dto.description?.trim() || !dto.event_date) {
+      throw new BadRequestException('Description and date are required');
+    }
+    if (!file) throw new BadRequestException('Certificate PDF is required');
+    if (!EXTRA_CERT_MIME.includes(file.mimetype)) {
+      throw new BadRequestException('Only PDF, JPG, and PNG files are allowed');
+    }
+
+    const filePath = await this.persistExtracurricularFile(tenantId, file);
     const rows = await this.dataSource.query(
-      `INSERT INTO helpdesk_tickets (student_user_id, category, subject, description, status)
-       VALUES ($1, 'ACADEMICS', $2, $3, 'PENDING')
-       RETURNING ticket_id`,
-      [
-        userId,
-        dto.subject.trim(),
-        `${dto.description.trim()}${dto.fields_requested?.length ? `\n\nFields: ${dto.fields_requested.join(', ')}` : ''}`,
-      ],
+      `INSERT INTO student_extracurriculars (
+         tenant_id, student_user_id, activity_type, details, credits_awarded,
+         event_date, verification_status, certificate_file_path
+       ) VALUES ($1, $2, $3, $4, 0, $5::date, 'PENDING_VERIFICATION', $6)
+       RETURNING record_id`,
+      [tenantId, userId, activityType, dto.description.trim(), dto.event_date, filePath],
     );
-    return { ticket_id: rows[0].ticket_id, message: 'Profile update request submitted to Admin.' };
+
+    const student = await this.dataSource.query<Array<{ name: string }>>(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [userId],
+    );
+    try {
+      const proctor = await this.workflowRouting.getStudentProctor(userId);
+      this.workflowNotify.notifyApprover({
+        tenantId,
+        approver: proctor,
+        title: 'Extracurricular activity pending verification',
+        message: `${student[0]?.name ?? 'A student'} logged ${activityType} activity for review.`,
+        actionLink: '/iqac/student-achievements',
+        category: 'ACADEMICS',
+        requesterName: student[0]?.name,
+      });
+    } catch {
+      // Proctor not assigned — IQAC admins poll the verification queue separately.
+    }
+
+    return { record_id: rows[0].record_id, status: 'PENDING_VERIFICATION' };
+  }
+
+  private async persistExtracurricularFile(tenantId: string, file: Express.Multer.File): Promise<string> {
+    const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
+    if (this.objectStorage.isEnabled()) {
+      const key = this.objectStorage.buildKey(tenantId, uniqueName);
+      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      return stored.url;
+    }
+    const uploadPath = process.env.UPLOAD_PATH || './uploads';
+    const date = new Date();
+    const dir = resolve(uploadPath, tenantId, `${date.getFullYear()}`, `${date.getMonth() + 1}`);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const fullPath = resolve(dir, uniqueName);
+    writeFileSync(fullPath, file.buffer);
+    return fullPath;
   }
 
   async getLibrary(tenantId: string, userId: string) {
@@ -526,26 +630,57 @@ export class StudentPortalService {
   }
 
   async getPlacements(tenantId: string, userId: string) {
-    const jobs = await this.dataSource.query(
-      `SELECT j.jd_id, j.title AS job_title, j.min_cgpa, j.application_deadline, c.company_name, j.job_profile
-       FROM placement_job_descriptions j
-       JOIN placement_companies c ON c.company_id = j.company_id
-       WHERE j.tenant_id = $1 AND j.status = 'OPEN'
-       ORDER BY j.created_at DESC`,
-      [tenantId],
+    const s = await resolvePlacementSchema(this.dataSource).catch(() => null);
+
+    if (s?.drivesTable === 'placement_ats_drives') {
+      const drives = await this.dataSource.query(
+        `SELECT d.drive_id, COALESCE(d.job_role, d.job_profile) AS job_title, d.min_cgpa,
+                COALESCE(d.deadline, d.drive_date::timestamptz) AS application_deadline,
+                COALESCE(d.package_lpa, d.package_details_lpa) AS package_lpa,
+                c.company_name, d.description
+         FROM placement_ats_drives d
+         JOIN placement_companies c ON c.company_id = d.company_id
+         WHERE d.tenant_id = $1 AND d.status IN ('ACTIVE', 'OPEN')
+         ORDER BY d.created_at DESC`,
+        [tenantId],
+      ).catch(() => []);
+
+      const applications = await this.dataSource.query(
+        `SELECT a.application_id, a.pipeline_stage AS status, a.rejected_at_stage,
+                a.applied_at, COALESCE(d.job_role, d.job_profile) AS job_title,
+                c.company_name, d.drive_id
+         FROM placement_ats_drive_applications a
+         JOIN placement_ats_drives d ON d.drive_id = a.drive_id
+         JOIN placement_companies c ON c.company_id = d.company_id
+         WHERE a.student_user_id = $1
+         ORDER BY a.applied_at DESC`,
+        [userId],
+      ).catch(() => []);
+
+      return { open_jobs: drives, my_applications: applications };
+    }
+
+    const drives = await this.dataSource.query(
+      `SELECT d.placement_drive_id AS drive_id,
+              COALESCE(d.job_role, d.role_title) AS job_title, d.min_cgpa,
+              d.deadline AS application_deadline, d.package_lpa, d.company_name, d.description
+       FROM placement_drives d
+       WHERE d.status IN ('ACTIVE', 'OPEN')
+       ORDER BY d.created_at DESC`,
     ).catch(() => []);
 
     const applications = await this.dataSource.query(
-      `SELECT pa.application_id, pa.status, pa.applied_at, j.title AS job_title, c.company_name
-       FROM placement_applications pa
-       JOIN placement_job_descriptions j ON j.jd_id = pa.jd_id
-       JOIN placement_companies c ON c.company_id = j.company_id
-       WHERE pa.student_user_id = $1
-       ORDER BY pa.applied_at DESC`,
+      `SELECT a.application_id, COALESCE(a.status, 'APPLIED') AS status,
+              a.applied_at, COALESCE(d.job_role, d.role_title) AS job_title,
+              d.company_name, d.placement_drive_id AS drive_id
+       FROM placement_applications a
+       JOIN placement_drives d ON d.placement_drive_id = a.placement_drive_id
+       WHERE a.student_user_id = $1
+       ORDER BY a.applied_at DESC NULLS LAST`,
       [userId],
     ).catch(() => []);
 
-    return { open_jobs: jobs, my_applications: applications };
+    return { open_jobs: drives, my_applications: applications };
   }
 
   async getFinanceLedger(userId: string) {

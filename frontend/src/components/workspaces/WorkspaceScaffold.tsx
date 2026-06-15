@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Download, Lock, Plus, Search } from 'lucide-react';
+import { Download, Lock, Plus, Search, ChevronUp, ChevronDown } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
+import { StudentDetailsModal } from '@/components/workspaces/StudentDetailsModal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 
 type SummaryCard = { label: string; value: string | number; helper?: string };
-type TableColumn = { key: string; label: string };
+type TableColumn = { key: string; label: string; sortable?: boolean };
 type ActionKind = 'bulk-demands' | 'lock-admit-cards' | 'scholarship' | 'create-task';
 
 export type WorkspacePageConfig = {
@@ -21,8 +22,15 @@ export type WorkspacePageConfig = {
   dataKey?: string;
   summary?: (data: unknown) => SummaryCard[];
   columns?: TableColumn[];
+  filters?: Array<{
+    key: string;
+    label: string;
+    options?: Array<{ label: string; value: string }>;
+    dynamicOptions?: (data: unknown) => Array<{ label: string; value: string }>;
+  }>;
   chart?: (data: unknown) => Array<{ label: string; value: number; tone?: 'navy' | 'gold' | 'green' | 'red' }>;
   action?: ActionKind;
+  rowAction?: 'student-details';
 };
 
 function valueAt(row: unknown, key: string): unknown {
@@ -99,6 +107,10 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
   const [query, setQuery] = useState('');
   const [acting, setActing] = useState(false);
   const [studentId, setStudentId] = useState('');
+  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [selectedRowId, setSelectedRowId] = useState('');
 
   if (!config) {
     return (
@@ -128,11 +140,43 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
   }, [config.endpoint]);
 
   const rows = useMemo(() => {
-    const all = rowsFromData(data, config.dataKey);
+    let all = rowsFromData(data, config.dataKey);
+
+    if (config.filters) {
+      for (const filter of config.filters) {
+        const val = filterValues[filter.key];
+        if (val) {
+          all = all.filter((row) => String(valueAt(row, filter.key)) === val);
+        }
+      }
+    }
+
+    if (sortConfig) {
+      all = [...all].sort((a, b) => {
+        const valA = valueAt(a, sortConfig.key);
+        const valB = valueAt(b, sortConfig.key);
+        if (valA == null && valB == null) return 0;
+        if (valA == null) return sortConfig.direction === 'asc' ? 1 : -1;
+        if (valB == null) return sortConfig.direction === 'asc' ? -1 : 1;
+        
+        const numA = Number(valA);
+        const numB = Number(valB);
+        if (!isNaN(numA) && !isNaN(numB)) {
+          return sortConfig.direction === 'asc' ? numA - numB : numB - numA;
+        }
+        
+        const strA = String(valA).toLowerCase();
+        const strB = String(valB).toLowerCase();
+        if (strA < strB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (strA > strB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
     if (!query.trim()) return all;
     const needle = query.toLowerCase();
     return all.filter((row) => JSON.stringify(row).toLowerCase().includes(needle));
-  }, [config.dataKey, data, query]);
+  }, [config.dataKey, config.filters, data, query, filterValues, sortConfig]);
 
   const summary = config.summary?.(data) ?? [];
   const chart = config.chart?.(data) ?? [];
@@ -262,9 +306,28 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
               <CardTitle>Data Table</CardTitle>
               <CardDescription>{rows.length} records</CardDescription>
             </div>
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" placeholder="Filter table..." value={query} onChange={(event) => setQuery(event.target.value)} />
+            <div className="flex w-full flex-col gap-3 sm:max-w-md sm:flex-row sm:items-center sm:justify-end">
+              {config.filters?.map((filter) => {
+                const options = filter.dynamicOptions ? filter.dynamicOptions(data) : filter.options ?? [];
+                return (
+                  <select
+                    key={filter.key}
+                    className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    value={filterValues[filter.key] ?? ''}
+                    onChange={(e) => setFilterValues((prev) => ({ ...prev, [filter.key]: e.target.value }))}
+                  >
+                    {options.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                );
+              })}
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-9" placeholder="Filter table..." value={query} onChange={(event) => setQuery(event.target.value)} />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="overflow-x-auto">
@@ -272,16 +335,45 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
               <thead className="border-b text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   {config.columns.map((column) => (
-                    <th key={column.key} className="px-3 py-3 font-bold">
-                      {column.label}
+                    <th key={column.key} className="px-3 py-3 font-bold align-middle">
+                      <div className="flex items-center gap-1.5">
+                        <span>{column.label}</span>
+                        {column.sortable && (
+                          <div className="flex flex-col">
+                            <button 
+                              onClick={() => setSortConfig({ key: column.key, direction: 'asc' })}
+                              className={`h-3 w-3 -mb-0.5 hover:text-sgvu-navy ${sortConfig?.key === column.key && sortConfig.direction === 'asc' ? 'text-sgvu-navy' : 'text-slate-300'}`}
+                            >
+                              <ChevronUp className="h-3 w-3" />
+                            </button>
+                            <button 
+                              onClick={() => setSortConfig({ key: column.key, direction: 'desc' })}
+                              className={`h-3 w-3 hover:text-sgvu-navy ${sortConfig?.key === column.key && sortConfig.direction === 'desc' ? 'text-sgvu-navy' : 'text-slate-300'}`}
+                            >
+                              <ChevronDown className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </th>
                   ))}
                   <th className="px-3 py-3 font-bold">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 25).map((row, index) => (
-                  <tr key={index} className="border-b last:border-0">
+                {rows.slice(0, 25).map((row, index) => {
+                  const isClickable = config.rowAction === 'student-details';
+                  return (
+                  <tr 
+                    key={index} 
+                    className={`border-b last:border-0 ${isClickable ? 'cursor-pointer hover:bg-slate-50 transition-colors' : ''}`}
+                    onClick={() => {
+                      if (isClickable) {
+                        setSelectedRowId(String(valueAt(row, 'user_id')));
+                        setDetailsModalOpen(true);
+                      }
+                    }}
+                  >
                     {config.columns!.map((column) => (
                       <td
                         key={column.key}
@@ -294,7 +386,7 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
                       <Badge variant="secondary">Live</Badge>
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
             {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No records found.</p>}
@@ -306,6 +398,14 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {config.rowAction === 'student-details' && (
+        <StudentDetailsModal
+          studentId={selectedRowId}
+          open={detailsModalOpen}
+          onOpenChange={setDetailsModalOpen}
+        />
       )}
     </div>
   );

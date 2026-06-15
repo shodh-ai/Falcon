@@ -40,6 +40,10 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/president/executive-summary';
   }
 
+  if (r === 'chairman') {
+    return '/leadership/overview';
+  }
+
   if (r === 'parent') {
     return '/parent/dashboard';
   }
@@ -85,6 +89,7 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'iqac') return 'IQAC Workspace';
   if (r === 'librarian') return 'Library Workspace';
   if (r === 'president') return 'Executive Workspace';
+  if (r === 'chairman') return 'Executive Command Center';
   if (r === 'parent') return 'Parent Workspace';
   if (r === 'alumni') return 'Alumni Network';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell Workspace';
@@ -103,10 +108,81 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'iqac') return 'IQAC';
   if (r === 'librarian') return 'Library';
   if (r === 'president') return 'Executive';
+  if (r === 'chairman') return 'Chairman';
   if (r === 'parent') return 'Parent';
   if (r === 'alumni') return 'Alumni';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell';
   return role;
+}
+
+export type EssParentWorkspace = {
+  label: string;
+  shortLabel: string;
+  href: string;
+};
+
+type EssUserLike =
+  | {
+      role?: string;
+      roles?: string[];
+      primaryRole?: string;
+    }
+  | null
+  | undefined;
+
+/** Parent workspace when viewing ESS (Faculty, HOD, HR, etc.). */
+export function getEssParentWorkspace(user: EssUserLike): EssParentWorkspace {
+  const role = user?.primaryRole ?? user?.role ?? user?.roles?.[0] ?? 'Faculty';
+  return {
+    label: getWorkspaceLabelForRole(role),
+    shortLabel: getWorkspaceShortLabelForRole(role),
+    href: getDashboardPathForRole(role),
+  };
+}
+
+const ESS_RETURN_KEY = 'ess_return_to';
+
+/** Resolve back link: ?from= query, then sessionStorage, then role dashboard. */
+export function resolveEssBackHref(fromQuery: string | null, parent: EssParentWorkspace): string {
+  if (fromQuery && fromQuery.startsWith('/') && !fromQuery.startsWith('//')) {
+    return fromQuery;
+  }
+  if (typeof window !== 'undefined') {
+    const stored = sessionStorage.getItem(ESS_RETURN_KEY);
+    if (stored?.startsWith('/') && !stored.startsWith('//')) {
+      return stored;
+    }
+  }
+  return parent.href;
+}
+
+export function persistEssReturnTo(href: string) {
+  if (typeof window !== 'undefined' && href.startsWith('/') && !href.startsWith('//')) {
+    sessionStorage.setItem(ESS_RETURN_KEY, href);
+  }
+}
+
+const ESS_BREADCRUMB_LEAVES: Array<{ prefix: string; label: string }> = [
+  { prefix: '/ess/team/dashboard', label: 'Team Dashboard' },
+  { prefix: '/ess/team/attendance', label: 'Team Attendance' },
+  { prefix: '/ess/team/requests', label: 'Pending on Me' },
+  { prefix: '/ess/calendar', label: 'My Calendar' },
+  { prefix: '/ess/leaves', label: 'Leaves' },
+  { prefix: '/ess/documents', label: 'Document Vault' },
+  { prefix: '/ess/policies', label: 'Company Policies' },
+  { prefix: '/ess/onboarding', label: 'Onboarding' },
+  { prefix: '/ess/offboarding', label: 'Resignation' },
+];
+
+export function isEssTeamPath(pathname: string): boolean {
+  return pathname === '/ess/team' || pathname.startsWith('/ess/team/');
+}
+
+export function getEssBreadcrumbLeaf(pathname: string): string {
+  const match = [...ESS_BREADCRUMB_LEAVES]
+    .sort((a, b) => b.prefix.length - a.prefix.length)
+    .find((p) => pathname === p.prefix || pathname.startsWith(`${p.prefix}/`));
+  return match?.label ?? 'Employee Self-Service';
 }
 
 export type HrCapabilities = Partial<Record<string, 'none' | 'read' | 'write'>>;
@@ -159,6 +235,10 @@ function canAccessHrPath(
     return roles.some((r) => ['hradmin', 'superadmin'].includes(r));
   }
 
+  if (pathname.startsWith('/hr/me/attendance-holidays')) {
+    return true; // Accessible to all roles permitted into the /hr portal
+  }
+
   const match = [...hrPathModules]
     .sort((a, b) => b.prefix.length - a.prefix.length)
     .find((p) => pathname === p.prefix || pathname.startsWith(`${p.prefix}/`));
@@ -181,6 +261,7 @@ const portalRoles: Record<string, string[]> = {
   '/library': ['librarian', 'superadmin'],
   '/library-admin': ['librarian', 'superadmin'],
   '/president': ['president', 'superadmin'],
+  '/leadership': ['chairman', 'president', 'superadmin', 'registrar'],
   '/parent': ['parent', 'superadmin'],
   '/exam-cell': ['examcell', 'superadmin'],
   '/alumni': ['alumni'],
@@ -192,7 +273,24 @@ const portalRoles: Record<string, string[]> = {
   '/admin': ['superadmin', 'registrar'],
   '/super-admin': ['superadmin'],
   '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
+  '/clinic-admin': ['registrar', 'superadmin'],
+  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin'],
 };
+
+/** Derive the active workspace role from the current pathname (for multi-role users). */
+export function getActiveWorkspaceRoleFromPath(
+  pathname: string,
+  userRoles: string[],
+): string | null {
+  const normalized = userRoles.map((r) => r.trim().toLowerCase());
+  const portal = Object.keys(portalRoles)
+    .sort((a, b) => b.length - a.length)
+    .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  if (!portal) return null;
+  const allowed = portalRoles[portal];
+  const match = normalized.find((r) => allowed.includes(r));
+  return match ? userRoles[normalized.indexOf(match)] ?? match : null;
+}
 
 const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
 
@@ -211,6 +309,18 @@ export function canRoleAccessPath(
     return (
       roles.includes('superadmin') &&
       (email ?? '').trim().toLowerCase() === ENTITY_CREATOR_EMAIL
+    );
+  }
+
+  if (pathname === '/directory' || pathname === '/directory/') {
+    return roles.some((role) =>
+      ['chairman', 'president', 'superadmin', 'registrar', 'hradmin', 'hr', 'hod', 'dean', 'warden', 'faculty'].includes(role),
+    );
+  }
+
+  if (pathname.startsWith('/admin-ops/directory') || pathname.startsWith('/directory/')) {
+    return roles.some((role) =>
+      ['chairman', 'president', 'superadmin', 'registrar', 'hod', 'dean', 'warden', 'faculty', 'hr', 'hradmin', 'student', 'applicant'].includes(role),
     );
   }
 

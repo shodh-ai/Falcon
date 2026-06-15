@@ -4,7 +4,7 @@ import useSWR from 'swr';
 import { useAuth } from '@/context/AuthContext';
 import { notificationsApi, type FalconNotification } from '@/lib/api/notifications';
 
-const POLL_MS = 30_000;
+const POLL_MS = 15_000;
 
 export function useNotificationUnreadCount() {
   const { token, isAuthenticated } = useAuth();

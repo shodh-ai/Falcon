@@ -9,7 +9,8 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Bell, CalendarClock, CreditCard, GraduationCap, Sparkles, UserRoundCheck } from 'lucide-react';
+import Link from 'next/link';
+import { Bell, Briefcase, CalendarClock, ChevronRight, CreditCard, GraduationCap, Sparkles, UserRoundCheck } from 'lucide-react';
 import type { TimetableSlot } from '@/lib/mock/student-dashboard';
 import { useAuthedApi } from '@/lib/api';
 
@@ -27,14 +28,30 @@ type Alert = {
   is_read: boolean;
 };
 
+type OpenDrive = {
+  drive_id: string;
+  job_title?: string;
+  job_role?: string;
+  company_name: string;
+  package_lpa?: string | number;
+  min_cgpa: string | number;
+};
+
 type TimetableResponse = {
   timetable_id: string;
+  course_id: string;
   course_name: string;
   room: string | null;
   faculty_name: string | null;
   start_time: string;
   end_time: string;
   status: 'upcoming' | 'ongoing' | 'done';
+  is_virtual?: boolean;
+  live_join_url?: string | null;
+};
+
+type Profile = {
+  profile_photo_url?: string | null;
 };
 
 function greeting() {
@@ -51,29 +68,41 @@ export default function StudentDashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
+  const [openDrives, setOpenDrives] = useState<OpenDrive[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [metricsResult, alertsResult, timetableResult] = await Promise.allSettled([
+        const [metricsResult, alertsResult, timetableResult, placementsResult, profileResult] = await Promise.allSettled([
           api.get<Summary>('/api/academics/dashboard/metrics'),
           api.get<Alert[]>('/api/notifications?limit=10'),
           api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
+          api.get<{ open_drives?: OpenDrive[]; open_jobs?: OpenDrive[] }>('/api/placement/student/hub'),
+          api.get<Profile>('/api/student/profile'),
         ]);
 
         if (metricsResult.status === 'fulfilled') setSummary(metricsResult.value);
         if (alertsResult.status === 'fulfilled') setAlerts(alertsResult.value);
         else setAlerts([]);
+        if (placementsResult.status === 'fulfilled') {
+          const hub = placementsResult.value;
+          setOpenDrives((hub.open_drives ?? hub.open_jobs ?? []).slice(0, 3));
+        }
+        if (profileResult.status === 'fulfilled') setProfile(profileResult.value);
 
         const timetableRows = timetableResult.status === 'fulfilled' ? timetableResult.value : [];
         setTimetable(
           timetableRows.map((slot) => ({
             id: slot.timetable_id,
+            courseId: slot.course_id,
             subject: slot.course_name,
             room: `${slot.room ?? 'Room TBA'}${slot.faculty_name ? ` · ${slot.faculty_name}` : ''}`,
             start: slot.start_time.slice(0, 5),
             end: slot.end_time.slice(0, 5),
             status: slot.status,
+            liveJoinUrl: slot.live_join_url ?? null,
+            isVirtual: slot.is_virtual ?? false,
           })),
         );
       } catch (error) {
@@ -92,15 +121,24 @@ export default function StudentDashboardPage() {
       <section className="overflow-hidden rounded-[2rem] border border-sgvu-navy/10 bg-gradient-to-br from-sgvu-navy via-sgvu-navy to-slate-900 p-6 text-white shadow-xl shadow-sgvu-navy/15 md:p-8">
         <div className="relative">
           <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-sgvu-gold/20 blur-3xl" />
-          <div className="relative">
-            <p className="flex items-center gap-2 text-sm font-medium text-sgvu-gold">
-              <Sparkles className="h-4 w-4" />
-              {greeting()}
-            </p>
-            <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">Hi, {firstName}</h2>
-            <p className="mt-2 max-w-2xl text-sm font-medium text-white/75">
-              Your academic health at a glance — performance, credits, attendance, and today&apos;s schedule.
-            </p>
+          <div className="relative flex items-start justify-between">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-medium text-sgvu-gold">
+                <Sparkles className="h-4 w-4" />
+                {greeting()}
+              </p>
+              <h2 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">Hi, {firstName}</h2>
+              <p className="mt-2 max-w-2xl text-sm font-medium text-white/75">
+                Your academic health at a glance — performance, credits, attendance, and today&apos;s schedule.
+              </p>
+            </div>
+            {profile?.profile_photo_url && (
+              <img
+                src={profile.profile_photo_url}
+                alt="Profile"
+                className="h-16 w-16 shrink-0 rounded-full border-2 border-white/20 object-cover shadow-sm sm:h-20 sm:w-20"
+              />
+            )}
           </div>
         </div>
       </section>
@@ -181,6 +219,43 @@ export default function StudentDashboardPage() {
           </div>
         </StudentSectionCard>
       </div>
+
+      <StudentSectionCard
+        title="Open positions"
+        description="Campus recruitment drives — apply from the Placements Hub"
+        icon={Briefcase}
+        action={
+          <Link href="/student/placements" className="text-xs font-semibold text-sgvu-navy hover:underline">
+            View all
+          </Link>
+        }
+      >
+        {openDrives.length === 0 ? (
+          <StudentEmptyState
+            icon={Briefcase}
+            title="No open drives"
+            description="New placement opportunities will appear here when announced."
+          />
+        ) : (
+          <div className="space-y-3">
+            {openDrives.map((drive) => (
+              <Link
+                key={drive.drive_id}
+                href={`/student/placements?drive=${drive.drive_id}`}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-gold/40"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-sgvu-navy">{drive.job_role ?? drive.job_title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {drive.company_name} · ₹{Number(drive.package_lpa ?? 0).toFixed(1)} LPA · Min CGPA {drive.min_cgpa}
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </Link>
+            ))}
+          </div>
+        )}
+      </StudentSectionCard>
 
       <TimetableWidget slots={timetable} />
     </StudentPageShell>

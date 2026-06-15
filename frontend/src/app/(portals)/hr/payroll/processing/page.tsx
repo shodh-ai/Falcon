@@ -47,7 +47,7 @@ export default function HrPayrollProcessingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Payroll Processing"
         description="Month-end engine: biometric LWP + approved leaves → salary structure → payslips."
@@ -78,6 +78,6 @@ export default function HrPayrollProcessingPage() {
           {payslips.length === 0 ? <p className="text-sm text-muted-foreground">Run payroll to generate payslips.</p> : null}
         </CardContent>
       </Card>
-    </div>
+    </>
   );
 }

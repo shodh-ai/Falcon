@@ -1,7 +1,8 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('hr_holidays')
-export class HrHoliday {
+export class HrHoliday extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   holiday_id: string;
 
@@ -16,6 +17,12 @@ export class HrHoliday {
 
   @Column({ type: 'text', nullable: true })
   description: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  entity_id: number | null;
+
+  @Column({ type: 'varchar', length: 50, default: 'ALL' })
+  applicable_to: 'ALL' | 'STUDENT' | 'STAFF';
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;

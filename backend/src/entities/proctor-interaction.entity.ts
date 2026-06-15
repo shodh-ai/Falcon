@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type ProctorInteractionType = 'MEETING' | 'MESSAGE' | 'LEAVE_REQUEST';
 
@@ -6,7 +7,7 @@ export type ProctorInteractionType = 'MEETING' | 'MESSAGE' | 'LEAVE_REQUEST';
 @Index(['student_user_id'])
 @Index(['proctor_user_id'])
 @Index(['interaction_type'])
-export class ProctorInteraction {
+export class ProctorInteraction extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   interaction_id: string;
 

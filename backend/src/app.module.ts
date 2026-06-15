@@ -31,6 +31,11 @@ import { ExamsModule } from './modules/exams/exams.module';
 import { HrModule } from './modules/hr/hr.module';
 import { IqacModule } from './modules/iqac/iqac.module';
 import { PresidentModule } from './modules/president/president.module';
+import { LeadershipModule } from './modules/leadership/leadership.module';
+import { LeadershipAiModule } from './modules/leadership-ai/leadership-ai.module';
+import { ResearchModule } from './modules/research/research.module';
+import { ClinicModule } from './modules/clinic/clinic.module';
+import { SearchModule } from './modules/search/search.module';
 import { OperationsModule } from './modules/operations/operations.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
@@ -55,6 +60,7 @@ import { TenantContextInterceptor } from './tenant/interceptors/tenant-context.i
 import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.interceptor';
 import { HrEntityScopeInterceptor } from './common/interceptors/hr-entity-scope.interceptor';
 import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscriber';
+import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
 
 @Module({
   imports: [
@@ -84,9 +90,13 @@ import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscr
         password: configService.get<string>('DB_PASSWORD') || 'postgres',
         database: configService.get('DB_DATABASE', 'university_governance'),
         entities: Object.values(entities).filter((e) => typeof e === 'function'),
-        subscribers: [EntityScopeSubscriber],
+        subscribers: [EntityScopeSubscriber, SystemAuditSubscriber],
         synchronize: configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
-        logging: configService.get('NODE_ENV') === 'development',
+        logging:
+          configService.get('TYPEORM_LOGGING', 'true') === 'true'
+            ? ['query', 'error', 'warn']
+            : configService.get('NODE_ENV') === 'development',
+        maxQueryExecutionTime: Number(configService.get('TYPEORM_SLOW_MS', '200')),
       }),
       inject: [ConfigService],
     }),
@@ -119,6 +129,11 @@ import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscr
     HrModule,
     IqacModule,
     PresidentModule,
+    LeadershipModule,
+    LeadershipAiModule,
+    ResearchModule,
+    ClinicModule,
+    SearchModule,
     OperationsModule,
     SettingsModule,
     HelpdeskModule,

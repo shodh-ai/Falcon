@@ -13,7 +13,11 @@ import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.ser
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
 import { HrWorkflowRoutingService } from './hr-workflow-routing.service';
-import { assertNoPendingRow } from '../../common/validators/pending-request.util';
+import { HrAccessControlService } from './hr-access-control.service';
+import {
+  assertNoOverlappingWorkforceDates,
+  assertRetroactiveWorkforceLimit,
+} from '../../common/validators/workforce-request.validator';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -41,6 +45,7 @@ export class HrWorkforceService {
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly attendanceCalc: AttendanceCalculationService,
     private readonly hrWorkflow: HrWorkflowRoutingService,
+    private readonly accessControl: HrAccessControlService,
   ) {}
 
   async getTodayWidget(userId: string) {
@@ -116,7 +121,66 @@ export class HrWorkforceService {
     };
   }
 
-  async applyRequest(staffUserId: string, tenantId: string, dto: ApplyWorkforceRequestDto) {
+  async listAdminHolidays(tenantId: string, entityId: number) {
+    return this.dataSource.query(
+      `SELECT * FROM hr_holidays WHERE entity_id = $1 OR entity_id IS NULL ORDER BY date ASC`,
+      [entityId]
+    );
+  }
+
+  async createHoliday(
+    tenantId: string,
+    entityId: number,
+    dto: { title: string; date: string; type: string; description?: string; applicable_to?: string }
+  ) {
+    const rows = await this.dataSource.query(
+      `INSERT INTO hr_holidays (entity_id, title, date, type, description, applicable_to)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [entityId, dto.title, dto.date, dto.type, dto.description || null, dto.applicable_to || 'ALL']
+    );
+    return rows[0];
+  }
+
+  async updateHoliday(
+    tenantId: string,
+    entityId: number,
+    holidayId: string,
+    dto: { title?: string; date?: string; type?: string; description?: string; applicable_to?: string }
+  ) {
+    const updates: string[] = [];
+    const params: any[] = [entityId, holidayId];
+
+    if (dto.title !== undefined) { params.push(dto.title); updates.push(`title = $${params.length}`); }
+    if (dto.date !== undefined) { params.push(dto.date); updates.push(`date = $${params.length}`); }
+    if (dto.type !== undefined) { params.push(dto.type); updates.push(`type = $${params.length}`); }
+    if (dto.description !== undefined) { params.push(dto.description); updates.push(`description = $${params.length}`); }
+    if (dto.applicable_to !== undefined) { params.push(dto.applicable_to); updates.push(`applicable_to = $${params.length}`); }
+
+    if (updates.length === 0) return null;
+
+    const rows = await this.dataSource.query(
+      `UPDATE hr_holidays SET ${updates.join(', ')} WHERE holiday_id = $2 AND (entity_id = $1 OR entity_id IS NULL) RETURNING *`,
+      params
+    );
+    if (!rows[0]) throw new NotFoundException('Holiday not found');
+    return rows[0];
+  }
+
+  async deleteHoliday(tenantId: string, entityId: number, holidayId: string) {
+    const rows = await this.dataSource.query(
+      `DELETE FROM hr_holidays WHERE holiday_id = $2 AND (entity_id = $1 OR entity_id IS NULL) RETURNING *`,
+      [entityId, holidayId]
+    );
+    if (!rows[0]) throw new NotFoundException('Holiday not found');
+    return rows[0];
+  }
+
+  async applyRequest(
+    staffUserId: string,
+    tenantId: string,
+    dto: ApplyWorkforceRequestDto,
+    options?: { actorRoles?: string[] },
+  ) {
     const staff = await this.users.findOne({ where: { user_id: staffUserId } });
     if (!staff) throw new NotFoundException('Employee not found');
 
@@ -143,12 +207,25 @@ export class HrWorkforceService {
       if (!startDate || !endDate) throw new BadRequestException('start_date and end_date are required');
     }
 
-    await assertNoPendingRow(this.requests, {
-      tenant_id: tenantId,
-      staff_user_id: staffUserId,
-      request_type: requestType,
-      status: 'PENDING',
-    });
+    const actorRoles = options?.actorRoles ?? [];
+
+    assertRetroactiveWorkforceLimit(
+      requestType,
+      startDate!,
+      endDate!,
+      actorRoles,
+      dto.regularization_date,
+    );
+
+    await assertNoOverlappingWorkforceDates(
+      this.dataSource,
+      tenantId,
+      staffUserId,
+      startDate!,
+      endDate!,
+      requestType,
+      dto.regularization_date,
+    );
 
     const entityId = await this.resolveEmployeeEntityId(tenantId, staffUserId);
     const routing = await this.hrWorkflow.initializeRequest(
@@ -195,19 +272,60 @@ export class HrWorkforceService {
     });
   }
 
-  async listTeamPending(reportingOfficerId: string, tenantId: string, requestType?: StaffRequestType) {
-    const where: Record<string, unknown> = {
-      tenant_id: tenantId,
-      current_approver_user_id: reportingOfficerId,
-      status: 'PENDING',
-    };
-    if (requestType) where.request_type = requestType;
+  async listTeamPending(
+    approverUserId: string,
+    tenantId: string,
+    requestType?: StaffRequestType,
+    roles: string[] = [],
+  ) {
+    const queryParams: unknown[] = [tenantId, approverUserId];
+    let paramIdx = 3;
+    const typeClause = requestType ? ` AND r.request_type = $${paramIdx++}` : '';
+    if (requestType) queryParams.push(requestType);
 
-    const rows = await this.requests.find({
-      where,
-      relations: ['staff'],
-      order: { applied_at: 'ASC' },
-    });
+    const { clause, params: scopeParams } = await this.accessControl.departmentScopeClause(
+      tenantId,
+      approverUserId,
+      roles,
+      'u',
+      paramIdx,
+    );
+    queryParams.push(...scopeParams);
+
+    const rows = await this.dataSource.query<
+      Array<{
+        leave_id: string;
+        request_type: StaffRequestType;
+        leave_type: string | null;
+        start_date: string;
+        end_date: string;
+        regularization_date: string | null;
+        missed_punch_type: string | null;
+        reason: string | null;
+        status: string;
+        applied_at: Date;
+        staff_user_id: string;
+        current_step_order: number | null;
+        employee_name: string;
+        employee_email: string | null;
+        employee_dept: string | null;
+      }>
+    >(
+      `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
+              r.regularization_date, r.missed_punch_type, r.reason, r.status, r.applied_at,
+              r.staff_user_id, r.current_step_order,
+              u.name AS employee_name, u.official_email AS employee_email, d.dept_name AS employee_dept
+       FROM staff_leave_requests r
+       JOIN users u ON u.user_id = r.staff_user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE r.tenant_id = $1
+         AND r.status = 'PENDING'
+         AND r.current_approver_user_id = $2
+         ${typeClause}
+         ${clause}
+       ORDER BY r.applied_at ASC`,
+      queryParams,
+    );
 
     return rows.map((r) => ({
       leave_id: r.leave_id,
@@ -220,12 +338,31 @@ export class HrWorkforceService {
       reason: r.reason,
       status: r.status,
       applied_at: r.applied_at,
+      current_step_order: r.current_step_order,
       employee: {
         user_id: r.staff_user_id,
-        name: r.staff?.name ?? 'Employee',
-        email: r.staff?.email ?? null,
+        name: r.employee_name ?? 'Employee',
+        email: r.employee_email ?? null,
+        department: r.employee_dept,
       },
     }));
+  }
+
+  private get dataSource() {
+    return this.users.manager.connection;
+  }
+
+  async listPendingInbox(userId: string, tenantId: string, roles: string[] = []) {
+    const pending = await this.listTeamPending(userId, tenantId, undefined, roles);
+    return {
+      count: pending.length,
+      items: pending.map((p) => ({
+        ...p,
+        inbox_type: 'WORKFLOW_APPROVAL',
+        title: `${p.request_type.replace(/_/g, ' ')} — ${p.employee.name}`,
+        action_link: '/hr/inbox',
+      })),
+    };
   }
 
   async actOnTeamRequest(
@@ -234,6 +371,7 @@ export class HrWorkforceService {
     leaveId: string,
     action: 'APPROVE' | 'REJECT',
     comment?: string,
+    options?: { adminOverride?: boolean },
   ) {
     const row = await this.requests.findOne({
       where: { leave_id: leaveId, tenant_id: tenantId },
@@ -242,10 +380,56 @@ export class HrWorkforceService {
     if (!row) throw new NotFoundException('Request not found');
 
     const staff = row.staff ?? (await this.users.findOne({ where: { user_id: row.staff_user_id } }));
-    this.hrWorkflow.assertActorIsCurrentApprover(reportingOfficerId, row.current_approver_user_id);
+    const roles = (await this.users.manager.query(
+      `SELECT r.role_name FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id WHERE ur.user_id = $1
+       UNION SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1`,
+      [reportingOfficerId],
+    )) as Array<{ role_name: string }>;
+    const roleNames = roles.map((r) => r.role_name);
+
+    const adminOverride =
+      options?.adminOverride === true &&
+      roleNames.some((r) => ['HRAdmin', 'SuperAdmin', 'HR'].includes(r));
+
+    if (!adminOverride) {
+      this.hrWorkflow.assertActorIsCurrentApprover(reportingOfficerId, row.current_approver_user_id);
+    }
+
+    if (action === 'APPROVE' && !adminOverride) {
+      const stepType = await this.resolveCurrentStepApproverType(tenantId, row);
+      await this.accessControl.assertWorkflowApproverPower(
+        tenantId,
+        reportingOfficerId,
+        roleNames,
+        stepType,
+        row.request_type,
+      );
+    }
 
     if (row.status !== 'PENDING') {
       throw new BadRequestException('Request has already been processed');
+    }
+
+    if (adminOverride) {
+      const approverDesignationRow = row.current_approver_user_id ? await this.users.manager.query(
+        `SELECT r.role_name FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.user_id = $1`, [row.current_approver_user_id]
+      ) : [{ role_name: 'Unknown' }];
+      const assignedApproverDesignation = approverDesignationRow[0]?.role_name || 'Unknown';
+
+      const employeeIdRow = await this.users.manager.query(
+        `SELECT employee_id FROM hr_employee_profiles WHERE user_id = $1`, [row.staff_user_id]
+      );
+      const employeeId = employeeIdRow[0]?.employee_id || row.staff_user_id;
+
+      const bypassedByDesignation = roleNames.find(r => ['HRAdmin', 'SuperAdmin', 'HR'].includes(r)) || 'HR Admin';
+      const actionType = action === 'APPROVE' ? 'Bypass Approve' : 'Force Reject';
+      const requestType = row.request_type === 'LEAVE' ? (row.leave_type || 'LEAVE') : row.request_type;
+
+      await this.users.manager.query(
+        `INSERT INTO hr_override_logs (tenant_id, employee_id, assigned_approver, bypassed_by, type_of_action, type_of_request, date_and_time)
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+         [tenantId, employeeId, assignedApproverDesignation, bypassedByDesignation, actionType, requestType]
+      );
     }
 
     if (action === 'REJECT') {
@@ -409,7 +593,7 @@ export class HrWorkforceService {
       },
       title: `${label} pending your approval (Step ${row.current_step_order})`,
       message: `${staff.name} submitted ${label} (${row.start_date}${row.end_date !== row.start_date ? ` – ${row.end_date}` : ''}).`,
-      actionLink: '/faculty/team-requests',
+      actionLink: row.current_approver_user_id ? '/hr/inbox' : '/faculty/team-requests',
       category: 'HR',
       requesterName: staff.name,
     });
@@ -541,6 +725,19 @@ export class HrWorkforceService {
       startDate: row.start_date,
       endDate: row.end_date,
     });
+  }
+
+  private async resolveCurrentStepApproverType(
+    tenantId: string,
+    row: StaffLeaveRequest,
+  ): Promise<string | null> {
+    if (!row.workflow_id || !row.current_step_order) return null;
+    const steps = await this.users.manager.query(
+      `SELECT approver_type FROM hr_approval_workflow_steps
+       WHERE workflow_id = $1 AND step_order = $2`,
+      [row.workflow_id, row.current_step_order],
+    );
+    return (steps[0] as { approver_type: string } | undefined)?.approver_type ?? null;
   }
 
   private requestTypeLabel(type: StaffRequestType) {

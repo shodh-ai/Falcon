@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
+import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
@@ -29,7 +30,7 @@ export default function HrAttendancePage() {
   }
 
   return (
-    <div className="mx-auto max-w-[95vw] space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Attendance matrix"
         description="Color-coded daily status from assigned shifts, biometric punches, holidays, and pending requests."
@@ -44,6 +45,29 @@ export default function HrAttendancePage() {
             <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncBiometric()}>
               {syncing ? 'Syncing…' : 'Sync biometric'}
             </Button>
+            <Button 
+              size="sm" 
+              className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white" 
+              onClick={() => {
+                const token = document.cookie.replace(/(?:(?:^|.*;\s*)access_token\s*=\s*([^;]*).*$)|^.*$/, "$1");
+                const url = new URL(`${window.location.origin}/api/hr/reports/muster-roll`);
+                url.searchParams.set('month', month);
+                if (entityId) url.searchParams.set('entity_id', String(entityId));
+                
+                fetch(url.toString(), {
+                  headers: { Authorization: `Bearer ${token}` }
+                })
+                .then(res => res.blob())
+                .then(blob => {
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(blob);
+                  a.download = `bulk-attendance-${month}.xlsx`;
+                  a.click();
+                });
+              }}
+            >
+              <Download className="mr-2 h-4 w-4" /> Bulk Export
+            </Button>
           </div>
         }
       />
@@ -54,6 +78,6 @@ export default function HrAttendancePage() {
         month={month}
         title={`Master matrix — ${month}`}
       />
-    </div>
+    </>
   );
 }

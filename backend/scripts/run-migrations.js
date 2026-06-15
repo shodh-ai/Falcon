@@ -38,6 +38,7 @@ const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
 /** Seed-only files (idempotent); run after schema exists via db:migrate. */
 const SEED_FILES = [
   '20260529152000_seed_master_test_personas.sql',
+  '20260609140000_hr_portal_smoke_seed.sql',
 ];
 
 function dbConfig() {

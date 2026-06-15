@@ -34,3 +34,21 @@ export function attendanceCircleStyle(status: CalculatedAttendanceStatus | strin
 export function attendanceLabel(status: string) {
   return ATTENDANCE_LEGEND.find((l) => l.status === status)?.label ?? status.replace(/_/g, ' ');
 }
+
+/** Simplified heatmap palette for matrix views (GitHub-style). */
+export const HEATMAP_LEGEND = [
+  { label: 'Present', color: '#22c55e' },
+  { label: 'Absent', color: '#dc2626' },
+  { label: 'Leave / Holiday', color: '#d6b65d' },
+  { label: 'Week off', color: '#e5e7eb' },
+] as const;
+
+export function attendanceHeatmapColor(status: CalculatedAttendanceStatus | string): string {
+  if (['FULL_DAY', 'HALF_DAY', 'LATE_COMING', 'EARLY_GOING', 'LESS_THAN_HALF_DAY'].includes(status)) {
+    return '#22c55e';
+  }
+  if (status === 'ABSENT') return '#dc2626';
+  if (['HOLIDAY', 'RESTRICTED_HOLIDAY', 'PENDING_REQUEST'].includes(status)) return '#d6b65d';
+  if (status === 'WEEK_OFF') return '#e5e7eb';
+  return '#d1d5db';
+}

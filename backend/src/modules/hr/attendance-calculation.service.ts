@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, In, IsNull } from 'typeorm';
 import { HrDailyAttendance, CalculatedAttendanceStatus } from '../../entities/hr-daily-attendance.entity';
 import { HrHoliday } from '../../entities/hr-holiday.entity';
 import { HrShift } from '../../entities/hr-shift.entity';
@@ -173,7 +173,12 @@ export class AttendanceCalculationService {
       return this.buildResult(date, 'WEEK_OFF', attendance, shiftCtx);
     }
 
-    const holiday = await this.holidays.findOne({ where: { date } });
+    const holiday = await this.holidays.findOne({
+      where: [
+        { date, entity_id: ctx?.entityId ? ctx.entityId : IsNull(), applicable_to: In(['ALL', 'STAFF']) },
+        { date, entity_id: IsNull(), applicable_to: In(['ALL', 'STAFF']) },
+      ],
+    });
     if (holiday) {
       const status: CalculatedAttendanceStatus =
         holiday.type === 'RESTRICTED' ? 'RESTRICTED_HOLIDAY' : 'HOLIDAY';
@@ -218,15 +223,53 @@ export class AttendanceCalculationService {
   async getMonthCalendar(userId: string, month: string) {
     const [year, monthNum] = month.split('-').map(Number);
     const daysInMonth = new Date(year, monthNum, 0).getDate();
-    const shift = await this.getEmployeeShift(userId);
-
     const start = `${year}-${String(monthNum).padStart(2, '0')}-01`;
     const end = `${year}-${String(monthNum).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+    const ctx = await this.loadAttendanceContext(userId);
+    const shift = await this.getEmployeeShift(userId);
+
+    const [attendanceRows, holidayRows, pendingRequests] = await Promise.all([
+      this.daily
+        .createQueryBuilder('d')
+        .where('d.user_id = :userId', { userId })
+        .andWhere('d.date BETWEEN :start AND :end', { start, end })
+        .getMany(),
+      this.holidays
+        .createQueryBuilder('h')
+        .where('h.date BETWEEN :start AND :end', { start, end })
+        .andWhere('h.applicable_to IN (:...applicableTo)', { applicableTo: ['ALL', 'STAFF'] })
+        .andWhere('(h.entity_id = :entityId OR h.entity_id IS NULL)', { entityId: ctx?.entityId ?? null })
+        .getMany(),
+      this.requests
+        .createQueryBuilder('r')
+        .where('r.staff_user_id = :userId', { userId })
+        .andWhere('r.status = :status', { status: 'PENDING' })
+        .andWhere(
+          '(r.regularization_date BETWEEN :start AND :end OR (r.start_date <= :end AND r.end_date >= :start))',
+          { start, end },
+        )
+        .getMany(),
+    ]);
+
+    const attendanceByDate = new Map(attendanceRows.map((row) => [row.date, row]));
+    const holidayByDate = new Map(holidayRows.map((holiday) => [holiday.date, holiday]));
+    const pendingDates = this.buildPendingDatesSet(pendingRequests, start, end);
+    const earlyMaxMins = Number(ctx?.entityRules?.early_going_max_mins ?? 0);
 
     const days: DayCalculationResult[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const date = `${year}-${String(monthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      days.push(await this.calculateAndPersist(userId, date));
+      days.push(
+        this.calculateDayCached(
+          date,
+          shift,
+          attendanceByDate.get(date) ?? null,
+          holidayByDate.get(date),
+          pendingDates.has(date),
+          earlyMaxMins,
+        ),
+      );
     }
 
     return { month, shift, days };
@@ -294,6 +337,85 @@ export class AttendanceCalculationService {
       date,
       result,
     );
+  }
+
+  private buildPendingDatesSet(
+    requests: StaffLeaveRequest[],
+    monthStart: string,
+    monthEnd: string,
+  ): Set<string> {
+    const pending = new Set<string>();
+    for (const req of requests) {
+      if (req.regularization_date) {
+        if (req.regularization_date >= monthStart && req.regularization_date <= monthEnd) {
+          pending.add(req.regularization_date);
+        }
+        continue;
+      }
+      const rangeStart = req.start_date < monthStart ? monthStart : req.start_date;
+      const rangeEnd = req.end_date > monthEnd ? monthEnd : req.end_date;
+      const cursor = new Date(`${rangeStart}T12:00:00`);
+      const end = new Date(`${rangeEnd}T12:00:00`);
+      while (cursor <= end) {
+        pending.add(cursor.toISOString().slice(0, 10));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+    return pending;
+  }
+
+  /** Read-only day status for calendar views (no per-day DB writes). */
+  private calculateDayCached(
+    date: string,
+    shiftCtx: ShiftContext,
+    attendance: HrDailyAttendance | null,
+    holiday: HrHoliday | undefined,
+    hasPending: boolean,
+    earlyMaxMins: number,
+  ): DayCalculationResult {
+    const dow = new Date(`${date}T12:00:00`).getDay();
+    if (dow === shiftCtx.week_off_day) {
+      return this.buildResult(date, 'WEEK_OFF', attendance, shiftCtx);
+    }
+
+    if (holiday) {
+      const status: CalculatedAttendanceStatus =
+        holiday.type === 'RESTRICTED' ? 'RESTRICTED_HOLIDAY' : 'HOLIDAY';
+      return this.buildResult(date, status, attendance, shiftCtx);
+    }
+
+    if (hasPending) {
+      return this.buildResult(date, 'PENDING_REQUEST', attendance, shiftCtx);
+    }
+
+    if (attendance?.is_regularized) {
+      return this.buildResult(date, 'FULL_DAY', attendance, shiftCtx);
+    }
+
+    if (!attendance?.first_in_time) {
+      return this.buildResult(date, 'ABSENT', attendance, shiftCtx);
+    }
+
+    const hours = this.hoursBetween(attendance.first_in_time, attendance.last_out_time);
+    const late = this.isLate(attendance.first_in_time, date, shiftCtx);
+    const early = attendance.last_out_time
+      ? this.isEarly(attendance.last_out_time, date, shiftCtx, earlyMaxMins)
+      : false;
+
+    let status: CalculatedAttendanceStatus;
+    if (hours >= shiftCtx.full_day_min_hours) {
+      status = late ? 'LATE_COMING' : early ? 'EARLY_GOING' : 'FULL_DAY';
+    } else if (hours >= shiftCtx.half_day_min_hours) {
+      status = 'HALF_DAY';
+    } else if (hours > 0) {
+      status = 'LESS_THAN_HALF_DAY';
+    } else if (!attendance.last_out_time) {
+      status = late ? 'LATE_COMING' : 'ABSENT';
+    } else {
+      status = 'LESS_THAN_HALF_DAY';
+    }
+
+    return this.buildResult(date, status, attendance, shiftCtx, hours);
   }
 
   private async hasPendingRequest(userId: string, date: string) {

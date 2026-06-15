@@ -46,7 +46,7 @@ export class ExamsService {
       subject_id: dto.subject_id,
       application_type: dto.application_type,
       fee_status: 'PENDING',
-      status: 'PENDING',
+      status: dto.application_type === 'RE_EVALUATION' ? 'DRAFT' : 'PENDING',
     });
 
     if (dto.application_type === 'RE_EVALUATION') {

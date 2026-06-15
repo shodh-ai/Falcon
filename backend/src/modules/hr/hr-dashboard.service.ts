@@ -38,7 +38,7 @@ export class HrDashboardService {
     );
 
     const [attendanceRow] = await this.dataSource.query<
-      Array<{ present: string; absent: string; on_leave: string; late: string; total_staff: string }>
+      Array<{ present: string; absent: string; on_leave: string; late: string; unmarked: string; total_staff: string }>
     >(
       `WITH staff AS (
          SELECT u.user_id FROM users u
@@ -46,24 +46,36 @@ export class HrDashboardService {
          JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
          WHERE u.tenant_id = $1 AND u.is_active = true
            AND r.role_name NOT IN ('Student', 'Applicant', 'Parent')${entityFilter}
+       ),
+       classified AS (
+         SELECT
+           s.user_id,
+           CASE
+             WHEN EXISTS (
+               SELECT 1 FROM staff_leave_requests sl
+               WHERE sl.staff_user_id = s.user_id
+                 AND sl.tenant_id = $1
+                 AND sl.status IN ('PENDING', 'HOD_APPROVED', 'HR_APPROVED')
+                 AND sl.start_date <= $3::date
+                 AND sl.end_date >= $3::date
+             ) THEN 'on_leave'
+             WHEN da.calculated_status IN ('FULL_DAY', 'HALF_DAY', 'LATE_COMING', 'EARLY_GOING')
+               OR da.status = 'PRESENT' THEN 'present'
+             WHEN da.calculated_status = 'ABSENT' OR da.status = 'ABSENT' THEN 'absent'
+             ELSE 'unmarked'
+           END AS bucket,
+           (da.calculated_status = 'LATE_COMING') AS is_late
+         FROM staff s
+         LEFT JOIN hr_daily_attendance da ON da.user_id = s.user_id AND da.date = $3::date
        )
        SELECT
-         COUNT(*) FILTER (
-           WHERE da.status = 'PRESENT' OR da.calculated_status IN ('FULL_DAY', 'HALF_DAY')
-         ) AS present,
-         COUNT(*) FILTER (
-           WHERE da.status = 'ABSENT' OR da.calculated_status = 'ABSENT'
-         ) AS absent,
-         COUNT(*) FILTER (WHERE da.calculated_status = 'LATE_COMING') AS late,
-         (SELECT COUNT(*) FROM staff s
-          JOIN staff_leave_requests sl ON sl.staff_user_id = s.user_id
-          WHERE sl.tenant_id = $1
-            AND sl.status IN ('PENDING', 'HOD_APPROVED', 'HR_APPROVED')
-            AND sl.start_date <= $3::date AND sl.end_date >= $3::date
-         ) AS on_leave,
+         COUNT(*) FILTER (WHERE bucket = 'present') AS present,
+         COUNT(*) FILTER (WHERE bucket = 'absent') AS absent,
+         COUNT(*) FILTER (WHERE bucket = 'on_leave') AS on_leave,
+         COUNT(*) FILTER (WHERE bucket = 'unmarked') AS unmarked,
+         COUNT(*) FILTER (WHERE is_late) AS late,
          (SELECT COUNT(*) FROM staff) AS total_staff
-       FROM staff s
-       LEFT JOIN hr_daily_attendance da ON da.user_id = s.user_id AND da.date = $3::date`,
+       FROM classified`,
       [tenantId, entityId, today],
     );
 
@@ -72,8 +84,7 @@ export class HrDashboardService {
     const absent = Number(attendanceRow?.absent ?? 0);
     const onLeave = Number(attendanceRow?.on_leave ?? 0);
     const late = Number(attendanceRow?.late ?? 0);
-    const accounted = present + absent + onLeave + late;
-    const unmarked = Math.max(totalStaff - accounted, 0);
+    const unmarked = Number(attendanceRow?.unmarked ?? 0);
 
     const [pendingLeaves] = await this.dataSource.query<Array<{ count: string }>>(
       `SELECT COUNT(*)::text AS count FROM staff_leave_requests sl
@@ -143,17 +154,23 @@ export class HrDashboardService {
         exits_this_month: Number(headcountRow?.exits ?? 0),
       },
       today_attendance: {
+        total_staff: totalStaff,
+        present,
+        absent,
+        on_leave: onLeave,
+        late,
+        unmarked,
         present_pct: Math.round((present / totalStaff) * 1000) / 10,
         absent_pct: Math.round((absent / totalStaff) * 1000) / 10,
         on_leave_pct: Math.round((onLeave / totalStaff) * 1000) / 10,
         late_pct: Math.round((late / totalStaff) * 1000) / 10,
         unmarked_pct: Math.round((unmarked / totalStaff) * 1000) / 10,
         chart: [
-          { name: 'Present', value: present, pct: Math.round((present / totalStaff) * 1000) / 10 },
-          { name: 'Absent', value: absent, pct: Math.round((absent / totalStaff) * 1000) / 10 },
-          { name: 'On Leave', value: onLeave, pct: Math.round((onLeave / totalStaff) * 1000) / 10 },
-          { name: 'Late', value: late, pct: Math.round((late / totalStaff) * 1000) / 10 },
-        ],
+          { name: 'Present', value: present, pct: Math.round((present / totalStaff) * 1000) / 10, color: '#1e3a5f' },
+          { name: 'Absent', value: absent, pct: Math.round((absent / totalStaff) * 1000) / 10, color: '#c9a227' },
+          { name: 'On Leave', value: onLeave, pct: Math.round((onLeave / totalStaff) * 1000) / 10, color: '#dc2626' },
+          { name: 'Unmarked', value: unmarked, pct: Math.round((unmarked / totalStaff) * 1000) / 10, color: '#94a3b8' },
+        ].filter((row) => row.value > 0),
       },
       pending_actions: {
         leave_approvals: Number(pendingLeaves?.count ?? 0),

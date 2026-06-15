@@ -14,6 +14,7 @@ import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.ser
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { assertNoPendingRow } from '../../common/validators/pending-request.util';
 import { TicketService } from '../helpdesk/ticket.service';
+import { MentorshipChatService } from './mentorship-chat.service';
 
 @Injectable()
 export class ProctorService {
@@ -29,6 +30,7 @@ export class ProctorService {
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly ticketService: TicketService,
+    private readonly chatService: MentorshipChatService,
   ) {}
 
   async assignMentor(dto: AssignMentorDto, assignedByUserId: string) {
@@ -184,13 +186,27 @@ export class ProctorService {
     }
 
     const trimmedRemarks = remarks?.trim() ?? '';
-    if (status === 'REJECTED' && trimmedRemarks.length < 3) {
-      throw new BadRequestException('Please provide a short reason for declining or rescheduling');
+    if (trimmedRemarks.length < 3) {
+      throw new BadRequestException(
+        status === 'APPROVED'
+          ? 'Please provide a meeting link or room number'
+          : 'Please provide a short reason for declining or rescheduling',
+      );
     }
 
     meeting.status = status;
     meeting.proctor_remarks = trimmedRemarks || null;
     const saved = await this.meetings.save(meeting);
+
+    // Post the approval message into the mentorship chat thread
+    if (status === 'APPROVED') {
+      const when = new Date(meeting.requested_time).toLocaleString();
+      await this.chatService.sendFacultyMessage(
+        proctorUserId,
+        meeting.student_user_id,
+        `📅 Meeting Approved (${when})\n📍 Room/Link: ${trimmedRemarks}`,
+      );
+    }
 
     const student = meeting.student ?? (await this.users.findOne({ where: { user_id: meeting.student_user_id } }));
     if (student?.tenant_id) {

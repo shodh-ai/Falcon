@@ -5,6 +5,7 @@ export * from './api.academics';
 export * from './api.finance';
 export * from './api.exams';
 export * from './api.hr';
+export * from './api.hr-documents';
 export * from './api.iqac';
 export * from './api.operations';
 export * from './api.hostel-admin';

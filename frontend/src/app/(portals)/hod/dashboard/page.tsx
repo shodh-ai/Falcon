@@ -1,5 +1,7 @@
-import { WorkspaceRoutePage } from '@/components/workspaces/WorkspaceRoutePage';
+'use client';
+
+import { HodCommandCenter } from '@/components/hod/HodCommandCenter';
 
 export default function HodDashboardPage() {
-  return <WorkspaceRoutePage portal="hod" page="dashboard" />;
+  return <HodCommandCenter />;
 }

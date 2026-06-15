@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BookOpen } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
@@ -16,11 +16,15 @@ import { LmsExtendedTabs } from '@/components/lms/LmsExtendedTabs';
 import { useAuthedApi } from '@/lib/api';
 import type { StudentWorkspace } from '@/lib/api/lms';
 
+const VALID_TABS = new Set(['materials', 'assignments', 'live']);
+
 export default function StudentCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
+  const searchParams = useSearchParams();
   const api = useAuthedApi();
   const [data, setData] = useState<StudentWorkspace | null>(null);
-  const [tab, setTab] = useState('materials');
+  const initialTab = searchParams.get('tab');
+  const [tab, setTab] = useState(() => (initialTab && VALID_TABS.has(initialTab) ? initialTab : 'materials'));
 
   const load = useCallback(() => {
     if (!courseId) return;

@@ -1,17 +1,21 @@
 export interface TimetableSlot {
   id: string;
+  courseId: string;
   subject: string;
   room: string;
   start: string;
   end: string;
+  /** Computed client-side in IST; API value is ignored by TimetableWidget. */
   status: 'upcoming' | 'ongoing' | 'done';
+  liveJoinUrl?: string | null;
+  isVirtual?: boolean;
 }
 
 export const mockTimetableToday: TimetableSlot[] = [
-  { id: '1', subject: 'Data Structures', room: 'Lab 204', start: '09:00', end: '10:00', status: 'done' },
-  { id: '2', subject: 'Operating Systems', room: 'Room 112', start: '10:15', end: '11:15', status: 'ongoing' },
-  { id: '3', subject: 'DBMS', room: 'Room 305', start: '11:30', end: '12:30', status: 'upcoming' },
-  { id: '4', subject: 'Soft Skills', room: 'Auditorium', start: '14:00', end: '15:00', status: 'upcoming' },
+  { id: '1', courseId: '1', subject: 'Data Structures', room: 'Lab 204', start: '09:00', end: '10:00', status: 'done' },
+  { id: '2', courseId: '2', subject: 'Operating Systems', room: 'Room 112', start: '10:15', end: '11:15', status: 'ongoing' },
+  { id: '3', courseId: '3', subject: 'DBMS', room: 'Room 305', start: '11:30', end: '12:30', status: 'upcoming' },
+  { id: '4', courseId: '4', subject: 'Soft Skills', room: 'Auditorium', start: '14:00', end: '15:00', status: 'upcoming' },
 ];
 
 export const mockAttendance = {

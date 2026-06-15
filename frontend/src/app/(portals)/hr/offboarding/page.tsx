@@ -62,7 +62,7 @@ export default function HrOffboardingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Offboarding & Resignation"
         description="HR control panel for exiting employees — notice period, buyout, or immediate separation."
@@ -140,6 +140,6 @@ export default function HrOffboardingPage() {
         ))}
         {!rows.length && <p className="text-sm text-muted-foreground">No active resignation requests.</p>}
       </div>
-    </div>
+    </>
   );
 }

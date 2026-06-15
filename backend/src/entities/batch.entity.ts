@@ -1,9 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('academic_sis_batches')
 @Index(['program_id'])
 @Index(['academic_year'])
-export class Batch {
+export class Batch extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   batch_id: number;
 

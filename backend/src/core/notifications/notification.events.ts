@@ -1,6 +1,7 @@
 export const NotificationEvents = {
   FINANCE_FEE_GENERATED: 'finance.fee_generated',
   FINANCE_ADMIT_CARD_LOCKED: 'finance.admit_card_locked',
+  EXAM_RESULTS_PUBLISHED: 'exam.results_published',
   ACADEMICS_ATTENDANCE_WARNING: 'academics.attendance_warning',
   ACADEMICS_TIMETABLE_CHANGED: 'academics.timetable_changed',
   ACADEMICS_MARKS_PUBLISHED: 'academics.marks_published',
@@ -11,6 +12,7 @@ export const NotificationEvents = {
   ACADEMICS_MEETING_REQUESTED: 'academics.meeting_requested',
   ACADEMICS_MEETING_RESPONDED: 'academics.meeting_responded',
   PLACEMENT_JOB_POSTED: 'placement.job_posted',
+  PLACEMENT_STAGE_UPDATED: 'placement.stage_updated',
   HELPDESK_TICKET_REPLY: 'helpdesk.ticket_reply',
   OPERATIONS_LIBRARY_OVERDUE: 'operations.library_overdue',
   OPERATIONS_LIBRARY_RESERVATION_READY: 'operations.library_reservation_ready',
@@ -19,6 +21,9 @@ export const NotificationEvents = {
   EVENT_PROPOSED: 'event.proposed',
   EVENT_PENDING_ESTATE: 'event.pending_estate',
   EVENT_PENDING_FINANCE: 'event.pending_finance',
+  HR_ONBOARDING_CREDENTIALS: 'hr.onboarding_credentials',
+  HR_EXPORT_READY: 'hr.export_ready',
+  HR_EXPORT_FAILED: 'hr.export_failed',
 } as const;
 
 export type NotificationEventName =
@@ -54,6 +59,11 @@ export type MarksPublishedPayload = BaseNotificationPayload & {
   examType: string;
 };
 
+export type ExamResultsPublishedPayload = BaseNotificationPayload & {
+  courseName: string;
+  examType: string;
+};
+
 export type CourseMaterialAddedPayload = BaseNotificationPayload & {
   courseId: string;
   courseName: string;
@@ -84,6 +94,12 @@ export type MeetingRespondedPayload = BaseNotificationPayload & {
 export type JobPostedPayload = BaseNotificationPayload & {
   companyName: string;
   roleTitle: string;
+};
+
+export type PlacementStageUpdatedPayload = BaseNotificationPayload & {
+  companyName: string;
+  roleTitle: string;
+  stage: string;
 };
 
 export type TicketReplyPayload = BaseNotificationPayload & {
@@ -123,4 +139,21 @@ export type EventTierPayload = BaseNotificationPayload & {
   eventId: string;
   eventTitle: string;
   clubName?: string;
+};
+
+export type OnboardingCredentialsPayload = BaseNotificationPayload & {
+  email: string;
+  tempPassword: string;
+};
+
+export type HrExportReadyPayload = BaseNotificationPayload & {
+  jobId: string;
+  label: string;
+  zipUrl: string;
+};
+
+export type HrExportFailedPayload = BaseNotificationPayload & {
+  jobId: string;
+  label: string;
+  errorMessage: string;
 };

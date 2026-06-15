@@ -1,11 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
+import { CalendarOff, Inbox, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
+import { HrTabBar } from '@/components/hr/HrTabBar';
+import { HrPersonCell } from '@/components/hr/HrAvatar';
+import { HrStatusBadge } from '@/components/hr/HrStatusBadge';
+import { HrEmptyState } from '@/components/hr/HrEmptyState';
+import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
@@ -18,7 +23,7 @@ type LeaveRequest = {
   end_date: string;
   reason: string;
   status: string;
-  staff?: { name?: string };
+  staff?: { name?: string; email?: string };
 };
 
 type BalanceRow = {
@@ -31,21 +36,86 @@ type BalanceRow = {
   maternity_balance: string;
 };
 
+type DirectoryRow = { user_id: string; name: string; employee_id: string | null };
+
+type OnBehalfForm = {
+  staff_user_id: string;
+  request_type: 'LEAVE' | 'ON_DUTY' | 'REGULARIZATION';
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  regularization_date: string;
+  reason: string;
+};
+
 export default function HrLeavesPage() {
   const api = useHrApi();
-  const { entityId } = useHrEntity();
+  const { entityId, entityReady } = useHrEntity();
   const [tab, setTab] = useState<'approvals' | 'balances'>('approvals');
   const [pending, setPending] = useState<LeaveRequest[]>([]);
   const [balances, setBalances] = useState<BalanceRow[]>([]);
+  const [staff, setStaff] = useState<DirectoryRow[]>([]);
+  const [onBehalfOpen, setOnBehalfOpen] = useState(false);
+  const [onBehalfSubmitting, setOnBehalfSubmitting] = useState(false);
+  const [onBehalf, setOnBehalf] = useState<OnBehalfForm>({
+    staff_user_id: '',
+    request_type: 'ON_DUTY',
+    leave_type: 'OD',
+    start_date: '',
+    end_date: '',
+    regularization_date: '',
+    reason: '',
+  });
   const year = new Date().getFullYear();
 
   useEffect(() => {
+    if (!entityReady) return;
     if (tab === 'approvals') {
       void api.get<LeaveRequest[]>('/api/hr/leaves/all?status=HOD_APPROVED').then(setPending);
     } else {
       void api.get<BalanceRow[]>(`/api/hr/leaves/balances-grid?year=${year}`).then(setBalances);
     }
-  }, [api, entityId, tab, year]);
+  }, [api, entityId, entityReady, tab, year]);
+
+  useEffect(() => {
+    if (!entityReady) return;
+    void api
+      .get<{ data: DirectoryRow[] }>('/api/hr/directory?limit=100&offset=0')
+      .then((res) => setStaff(res.data));
+  }, [api, entityId, entityReady]);
+
+  async function submitOnBehalf(e: FormEvent) {
+    e.preventDefault();
+    if (!onBehalf.staff_user_id) {
+      toast.error('Select an employee');
+      return;
+    }
+    setOnBehalfSubmitting(true);
+    try {
+      await api.post('/api/hr/workforce/requests', {
+        staff_user_id: onBehalf.staff_user_id,
+        request_type: onBehalf.request_type,
+        leave_type: onBehalf.request_type === 'LEAVE' ? onBehalf.leave_type : onBehalf.request_type === 'ON_DUTY' ? 'OD' : 'REG',
+        start_date:
+          onBehalf.request_type === 'REGULARIZATION'
+            ? onBehalf.regularization_date
+            : onBehalf.start_date,
+        end_date:
+          onBehalf.request_type === 'REGULARIZATION'
+            ? onBehalf.regularization_date
+            : onBehalf.end_date,
+        regularization_date:
+          onBehalf.request_type === 'REGULARIZATION' ? onBehalf.regularization_date : undefined,
+        reason: onBehalf.reason,
+      });
+      toast.success('Request submitted on behalf of employee');
+      setOnBehalfOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Submit failed');
+    } finally {
+      setOnBehalfSubmitting(false);
+    }
+  }
 
   async function hrApprove(leaveId: string, status: 'HR_APPROVED' | 'REJECTED') {
     try {
@@ -68,93 +138,209 @@ export default function HrLeavesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+    <>
       <HrPageHeader
         title="Leave Management & Balances"
         description="Final HR sign-off on HoD-approved requests and organization-wide leave balance grid."
+        actions={
+          <Button variant="outline" size="sm" onClick={() => setOnBehalfOpen(true)}>
+            <UserPlus className="mr-2 h-4 w-4" />
+            Apply on Behalf of Employee
+          </Button>
+        }
       />
 
-      <div className="flex gap-2">
-        <Button variant={tab === 'approvals' ? 'default' : 'outline'} size="sm" onClick={() => setTab('approvals')}>
-          Pending approvals
-        </Button>
-        <Button variant={tab === 'balances' ? 'default' : 'outline'} size="sm" onClick={() => setTab('balances')}>
-          Leave balances
-        </Button>
-      </div>
+      <HrTabBar
+        tabs={[
+          { id: 'approvals', label: 'Pending approvals' },
+          { id: 'balances', label: 'Leave balances' },
+        ]}
+        active={tab}
+        onChange={(id) => setTab(id as 'approvals' | 'balances')}
+      />
 
       {tab === 'approvals' ? (
-        <div className="space-y-3">
-          {pending.map((l) => {
-            const leaveId = l.leave_id ?? l.staff_leave_id ?? '';
-            return (
-            <Card key={leaveId}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base">{l.staff?.name ?? 'Staff'}</CardTitle>
-                <Badge>{l.status}</Badge>
-              </CardHeader>
-              <CardContent className="text-sm">
-                <p>
-                  {l.leave_type}: {l.start_date} → {l.end_date}
-                </p>
-                <p className="text-muted-foreground">{l.reason}</p>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={() => void hrApprove(leaveId, 'HR_APPROVED')}>
-                    HR Approve
+        <div className="space-y-3 pt-2">
+          {pending.length === 0 ? (
+            <HrEmptyState
+              icon={Inbox}
+              title="No pending leaves"
+              description="You're all caught up — no HoD-approved requests awaiting HR sign-off."
+            />
+          ) : (
+            pending.map((l) => {
+              const leaveId = l.leave_id ?? l.staff_leave_id ?? '';
+              return (
+                <Card
+                  key={leaveId}
+                  className="border-gray-100 shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 flex-1 items-start gap-4">
+                      <HrPersonCell
+                        name={l.staff?.name ?? 'Staff member'}
+                        subtitle={l.staff?.email ?? `${l.leave_type} · ${l.start_date} → ${l.end_date}`}
+                      />
+                      <div className="hidden sm:block">
+                        <HrStatusBadge status={l.status} />
+                      </div>
+                    </div>
+                    <div className="space-y-2 sm:text-right">
+                      <p className="text-sm text-muted-foreground sm:hidden">
+                        <HrStatusBadge status={l.status} />
+                      </p>
+                      <p className="text-sm text-muted-foreground">{l.reason}</p>
+                      <div className="flex gap-2 sm:justify-end">
+                        <Button size="sm" onClick={() => void hrApprove(leaveId, 'HR_APPROVED')}>
+                          HR Approve
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => void hrApprove(leaveId, 'REJECTED')}>
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })
+          )}
+        </div>
+      ) : balances.length === 0 ? (
+        <HrEmptyState
+          icon={CalendarOff}
+          title="No balance records"
+          description="Leave balances will appear once employees are assigned entitlements."
+        />
+      ) : (
+        <HrDataTable>
+          <HrTable minWidth="720px">
+            <HrTableHead>
+              <HrTh>Employee</HrTh>
+              <HrTh>CL</HrTh>
+              <HrTh>SL</HrTh>
+              <HrTh>EL</HrTh>
+              <HrTh>Maternity</HrTh>
+              <HrTh>Adjust CL</HrTh>
+            </HrTableHead>
+            <HrTableBody>
+              {balances.map((b) => (
+                <HrTr key={b.user_id}>
+                  <HrTd>
+                    <HrPersonCell name={b.name} subtitle={b.employee_id} />
+                  </HrTd>
+                  <HrTd className="font-medium">{b.cl_balance ?? '—'}</HrTd>
+                  <HrTd className="font-medium">{b.sl_balance ?? '—'}</HrTd>
+                  <HrTd className="font-medium">{b.el_balance ?? '—'}</HrTd>
+                  <HrTd className="font-medium">{b.maternity_balance ?? '—'}</HrTd>
+                  <HrTd>
+                    <Input
+                      type="number"
+                      className="h-8 w-20 border-gray-200"
+                      placeholder="+/-"
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v) void adjust(b.user_id, 'CL', v);
+                      }}
+                    />
+                  </HrTd>
+                </HrTr>
+              ))}
+            </HrTableBody>
+          </HrTable>
+        </HrDataTable>
+      )}
+
+      {onBehalfOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="text-base">Apply on behalf of employee</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                HR can submit past-date OD or leave requests beyond the 3-day employee lock.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={submitOnBehalf} className="space-y-3">
+                <select
+                  className="w-full rounded-md border px-2 py-2 text-sm"
+                  required
+                  value={onBehalf.staff_user_id}
+                  onChange={(e) => setOnBehalf((f) => ({ ...f, staff_user_id: e.target.value }))}
+                >
+                  <option value="">Select employee…</option>
+                  {staff.map((s) => (
+                    <option key={s.user_id} value={s.user_id}>
+                      {s.name} {s.employee_id ? `(${s.employee_id})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="w-full rounded-md border px-2 py-2 text-sm"
+                  value={onBehalf.request_type}
+                  onChange={(e) =>
+                    setOnBehalf((f) => ({
+                      ...f,
+                      request_type: e.target.value as OnBehalfForm['request_type'],
+                    }))
+                  }
+                >
+                  <option value="ON_DUTY">On Duty (OD)</option>
+                  <option value="LEAVE">Leave</option>
+                  <option value="REGULARIZATION">Regularisation</option>
+                </select>
+                {onBehalf.request_type === 'LEAVE' && (
+                  <select
+                    className="w-full rounded-md border px-2 py-2 text-sm"
+                    value={onBehalf.leave_type}
+                    onChange={(e) => setOnBehalf((f) => ({ ...f, leave_type: e.target.value }))}
+                  >
+                    <option value="CL">Casual (CL)</option>
+                    <option value="SL">Sick (SL)</option>
+                    <option value="EL">Earned (EL)</option>
+                  </select>
+                )}
+                {onBehalf.request_type === 'REGULARIZATION' ? (
+                  <Input
+                    type="date"
+                    required
+                    value={onBehalf.regularization_date}
+                    onChange={(e) => setOnBehalf((f) => ({ ...f, regularization_date: e.target.value }))}
+                  />
+                ) : (
+                  <>
+                    <Input
+                      type="date"
+                      required
+                      value={onBehalf.start_date}
+                      onChange={(e) => setOnBehalf((f) => ({ ...f, start_date: e.target.value }))}
+                    />
+                    <Input
+                      type="date"
+                      required
+                      value={onBehalf.end_date}
+                      onChange={(e) => setOnBehalf((f) => ({ ...f, end_date: e.target.value }))}
+                    />
+                  </>
+                )}
+                <Input
+                  placeholder="Reason"
+                  required
+                  value={onBehalf.reason}
+                  onChange={(e) => setOnBehalf((f) => ({ ...f, reason: e.target.value }))}
+                />
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={onBehalfSubmitting}>
+                    Submit
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => void hrApprove(leaveId, 'REJECTED')}>
-                    Reject
+                  <Button type="button" variant="outline" onClick={() => setOnBehalfOpen(false)}>
+                    Cancel
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          );
-          })}
-          {pending.length === 0 ? <p className="text-sm text-muted-foreground">No HoD-approved leaves pending HR.</p> : null}
+              </form>
+            </CardContent>
+          </Card>
         </div>
-      ) : (
-        <Card>
-          <CardContent className="overflow-x-auto p-0">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left">
-                  <th className="p-3">Employee</th>
-                  <th className="p-3">CL</th>
-                  <th className="p-3">SL</th>
-                  <th className="p-3">EL</th>
-                  <th className="p-3">Maternity</th>
-                  <th className="p-3">Adjust CL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {balances.map((b) => (
-                  <tr key={b.user_id} className="border-b">
-                    <td className="p-3">
-                      {b.name}
-                      <span className="block text-xs text-muted-foreground">{b.employee_id}</span>
-                    </td>
-                    <td className="p-3">{b.cl_balance ?? '—'}</td>
-                    <td className="p-3">{b.sl_balance ?? '—'}</td>
-                    <td className="p-3">{b.el_balance ?? '—'}</td>
-                    <td className="p-3">{b.maternity_balance ?? '—'}</td>
-                    <td className="p-3">
-                      <Input
-                        type="number"
-                        className="h-8 w-20"
-                        placeholder="+/-"
-                        onBlur={(e) => {
-                          const v = Number(e.target.value);
-                          if (v) void adjust(b.user_id, 'CL', v);
-                        }}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
       )}
-    </div>
+    </>
   );
 }

@@ -1,9 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('academic_subjects')
 @Index(['subject_code'], { unique: true })
 @Index(['program_id'])
-export class Subject {
+export class Subject extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   subject_id: number;
 

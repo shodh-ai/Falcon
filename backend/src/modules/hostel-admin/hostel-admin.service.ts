@@ -10,6 +10,11 @@ import { randomBytes } from 'crypto';
 import { FinanceService } from '../finance/finance.service';
 import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
 import { HostelAdminGateway } from './hostel-admin.gateway';
+import {
+  DEFAULT_PAGE_LIMIT,
+  type PaginatedResponse,
+  parsePageParams,
+} from '../../common/utils/pagination';
 
 type AuthCtx = { userId: string; tenantId: string; roles: string[] };
 
@@ -20,7 +25,7 @@ export class HostelAdminService {
     private readonly finance: FinanceService,
     private readonly falconNotify: FalconNotificationsService,
     private readonly gateway: HostelAdminGateway,
-  ) {}
+  ) { }
 
   private isGlobalAdmin(roles: string[]) {
     return roles.some((r) => ['SuperAdmin', 'Registrar'].includes(r));
@@ -45,10 +50,14 @@ export class HostelAdminService {
 
   async assertHostelAccess(ctx: AuthCtx, hostelId: string | null | undefined) {
     if (!hostelId) {
-      if (!this.isGlobalAdmin(ctx.roles)) {
-        throw new ForbiddenException('All-hostels view requires Hostel Admin or Super Admin role.');
-      }
-      return;
+      if (this.isGlobalAdmin(ctx.roles)) return;
+      const allowed = await this.getAccessibleHostelIds(ctx);
+      if (allowed?.length) return;
+      throw new ForbiddenException(
+        allowed?.length === 0
+          ? 'No hostel is assigned to your account. Contact administration.'
+          : 'All-hostels view requires Hostel Admin or Super Admin role.',
+      );
     }
     const allowed = await this.getAccessibleHostelIds(ctx);
     if (allowed === null) return;
@@ -172,11 +181,15 @@ export class HostelAdminService {
     return { hostel, rooms };
   }
 
-  async listStudents(ctx: AuthCtx, filters: { hostelId?: string; status?: string }) {
+  async listStudents(
+    ctx: AuthCtx,
+    filters: { hostelId?: string; status?: string; limit?: number; offset?: number },
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    const { limit, offset } = parsePageParams(filters.limit, filters.offset, DEFAULT_PAGE_LIMIT);
     if (filters.hostelId) await this.assertHostelAccess(ctx, filters.hostelId);
     else if (!this.isGlobalAdmin(ctx.roles)) {
       const allowed = await this.getAccessibleHostelIds(ctx);
-      if (!allowed?.length) return [];
+      if (!allowed?.length) return { data: [], total: 0, limit, offset };
     }
 
     const allowed = await this.getAccessibleHostelIds(ctx);
@@ -195,26 +208,41 @@ export class HostelAdminService {
       params.push(filters.status);
     }
 
-    return this.db.query(
-      `SELECT a.allocation_id, a.status, a.bed_number, a.mess_plan,
-              u.user_id AS student_user_id, u.name, u.email,
-              COALESCE(sp.enrollment_no, u.official_email) AS student_id,
-              h.hostel_name, h.hostel_code, r.room_number, r.floor, r.room_type,
-              sp.batch AS program_name, d.dept_name,
-              COALESCE(
-                (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
-                1
-              ) AS year_of_study
-       FROM hostel_allocations a
+    const baseFrom = `FROM hostel_allocations a
        JOIN users u ON u.user_id = a.student_user_id
        JOIN operations_hostel_rooms r ON r.room_id = a.room_id
        LEFT JOIN operations_hostels h ON h.hostel_id = r.hostel_id
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
-       WHERE u.tenant_id = $1 ${clause}
-       ORDER BY u.name`,
+       LEFT JOIN (
+         SELECT student_user_id, MAX(semester) AS max_semester
+         FROM student_course_enrollments
+         GROUP BY student_user_id
+       ) enroll ON enroll.student_user_id = u.user_id
+       WHERE u.tenant_id = $1 ${clause}`;
+
+    const countRows = await this.db.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::text AS total ${baseFrom}`,
       params,
     );
+    const total = Number(countRows[0]?.total ?? 0);
+
+    params.push(limit, offset);
+    const data = await this.db.query(
+      `SELECT a.allocation_id, a.status, a.bed_number, a.mess_plan,
+              u.user_id AS student_user_id, u.name, u.email,
+              COALESCE(sp.enrollment_no, u.official_email) AS student_id,
+              sp.phone,
+              h.hostel_name, h.hostel_code, r.room_number, r.floor, r.room_type,
+              sp.batch AS program_name, d.dept_name,
+              COALESCE(enroll.max_semester, 1) AS year_of_study
+       ${baseFrom}
+       ORDER BY u.name
+       LIMIT $${idx++} OFFSET $${idx}`,
+      params,
+    );
+
+    return { data, total, limit, offset };
   }
 
   async markRollCall(ctx: AuthCtx, dto: { hostel_id: string; records: Array<{ student_user_id: string; status: string }> }) {
@@ -235,7 +263,7 @@ export class HostelAdminService {
   async listRollCall(ctx: AuthCtx, hostelId: string, date: string) {
     await this.assertHostelAccess(ctx, hostelId);
     return this.db.query(
-      `SELECT rc.*, u.name AS student_name, u.email, m.name AS marked_by_name
+      `SELECT rc.*, u.name AS student_name, u.official_email AS email, m.name AS marked_by_name
        FROM operations_hostel_roll_call rc
        JOIN users u ON u.user_id = rc.student_user_id
        JOIN users m ON m.user_id = rc.marked_by_user_id

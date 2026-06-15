@@ -1,7 +1,7 @@
 'use client';
 
 import { BriefcaseBusiness, Check, ChevronsUpDown } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -12,16 +12,23 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/context/AuthContext';
-import { getDashboardPathForRole, getWorkspaceLabelForRole, getWorkspaceShortLabelForRole } from '@/lib/auth-routing';
+import {
+  getActiveWorkspaceRoleFromPath,
+  getDashboardPathForRole,
+  getWorkspaceLabelForRole,
+  getWorkspaceShortLabelForRole,
+} from '@/lib/auth-routing';
 
 export function WorkspaceSwitcher() {
   const { user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const roles = Array.from(new Set(user?.roles?.length ? user.roles : user?.role ? [user.role] : []));
 
   if (roles.length <= 1) return null;
 
-  const activeRole = user?.primaryRole ?? user?.role ?? roles[0];
+  const pathRole = getActiveWorkspaceRoleFromPath(pathname, roles);
+  const activeRole = pathRole ?? user?.primaryRole ?? user?.role ?? roles[0];
 
   return (
     <DropdownMenu>

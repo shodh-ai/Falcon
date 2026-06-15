@@ -1,13 +1,14 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type ExamApplicationType = 'RE_EVALUATION' | 'BACKLOG';
 export type ExamApplicationFeeStatus = 'PENDING' | 'PAID' | 'WAIVED';
-export type ExamApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ExamApplicationStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
 @Entity('exam_applications')
 @Index(['student_user_id'])
 @Index(['status'])
-export class ExamApplication {
+export class ExamApplication extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   exam_application_id: string;
 

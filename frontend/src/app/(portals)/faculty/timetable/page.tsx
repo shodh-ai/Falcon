@@ -42,7 +42,7 @@ type Adjustment = {
 
 export default function FacultyTimetablePage() {
   const api = useAuthedApi();
-  const { courses } = useFacultyCourses();
+  const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [form, setForm] = useState({
@@ -67,6 +67,8 @@ export default function FacultyTimetablePage() {
     () => adjustments.filter((a) => a.status.includes('PENDING')),
     [adjustments],
   );
+
+  const courseOptions = useMemo(() => courses, [courses]);
 
   async function submitAdjustment(e: FormEvent) {
     e.preventDefault();
@@ -115,17 +117,23 @@ export default function FacultyTimetablePage() {
           <CardTitle className="text-base">Schedule extra / cancel / substitute</CardTitle>
         </CardHeader>
         <CardContent>
+          {coursesError && (
+            <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {coursesError}
+            </p>
+          )}
           <form className="grid gap-3 md:grid-cols-2" onSubmit={submitAdjustment}>
             <select
               className="rounded-md border bg-background px-3 py-2 text-sm"
               value={form.course_id}
               onChange={(e) => setForm({ ...form, course_id: e.target.value })}
               required
+              disabled={coursesLoading || courseOptions.length === 0}
             >
-              <option value="">Course</option>
-              {courses.map((c) => (
+              <option value="">{coursesLoading ? 'Loading courses…' : 'Select course'}</option>
+              {courseOptions.map((c) => (
                 <option key={c.course_id} value={c.course_id}>
-                  {c.course_code}
+                  {c.course_code} — {c.course_name}
                 </option>
               ))}
             </select>
@@ -148,7 +156,11 @@ export default function FacultyTimetablePage() {
               value={form.reason}
               onChange={(e) => setForm({ ...form, reason: e.target.value })}
             />
-            <Button type="submit" className="md:col-span-2" disabled={isSubmitting}>
+            <Button
+              type="submit"
+              className="md:col-span-2"
+              disabled={isSubmitting || courseOptions.length === 0}
+            >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit for HoD approval'}
             </Button>
           </form>
