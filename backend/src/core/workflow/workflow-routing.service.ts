@@ -149,18 +149,33 @@ export class WorkflowRoutingService {
     category: HelpdeskTicketCategory,
   ): Promise<RoutedApprover> {
     switch (category) {
-      case 'FINANCE':
+      case 'FINANCE': {
+        const admin = await this.resolveUserByRole('Accountant', tenantId) || await this.resolveUserByRole('FinanceManager', tenantId);
+        if (admin) return admin;
         return this.getFinanceAdmin(tenantId);
-      case 'IT':
+      }
+      case 'IT': {
+        const admin = await this.resolveUserByRole('Admin', tenantId) || await this.resolveUserByRole('SuperAdmin', tenantId);
+        if (admin) return admin;
         return this.getItAdmin(tenantId);
-      case 'HOSTEL':
-        return this.getWardenForStudent(studentUserId);
+      }
+      case 'HOSTEL': {
+        try {
+          return await this.getWardenForStudent(studentUserId);
+        } catch {
+          const warden = await this.resolveUserByRole('Warden', tenantId);
+          if (warden) return warden;
+          throw new NotFoundException('No warden found for helpdesk routing');
+        }
+      }
       case 'MENTORSHIP':
         return this.getStudentProctor(studentUserId);
       case 'ACADEMICS':
         try {
           return await this.getStudentProctor(studentUserId);
         } catch {
+          const hod = await this.resolveUserByRole('HOD', tenantId) || await this.resolveUserByRole('Dean', tenantId);
+          if (hod) return hod;
           return this.resolveUserByEmail(
             this.fallbackHodEmail,
             tenantId,
@@ -169,12 +184,16 @@ export class WorkflowRoutingService {
         }
       case 'STUDENT_PROFILE':
         try {
+          const reg = await this.resolveUserByRole('Registrar', tenantId);
+          if (reg) return reg;
           return await this.resolveUserByEmail(
             this.fallbackRegistrarEmail,
             tenantId,
             'STUDENT_PROFILE_REGISTRAR',
           );
         } catch {
+          const hod = await this.resolveUserByRole('HOD', tenantId);
+          if (hod) return hod;
           return this.resolveUserByEmail(
             this.fallbackHodEmail,
             tenantId,
