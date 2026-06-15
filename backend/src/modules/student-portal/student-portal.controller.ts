@@ -22,9 +22,24 @@ export class StudentPortalController {
   @Patch('profile')
   updateProfile(
     @Req() req: { user: AuthUser },
-    @Body() body: { profile_photo_url?: string; bank_details?: Record<string, any> },
+    @Body() body: {
+      profile_photo_url?: string;
+      bank_details?: Record<string, any>;
+      parent_details?: Record<string, any>;
+      address?: { permanent?: string; current?: string };
+    },
   ) {
     return this.portal.updateProfile(this.tenant(req), req.user.user_id, body);
+  }
+
+  @Get('campus-settings')
+  campusSettings(@Req() req: { user: AuthUser }) {
+    return this.portal.getCampusSettings(this.tenant(req));
+  }
+
+  @Get('documents')
+  documents(@Req() req: { user: AuthUser }) {
+    return this.portal.getDocumentVault(this.tenant(req), req.user.user_id);
   }
 
   @Get('admission-vault')

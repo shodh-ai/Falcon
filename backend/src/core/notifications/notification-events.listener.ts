@@ -33,6 +33,8 @@ import {
   type OnboardingCredentialsPayload,
   type HrExportReadyPayload,
   type HrExportFailedPayload,
+  type AlumniConversionRequestedPayload,
+  type AlumniConversionApprovedPayload,
 } from './notification.events';
 
 @Injectable()
@@ -446,6 +448,32 @@ export class NotificationEventsListener {
         `Could not build your ${payload.label} archive: ${payload.errorMessage}`,
       actionLink: payload.actionLink ?? '/hr/directory',
     });
+  }
+
+  @OnEvent(NotificationEvents.ALUMNI_CONVERSION_REQUESTED)
+  async onAlumniConversionRequested(payload: AlumniConversionRequestedPayload) {
+    const officers = await this.dataSource.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.is_active = true
+         AND r.role_name IN ('IQAC', 'Registrar')`,
+      [payload.tenantId],
+    );
+
+    const programSuffix = payload.programName ? ` (${payload.programName})` : '';
+    const message = `${payload.studentName}${programSuffix} has requested Alumni Conversion.`;
+
+    for (const officer of officers) {
+      await this.falconNotifications.create({
+        tenantId: payload.tenantId,
+        userId: officer.user_id,
+        category: 'OPERATIONS',
+        title: 'Alumni Conversion Request',
+        message,
+        actionLink: '/alumni-admin/verification',
+      });
+    }
   }
 
 }

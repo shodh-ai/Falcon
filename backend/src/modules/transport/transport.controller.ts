@@ -111,6 +111,12 @@ export class TransportController {
     return this.transport.getOccupancyDashboard(this.tenant(req));
   }
 
+  @Post('request-route-change')
+  @Roles('Student', 'SuperAdmin')
+  requestRouteChange(@Req() req: { user: AuthUser }, @Body() dto: { reason: string }) {
+    return this.transport.requestRouteChange(this.tenant(req), req.user.user_id, dto.reason);
+  }
+
   @Post('admin/routes')
   @Roles('TransportOfficer', 'SuperAdmin')
   createRoute(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {

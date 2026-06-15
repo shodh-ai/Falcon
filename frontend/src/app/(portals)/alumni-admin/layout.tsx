@@ -1,5 +1,11 @@
-import { redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
+import { GenericPortalShell } from '@/components/layout/GenericPortalShell';
+import { RoleGate } from '@/components/layout/RoleGate';
 
-export default function AlumniAdminRedirectLayout() {
-  redirect('/iqac/alumni/verification');
+export default function AlumniAdminLayout({ children }: { children: ReactNode }) {
+  return (
+    <RoleGate>
+      <GenericPortalShell portal="alumni-admin">{children}</GenericPortalShell>
+    </RoleGate>
+  );
 }

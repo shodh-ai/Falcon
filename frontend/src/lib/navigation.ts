@@ -220,8 +220,8 @@ export function filterPortalConfigForHrCapabilities(
 }
 
 export const studentPortal: PortalConfig = {
-  personaLabel: 'Student Portal',
-  personaTitle: 'SGVU Student Life',
+  personaLabel: 'Falcon Student',
+  personaTitle: 'Falcon Student Life',
   homeHref: '/student/dashboard',
   navGroups: [
     {
@@ -249,13 +249,10 @@ export const studentPortal: PortalConfig = {
       title: 'Campus Services',
       items: [
         { label: 'My Financial Ledger', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
-        { label: 'Hostel & Mess', href: '/student/hostel', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'room'] },
-        { label: 'Smart Mess & Wallet', href: '/student/dining', icon: UtensilsCrossed, keywords: ['dining', 'mess', 'wallet', 'add-on', 'qr', 'falcon pay'] },
-        { label: 'Hostel Bed Booking', href: '/student/hostel-booking', icon: BedDouble, keywords: ['tatkal', 'bed', 'allocation'] },
+        { label: 'Campus Life', href: '/student/campus-life', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'wallet', 'campus'] },
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
-        { label: 'Extra-Curriculars', href: '/student/extracurriculars', icon: Medal, keywords: ['ncc', 'nss', 'sodeca', 'credits'] },
-        { label: 'Falcon Events', href: '/student/events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'workshop', 'dj'] },
+        { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'ncc', 'nss', 'fest'] },
       ],
     },
     {
@@ -276,9 +273,8 @@ export const studentPortal: PortalConfig = {
     { label: 'Marks', href: '/student/marks', icon: TrendingUp },
     { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
     { label: 'Financial Ledger', href: '/student/finance', icon: Wallet },
-    { label: 'Hostel', href: '/student/hostel', icon: Bus },
-    { label: 'Smart Mess', href: '/student/dining', icon: UtensilsCrossed },
-    { label: 'Falcon Events', href: '/student/events', icon: PartyPopper },
+    { label: 'Campus Life', href: '/student/campus-life', icon: Bus },
+    { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
 };
@@ -906,10 +902,38 @@ export const placementPortal: PortalConfig = {
   ],
 };
 
-/** Legacy portal key — routes redirect to IQAC; nav mirrors iqacPortal. */
+/** Alumni Officer portal — conversion verifications, donations, events. */
 export const alumniAdminPortal: PortalConfig = {
-  ...iqacPortal,
-  homeHref: '/iqac/alumni/verification',
+  personaLabel: 'Alumni Relations',
+  personaTitle: 'Alumni Admin Portal',
+  homeHref: '/alumni-admin/verification',
+  navGroups: [
+    {
+      title: 'Conversion Workflow',
+      items: [
+        {
+          label: 'Pending Verifications',
+          href: '/alumni-admin/verification',
+          icon: CheckCircle,
+          keywords: ['approve', 'no-dues', 'graduate', 'alumni'],
+        },
+      ],
+    },
+    {
+      title: 'Engagement',
+      items: [
+        { label: 'Donation Ledger', href: '/alumni-admin/donations', icon: DollarSign, keywords: ['80g', 'endowment'] },
+        { label: 'Engagement Analytics', href: '/alumni-admin/analytics', icon: BarChart3, keywords: ['retention', 'mentorship'] },
+        { label: 'Event Manager', href: '/alumni-admin/events', icon: Calendar, keywords: ['rsvp', 'reunion'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Pending Verifications', href: '/alumni-admin/verification', icon: CheckCircle },
+    { label: 'Donation Ledger', href: '/alumni-admin/donations', icon: DollarSign },
+    { label: 'Analytics', href: '/alumni-admin/analytics', icon: BarChart3 },
+    { label: 'Events', href: '/alumni-admin/events', icon: Calendar },
+  ],
 };
 
 export const adminPortal: PortalConfig = {

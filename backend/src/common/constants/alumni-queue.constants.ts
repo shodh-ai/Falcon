@@ -6,4 +6,5 @@ export type AlumniConversionJob = {
   autoVerify: boolean;
   linkedinUrl?: string;
   placementOrganization?: string;
+  personalEmail?: string;
 };

@@ -27,6 +27,7 @@ type TicketRow = {
   category: string;
   status: string;
   subject: string;
+  rejection_reason?: string | null;
 };
 
 type DisciplineRecord = {
@@ -162,6 +163,11 @@ export default function StudentHelpdeskPage() {
                   </div>
                   <p className="mt-2 font-semibold text-sgvu-navy">{ticket.subject}</p>
                   <p className="text-xs text-muted-foreground">{ticket.category}</p>
+                  {ticket.status === 'REJECTED' && ticket.rejection_reason && (
+                    <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-800">
+                      Rejection reason: {ticket.rejection_reason}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>

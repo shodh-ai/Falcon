@@ -12,6 +12,7 @@ import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.ser
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { resolvePlacementSchema } from '../placement/placement-schema';
+import { FinanceReceiptService } from '../finance/finance-receipt.service';
 
 const EXTRA_CERT_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
 
@@ -26,7 +27,13 @@ export class StudentPortalService {
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly objectStorage: ObjectStorageService,
+    private readonly financeReceipts: FinanceReceiptService,
   ) {}
+
+  private isProfileUnlocked(until: Date | string | null): boolean {
+    if (!until) return false;
+    return new Date(until).getTime() > Date.now();
+  }
 
   private maskEncrypted(value: string | null, maskFn: (v: string) => string) {
     if (!value) return null;
@@ -44,7 +51,7 @@ export class StudentPortalService {
               sp.enrollment_number, sp.enrollment_no, sp.batch, sp.category, sp.gender, sp.date_of_birth,
               sp.nationality, sp.parent_info, sp.admission_type, sp.admission_number,
               sp.admission_status, sp.aadhaar_encrypted, sp.passport_encrypted,
-              sp.profile_photo_url, sp.bank_details,
+              sp.profile_photo_url, sp.bank_details, sp.profile_unlocked_until,
               d.dept_name AS department,
               COALESCE(
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
@@ -58,12 +65,14 @@ export class StudentPortalService {
     );
     if (!rows[0]) throw new NotFoundException('Student not found');
     const row = rows[0];
+    const parentInfo = row.parent_info ?? {};
+    const unlocked = this.isProfileUnlocked(row.profile_unlocked_until);
     return {
       student_id: row.enrollment_number ?? row.admission_number ?? row.enrollment_no ?? row.user_id,
       enrollment_no: row.enrollment_number ?? row.admission_number ?? row.enrollment_no,
       name: row.name,
       email: row.email,
-      mobile: row.parent_info?.student_mobile ?? row.parent_info?.mobile ?? null,
+      mobile: parentInfo?.student_mobile ?? parentInfo?.mobile ?? null,
       category: row.category,
       gender: row.gender,
       date_of_birth: row.date_of_birth,
@@ -72,19 +81,48 @@ export class StudentPortalService {
       branch: row.department,
       session: row.batch,
       semester: Number(row.current_semester),
-      scholarship: row.parent_info?.scholarship ?? null,
-      parent_details: row.parent_info,
-      address: row.parent_info?.address ?? null,
+      scholarship: parentInfo?.scholarship ?? null,
+      parent_details: {
+        father_name: parentInfo?.father_name ?? parentInfo?.father ?? null,
+        mother_name: parentInfo?.mother_name ?? parentInfo?.mother ?? null,
+        parent_occupation: parentInfo?.parent_occupation ?? parentInfo?.occupation ?? null,
+        annual_income: parentInfo?.annual_income ?? null,
+        emergency_contact_name: parentInfo?.emergency_contact_name ?? parentInfo?.emergency_contact ?? null,
+        emergency_contact_phone: parentInfo?.emergency_contact_phone ?? parentInfo?.emergency_phone ?? null,
+        emergency_contact_priority: parentInfo?.emergency_contact_priority ?? 'Primary',
+      },
+      address: {
+        permanent: parentInfo?.permanent_address ?? parentInfo?.address?.permanent ?? parentInfo?.address ?? null,
+        current: parentInfo?.current_address ?? parentInfo?.address?.current ?? null,
+      },
       aadhaar_masked: this.maskEncrypted(row.aadhaar_encrypted, (v) => this.crypto.maskAadhaar(v)),
       passport_masked: this.maskEncrypted(row.passport_encrypted, (v) => `••••${v.slice(-4)}`),
       admission_type: row.admission_type,
       admission_status: row.admission_status,
       profile_photo_url: row.profile_photo_url,
       bank_details: row.bank_details,
+      profile_unlocked_until: row.profile_unlocked_until,
+      is_profile_editable: unlocked,
     };
   }
 
-  async updateProfile(tenantId: string, userId: string, dto: { profile_photo_url?: string; bank_details?: Record<string, any> }) {
+  async updateProfile(
+    tenantId: string,
+    userId: string,
+    dto: {
+      profile_photo_url?: string;
+      bank_details?: Record<string, any>;
+      parent_details?: Record<string, any>;
+      address?: { permanent?: string; current?: string };
+    },
+  ) {
+    const profileRows = await this.dataSource.query<Array<{ profile_unlocked_until: Date | null; parent_info: Record<string, any> | null }>>(
+      `SELECT profile_unlocked_until, parent_info FROM student_profiles WHERE user_id = $1`,
+      [userId],
+    );
+    const profileRow = profileRows[0];
+    if (!profileRow) throw new NotFoundException('Student profile not found');
+
     const setChunks: string[] = [];
     const values: any[] = [];
     let queryIdx = 1;
@@ -98,6 +136,21 @@ export class StudentPortalService {
       values.push(dto.bank_details);
     }
 
+    const wantsLockedFields = dto.parent_details !== undefined || dto.address !== undefined;
+    if (wantsLockedFields) {
+      if (!this.isProfileUnlocked(profileRow.profile_unlocked_until)) {
+        throw new BadRequestException('Profile fields are locked. Request a correction from Admin.');
+      }
+      const mergedParent = { ...(profileRow.parent_info ?? {}), ...(dto.parent_details ?? {}) };
+      if (dto.address) {
+        mergedParent.permanent_address = dto.address.permanent ?? mergedParent.permanent_address;
+        mergedParent.current_address = dto.address.current ?? mergedParent.current_address;
+      }
+      setChunks.push(`parent_info = $${queryIdx++}`);
+      values.push(mergedParent);
+      setChunks.push(`profile_unlocked_until = NULL`);
+    }
+
     if (setChunks.length === 0) return { success: true };
 
     values.push(userId);
@@ -105,7 +158,18 @@ export class StudentPortalService {
       `UPDATE student_profiles SET ${setChunks.join(', ')} WHERE user_id = $${queryIdx}`,
       values,
     );
-    return { success: true };
+    return { success: true, locked: wantsLockedFields };
+  }
+
+  async getCampusSettings(tenantId: string) {
+    const rows = await this.dataSource.query<Array<{ settings: Record<string, unknown> | null }>>(
+      `SELECT settings FROM tenants WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    const settings = rows[0]?.settings ?? {};
+    return {
+      is_hostel_sale_active: settings.is_hostel_sale_active === true,
+    };
   }
 
   async getAdmissionVault(tenantId: string, userId: string) {
@@ -178,9 +242,19 @@ export class StudentPortalService {
   }
 
   async getRegistration(tenantId: string, userId: string) {
+    const currentSemesterRows = await this.dataSource.query(
+      `SELECT COALESCE(MAX(semester), 1) AS semester
+       FROM student_course_enrollments WHERE student_user_id = $1`,
+      [userId],
+    );
+    const currentSemester = Number(currentSemesterRows[0]?.semester ?? 1);
+
+    await this.ensureCoreEnrollments(tenantId, userId, currentSemester);
+
     const enrollments = await this.dataSource.query(
       `SELECT e.enrollment_id, e.semester, e.status, e.grade, e.grade_points,
-              c.course_id, c.course_code, c.course_name, c.credits, c.is_elective
+              c.course_id, c.course_code, c.course_name, c.credits,
+              COALESCE(c.course_type, CASE WHEN c.is_elective THEN 'ELECTIVE' ELSE 'CORE' END) AS course_type
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
@@ -192,31 +266,60 @@ export class StudentPortalService {
       .filter((r: { status: string }) => r.status === 'COMPLETED')
       .reduce((sum: number, r: { credits: number }) => sum + Number(r.credits), 0);
 
+    const currentSemEnrollments = enrollments.filter(
+      (r: { semester: number }) => Number(r.semester) === currentSemester,
+    );
+    const electiveCount = currentSemEnrollments.filter(
+      (r: { course_type: string }) => r.course_type === 'ELECTIVE',
+    ).length;
+    const electivesNeeded = Math.max(0, 2 - electiveCount);
+
     const electives = await this.dataSource.query(
       `SELECT c.course_id, c.course_code, c.course_name, c.credits
        FROM academic_courses c
-       WHERE c.tenant_id = $1 AND c.is_elective = true
+       WHERE c.tenant_id = $1
+         AND COALESCE(c.course_type, CASE WHEN c.is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'ELECTIVE'
          AND NOT EXISTS (
            SELECT 1 FROM student_course_enrollments e
-           WHERE e.course_id = c.course_id AND e.student_user_id = $2
+           WHERE e.course_id = c.course_id AND e.student_user_id = $2 AND e.semester = $3
          )
        ORDER BY c.course_code`,
-      [tenantId, userId],
-    );
-
-    const currentSemester = await this.dataSource.query(
-      `SELECT COALESCE(MAX(semester), 1) AS semester
-       FROM student_course_enrollments WHERE student_user_id = $1`,
-      [userId],
+      [tenantId, userId, currentSemester],
     );
 
     return {
-      current_semester: Number(currentSemester[0]?.semester ?? 1),
+      current_semester: currentSemester,
       credits_earned: creditsEarned,
       credits_required: 160,
       enrollments,
+      core_enrollments: enrollments.filter((r: { course_type: string }) => r.course_type === 'CORE'),
+      elective_enrollments: enrollments.filter((r: { course_type: string }) => r.course_type === 'ELECTIVE'),
       available_electives: electives,
+      electives_needed: electivesNeeded,
+      electives_max: 2,
     };
+  }
+
+  private async ensureCoreEnrollments(tenantId: string, userId: string, semester: number) {
+    const coreCourses = await this.dataSource.query<Array<{ course_id: string }>>(
+      `SELECT course_id FROM academic_courses
+       WHERE tenant_id = $1
+         AND COALESCE(course_type, CASE WHEN is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'CORE'`,
+      [tenantId],
+    );
+    for (const course of coreCourses) {
+      await this.dataSource.query(
+        `INSERT INTO student_course_enrollments (
+           tenant_id, student_user_id, course_id, semester, status, attendance_percent
+         )
+         SELECT $1, $2, $3, $4, 'ENROLLED', 0
+         WHERE NOT EXISTS (
+           SELECT 1 FROM student_course_enrollments
+           WHERE student_user_id = $2 AND course_id = $3 AND semester = $4
+         )`,
+        [tenantId, userId, course.course_id, semester],
+      );
+    }
   }
 
   async getAttendance(tenantId: string, userId: string) {
@@ -351,31 +454,43 @@ export class StudentPortalService {
     ).catch(() => []);
 
     const seating = await this.dataSource.query(
-      `SELECT sp.seating_plan_id, sp.room, sp.seating_map,
+      `SELECT sp.seating_plan_id, sp.room,
+              seat.elem->>'block' AS block,
+              seat.elem->>'seat_no' AS seat_no,
               ${examLabel} AS exam_name, es.exam_date, es.start_time
        FROM exam_seating_plans sp
        JOIN exam_schedules es ON es.exam_schedule_id = sp.exam_schedule_id
        LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-       WHERE sp.tenant_id = $1 AND sp.published = true`,
-      [tenantId],
+       JOIN LATERAL jsonb_array_elements(sp.seating_map) AS seat(elem) ON true
+       WHERE sp.tenant_id = $1 AND sp.published = true
+         AND seat.elem->>'student_user_id' = $2`,
+      [tenantId, userId],
     ).catch(() => []);
 
-    const mySeats = seating
-      .map((plan: { seating_map: unknown[]; exam_name: string; exam_date: string; room: string }) => {
-        const map = Array.isArray(plan.seating_map) ? plan.seating_map : [];
-        const seat = map.find(
-          (s: { student_user_id?: string }) => s.student_user_id === userId,
-        ) as { block?: string; seat_no?: string } | undefined;
-        if (!seat) return null;
+    const mySeats = seating.map(
+      (plan: {
+        exam_name: string;
+        exam_date: string;
+        room: string;
+        block?: string;
+        seat_no?: string;
+      }) => {
+        const examDate = new Date(plan.exam_date);
+        const hoursUntilExam = (examDate.getTime() - Date.now()) / (1000 * 60 * 60);
+        const seatRevealed = hoursUntilExam <= 24;
         return {
           exam_name: plan.exam_name,
           exam_date: plan.exam_date,
-          block: seat.block ?? 'Main Block',
-          room: plan.room,
-          seat: seat.seat_no ?? '—',
+          block: seatRevealed ? (plan.block ?? 'Main Block') : null,
+          room: seatRevealed ? plan.room : null,
+          seat: seatRevealed ? (plan.seat_no ?? '—') : null,
+          seat_revealed: seatRevealed,
+          seat_reveal_message: seatRevealed
+            ? null
+            : 'Will be revealed 24 hours prior to exam',
         };
-      })
-      .filter(Boolean);
+      },
+    );
 
     return { ufm_cases: [...ufm, ...disciplineUfm], seating: mySeats };
   }
@@ -468,6 +583,7 @@ export class StudentPortalService {
       linkedin_url: c.linkedin_url,
       placement_organization: c.placement_organization,
       clearance_tasks: tasks,
+      alumni_eligibility: await this.alumniConversion.getConversionEligibility(tenantId, userId),
     };
   }
 
@@ -795,6 +911,7 @@ export class StudentPortalService {
     );
     const feeHead = demandMeta[0]?.fee_head ?? 'FEE';
     const tenantId = demandMeta[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const receiptNumber = `RCP-${paymentId.replace(/\W/g, '').slice(-12).toUpperCase()}`;
 
     const txnRows = await this.dataSource.query(
       `INSERT INTO finance_transactions (
@@ -804,6 +921,31 @@ export class StudentPortalService {
        RETURNING *`,
       [userId, demandId, paymentId, outstanding, `/receipts/${paymentId}.pdf`],
     );
+    const transactionId = txnRows[0]?.transaction_id as string;
+
+    let receiptUrl = txnRows[0]?.receipt_url as string;
+    try {
+      receiptUrl = await this.financeReceipts.generateAndStore({
+        tenantId,
+        transactionId,
+        receiptNumber,
+        studentUserId: userId,
+        amount: outstanding,
+        paymentMode: 'UPI',
+        feeHead,
+      });
+      await this.dataSource.query(
+        `UPDATE finance_transactions SET receipt_url = $2 WHERE transaction_id = $1`,
+        [transactionId, receiptUrl],
+      );
+      await this.dataSource.query(
+        `INSERT INTO student_documents (tenant_id, student_user_id, category, title, file_url, source_transaction_id)
+         VALUES ($1, $2, 'FEE_RECEIPTS', $3, $4, $5)`,
+        [tenantId, userId, `${feeHead} Receipt — ${receiptNumber}`, receiptUrl, transactionId],
+      );
+    } catch (err) {
+      // Receipt generation is best-effort; payment still recorded
+    }
 
     await this.dataSource.query(
       `UPDATE finance_fee_demands
@@ -841,9 +983,21 @@ export class StudentPortalService {
     return {
       success: true,
       transaction: txnRows[0],
-      receipt_url: txnRows[0]?.receipt_url,
+      receipt_url: receiptUrl,
+      document_vault_added: true,
       message: `Payment of ₹${outstanding} recorded successfully`,
       gates: ledger.gates,
     };
+  }
+
+  async getDocumentVault(tenantId: string, userId: string) {
+    const docs = await this.dataSource.query(
+      `SELECT document_id, category, title, file_url, source_transaction_id, created_at
+       FROM student_documents
+       WHERE tenant_id = $1 AND student_user_id = $2
+       ORDER BY created_at DESC`,
+      [tenantId, userId],
+    ).catch(() => []);
+    return { documents: docs };
   }
 }
