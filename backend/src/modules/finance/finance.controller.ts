@@ -4,6 +4,7 @@ import {
   Get,
   Header,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -103,6 +104,12 @@ export class FinanceController {
   @Roles('SuperAdmin', 'Accountant')
   listTransactions(@Query('studentUserId') studentUserId?: string) {
     return this.finance.listTransactions(studentUserId);
+  }
+
+  @Patch('transactions/:id/receipt')
+  @Roles('SuperAdmin', 'Accountant')
+  uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
+    return this.finance.uploadReceipt(id, dto.receipt_url);
   }
 
   @Get('defaulters')
