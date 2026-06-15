@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { getDashboardPathForRole } from '@/lib/auth-routing';
+import { getPostLoginPath } from '@/lib/auth-routing';
 import { FalconLogo } from '@/components/brand/FalconLogo';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { LogIn } from 'lucide-react';
@@ -19,7 +19,7 @@ export default function Home() {
 
   useEffect(() => {
     if (isAuthenticated && user) {
-      router.push(getDashboardPathForRole(user.primaryRole ?? user.role));
+      router.push(getPostLoginPath(user));
     }
   }, [isAuthenticated, user, router]);
 
@@ -34,7 +34,7 @@ export default function Home() {
     try {
       const result = await api.localLogin(email.trim(), password);
       login(result.token, result.user);
-      router.push(getDashboardPathForRole(result.user.primaryRole ?? result.user.role));
+      router.push(getPostLoginPath(result.user));
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : 'Login failed');
     } finally {
@@ -53,7 +53,7 @@ export default function Home() {
         .then((res) => res.json())
         .then((data) => {
           login(token, data);
-          router.push(getDashboardPathForRole(data.primaryRole ?? data.role));
+          router.push(getPostLoginPath(data));
         })
         .catch((err) => console.error('Failed to fetch user profile', err));
     }

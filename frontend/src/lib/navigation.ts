@@ -5,6 +5,7 @@ import {
   GraduationCap,
   ClipboardCheck,
   ClipboardList,
+  FileCheck2,
   CalendarDays,
   CalendarRange,
   ListChecks,
@@ -955,6 +956,7 @@ export const adminPortal: PortalConfig = {
       items: [
         { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield, roles: ['SuperAdmin', 'Registrar'] },
         { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
+        { label: 'Student Verifications', href: '/admin/verifications', icon: FileCheck2, roles: ['SuperAdmin', 'AdmissionsOfficer', 'Registrar'] },
         { label: 'Academics', href: '/admin/academics', icon: GraduationCap, roles: ['SuperAdmin', 'Registrar'] },
         { label: 'Finance', href: '/admin/finance', icon: Wallet, roles: ['SuperAdmin', 'Accountant', 'President'] },
         { label: 'HR & Payroll', href: '/admin/hr', icon: Users, roles: ['SuperAdmin', 'HR', 'President'] },

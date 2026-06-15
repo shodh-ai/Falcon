@@ -2,7 +2,7 @@
 
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { useAuth } from '@/context/AuthContext';
-import { getDashboardPathForRole } from '@/lib/auth-routing';
+import { getPostLoginPath } from '@/lib/auth-routing';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -34,7 +34,7 @@ export default function AuthCallbackPage() {
 
         const user = await response.json();
         login(token, user);
-        router.replace(getDashboardPathForRole(user.primaryRole ?? user.role));
+        router.replace(getPostLoginPath(user));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Authentication failed.');
       }

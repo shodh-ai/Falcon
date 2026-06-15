@@ -20,6 +20,7 @@ interface User {
   hr_capabilities?: Record<string, 'none' | 'read' | 'write'>;
   permissions?: string[];
   allowed_entities?: AllowedEntity[];
+  onboarding_status?: string;
 }
 
 interface AuthContextType {
