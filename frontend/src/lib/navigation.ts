@@ -220,8 +220,8 @@ export function filterPortalConfigForHrCapabilities(
 }
 
 export const studentPortal: PortalConfig = {
-  personaLabel: 'Student Portal',
-  personaTitle: 'SGVU Student Life',
+  personaLabel: 'Falcon Student',
+  personaTitle: 'Falcon Student Life',
   homeHref: '/student/dashboard',
   navGroups: [
     {
@@ -249,13 +249,10 @@ export const studentPortal: PortalConfig = {
       title: 'Campus Services',
       items: [
         { label: 'My Financial Ledger', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
-        { label: 'Hostel & Mess', href: '/student/hostel', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'room'] },
-        { label: 'Smart Mess & Wallet', href: '/student/dining', icon: UtensilsCrossed, keywords: ['dining', 'mess', 'wallet', 'add-on', 'qr', 'falcon pay'] },
-        { label: 'Hostel Bed Booking', href: '/student/hostel-booking', icon: BedDouble, keywords: ['tatkal', 'bed', 'allocation'] },
+        { label: 'Campus Life', href: '/student/campus-life', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'wallet', 'campus'] },
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
-        { label: 'Extra-Curriculars', href: '/student/extracurriculars', icon: Medal, keywords: ['ncc', 'nss', 'sodeca', 'credits'] },
-        { label: 'Falcon Events', href: '/student/events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'workshop', 'dj'] },
+        { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'ncc', 'nss', 'fest'] },
       ],
     },
     {
@@ -276,9 +273,8 @@ export const studentPortal: PortalConfig = {
     { label: 'Marks', href: '/student/marks', icon: TrendingUp },
     { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
     { label: 'Financial Ledger', href: '/student/finance', icon: Wallet },
-    { label: 'Hostel', href: '/student/hostel', icon: Bus },
-    { label: 'Smart Mess', href: '/student/dining', icon: UtensilsCrossed },
-    { label: 'Falcon Events', href: '/student/events', icon: PartyPopper },
+    { label: 'Campus Life', href: '/student/campus-life', icon: Bus },
+    { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
 };
@@ -788,29 +784,42 @@ export const presidentPortal: PortalConfig = {
 
 export const leadershipPortal: PortalConfig = {
   personaLabel: 'Chairman / Executive Board',
-  personaTitle: 'Executive Command Center',
+  personaTitle: 'Owner’s Command Center',
   homeHref: '/leadership/overview',
   navGroups: [
     {
       title: 'Global Command Center',
       items: [
+        { label: 'Automated Insights', href: '/leadership/intelligence', icon: LineChart, keywords: ['owners brief', 'ticker', 'ai', 'alerts'] },
+        { label: 'Versus · Comparative Analytics', href: '/leadership/versus', icon: LineChart, keywords: ['mom', 'yoy', 'variance', 'scatter', 'ratios'] },
+        { label: 'Finance Config', href: '/leadership/finance-config', icon: Settings, keywords: ['allocation rules', 'bank snapshot', 'waterfall'] },
+        { label: 'Budget Allocation', href: '/leadership/budget-allocation', icon: Banknote, keywords: ['fpa', 'allocate', 'financial year', 'department'] },
+        { label: 'Budget Monitor', href: '/leadership/budget-monitor', icon: BarChart3, keywords: ['sankey', 'drill-down', 'encumbrance', 'program'] },
         { label: 'Overview', href: '/leadership/overview', icon: LayoutDashboard, keywords: ['tickers', 'students', 'revenue', 'attendance'] },
-        { label: 'Financial Health', href: '/leadership/finance', icon: Wallet, keywords: ['revenue', 'expenses', 'defaulters'] },
-        { label: 'Academics & Brand', href: '/leadership/academics', icon: GraduationCap, keywords: ['cgpa', 'naac', 'iqac', 'research'] },
-        { label: 'Corporate Relations', href: '/leadership/placements', icon: Briefcase, keywords: ['lpa', 'placement', 'recruiters'] },
-        { label: 'HR & Operations', href: '/leadership/hr-ops', icon: Users, keywords: ['nirf', 'hostel', 'grievances', 'attrition'] },
-        { label: 'Issue Command Center', href: '/leadership/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'helpdesk', 'escalation'] },
+        { label: 'Pillar 1 · Financial P&L + Cash Flow', href: '/leadership/finance', icon: Wallet, keywords: ['sankey', 'waterfall', 'p&l', 'cash flow'] },
+        { label: 'Pillar 2 · Admissions Funnel', href: '/leadership/admissions-funnel', icon: TrendingUp, keywords: ['leads', 'applications', 'enrolled', 'conversion'] },
+        { label: 'Pillar 3 · Academic & Brand Value', href: '/leadership/academics', icon: GraduationCap, keywords: ['placements heatmap', 'naac', 'iqac', 'faculty phd'] },
+        { label: 'Pillar 4 · HR & Payroll Economics', href: '/leadership/hr-ops', icon: Users, keywords: ['payroll', 'attrition', 'cost vs revenue'] },
+        { label: 'Pillar 5 · Infrastructure & Assets', href: '/leadership/infrastructure', icon: Building2, keywords: ['hostel occupancy', 'assets', 'maintenance'] },
+        { label: 'Pillar 6 · Risk & Compliance', href: '/leadership/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'compliance'] },
         { label: 'University Directory', href: '/directory', icon: Contact, keywords: ['students', 'faculty', 'browse', 'export', '360'] },
       ],
     },
   ],
   commandItems: [
+    { label: 'Automated Insights', href: '/leadership/intelligence', icon: LineChart },
+    { label: 'Versus', href: '/leadership/versus', icon: LineChart },
+    { label: 'Finance Config', href: '/leadership/finance-config', icon: Settings },
+    { label: 'Budget Allocation', href: '/leadership/budget-allocation', icon: Banknote },
+    { label: 'Budget Monitor', href: '/leadership/budget-monitor', icon: BarChart3 },
     { label: 'Executive Overview', href: '/leadership/overview', icon: LayoutDashboard },
-    { label: 'Finance', href: '/leadership/finance', icon: Wallet },
+    { label: 'Cash Flow', href: '/leadership/finance', icon: Wallet },
+    { label: 'Admissions Funnel', href: '/leadership/admissions-funnel', icon: TrendingUp },
     { label: 'Academics', href: '/leadership/academics', icon: GraduationCap },
     { label: 'Placements', href: '/leadership/placements', icon: Briefcase },
-    { label: 'HR & Ops', href: '/leadership/hr-ops', icon: Users },
-    { label: 'Issue Command Center', href: '/leadership/issues', icon: AlertTriangle },
+    { label: 'HR Economics', href: '/leadership/hr-ops', icon: Users },
+    { label: 'Infrastructure', href: '/leadership/infrastructure', icon: Building2 },
+    { label: 'Risk & Compliance', href: '/leadership/issues', icon: AlertTriangle },
     { label: 'University Directory', href: '/directory', icon: Contact },
   ],
 };
@@ -893,10 +902,38 @@ export const placementPortal: PortalConfig = {
   ],
 };
 
-/** Legacy portal key — routes redirect to IQAC; nav mirrors iqacPortal. */
+/** Alumni Officer portal — conversion verifications, donations, events. */
 export const alumniAdminPortal: PortalConfig = {
-  ...iqacPortal,
-  homeHref: '/iqac/alumni/verification',
+  personaLabel: 'Alumni Relations',
+  personaTitle: 'Alumni Admin Portal',
+  homeHref: '/alumni-admin/verification',
+  navGroups: [
+    {
+      title: 'Conversion Workflow',
+      items: [
+        {
+          label: 'Pending Verifications',
+          href: '/alumni-admin/verification',
+          icon: CheckCircle,
+          keywords: ['approve', 'no-dues', 'graduate', 'alumni'],
+        },
+      ],
+    },
+    {
+      title: 'Engagement',
+      items: [
+        { label: 'Donation Ledger', href: '/alumni-admin/donations', icon: DollarSign, keywords: ['80g', 'endowment'] },
+        { label: 'Engagement Analytics', href: '/alumni-admin/analytics', icon: BarChart3, keywords: ['retention', 'mentorship'] },
+        { label: 'Event Manager', href: '/alumni-admin/events', icon: Calendar, keywords: ['rsvp', 'reunion'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Pending Verifications', href: '/alumni-admin/verification', icon: CheckCircle },
+    { label: 'Donation Ledger', href: '/alumni-admin/donations', icon: DollarSign },
+    { label: 'Analytics', href: '/alumni-admin/analytics', icon: BarChart3 },
+    { label: 'Events', href: '/alumni-admin/events', icon: Calendar },
+  ],
 };
 
 export const adminPortal: PortalConfig = {

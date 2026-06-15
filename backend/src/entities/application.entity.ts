@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { Lead } from './lead.entity';
 
 export type ApplicationStatus =
@@ -13,7 +14,7 @@ export type ApplicationStatus =
 @Entity('admissions_applications')
 @Index(['status'])
 @Index(['lead_id'])
-export class Application {
+export class Application extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   application_id: string;
 

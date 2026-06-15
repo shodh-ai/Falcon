@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { TaskMaster } from './task-master.entity';
 import { User } from './user.entity';
 
@@ -6,7 +7,7 @@ import { User } from './user.entity';
 @Index(['assigned_to', 'status'])
 @Index(['task_id', 'status'])
 @Index(['due_date'])
-export class TaskAssignment {
+export class TaskAssignment extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   assignment_id: string;
 

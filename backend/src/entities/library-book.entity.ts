@@ -1,9 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('operations_library_books')
 @Index(['isbn'])
 @Index(['title'])
-export class LibraryBook {
+export class LibraryBook extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn()
   book_id: number;
 

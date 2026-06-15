@@ -1,3 +1,6 @@
+'use client';
+
+import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 export type StudentTabItem<T extends string> = {
@@ -27,17 +30,22 @@ export function StudentTabBar<T extends string>({
             type="button"
             onClick={() => onChange(tab.id)}
             className={cn(
-              'inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition',
-              isActive
-                ? 'bg-sgvu-navy text-white shadow-sm'
-                : 'text-muted-foreground hover:bg-background hover:text-sgvu-navy',
+              'relative inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors',
+              isActive ? 'text-white' : 'text-muted-foreground hover:bg-background hover:text-sgvu-navy',
             )}
           >
-            {tab.label}
+            {isActive && (
+              <motion.span
+                layoutId="student-tab-pill"
+                className="absolute inset-0 rounded-xl bg-sgvu-navy shadow-sm"
+                transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+              />
+            )}
+            <span className="relative z-10">{tab.label}</span>
             {tab.count != null ? (
               <span
                 className={cn(
-                  'rounded-full px-2 py-0.5 text-xs font-bold',
+                  'relative z-10 rounded-full px-2 py-0.5 text-xs font-bold',
                   isActive ? 'bg-white/20 text-white' : 'bg-sgvu-navy/10 text-sgvu-navy',
                 )}
               >

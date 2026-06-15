@@ -74,6 +74,8 @@ export default function StudentTransportPage() {
   const [qr, setQr] = useState<QrPayload | null>(null);
   const [live, setLive] = useState<LiveData | null>(null);
   const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
+  const [routeChangeReason, setRouteChangeReason] = useState('');
+  const [routeChangeOpen, setRouteChangeOpen] = useState(false);
 
   const loadAllocation = useCallback(() => {
     void api.get<Allocation | null>('/api/transport/my-allocation').then((a) => {
@@ -145,12 +147,26 @@ export default function StudentTransportPage() {
     };
   }, [api, apiUrl, tab, allocation?.route_id]);
 
+  async function requestRouteChange() {
+    if (routeChangeReason.trim().length < 10) {
+      toast.error('Provide a reason (10+ characters)');
+      return;
+    }
+    try {
+      await api.post('/api/transport/request-route-change', { reason: routeChangeReason.trim() });
+      toast.success('Route change request sent to Transport Officer');
+      setRouteChangeOpen(false);
+      setRouteChangeReason('');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Request failed');
+    }
+  }
+
   async function geocodeAddress() {
     if (!address.trim()) {
       toast.error('Enter your home area or landmark');
       return;
     }
-    // Demo geocoder: use Jaipur center offset by hash of address for testing without Maps API key
     const hash = address.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
     const lat = 26.85 + (hash % 100) / 1000;
     const lng = 75.75 + ((hash >> 4) % 100) / 1000;
@@ -233,6 +249,37 @@ export default function StudentTransportPage() {
 
       {tab === 'find' && (
         <>
+          {allocation?.payment_status === 'PAID' ? (
+            <Card className="border-sgvu-gold/40 bg-sgvu-gold/5">
+              <CardHeader>
+                <CardTitle className="text-base">Your Route</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p className="text-lg font-bold text-sgvu-navy">
+                  {allocation.route_name} | Stop: {allocation.stop_name}
+                </p>
+                <p className="text-muted-foreground">Pickup is locked to this stop for the semester.</p>
+                {!routeChangeOpen ? (
+                  <Button variant="outline" onClick={() => setRouteChangeOpen(true)}>
+                    Request Route Change
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <Input
+                      placeholder="Why do you need a different route?"
+                      value={routeChangeReason}
+                      onChange={(e) => setRouteChangeReason(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Button onClick={() => void requestRouteChange()}>Submit to Transport Officer</Button>
+                      <Button variant="ghost" onClick={() => setRouteChangeOpen(false)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Where do you board from?</CardTitle>
@@ -319,6 +366,8 @@ export default function StudentTransportPage() {
               ))}
             </CardContent>
           </Card>
+            </>
+          )}
         </>
       )}
 

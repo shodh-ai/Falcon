@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type HelpdeskTicketCategory =
   | 'FINANCE'
@@ -7,14 +8,14 @@ export type HelpdeskTicketCategory =
   | 'HOSTEL'
   | 'MENTORSHIP'
   | 'STUDENT_PROFILE';
-export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED';
+export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'REJECTED';
 
 @Entity('helpdesk_tickets')
 @Index(['student_user_id'])
 @Index(['assigned_to_user_id'])
 @Index(['category'])
 @Index(['status'])
-export class HelpdeskTicket {
+export class HelpdeskTicket extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   ticket_id: string;
 
@@ -64,6 +65,9 @@ export class HelpdeskTicket {
 
   @Column({ type: 'timestamptz', nullable: true })
   resolved_at: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  rejection_reason: string | null;
 
   @CreateDateColumn()
   created_at: Date;

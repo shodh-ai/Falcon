@@ -24,6 +24,9 @@ export const NotificationEvents = {
   HR_ONBOARDING_CREDENTIALS: 'hr.onboarding_credentials',
   HR_EXPORT_READY: 'hr.export_ready',
   HR_EXPORT_FAILED: 'hr.export_failed',
+  ALUMNI_CONVERSION_REQUESTED: 'alumni.conversion_requested',
+  ALUMNI_CONVERSION_APPROVED: 'alumni.conversion_approved',
+  ALUMNI_WELCOME_EMAIL: 'alumni.welcome_email',
 } as const;
 
 export type NotificationEventName =
@@ -156,4 +159,26 @@ export type HrExportFailedPayload = BaseNotificationPayload & {
   jobId: string;
   label: string;
   errorMessage: string;
+};
+
+export type AlumniConversionRequestedPayload = {
+  tenantId: string;
+  studentUserId: string;
+  studentName: string;
+  programName?: string | null;
+  enrollmentNo?: string | null;
+};
+
+export type AlumniWelcomeEmailPayload = {
+  tenantId: string;
+  studentUserId: string;
+  personalEmail: string;
+  studentName: string;
+};
+
+export type AlumniConversionApprovedPayload = {
+  tenantId: string;
+  studentUserId: string;
+  studentName: string;
+  officialEmail: string;
 };

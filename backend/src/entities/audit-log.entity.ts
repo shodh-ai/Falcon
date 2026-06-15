@@ -1,10 +1,11 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
 @Entity('audit_log')
 @Index(['user_id', 'action'])
 @Index(['entity_type', 'entity_id'])
-export class AuditLog {
+export class AuditLog extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   log_id: string;
 

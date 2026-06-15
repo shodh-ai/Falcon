@@ -7,6 +7,7 @@ import { AttendanceCalculationService } from './attendance-calculation.service';
 import { HrTeamScopeService, parseTeamScope, type TeamScope } from './hr-team-scope.service';
 import { HrWorkforceService } from './hr-workforce.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { CacheService } from '../../core/redis/cache.service';
 
 export type TeamRequestTab =
   | 'LEAVE'
@@ -33,6 +34,7 @@ export class HrTeamService {
     private readonly attendanceCalc: AttendanceCalculationService,
     private readonly workforce: HrWorkforceService,
     private readonly notify: NotificationEmitterService,
+    private readonly cache: CacheService,
   ) {}
 
   private monthRange(month: string) {
@@ -218,74 +220,121 @@ export class HrTeamService {
   ) {
     const scope = parseTeamScope(scopeRaw);
     const monthKey = month ?? new Date().toISOString().slice(0, 7);
-    const { daysInMonth } = this.monthRange(monthKey);
+    const cacheKey = `hr_team_att:${tenantId}:${managerId}:${scope}:${monthKey}`;
+    return this.cache.getOrSet(
+      cacheKey,
+      () => this.buildAttendanceMatrix(managerId, tenantId, scope, monthKey),
+      600,
+    );
+  }
+
+  private async buildAttendanceMatrix(
+    managerId: string,
+    tenantId: string,
+    scope: TeamScope,
+    monthKey: string,
+  ) {
+    const { daysInMonth, start, end } = this.monthRange(monthKey);
     const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    if (!members.length) {
+      return { scope, month: monthKey, days_in_month: daysInMonth, employees: [] };
+    }
 
-    const employees = await Promise.all(
-      members.map(async (m) => {
-        const cal = await this.attendanceCalc.getMonthCalendar(m.user_id, monthKey);
-        const shift = cal.shift;
-        const requiredLabel = `${String(shift.full_day_min_hours ?? 8).padStart(2, '0')}:00 Hrs`;
+    const entityRows = await this.dataSource.query<Array<{ entity_id: number }>>(
+      `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [managerId, tenantId],
+    );
+    const entityId = Number(entityRows[0]?.entity_id ?? 1);
+    const userIds = members.map((m) => m.user_id);
 
-        const leaveRows = await this.dataSource.query<
-          Array<{ start_date: string; end_date: string; leave_type: string; request_type: string; status: string }>
-        >(
-          `SELECT start_date, end_date, leave_type, request_type, status
-           FROM staff_leave_requests
-           WHERE staff_user_id = $1
-             AND status IN ('PENDING','HOD_APPROVED','HR_APPROVED')
-             AND start_date <= $3 AND end_date >= $2`,
-          [m.user_id, `${monthKey}-01`, `${monthKey}-${String(daysInMonth).padStart(2, '0')}`],
-        );
+    const [calendars, leaveRows] = await Promise.all([
+      this.attendanceCalc.buildMonthCalendarsBatch(userIds, monthKey, tenantId, entityId),
+      this.dataSource.query<
+        Array<{
+          staff_user_id: string;
+          start_date: string;
+          end_date: string;
+          leave_type: string;
+          request_type: string;
+          status: string;
+        }>
+      >(
+        `SELECT staff_user_id, start_date, end_date, leave_type, request_type, status
+         FROM staff_leave_requests
+         WHERE staff_user_id = ANY($1::uuid[])
+           AND status IN ('PENDING','HOD_APPROVED','HR_APPROVED')
+           AND start_date <= $3 AND end_date >= $2`,
+        [userIds, start, end],
+      ),
+    ]);
 
-        const odRows = leaveRows.filter((r) => r.request_type === 'ON_DUTY');
+    const leavesByUser = new Map<string, typeof leaveRows>();
+    for (const row of leaveRows) {
+      const list = leavesByUser.get(row.staff_user_id) ?? [];
+      list.push(row);
+      leavesByUser.set(row.staff_user_id, list);
+    }
 
-        const days = cal.days.map((d) => {
-          const leave = leaveRows.find((r) => {
-            if (r.request_type === 'ON_DUTY') return false;
-            return d.date >= r.start_date && d.date <= r.end_date;
-          });
-          const od = odRows.find((r) => d.date >= r.start_date && d.date <= r.end_date);
-
-          let bottomLine: string;
-          if (leave) {
-            bottomLine = `Leave(${leave.leave_type})`;
-          } else if (od) {
-            bottomLine = 'On Duty';
-          } else if (d.calculated_status === 'ABSENT') {
-            bottomLine = 'Absent';
-          } else if (d.first_in_time && d.last_out_time) {
-            bottomLine = `${this.formatClock(d.first_in_time)}-${this.formatClock(d.last_out_time)}`;
-          } else if (d.calculated_status === 'WEEK_OFF') {
-            bottomLine = 'Week Off';
-          } else if (d.calculated_status === 'HOLIDAY') {
-            bottomLine = 'Holiday';
-          } else {
-            bottomLine = d.calculated_status.replace(/_/g, ' ');
-          }
-
-          const topLine =
-            d.calculated_status === 'WEEK_OFF' || d.calculated_status === 'HOLIDAY'
-              ? '—'
-              : requiredLabel;
-
-          return {
-            date: d.date,
-            top_line: topLine,
-            bottom_line: bottomLine,
-            calculated_status: d.calculated_status,
-            color: this.cellColor(d.calculated_status, bottomLine),
-          };
+    const employees = members.map((m) => {
+      const cal = calendars.get(m.user_id);
+      const shift = cal?.shift ?? {
+        full_day_min_hours: 8,
+        half_day_min_hours: 4,
+        grace_period_mins: 15,
+        shift_id: '',
+        shift_name: 'Default',
+        start_time: '09:00:00',
+        end_time: '17:00:00',
+        week_off_day: 0,
+      };
+      const requiredLabel = `${String(shift.full_day_min_hours ?? 8).padStart(2, '0')}:00 Hrs`;
+      const userLeaves = leavesByUser.get(m.user_id) ?? [];
+      const odRows = userLeaves.filter((r) => r.request_type === 'ON_DUTY');
+      const days = (cal?.days ?? []).map((d) => {
+        const leave = userLeaves.find((r) => {
+          if (r.request_type === 'ON_DUTY') return false;
+          return d.date >= r.start_date && d.date <= r.end_date;
         });
+        const od = odRows.find((r) => d.date >= r.start_date && d.date <= r.end_date);
+
+        let bottomLine: string;
+        if (leave) {
+          bottomLine = `Leave(${leave.leave_type})`;
+        } else if (od) {
+          bottomLine = 'On Duty';
+        } else if (d.calculated_status === 'ABSENT') {
+          bottomLine = 'Absent';
+        } else if (d.first_in_time && d.last_out_time) {
+          bottomLine = `${this.formatClock(d.first_in_time)}-${this.formatClock(d.last_out_time)}`;
+        } else if (d.calculated_status === 'WEEK_OFF') {
+          bottomLine = 'Week Off';
+        } else if (d.calculated_status === 'HOLIDAY') {
+          bottomLine = 'Holiday';
+        } else {
+          bottomLine = d.calculated_status.replace(/_/g, ' ');
+        }
+
+        const topLine =
+          d.calculated_status === 'WEEK_OFF' || d.calculated_status === 'HOLIDAY'
+            ? '—'
+            : requiredLabel;
 
         return {
-          user_id: m.user_id,
-          name: m.name,
-          employee_id: m.employee_id,
-          days,
+          date: d.date,
+          top_line: topLine,
+          bottom_line: bottomLine,
+          calculated_status: d.calculated_status,
+          color: this.cellColor(d.calculated_status, bottomLine),
         };
-      }),
-    );
+      });
+
+      return {
+        user_id: m.user_id,
+        name: m.name,
+        employee_id: m.employee_id,
+        days,
+      };
+    });
 
     return { scope, month: monthKey, days_in_month: daysInMonth, employees };
   }

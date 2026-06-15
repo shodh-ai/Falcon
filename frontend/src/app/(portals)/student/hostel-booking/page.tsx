@@ -547,8 +547,12 @@ export default function StudentHostelBookingPage() {
   const [locking, setLocking] = useState(false);
   const [roomTypeFilter, setRoomTypeFilter] = useState('ALL');
   const [acFilter, setAcFilter] = useState('ALL');
+  const [saleActive, setSaleActive] = useState<boolean | null>(null);
 
   async function load() {
+    const settings = await api.get<{ is_hostel_sale_active: boolean }>('/api/student/campus-settings');
+    setSaleActive(settings.is_hostel_sale_active);
+    if (!settings.is_hostel_sale_active) return;
     const c = await api.get<HostelBlock[]>('/api/hostel-tatkal/catalog');
     setCatalog(c);
     if (!selectedHostel && c[0]) setSelectedHostel(c[0].hostel_block);
@@ -699,9 +703,13 @@ export default function StudentHostelBookingPage() {
       />
 
       {loading ? (
-        <div className="flex justify-center p-12">
-          <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" />
-        </div>
+        <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" /></div>
+      ) : saleActive === false ? (
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            Hostel bed booking is closed. The Chief Warden will open sales when rooms are available.
+          </CardContent>
+        </Card>
       ) : (
         <div className="space-y-8">
           <div className="space-y-5">

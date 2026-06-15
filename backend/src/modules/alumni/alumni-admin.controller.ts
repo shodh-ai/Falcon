@@ -16,13 +16,52 @@ export class AlumniAdminController {
   ) {}
 
   @Get('verification-queue')
-  @Roles('IQAC', 'SuperAdmin', 'Registrar')
+  @Roles('IQAC', 'Registrar')
   verificationQueue(@Req() req: { user: AuthUser }) {
     return this.admin.verificationQueue(this.tenant(req));
   }
 
+  @Get('verification')
+  @Roles('IQAC', 'Registrar')
+  listVerificationInbox(@Req() req: { user: AuthUser }) {
+    return this.admin.listConversionVerifications(this.tenant(req));
+  }
+
+  @Get('verifications')
+  @Roles('IQAC', 'Registrar')
+  listVerifications(@Req() req: { user: AuthUser }) {
+    return this.admin.listConversionVerifications(this.tenant(req));
+  }
+
+  @Post('verification/:alumniId/approve')
+  @Roles('IQAC', 'Registrar')
+  approveVerificationInbox(
+    @Req() req: { user: AuthUser },
+    @Param('alumniId') alumniId: string,
+  ) {
+    return this.admin.approveConversion(this.tenant(req), alumniId, req.user.user_id);
+  }
+
+  @Post('verifications/:alumniId/approve')
+  @Roles('IQAC', 'Registrar')
+  approveVerification(
+    @Req() req: { user: AuthUser },
+    @Param('alumniId') alumniId: string,
+  ) {
+    return this.admin.approveConversion(this.tenant(req), alumniId, req.user.user_id);
+  }
+
+  @Post('verifications/:alumniId/reject')
+  @Roles('IQAC', 'Registrar')
+  rejectVerification(
+    @Req() req: { user: AuthUser },
+    @Param('alumniId') alumniId: string,
+  ) {
+    return this.admin.verifyProfile(this.tenant(req), alumniId, req.user.user_id, { action: 'reject' });
+  }
+
   @Patch('profiles/:alumniId/verify')
-  @Roles('IQAC', 'SuperAdmin', 'Registrar')
+  @Roles('IQAC', 'Registrar')
   verify(
     @Req() req: { user: AuthUser },
     @Param('alumniId') alumniId: string,

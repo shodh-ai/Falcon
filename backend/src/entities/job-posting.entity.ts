@@ -1,10 +1,11 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type JobPostingStatus = 'DRAFT' | 'OPEN' | 'CLOSED' | 'ARCHIVED';
 
 @Entity('placement_job_postings')
 @Index(['status'])
-export class JobPosting {
+export class JobPosting extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   job_id: string;
 

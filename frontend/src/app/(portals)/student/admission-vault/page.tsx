@@ -23,9 +23,13 @@ type Vault = {
 export default function StudentAdmissionVaultPage() {
   const api = useAuthedApi();
   const [data, setData] = useState<Vault | null>(null);
+  const [feeDocs, setFeeDocs] = useState<{ title: string; file_url: string; created_at: string }[]>([]);
 
   useEffect(() => {
     void api.get<Vault>('/api/student/admission-vault').then(setData);
+    void api.get<{ documents: { title: string; file_url: string; created_at: string; category: string }[] }>(
+      '/api/student/documents',
+    ).then((res) => setFeeDocs(res.documents.filter((d) => d.category === 'FEE_RECEIPTS'))).catch(() => setFeeDocs([]));
   }, [api]);
 
   return (
@@ -97,11 +101,23 @@ export default function StudentAdmissionVaultPage() {
         )}
       </StudentSectionCard>
 
-      <StudentSectionCard title="Fee payment receipts" description="Admission fee payment records and transaction history" icon={Receipt}>
-        {(data?.admission_fee_receipts ?? []).length === 0 ? (
-          <StudentEmptyState title="No fee receipts" description="Fee payment records will appear here once processed." />
+      <StudentSectionCard title="Fee payment receipts" description="Auto-archived to your Document Vault when you pay via Finance" icon={Receipt}>
+        {feeDocs.length === 0 && (data?.admission_fee_receipts ?? []).length === 0 ? (
+          <StudentEmptyState title="No fee receipts" description="Pay fees in Finance — PDF receipts appear here automatically." />
         ) : (
           <div className="space-y-3 text-sm">
+            {feeDocs.map((doc) => (
+              <a
+                key={doc.file_url}
+                href={doc.file_url}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded-2xl border border-sgvu-gold/30 bg-sgvu-gold/5 p-3 transition hover:shadow-sm"
+              >
+                <p className="font-medium text-sgvu-navy">{doc.title}</p>
+                <p className="text-xs text-muted-foreground">{new Date(doc.created_at).toLocaleString()}</p>
+              </a>
+            ))}
             {(data?.admission_fee_receipts ?? []).map((r) => (
               <div key={String(r.demand_id)} className="rounded-2xl border border-border/70 bg-white p-3">
                 <p className="font-medium text-sgvu-navy">{String(r.fee_head)}</p>

@@ -12,6 +12,7 @@ import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Trash2, Pencil, Us
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
+import { type CalendarDay } from '@/components/hr/HrAttendanceCalendar';
 import { attendanceCircleStyle, ATTENDANCE_LEGEND } from '@/lib/hr-attendance-status';
 
 type Holiday = {
@@ -25,7 +26,7 @@ type Holiday = {
 
 export default function AttendanceHolidaysCalendarPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [attendanceDays, setAttendanceDays] = useState<Record<string, any>>({});
+  const [attendanceDays, setAttendanceDays] = useState<Record<string, CalendarDay>>({});
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -135,9 +136,9 @@ export default function AttendanceHolidaysCalendarPage() {
   const fetchAttendance = async () => {
     try {
       const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
-      const data = await api.get(`/api/hr/attendance/calendar?month=${monthStr}`);
-      const map: Record<string, any> = {};
-      data?.days?.forEach((d: any) => {
+      const data = await api.get<{ days: CalendarDay[] }>(`/api/hr/attendance/calendar?month=${monthStr}`);
+      const map: Record<string, CalendarDay> = {};
+      data?.days?.forEach((d) => {
         map[d.date] = d;
       });
       setAttendanceDays(map);
@@ -266,9 +267,15 @@ export default function AttendanceHolidaysCalendarPage() {
                                   <span className="font-bold opacity-80">{h.type === 'RESTRICTED' ? 'RH' : 'M'}</span>
                                   <span className="truncate">{h.title}</span>
                                 </div>
-                                {h.applicable_to === 'STAFF' && <Briefcase className="h-3 w-3 shrink-0 opacity-70" title="Staff" />}
-                                {h.applicable_to === 'STUDENT' && <Users className="h-3 w-3 shrink-0 opacity-70" title="Students" />}
-                                {h.applicable_to === 'ALL' && <Globe className="h-3 w-3 shrink-0 opacity-70" title="All" />}
+                                {h.applicable_to === 'STAFF' && (
+                                  <span title="Staff"><Briefcase className="h-3 w-3 shrink-0 opacity-70" /></span>
+                                )}
+                                {h.applicable_to === 'STUDENT' && (
+                                  <span title="Students"><Users className="h-3 w-3 shrink-0 opacity-70" /></span>
+                                )}
+                                {h.applicable_to === 'ALL' && (
+                                  <span title="All"><Globe className="h-3 w-3 shrink-0 opacity-70" /></span>
+                                )}
                               </div>
                             ))}
                           </div>

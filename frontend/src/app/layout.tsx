@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { TenantProvider } from "@/context/TenantContext";
+import { SWRProvider } from "@/components/providers/SWRProvider";
 
 export const metadata: Metadata = {
   title: "Falcon | SGVU Campus OS",
@@ -28,7 +29,9 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <TenantProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <SWRProvider>{children}</SWRProvider>
+          </AuthProvider>
         </TenantProvider>
         <Toaster position="top-center" richColors closeButton />
       </body>

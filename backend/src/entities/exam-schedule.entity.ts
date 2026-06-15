@@ -1,11 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type ExamType = 'MID_TERM' | 'END_TERM' | 'PRACTICAL';
 
 @Entity('exam_schedules')
 @Index(['exam_date'])
 @Index(['subject_id'])
-export class ExamSchedule {
+export class ExamSchedule extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   exam_schedule_id: string;
 

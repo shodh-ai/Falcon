@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
 import { User } from '../../entities/user.entity';
+import { WorkflowModule } from '../../core/workflow/workflow.module';
 import { TicketController } from './ticket.controller';
 import { TicketService } from './ticket.service';
+import { HelpdeskEscalationService } from './helpdesk-escalation.service';
 import { TICKET_PROVIDER } from './providers/ticket-provider.interface';
 import { LocalTicketProvider } from './providers/local-ticket.provider';
 import { WebhookTicketProvider } from './providers/webhook-ticket.provider';
@@ -18,10 +20,11 @@ const ticketProviderFactory = {
 };
 
 @Module({
-  imports: [TypeOrmModule.forFeature([HelpdeskTicket, User])],
+  imports: [TypeOrmModule.forFeature([HelpdeskTicket, User]), WorkflowModule],
   controllers: [TicketController],
   providers: [
     TicketService,
+    HelpdeskEscalationService,
     LocalTicketProvider,
     WebhookTicketProvider,
     ticketProviderFactory,

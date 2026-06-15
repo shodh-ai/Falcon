@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { DataTable } from '@/components/ui/DataTable';
+import { VirtualizedDataTable } from '@/components/ui/VirtualizedDataTable';
 import { useAuthedApi } from '@/lib/api';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import type { PaginatedResponse } from '@/lib/api/pagination';
@@ -84,7 +84,7 @@ export default function HostelAttendancePage() {
         />
       </div>
 
-      <DataTable
+      <VirtualizedDataTable
         columns={[
           { key: 'student', header: 'Student', render: (r) => r.student_name },
           { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },

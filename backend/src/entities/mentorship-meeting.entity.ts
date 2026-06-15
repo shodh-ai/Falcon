@@ -8,6 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
 export type MentorshipMeetingStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
@@ -15,7 +16,7 @@ export type MentorshipMeetingStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COM
 @Entity('mentorship_meetings')
 @Index(['proctor_user_id', 'status'])
 @Index(['student_user_id'])
-export class MentorshipMeeting {
+export class MentorshipMeeting extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   meeting_id: string;
 
