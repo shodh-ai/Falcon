@@ -1031,7 +1031,7 @@ export class CampusEventsService {
 
   @Interval(30_000)
   async expireStalePaymentHolds() {
-    const expired = await this.dataSource.query(
+    const [expired] = await this.dataSource.query(
       `UPDATE event_registrations r
        SET status = 'EXPIRED', payment_status = 'EXPIRED'
        FROM campus_events e

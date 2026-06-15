@@ -97,7 +97,11 @@ export default function StudentFinancePage() {
 
   function downloadReceipt(row: PaymentRow) {
     if (row.receipt_url) {
-      window.open(row.receipt_url, '_blank');
+      if (row.receipt_url.startsWith('http')) {
+        window.open(row.receipt_url, '_blank');
+      } else {
+        window.open(`/api/uploads/download?path=${encodeURIComponent(row.receipt_url)}`, '_blank');
+      }
       return;
     }
     toast.info('Receipt will be available once finance generates the PDF');

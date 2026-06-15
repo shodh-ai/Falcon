@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { FileCheck2, FileText, History, Receipt } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -8,6 +8,7 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentInfoTile } from '@/components/student/StudentInfoTile';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 
 type Vault = {
@@ -94,7 +95,14 @@ export default function StudentAdmissionVaultPage() {
             {(data?.documents ?? []).map((doc) => (
               <div key={String(doc.certificate_id)} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/70 bg-white p-3">
                 <span className="font-medium text-sgvu-navy">{String(doc.title)}</span>
-                <Badge variant="outline">{String(doc.verification_status)}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{String(doc.verification_status)}</Badge>
+                  {Boolean(doc.file_path) && (
+                    <Button variant="ghost" size="sm" asChild>
+                      <a href={`/api/uploads/download?path=${encodeURIComponent(String(doc.file_path))}`} target="_blank" rel="noreferrer">Download</a>
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -119,11 +127,18 @@ export default function StudentAdmissionVaultPage() {
               </a>
             ))}
             {(data?.admission_fee_receipts ?? []).map((r) => (
-              <div key={String(r.demand_id)} className="rounded-2xl border border-border/70 bg-white p-3">
-                <p className="font-medium text-sgvu-navy">{String(r.fee_head)}</p>
-                <p className="text-muted-foreground">
-                  ₹{String(r.paid_amount)} / ₹{String(r.total_amount)} · {String(r.status)}
-                </p>
+              <div key={String(r.demand_id)} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/70 bg-white p-3">
+                <div>
+                  <p className="font-medium text-sgvu-navy">{String(r.fee_head)}</p>
+                  <p className="text-muted-foreground">
+                    ₹{String(r.paid_amount)} / ₹{String(r.total_amount)} · {String(r.status)}
+                  </p>
+                </div>
+                {Boolean(r.receipt_url) && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={`/api/uploads/download?path=${encodeURIComponent(String(r.receipt_url))}`} target="_blank" rel="noreferrer">Receipt</a>
+                  </Button>
+                )}
               </div>
             ))}
           </div>
