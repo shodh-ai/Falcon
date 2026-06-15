@@ -230,7 +230,7 @@ export class HostelAdminService {
     params.push(limit, offset);
     const data = await this.db.query(
       `SELECT a.allocation_id, a.status, a.bed_number, a.mess_plan,
-              u.user_id AS student_user_id, u.name, u.email,
+              u.user_id AS student_user_id, u.name, u.official_email AS email,
               COALESCE(sp.enrollment_no, u.official_email) AS student_id,
               sp.phone,
               h.hostel_name, h.hostel_code, r.room_number, r.floor, r.room_type,
