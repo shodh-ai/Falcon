@@ -8,7 +8,6 @@ import {
 import { BaseTenantEntity } from './base-tenant.entity';
 
 @Entity('fin_vendors')
-@Index(['tenant_id'])
 export class FinVendor extends BaseTenantEntity {
   @PrimaryGeneratedColumn('uuid')
   vendor_id: string;

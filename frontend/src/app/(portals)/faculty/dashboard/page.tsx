@@ -241,6 +241,21 @@ export default function FacultyDashboardPage() {
               ))}
             </CardContent>
           </Card>
+
+          <Card className="border-red-100 bg-red-50/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-800">
+                <ShieldCheck className="h-5 w-5" />
+                Early Warning System
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-red-700">Identify at-risk students in your classes based on attendance and exam performance.</p>
+              <Button asChild className="mt-4 w-full bg-red-700 hover:bg-red-800 text-white" variant="default">
+                <Link href="/faculty/at-risk">View At-Risk Students</Link>
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

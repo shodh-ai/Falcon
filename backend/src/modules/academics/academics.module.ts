@@ -42,6 +42,9 @@ import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 
+import { EarlyWarningService } from './early-warning.service';
+import { EarlyWarningController } from './early-warning.controller';
+
 @Module({
   imports: [
     StorageModule,
@@ -74,7 +77,7 @@ import { HelpdeskModule } from '../helpdesk/helpdesk.module';
       HelpdeskTicket,
     ]),
   ],
-  controllers: [AcademicsController, ProctorController, CertificatesController],
+  controllers: [AcademicsController, ProctorController, CertificatesController, EarlyWarningController],
   providers: [
     AcademicsService,
     AcademicsFacultyService,
@@ -87,6 +90,7 @@ import { HelpdeskModule } from '../helpdesk/helpdesk.module';
     CourseLmsService,
     MarksheetPdfService,
     MarksHistoryService,
+    EarlyWarningService,
   ],
   exports: [
     AcademicsService,

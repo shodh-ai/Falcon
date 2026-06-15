@@ -230,7 +230,7 @@ export class HostelAdminService {
     params.push(limit, offset);
     const data = await this.db.query(
       `SELECT a.allocation_id, a.status, a.bed_number, a.mess_plan,
-              u.user_id AS student_user_id, u.name, u.email,
+              u.user_id AS student_user_id, u.name, u.official_email AS email,
               COALESCE(sp.enrollment_no, u.official_email) AS student_id,
               sp.phone,
               h.hostel_name, h.hostel_code, r.room_number, r.floor, r.room_type,
@@ -718,6 +718,51 @@ export class HostelAdminService {
       hostel_id: alloc?.hostel_id,
     });
     return { request_id: requestId, status: 'APPROVED', qr_token: token };
+  }
+
+  async rejectHostelRequest(ctx: AuthCtx, requestId: string) {
+    const [req] = await this.db.query<Array<{ student_user_id: string }>>(
+      `SELECT * FROM hostel_requests WHERE request_id = $1`,
+      [requestId],
+    );
+    if (!req) throw new NotFoundException('Request not found');
+    await this.db.query(
+      `UPDATE hostel_requests SET status = 'REJECTED', approved_at = NOW() WHERE request_id = $1`,
+      [requestId],
+    );
+    const [alloc] = await this.db.query<Array<{ hostel_id: string }>>(
+      `SELECT h.hostel_id FROM hostel_allocations a
+       JOIN operations_hostel_rooms r ON r.room_id = a.room_id
+       JOIN operations_hostels h ON h.hostel_id = r.hostel_id
+       WHERE a.student_user_id = $1`,
+      [req.student_user_id],
+    );
+    this.broadcastGatePass(ctx, {
+      request_id: requestId,
+      status: 'REJECTED',
+      hostel_id: alloc?.hostel_id,
+    });
+    return { request_id: requestId, status: 'REJECTED' };
+  }
+
+  async updateGatePassStatus(ctx: AuthCtx, passId: string, status: 'APPROVED' | 'REJECTED') {
+    const [gp] = await this.db.query<Array<{ hostel_id: string; student_user_id: string }>>(
+      `SELECT hostel_id, student_user_id FROM operations_gate_passes WHERE pass_id = $1`,
+      [passId],
+    );
+    if (!gp) throw new NotFoundException('Gate pass not found');
+    if (gp.hostel_id) await this.assertHostelAccess(ctx, gp.hostel_id);
+    const token = status === 'APPROVED' ? randomBytes(24).toString('hex') : null;
+    await this.db.query(
+      `UPDATE operations_gate_passes SET status = $2, approved_by_user_id = $3, qr_token = COALESCE(qr_token, $4), updated_at = NOW() WHERE pass_id = $1`,
+      [passId, status, ctx.userId, token],
+    );
+    this.broadcastGatePass(ctx, {
+      pass_id: passId,
+      status,
+      hostel_id: gp.hostel_id,
+    });
+    return { pass_id: passId, status, qr_token: token };
   }
 
   async createLeave(

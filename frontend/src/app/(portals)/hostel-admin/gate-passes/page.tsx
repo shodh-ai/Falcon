@@ -35,11 +35,31 @@ export default function HostelGatePassesPage() {
 
   const load = useCallback(async () => {
     const q = hostelId ? `?hostelId=${hostelId}` : '';
-    const [p, s] = await Promise.all([
+    const [gp, leaves, s] = await Promise.all([
       api.get<PassRow[]>(`/api/hostel-admin/gate-passes${q}`),
+      api.get<any[]>(`/api/hostel-admin/leaves${q}`),
       api.get<LeaveStats>(`/api/hostel-admin/leaves/stats${hostelId ? `?hostelId=${hostelId}` : ''}`),
     ]);
-    setPasses(p);
+
+    const mappedLeaves: PassRow[] = leaves.map(l => ({
+      pass_id: l.leave_id,
+      pass_no: 'LV-' + l.leave_id.slice(0, 5).toUpperCase(),
+      student_name: l.student_name,
+      hostel_name: l.hostel_name,
+      purpose: l.leave_type + (l.purpose ? ` - ${l.purpose}` : ''),
+      out_time: l.from_date,
+      status: l.status,
+      source: 'leave'
+    }));
+
+    // Combine and sort by date descending
+    const combined = [...gp, ...mappedLeaves].sort((a, b) => {
+      const d1 = new Date(a.out_time).getTime();
+      const d2 = new Date(b.out_time).getTime();
+      return (isNaN(d2) ? 0 : d2) - (isNaN(d1) ? 0 : d1);
+    });
+
+    setPasses(combined);
     setStats(s);
   }, [api, hostelId]);
 
@@ -61,13 +81,31 @@ export default function HostelGatePassesPage() {
   }, [hostelId, load, user?.tenant_id]);
 
   async function approve(passId: string, source: string) {
-    if (source !== 'request') {
-      toast.message('Use operations API for legacy passes');
-      return;
-    }
     try {
-      await api.patch(`/api/hostel-admin/requests/${passId}/approve`, {});
-      toast.success('Gate pass approved');
+      if (source === 'leave') {
+        await api.patch(`/api/hostel-admin/leaves/${passId}`, { status: 'APPROVED' });
+      } else if (source === 'request') {
+        await api.patch(`/api/hostel-admin/requests/${passId}/approve`, {});
+      } else if (source === 'operations') {
+        await api.patch(`/api/hostel-admin/gate-passes/${passId}`, { status: 'APPROVED' });
+      }
+      toast.success('Approved successfully');
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  }
+
+  async function reject(passId: string, source: string) {
+    try {
+      if (source === 'leave') {
+        await api.patch(`/api/hostel-admin/leaves/${passId}`, { status: 'REJECTED' });
+      } else if (source === 'request') {
+        await api.patch(`/api/hostel-admin/requests/${passId}/reject`, {});
+      } else if (source === 'operations') {
+        await api.patch(`/api/hostel-admin/gate-passes/${passId}`, { status: 'REJECTED' });
+      }
+      toast.success('Rejected successfully');
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
@@ -96,13 +134,13 @@ export default function HostelGatePassesPage() {
 
       <DataTable
         columns={[
-          { key: 'no', header: 'Pass No', render: (r) => r.pass_no ?? r.pass_id.slice(0, 8) },
+          { key: 'no', header: 'Pass/Leave No', render: (r) => r.pass_no ?? r.pass_id.slice(0, 8) },
           { key: 'student', header: 'Student', render: (r) => r.student_name },
           { key: 'hostel', header: 'Hostel', render: (r) => r.hostel_name ?? '—' },
           { key: 'purpose', header: 'Purpose', render: (r) => r.purpose ?? '—' },
           {
             key: 'out',
-            header: 'Out Time',
+            header: 'Out Time / Date',
             render: (r) => (r.out_time ? new Date(r.out_time).toLocaleString() : '—'),
           },
           { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },
@@ -111,9 +149,14 @@ export default function HostelGatePassesPage() {
             header: 'Action',
             render: (r) =>
               r.status === 'PENDING' ? (
-                <Button size="sm" onClick={() => void approve(r.pass_id, r.source)}>
-                  Approve
-                </Button>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => void approve(r.pass_id, r.source)}>
+                    Approve
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => void reject(r.pass_id, r.source)}>
+                    Decline
+                  </Button>
+                </div>
               ) : null,
           },
         ]}
