@@ -56,7 +56,7 @@ const multerOptions = {
 
 type AuthRequest = { user?: { tenant_id?: string } };
 
-@Controller('uploads')
+@Controller(['uploads', 'api/uploads'])
 @UseGuards(JwtAuthGuard)
 export class UploadsController {
   constructor(private readonly objectStorage: ObjectStorageService) {}

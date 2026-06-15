@@ -216,10 +216,12 @@ export class StudentPortalService {
     ).catch(() => []);
 
     const feeReceipts = await this.dataSource.query(
-      `SELECT demand_id, fee_head, total_amount, paid_amount, status, due_date
-       FROM finance_fee_demands
-       WHERE student_user_id = $1 AND fee_head ILIKE '%admission%'
-       ORDER BY created_at DESC LIMIT 5`,
+      `SELECT f.demand_id, f.fee_head, f.total_amount, f.paid_amount, f.status, f.due_date,
+              t.receipt_url
+       FROM finance_fee_demands f
+       LEFT JOIN finance_transactions t ON t.demand_id = f.demand_id AND t.status = 'SUCCESS'
+       WHERE f.student_user_id = $1 AND f.fee_head ILIKE '%admission%'
+       ORDER BY f.created_at DESC LIMIT 5`,
       [userId],
     ).catch(() => []);
 
@@ -312,15 +314,13 @@ export class StudentPortalService {
         `INSERT INTO student_course_enrollments (
            tenant_id, student_user_id, course_id, semester, status, attendance_percent
          )
-         SELECT $1, $2, $3, $4, 'ENROLLED', 0
-         WHERE NOT EXISTS (
-           SELECT 1 FROM student_course_enrollments
-           WHERE student_user_id = $2 AND course_id = $3 AND semester = $4
-         )`,
+         VALUES ($1, $2, $3, $4, 'ENROLLED', 0)
+         ON CONFLICT (tenant_id, student_user_id, course_id) DO NOTHING`,
         [tenantId, userId, course.course_id, semester],
       );
     }
   }
+
 
   async getAttendance(tenantId: string, userId: string) {
     const subjectWise = await this.dataSource.query(
