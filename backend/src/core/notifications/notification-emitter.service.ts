@@ -28,6 +28,7 @@ import {
   type AlumniConversionRequestedPayload,
   type AlumniWelcomeEmailPayload,
   type AlumniConversionApprovedPayload,
+  type StudentOnboardingApprovedPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -145,5 +146,9 @@ export class NotificationEmitterService {
 
   alumniConversionApproved(payload: AlumniConversionApprovedPayload) {
     this.events.emit(NotificationEvents.ALUMNI_CONVERSION_APPROVED, payload);
+  }
+
+  studentOnboardingApproved(payload: StudentOnboardingApprovedPayload) {
+    this.events.emit(NotificationEvents.STUDENT_ONBOARDING_APPROVED, payload);
   }
 }

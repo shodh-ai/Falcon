@@ -40,6 +40,7 @@ import { OperationsModule } from './modules/operations/operations.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module';
+import { StudentOnboardingModule } from './modules/student-onboarding/student-onboarding.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { LmsExtendedModule } from './modules/lms-extended/lms-extended.module';
@@ -144,6 +145,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     SettingsModule,
     HelpdeskModule,
     StudentPortalModule,
+    StudentOnboardingModule,
     ReportsModule,
     SuperAdminModule,
     LmsExtendedModule,

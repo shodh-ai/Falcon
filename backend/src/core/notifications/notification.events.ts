@@ -27,6 +27,7 @@ export const NotificationEvents = {
   ALUMNI_CONVERSION_REQUESTED: 'alumni.conversion_requested',
   ALUMNI_CONVERSION_APPROVED: 'alumni.conversion_approved',
   ALUMNI_WELCOME_EMAIL: 'alumni.welcome_email',
+  STUDENT_ONBOARDING_APPROVED: 'student.onboarding_approved',
 } as const;
 
 export type NotificationEventName =
@@ -179,6 +180,13 @@ export type AlumniWelcomeEmailPayload = {
 export type AlumniConversionApprovedPayload = {
   tenantId: string;
   studentUserId: string;
+  studentName: string;
+  officialEmail: string;
+};
+
+export type StudentOnboardingApprovedPayload = {
+  tenantId: string;
+  userId: string;
   studentName: string;
   officialEmail: string;
 };
