@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd';
 import { Download, GripVertical, Loader2, Mail } from 'lucide-react';
 import { toast } from 'sonner';
@@ -190,10 +190,13 @@ export function PlacementKanbanBoard({ driveId, companyName, jobRole, fetchPipel
                       ) : null}
                       {items.map((app, index) => (
                         <Draggable key={app.application_id} draggableId={app.application_id} index={index}>
-                          {(dragProvided, dragSnapshot) => (
+                          {(dragProvided, dragSnapshot) => {
+                            const { style, ...draggableProps } = dragProvided.draggableProps;
+                            return (
                             <div
                               ref={dragProvided.innerRef}
-                              {...dragProvided.draggableProps}
+                              {...draggableProps}
+                              style={style as CSSProperties}
                               className={cn(
                                 'rounded-xl border bg-white p-3 shadow-sm transition',
                                 dragSnapshot.isDragging ? 'border-sgvu-gold shadow-lg ring-2 ring-sgvu-gold/20' : 'border-border/60',
@@ -220,7 +223,8 @@ export function PlacementKanbanBoard({ driveId, companyName, jobRole, fetchPipel
                                 </div>
                               </div>
                             </div>
-                          )}
+                            );
+                          }}
                         </Draggable>
                       ))}
                       {provided.placeholder}
