@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { FileUp, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuth } from '@/context/AuthContext';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { Button } from '@/components/ui/button';

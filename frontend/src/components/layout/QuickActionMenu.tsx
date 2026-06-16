@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import { CalendarDays, Headphones, Loader2, Plus, Presentation } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -20,8 +20,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { useAuthedApi } from '@/lib/api';
 import { workforceMinDate } from '@/lib/workforce-dates';
+import { HEADER_CONTROL_CLASS } from '@/components/layout/header-styles';
 
 type ModalKind = 'leave' | 'od' | 'ticket' | 'room' | null;
 
@@ -109,7 +111,7 @@ export function QuickActionMenu() {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="hidden gap-1.5 sm:inline-flex">
+          <Button variant="outline" size="sm" className={cn('hidden gap-1.5 sm:inline-flex', HEADER_CONTROL_CLASS)}>
             <Plus className="h-4 w-4 text-sgvu-gold" />
             Quick Action
           </Button>

@@ -1,14 +1,12 @@
 'use client';
 
 import { DocumentVaultGrid } from '@/components/hr/DocumentVaultGrid';
+import { FacultyPanel } from '@/components/faculty';
 
 export function MyDocumentsPanel() {
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Upload missing documents for HR verification — degree, identity proofs, and onboarding kit.
-      </p>
+    <FacultyPanel title="Document vault" description="Upload and track verification status">
       <DocumentVaultGrid mode="ess" />
-    </div>
+    </FacultyPanel>
   );
 }

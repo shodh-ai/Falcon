@@ -189,4 +189,5 @@ export type StudentOnboardingApprovedPayload = {
   userId: string;
   studentName: string;
   officialEmail: string;
+  dashboardPath?: string;
 };

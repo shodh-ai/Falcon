@@ -13,7 +13,7 @@ export function FalconLoader({
       <div className="relative">
         <div className="absolute inset-0 animate-ping rounded-2xl bg-sgvu-gold/20" />
         <div className="relative animate-pulse rounded-2xl shadow-lg ring-2 ring-sgvu-gold/30">
-          <FalconLogo size={56} />
+          <FalconLogo size={72} />
         </div>
       </div>
       <p className="text-sm font-medium text-muted-foreground">{label}</p>

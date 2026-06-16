@@ -1,10 +1,11 @@
 import { MyPoliciesPanel } from '@/components/self-service/MyPoliciesPanel';
-import { SelfServiceStubPage } from '@/components/self-service/SelfServiceStubPage';
+import { FacultyPageHeader, FacultyPageShell } from '@/components/faculty';
 
 export default function FacultyPoliciesPage() {
   return (
-    <SelfServiceStubPage title="Company Policies" description="Read and acknowledge mandatory policies.">
+    <FacultyPageShell>
+      <FacultyPageHeader description="Read, acknowledge, and vote on mandatory company policies." />
       <MyPoliciesPanel />
-    </SelfServiceStubPage>
+    </FacultyPageShell>
   );
 }

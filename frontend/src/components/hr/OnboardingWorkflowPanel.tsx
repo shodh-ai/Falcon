@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { GripVertical, CheckCircle2, Circle } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrTabBar } from '@/components/hr/HrTabBar';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';

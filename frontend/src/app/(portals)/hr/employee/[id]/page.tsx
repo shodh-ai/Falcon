@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Lock, Eye } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { ExternalLink } from 'lucide-react';
 import { AlumniPageHeader } from '@/components/alumni/AlumniPageHeader';
 import { Button } from '@/components/ui/button';

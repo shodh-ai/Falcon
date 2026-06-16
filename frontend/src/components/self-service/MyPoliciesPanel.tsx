@@ -1,17 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import { Card, CardContent } from '@/components/ui/card';
+import { toast } from '@/lib/notifications/falcon-toast';
+import { ThumbsUp, ThumbsDown, CheckCircle2, FileText } from 'lucide-react';
+import { FacultyEmptyState, FacultyPanel } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
-import { ThumbsUp, ThumbsDown, CheckCircle2 } from 'lucide-react';
 
-type Policy = { 
-  policy_id: string; 
-  title: string; 
-  category: string; 
-  file_url: string | null; 
+type Policy = {
+  policy_id: string;
+  title: string;
+  category: string;
+  file_url: string | null;
   is_mandatory: boolean;
   acknowledged: boolean;
   user_vote: 'YES' | 'NO' | null;
@@ -20,9 +20,18 @@ type Policy = {
 export function MyPoliciesPanel() {
   const api = useAuthedApi();
   const [policies, setPolicies] = useState<Policy[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const load = () => {
-    api.get<Policy[]>('/api/hr/ess/policies').then(setPolicies);
+    setLoading(true);
+    api
+      .get<Policy[]>('/api/hr/ess/policies')
+      .then(setPolicies)
+      .catch((err) => {
+        setPolicies([]);
+        toast.error(err instanceof Error ? err.message : 'Failed to load policies');
+      })
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -42,75 +51,90 @@ export function MyPoliciesPanel() {
   async function castVote(id: string, vote: 'YES' | 'NO') {
     try {
       await api.post(`/api/hr/ess/policies/${id}/vote`, { vote });
-      toast.success('Vote submitted successfully!');
+      toast.success('Vote submitted');
       load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to submit vote');
     }
   }
 
+  if (loading) {
+    return <p className="text-sm text-muted-foreground">Loading policies…</p>;
+  }
+
+  if (policies.length === 0) {
+    return (
+      <FacultyEmptyState
+        title="No active policies"
+        description="When HR publishes company policies, they will appear here for acknowledgement."
+      />
+    );
+  }
+
   return (
-    <div className="space-y-4">
-      {policies.length === 0 && (
-        <div className="text-center py-10 text-slate-500 text-sm">
-          No active policies available right now.
-        </div>
-      )}
-      {policies.map((p) => (
-        <Card key={p.policy_id} className="group overflow-hidden border border-slate-200">
-          <CardContent className="p-0">
-            <div className="flex flex-col md:flex-row items-center justify-between p-5 gap-4">
-              <div className="flex-1 w-full">
-                <div className="flex items-center gap-3">
-                  <p className="font-semibold text-slate-800 text-lg">{p.title}</p>
-                  {p.is_mandatory && <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider">Mandatory</span>}
+    <FacultyPanel title="Active policies" count={policies.length}>
+      <div className="space-y-3">
+        {policies.map((p) => (
+          <div
+            key={p.policy_id}
+            className="rounded-xl border border-border/60 bg-background p-4 shadow-sm"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-3 min-w-0">
+                <FileText className="mt-0.5 h-5 w-5 shrink-0 text-sgvu-gold" />
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-sgvu-navy">{p.title}</p>
+                    {p.is_mandatory && (
+                      <span className="rounded bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-600">
+                        Mandatory
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">{p.category}</p>
+                  {p.file_url && (
+                    <a
+                      href={p.file_url}
+                      className="mt-1 text-sm font-medium text-sgvu-navy underline hover:text-sgvu-gold"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View PDF
+                    </a>
+                  )}
                 </div>
-                <p className="text-muted-foreground text-sm mt-1">{p.category}</p>
               </div>
-              
-              <div className="flex items-center gap-4 w-full md:w-auto shrink-0 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-2">Your Vote</p>
+
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant={p.user_vote === 'YES' ? 'default' : 'outline'}
                   size="sm"
-                  className={p.user_vote === 'YES' ? 'bg-green-600 hover:bg-green-700 text-white' : 'text-slate-600 hover:text-green-600 hover:bg-green-50'}
                   onClick={() => castVote(p.policy_id, 'YES')}
                 >
-                  <ThumbsUp className="h-4 w-4 mr-2" />
-                  In Favour
+                  <ThumbsUp className="mr-1 h-4 w-4" />
+                  In favour
                 </Button>
                 <Button
-                  variant={p.user_vote === 'NO' ? 'default' : 'outline'}
+                  variant={p.user_vote === 'NO' ? 'destructive' : 'outline'}
                   size="sm"
-                  className={p.user_vote === 'NO' ? 'bg-red-600 hover:bg-red-700 text-white' : 'text-slate-600 hover:text-red-600 hover:bg-red-50'}
                   onClick={() => castVote(p.policy_id, 'NO')}
                 >
-                  <ThumbsDown className="h-4 w-4 mr-2" />
+                  <ThumbsDown className="mr-1 h-4 w-4" />
                   Against
                 </Button>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto shrink-0 justify-end md:ml-4">
-                {p.file_url && (
-                  <a href={p.file_url} className="text-sgvu-navy underline text-sm font-medium hover:text-blue-600" target="_blank" rel="noopener noreferrer">
-                    View PDF
-                  </a>
-                )}
                 {p.acknowledged ? (
-                  <div className="flex items-center text-green-600 bg-green-50 px-3 py-1.5 rounded-md text-sm font-medium">
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                  <span className="flex items-center gap-1 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
+                    <CheckCircle2 className="h-4 w-4" />
                     Acknowledged
-                  </div>
+                  </span>
                 ) : (
-                  <Button onClick={() => acknowledge(p.policy_id)} size="sm">
-                    Acknowledge
-                  </Button>
+                  <Button size="sm" onClick={() => acknowledge(p.policy_id)}>Acknowledge</Button>
                 )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+          </div>
+        ))}
+      </div>
+    </FacultyPanel>
   );
 }

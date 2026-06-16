@@ -5,7 +5,14 @@ import { useAuthedApi } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/DataTable';
 import { Badge } from '@/components/ui/badge';
-import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/lib/notifications/falcon-toast';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyPageLoading,
+  FacultyMetricChip,
+} from '@/components/faculty';
 
 type AtRiskStudent = {
   user_id: string;
@@ -29,7 +36,8 @@ export default function FacultyAtRiskPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get<AtRiskStudent[]>('/api/academics/early-warning/dashboard')
+    api
+      .get<AtRiskStudent[]>('/api/academics/early-warning/dashboard')
       .then(setStudents)
       .catch((e) => toast.error(e.message || 'Failed to load at-risk students'))
       .finally(() => setLoading(false));
@@ -39,35 +47,44 @@ export default function FacultyAtRiskPage() {
     try {
       await api.post(`/api/academics/early-warning/${student.user_id}/intervention`);
       toast.success(`Meeting request sent to ${student.name}`);
-    } catch (error: any) {
-      toast.error(error.message || `Failed to schedule meeting with ${student.name}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : `Failed to schedule meeting with ${student.name}`;
+      toast.error(message);
     }
   };
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-sgvu-navy">At-Risk Students Early Warning</h1>
-        <p className="text-sm text-muted-foreground">
-          Students below 75% attendance or failing in assessments across your active batches.
-        </p>
-      </div>
+  const highCount = students.filter((s) => s.risk_level === 'HIGH').length;
+  const mediumCount = students.filter((s) => s.risk_level === 'MEDIUM').length;
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card>
+  if (loading) {
+    return <FacultyPageLoading label="Loading at-risk students…" branded />;
+  }
+
+  return (
+    <FacultyPageShell>
+      <FacultyPageHeader
+        title="At-Risk Students Early Warning"
+        description="Students below 75% attendance or failing in assessments across your active batches."
+        meta={
+          <>
+            <FacultyMetricChip label="High risk" value={highCount} emphasis={highCount > 0} />
+            <FacultyMetricChip label="Medium risk" value={mediumCount} />
+            <FacultyMetricChip label="Total flagged" value={students.length} />
+          </>
+        }
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Card className="border-red-200/60 bg-red-50/30 shadow-sm">
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">High Risk Students</p>
-            <p className="text-2xl font-bold text-red-600">
-              {students.filter((s) => s.risk_level === 'HIGH').length}
-            </p>
+            <p className="text-sm text-muted-foreground">High risk students</p>
+            <p className="text-2xl font-bold text-red-600">{highCount}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-amber-200/60 bg-amber-50/30 shadow-sm">
           <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">Medium Risk Students</p>
-            <p className="text-2xl font-bold text-amber-600">
-              {students.filter((s) => s.risk_level === 'MEDIUM').length}
-            </p>
+            <p className="text-sm text-muted-foreground">Medium risk students</p>
+            <p className="text-2xl font-bold text-amber-600">{mediumCount}</p>
           </CardContent>
         </Card>
       </div>
@@ -81,7 +98,10 @@ export default function FacultyAtRiskPage() {
             key: 'risk_level',
             header: 'Risk Level',
             render: (r) => (
-              <Badge variant={r.risk_level === 'HIGH' ? 'destructive' : 'default'} className={r.risk_level === 'MEDIUM' ? 'bg-amber-600' : ''}>
+              <Badge
+                variant={r.risk_level === 'HIGH' ? 'destructive' : 'default'}
+                className={r.risk_level === 'MEDIUM' ? 'bg-amber-600' : ''}
+              >
                 {r.risk_level}
               </Badge>
             ),
@@ -92,7 +112,10 @@ export default function FacultyAtRiskPage() {
             render: (r) => (
               <div className="flex flex-wrap gap-1">
                 {r.risk_factors.map((f, i) => (
-                  <span key={i} className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded border border-red-100">
+                  <span
+                    key={i}
+                    className="rounded border border-red-100 bg-red-50 px-2 py-1 text-xs text-red-700"
+                  >
                     {f}
                   </span>
                 ))}
@@ -103,18 +126,15 @@ export default function FacultyAtRiskPage() {
             key: 'action',
             header: 'Intervention',
             render: (r) => (
-              <button 
-                onClick={() => handleScheduleMeeting(r)}
-                className="text-sm text-sgvu-navy hover:underline border px-3 py-1 rounded bg-white shadow-sm"
-              >
-                Schedule Meeting
-              </button>
+              <Button size="sm" variant="outline" onClick={() => handleScheduleMeeting(r)}>
+                Schedule meeting
+              </Button>
             ),
           },
         ]}
         rows={students}
         rowKey={(r) => r.user_id}
       />
-    </div>
+    </FacultyPageShell>
   );
 }

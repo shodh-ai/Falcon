@@ -20,6 +20,14 @@ export type FalconNotificationCategory =
   | 'PLACEMENT'
   | 'HELPDESK';
 
+export type FalconNotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
+
+export type FalconNotificationIntent =
+  | 'info'
+  | 'action_required'
+  | 'status_update'
+  | 'alert';
+
 @Entity('falcon_notifications')
 @Index(['user_id', 'created_at'])
 export class FalconNotification extends BaseSoftDeleteEntity {
@@ -47,6 +55,18 @@ export class FalconNotification extends BaseSoftDeleteEntity {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   action_link: string | null;
+
+  @Column({ type: 'varchar', length: 20, default: 'info' })
+  severity: FalconNotificationSeverity;
+
+  @Column({ type: 'varchar', length: 30, default: 'info' })
+  intent: FalconNotificationIntent;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  action_label: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata: Record<string, unknown> | null;
 
   @Column({ type: 'boolean', default: false })
   is_read: boolean;

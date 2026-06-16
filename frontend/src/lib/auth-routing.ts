@@ -1,6 +1,11 @@
 /**
  * Maps backend role_name to the correct portal dashboard.
  */
+import {
+  getOnboardingConfigForRole,
+  getOnboardingStepPath,
+} from '@/lib/onboarding/portal-onboarding';
+
 export function getDashboardPathForRole(role: string | undefined | null): string {
   const r = (role ?? '').trim().toLowerCase();
 
@@ -337,33 +342,51 @@ export function canRoleAccessPath(
   return roles.some((role) => portalRoles[portal].includes(role));
 }
 
-export const STUDENT_ONBOARDING_STATUSES = [
-  'PENDING_PASSWORD_RESET',
-  'PENDING_DOCUMENTS',
-  'PENDING_ADMIN_APPROVAL',
-] as const;
+const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
+  '/student': '/student/profile',
+  '/faculty': '/faculty/profile',
+  '/hod': '/hod/profile',
+  '/alumni': '/alumni/profile',
+  '/hr': '/hr/me/documents',
+};
 
-export function isStudentRole(role: string | undefined | null): boolean {
-  const r = (role ?? '').trim().toLowerCase();
-  return r === 'student' || r === 'applicant';
-}
-
-export function isStudentOnboardingComplete(status: string | undefined | null): boolean {
-  const s = (status ?? 'ACTIVE').trim();
-  return s === 'COMPLETED' || s === 'ACTIVE';
-}
-
-export function getStudentOnboardingPath(status: string | undefined | null): string | null {
-  switch ((status ?? '').trim()) {
-    case 'PENDING_PASSWORD_RESET':
-      return '/student/onboarding/step-1';
-    case 'PENDING_DOCUMENTS':
-      return '/student/onboarding/step-2';
-    case 'PENDING_ADMIN_APPROVAL':
-      return '/student/onboarding/step-3';
-    default:
-      return null;
+/** Resolve the user profile page for the active portal (never the dashboard). */
+export function getProfileHrefFromPath(pathname: string, role?: string | null): string {
+  if (pathname.startsWith('/ess')) {
+    const dash = getDashboardPathForRole(role);
+    if (dash.startsWith('/hod')) return '/hod/profile';
+    if (dash.startsWith('/hr')) return '/hr/me/documents';
+    return '/faculty/profile';
   }
+
+  const portal = Object.keys(portalRoles)
+    .sort((a, b) => b.length - a.length)
+    .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+
+  if (portal && EXPLICIT_PORTAL_PROFILE_PATHS[portal]) {
+    return EXPLICIT_PORTAL_PROFILE_PATHS[portal];
+  }
+
+  if (portal) {
+    return `${portal}/profile`;
+  }
+
+  return '/student/profile';
+}
+
+/** Prefer an explicit profile link; ignore dashboard/home links misconfigured as profile. */
+export function resolveProfileHref(
+  pathname: string,
+  role?: string | null,
+  explicitHref?: string,
+): string {
+  if (
+    explicitHref &&
+    (explicitHref.includes('/profile') || explicitHref.includes('/me/documents'))
+  ) {
+    return explicitHref;
+  }
+  return getProfileHrefFromPath(pathname, role);
 }
 
 export function getPostLoginPath(user: {
@@ -372,8 +395,9 @@ export function getPostLoginPath(user: {
   onboarding_status?: string;
 }): string {
   const role = user.primaryRole ?? user.role;
-  if (isStudentRole(role) && user.onboarding_status) {
-    const onboardingPath = getStudentOnboardingPath(user.onboarding_status);
+  const config = getOnboardingConfigForRole(role);
+  if (config && user.onboarding_status) {
+    const onboardingPath = getOnboardingStepPath(config.portalPrefix, user.onboarding_status);
     if (onboardingPath) return onboardingPath;
   }
   return getDashboardPathForRole(role);

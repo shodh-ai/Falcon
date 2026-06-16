@@ -20,7 +20,7 @@ export function HrShell({ children }: { children: ReactNode }) {
 
   return (
     <HrEntityProvider>
-      <AppShell config={config} profileHref="/hr/dashboard" headerExtra={<HrEntitySwitcher />}>
+      <AppShell config={config} headerExtra={<HrEntitySwitcher />}>
         {children}
       </AppShell>
     </HrEntityProvider>

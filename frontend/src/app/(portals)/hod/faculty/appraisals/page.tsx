@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HodPageFrame, HodPageHeader, HodTableHead, HodTableWrap } from '@/components/hod/HodPagePrimitives';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';

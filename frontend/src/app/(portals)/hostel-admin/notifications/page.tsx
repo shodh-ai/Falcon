@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 export default function HostelNotificationsPage() {
   const api = useAuthedApi();

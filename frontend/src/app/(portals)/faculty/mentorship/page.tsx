@@ -1,15 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
 import { PendingMeetingRequests, type PendingMeeting } from '@/components/mentorship/PendingMeetingRequests';
 import { PendingLeaveRequests, type PendingLeaveRequest } from '@/components/mentorship/PendingLeaveRequests';
 import { FalconLoader } from '@/components/brand/FalconLoader';
-import { toast } from 'sonner';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyMetricChip,
+  FacultyEmptyState,
+  FacultyPanel,
+} from '@/components/faculty';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getSubdomainFromClient } from '@/lib/tenant';
@@ -114,11 +119,20 @@ export default function FacultyMentorshipPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">Mentorship — My Mentees</h2>
-        <p className="mt-1 text-sm text-muted-foreground">View and manage mentees assigned to you for mentorship.</p>
-      </section>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        description="View and manage mentees assigned to you for mentorship."
+        meta={
+          <>
+            <FacultyMetricChip label="Mentees" value={students.length} />
+            <FacultyMetricChip
+              label="Pending certs"
+              value={pendingCertificates.length}
+              emphasis={pendingCertificates.length > 0}
+            />
+          </>
+        }
+      />
 
       {loading && <FalconLoader label="Loading mentorship roster…" />}
 
@@ -133,17 +147,15 @@ export default function FacultyMentorshipPage() {
       )}
 
       {!loading && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Pending Certificates to Verify</CardTitle>
-            <Badge variant={pendingCertificates.length ? 'warning' : 'success'}>
-              {pendingCertificates.length} pending
-            </Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {pendingCertificates.length === 0 && (
-              <p className="text-sm text-muted-foreground">No certificates are waiting for your review.</p>
-            )}
+        <FacultyPanel
+          title="Pending certificates"
+          count={pendingCertificates.length}
+          description="Review and verify mentee certificate uploads"
+        >
+          {pendingCertificates.length === 0 && (
+            <FacultyEmptyState description="No certificates are waiting for your review." className="py-6" />
+          )}
+          <div className="space-y-3">
             {pendingCertificates.map((certificate) => (
               <div
                 key={certificate.certificate_id}
@@ -178,46 +190,46 @@ export default function FacultyMentorshipPage() {
                 </div>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </FacultyPanel>
       )}
 
       {!loading && students.length === 0 && (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-muted-foreground">No mentees assigned to you yet.</p>
-          </CardContent>
-        </Card>
+        <FacultyEmptyState title="No mentees yet" description="No mentees have been assigned to you." />
       )}
 
       {!loading && students.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {students.map((item) => (
-            <Card key={item.mentorship_id}>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span>Mentee profile</span>
-                  <Badge variant="secondary">Active</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
+        <FacultyPanel title="Mentee profiles" count={students.length}>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {students.map((item) => (
+              <div
+                key={item.mentorship_id}
+                className="rounded-xl border border-border/60 bg-background p-4 shadow-sm"
+              >
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarFallback>{item.student.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</AvatarFallback>
+                  <Avatar className="h-11 w-11">
+                    <AvatarFallback className="bg-sgvu-gold/20 text-sgvu-navy">
+                      {item.student.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
                   </Avatar>
-                  <div>
-                    <p className="font-semibold">{item.student.name}</p>
-                    <p className="text-xs text-muted-foreground">{item.student.email}</p>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sgvu-navy">{item.student.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{item.student.email}</p>
                   </div>
                 </div>
-                <Button className="w-full" variant="outline" onClick={() => window.open(`mailto:${item.student.email}`)}>
-                  Send Email
+                <Button
+                  className="mt-3 w-full"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(`mailto:${item.student.email}`)}
+                >
+                  Send email
                 </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+              </div>
+            ))}
+          </div>
+        </FacultyPanel>
       )}
-    </div>
+    </FacultyPageShell>
   );
 }

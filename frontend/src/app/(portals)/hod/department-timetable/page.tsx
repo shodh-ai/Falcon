@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import {
   HodActionButton,
   HodDataTable,

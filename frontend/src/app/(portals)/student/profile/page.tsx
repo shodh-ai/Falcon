@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays,
@@ -19,7 +19,11 @@ import {
   Timer,
   UserRound,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
+import {
+  AuthenticatedProfilePhoto,
+  validateProfilePhotoFile,
+} from '@/components/profile/AuthenticatedProfilePhoto';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
@@ -45,12 +49,21 @@ type AddressDetails = {
   current?: string | null;
 };
 
+type OnboardingDocument = {
+  doc_type: string;
+  status: string;
+  uploaded_at: string;
+  admin_remarks?: string | null;
+};
+
 type MasterProfile = {
   student_id: string;
   enrollment_no: string;
   name: string;
   email: string;
   mobile: string | null;
+  blood_group: string | null;
+  abc_id: string | null;
   category: string | null;
   gender: string | null;
   date_of_birth: string | null;
@@ -66,6 +79,8 @@ type MasterProfile = {
   passport_masked: string | null;
   profile_photo_url: string | null;
   bank_details: { bank_name?: string; account_number?: string; ifsc_code?: string } | null;
+  onboarding_status?: string;
+  onboarding_documents?: OnboardingDocument[];
   profile_unlocked_until: string | null;
   is_profile_editable: boolean;
 };
@@ -82,6 +97,68 @@ function displayValue(value: unknown) {
   return String(value);
 }
 
+function hasProfileValue(value: unknown) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function ProfileFieldValue({ value }: { value: unknown }) {
+  const shown = hasProfileValue(value) ? String(value) : null;
+  return (
+    <span className={shown ? 'text-sm font-medium text-sgvu-navy' : 'text-sm text-muted-foreground'}>
+      {shown ?? '—'}
+    </span>
+  );
+}
+
+function ProfileFieldRow({
+  label,
+  children,
+  stacked,
+}: {
+  label: string;
+  children: ReactNode;
+  stacked?: boolean;
+}) {
+  if (stacked) {
+    return (
+      <div className="px-4 py-3">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <div className="mt-1.5">{children}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="sm:max-w-[58%] sm:text-right">{children}</div>
+    </div>
+  );
+}
+
+function ProfileDetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+      <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/15">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const ONBOARDING_DOC_LABELS: Record<string, string> = {
+  PHOTO: 'Passport Photo',
+  AADHAAR: 'Aadhaar Card',
+  '10TH_MARKSHEET': '10th Marksheet',
+  '12TH_MARKSHEET': '12th Marksheet',
+};
+
 export default function StudentProfilePage() {
   const api = useAuthedApi();
   const [profile, setProfile] = useState<MasterProfile | null>(null);
@@ -96,6 +173,7 @@ export default function StudentProfilePage() {
   const autoSavedRef = useRef(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const loadProfile = useCallback(async () => {
     const data = await api.get<MasterProfile>('/api/student/profile');
@@ -153,21 +231,35 @@ export default function StudentProfilePage() {
     }
   }
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64String = event.target?.result as string;
-      try {
-        await api.patch('/api/student/profile', { profile_photo_url: base64String });
-        setProfile((prev) => (prev ? { ...prev, profile_photo_url: base64String } : null));
-        toast.success('Profile photo updated!');
-      } catch {
-        toast.error('Failed to update photo');
-      }
-    };
-    reader.readAsDataURL(file);
+
+    const validationError = validateProfilePhotoFile(file);
+    if (validationError) {
+      toast.warning('Photo not uploaded', { description: validationError, category: 'ACADEMICS' });
+      e.target.value = '';
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const updated = await api.post<MasterProfile>('/api/student/profile/photo', form);
+      setProfile((prev) => (prev ? { ...prev, profile_photo_url: updated.profile_photo_url } : updated));
+      toast.success('Profile photo updated', {
+        description: 'Your photo is saved on your master record.',
+        category: 'ACADEMICS',
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload photo', {
+        category: 'ACADEMICS',
+      });
+    } finally {
+      setUploadingPhoto(false);
+      e.target.value = '';
+    }
   }
 
   async function saveBankDetails() {
@@ -243,18 +335,26 @@ export default function StudentProfilePage() {
           <div className="absolute right-0 top-0 h-56 w-56 rounded-full bg-sgvu-gold/20 blur-3xl" />
           <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
             <div className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-white/20 bg-white/15 text-3xl font-black">
-              {profile.profile_photo_url ? (
-                <img src={profile.profile_photo_url} alt="Profile" className="h-full w-full object-cover" />
-              ) : (
-                profile.name?.slice(0, 1).toUpperCase() ?? 'S'
-              )}
+              <AuthenticatedProfilePhoto
+                photoUrl={profile.profile_photo_url}
+                alt="Profile"
+                className="h-full w-full"
+                fallback={profile.name?.slice(0, 1).toUpperCase() ?? 'S'}
+              />
               <div
                 className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => !uploadingPhoto && fileInputRef.current?.click()}
               >
                 <Pen className="h-5 w-5 text-white" />
               </div>
-              <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                ref={fileInputRef}
+                className="hidden"
+                disabled={uploadingPhoto}
+                onChange={handleFileSelect}
+              />
             </div>
             <div>
               <h2 className="text-3xl font-black tracking-tight">{profile.name}</h2>
@@ -268,9 +368,11 @@ export default function StudentProfilePage() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StudentInfoTile label="Email" value={profile.email} icon={Mail} />
         <StudentInfoTile label="Mobile" value={profile.mobile} icon={Phone} />
+        <StudentInfoTile label="Blood Group" value={profile.blood_group} icon={Sparkles} />
+        <StudentInfoTile label="ABC ID" value={profile.abc_id} icon={IdCard} />
         <StudentInfoTile label="Program / Branch" value={`${profile.program} — ${profile.branch}`} icon={GraduationCap} />
         <StudentInfoTile
           label="Gender / DOB"
@@ -281,69 +383,92 @@ export default function StudentProfilePage() {
 
       <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
         <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
-          <CardHeader className="border-b border-border/70 bg-white/80 pb-5">
-            <CardTitle className="text-base">Parent & address details</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {isEditable ? 'Editing enabled — save before the timer expires.' : 'Locked — request Admin approval to edit.'}
-            </p>
+          <CardHeader className="border-b border-border/70 bg-white/80 pb-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <CardTitle className="text-base">Parent & address details</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  {isEditable
+                    ? 'Editing enabled — save before the timer expires.'
+                    : 'Submit a correction request below to unlock a 15-minute edit window.'}
+                </p>
+              </div>
+              {!isEditable ? (
+                <Badge variant="outline" className="shrink-0 gap-1 text-muted-foreground">
+                  <LockKeyhole className="h-3 w-3" />
+                  Locked
+                </Badge>
+              ) : null}
+            </div>
           </CardHeader>
-          <CardContent className="grid gap-4 pt-5 sm:grid-cols-2">
-            {[
-              { key: 'father_name', label: "Father's name" },
-              { key: 'mother_name', label: "Mother's name" },
-              { key: 'parent_occupation', label: "Parent's occupation" },
-              { key: 'annual_income', label: 'Annual income (scholarships)' },
-              { key: 'emergency_contact_name', label: 'Emergency contact' },
-              { key: 'emergency_contact_phone', label: 'Emergency phone' },
-              { key: 'emergency_contact_priority', label: 'Contact priority' },
-            ].map(({ key, label }) => (
-              <div key={key}>
-                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{label}</label>
+          <CardContent className="space-y-5 pt-5">
+            <ProfileDetailSection title="Parents">
+              {[
+                { key: 'father_name', label: "Father's name" },
+                { key: 'mother_name', label: "Mother's name" },
+                { key: 'parent_occupation', label: "Parent's occupation" },
+                { key: 'annual_income', label: 'Annual income (scholarships)' },
+              ].map(({ key, label }) => (
+                <ProfileFieldRow key={key} label={label}>
+                  {isEditable ? (
+                    <Input
+                      className="h-9 sm:text-right"
+                      value={(parentForm as Record<string, string>)[key] ?? ''}
+                      onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
+                    />
+                  ) : (
+                    <ProfileFieldValue value={(parentForm as Record<string, unknown>)[key]} />
+                  )}
+                </ProfileFieldRow>
+              ))}
+            </ProfileDetailSection>
+
+            <ProfileDetailSection title="Emergency contact">
+              {[
+                { key: 'emergency_contact_name', label: 'Contact name' },
+                { key: 'emergency_contact_phone', label: 'Phone' },
+                { key: 'emergency_contact_priority', label: 'Priority' },
+              ].map(({ key, label }) => (
+                <ProfileFieldRow key={key} label={label}>
+                  {isEditable ? (
+                    <Input
+                      className="h-9 sm:text-right"
+                      value={(parentForm as Record<string, string>)[key] ?? ''}
+                      onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
+                    />
+                  ) : (
+                    <ProfileFieldValue value={(parentForm as Record<string, unknown>)[key]} />
+                  )}
+                </ProfileFieldRow>
+              ))}
+            </ProfileDetailSection>
+
+            <ProfileDetailSection title="Addresses">
+              <ProfileFieldRow label="Permanent address" stacked>
                 {isEditable ? (
-                  <Input
-                    className="mt-2"
-                    value={(parentForm as Record<string, string>)[key] ?? ''}
-                    onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
+                  <textarea
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    rows={2}
+                    value={addressForm.permanent ?? ''}
+                    onChange={(e) => setAddressForm((a) => ({ ...a, permanent: e.target.value }))}
                   />
                 ) : (
-                  <p className="mt-2 text-sm font-medium text-sgvu-navy">
-                    {displayValue((parentForm as Record<string, unknown>)[key])}
-                  </p>
+                  <ProfileFieldValue value={addressForm.permanent} />
                 )}
-              </div>
-            ))}
-            <div className="sm:col-span-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Permanent address</label>
-              {isEditable ? (
-                <textarea
-                  className="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
-                  rows={2}
-                  value={addressForm.permanent ?? ''}
-                  onChange={(e) => setAddressForm((a) => ({ ...a, permanent: e.target.value }))}
-                />
-              ) : (
-                <p className="mt-2 text-sm font-medium text-sgvu-navy">{displayValue(addressForm.permanent)}</p>
-              )}
-            </div>
-            <div className="sm:col-span-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Current address</label>
-              {isEditable ? (
-                <textarea
-                  className="mt-2 w-full rounded-lg border px-3 py-2 text-sm"
-                  rows={2}
-                  value={addressForm.current ?? ''}
-                  onChange={(e) => setAddressForm((a) => ({ ...a, current: e.target.value }))}
-                />
-              ) : (
-                <p className="mt-2 text-sm font-medium text-sgvu-navy">{displayValue(addressForm.current)}</p>
-              )}
-            </div>
-            {!isEditable && (
-              <div className="sm:col-span-2 flex items-center gap-2 rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-                <LockKeyhole className="h-4 w-4" />
-                Fields are locked. Submit a correction request below to unlock a 15-minute edit window.
-              </div>
-            )}
+              </ProfileFieldRow>
+              <ProfileFieldRow label="Current address" stacked>
+                {isEditable ? (
+                  <textarea
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    rows={2}
+                    value={addressForm.current ?? ''}
+                    onChange={(e) => setAddressForm((a) => ({ ...a, current: e.target.value }))}
+                  />
+                ) : (
+                  <ProfileFieldValue value={addressForm.current} />
+                )}
+              </ProfileFieldRow>
+            </ProfileDetailSection>
           </CardContent>
         </Card>
 
@@ -386,8 +511,33 @@ export default function StudentProfilePage() {
           <Card className="border-emerald-200/70 bg-emerald-50/60">
             <CardContent className="space-y-3 pt-6">
               <div className="flex items-center justify-between rounded-2xl bg-white/80 p-3 text-sm">
+                <span className="font-semibold">Onboarding</span>
+                <Badge variant={profile.onboarding_status === 'COMPLETED' ? 'success' : 'warning'}>
+                  {profile.onboarding_status ?? 'Not started'}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between rounded-2xl bg-white/80 p-3 text-sm">
                 <span className="font-semibold">Aadhaar</span>
-                <Badge variant={profile.aadhaar_masked ? 'success' : 'warning'}>{profile.aadhaar_masked ?? 'Not on file'}</Badge>
+                <Badge variant={profile.aadhaar_masked || profile.onboarding_documents?.some((doc) => doc.doc_type === 'AADHAAR') ? 'success' : 'warning'}>
+                  {profile.aadhaar_masked ?? profile.onboarding_documents?.find((doc) => doc.doc_type === 'AADHAAR')?.status ?? 'Not on file'}
+                </Badge>
+              </div>
+              <div className="space-y-2 rounded-2xl bg-white/80 p-3 text-sm">
+                <p className="font-semibold">Onboarding documents</p>
+                <div className="grid gap-2">
+                  {(profile.onboarding_documents ?? []).length > 0 ? (
+                    profile.onboarding_documents?.map((doc) => (
+                      <div key={doc.doc_type} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="text-muted-foreground">{ONBOARDING_DOC_LABELS[doc.doc_type] ?? doc.doc_type}</span>
+                        <Badge variant={doc.status === 'APPROVED' ? 'success' : doc.status === 'REJECTED' ? 'destructive' : 'outline'}>
+                          {doc.status}
+                        </Badge>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No onboarding documents uploaded.</p>
+                  )}
+                </div>
               </div>
               <div className="flex gap-2 rounded-2xl border border-emerald-200 bg-white/70 p-3 text-xs">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />

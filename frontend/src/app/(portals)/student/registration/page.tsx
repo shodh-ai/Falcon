@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { BookMarked, CheckSquare, GraduationCap } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';

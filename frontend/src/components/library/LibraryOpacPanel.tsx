@@ -12,7 +12,7 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { useAuthedApi } from '@/lib/api';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 
 type CatalogHit = {

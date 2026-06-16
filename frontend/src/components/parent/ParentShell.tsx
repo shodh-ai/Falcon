@@ -11,7 +11,6 @@ export function ParentShell({ children }: { children: ReactNode }) {
     <ParentChildProvider>
       <AppShell
         config={parentPortal}
-        profileHref="/parent/dashboard"
         headerExtra={<ParentChildSwitcher variant="header" />}
       >
         {children}

@@ -8,7 +8,7 @@ import { useAuthedApi } from '@/lib/api';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import type { PaginatedResponse } from '@/lib/api/pagination';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 type StudentRow = { student_user_id: string; name: string };
 type RollRow = {

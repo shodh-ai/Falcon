@@ -3,7 +3,11 @@
 import { CreditCard, LogOut, Settings, User } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { getActiveWorkspaceRoleFromPath, getWorkspaceLabelForRole } from '@/lib/auth-routing';
+import {
+  getActiveWorkspaceRoleFromPath,
+  getWorkspaceLabelForRole,
+  resolveProfileHref,
+} from '@/lib/auth-routing';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,13 +23,14 @@ interface ProfileMenuProps {
   profileHref?: string;
 }
 
-export function ProfileMenu({ profileHref = '/student/profile' }: ProfileMenuProps) {
+export function ProfileMenu({ profileHref }: ProfileMenuProps) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const roles = user?.roles?.length ? user.roles : user?.role ? [user.role] : [];
   const pathRole = getActiveWorkspaceRoleFromPath(pathname, roles);
   const workspaceRole = pathRole ?? user?.primaryRole ?? user?.role ?? 'Student';
+  const resolvedProfileHref = resolveProfileHref(pathname, workspaceRole, profileHref);
 
   const handleLogout = () => {
     logout();
@@ -35,7 +40,7 @@ export function ProfileMenu({ profileHref = '/student/profile' }: ProfileMenuPro
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-11 shrink-0 gap-2 px-2 touch-target">
+        <Button variant="ghost" className="h-10 shrink-0 gap-2 rounded-lg px-2 hover:bg-sgvu-surface/80 touch-target">
           <Avatar className="h-9 w-9 shrink-0">
             <AvatarFallback>{user?.name?.charAt(0) ?? 'U'}</AvatarFallback>
           </Avatar>
@@ -57,11 +62,11 @@ export function ProfileMenu({ profileHref = '/student/profile' }: ProfileMenuPro
           )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => router.push(profileHref)}>
+        <DropdownMenuItem onClick={() => router.push(resolvedProfileHref)}>
           <User className="mr-2 h-4 w-4" />
           Profile
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push(profileHref)}>
+        <DropdownMenuItem onClick={() => router.push(resolvedProfileHref)}>
           <CreditCard className="mr-2 h-4 w-4" />
           ID Card
         </DropdownMenuItem>

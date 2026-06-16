@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Check, Inbox, X } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
@@ -106,7 +106,7 @@ export default function HrInboxPage() {
     <>
       <HrPageHeader
         title="Pending on Me"
-        description="Maker-checker approvals routed to you by the workflow engine."
+        description="Maker-checker approvals routed to you. You'll also receive in-app notifications in the bell when something needs your action."
       />
 
       <div className="mb-4 flex items-center gap-2">

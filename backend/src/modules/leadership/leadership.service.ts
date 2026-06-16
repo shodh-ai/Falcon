@@ -2,7 +2,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { CacheService } from '../../core/redis/cache.service';
-import { FalconNotification } from '../../entities/falcon-notification.entity';
+import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
+import {
+  executiveAuditRequestMessage,
+  leadershipHelpdeskEscalationMessage,
+} from '../../core/notifications/notification-message.catalog';
 import { User } from '../../entities/user.entity';
 
 type LiveMetrics = {
@@ -15,9 +19,9 @@ type LiveMetrics = {
 export class LeadershipService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
-    @InjectRepository(FalconNotification) private notifications: Repository<FalconNotification>,
     @InjectRepository(User) private users: Repository<User>,
     private readonly cache: CacheService,
+    private readonly notifyDispatch: NotificationDispatchService,
   ) {}
 
   private tenantId(tenantId?: string) {
@@ -308,21 +312,17 @@ export class LeadershipService {
     if (!hodRows.length) throw new NotFoundException('No HOD found for notification routing');
 
     const hod = hodRows[0] as { user_id: string; name: string };
-    const title = 'Executive Audit Request';
-    const message =
-      dto.message ??
-      `The Chairman has requested an audit on ${dto.label} attendance. Please review and respond.`;
-
-    const notification = this.notifications.create({
-      tenant_id: tid,
-      user_id: hod.user_id,
-      category: 'ACADEMICS',
-      title,
-      message,
-      action_link: '/hod/students/attendance',
-      is_read: false,
+    const msg = executiveAuditRequestMessage({
+      label: dto.label,
+      customMessage: dto.message,
     });
-    await this.notifications.save(notification);
+
+    const notification = await this.notifyDispatch.dispatch({
+      tenantId: tid,
+      userId: hod.user_id,
+      ...msg,
+      queueDelivery: false,
+    });
 
     return {
       success: true,
@@ -432,17 +432,18 @@ export class LeadershipService {
       [ticketId, newLevel],
     );
 
-    await this.notifications.save(
-      this.notifications.create({
-        tenant_id: tid,
-        user_id: hod.user_id,
-        category: 'HELPDESK',
-        title: 'Executive Escalation — Action Required',
-        message: `SLA breached: "${ticket.subject}". Chairman/Registrar requested immediate HOD review.`,
-        action_link: '/hod/inbox',
-        is_read: false,
-      }),
-    );
+    const msg = leadershipHelpdeskEscalationMessage({
+      title: 'Executive escalation — action required',
+      message: `SLA breached on "${ticket.subject}". Chairman/Registrar requested immediate HOD review and resolution.`,
+      actionLink: '/hod/inbox',
+    });
+
+    await this.notifyDispatch.dispatch({
+      tenantId: tid,
+      userId: hod.user_id,
+      ...msg,
+      queueDelivery: false,
+    });
 
     return { success: true, escalation_level: newLevel, notified_hod: hod.name, ticket_id: ticketId };
   }

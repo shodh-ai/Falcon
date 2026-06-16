@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UploadedFile,
@@ -22,26 +23,58 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { StudentOnboardingService } from './student-onboarding.service';
+import {
+  getRequiredDocTypes,
+  STAFF_ONBOARDING_DOC_TYPES,
+  STUDENT_ONBOARDING_DOC_TYPES,
+} from './onboarding-portal.util';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
-const DOC_TYPES = ['AADHAAR', '10TH_MARKSHEET', '12TH_MARKSHEET', 'PHOTO'] as const;
+type ProfileBody = {
+  blood_group?: string;
+  parent_contact_phone?: string;
+  abc_id?: string;
+  pan_number?: string;
+  aadhaar_number?: string;
+  bank_account_no?: string;
+  ifsc_code?: string;
+  pf_uan?: string;
+  student_mobile?: string;
+  staff_mobile?: string;
+  gender?: string;
+  date_of_birth?: string;
+  father_name?: string;
+  mother_name?: string;
+  parent_occupation?: string;
+  annual_income?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  permanent_address?: string;
+  current_address?: string;
+  orcid_id?: string;
+  scopus_id?: string;
+  google_scholar_url?: string;
+  total_experience_years?: number | string;
+  industry_experience_years?: number | string;
+  degree_level?: string;
+  degree_name?: string;
+  university?: string;
+  passing_year?: number | string;
+  specialization?: string;
+};
 
-@Controller('api/student/onboarding')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Student', 'Applicant')
-export class StudentOnboardingController {
+abstract class BaseOnboardingController {
   constructor(
-    private readonly onboarding: StudentOnboardingService,
-    private readonly objectStorage: ObjectStorageService,
+    protected readonly onboarding: StudentOnboardingService,
+    protected readonly objectStorage: ObjectStorageService,
+    protected readonly allowedDocTypes: readonly string[],
   ) {}
 
-  @Get('status')
   status(@Req() req: { user: AuthUser }) {
     return this.onboarding.getStatus(this.tenant(req), req.user.user_id);
   }
 
-  @Post('reset-password')
   resetPassword(
     @Req() req: { user: AuthUser },
     @Body() body: { current_password: string; new_password: string; confirm_password?: string },
@@ -57,51 +90,41 @@ export class StudentOnboardingController {
     );
   }
 
-  @Get('profile')
   profile(@Req() req: { user: AuthUser }) {
     return this.onboarding.getStep2Profile(this.tenant(req), req.user.user_id);
   }
 
-  @Post('profile')
-  saveProfile(
-    @Req() req: { user: AuthUser },
-    @Body() body: { blood_group?: string; parent_contact_phone?: string; abc_id?: string },
-  ) {
+  saveProfile(@Req() req: { user: AuthUser }, @Body() body: ProfileBody) {
     return this.onboarding.saveStep2Profile(this.tenant(req), req.user.user_id, body);
   }
 
-  @Post('documents/:docType')
-  @UseInterceptors(
-    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }),
-  )
   async uploadDocument(
     @Req() req: { user: AuthUser },
     @Param('docType') docType: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     const normalized = docType.toUpperCase().replace(/-/g, '_');
-    if (!DOC_TYPES.includes(normalized as (typeof DOC_TYPES)[number])) {
+    if (!this.allowedDocTypes.includes(normalized)) {
       throw new BadRequestException('Invalid document type');
     }
     const storedPath = await this.persistFile(file, this.tenant(req));
     return this.onboarding.registerDocument(
       this.tenant(req),
       req.user.user_id,
-      normalized as (typeof DOC_TYPES)[number],
+      normalized,
       storedPath,
     );
   }
 
-  @Post('submit')
   submit(@Req() req: { user: AuthUser }) {
     return this.onboarding.submitForVerification(this.tenant(req), req.user.user_id);
   }
 
-  private tenant(req: { user: AuthUser }) {
+  protected tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? '';
   }
 
-  private async persistFile(file: Express.Multer.File, tenantId: string): Promise<string> {
+  protected async persistFile(file: Express.Multer.File, tenantId: string): Promise<string> {
     if (!file) throw new BadRequestException('No file uploaded');
     const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
 
@@ -118,9 +141,9 @@ export class StudentOnboardingController {
     const targetDir = `${uploadPath}/${tenantId}/${year}/${month}`;
     if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
     const fullPath = `${targetDir}/${uniqueName}`;
-    await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolvePromise, reject) => {
       const stream = createWriteStream(fullPath);
-      stream.on('finish', () => resolve());
+      stream.on('finish', () => resolvePromise());
       stream.on('error', reject);
       stream.end(file.buffer);
     });
@@ -128,9 +151,107 @@ export class StudentOnboardingController {
   }
 }
 
+@Controller('api/student/onboarding')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('Student', 'Applicant')
+export class StudentOnboardingController extends BaseOnboardingController {
+  constructor(onboarding: StudentOnboardingService, objectStorage: ObjectStorageService) {
+    super(onboarding, objectStorage, STUDENT_ONBOARDING_DOC_TYPES);
+  }
+
+  @Get('status')
+  status(@Req() req: { user: AuthUser }) {
+    return super.status(req);
+  }
+
+  @Post('reset-password')
+  resetPassword(
+    @Req() req: { user: AuthUser },
+    @Body() body: { current_password: string; new_password: string; confirm_password?: string },
+  ) {
+    return super.resetPassword(req, body);
+  }
+
+  @Get('profile')
+  profile(@Req() req: { user: AuthUser }) {
+    return super.profile(req);
+  }
+
+  @Post('profile')
+  saveProfile(@Req() req: { user: AuthUser }, @Body() body: ProfileBody) {
+    return super.saveProfile(req, body);
+  }
+
+  @Post('documents/:docType')
+  @UseInterceptors(
+    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
+  uploadDocument(
+    @Req() req: { user: AuthUser },
+    @Param('docType') docType: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return super.uploadDocument(req, docType, file);
+  }
+
+  @Post('submit')
+  submit(@Req() req: { user: AuthUser }) {
+    return super.submit(req);
+  }
+}
+
+@Controller('api/staff/onboarding')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('Faculty', 'HOD', 'Dean')
+export class StaffOnboardingController extends BaseOnboardingController {
+  constructor(onboarding: StudentOnboardingService, objectStorage: ObjectStorageService) {
+    super(onboarding, objectStorage, STAFF_ONBOARDING_DOC_TYPES);
+  }
+
+  @Get('status')
+  status(@Req() req: { user: AuthUser }) {
+    return super.status(req);
+  }
+
+  @Post('reset-password')
+  resetPassword(
+    @Req() req: { user: AuthUser },
+    @Body() body: { current_password: string; new_password: string; confirm_password?: string },
+  ) {
+    return super.resetPassword(req, body);
+  }
+
+  @Get('profile')
+  profile(@Req() req: { user: AuthUser }) {
+    return super.profile(req);
+  }
+
+  @Post('profile')
+  saveProfile(@Req() req: { user: AuthUser }, @Body() body: ProfileBody) {
+    return super.saveProfile(req, body);
+  }
+
+  @Post('documents/:docType')
+  @UseInterceptors(
+    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
+  uploadDocument(
+    @Req() req: { user: AuthUser },
+    @Param('docType') docType: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return super.uploadDocument(req, docType, file);
+  }
+
+  @Post('submit')
+  submit(@Req() req: { user: AuthUser }) {
+    return super.submit(req);
+  }
+}
+
 @Controller('api/admin/student-verifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar')
+@Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'HR', 'HRAdmin')
 export class StudentVerificationAdminController {
   constructor(
     private readonly onboarding: StudentOnboardingService,
@@ -138,39 +259,42 @@ export class StudentVerificationAdminController {
   ) {}
 
   @Get('queue')
-  queue(@Req() req: { user: AuthUser }) {
-    return this.onboarding.getVerificationQueue(req.user.tenant_id ?? '');
+  queue(
+    @Req() req: { user: AuthUser },
+    @Query('portal_kind') portalKind?: 'student' | 'staff' | 'all',
+  ) {
+    return this.onboarding.getVerificationQueue(req.user.tenant_id ?? '', portalKind ?? 'all');
   }
 
-  @Get(':studentUserId')
-  detail(@Req() req: { user: AuthUser }, @Param('studentUserId') studentUserId: string) {
-    return this.onboarding.getVerificationDetail(req.user.tenant_id ?? '', studentUserId);
+  @Get(':targetUserId')
+  detail(@Req() req: { user: AuthUser }, @Param('targetUserId') targetUserId: string) {
+    return this.onboarding.getVerificationDetail(req.user.tenant_id ?? '', targetUserId);
   }
 
-  @Post(':studentUserId/approve')
-  approve(@Req() req: { user: AuthUser }, @Param('studentUserId') studentUserId: string) {
-    return this.onboarding.approve(req.user.tenant_id ?? '', studentUserId);
+  @Post(':targetUserId/approve')
+  approve(@Req() req: { user: AuthUser }, @Param('targetUserId') targetUserId: string) {
+    return this.onboarding.approve(req.user.tenant_id ?? '', targetUserId);
   }
 
-  @Post(':studentUserId/reject')
+  @Post(':targetUserId/reject')
   reject(
     @Req() req: { user: AuthUser },
-    @Param('studentUserId') studentUserId: string,
+    @Param('targetUserId') targetUserId: string,
     @Body() body: { remarks: string },
   ) {
-    return this.onboarding.reject(req.user.tenant_id ?? '', studentUserId, body.remarks);
+    return this.onboarding.reject(req.user.tenant_id ?? '', targetUserId, body.remarks);
   }
 
-  @Get(':studentUserId/documents/:docType/preview')
+  @Get(':targetUserId/documents/:docType/preview')
   async previewDocument(
     @Req() req: { user: AuthUser },
-    @Param('studentUserId') studentUserId: string,
+    @Param('targetUserId') targetUserId: string,
     @Param('docType') docType: string,
     @Res() res: Response,
   ) {
     const filePath = await this.onboarding.getDocumentPath(
       req.user.tenant_id ?? '',
-      studentUserId,
+      targetUserId,
       docType.toUpperCase().replace(/-/g, '_'),
     );
 

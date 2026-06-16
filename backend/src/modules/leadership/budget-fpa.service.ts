@@ -4,9 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
-import { FalconNotification } from '../../entities/falcon-notification.entity';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
+import { budgetAlertMessage } from '../../core/notifications/notification-message.catalog';
 
 type DeptAllocation = { department_id: number; allocated_amount: number };
 
@@ -14,7 +15,7 @@ type DeptAllocation = { department_id: number; allocated_amount: number };
 export class BudgetFpaService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
-    @InjectRepository(FalconNotification) private notifications: Repository<FalconNotification>,
+    private readonly notifyDispatch: NotificationDispatchService,
   ) {}
 
   private tenantId(tenantId?: string) {
@@ -509,17 +510,17 @@ export class BudgetFpaService {
         )[0]?.program_name
       : 'Department';
     for (const c of chairmen as { user_id: string }[]) {
-      await this.notifications.save(
-        this.notifications.create({
-          tenant_id: tid,
-          user_id: c.user_id,
-          category: 'FINANCE',
-          title: 'Budget Expansion Request',
-          message: `${programName}: requesting ₹${Number(dto.requested_amount).toLocaleString('en-IN')} additional budget. ${dto.reason ?? ''}`,
-          action_link: `/leadership/budget-allocation?expansion=${req.request_id}`,
-          is_read: false,
-        }),
-      );
+      const msg = budgetAlertMessage({
+        title: 'Budget expansion request',
+        message: `${programName} is requesting ₹${Number(dto.requested_amount).toLocaleString('en-IN')} in additional budget.${dto.reason ? ` Reason: ${dto.reason}` : ''} Review and approve or reject.`,
+      });
+      await this.notifyDispatch.dispatch({
+        tenantId: tid,
+        userId: c.user_id,
+        ...msg,
+        actionLink: `/leadership/budget-allocation?expansion=${req.request_id}`,
+        queueDelivery: false,
+      });
     }
     return req;
   }

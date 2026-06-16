@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Plus, Scale } from 'lucide-react';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrStatusBadge } from '@/components/hr/HrStatusBadge';

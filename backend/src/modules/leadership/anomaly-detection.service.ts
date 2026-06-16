@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { FinancialFeedEmitter } from './financial-feed.emitter';
-import { FalconNotification } from '../../entities/falcon-notification.entity';
+import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
+import { financialAnomalyMessage } from '../../core/notifications/notification-message.catalog';
 
 export type AnomalySeverity = 'GREEN' | 'YELLOW' | 'RED';
 
@@ -14,7 +15,7 @@ export class AnomalyDetectionService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly feed: FinancialFeedEmitter,
-    @InjectRepository(FalconNotification) private notifications: Repository<FalconNotification>,
+    private readonly notifyDispatch: NotificationDispatchService,
   ) {}
 
   duplicateHash(vendorId: string, invoiceNumber: string, amount: number): string {
@@ -193,16 +194,17 @@ export class AnomalyDetectionService {
       [tenantId],
     );
     for (const row of chairmanRows as { user_id: string }[]) {
-      const notification = this.notifications.create({
-        tenant_id: tenantId,
-        user_id: row.user_id,
-        category: 'FINANCE',
-        title: severity === 'RED' ? 'Critical Financial Alert' : 'Financial Attention Required',
+      const msg = financialAnomalyMessage({
         message,
-        action_link: '/leadership/intelligence',
-        is_read: false,
+        severity: severity === 'RED' ? 'RED' : 'AMBER',
+        ruleCode,
       });
-      await this.notifications.save(notification);
+      await this.notifyDispatch.dispatch({
+        tenantId,
+        userId: row.user_id,
+        ...msg,
+        queueDelivery: false,
+      });
     }
     this.logger.warn(`Anomaly ${ruleCode} (${severity}) for tenant ${tenantId}`);
   }

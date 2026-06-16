@@ -1,5 +1,6 @@
 'use client';
 
+import { FalconLogo } from '@/components/brand/FalconLogo';
 import { useAuth } from '@/context/AuthContext';
 import { BarChart3, Clock3, HelpCircle, History, LayoutDashboard, LogOut, Repeat2, UserCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -30,9 +31,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-[#d6b65d]/30 bg-[#08234a] text-white shadow-xl lg:flex lg:flex-col">
         <div className="flex h-20 items-center gap-3 border-b border-white/10 px-6">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#d6b65d] text-lg font-black text-[#08234a] shadow-lg">
-            SGVU
-          </div>
+          <FalconLogo size={56} />
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#d6b65d]">Falcon</p>
             <p className="text-sm font-medium text-blue-100">SGVU Workspace</p>
@@ -89,9 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-10 border-b border-[#d6b65d]/25 bg-white/90 backdrop-blur">
           <div className="flex h-20 items-center justify-between px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3 lg:hidden">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#08234a] text-sm font-black text-[#d6b65d]">
-                SGVU
-              </div>
+              <FalconLogo size={48} compact />
               <div>
                 <p className="font-black text-[#08234a]">Falcon</p>
                 <p className="text-xs font-medium text-slate-500">SGVU Workspace</p>

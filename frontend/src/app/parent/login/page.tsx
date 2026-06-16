@@ -50,12 +50,12 @@ export default function ParentLoginPage() {
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.07]"
           style={{
-            backgroundImage: `url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 64 64' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M32 12c-8 6-14 14-14 22 0 8 6 14 14 18 8-4 14-10 14-18 0-8-6-16-14-22z' fill='%23d6b65d'/%3E%3C/svg%3E")`,
+            backgroundImage: 'url("/logo.png")',
             backgroundSize: '120px 120px',
           }}
         />
         <div className="relative z-10">
-          <FalconLogo variant="full" size={48} />
+          <FalconLogo variant="full" size={72} />
         </div>
         <div className="relative z-10 max-w-xl space-y-5 py-10 lg:py-16">
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sgvu-gold">

@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Post, Patch, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Post, Patch, Req, Res, UploadedFile, UseGuards, UseInterceptors, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -30,6 +31,31 @@ export class StudentPortalController {
     },
   ) {
     return this.portal.updateProfile(this.tenant(req), req.user.user_id, body);
+  }
+
+  @Get('profile/photo')
+  async getProfilePhoto(@Req() req: { user: AuthUser }, @Res() res: Response) {
+    const { stream, filePath } = await this.portal.openProfilePhotoStream(
+      this.tenant(req),
+      req.user.user_id,
+    );
+    const ext = filePath.split('.').pop()?.toLowerCase();
+    const contentType =
+      ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    stream.pipe(res);
+  }
+
+  @Post('profile/photo')
+  @UseInterceptors(
+    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  uploadProfilePhoto(@Req() req: { user: AuthUser }, @UploadedFile() file?: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('No photo uploaded');
+    }
+    return this.portal.uploadProfilePhoto(this.tenant(req), req.user.user_id, file);
   }
 
   @Get('campus-settings')

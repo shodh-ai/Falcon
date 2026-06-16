@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,6 +15,8 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { type CalendarDay } from '@/components/hr/HrAttendanceCalendar';
 import { attendanceCircleStyle, ATTENDANCE_LEGEND } from '@/lib/hr-attendance-status';
+import { getDashboardPathForRole } from '@/lib/auth-routing';
+import { selfServicePaths, workspacePrefixFromPath } from '@/lib/workspace-self-service';
 
 type Holiday = {
   holiday_id: string;
@@ -25,6 +28,7 @@ type Holiday = {
 };
 
 export default function AttendanceHolidaysCalendarPage() {
+  const router = useRouter();
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [attendanceDays, setAttendanceDays] = useState<Record<string, CalendarDay>>({});
   const [loading, setLoading] = useState(true);
@@ -32,6 +36,17 @@ export default function AttendanceHolidaysCalendarPage() {
 
   const { user } = useAuth();
   const isAdmin = user?.roles?.includes('HRAdmin') || user?.roles?.includes('SuperAdmin') || user?.role === 'HRAdmin' || user?.role === 'SuperAdmin';
+
+  // Faculty/HOD self-service lives in their workspace — not the HR portal shell.
+  useEffect(() => {
+    if (!user) return;
+    const roles = (user.roles?.length ? user.roles : [user.role]).filter(Boolean).map((r) => r.toLowerCase());
+    const isHrOps = roles.some((r) => ['hr', 'hradmin', 'superadmin', 'president'].includes(r));
+    if (isHrOps) return;
+    const dash = getDashboardPathForRole(user.role ?? roles[0]);
+    const prefix = workspacePrefixFromPath(dash) ?? 'faculty';
+    router.replace(selfServicePaths(prefix).workforce);
+  }, [user, router]);
 
   const [form, setForm] = useState<{
     id?: string;
@@ -53,11 +68,24 @@ export default function AttendanceHolidaysCalendarPage() {
   const entityId = hrEntityCtx?.entityId;
 
   const getLocalYYYYMMDD = (isoString: string) => {
+    if (isoString.length >= 10 && isoString[4] === '-' && isoString[7] === '-') {
+      return isoString.slice(0, 10);
+    }
     const d = new Date(isoString);
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const dedupeHolidays = (list: Holiday[]) => {
+    const seen = new Set<string>();
+    return list.filter((h) => {
+      const key = `${getLocalYYYYMMDD(h.date)}|${h.title}|${h.type}|${h.applicable_to ?? 'ALL'}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   };
 
   useEffect(() => {
@@ -76,7 +104,7 @@ export default function AttendanceHolidaysCalendarPage() {
         const data = await api.get<any>('/api/hr/holidays');
         list = [...(data?.mandatory || []), ...(data?.restricted || [])];
       }
-      setHolidays(list || []);
+      setHolidays(dedupeHolidays(list || []));
     } catch (err: any) {
       toast.error('Failed to load holidays');
     } finally {

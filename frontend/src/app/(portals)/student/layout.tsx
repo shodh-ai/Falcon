@@ -1,12 +1,11 @@
 'use client';
 
-'use client';
-
 import type { ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { RoleGate } from '@/components/layout/RoleGate';
 import { StudentShell } from '@/components/layout/StudentShell';
-import { StudentOnboardingGuard } from '@/components/student/StudentOnboardingGuard';
+import { PortalOnboardingGuard } from '@/components/onboarding/PortalOnboardingGuard';
+import { STUDENT_ONBOARDING_CONFIG } from '@/lib/onboarding/portal-onboarding';
 
 export default function StudentPortalLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -15,16 +14,16 @@ export default function StudentPortalLayout({ children }: { children: ReactNode 
   if (isOnboarding) {
     return (
       <RoleGate>
-        <StudentOnboardingGuard>{children}</StudentOnboardingGuard>
+        <PortalOnboardingGuard config={STUDENT_ONBOARDING_CONFIG}>{children}</PortalOnboardingGuard>
       </RoleGate>
     );
   }
 
   return (
     <RoleGate>
-      <StudentOnboardingGuard>
+      <PortalOnboardingGuard config={STUDENT_ONBOARDING_CONFIG}>
         <StudentShell>{children}</StudentShell>
-      </StudentOnboardingGuard>
+      </PortalOnboardingGuard>
     </RoleGate>
   );
 }

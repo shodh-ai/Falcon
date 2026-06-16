@@ -1,11 +1,18 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
+import { toast } from '@/lib/notifications/falcon-toast';
+import { FlaskConical, Plus } from 'lucide-react';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyEmptyState,
+  FacultyPanel,
+  FacultyMetricChip,
+} from '@/components/faculty';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 
 type ResearchLog = {
@@ -20,6 +27,7 @@ type ResearchLog = {
 export default function FacultyResearchPage() {
   const api = useAuthedApi();
   const [logs, setLogs] = useState<ResearchLog[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     publication_title: '',
     journal_name: '',
@@ -34,65 +42,109 @@ export default function FacultyResearchPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    setSubmitting(true);
     try {
       await api.post('/api/academics/faculty/workspaces/research', form);
       toast.success('Research entry logged (feeds HR PMS & IQAC)');
       setLogs(await api.get<ResearchLog[]>('/api/academics/faculty/workspaces/research'));
-      setForm({ publication_title: '', journal_name: '', indexing_type: 'SCOPUS', publication_type: 'JOURNAL', published_date: '' });
+      setForm({
+        publication_title: '',
+        journal_name: '',
+        indexing_type: 'SCOPUS',
+        publication_type: 'JOURNAL',
+        published_date: '',
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <FacultyPageShell>
       <FacultyPageHeader
-        title="Research & Publications"
         description="Log Scopus papers, patents, and book chapters — data flows to HR appraisals and NAAC SSR."
+        meta={<FacultyMetricChip label="Publications" value={logs.length} emphasis />}
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Add publication</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-3" onSubmit={onSubmit}>
-            <Input required value={form.publication_title} onChange={(e) => setForm({ ...form, publication_title: e.target.value })} placeholder="Title" />
-            <Input value={form.journal_name} onChange={(e) => setForm({ ...form, journal_name: e.target.value })} placeholder="Journal / Conference" />
-            <select className="rounded-md border px-3 py-2 text-sm" value={form.indexing_type} onChange={(e) => setForm({ ...form, indexing_type: e.target.value })}>
-              <option value="SCOPUS">Scopus</option>
-              <option value="WOS">Web of Science</option>
-              <option value="UGC_CARE">UGC-CARE</option>
-              <option value="OTHER">Other</option>
-            </select>
-            <select className="rounded-md border px-3 py-2 text-sm" value={form.publication_type} onChange={(e) => setForm({ ...form, publication_type: e.target.value })}>
-              <option value="JOURNAL">Journal</option>
-              <option value="CONFERENCE">Conference</option>
-              <option value="PATENT">Patent</option>
-              <option value="BOOK">Book</option>
-              <option value="BOOK_CHAPTER">Book chapter</option>
-            </select>
-            <Input type="date" value={form.published_date} onChange={(e) => setForm({ ...form, published_date: e.target.value })} />
-            <Button type="submit">Save to research log</Button>
-          </form>
-        </CardContent>
-      </Card>
+      <FacultyPanel title="Add publication" description="Journal, conference, patent, or book chapter">
+        <form className="grid gap-3 sm:grid-cols-2" onSubmit={onSubmit}>
+          <Input
+            required
+            className="sm:col-span-2"
+            value={form.publication_title}
+            onChange={(e) => setForm({ ...form, publication_title: e.target.value })}
+            placeholder="Publication title"
+          />
+          <Input
+            value={form.journal_name}
+            onChange={(e) => setForm({ ...form, journal_name: e.target.value })}
+            placeholder="Journal / conference"
+          />
+          <select
+            className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+            value={form.indexing_type}
+            onChange={(e) => setForm({ ...form, indexing_type: e.target.value })}
+          >
+            <option value="SCOPUS">Scopus</option>
+            <option value="WOS">Web of Science</option>
+            <option value="UGC_CARE">UGC-CARE</option>
+            <option value="OTHER">Other</option>
+          </select>
+          <select
+            className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+            value={form.publication_type}
+            onChange={(e) => setForm({ ...form, publication_type: e.target.value })}
+          >
+            <option value="JOURNAL">Journal</option>
+            <option value="CONFERENCE">Conference</option>
+            <option value="PATENT">Patent</option>
+            <option value="BOOK">Book</option>
+            <option value="BOOK_CHAPTER">Book chapter</option>
+          </select>
+          <Input
+            type="date"
+            value={form.published_date}
+            onChange={(e) => setForm({ ...form, published_date: e.target.value })}
+          />
+          <div className="sm:col-span-2">
+            <Button type="submit" disabled={submitting} className="gap-1.5">
+              <Plus className="h-4 w-4" />
+              {submitting ? 'Saving…' : 'Save to research log'}
+            </Button>
+          </div>
+        </form>
+      </FacultyPanel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Your publications</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          {logs.map((l) => (
-            <div key={l.research_id} className="rounded-lg border px-3 py-2">
-              <p className="font-medium">{l.publication_title}</p>
-              <p className="text-muted-foreground">
-                {l.publication_type} · {l.indexing_type ?? '—'} · {l.journal_name ?? '—'}
-              </p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+      <FacultyPanel title="Your publications" count={logs.length}>
+        {logs.length === 0 ? (
+          <FacultyEmptyState description="No publications logged yet." />
+        ) : (
+          <div className="space-y-2">
+            {logs.map((l) => (
+              <div
+                key={l.research_id}
+                className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/20 px-4 py-3"
+              >
+                <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-sgvu-gold" />
+                <div>
+                  <p className="font-medium text-sgvu-navy">{l.publication_title}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {l.publication_type.replace('_', ' ')} · {l.indexing_type ?? '—'}
+                    {l.journal_name ? ` · ${l.journal_name}` : ''}
+                  </p>
+                  {l.published_date && (
+                    <Badge variant="outline" className="mt-2 text-[10px]">
+                      {new Date(l.published_date).toLocaleDateString('en-IN')}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </FacultyPanel>
+    </FacultyPageShell>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Headphones, Loader2, MessageSquarePlus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

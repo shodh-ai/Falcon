@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DataTable } from '@/components/ui/DataTable';
 import { useAuthedApi } from '@/lib/api';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 type MasterRow = { config_id: string; category: string; label: string };
 type PermRow = { permission_id: string; role_name: string; permission_key: string; allowed: boolean };

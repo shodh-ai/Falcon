@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { CalendarOff, Inbox, UserPlus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrTabBar } from '@/components/hr/HrTabBar';
 import { HrPersonCell } from '@/components/hr/HrAvatar';

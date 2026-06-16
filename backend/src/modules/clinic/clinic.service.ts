@@ -2,16 +2,17 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { FalconNotification } from '../../entities/falcon-notification.entity';
+import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
+import { medicalLeaveAlertMessage } from '../../core/notifications/notification-message.catalog';
 import { User } from '../../entities/user.entity';
 
 @Injectable()
 export class ClinicService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
-    @InjectRepository(FalconNotification) private notifications: Repository<FalconNotification>,
     @InjectRepository(User) private users: Repository<User>,
     private events: EventEmitter2,
+    private readonly notifyDispatch: NotificationDispatchService,
   ) {}
 
   private tenant(tenantId?: string) {
@@ -74,23 +75,22 @@ export class ClinicService {
       [patientUserId],
     );
 
-    const message = `${patient.name} advised ${restDays} day(s) rest: ${diagnosis}. Attendance marked Medical Leave.`;
+    const msg = medicalLeaveAlertMessage({
+      patientName: patient.name,
+      restDays,
+      diagnosis,
+    });
 
     for (const target of [wardenRows[0], proctorRows[0]].filter(Boolean)) {
       const userId = (target as { user_id?: string; proctor_user_id?: string }).user_id
         ?? (target as { proctor_user_id?: string }).proctor_user_id;
       if (!userId) continue;
-      await this.notifications.save(
-        this.notifications.create({
-          tenant_id: tenantId,
-          user_id: userId,
-          category: 'HOSTEL',
-          title: 'Medical Leave Alert',
-          message,
-          action_link: '/hostel-admin/students',
-          is_read: false,
-        }),
-      );
+      await this.notifyDispatch.dispatch({
+        tenantId,
+        userId,
+        ...msg,
+        queueDelivery: false,
+      });
     }
 
     this.events.emit('clinic.medical_leave', {

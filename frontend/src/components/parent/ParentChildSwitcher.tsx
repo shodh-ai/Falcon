@@ -9,6 +9,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { HEADER_CONTROL_CLASS } from '@/components/layout/header-styles';
+import { cn } from '@/lib/utils';
 
 type ParentChildSwitcherProps = {
   variant?: 'header' | 'banner';
@@ -44,7 +46,7 @@ export function ParentChildSwitcher({ variant = 'banner' }: ParentChildSwitcherP
       const sole = children[0];
       return (
         <div
-          className="inline-flex h-9 max-w-[140px] items-center gap-1.5 rounded-md border bg-muted/40 px-2 sm:max-w-[180px] sm:gap-2 sm:px-3"
+          className={cn('inline-flex max-w-[140px] gap-1.5 px-2 sm:max-w-[180px] sm:gap-2 sm:px-3', HEADER_CONTROL_CLASS)}
           title={sole.department ?? undefined}
         >
           <GraduationCap className="h-4 w-4 shrink-0 text-sgvu-gold" />
@@ -56,7 +58,7 @@ export function ParentChildSwitcher({ variant = 'banner' }: ParentChildSwitcherP
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="h-9 shrink-0 gap-1.5 px-2 sm:gap-2 sm:px-3" title="Switch child">
+          <Button variant="outline" className={cn('shrink-0 gap-1.5 px-2 sm:gap-2 sm:px-3', HEADER_CONTROL_CLASS)} title="Switch child">
             <GraduationCap className="h-4 w-4 shrink-0 text-sgvu-gold" />
             <span className="max-w-[88px] truncate whitespace-nowrap text-xs sm:max-w-[140px] sm:text-sm">
               {selectedChild?.name ?? 'Select child'}
