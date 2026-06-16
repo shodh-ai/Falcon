@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CalendarClock, Loader2, UserRound } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -34,6 +34,10 @@ export default function StudentMentorshipPage() {
   const [loading, setLoading] = useState(true);
   const [meetingLoading, setMeetingLoading] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<StudentMeeting[]>([]);
+  const [meetingDate, setMeetingDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  });
   const [leaveReason, setLeaveReason] = useState('');
   const [leaveStart, setLeaveStart] = useState('');
   const [leaveEnd, setLeaveEnd] = useState('');
@@ -65,15 +69,39 @@ export default function StudentMentorshipPage() {
       });
   }, [api]);
 
+  /** Parse a slot label (e.g. '10:00 AM') + a date string ('YYYY-MM-DD') into a Date. */
+  function parseSlotDateTime(slot: string, dateStr: string): Date {
+    const [time, meridian] = slot.split(' ');
+    const [hoursRaw, minutesRaw] = time.split(':').map(Number);
+    const normalizedHours =
+      meridian === 'PM' && hoursRaw !== 12 ? hoursRaw + 12 : hoursRaw === 12 && meridian === 'AM' ? 0 : hoursRaw;
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day, normalizedHours, minutesRaw, 0, 0);
+  }
+
+  /** Today and max date (2 weeks ahead) as YYYY-MM-DD for the date picker bounds. */
+  const { todayStr, maxDateStr } = useMemo(() => {
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const now = new Date();
+    const max = new Date();
+    max.setDate(max.getDate() + 14);
+    return { todayStr: fmt(now), maxDateStr: fmt(max) };
+  }, []);
+
+  /** Returns true if the given slot has already passed for the selected date. */
+  function isSlotPassed(slot: string): boolean {
+    return parseSlotDateTime(slot, meetingDate) < new Date();
+  }
+
   async function bookMeeting(slot: string) {
+    if (isSlotPassed(slot)) {
+      toast.error('This time slot has already passed. Please choose a later slot or a future date.');
+      return;
+    }
     setMeetingLoading(slot);
     try {
-      const date = new Date();
-      const [time, meridian] = slot.split(' ');
-      const [hoursRaw, minutesRaw] = time.split(':').map(Number);
-      const normalizedHours =
-        meridian === 'PM' && hoursRaw !== 12 ? hoursRaw + 12 : hoursRaw === 12 && meridian === 'AM' ? 0 : hoursRaw;
-      date.setHours(normalizedHours, minutesRaw, 0, 0);
+      const date = parseSlotDateTime(slot, meetingDate);
       await api.post('/api/academics/proctor/meetings', {
         meeting_at: date.toISOString(),
         note: 'Meeting requested from student portal',
@@ -158,19 +186,34 @@ export default function StudentMentorshipPage() {
               </div>
             </StudentSectionCard>
 
-            <StudentSectionCard title="Book a 15-min meeting" description="Select an available slot" icon={CalendarClock}>
+            <StudentSectionCard title="Book a 15-min meeting" description="Pick a date & select an available slot" icon={CalendarClock}>
+              <div className="mb-3 flex items-center gap-3">
+                <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Meeting date</label>
+                <Input
+                  type="date"
+                  className="max-w-[180px]"
+                  value={meetingDate}
+                  min={todayStr}
+                  max={maxDateStr}
+                  onChange={(e) => setMeetingDate(e.target.value)}
+                />
+              </div>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {['10:00 AM', '11:30 AM', '2:15 PM', '4:30 PM'].map((slot) => (
-                  <Button
-                    key={slot}
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => bookMeeting(slot)}
-                    disabled={meetingLoading === slot}
-                  >
-                    {meetingLoading === slot ? <Loader2 className="h-4 w-4 animate-spin" /> : slot}
-                  </Button>
-                ))}
+                {['10:00 AM', '11:30 AM', '2:15 PM', '4:30 PM'].map((slot) => {
+                  const passed = isSlotPassed(slot);
+                  return (
+                    <Button
+                      key={slot}
+                      variant="outline"
+                      className={`w-full ${passed ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      onClick={() => bookMeeting(slot)}
+                      disabled={passed || meetingLoading === slot}
+                      title={passed ? 'This slot has already passed' : `Book meeting at ${slot}`}
+                    >
+                      {meetingLoading === slot ? <Loader2 className="h-4 w-4 animate-spin" /> : slot}
+                    </Button>
+                  );
+                })}
               </div>
             </StudentSectionCard>
           </div>

@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
+import { StudentProfile } from '../../entities/student-profile.entity';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { Subject } from '../../entities/subject.entity';
 import { Batch } from '../../entities/batch.entity';
@@ -40,6 +42,8 @@ export class AcademicsService {
     @InjectRepository(StaffLeaveRequest)
     private staffLeaveRequests: Repository<StaffLeaveRequest>,
     @InjectRepository(StaffGatePass) private staffGatePasses: Repository<StaffGatePass>,
+    @InjectRepository(HelpdeskTicket) private helpdeskTickets: Repository<HelpdeskTicket>,
+    @InjectRepository(StudentProfile) private studentProfiles: Repository<StudentProfile>,
     private readonly notify: NotificationEmitterService,
   ) {}
 
@@ -1166,5 +1170,112 @@ export class AcademicsService {
       .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', { deptIds })
       .orderBy('user.name', 'ASC')
       .getMany();
+  }
+
+  /**
+   * Lists all PENDING helpdesk tickets in the ACADEMICS category,
+   * joined with student user info and their student profile.
+   */
+  async listProfileUpdateRequests() {
+    const tickets = await this.helpdeskTickets.find({
+      where: { category: 'ACADEMICS', status: 'PENDING' },
+      order: { created_at: 'ASC' },
+    });
+
+    if (tickets.length === 0) return [];
+
+    const studentIds = [...new Set(tickets.map((t) => t.student_user_id))];
+    const students = await this.users.find({
+      where: { user_id: In(studentIds) },
+      relations: ['department'],
+    });
+    const profiles = await this.studentProfiles.find({
+      where: { user_id: In(studentIds) },
+    });
+
+    const studentMap = new Map(students.map((s) => [s.user_id, s]));
+    const profileMap = new Map(profiles.map((p) => [p.user_id, p]));
+
+    return tickets.map((ticket) => {
+      const student = studentMap.get(ticket.student_user_id);
+      const profile = profileMap.get(ticket.student_user_id);
+      return {
+        ticket_id: ticket.ticket_id,
+        subject: ticket.subject,
+        description: ticket.description,
+        status: ticket.status,
+        created_at: ticket.created_at,
+        student: {
+          user_id: student?.user_id ?? ticket.student_user_id,
+          name: student?.name ?? 'Unknown',
+          email: student?.email ?? '',
+          department: student?.department?.dept_name ?? null,
+          enrollment_no: profile?.enrollment_no ?? null,
+          mobile: (profile?.parent_info as Record<string, unknown>)?.mobile ?? null,
+          address: (profile?.parent_info as Record<string, unknown>)?.address ?? null,
+          parent_details: (profile?.parent_info as Record<string, unknown>)?.parent_details ?? null,
+        },
+      };
+    });
+  }
+
+  /**
+   * Resolves a pending ACADEMICS ticket by approving (with optional profile
+   * updates) or rejecting it. Appends an audit entry to the conversation.
+   */
+  async resolveProfileUpdateRequest(
+    adminUserId: string,
+    ticketId: string,
+    dto: {
+      action: 'APPROVE' | 'REJECT';
+      rejection_reason?: string;
+      updated_name?: string;
+      updated_mobile?: string;
+      updated_address?: string;
+      updated_parent_details?: Record<string, unknown>;
+    },
+  ) {
+    const ticket = await this.helpdeskTickets.findOne({
+      where: { ticket_id: ticketId, category: 'ACADEMICS', status: 'PENDING' },
+    });
+    if (!ticket) throw new NotFoundException('Ticket not found or already resolved');
+
+    const auditEntry = {
+      sender_user_id: adminUserId,
+      sender_role: 'Admin',
+      message:
+        dto.action === 'APPROVE'
+          ? 'Profile correction request approved and applied.'
+          : `Profile correction request rejected. Reason: ${dto.rejection_reason ?? 'No reason provided'}`,
+      sent_at: new Date().toISOString(),
+    };
+    ticket.conversation = [...(ticket.conversation ?? []), auditEntry];
+    ticket.status = 'RESOLVED';
+    await this.helpdeskTickets.save(ticket);
+
+    if (dto.action === 'APPROVE') {
+      // Update user name if provided
+      if (dto.updated_name) {
+        await this.users.update(
+          { user_id: ticket.student_user_id },
+          { name: dto.updated_name },
+        );
+      }
+
+      // Update student profile parent_info fields
+      const profile = await this.studentProfiles.findOne({
+        where: { user_id: ticket.student_user_id },
+      });
+      if (profile) {
+        const info = (profile.parent_info ?? {}) as Record<string, unknown>;
+        if (dto.updated_mobile !== undefined) info.mobile = dto.updated_mobile;
+        if (dto.updated_address !== undefined) info.address = dto.updated_address;
+        if (dto.updated_parent_details !== undefined) info.parent_details = dto.updated_parent_details;
+        profile.parent_info = info;
+        await this.studentProfiles.save(profile);
+      }
+    }
+
+    return { success: true, action: dto.action, ticket_id: ticketId };
   }
 }

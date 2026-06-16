@@ -32,6 +32,22 @@ function tenantHeaders(): Record<string, string> {
   return { 'x-tenant-subdomain': getSubdomainFromClient() };
 }
 
+function extractErrorMessage(text: string, defaultMessage: string): string {
+  if (!text.trim()) return defaultMessage;
+  try {
+    const errorData = JSON.parse(text);
+    if (errorData.message) {
+      return Array.isArray(errorData.message) ? String(errorData.message[0]) : String(errorData.message);
+    }
+    if (errorData.error) {
+      return String(errorData.error);
+    }
+  } catch {
+    // Ignore JSON parse error, proceed to return raw text
+  }
+  return text || defaultMessage;
+}
+
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
 async function request<T>(
@@ -65,7 +81,7 @@ async function request<T>(
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed with status ${response.status}`);
+    throw new Error(extractErrorMessage(text, `Request failed with status ${response.status}`));
   }
 
   if (response.status === 204) return undefined as T;
@@ -96,7 +112,7 @@ export const api = {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(text || 'Login failed');
+      throw new Error(extractErrorMessage(text, 'Login failed'));
     }
     return response.json() as Promise<{
       token: string;

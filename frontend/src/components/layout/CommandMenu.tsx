@@ -34,8 +34,8 @@ export function CommandMenu({ items }: CommandMenuProps) {
 
   const run = useCallback(
     (href: string) => {
-      setOpen(false);
       router.push(href);
+      setOpen(false);
     },
     [router],
   );
@@ -65,11 +65,6 @@ export function CommandMenu({ items }: CommandMenuProps) {
                   key={item.href}
                   value={`${item.label} ${item.keywords?.join(' ') ?? ''}`}
                   onSelect={() => run(item.href)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    run(item.href);
-                  }}
-                  className="cursor-pointer"
                 >
                   <Icon className="h-4 w-4 text-sgvu-gold" />
                   <span>{item.label}</span>

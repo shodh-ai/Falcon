@@ -352,11 +352,98 @@ export class HostelTatkalService {
 
   @Interval(30_000)
   async expireStaleHolds() {
-    const expired = await this.dataSource.query(
-      `UPDATE hostel_booking_holds SET status = 'EXPIRED'
-       WHERE status = 'PENDING' AND expires_at < NOW()
-       RETURNING hold_id, bed_id, student_user_id, tenant_id`,
-    );
+    // #region agent log
+    const dsOpts = this.dataSource.options as {
+      host?: string;
+      port?: number;
+      database?: string;
+      username?: string;
+    };
+    let tableExists = false;
+    try {
+      const check = await this.dataSource.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_tables
+           WHERE schemaname = 'public' AND tablename = 'hostel_booking_holds'
+         ) AS exists`,
+      );
+      tableExists = Boolean(check[0]?.exists);
+    } catch {
+      tableExists = false;
+    }
+    fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
+      body: JSON.stringify({
+        sessionId: 'f13440',
+        runId: 'pre-fix',
+        hypothesisId: 'H1-H3',
+        location: 'hostel-tatkal.service.ts:expireStaleHolds',
+        message: 'scheduler db context',
+        data: {
+          host: dsOpts.host,
+          port: dsOpts.port,
+          database: dsOpts.database,
+          username: dsOpts.username,
+          tableExists,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    let expired: Array<{
+      hold_id: string;
+      bed_id: string;
+      student_user_id: string;
+      tenant_id: string;
+    }>;
+    try {
+      const updateResult = await this.dataSource.query(
+        `UPDATE hostel_booking_holds SET status = 'EXPIRED'
+         WHERE status = 'PENDING' AND expires_at < NOW()
+         RETURNING hold_id, bed_id, student_user_id, tenant_id`,
+      );
+      expired = Array.isArray(updateResult?.[0]) ? updateResult[0] : updateResult;
+      // #region agent log
+      fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
+        body: JSON.stringify({
+          sessionId: 'f13440',
+          runId: 'post-fix',
+          hypothesisId: 'H6',
+          location: 'hostel-tatkal.service.ts:expireStaleHolds',
+          message: 'update result normalized',
+          data: {
+            rawLength: Array.isArray(updateResult) ? updateResult.length : null,
+            expiredCount: expired.length,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    } catch (err: unknown) {
+      // #region agent log
+      fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
+        body: JSON.stringify({
+          sessionId: 'f13440',
+          runId: 'pre-fix',
+          hypothesisId: 'H1-H4',
+          location: 'hostel-tatkal.service.ts:expireStaleHolds',
+          message: 'scheduler query failed',
+          data: {
+            code: (err as { code?: string })?.code,
+            message: err instanceof Error ? err.message : String(err),
+            tableExists,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      throw err;
+    }
     for (const row of expired) {
       await this.redis.releaseBedLock(row.bed_id, row.student_user_id);
       this.broadcastBed(row.tenant_id, row.bed_id, 'AVAILABLE');

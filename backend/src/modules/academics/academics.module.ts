@@ -24,6 +24,7 @@ import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { User } from '../../entities/user.entity';
+import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
 import { AcademicsController } from './academics.controller';
 import { AcademicsService } from './academics.service';
 import { AcademicsFacultyService } from './academics-faculty.service';
@@ -40,6 +41,9 @@ import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
+
+import { EarlyWarningService } from './early-warning.service';
+import { EarlyWarningController } from './early-warning.controller';
 
 @Module({
   imports: [
@@ -70,9 +74,10 @@ import { HelpdeskModule } from '../helpdesk/helpdesk.module';
       StaffLeaveRequest,
       StaffGatePass,
       User,
+      HelpdeskTicket,
     ]),
   ],
-  controllers: [AcademicsController, ProctorController, CertificatesController],
+  controllers: [AcademicsController, ProctorController, CertificatesController, EarlyWarningController],
   providers: [
     AcademicsService,
     AcademicsFacultyService,
@@ -85,6 +90,7 @@ import { HelpdeskModule } from '../helpdesk/helpdesk.module';
     CourseLmsService,
     MarksheetPdfService,
     MarksHistoryService,
+    EarlyWarningService,
   ],
   exports: [
     AcademicsService,
