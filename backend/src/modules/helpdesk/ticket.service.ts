@@ -64,7 +64,7 @@ export class TicketService {
         status: 'PENDING',
         tenant_id: tenantId,
         ticket_ref: ticketRef,
-        sla_deadline: new Date(Date.now() + 48 * 60 * 60 * 1000),
+        sla_deadline: new Date(Date.now() + 24 * 60 * 60 * 1000),
       } as Partial<HelpdeskTicket>),
     );
 

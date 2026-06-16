@@ -43,9 +43,8 @@ export class HelpdeskEscalationService {
     for (const ticket of tickets) {
       const hoursOpen = (Date.now() - new Date(ticket.created_at).getTime()) / (1000 * 60 * 60);
       let targetLevel = 0;
-      if (hoursOpen >= 72) targetLevel = 3;
-      else if (hoursOpen >= 48) targetLevel = 2;
-      else if (hoursOpen >= 24) targetLevel = 1;
+      if (hoursOpen >= 48) targetLevel = 4; // Leadership
+      else if (hoursOpen >= 24) targetLevel = 3; // Vice Chancellor
 
       if (targetLevel <= ticket.escalation_level) continue;
 
@@ -59,7 +58,7 @@ export class HelpdeskEscalationService {
         [ticket.ticket_id, assignee.userId, targetLevel],
       );
 
-      const levelLabels = ['Faculty/Proctor', 'HOD', 'Vice Chancellor', 'Leadership/Chairman'];
+      const levelLabels = ['None', 'Faculty/Proctor', 'HOD', 'Vice Chancellor', 'Leadership/Chairman'];
       this.notify.approvalRequired({
         tenantId: ticket.tenant_id,
         userId: assignee.userId,

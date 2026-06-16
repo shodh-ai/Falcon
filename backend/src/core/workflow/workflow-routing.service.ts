@@ -170,18 +170,15 @@ export class WorkflowRoutingService {
       }
       case 'MENTORSHIP':
         return this.getStudentProctor(studentUserId);
-      case 'ACADEMICS':
-        try {
-          return await this.getStudentProctor(studentUserId);
-        } catch {
-          const hod = await this.resolveUserByRole('HOD', tenantId) || await this.resolveUserByRole('Dean', tenantId);
-          if (hod) return hod;
-          return this.resolveUserByEmail(
-            this.fallbackHodEmail,
-            tenantId,
-            'ACADEMICS_HOD_FALLBACK',
-          );
-        }
+      case 'ACADEMICS': {
+        const hod = await this.resolveUserByRole('HOD', tenantId) || await this.resolveUserByRole('Dean', tenantId);
+        if (hod) return hod;
+        return this.resolveUserByEmail(
+          this.fallbackHodEmail,
+          tenantId,
+          'ACADEMICS_HOD_FALLBACK',
+        );
+      }
       case 'STUDENT_PROFILE':
         try {
           const reg = await this.resolveUserByRole('Registrar', tenantId);
