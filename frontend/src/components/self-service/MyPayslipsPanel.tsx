@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';

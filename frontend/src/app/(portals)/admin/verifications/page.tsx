@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,20 +24,45 @@ type QueueRow = {
   name: string;
   official_email: string;
   onboarding_status: string;
+  role_name: string;
+  portal_kind: string;
   submitted_at: string | null;
   doc_count: string;
 };
 
 type VerificationDetail = {
-  student: {
+  portal_kind: string;
+  person: {
     user_id: string;
     name: string;
     email: string;
-    blood_group: string | null;
-    abc_id: string | null;
-    parent_contact_phone: string | null;
-    enrollment_no: string | null;
-    batch: string | null;
+    role_name: string;
+    blood_group?: string | null;
+    gender?: string | null;
+    date_of_birth?: string | null;
+    staff_mobile?: string | null;
+    abc_id?: string | null;
+    pan_number?: string | null;
+    aadhaar_number?: string | null;
+    bank_account_no?: string | null;
+    ifsc_code?: string | null;
+    pf_uan?: string | null;
+    parent_contact_phone?: string | null;
+    emergency_contact_phone?: string | null;
+    orcid_id?: string | null;
+    scopus_id?: string | null;
+    google_scholar_url?: string | null;
+    total_experience_years?: string | null;
+    industry_experience_years?: string | null;
+    degree_level?: string | null;
+    degree_name?: string | null;
+    university?: string | null;
+    passing_year?: string | null;
+    specialization?: string | null;
+    employee_id?: string | null;
+    designation?: string | null;
+    enrollment_no?: string | null;
+    batch?: string | null;
   };
   documents: Array<{
     doc_id: string;
@@ -50,6 +75,8 @@ type VerificationDetail = {
 const DOC_LABELS: Record<string, string> = {
   PHOTO: 'Passport Photo',
   AADHAAR: 'Aadhaar Card',
+  PAN: 'PAN Card',
+  HIGHEST_DEGREE: 'Highest Degree',
   '10TH_MARKSHEET': '10th Marksheet',
   '12TH_MARKSHEET': '12th Marksheet',
 };
@@ -154,7 +181,7 @@ export default function AdminStudentVerificationsPage() {
     setActing(true);
     try {
       await api.post(`/api/admin/student-verifications/${selectedId}/approve`);
-      toast.success('Student approved — portal unlocked');
+      toast.success('Approved — portal unlocked');
       setSelectedId(null);
       setDetail(null);
       await loadQueue();
@@ -175,7 +202,7 @@ export default function AdminStudentVerificationsPage() {
       await api.post(`/api/admin/student-verifications/${selectedId}/reject`, {
         remarks: rejectReason.trim(),
       });
-      toast.success('Sent back to student for corrections');
+      toast.success('Sent back for corrections');
       setSelectedId(null);
       setDetail(null);
       await loadQueue();
@@ -189,28 +216,29 @@ export default function AdminStudentVerificationsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-bold text-sgvu-navy">Student Onboarding Verifications</h2>
+        <h2 className="text-xl font-bold text-sgvu-navy">First-Login Onboarding Verifications</h2>
         <p className="text-sm text-muted-foreground">
-          High-speed queue for pilot students awaiting document approval.
+          Review students, faculty, and HOD submissions awaiting approval.
         </p>
       </div>
 
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Verification Queue</CardTitle>
-          <CardDescription>{queue.length} student(s) pending admin approval</CardDescription>
+          <CardDescription>{queue.length} user(s) pending admin approval</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading queue…</p>
           ) : queue.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No students awaiting verification.</p>
+            <p className="text-sm text-muted-foreground">No users awaiting verification.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-4 font-medium">Student</th>
+                    <th className="py-2 pr-4 font-medium">Name</th>
+                    <th className="py-2 pr-4 font-medium">Role</th>
                     <th className="py-2 pr-4 font-medium">Email</th>
                     <th className="py-2 pr-4 font-medium">Docs</th>
                     <th className="py-2 pr-4 font-medium">Submitted</th>
@@ -221,6 +249,9 @@ export default function AdminStudentVerificationsPage() {
                   {queue.map((row) => (
                     <tr key={row.user_id} className="border-b last:border-0">
                       <td className="py-3 pr-4 font-medium">{row.name}</td>
+                      <td className="py-3 pr-4">
+                        <Badge variant="outline">{row.role_name}</Badge>
+                      </td>
                       <td className="py-3 pr-4">{row.official_email}</td>
                       <td className="py-3 pr-4">
                         <Badge variant="outline">{row.doc_count} files</Badge>
@@ -246,25 +277,80 @@ export default function AdminStudentVerificationsPage() {
       <Dialog open={Boolean(selectedId && detail)} onOpenChange={(open) => !open && setSelectedId(null)}>
         <DialogContent className="max-w-6xl">
           <DialogHeader>
-            <DialogTitle>{detail?.student.name}</DialogTitle>
-            <DialogDescription>{detail?.student.email}</DialogDescription>
+            <DialogTitle>{detail?.person.name}</DialogTitle>
+            <DialogDescription>
+              {detail?.person.email} · {detail?.person.role_name}
+            </DialogDescription>
           </DialogHeader>
 
           {detail && (
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-3 rounded-xl border p-4">
-                <h3 className="font-semibold text-sgvu-navy">Student Data</h3>
+                <h3 className="font-semibold text-sgvu-navy">Submitted Data</h3>
                 <dl className="grid grid-cols-2 gap-2 text-sm">
                   <dt className="text-muted-foreground">Blood Group</dt>
-                  <dd>{detail.student.blood_group ?? '—'}</dd>
-                  <dt className="text-muted-foreground">ABC ID</dt>
-                  <dd>{detail.student.abc_id ?? '—'}</dd>
-                  <dt className="text-muted-foreground">Parent Contact</dt>
-                  <dd>{detail.student.parent_contact_phone ?? '—'}</dd>
-                  <dt className="text-muted-foreground">Enrollment</dt>
-                  <dd>{detail.student.enrollment_no ?? '—'}</dd>
-                  <dt className="text-muted-foreground">Batch</dt>
-                  <dd>{detail.student.batch ?? '—'}</dd>
+                  <dd>{detail.person.blood_group ?? '—'}</dd>
+                  {detail.portal_kind === 'staff' ? (
+                    <>
+                      <dt className="text-muted-foreground">Gender / DOB</dt>
+                      <dd>
+                        {detail.person.gender ?? '—'}
+                        {detail.person.date_of_birth ? ` · ${detail.person.date_of_birth}` : ''}
+                      </dd>
+                      <dt className="text-muted-foreground">Mobile</dt>
+                      <dd>{detail.person.staff_mobile ?? '—'}</dd>
+                      <dt className="text-muted-foreground">PAN</dt>
+                      <dd className="font-mono text-xs">{detail.person.pan_number ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Aadhaar</dt>
+                      <dd className="font-mono text-xs">{detail.person.aadhaar_number ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Bank / IFSC</dt>
+                      <dd className="font-mono text-xs">
+                        {detail.person.bank_account_no ? `****${detail.person.bank_account_no.slice(-4)}` : '—'}
+                        {detail.person.ifsc_code ? ` · ${detail.person.ifsc_code}` : ''}
+                      </dd>
+                      <dt className="text-muted-foreground">UAN (PF)</dt>
+                      <dd>{detail.person.pf_uan || '—'}</dd>
+                      <dt className="text-muted-foreground">ORCID</dt>
+                      <dd>{detail.person.orcid_id ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Experience</dt>
+                      <dd>
+                        {detail.person.total_experience_years ?? '—'} yrs teaching
+                        {detail.person.industry_experience_years
+                          ? ` · ${detail.person.industry_experience_years} yrs industry`
+                          : ''}
+                      </dd>
+                      <dt className="text-muted-foreground">Highest degree</dt>
+                      <dd>
+                        {[detail.person.degree_level, detail.person.degree_name].filter(Boolean).join(' · ') || '—'}
+                        {detail.person.university ? ` — ${detail.person.university}` : ''}
+                        {detail.person.passing_year ? ` (${detail.person.passing_year})` : ''}
+                      </dd>
+                      <dt className="text-muted-foreground">Employee ID</dt>
+                      <dd>{detail.person.employee_id ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Designation</dt>
+                      <dd>{detail.person.designation ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Emergency Phone</dt>
+                      <dd>{detail.person.emergency_contact_phone ?? '—'}</dd>
+                      {!detail.person.aadhaar_number && !detail.person.orcid_id && !detail.person.university ? (
+                        <dd className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                          KYC, research, and qualification text fields were not submitted — only document uploads
+                          and basic contact info are on file. Reject with a note so the user completes all Step 2
+                          sections (not just file uploads).
+                        </dd>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <dt className="text-muted-foreground">ABC ID</dt>
+                      <dd>{detail.person.abc_id ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Parent Contact</dt>
+                      <dd>{detail.person.parent_contact_phone ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Enrollment</dt>
+                      <dd>{detail.person.enrollment_no ?? '—'}</dd>
+                      <dt className="text-muted-foreground">Batch</dt>
+                      <dd>{detail.person.batch ?? '—'}</dd>
+                    </>
+                  )}
                 </dl>
                 <div className="space-y-2 pt-2">
                   <p className="text-xs font-medium uppercase text-muted-foreground">Documents</p>

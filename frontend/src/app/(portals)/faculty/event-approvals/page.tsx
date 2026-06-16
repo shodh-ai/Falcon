@@ -1,14 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Loader2, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { Check, X } from 'lucide-react';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi, type CampusEvent } from '@/lib/api/api.campus-events';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyPageLoading,
+  FacultyEmptyState,
+} from '@/components/faculty';
 
 export default function FacultyEventApprovalsPage() {
   const api = useAuthedApi();
@@ -63,27 +69,21 @@ export default function FacultyEventApprovalsPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center p-8">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
+    return <FacultyPageLoading label="Loading event approvals…" branded />;
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-8">
-      <div>
-        <h1 className="text-2xl font-bold text-sgvu-navy">Event Approvals</h1>
-        <p className="text-sm text-muted-foreground">
-          Tier 1 — review content and relevance before Estate and Finance sign off.
-        </p>
-      </div>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        title="Event Approvals"
+        description="Tier 1 — review content and relevance before Estate and Finance sign off."
+      />
 
       {pending.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No pending proposals.</p>
+        <FacultyEmptyState description="No pending event proposals." />
       ) : (
         pending.map((ev) => (
-          <Card key={ev.event_id}>
+          <Card key={ev.event_id} className="border-border/60 shadow-sm">
             <CardHeader className="flex flex-row items-start justify-between gap-4">
               <div>
                 <CardTitle className="text-lg">{ev.title}</CardTitle>
@@ -113,7 +113,7 @@ export default function FacultyEventApprovalsPage() {
                 </Button>
               </div>
               {rejectId === ev.event_id ? (
-                <div className="space-y-2 rounded-lg border p-3">
+                <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
                   <label className="text-sm font-medium">Rejection reason (required)</label>
                   <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Explain why…" />
                   <div className="flex gap-2">
@@ -135,6 +135,6 @@ export default function FacultyEventApprovalsPage() {
           </Card>
         ))
       )}
-    </div>
+    </FacultyPageShell>
   );
 }

@@ -11,6 +11,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useHrEntity } from '@/context/HrEntityContext';
+import { HEADER_CONTROL_CLASS } from '@/components/layout/header-styles';
+import { cn } from '@/lib/utils';
 
 export function HrEntitySwitcher() {
   const { entities, entityId, setEntityId, loading } = useHrEntity();
@@ -30,7 +32,7 @@ export function HrEntitySwitcher() {
     const sole = entities[0];
     return (
       <div
-        className="hidden h-10 items-center gap-2 rounded-md border bg-muted/40 px-3 md:inline-flex"
+        className={cn('hidden md:inline-flex', HEADER_CONTROL_CLASS, 'px-3')}
         title={sole.entity_code}
       >
         <Building2 className="h-4 w-4 shrink-0 text-sgvu-gold" />
@@ -44,7 +46,7 @@ export function HrEntitySwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="hidden h-10 shrink-0 gap-2 md:inline-flex" title="Switch organization entity">
+        <Button variant="outline" className={cn('hidden md:inline-flex gap-2', HEADER_CONTROL_CLASS)} title="Switch organization entity">
           <Building2 className="h-4 w-4 shrink-0 text-sgvu-gold" />
           <span className="max-w-[140px] truncate whitespace-nowrap">
             {active?.entity_name ?? 'Select Entity'}

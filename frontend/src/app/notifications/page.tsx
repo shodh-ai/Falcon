@@ -1,35 +1,58 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { ArrowLeft, Bell, CheckCheck, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
+  filterNotifications,
   useNotificationHistory,
   toAppNotification,
-  categoryToUiType,
 } from '@/hooks/useNotifications';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
+import {
+  NotificationEmptyState,
+  NotificationItem,
+  NOTIFICATION_CATEGORY_FILTERS,
+} from '@/components/notifications/NotificationItem';
 import { cn } from '@/lib/utils';
 
-const typeStyles = {
-  fee: 'bg-amber-100 text-amber-800',
-  warning: 'bg-red-100 text-red-800',
-  success: 'bg-emerald-100 text-emerald-800',
-  info: 'bg-blue-100 text-blue-800',
-};
+type FilterTab = 'all' | 'unread' | 'action_required';
+
+const FILTER_TABS: { id: FilterTab; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'action_required', label: 'Action required' },
+];
 
 export default function NotificationsPage() {
   const router = useRouter();
   const { token, isAuthenticated, isLoading: authLoading } = useAuth();
-  const { notifications, isLoading, refresh } = useNotificationHistory();
+  const { notifications, isLoading, error, refresh } = useNotificationHistory();
+  const [filter, setFilter] = useState<FilterTab>('all');
+  const [category, setCategory] = useState('ALL');
+
+  const items = useMemo(() => notifications.map(toAppNotification), [notifications]);
+  const filtered = useMemo(
+    () => filterNotifications(items, filter, category),
+    [items, filter, category],
+  );
+  const unreadCount = items.filter((n) => n.unread).length;
+  const actionCount = items.filter((n) => n.intent === 'action_required' && n.unread).length;
 
   if (authLoading) {
-    return <p className="p-8 text-muted-foreground">Loading…</p>;
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center text-muted-foreground">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        Loading…
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
@@ -47,12 +70,18 @@ export default function NotificationsPage() {
     if (!token) return;
     await notificationsApi.markAllRead(token);
     await refresh();
+    toast.success('All notifications marked as read');
   };
 
-  const openNotification = async (id: string, actionLink: string | null | undefined, unread: boolean) => {
+  const openNotification = async (
+    id: string,
+    actionLink: string | null | undefined,
+    unread: boolean,
+  ) => {
     if (!token) return;
     try {
-      await handleNotificationAction(token, actionLink, router);
+      const result = await handleNotificationAction(token, actionLink, router);
+      if (result === 'download') toast.success('Download started');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
       return;
@@ -64,53 +93,102 @@ export default function NotificationsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-sgvu-navy">Notifications</h1>
-          <p className="text-sm text-muted-foreground">Alerts from Academics, Finance, HR, and more.</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={markAll}>
-          Mark all as read
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8">
+      <div className="mb-6">
+        <Button variant="ghost" size="sm" asChild className="mb-4 -ml-2 text-muted-foreground">
+          <Link href="/">
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            Back to portal
+          </Link>
         </Button>
+
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <Bell className="h-6 w-6 text-sgvu-gold" />
+              <h1 className="text-2xl font-black text-sgvu-navy">Notification Center</h1>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Updates, approvals, and alerts from across Falcon — with clear next steps.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {unreadCount > 0 && <Badge variant="destructive">{unreadCount} unread</Badge>}
+              {actionCount > 0 && (
+                <Badge variant="outline" className="border-amber-300 text-amber-800">
+                  {actionCount} need action
+                </Badge>
+              )}
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={markAll} disabled={unreadCount === 0}>
+            <CheckCheck className="mr-1 h-4 w-4" />
+            Mark all read
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {FILTER_TABS.map((tab) => (
+          <Button
+            key={tab.id}
+            size="sm"
+            variant={filter === tab.id ? 'default' : 'outline'}
+            onClick={() => setFilter(tab.id)}
+          >
+            {tab.label}
+          </Button>
+        ))}
+      </div>
+
+      <div className="mb-4">
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className={cn(
+            'h-9 rounded-md border border-input bg-background px-3 text-sm',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          )}
+        >
+          {NOTIFICATION_CATEGORY_FILTERS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">All alerts</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">
+            {filter === 'action_required'
+              ? 'Pending actions'
+              : filter === 'unread'
+                ? 'Unread alerts'
+                : 'All notifications'}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {isLoading && <p className="text-sm text-muted-foreground">Loading notifications…</p>}
-          {!isLoading && notifications.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">You&apos;re all caught up.</p>
+          {isLoading && (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading notifications…
+            </div>
           )}
-          {notifications.map((raw) => {
-            const n = toAppNotification(raw);
-            const uiType = categoryToUiType(raw.category);
-            return (
-              <button
+          {error && (
+            <p className="py-6 text-center text-sm text-destructive">
+              Could not load notifications. Please refresh the page.
+            </p>
+          )}
+          {!isLoading && !error && filtered.length === 0 && <NotificationEmptyState />}
+          {!isLoading &&
+            !error &&
+            filtered.map((n) => (
+              <NotificationItem
                 key={n.id}
-                type="button"
+                notification={n}
                 onClick={() => openNotification(n.id, n.actionLink, n.unread)}
-                className={cn(
-                  'w-full rounded-lg border p-4 text-left transition hover:bg-muted/50',
-                  n.unread && 'border-sgvu-gold/40 bg-sgvu-gold/5',
-                )}
-              >
-                <div className="mb-2 flex items-center gap-2">
-                  <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase', typeStyles[uiType])}>
-                    {raw.category}
-                  </span>
-                  {n.unread && <Badge variant="destructive">New</Badge>}
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {new Date(n.createdAt).toLocaleString()}
-                  </span>
-                </div>
-                <p className="font-semibold text-foreground">{n.title}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
-              </button>
-            );
-          })}
+              />
+            ))}
         </CardContent>
       </Card>
     </div>

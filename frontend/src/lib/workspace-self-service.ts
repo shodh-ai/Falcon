@@ -18,6 +18,7 @@ export function selfServicePaths(prefix: WorkspacePrefix) {
     prefix === 'faculty' || prefix === 'hr' ? `/${prefix}/me/workforce` : `/${prefix}/attendance`;
   return {
     workforce,
+    profile: `/${prefix}/profile`,
     documents: `/${prefix}/me/documents`,
     payslips: `/${prefix}/me/payslips`,
     tickets: `/${prefix}/me/tickets`,
@@ -54,7 +55,9 @@ export function mapEssPathToWorkspace(pathname: string, role: string): string {
   if (pathname.startsWith('/ess/calendar') || pathname.startsWith('/ess/leaves')) {
     return `${paths.workforce}?view=self`;
   }
-  if (pathname.startsWith('/ess/documents')) return paths.documents;
+  if (pathname.startsWith('/ess/documents')) {
+    return prefix === 'hr' ? paths.documents : `${paths.profile}?tab=documents`;
+  }
   if (pathname.startsWith('/ess/policies')) return paths.policies;
   if (pathname.startsWith('/ess/onboarding')) return paths.onboarding;
   if (pathname.startsWith('/ess/offboarding')) return paths.offboarding;

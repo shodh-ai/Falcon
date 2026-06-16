@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
 import { Download } from 'lucide-react';

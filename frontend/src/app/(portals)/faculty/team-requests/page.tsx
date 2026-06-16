@@ -1,12 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyTabBar,
+  FacultyInlineLoading,
+  FacultyEmptyState,
+} from '@/components/faculty';
 
 type Tab = 'LEAVE' | 'ON_DUTY' | 'REGULARIZATION' | 'COMP_OFF_CREDIT';
 
@@ -70,65 +76,50 @@ export default function FacultyTeamRequestsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy">Team requests — Pending on me</h2>
-        <p className="text-sm text-muted-foreground">
-          Approve or reject requests from employees who report to you.
-        </p>
-      </section>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        title="Team requests — Pending on me"
+        description="Approve or reject requests from employees who report to you."
+      />
 
-      <div className="flex flex-wrap gap-1 rounded-lg border bg-muted/40 p-1">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`rounded-md px-3 py-2 text-sm font-medium ${
-              tab === t.id ? 'bg-background shadow-sm' : 'text-muted-foreground'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <FacultyTabBar tabs={TABS} active={tab} onChange={setTab} />
 
-      <Card>
+      <Card className="border-border/60 shadow-sm">
         <CardHeader>
           <CardTitle className="text-base">{TABS.find((t) => t.id === tab)?.label}</CardTitle>
         </CardHeader>
         <CardContent>
-          {loading && <Loader2 className="mx-auto h-6 w-6 animate-spin" />}
+          {loading && <FacultyInlineLoading label="Loading queue…" />}
           {!loading && rows.length === 0 && (
-            <p className="text-sm text-muted-foreground">Nothing pending in this queue.</p>
+            <FacultyEmptyState description="Nothing pending in this queue." />
           )}
           {!loading && rows.length > 0 && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-lg border border-border/50">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-4">Employee</th>
-                    <th className="py-2 pr-4">Dates</th>
-                    <th className="py-2 pr-4">Reason</th>
-                    <th className="py-2">Actions</th>
+                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <th className="px-3 py-2 pr-4">Employee</th>
+                    <th className="px-3 py-2 pr-4">Dates</th>
+                    <th className="px-3 py-2 pr-4">Reason</th>
+                    <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={row.leave_id} className="border-b">
-                      <td className="py-3 pr-4">
+                    <tr key={row.leave_id} className="border-b border-border/40">
+                      <td className="px-3 py-3 pr-4">
                         <p className="font-medium">{row.employee.name}</p>
                         <p className="text-xs text-muted-foreground">{row.employee.email}</p>
                       </td>
-                      <td className="py-3 pr-4">
+                      <td className="px-3 py-3 pr-4">
                         {row.regularization_date ?? `${row.start_date}${row.end_date !== row.start_date ? ` – ${row.end_date}` : ''}`}
                         <Badge className="ml-2" variant="outline">
                           {row.leave_type}
                         </Badge>
                       </td>
-                      <td className="py-3 pr-4 max-w-xs">{row.reason ?? '—'}</td>
-                      <td className="py-3">
-                        <div className="flex gap-2">
+                      <td className="px-3 py-3 pr-4 max-w-xs">{row.reason ?? '—'}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap gap-2">
                           <Button size="sm" onClick={() => void act(row.leave_id, 'APPROVE')}>
                             Approve
                           </Button>
@@ -145,6 +136,6 @@ export default function FacultyTeamRequestsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </FacultyPageShell>
   );
 }

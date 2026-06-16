@@ -1,13 +1,14 @@
 import { MyHelpdeskPanel } from '@/components/self-service/MyHelpdeskPanel';
+import { FacultyPageHeader, FacultyPageShell } from '@/components/faculty';
 
 export default function FacultyTicketsPage() {
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy">My Helpdesk Tickets</h2>
-        <p className="text-sm text-muted-foreground">Raise and track IT, HR, and facilities requests.</p>
-      </section>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        title="My Helpdesk Tickets"
+        description="Raise and track IT, HR, and facilities requests."
+      />
       <MyHelpdeskPanel />
-    </div>
+    </FacultyPageShell>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

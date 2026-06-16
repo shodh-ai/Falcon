@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { API_URL } from '@/lib/api/client';
 import { useAuth } from '@/context/AuthContext';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 
 type CourseRow = {

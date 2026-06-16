@@ -2,11 +2,26 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CalendarDays, ClipboardCheck, Clock, Loader2, ShieldCheck } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  ClipboardCheck,
+  Clock,
+  Inbox,
+  ShieldCheck,
+  AlertTriangle,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyStatCard,
+  FacultyPanel,
+  FacultyEmptyState,
+  FacultyInlineLoading,
+  FacultyErrorBanner,
+} from '@/components/faculty';
 
 type FacultyClass = {
   timetable_id: string;
@@ -40,6 +55,8 @@ type GatePassApproval = {
   staff?: { name?: string; email?: string };
 };
 
+const PROFILE_COMPLIANCE_KEY = 'faculty-profile-compliance-dismissed';
+
 export default function FacultyDashboardPage() {
   const api = useAuthedApi();
   const [classes, setClasses] = useState<FacultyClass[]>([]);
@@ -47,8 +64,16 @@ export default function FacultyDashboardPage() {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovals>({ certificates: [] });
   const [gatePassApprovals, setGatePassApprovals] = useState<GatePassApproval[]>([]);
   const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
+  const [profileCompliance, setProfileCompliance] = useState<{ needs_academic_profile: boolean; message: string | null } | null>(null);
+  const [complianceDismissed, setComplianceDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setComplianceDismissed(localStorage.getItem(PROFILE_COMPLIANCE_KEY) === '1');
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,12 +81,17 @@ export default function FacultyDashboardPage() {
       try {
         setLoading(true);
         setError(null);
-        const [classData, hrData, approvalData, gatePassData, balanceData] = await Promise.all([
+        const [classData, hrData, approvalData, gatePassData, balanceData, complianceData] = await Promise.all([
           api.get<FacultyClass[]>('/api/academics/faculty/timetable/today').catch(() => []),
-          api.get<HrSummary>('/api/hr/workforce/today').catch(() => api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null)),
+          api.get<HrSummary>('/api/hr/workforce/today').catch(() =>
+            api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null),
+          ),
           api.get<PendingApprovals>('/api/academics/proctor/pending-approvals').catch(() => ({ certificates: [] })),
           api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals').catch(() => []),
           api.get<LeaveBalance[]>('/api/hr/leaves/my-balances').catch(() => []),
+          api.get<{ needs_academic_profile: boolean; message: string | null }>(
+            '/api/academics/faculty/profile/compliance',
+          ).catch(() => null),
         ]);
         if (!cancelled) {
           setClasses(classData);
@@ -69,10 +99,11 @@ export default function FacultyDashboardPage() {
           setPendingApprovals(approvalData);
           setGatePassApprovals(gatePassData);
           setLeaveBalances(balanceData);
+          if (complianceData) setProfileCompliance(complianceData);
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load classes');
+          setError(e instanceof Error ? e.message : 'Failed to load dashboard');
           setClasses([]);
         }
       } finally {
@@ -85,9 +116,8 @@ export default function FacultyDashboardPage() {
     };
   }, [api]);
 
-  const attendanceHref = (c: FacultyClass) => {
-    return `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
-  };
+  const attendanceHref = (c: FacultyClass) =>
+    `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
 
   async function actOnGatePass(passId: string, status: 'APPROVED' | 'REJECTED') {
     await api.patch(`/api/hr/gate-passes/${passId}/action`, { status });
@@ -105,159 +135,178 @@ export default function FacultyDashboardPage() {
     return Math.max(0, Number(row.entitled) - Number(row.used));
   };
 
+  const inTime = (hrSummary as { display?: { in_time: string } })?.display?.in_time ?? '—';
+  const outTime = (hrSummary as { display?: { out_time: string } })?.display?.out_time ?? '—';
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy">Faculty Dashboard</h2>
-        <p className="text-sm text-muted-foreground">Command center for classes, biometric HR, and mentorship approvals.</p>
-      </section>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        variant="hero"
+        title="Good morning — here is your day"
+        description="Classes, attendance, approvals, and HR at a glance."
+      />
 
-      <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-sgvu-gold" />
-              Today&apos;s attendance
-            </CardTitle>
-            <CardDescription>Biometric sync — read-only</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm font-medium text-sgvu-navy">
-              In: {(hrSummary as { display?: { in_time: string } })?.display?.in_time ?? '—'} | Out:{' '}
-              {(hrSummary as { display?: { out_time: string } })?.display?.out_time ?? '—'}
-            </p>
-            <Button className="h-12 w-full" variant="outline" asChild>
-              <Link href="/faculty/hr">Open HR hub · regularize</Link>
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardCheck className="h-5 w-5 text-sgvu-gold" />
-              Today&apos;s Classes
-            </CardTitle>
-            <CardDescription>Open academics, attendance, and digital assignments</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loading && (
-              <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Loading schedule…
-              </div>
-            )}
-            {!loading && error && (
-              <p className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p>
-            )}
-            {!loading && !error && classes.length === 0 && (
-              <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                No classes scheduled for today.
+      {!complianceDismissed && profileCompliance?.needs_academic_profile && (
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <div className="flex gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+            <div>
+              <p className="font-semibold">Complete your Academic Profile</p>
+              <p className="mt-0.5 text-amber-900/90">
+                {profileCompliance.message ?? 'Please complete your Academic Profile for IQAC compliance.'}
               </p>
-            )}
-            {!loading &&
-              !error &&
-              classes.map((c) => (
+              <Link href="/faculty/profile" className="mt-2 inline-block font-medium text-sgvu-navy underline">
+                Open My Profile →
+              </Link>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg p-1 text-amber-800 hover:bg-amber-100"
+            aria-label="Dismiss"
+            onClick={() => {
+              localStorage.setItem(PROFILE_COMPLIANCE_KEY, '1');
+              setComplianceDismissed(true);
+            }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <FacultyStatCard
+          label="Classes today"
+          value={loading ? '—' : classes.length}
+          icon={ClipboardCheck}
+          accent="gold"
+        />
+        <FacultyStatCard
+          label="Pending approvals"
+          value={totalPending}
+          sub={`${pendingCerts} certs · ${pendingMeetings} meetings · ${pendingLeaves} leaves`}
+          icon={Inbox}
+          accent={totalPending > 0 ? 'alert' : 'navy'}
+          alert={totalPending > 0}
+        />
+        <FacultyStatCard
+          label="Gate passes"
+          value={gatePassApprovals.length}
+          icon={ShieldCheck}
+          accent={gatePassApprovals.length > 0 ? 'alert' : 'navy'}
+        />
+        <FacultyStatCard
+          label="Biometric today"
+          value={inTime}
+          sub={`Out: ${outTime}`}
+          icon={Clock}
+          accent="navy"
+        />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <FacultyPanel
+          title="Today's classes"
+          count={classes.length}
+          href="/faculty/timetable"
+          description="Tap a class to mark attendance"
+          className="lg:col-span-2"
+        >
+          {loading && <FacultyInlineLoading label="Loading schedule…" />}
+          {!loading && error && <FacultyErrorBanner message={error} />}
+          {!loading && !error && classes.length === 0 && (
+            <FacultyEmptyState
+              title="No classes today"
+              description="Your timetable has no sessions scheduled for today."
+            />
+          )}
+          {!loading && !error && classes.length > 0 && (
+            <div className="space-y-2">
+              {classes.map((c) => (
                 <Link
                   key={c.timetable_id}
                   href={attendanceHref(c)}
-                  className="flex w-full flex-col items-start justify-between gap-2 rounded-xl border border-input bg-background p-4 transition hover:bg-accent touch-target sm:flex-row sm:items-center"
+                  className="flex flex-col items-start justify-between gap-2 rounded-xl border border-border/60 bg-background p-4 transition hover:border-sgvu-gold/50 hover:bg-accent/40 sm:flex-row sm:items-center"
                 >
-                  <span>
-                    <span className="font-semibold text-sgvu-navy">{c.course_name}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {c.start_time.slice(0, 5)}-{c.end_time.slice(0, 5)} · {c.room ?? 'Room TBA'} · {c.student_count} students
-                    </span>
-                  </span>
-                  <Badge variant="secondary">Mark Attendance</Badge>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sgvu-navy">
+                      {c.course_code} · {c.course_name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {c.start_time.slice(0, 5)}–{c.end_time.slice(0, 5)} · {c.room ?? 'Room TBA'} ·{' '}
+                      {c.student_count} students
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className="shrink-0">Mark attendance</Badge>
                 </Link>
               ))}
-          </CardContent>
-        </Card>
+            </div>
+          )}
+        </FacultyPanel>
 
         <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-sgvu-gold" />
-                Pending Approvals
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-black text-sgvu-navy">{totalPending} pending</p>
-              <p className="text-sm text-muted-foreground">
-                {pendingCerts} cert{pendingCerts !== 1 ? 's' : ''}, {pendingMeetings} meeting
-                {pendingMeetings !== 1 ? 's' : ''}, {pendingLeaves} leave
-                {pendingLeaves !== 1 ? 's' : ''}
-              </p>
-              <Button asChild className="mt-4 w-full" variant="secondary">
-                <Link href="/faculty/mentorship">Open queue</Link>
-              </Button>
-            </CardContent>
-          </Card>
+          <FacultyPanel title="Pending approvals" count={totalPending} href="/faculty/inbox">
+            <p className="text-sm text-muted-foreground">
+              Mentorship certificates, meetings, and leave requests awaiting action.
+            </p>
+            <Button asChild className="mt-3 w-full" variant="secondary" size="sm">
+              <Link href="/faculty/inbox">Open inbox</Link>
+            </Button>
+          </FacultyPanel>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarDays className="h-5 w-5 text-sgvu-gold" />
-                Leave Balance
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-3 gap-2 text-center text-sm">
-              <div className="rounded-xl bg-muted p-3">
-                <p className="font-bold text-sgvu-navy">{balanceRemaining('CL')}</p>
-                <p className="text-xs text-muted-foreground">CL</p>
-              </div>
-              <div className="rounded-xl bg-muted p-3">
-                <p className="font-bold text-sgvu-navy">{balanceRemaining('SL')}</p>
-                <p className="text-xs text-muted-foreground">SL</p>
-              </div>
-              <div className="rounded-xl bg-muted p-3">
-                <p className="font-bold text-sgvu-navy">{balanceRemaining('EL')}</p>
-                <p className="text-xs text-muted-foreground">EL</p>
-              </div>
-            </CardContent>
-          </Card>
+          <FacultyPanel title="Leave balance">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              {(['CL', 'SL', 'EL'] as const).map((type) => (
+                <div key={type} className="rounded-lg border border-border/50 bg-muted/30 p-3">
+                  <p className="text-xl font-bold text-sgvu-navy">{balanceRemaining(type)}</p>
+                  <p className="text-xs text-muted-foreground">{type}</p>
+                </div>
+              ))}
+            </div>
+            <Button asChild className="mt-3 w-full" variant="outline" size="sm">
+              <Link href="/faculty/me/workforce">Leaves & attendance</Link>
+            </Button>
+          </FacultyPanel>
+        </div>
+      </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Gate Pass Approvals</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {gatePassApprovals.length === 0 && (
-                <p className="text-sm text-muted-foreground">No staff gate passes awaiting your action.</p>
-              )}
+      <div className="grid gap-4 md:grid-cols-2">
+        <FacultyPanel title="Gate pass approvals" count={gatePassApprovals.length}>
+          {gatePassApprovals.length === 0 ? (
+            <FacultyEmptyState description="No staff gate passes awaiting your action." />
+          ) : (
+            <div className="space-y-2">
               {gatePassApprovals.map((pass) => (
-                <div key={pass.pass_id} className="rounded-xl border p-3 text-sm">
+                <div key={pass.pass_id} className="rounded-xl border border-border/60 p-3 text-sm">
                   <p className="font-medium text-sgvu-navy">{pass.staff?.name ?? 'Staff member'}</p>
                   <p className="text-xs text-muted-foreground">
                     {new Date(pass.out_time).toLocaleString()} · {pass.reason}
                   </p>
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" onClick={() => actOnGatePass(pass.pass_id, 'APPROVED')}>Approve</Button>
-                    <Button size="sm" variant="destructive" onClick={() => actOnGatePass(pass.pass_id, 'REJECTED')}>Reject</Button>
+                    <Button size="sm" variant="destructive" onClick={() => actOnGatePass(pass.pass_id, 'REJECTED')}>
+                      Reject
+                    </Button>
                   </div>
                 </div>
               ))}
-            </CardContent>
-          </Card>
+            </div>
+          )}
+        </FacultyPanel>
 
-          <Card className="border-red-100 bg-red-50/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-red-800">
-                <ShieldCheck className="h-5 w-5" />
-                Early Warning System
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-red-700">Identify at-risk students in your classes based on attendance and exam performance.</p>
-              <Button asChild className="mt-4 w-full bg-red-700 hover:bg-red-800 text-white" variant="default">
-                <Link href="/faculty/at-risk">View At-Risk Students</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+        <FacultyPanel
+          title="Early warning system"
+          description="Students at risk in your classes"
+          className="border-red-200/60 bg-red-50/20"
+        >
+          <p className="text-sm text-red-800">
+            Review students below attendance or performance thresholds and schedule interventions.
+          </p>
+          <Button asChild className="mt-3 w-full bg-red-700 hover:bg-red-800 text-white" size="sm">
+            <Link href="/faculty/at-risk">View at-risk students</Link>
+          </Button>
+        </FacultyPanel>
       </div>
-    </div>
+    </FacultyPageShell>
   );
 }

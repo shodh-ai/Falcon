@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { GripVertical, Plus, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrTabBar } from '@/components/hr/HrTabBar';
 import { ONBOARDING_STAGE_TABS } from '@/components/hr/OnboardingWorkflowPanel';

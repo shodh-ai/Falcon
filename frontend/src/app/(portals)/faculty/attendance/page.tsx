@@ -3,12 +3,20 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
+import { BookOpen, Check, X } from 'lucide-react';
+import { toast } from '@/lib/notifications/falcon-toast';
+import { cn } from '@/lib/utils';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyPageLoading,
+  FacultyPanel,
+  FacultyEmptyState,
+  FacultyInlineLoading,
+  FacultyMetricChip,
+} from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 
@@ -50,6 +58,7 @@ function MarkAttendanceContent() {
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [rosterLoading, setRosterLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -58,13 +67,45 @@ function MarkAttendanceContent() {
     [classes, selectedCourseId],
   );
 
+  const filteredStudents = useMemo(
+    () =>
+      students.filter(
+        (s) =>
+          !searchQuery.trim() ||
+          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.roll_number?.toLowerCase().includes(searchQuery.toLowerCase()),
+      ),
+    [students, searchQuery],
+  );
+
+  const presentCount = useMemo(
+    () => students.filter((s) => attendance[s.student_id] === 'PRESENT').length,
+    [students, attendance],
+  );
+  const absentCount = useMemo(
+    () => students.filter((s) => attendance[s.student_id] === 'ABSENT').length,
+    [students, attendance],
+  );
+
   useEffect(() => {
-    void api.get<FacultyClass[]>('/api/academics/faculty/timetable/today').then(setClasses).finally(() => setLoading(false));
-  }, [api]);
+    void api
+      .get<FacultyClass[]>('/api/academics/faculty/timetable/today')
+      .then((data) => {
+        setClasses(data);
+        if (data.length === 0) {
+          setSelectedCourseId(null);
+          return;
+        }
+        const fromUrl = initialCourseId && data.find((c) => c.course_id === initialCourseId);
+        setSelectedCourseId(fromUrl ? fromUrl.course_id : data[0].course_id);
+      })
+      .finally(() => setLoading(false));
+  }, [api, initialCourseId]);
 
   useEffect(() => {
     if (!selectedCourseId) return;
     let cancelled = false;
+    setRosterLoading(true);
     (async () => {
       try {
         const [roster, state] = await Promise.all([
@@ -82,14 +123,25 @@ function MarkAttendanceContent() {
           if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
         }
         setAttendance(map);
+        setSearchQuery('');
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load roster');
+        setStudents([]);
+      } finally {
+        if (!cancelled) setRosterLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [api, selectedCourseId, selectedDate]);
+
+  function markAll(status: UiStatus) {
+    if (locked) return;
+    const next: Record<string, UiStatus> = {};
+    for (const s of students) next[s.student_id] = status;
+    setAttendance(next);
+  }
 
   async function save() {
     if (!selectedCourseId) return;
@@ -130,119 +182,170 @@ function MarkAttendanceContent() {
   }
 
   if (loading) {
-    return (
-      <div className="flex justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" />
-      </div>
-    );
+    return <FacultyPageLoading label="Loading attendance…" branded />;
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <FacultyPageShell>
       <FacultyPageHeader
-        title="Mark Attendance"
-        description="Dedicated attendance workspace — select today's class, mark present/absent, then log the lecture in Class Logbook."
+        description="Select today's class, mark present or absent, then log the lecture in your class logbook."
         actions={
           <Button variant="outline" size="sm" asChild>
-            <Link href="/faculty/logbook">Open logbook</Link>
+            <Link href="/faculty/logbook">
+              <BookOpen className="mr-1.5 h-4 w-4" />
+              Open logbook
+            </Link>
           </Button>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {classes.map((c) => (
-          <Card
-            key={c.timetable_id}
-            className={`cursor-pointer transition ${selectedCourseId === c.course_id ? 'ring-2 ring-sgvu-gold' : ''}`}
-            onClick={() => setSelectedCourseId(c.course_id)}
-          >
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">
-                {c.course_code} — {c.course_name}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-xs text-muted-foreground">
-              {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · Room {c.room ?? 'TBA'} · {c.student_count} students
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {classes.length === 0 ? (
+        <FacultyEmptyState
+          title="No classes today"
+          description="When you have sessions on the timetable, they will appear here for attendance marking."
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
+          <FacultyPanel title="Today's classes" count={classes.length}>
+            <ul className="space-y-1.5">
+              {classes.map((c) => {
+                const active = selectedCourseId === c.course_id;
+                return (
+                  <li key={c.timetable_id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCourseId(c.course_id)}
+                      className={cn(
+                        'w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
+                        active
+                          ? 'border-sgvu-gold/60 bg-sgvu-gold/10 ring-1 ring-sgvu-gold/40'
+                          : 'border-border/60 bg-background hover:border-sgvu-gold/30 hover:bg-muted/40',
+                      )}
+                    >
+                      <p className="font-semibold text-sgvu-navy">{c.course_code}</p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.course_name}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {String(c.start_time).slice(0, 5)}–{String(c.end_time).slice(0, 5)} · {c.student_count} students
+                      </p>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </FacultyPanel>
 
-      {selectedClass ? (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">{selectedClass.course_name}</CardTitle>
-            {locked ? <Badge>Locked</Badge> : null}
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <input
-              type="date"
-              className="rounded-md border px-3 py-2 text-sm"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-            />
-            <Input
-              type="search"
-              placeholder="Search by name or roll number…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {students
-              .filter(
-                (s) =>
-                  !searchQuery.trim() ||
-                  s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  s.roll_number?.includes(searchQuery),
-              )
-              .map((s) => (
-              <div key={s.student_id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
-                <span>
-                  {s.name} <span className="text-muted-foreground">({s.roll_number})</span>
-                </span>
-                <div className="flex gap-2">
+          <FacultyPanel
+            title={selectedClass ? `${selectedClass.course_code} — roster` : 'Student roster'}
+            description={selectedClass ? `${selectedClass.room ?? 'Room TBA'} · ${selectedClass.student_count} enrolled` : undefined}
+          >
+            {!selectedClass ? (
+              <FacultyEmptyState description="Select a class from the list to load the roster." />
+            ) : rosterLoading ? (
+              <FacultyInlineLoading label="Loading roster…" />
+            ) : (
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                  <input
+                    type="date"
+                    className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                  />
+                  <Input
+                    type="search"
+                    className="sm:max-w-xs"
+                    placeholder="Search name or roll no…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                    {locked ? <Badge variant="secondary">Locked</Badge> : null}
+                    <FacultyMetricChip label="Present" value={presentCount} emphasis />
+                    <FacultyMetricChip label="Absent" value={absentCount} />
+                  </div>
+                </div>
+
+                {!locked && students.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => markAll('PRESENT')}>
+                      <Check className="mr-1 h-3.5 w-3.5" />
+                      All present
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => markAll('ABSENT')}>
+                      <X className="mr-1 h-3.5 w-3.5" />
+                      All absent
+                    </Button>
+                  </div>
+                )}
+
+                {students.length === 0 ? (
+                  <FacultyEmptyState description="No students on the roster for this course." />
+                ) : filteredStudents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No students match &ldquo;{searchQuery}&rdquo;.</p>
+                ) : (
+                  <div className="overflow-hidden rounded-lg border border-border/60">
+                    <ul className="divide-y divide-border/50">
+                      {filteredStudents.map((s) => (
+                        <li
+                          key={s.student_id}
+                          className="flex flex-col gap-2 bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-sgvu-navy">{s.name}</p>
+                            <p className="text-xs text-muted-foreground">{s.roll_number || 'No roll number'}</p>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              size="sm"
+                              className="min-w-[5.5rem]"
+                              variant={attendance[s.student_id] === 'PRESENT' ? 'default' : 'outline'}
+                              disabled={locked}
+                              onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'PRESENT' }))}
+                            >
+                              Present
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="min-w-[5.5rem]"
+                              variant={attendance[s.student_id] === 'ABSENT' ? 'destructive' : 'outline'}
+                              disabled={locked}
+                              onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'ABSENT' }))}
+                            >
+                              Absent
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    {students.length > 0
+                      ? `${presentCount} present · ${absentCount} absent · ${students.length} total`
+                      : 'Save syncs attendance to enrollment percentages.'}
+                  </p>
                   <Button
-                    size="sm"
-                    variant={attendance[s.student_id] === 'PRESENT' ? 'default' : 'outline'}
-                    disabled={locked}
-                    onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'PRESENT' }))}
+                    className="sm:min-w-[10rem]"
+                    disabled={locked || saving || students.length === 0}
+                    onClick={() => void save()}
                   >
-                    Present
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={attendance[s.student_id] === 'ABSENT' ? 'destructive' : 'outline'}
-                    disabled={locked}
-                    onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'ABSENT' }))}
-                  >
-                    Absent
+                    {saving ? 'Saving…' : 'Save attendance'}
                   </Button>
                 </div>
               </div>
-            ))}
-            {students.length > 0 &&
-              students.filter(
-                (s) =>
-                  !searchQuery.trim() ||
-                  s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  s.roll_number?.includes(searchQuery),
-              ).length === 0 && (
-                <p className="text-sm text-muted-foreground">No students match &ldquo;{searchQuery}&rdquo;.</p>
-              )}
-            <Button disabled={locked || saving || students.length === 0} onClick={() => void save()}>
-              {saving ? 'Saving…' : 'Save attendance'}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <p className="text-center text-sm text-muted-foreground">Select a class above to mark attendance.</p>
+            )}
+          </FacultyPanel>
+        </div>
       )}
-    </div>
+    </FacultyPageShell>
   );
 }
 
 export default function FacultyAttendancePage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-sm text-muted-foreground">Loading attendance…</div>}>
+    <Suspense fallback={<FacultyPageLoading label="Loading attendance…" branded />}>
       <MarkAttendanceContent />
     </Suspense>
   );

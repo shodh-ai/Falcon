@@ -14,6 +14,10 @@ import {
 } from '@/components/ui/command';
 import { useAuthedApi } from '@/lib/api';
 import { profile360Path } from '@/lib/directory-routes';
+import {
+  HEADER_SEARCH_CLASS,
+  HEADER_SEARCH_MOBILE_CLASS,
+} from '@/components/layout/header-styles';
 
 type SearchItem = {
   id: string;
@@ -158,7 +162,7 @@ export function UniversalSearchOmnibar() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hidden h-9 min-w-[9rem] items-center gap-2 rounded-xl border border-sgvu-navy/12 bg-white px-3 text-sm text-muted-foreground shadow-sm transition hover:border-sgvu-gold/40 hover:text-sgvu-navy sm:flex lg:min-w-[11rem]"
+        className={HEADER_SEARCH_CLASS}
         aria-label="Open search (Cmd+K)"
       >
         <Search className="h-4 w-4 shrink-0 text-sgvu-navy/50" />
@@ -171,7 +175,7 @@ export function UniversalSearchOmnibar() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-9 w-9 items-center justify-center rounded-xl border border-sgvu-navy/12 bg-white text-sgvu-navy shadow-sm transition hover:border-sgvu-gold/40 sm:hidden"
+        className={HEADER_SEARCH_MOBILE_CLASS}
         aria-label="Open search"
       >
         <Search className="h-4 w-4" />

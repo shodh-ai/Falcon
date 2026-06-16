@@ -18,6 +18,8 @@ import {
   getWorkspaceLabelForRole,
   getWorkspaceShortLabelForRole,
 } from '@/lib/auth-routing';
+import { HEADER_CONTROL_CLASS } from '@/components/layout/header-styles';
+import { cn } from '@/lib/utils';
 
 export function WorkspaceSwitcher() {
   const { user } = useAuth();
@@ -35,7 +37,7 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          className="hidden h-10 shrink-0 gap-2 md:inline-flex"
+          className={cn('hidden h-10 shrink-0 gap-2 md:inline-flex', HEADER_CONTROL_CLASS)}
           title={getWorkspaceLabelForRole(activeRole)}
         >
           <BriefcaseBusiness className="h-4 w-4 shrink-0 text-sgvu-gold" />

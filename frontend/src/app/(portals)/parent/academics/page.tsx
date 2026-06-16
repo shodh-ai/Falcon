@@ -4,7 +4,7 @@ import { useState } from 'react';
 import useSWR from 'swr';
 import dynamic from 'next/dynamic';
 import { Loader2, Mail, User } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';

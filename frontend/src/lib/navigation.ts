@@ -86,6 +86,8 @@ export interface NavItem {
   keywords?: string[];
   roles?: string[];
   hrModule?: HrModuleKey;
+  /** Shorter label for mobile bottom nav */
+  shortLabel?: string;
 }
 
 export interface NavGroup {
@@ -99,6 +101,8 @@ export interface PortalConfig {
   homeHref: string;
   navGroups: NavGroup[];
   commandItems: NavItem[];
+  /** Optional override for mobile bottom nav (defaults to first 4 command items) */
+  mobileNavItems?: NavItem[];
 }
 
 /** Build command palette items from sidebar nav so search keywords stay in sync. */
@@ -110,13 +114,25 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
     items: [
       {
         label: 'My Profile & Documents',
-        href: p.documents,
-        icon: FolderLock,
-        keywords: ['profile', 'kyc', 'aadhaar', 'pan', 'vault'],
+        href: prefix === 'hr' ? p.documents : p.profile,
+        icon: UserCog,
+        keywords: [
+          'profile',
+          'naac',
+          'iqac',
+          'qualifications',
+          'orcid',
+          'kyc',
+          'aadhaar',
+          'pan',
+          'vault',
+          'documents',
+          'degree',
+        ],
       },
       {
         label: 'Attendance & Holidays Calendar',
-        href: '/hr/me/attendance-holidays',
+        href: prefix === 'hr' ? '/hr/me/attendance-holidays' : p.workforce,
         icon: CalendarDays,
         keywords: ['leave', 'cl', 'sl', 'attendance', 'calendar', 'holidays', 'regularize'],
       },
@@ -294,8 +310,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
-        { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt'] },
-        { label: 'Digital Assignments (DA)', href: '/faculty/assignments', icon: FileText, keywords: ['da', 'submission', 'deadline'] },
+        { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
         { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
@@ -337,8 +352,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp', 'extra'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
-        { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt'] },
-        { label: 'Digital Assignments (DA)', href: '/faculty/assignments', icon: FileText, keywords: ['da', 'submission', 'deadline'] },
+        { label: 'Course Page & Syllabus', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
         { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
@@ -407,6 +421,7 @@ export const hrPortal: PortalConfig = {
       title: 'Performance & Lifecycle',
       items: [
         { label: 'Onboarding Pipeline', href: '/hr/onboarding', icon: Kanban, keywords: ['kanban', 'hired', 'new hire'], hrModule: 'onboarding' },
+        { label: 'First-Login Verifications', href: '/hr/verifications', icon: FileCheck2, keywords: ['faculty', 'hod', 'documents', 'approve'], hrModule: 'onboarding' },
         { label: 'Offboarding & Exit', href: '/hr/offboarding', icon: DoorOpen, keywords: ['resignation', 'fnf', 'separation'], hrModule: 'offboarding' },
         { label: 'Recruitment (ATS)', href: '/hr/recruitment', icon: Briefcase, keywords: ['kanban', 'hired', 'interview'], hrModule: 'recruitment' },
         { label: 'Appraisals & API Scores', href: '/hr/appraisals', icon: Award, keywords: ['ugc', 'api', 'scopus', 'research'], hrModule: 'directory' },

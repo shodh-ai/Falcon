@@ -39,6 +39,11 @@
 
   --sidebar-width: 16.5rem;
   --sidebar-width-collapsed: 4.5rem;
+
+  --scrollbar-thumb: var(--sgvu-gold);
+  --scrollbar-thumb-hover: var(--sgvu-gold-hover);
+  --scrollbar-track: hsl(var(--muted));
+  --scroll-area-track: rgba(8, 35, 74, 0.1);
 }
 
 @theme inline {
@@ -77,6 +82,8 @@
 
 * {
   border-color: hsl(var(--border));
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 body {
@@ -84,6 +91,40 @@ body {
   color: hsl(var(--foreground));
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Branded scrollbars — WebKit */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* Dark surfaces (sidebar, navy panels) */
+.bg-sgvu-navy,
+.bg-sgvu-navy * {
+  scrollbar-color: var(--scrollbar-thumb) rgba(255, 255, 255, 0.12);
+  --scroll-area-track: rgba(255, 255, 255, 0.12);
+}
+
+.bg-sgvu-navy::-webkit-scrollbar-track,
+.bg-sgvu-navy *::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* Minimum touch target for mobile */

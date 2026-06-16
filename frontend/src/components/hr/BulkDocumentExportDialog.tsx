@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Archive } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import {
   Dialog,
   DialogContent,

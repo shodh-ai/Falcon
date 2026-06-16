@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuthedApi } from '@/lib/api';
 import { StudentMeetingSlots, type StudentMeeting } from '@/components/mentorship/StudentMeetingSlots';
 import { MentorshipStudentChat } from '@/components/mentorship/MentorshipStudentChat';

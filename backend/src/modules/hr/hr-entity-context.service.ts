@@ -75,10 +75,20 @@ export class HrEntityContextService {
     }
 
     return this.dataSource.query(
-      `SELECT oe.entity_id, oe.entity_code, oe.entity_name, oe.is_active
+      `SELECT DISTINCT oe.entity_id, oe.entity_code, oe.entity_name, oe.is_active
        FROM org_entities oe
-       INNER JOIN user_entity_access uea ON uea.entity_id = oe.entity_id
-       WHERE oe.tenant_id = $1 AND uea.user_id = $2 AND oe.is_active = true
+       WHERE oe.tenant_id = $1 AND oe.is_active = true
+         AND (
+           oe.entity_id IN (
+             SELECT uea.entity_id FROM user_entity_access uea WHERE uea.user_id = $2
+           )
+           OR oe.entity_id = (
+             SELECT COALESCE(u.entity_id, p.entity_id)
+             FROM users u
+             LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
+             WHERE u.user_id = $2 AND u.tenant_id = $1
+           )
+         )
        ORDER BY oe.entity_id ASC`,
       [tenantId, userId],
     );

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { DataTable } from '@/components/ui/DataTable';
 import { useAuthedApi } from '@/lib/api';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 type Visitor = {
   visitor_id: string;

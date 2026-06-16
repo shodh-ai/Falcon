@@ -14,7 +14,7 @@ import {
   RefreshCw,
   Users,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrAvatar } from '@/components/hr/HrAvatar';
 import { HrStatCard } from '@/components/hr/HrStatCard';
 import { FalconLoader } from '@/components/brand/FalconLoader';

@@ -12,7 +12,9 @@ export async function handleNotificationAction(
   actionLink: string | null | undefined,
   router: NotificationActionRouter,
 ): Promise<'download' | 'navigate' | 'none'> {
-  if (!token) return 'none';
+  if (!token) {
+    throw new Error('You must be signed in to open this notification.');
+  }
 
   const exportJobId = parseExportJobId(actionLink);
   if (exportJobId) {

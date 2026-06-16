@@ -45,6 +45,21 @@ export class HrEmployeeProfile extends BaseSoftDeleteEntity {
   @Column({ type: 'int', default: 0 })
   week_off_day: number;
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  orcid_id: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  scopus_id: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  google_scholar_url: string | null;
+
+  @Column({ type: 'decimal', precision: 4, scale: 1, nullable: true })
+  total_experience_years: string | null;
+
+  @Column({ type: 'decimal', precision: 4, scale: 1, default: 0 })
+  industry_experience_years: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Building2, Mail, Plus, UserRound } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';

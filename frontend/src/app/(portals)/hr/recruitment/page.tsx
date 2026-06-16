@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { KanbanBoard, type KanbanColumn } from '@/components/workspaces/KanbanBoard';
 import { useHrApi } from '@/lib/api/use-hr-api';
@@ -64,10 +64,8 @@ export default function HrRecruitmentPage() {
     if (result.onboarding_triggered || result.already_hired) {
       toast.success(`${result.email} moved to Onboarding`, {
         description: 'They are no longer shown in the ATS pipeline.',
-        action: {
-          label: 'Open Onboarding',
-          onClick: () => router.push('/hr/onboarding'),
-        },
+        actionLabel: 'Open Onboarding',
+        onAction: () => router.push('/hr/onboarding'),
       });
     } else {
       toast.success(`User provisioned: ${result.email}`);

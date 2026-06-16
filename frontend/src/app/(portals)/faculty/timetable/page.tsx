@@ -2,11 +2,15 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Eye, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
+import { toast } from '@/lib/notifications/falcon-toast';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyPanel,
+  FacultyEmptyState,
+} from '@/components/faculty';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -75,56 +79,74 @@ export default function FacultyTimetablePage() {
     setIsSubmitting(true);
     try {
       await api.post('/api/academics/faculty/workspaces/adjustments', form);
-      toast.success('Request sent to HoD for approval. Students will be notified after approval.');
+      toast.success(
+        'Schedule change submitted',
+        {
+          description:
+            'Your request was sent to the HoD for approval. Students will be notified automatically once it is approved.',
+        },
+      );
       setForm({ course_id: '', adjustment_type: 'EXTRA_CLASS', new_date: '', reason: '' });
       await loadAdjustments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Request failed');
+      const message = err instanceof Error ? err.message : 'Request failed';
+      if (/pending request|pending schedule change/i.test(message)) {
+        toast.warning('You already have a pending request', {
+          description:
+            'This course already has a schedule change waiting for HoD approval. Check "My pending requests" below — you can submit a new request after it is approved or rejected.',
+          category: 'ACADEMICS',
+          actionLabel: 'View pending requests',
+          onAction: () => {
+            document.getElementById('falcon-pending-requests')?.scrollIntoView({ behavior: 'smooth' });
+          },
+        });
+      } else {
+        toast.error(message, { category: 'ACADEMICS' });
+      }
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <FacultyPageShell>
       <FacultyPageHeader
         title="Timetable & Extra Classes"
         description="Weekly L-T-P schedule. Request extra classes, cancellations, or substitutions (HoD approval + student alerts)."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Weekly schedule</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-2 sm:grid-cols-2">
-          {schedule.map((s) => (
-            <div key={s.timetable_id} className="rounded-xl border p-3 text-sm">
-              <p className="font-semibold text-sgvu-navy">
-                {DAYS[s.day_of_week]} · {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)}
-              </p>
-              <p>
-                {s.course_code} — {s.course_name}
-              </p>
-              <p className="text-muted-foreground">Room {s.room ?? 'TBA'}</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <FacultyPanel title="Weekly schedule" count={schedule.length}>
+          {schedule.length === 0 ? (
+            <FacultyEmptyState description="No timetable rows assigned yet." />
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {schedule.map((s) => (
+                <div
+                  key={s.timetable_id}
+                  className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
+                >
+                  <p className="font-semibold text-sgvu-navy">
+                    {DAYS[s.day_of_week]} · {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)}
+                  </p>
+                  <p className="mt-0.5 font-medium">{s.course_code}</p>
+                  <p className="text-muted-foreground">{s.course_name}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Room {s.room ?? 'TBA'}</p>
+                </div>
+              ))}
             </div>
-          ))}
-          {schedule.length === 0 ? <p className="text-sm text-muted-foreground">No timetable rows assigned yet.</p> : null}
-        </CardContent>
-      </Card>
+          )}
+        </FacultyPanel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Schedule extra / cancel / substitute</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <FacultyPanel title="Schedule change request" description="Extra class, cancel, or substitute">
           {coursesError && (
-            <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               {coursesError}
             </p>
           )}
-          <form className="grid gap-3 md:grid-cols-2" onSubmit={submitAdjustment}>
+          <form className="grid gap-3" onSubmit={submitAdjustment}>
             <select
-              className="rounded-md border bg-background px-3 py-2 text-sm"
+              className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
               value={form.course_id}
               onChange={(e) => setForm({ ...form, course_id: e.target.value })}
               required
@@ -138,7 +160,7 @@ export default function FacultyTimetablePage() {
               ))}
             </select>
             <select
-              className="rounded-md border bg-background px-3 py-2 text-sm"
+              className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
               value={form.adjustment_type}
               onChange={(e) => setForm({ ...form, adjustment_type: e.target.value })}
             >
@@ -156,60 +178,51 @@ export default function FacultyTimetablePage() {
               value={form.reason}
               onChange={(e) => setForm({ ...form, reason: e.target.value })}
             />
-            <Button
-              type="submit"
-              className="md:col-span-2"
-              disabled={isSubmitting || courseOptions.length === 0}
-            >
+            <Button type="submit" disabled={isSubmitting || courseOptions.length === 0}>
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit for HoD approval'}
             </Button>
           </form>
-        </CardContent>
-      </Card>
+        </FacultyPanel>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">My Pending Requests</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {pendingAdjustments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No pending adjustment requests.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-3">Requested Date</th>
-                    <th className="py-2 pr-3">Course</th>
-                    <th className="py-2 pr-3">Type</th>
-                    <th className="py-2 pr-3">Status</th>
-                    <th className="py-2">View</th>
+      <FacultyPanel id="falcon-pending-requests" title="My pending requests" count={pendingAdjustments.length}>
+        {pendingAdjustments.length === 0 ? (
+          <FacultyEmptyState description="No pending adjustment requests." />
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border/50">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <th className="px-3 py-2">Requested date</th>
+                  <th className="px-3 py-2">Course</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">View</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingAdjustments.map((a) => (
+                  <tr key={a.adjustment_id} className="border-b border-border/40">
+                    <td className="px-3 py-2.5">
+                      {a.new_date ? new Date(a.new_date).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 font-medium">{a.course_code}</td>
+                    <td className="px-3 py-2.5">{a.adjustment_type.replace('_', ' ')}</td>
+                    <td className="px-3 py-2.5">
+                      <Badge variant="outline">{a.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <Button size="sm" variant="ghost" onClick={() => setViewAdjustment(a)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {pendingAdjustments.map((a) => (
-                    <tr key={a.adjustment_id} className="border-b">
-                      <td className="py-2 pr-3">
-                        {a.new_date ? new Date(a.new_date).toLocaleString() : '—'}
-                      </td>
-                      <td className="py-2 pr-3">{a.course_code}</td>
-                      <td className="py-2 pr-3">{a.adjustment_type.replace('_', ' ')}</td>
-                      <td className="py-2 pr-3">
-                        <Badge variant="outline">{a.status}</Badge>
-                      </td>
-                      <td className="py-2">
-                        <Button size="sm" variant="ghost" onClick={() => setViewAdjustment(a)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </FacultyPanel>
 
       <Dialog open={!!viewAdjustment} onOpenChange={(open) => !open && setViewAdjustment(null)}>
         <DialogContent>
@@ -228,6 +241,6 @@ export default function FacultyTimetablePage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </FacultyPageShell>
   );
 }

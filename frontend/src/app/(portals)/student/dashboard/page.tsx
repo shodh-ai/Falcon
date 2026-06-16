@@ -1,31 +1,31 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { TimetableWidget } from '@/components/student/TimetableWidget';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
+import { NotificationItem } from '@/components/notifications/NotificationItem';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import Link from 'next/link';
 import { Bell, Briefcase, CalendarClock, ChevronRight, CreditCard, GraduationCap, Sparkles, UserRoundCheck } from 'lucide-react';
 import type { TimetableSlot } from '@/lib/mock/student-dashboard';
 import { useAuthedApi } from '@/lib/api';
+import { AuthenticatedProfilePhoto } from '@/components/profile/AuthenticatedProfilePhoto';
+import { useRecentNotifications, toAppNotification } from '@/hooks/useNotifications';
+import { notificationsApi } from '@/lib/api/notifications';
+import { handleNotificationAction } from '@/lib/notifications/notification-actions';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 type Summary = {
   cgpa: number;
   credits_completed: number;
   credits_required: number;
   attendance_percent: number;
-};
-
-type Alert = {
-  notification_id: string;
-  title: string;
-  message: string | null;
-  is_read: boolean;
 };
 
 type OpenDrive = {
@@ -62,11 +62,12 @@ function greeting() {
 }
 
 export default function StudentDashboardPage() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, token } = useAuth();
   const api = useAuthedApi();
+  const { notifications, refresh: refreshNotifications } = useRecentNotifications();
   const firstName = user?.name?.split(' ')[0] ?? 'Student';
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
   const [openDrives, setOpenDrives] = useState<OpenDrive[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -74,17 +75,14 @@ export default function StudentDashboardPage() {
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [metricsResult, alertsResult, timetableResult, placementsResult, profileResult] = await Promise.allSettled([
+        const [metricsResult, timetableResult, placementsResult, profileResult] = await Promise.allSettled([
           api.get<Summary>('/api/academics/dashboard/metrics'),
-          api.get<Alert[]>('/api/notifications?limit=10'),
           api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
           api.get<{ open_drives?: OpenDrive[]; open_jobs?: OpenDrive[] }>('/api/placement/student/hub'),
           api.get<Profile>('/api/student/profile'),
         ]);
 
         if (metricsResult.status === 'fulfilled') setSummary(metricsResult.value);
-        if (alertsResult.status === 'fulfilled') setAlerts(alertsResult.value);
-        else setAlerts([]);
         if (placementsResult.status === 'fulfilled') {
           const hub = placementsResult.value;
           setOpenDrives((hub.open_drives ?? hub.open_jobs ?? []).slice(0, 3));
@@ -112,9 +110,21 @@ export default function StudentDashboardPage() {
     void loadDashboard();
   }, [api]);
 
-  const unreadAlerts = alerts.filter((alert) => !alert.is_read);
+  const alertItems = notifications.map(toAppNotification).filter((n) => n.unread);
   const attendance = summary?.attendance_percent ?? 0;
   const attendanceTone = attendance >= 75 ? 'success' : 'warning';
+
+  const openAlert = async (id: string, actionLink: string | null | undefined) => {
+    if (!token) return;
+    try {
+      await handleNotificationAction(token, actionLink, router);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open notification');
+      return;
+    }
+    await notificationsApi.markRead(token, id).catch(() => undefined);
+    await refreshNotifications();
+  };
 
   return (
     <StudentPageShell>
@@ -132,13 +142,13 @@ export default function StudentDashboardPage() {
                 Your academic health at a glance — performance, credits, attendance, and today&apos;s schedule.
               </p>
             </div>
-            {profile?.profile_photo_url && (
-              <img
-                src={profile.profile_photo_url}
+            {profile?.profile_photo_url ? (
+              <AuthenticatedProfilePhoto
+                photoUrl={profile.profile_photo_url}
                 alt="Profile"
-                className="h-16 w-16 shrink-0 rounded-full border-2 border-white/20 object-cover shadow-sm sm:h-20 sm:w-20"
+                className="h-16 w-16 shrink-0 rounded-full border-2 border-white/20 shadow-sm sm:h-20 sm:w-20"
               />
-            )}
+            ) : null}
           </div>
         </div>
       </section>
@@ -169,11 +179,16 @@ export default function StudentDashboardPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         <StudentSectionCard
           title="Alerts & Notifications"
-          description="Unread updates from academics, finance, and campus services"
+          description="Unread updates with clear next steps"
           icon={Bell}
           className="lg:col-span-2"
+          action={
+            <Link href="/notifications" className="text-xs font-semibold text-sgvu-navy hover:underline">
+              View all
+            </Link>
+          }
         >
-          {unreadAlerts.length === 0 ? (
+          {alertItems.length === 0 ? (
             <StudentEmptyState
               icon={Bell}
               title="All caught up"
@@ -181,19 +196,13 @@ export default function StudentDashboardPage() {
             />
           ) : (
             <div className="space-y-3">
-              {unreadAlerts.map((alert) => (
-                <div
-                  key={alert.notification_id}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-gold/40"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-sgvu-navy">{alert.title}</p>
-                    {alert.message ? <p className="mt-0.5 text-xs text-muted-foreground">{alert.message}</p> : null}
-                  </div>
-                  <Badge variant="warning" className="shrink-0">
-                    New
-                  </Badge>
-                </div>
+              {alertItems.map((alert) => (
+                <NotificationItem
+                  key={alert.id}
+                  notification={alert}
+                  compact
+                  onClick={() => void openAlert(alert.id, alert.actionLink)}
+                />
               ))}
             </div>
           )}
