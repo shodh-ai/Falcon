@@ -8,7 +8,7 @@ const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM', 'INTERNAL', 'ASSIGNMENT'
 type ExamType = (typeof EXAM_TYPES)[number];
 
 /** Canonical roll-number expression aligned with student profile schema. */
-const ROLL_NUMBER_SQL = `COALESCE(sp.enrollment_number, sp.admission_number, sp.enrollment_no, u.user_id::text)`;
+const ROLL_NUMBER_SQL = `COALESCE(sp.enrollment_no, u.user_id::text)`;
 
 @Injectable()
 export class FacultyWorkspacesService {
@@ -198,7 +198,9 @@ export class FacultyWorkspacesService {
     );
     const courseName = courseRows[0]?.course_name ?? 'your course';
 
-    const publishedCount = result.length;
+    const publishedCount = Array.isArray(result) && result.length === 2 && typeof result[1] === 'number' 
+      ? result[1] 
+      : result.length;
     if (publishedCount === 0) {
       throw new BadRequestException(
         'No draft marks found to submit. Save draft marks first for this course and exam type.',
