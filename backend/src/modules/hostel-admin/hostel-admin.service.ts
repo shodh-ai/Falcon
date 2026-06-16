@@ -245,19 +245,19 @@ export class HostelAdminService {
     return { data, total, limit, offset };
   }
 
-  async markRollCall(ctx: AuthCtx, dto: { hostel_id: string; records: Array<{ student_user_id: string; status: string }> }) {
+  async markRollCall(ctx: AuthCtx, dto: { hostel_id: string; date?: string; records: Array<{ student_user_id: string; status: string }> }) {
     await this.assertHostelAccess(ctx, dto.hostel_id);
-    const today = new Date().toISOString().slice(0, 10);
+    const date = dto.date || new Date().toISOString().slice(0, 10);
     for (const rec of dto.records) {
       await this.db.query(
         `INSERT INTO operations_hostel_roll_call (hostel_id, student_user_id, roll_date, status, marked_by_user_id)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (hostel_id, student_user_id, roll_date)
          DO UPDATE SET status = EXCLUDED.status, marked_at = NOW(), marked_by_user_id = EXCLUDED.marked_by_user_id`,
-        [dto.hostel_id, rec.student_user_id, today, rec.status, ctx.userId],
+        [dto.hostel_id, rec.student_user_id, date, rec.status, ctx.userId],
       );
     }
-    return { marked: dto.records.length, roll_date: today };
+    return { marked: dto.records.length, roll_date: date };
   }
 
   async listRollCall(ctx: AuthCtx, hostelId: string, date: string) {
@@ -270,6 +270,17 @@ export class HostelAdminService {
        WHERE rc.hostel_id = $1 AND rc.roll_date = $2
        ORDER BY rc.marked_at DESC`,
       [hostelId, date],
+    );
+  }
+
+  async getMonthlyRollCall(ctx: AuthCtx, hostelId: string, month: string) {
+    await this.assertHostelAccess(ctx, hostelId);
+    const startOfMonth = `${month}-01`;
+    return this.db.query(
+      `SELECT student_user_id, roll_date::text AS roll_date, status
+       FROM operations_hostel_roll_call
+       WHERE hostel_id = $1 AND roll_date >= $2::date AND roll_date < ($2::date + INTERVAL '1 month')`,
+      [hostelId, startOfMonth],
     );
   }
 
