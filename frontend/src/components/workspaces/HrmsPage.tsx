@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Play, Search } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { KanbanBoard, type KanbanColumn } from '@/components/workspaces/KanbanBoard';

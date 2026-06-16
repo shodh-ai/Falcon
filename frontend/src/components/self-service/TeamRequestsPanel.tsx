@@ -1,11 +1,12 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { Inbox, Loader2, PackageOpen } from 'lucide-react';
-import { toast } from 'sonner';
+import { Inbox, Loader2 } from 'lucide-react';
+import { toast } from '@/lib/notifications/falcon-toast';
+import { cn } from '@/lib/utils';
+import { FacultyEmptyState, FacultyMetricChip } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { HrEmptyState } from '@/components/hr/HrEmptyState';
 import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { TeamScopeBar, useTeamScope, type TeamScope } from '@/components/self-service/TeamScopeBar';
 import { useAuthedApi } from '@/lib/api';
@@ -54,6 +55,19 @@ type PendingCounts = {
   appraisals: number;
 };
 
+const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
+  'leaves',
+  'regularization',
+  'onDuty',
+  'compOff',
+  'documents',
+  'appraisals',
+];
+
+function sumPendingCounts(counts: PendingCounts): number {
+  return PENDING_COUNT_KEYS.reduce((sum, key) => sum + Number(counts[key] || 0), 0);
+}
+
 const TAB_COUNT_KEY: Record<TabId, keyof PendingCounts> = {
   LEAVE: 'leaves',
   REGULARIZATION: 'regularization',
@@ -79,8 +93,17 @@ function RequestsContent({ defaultScope }: Props) {
 
   async function loadCounts() {
     try {
-      const res = await api.get<PendingCounts>(`/api/hr/team/pending-counts?scope=${scope}`);
-      setCounts(res);
+      const res = await api.get<PendingCounts & { scope?: string }>(
+        `/api/hr/team/pending-counts?scope=${scope}`,
+      );
+      setCounts({
+        leaves: Number(res.leaves) || 0,
+        regularization: Number(res.regularization) || 0,
+        onDuty: Number(res.onDuty) || 0,
+        compOff: Number(res.compOff) || 0,
+        documents: Number(res.documents) || 0,
+        appraisals: Number(res.appraisals) || 0,
+      });
     } catch {
       setCounts({
         leaves: 0,
@@ -174,21 +197,26 @@ function RequestsContent({ defaultScope }: Props) {
 
   const allSelected = data ? data.items.length > 0 && selected.size === data.items.length : false;
 
+  const totalPending = counts ? sumPendingCounts(counts) : 0;
+
   return (
     <div className="space-y-4">
       <Suspense fallback={null}>
         <TeamScopeBar defaultScope={defaultScope} />
       </Suspense>
 
-      <div className="flex flex-wrap gap-1 rounded-lg border bg-muted/40 p-1">
+      <div className="flex flex-wrap gap-1 rounded-xl border border-border/60 bg-muted/40 p-1">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`rounded-md px-3 py-2 text-sm font-medium ${
-              tab === t.id ? 'bg-background text-sgvu-navy shadow-sm' : 'text-muted-foreground'
-            }`}
+            className={cn(
+              'rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              tab === t.id
+                ? 'bg-background text-sgvu-navy shadow-sm'
+                : 'text-muted-foreground hover:text-sgvu-navy',
+            )}
           >
             {tabLabel(t)}
           </button>
@@ -196,13 +224,9 @@ function RequestsContent({ defaultScope }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Inbox className="h-5 w-5 text-sgvu-gold" />
-          <span className="text-sm text-muted-foreground">
-            {counts
-              ? `${Object.values(counts).reduce((a, b) => a + b, 0)} total pending in scope`
-              : 'Loading counts…'}
-          </span>
+          <FacultyMetricChip label="Pending in scope" value={totalPending} emphasis={totalPending > 0} />
         </div>
         {data && data.items.length > 0 && (
           <div className="flex gap-2">
@@ -228,15 +252,14 @@ function RequestsContent({ defaultScope }: Props) {
       )}
 
       {!loading && data && data.items.length === 0 && (
-        <HrEmptyState
-          icon={PackageOpen}
-          title="No Requests Found"
+        <FacultyEmptyState
+          title="No requests found"
           description={`You have no pending ${TABS.find((t) => t.id === tab)?.label.toLowerCase()} in this scope.`}
         />
       )}
 
       {!loading && data && data.items.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white shadow-sm">
+        <div className="overflow-x-auto rounded-xl border border-border/60 bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-slate-50 text-left text-muted-foreground">

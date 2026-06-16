@@ -1,16 +1,23 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send } from 'lucide-react';
-import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
+import Link from 'next/link';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyEmptyState,
+  FacultyErrorBanner,
+  FacultyPanel,
+  FacultyMetricChip,
+  FacultyInlineLoading,
+} from '@/components/faculty';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
-import Link from 'next/link';
 
 const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM'] as const;
 
@@ -42,6 +49,8 @@ export default function FacultyGradingPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
+
+  const selectedCourse = courses.find((c) => c.course_id === courseId);
 
   useEffect(() => {
     if (!courseId) {
@@ -147,11 +156,22 @@ export default function FacultyGradingPage() {
     }
   }
 
+  const enteredCount = rows.filter((r) => r.marks_obtained !== null).length;
+
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
+    <FacultyPageShell>
       <FacultyPageHeader
-        title="Examinations & Grading"
         description="Spreadsheet-style marks entry with max-marks validation. Link assessments to COs via CO-PO Mapping."
+        meta={
+          courseId ? (
+            <>
+              <FacultyMetricChip label="Course" value={selectedCourse?.course_code ?? '—'} emphasis />
+              <FacultyMetricChip label="Assessment" value={examType.replace('_', ' ')} />
+              <FacultyMetricChip label="Students" value={rows.length} />
+              <FacultyMetricChip label="Marks entered" value={enteredCount} />
+            </>
+          ) : null
+        }
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/faculty/grading/copo">CO-PO Mapping</Link>
@@ -159,15 +179,12 @@ export default function FacultyGradingPage() {
         }
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Assessment setup</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-4">
+      <FacultyPanel title="Assessment setup" description="Choose course, exam type, and max marks">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="text-sm">
-            <span className="mb-1 block font-medium">Course</span>
+            <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
             <select
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
               value={courseId}
               onChange={(e) => setCourseId(e.target.value)}
               disabled={coursesLoading}
@@ -181,21 +198,19 @@ export default function FacultyGradingPage() {
             </select>
           </label>
           <label className="text-sm">
-            <span className="mb-1 block font-medium">Assessment type</span>
+            <span className="mb-1.5 block font-medium text-sgvu-navy">Assessment type</span>
             <select
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
               value={examType}
               onChange={(e) => setExamType(e.target.value as (typeof EXAM_TYPES)[number])}
             >
               {EXAM_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t.replace('_', ' ')}
-                </option>
+                <option key={t} value={t}>{t.replace('_', ' ')}</option>
               ))}
             </select>
           </label>
           <label className="text-sm">
-            <span className="mb-1 block font-medium">Max marks</span>
+            <span className="mb-1.5 block font-medium text-sgvu-navy">Max marks</span>
             <Input
               type="number"
               min={1}
@@ -203,46 +218,47 @@ export default function FacultyGradingPage() {
               onChange={(e) => setMaxMarks(Number(e.target.value) || 50)}
             />
           </label>
-          <div className="flex items-end gap-2">
-            <Badge variant={publishStatus === 'PUBLISHED' ? 'default' : 'secondary'}>
+          <div className="flex items-end">
+            <Badge
+              variant={publishStatus === 'PUBLISHED' ? 'default' : 'secondary'}
+              className="text-xs font-semibold uppercase tracking-wide"
+            >
               {publishStatus}
             </Badge>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </FacultyPanel>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Student marks</CardTitle>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={!courseId || saving} onClick={() => void saveDraft()}>
-              {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
-              Save draft
-            </Button>
-            <Button size="sm" disabled={!courseId || saving} onClick={() => void publish()}>
-              <Send className="mr-1 h-4 w-4" />
-              Publish to students
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" />
-            </div>
-          ) : !courseId ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">Select a course to load the class roster.</p>
-          ) : rosterError ? (
-            <p className="py-8 text-center text-sm text-destructive">{rosterError}</p>
-          ) : rows.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No enrolled students found for this course. Check enrollments in Academics admin.
-            </p>
-          ) : (
+      <FacultyPanel
+        title="Student marks"
+        count={rows.length}
+        description="Enter marks per student — CO mapping optional"
+      >
+        <div className="mb-4 flex flex-wrap justify-end gap-2">
+          <Button variant="outline" size="sm" disabled={!courseId || saving} onClick={() => void saveDraft()}>
+            {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
+            Save draft
+          </Button>
+          <Button size="sm" disabled={!courseId || saving} onClick={() => void publish()}>
+            <Send className="mr-1 h-4 w-4" />
+            Publish to students
+          </Button>
+        </div>
+
+        {loading ? (
+          <FacultyInlineLoading label="Loading marks…" />
+        ) : !courseId ? (
+          <FacultyEmptyState description="Select a course to load the class roster." />
+        ) : rosterError ? (
+          <FacultyErrorBanner message={rosterError} />
+        ) : rows.length === 0 ? (
+          <FacultyEmptyState description="No enrolled students found for this course." />
+        ) : (
+          <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="pb-2 pr-4">Roll / ID</th>
+                <tr className="border-b border-border/60 text-left text-xs font-medium text-muted-foreground">
+                  <th className="pb-2 pr-4">Roll</th>
                   <th className="pb-2 pr-4">Student</th>
                   <th className="pb-2 pr-4">CO</th>
                   <th className="pb-2">Marks</th>
@@ -251,9 +267,13 @@ export default function FacultyGradingPage() {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.student_user_id} className="border-b border-border/40">
-                    <td className="py-2 pr-4 font-mono text-xs">{row.roll_number}</td>
-                    <td className="py-2 pr-4">{row.name}</td>
-                    <td className="py-2 pr-4">
+                    <td className="py-2.5 pr-4 text-xs font-medium text-muted-foreground">
+                      {row.roll_number && row.roll_number.length <= 24 && !row.roll_number.includes('0000-4000')
+                        ? row.roll_number
+                        : '—'}
+                    </td>
+                    <td className="py-2.5 pr-4 font-medium text-sgvu-navy">{row.name}</td>
+                    <td className="py-2.5 pr-4">
                       <Input
                         className="h-8 w-20"
                         placeholder="CO1"
@@ -269,7 +289,7 @@ export default function FacultyGradingPage() {
                         }
                       />
                     </td>
-                    <td className="py-2">
+                    <td className="py-2.5">
                       <div className="flex items-center gap-1">
                         <Input
                           type="number"
@@ -286,9 +306,9 @@ export default function FacultyGradingPage() {
                 ))}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+          </div>
+        )}
+      </FacultyPanel>
+    </FacultyPageShell>
   );
 }

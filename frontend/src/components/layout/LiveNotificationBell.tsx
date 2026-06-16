@@ -2,12 +2,9 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuth } from '@/context/AuthContext';
-import {
-  NotificationBell,
-  type AppNotification,
-} from '@/components/layout/NotificationBell';
+import { NotificationBell } from '@/components/layout/NotificationBell';
 import {
   useNotificationUnreadCount,
   useRecentNotifications,
@@ -20,9 +17,9 @@ export function LiveNotificationBell() {
   const router = useRouter();
   const { token } = useAuth();
   const { count, refresh: refreshCount } = useNotificationUnreadCount();
-  const { notifications, refresh: refreshList } = useRecentNotifications();
+  const { notifications, isLoading, refresh: refreshList } = useRecentNotifications();
 
-  const items: AppNotification[] = notifications.map(toAppNotification);
+  const items = notifications.map(toAppNotification);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -32,10 +29,13 @@ export function LiveNotificationBell() {
     return () => window.removeEventListener('falcon:notifications-refresh', onRefresh);
   }, [refreshCount, refreshList]);
 
-  const handleSelect = async (n: AppNotification) => {
+  const handleSelect = async (n: ReturnType<typeof toAppNotification>) => {
     if (!token) return;
     try {
-      await handleNotificationAction(token, n.actionLink, router);
+      const result = await handleNotificationAction(token, n.actionLink, router);
+      if (result === 'download') {
+        toast.success('Download started');
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
       return;
@@ -50,6 +50,7 @@ export function LiveNotificationBell() {
     <NotificationBell
       notifications={items}
       unreadCount={count}
+      isLoading={isLoading}
       onSelect={handleSelect}
       viewAllHref="/notifications"
     />

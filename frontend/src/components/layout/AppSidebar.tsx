@@ -37,27 +37,29 @@ export function AppSidebar({
     >
       <div
         className={cn(
-          'flex h-[4.5rem] items-center border-b border-white/10 px-3',
-          collapsed ? 'justify-center' : 'justify-between',
+          'relative',
+          collapsed
+            ? 'flex h-16 items-center justify-center px-2'
+            : 'flex flex-col items-center px-3 py-3 text-center',
         )}
       >
         {!collapsed && (
-          <div className="min-w-0 px-1">
-            <p className="text-lg font-black tracking-tight text-white">Falcon</p>
-            <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-sgvu-gold/85">
+          <div className="flex w-full flex-col items-center gap-1">
+            <FalconLogo size={48} className="mx-auto" />
+            <p className="text-[9px] font-medium uppercase tracking-[0.14em] text-sgvu-gold/85">
               SGVU Workspace
             </p>
-            <p className="mt-1 truncate text-[11px] font-medium text-blue-100/70">{personaLabel}</p>
+            <p className="max-w-full truncate text-[10px] font-medium text-blue-100/70">{personaLabel}</p>
           </div>
         )}
-        {collapsed && <FalconLogo size={32} />}
+        {collapsed && <FalconLogo size={36} compact className="mx-auto" />}
         <Button
           variant="ghost"
           size="icon"
           onClick={onToggleCollapse}
           className={cn(
-            'hidden shrink-0 text-white hover:bg-white/10 lg:flex',
-            collapsed && 'absolute right-1 top-3',
+            'absolute hidden shrink-0 text-white hover:bg-white/10 lg:flex',
+            collapsed ? 'right-1 top-2' : 'right-1 top-2',
           )}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >

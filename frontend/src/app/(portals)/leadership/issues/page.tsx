@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LeadershipMetricCard, LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';

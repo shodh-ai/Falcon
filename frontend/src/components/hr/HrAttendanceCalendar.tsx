@@ -41,6 +41,8 @@ type MatrixPayload = {
 type Props = {
   title?: string;
   month?: string;
+  /** When true, renders calendar grid only (no outer card chrome). */
+  embedded?: boolean;
 } & ({ mode: 'self' } | { mode: 'matrix' });
 
 function monthMeta(month: string) {
@@ -93,77 +95,58 @@ export function HrAttendanceCalendar(props: Props) {
   const { year, monthNum, daysInMonth, leading } = monthMeta(month);
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  return (
-    <Card className="border-gray-100 shadow-sm">
-      <CardHeader className="flex flex-col gap-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <CardTitle className="text-base">{props.title ?? 'Attendance calendar'}</CardTitle>
-          {selfData?.shift && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Shift: {selfData.shift.shift_name} ({selfData.shift.start_time?.slice(0, 5)} –{' '}
-              {selfData.shift.end_time?.slice(0, 5)})
-            </p>
-          )}
+  const legend = (
+    <div className="flex flex-wrap gap-3 text-[11px] font-medium text-muted-foreground">
+      {(props.mode === 'matrix' ? HEATMAP_LEGEND : ATTENDANCE_LEGEND).map((item) => (
+        <div
+          key={'status' in item ? item.status : item.label}
+          className="flex items-center gap-1.5"
+        >
+          <span
+            className="inline-block h-3 w-3 rounded-full ring-1 ring-black/5"
+            style={{ backgroundColor: item.color }}
+          />
+          <span>{item.label}</span>
         </div>
-        <div className="flex flex-wrap items-start gap-4">
-          {showMonthPicker && (
-            <input
-              type="month"
-              className="rounded-md border px-2 py-1 text-sm"
-              value={month}
-              onChange={(e) => setInternalMonth(e.target.value)}
-            />
-          )}
-          <div className="flex flex-wrap gap-3 text-[11px] font-medium text-muted-foreground">
-            {(props.mode === 'matrix' ? HEATMAP_LEGEND : ATTENDANCE_LEGEND).map((item) => (
-              <div
-                key={'status' in item ? item.status : item.label}
-                className="flex items-center gap-1.5"
-              >
+      ))}
+    </div>
+  );
+
+  const calendarBody = (
+    <>
+      {loading && (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-sgvu-navy" />
+        </div>
+      )}
+
+      {!loading && props.mode === 'self' && selfData && (
+        <div className="grid grid-cols-7 gap-2">
+          {dayLabels.map((d) => (
+            <div key={d} className="text-center text-xs font-medium text-muted-foreground">
+              {d}
+            </div>
+          ))}
+          {Array.from({ length: leading }).map((_, i) => (
+            <div key={`pad-${i}`} />
+          ))}
+          {selfData.days.map((day) => {
+            const style = attendanceCircleStyle(day.calculated_status);
+            return (
+              <div key={day.date} className="flex flex-col items-center gap-1" title={day.tooltip}>
                 <span
-                  className="inline-block h-3 w-3 rounded-full ring-1 ring-black/5"
-                  style={{ backgroundColor: item.color }}
-                />
-                <span>{item.label}</span>
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-[10px] font-semibold"
+                  style={style}
+                >
+                  {new Date(`${day.date}T12:00:00`).getDate()}
+                </span>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
-      </CardHeader>
-      <CardContent>
-        {loading && (
-          <div className="flex justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        )}
+      )}
 
-        {!loading && props.mode === 'self' && selfData && (
-          <div className="grid grid-cols-7 gap-2">
-            {dayLabels.map((d) => (
-              <div key={d} className="text-center text-xs font-medium text-muted-foreground">
-                {d}
-              </div>
-            ))}
-            {Array.from({ length: leading }).map((_, i) => (
-              <div key={`pad-${i}`} />
-            ))}
-            {selfData.days.map((day) => {
-              const style = attendanceCircleStyle(day.calculated_status);
-              return (
-                <div key={day.date} className="flex flex-col items-center gap-1" title={day.tooltip}>
-                  <span
-                    className="flex h-9 w-9 items-center justify-center rounded-full text-[10px] font-semibold"
-                    style={style}
-                  >
-                    {new Date(`${day.date}T12:00:00`).getDate()}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {!loading && props.mode === 'matrix' && matrixData && (
+      {!loading && props.mode === 'matrix' && matrixData && (
           <div className="overflow-x-auto rounded-lg border border-gray-100">
             {matrixData.employees.length === 0 ? (
               <HrEmptyState
@@ -246,7 +229,43 @@ export function HrAttendanceCalendar(props: Props) {
             )}
           </div>
         )}
-      </CardContent>
+    </>
+  );
+
+  if (props.embedded) {
+    return (
+      <div className="space-y-3">
+        {legend}
+        {calendarBody}
+      </div>
+    );
+  }
+
+  return (
+    <Card className="border-border/60 shadow-sm">
+      <CardHeader className="flex flex-col gap-4 border-b border-border/50 bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <CardTitle className="text-base text-sgvu-navy">{props.title ?? 'Attendance calendar'}</CardTitle>
+          {selfData?.shift && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Shift: {selfData.shift.shift_name} ({selfData.shift.start_time?.slice(0, 5)} –{' '}
+              {selfData.shift.end_time?.slice(0, 5)})
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-start gap-4">
+          {showMonthPicker && (
+            <input
+              type="month"
+              className="rounded-lg border border-border/60 px-2 py-1 text-sm"
+              value={month}
+              onChange={(e) => setInternalMonth(e.target.value)}
+            />
+          )}
+          {legend}
+        </div>
+      </CardHeader>
+      <CardContent>{calendarBody}</CardContent>
     </Card>
   );
 }

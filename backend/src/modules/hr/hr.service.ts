@@ -74,10 +74,13 @@ export class HrService {
       tenantId: requester.tenant_id,
       approver,
       title: 'Leave approval required',
-      message: `${requester.name} applied for ${saved.leave_type} leave (${saved.start_date} – ${saved.end_date}).`,
-      actionLink: '/faculty/leaves',
+      message: `${requester.name} applied for ${saved.leave_type} leave (${saved.start_date} – ${saved.end_date}). Review dates and approve or reject.`,
+      actionLink: '/faculty/inbox',
       category: 'HR',
       requesterName: requester.name,
+      requestType: 'Leave request',
+      startDate: saved.start_date,
+      endDate: saved.end_date,
     });
 
     return saved;
@@ -131,10 +134,13 @@ export class HrService {
         tenantId,
         approver: hrAdmin,
         title: 'Leave awaiting HR approval',
-        message: `${requester.name}'s leave was approved by HOD and needs HR final sign-off.`,
-        actionLink: '/hr/leaves',
+        message: `${requester.name}'s ${saved.leave_type} leave (${saved.start_date} – ${saved.end_date}) was approved by HOD and needs your final sign-off.`,
+        actionLink: '/hr/inbox',
         category: 'HR',
         requesterName: requester.name,
+        requestType: 'Leave request',
+        startDate: saved.start_date,
+        endDate: saved.end_date,
       });
     }
 

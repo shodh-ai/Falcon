@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Award, GraduationCap, ShieldCheck, UserPlus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';

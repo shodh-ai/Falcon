@@ -12,7 +12,7 @@ import {
 } from '@/lib/workspace-self-service';
 import { useAuth } from '@/context/AuthContext';
 
-function WorkforceHubContent() {
+function WorkforceHubContent({ embedded }: { embedded?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -42,33 +42,41 @@ function WorkforceHubContent() {
     [defaultScope, pathname, router, searchParams],
   );
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy">My Leaves & Attendance</h2>
-        <p className="text-sm text-muted-foreground">
-          Personal calendar, leave balances, and team attendance matrix — without leaving your workspace.
-        </p>
-      </section>
+  const body = (
+    <>
+      {!embedded && (
+        <section>
+          <h2 className="text-2xl font-bold text-sgvu-navy">My Leaves & Attendance</h2>
+          <p className="text-sm text-muted-foreground">
+            Personal calendar, leave balances, and team attendance matrix — without leaving your workspace.
+          </p>
+        </section>
+      )}
 
       <SelfTeamToggle value={view} onChange={setView} showTeam={showTeam} />
 
       {view === 'self' ? (
-        <div className="space-y-8">
+        <div className="space-y-4">
           <MyCalendarPanel />
           <MyLeavesPanel />
         </div>
       ) : (
         <TeamAttendancePanel defaultScope={defaultScope} />
       )}
-    </div>
+    </>
   );
+
+  if (embedded) {
+    return <div className="space-y-6">{body}</div>;
+  }
+
+  return <div className="mx-auto w-full max-w-6xl space-y-6">{body}</div>;
 }
 
-export function WorkforceHubPage() {
+export function WorkforceHubPage({ embedded }: { embedded?: boolean } = {}) {
   return (
     <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading…</div>}>
-      <WorkforceHubContent />
+      <WorkforceHubContent embedded={embedded} />
     </Suspense>
   );
 }

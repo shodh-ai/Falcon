@@ -6,7 +6,7 @@ import { leadershipPortal } from '@/lib/navigation';
 
 export function LeadershipPortalShell({ children }: { children: ReactNode }) {
   return (
-    <AppShell config={leadershipPortal} profileHref={leadershipPortal.homeHref}>
+    <AppShell config={leadershipPortal}>
       {children}
     </AppShell>
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { ChevronRight, Flag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLeadershipApi, type DrillNode } from '@/lib/api/api.leadership';

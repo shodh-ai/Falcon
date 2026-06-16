@@ -2,9 +2,13 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { extname, resolve } from 'path';
+import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { extname, join, resolve } from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  openDocumentReadStream,
+  resolveDocumentDiskPath,
+} from '../hr/utils/document-file-path.util';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { AlumniConversionService } from '../alumni/alumni-conversion.service';
 import { TicketService } from '../helpdesk/ticket.service';
@@ -47,16 +51,34 @@ export class StudentPortalService {
 
   async getMasterProfile(tenantId: string, userId: string) {
     const rows = await this.dataSource.query(
-      `SELECT u.user_id, u.name, u.official_email AS email,
+      `SELECT u.user_id, u.name, u.official_email AS email, u.onboarding_status,
               sp.enrollment_number, sp.enrollment_no, sp.batch, sp.category, sp.gender, sp.date_of_birth,
               sp.nationality, sp.parent_info, sp.admission_type, sp.admission_number,
               sp.admission_status, sp.aadhaar_encrypted, sp.passport_encrypted,
               sp.profile_photo_url, sp.bank_details, sp.profile_unlocked_until,
+              sp.blood_group, sp.abc_id,
               d.dept_name AS department,
               COALESCE(
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
                 1
-              ) AS current_semester
+              ) AS current_semester,
+              COALESCE(
+                (
+                  SELECT jsonb_agg(
+                    jsonb_build_object(
+                      'doc_type', sod.doc_type,
+                      'status', sod.status,
+                      'uploaded_at', sod.uploaded_at,
+                      'admin_remarks', sod.admin_remarks
+                    )
+                    ORDER BY sod.doc_type
+                  )
+                  FROM student_onboarding_docs sod
+                  WHERE sod.student_user_id = u.user_id
+                    AND sod.tenant_id = u.tenant_id
+                ),
+                '[]'::jsonb
+              ) AS onboarding_documents
        FROM users u
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
@@ -73,6 +95,8 @@ export class StudentPortalService {
       name: row.name,
       email: row.email,
       mobile: parentInfo?.student_mobile ?? parentInfo?.mobile ?? null,
+      blood_group: row.blood_group,
+      abc_id: row.abc_id,
       category: row.category,
       gender: row.gender,
       date_of_birth: row.date_of_birth,
@@ -99,8 +123,10 @@ export class StudentPortalService {
       passport_masked: this.maskEncrypted(row.passport_encrypted, (v) => `••••${v.slice(-4)}`),
       admission_type: row.admission_type,
       admission_status: row.admission_status,
-      profile_photo_url: row.profile_photo_url,
+      profile_photo_url: this.displayProfilePhotoUrl(row.profile_photo_url),
       bank_details: row.bank_details,
+      onboarding_status: row.onboarding_status,
+      onboarding_documents: row.onboarding_documents ?? [],
       profile_unlocked_until: row.profile_unlocked_until,
       is_profile_editable: unlocked,
     };
@@ -128,6 +154,11 @@ export class StudentPortalService {
     let queryIdx = 1;
 
     if (dto.profile_photo_url !== undefined) {
+      if (typeof dto.profile_photo_url === 'string' && dto.profile_photo_url.startsWith('data:')) {
+        throw new BadRequestException(
+          'Profile photo is too large to save this way. Use the photo upload button with a JPG, PNG, or WEBP file under 5 MB.',
+        );
+      }
       setChunks.push(`profile_photo_url = $${queryIdx++}`);
       values.push(dto.profile_photo_url);
     }
@@ -159,6 +190,92 @@ export class StudentPortalService {
       values,
     );
     return { success: true, locked: wantsLockedFields };
+  }
+
+  async uploadProfilePhoto(tenantId: string, userId: string, file: Express.Multer.File) {
+    if (!file?.buffer?.length) throw new BadRequestException('No photo uploaded');
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!allowed.includes(file.mimetype)) {
+      throw new BadRequestException('Profile photo must be JPG, PNG, or WEBP');
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('Profile photo must be 5 MB or smaller');
+    }
+
+    const filePath = await this.persistProfilePhotoFile(tenantId, file);
+
+    await this.dataSource.query(
+      `INSERT INTO student_onboarding_docs (tenant_id, student_user_id, doc_type, file_path, status)
+       VALUES ($1, $2, 'PHOTO', $3, 'APPROVED')
+       ON CONFLICT (student_user_id, doc_type) DO UPDATE SET
+         file_path = EXCLUDED.file_path,
+         status = 'APPROVED',
+         uploaded_at = NOW()`,
+      [tenantId, userId, filePath],
+    );
+
+    await this.dataSource.query(
+      `UPDATE student_profiles SET profile_photo_url = $1, updated_at = NOW()
+       WHERE user_id = $2 AND tenant_id = $3`,
+      [filePath, userId, tenantId],
+    );
+
+    return this.getMasterProfile(tenantId, userId);
+  }
+
+  async openProfilePhotoStream(tenantId: string, userId: string) {
+    const filePath = await this.getProfilePhotoPath(tenantId, userId);
+    if (!filePath) throw new NotFoundException('Profile photo not found');
+
+    const stream = await openDocumentReadStream(filePath, this.objectStorage);
+    if (stream) return { stream, filePath };
+
+    const diskPath = resolveDocumentDiskPath(filePath);
+    if (!diskPath) throw new NotFoundException('Profile photo file missing');
+    return { stream: createReadStream(diskPath), filePath: diskPath };
+  }
+
+  private displayProfilePhotoUrl(stored: string | null): string | null {
+    if (!stored?.trim()) return null;
+    if (stored.startsWith('data:')) return stored;
+    if (stored.startsWith('/api/student/profile/photo')) return stored;
+    return '/api/student/profile/photo';
+  }
+
+  private async getProfilePhotoPath(tenantId: string, userId: string): Promise<string | null> {
+    const [doc] = await this.dataSource.query<Array<{ file_path: string }>>(
+      `SELECT file_path FROM student_onboarding_docs
+       WHERE tenant_id = $1 AND student_user_id = $2 AND doc_type = 'PHOTO' AND file_path IS NOT NULL
+       ORDER BY uploaded_at DESC LIMIT 1`,
+      [tenantId, userId],
+    );
+    if (doc?.file_path) return doc.file_path;
+
+    const [profile] = await this.dataSource.query<Array<{ profile_photo_url: string | null }>>(
+      `SELECT profile_photo_url FROM student_profiles WHERE tenant_id = $1 AND user_id = $2`,
+      [tenantId, userId],
+    );
+    const url = profile?.profile_photo_url;
+    if (typeof url === 'string' && url.trim() && !url.startsWith('data:')) return url;
+    return null;
+  }
+
+  private async persistProfilePhotoFile(tenantId: string, file: Express.Multer.File): Promise<string> {
+    const uniqueName = `${uuidv4()}${extname(file.originalname) || '.jpg'}`;
+    if (this.objectStorage.isEnabled()) {
+      const key = this.objectStorage.buildKey(tenantId, uniqueName);
+      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      return stored.url ?? stored.key;
+    }
+    const uploadPath = process.env.UPLOAD_PATH || './uploads';
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const targetDir = join(process.cwd(), uploadPath, tenantId, String(year), month);
+    mkdirSync(targetDir, { recursive: true });
+    const fullPath = join(targetDir, uniqueName);
+    writeFileSync(fullPath, file.buffer);
+    return fullPath;
   }
 
   async getCampusSettings(tenantId: string) {

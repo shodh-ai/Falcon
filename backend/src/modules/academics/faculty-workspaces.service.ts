@@ -280,6 +280,7 @@ export class FacultyWorkspacesService {
        WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3
          AND status = 'PENDING_HOD_APPROVAL'`,
       [tenantId, facultyUserId, dto.course_id],
+      'You already have a pending schedule change for this course. Wait for HoD approval on the existing request, or cancel it before submitting another.',
     );
 
     const rows = await this.dataSource.query(

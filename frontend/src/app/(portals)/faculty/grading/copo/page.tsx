@@ -1,8 +1,8 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
+import { toast } from '@/lib/notifications/falcon-toast';
+import { FacultyPageHeader, FacultyPageShell, FacultyEmptyState } from '@/components/faculty';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -60,7 +60,7 @@ export default function FacultyCoPoPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+    <FacultyPageShell>
       <FacultyPageHeader
         title="CO-PO Mapping"
         description="Map questions to Course Outcomes and Program Outcomes for NBA/NAAC attainment tracking."
@@ -112,7 +112,7 @@ export default function FacultyCoPoPage() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               {rows.length === 0 ? (
-                <p className="text-muted-foreground">No mappings yet for this course.</p>
+                <FacultyEmptyState description="No mappings yet for this course." />
               ) : (
                 rows.map((r) => (
                   <div key={r.mapping_id} className="rounded-lg border px-3 py-2">
@@ -124,6 +124,6 @@ export default function FacultyCoPoPage() {
           </Card>
         </>
       ) : null}
-    </div>
+    </FacultyPageShell>
   );
 }

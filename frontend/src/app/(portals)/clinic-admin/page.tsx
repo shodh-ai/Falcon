@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 export default function ClinicAdminPage() {
   const api = useAuthedApi();

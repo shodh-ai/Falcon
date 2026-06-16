@@ -11,7 +11,7 @@ const HostelOccupancyChart = dynamic(
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuthedApi } from '@/lib/api';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
 

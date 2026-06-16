@@ -1,10 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { CalendarClock, CheckCircle2, XCircle } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { FacultyPanel, FacultyEmptyState } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -66,16 +65,10 @@ export function PendingMeetingRequests({ meetings, onUpdated }: Props) {
 
   return (
     <>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Pending Meeting Requests</CardTitle>
-          <Badge variant={meetings.length ? 'warning' : 'success'}>
-            {meetings.length} pending
-          </Badge>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <FacultyPanel title="Pending meeting requests" count={meetings.length}>
+        <div className="space-y-3">
           {meetings.length === 0 && (
-            <p className="text-sm text-muted-foreground">No meeting requests awaiting your response.</p>
+            <FacultyEmptyState description="No meeting requests awaiting your response." className="py-6" />
           )}
           {meetings.map((meeting) => (
             <div
@@ -118,8 +111,8 @@ export function PendingMeetingRequests({ meetings, onUpdated }: Props) {
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </FacultyPanel>
 
       <Dialog open={Boolean(approveTarget)} onOpenChange={(open) => !open && setApproveTarget(null)}>
         <DialogContent>

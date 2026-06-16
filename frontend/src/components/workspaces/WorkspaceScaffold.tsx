@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Download, Lock, Plus, Search, ChevronUp, ChevronDown } from 'lucide-react';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { StudentDetailsModal } from '@/components/workspaces/StudentDetailsModal';

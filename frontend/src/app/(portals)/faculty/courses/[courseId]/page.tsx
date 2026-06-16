@@ -3,20 +3,28 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
-import { CourseWorkspaceTabs } from '@/components/lms/CourseWorkspaceTabs';
+import { ArrowLeft } from 'lucide-react';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyPageLoading,
+  FacultyMetricChip,
+  FacultyTabBar,
+} from '@/components/faculty';
 import { FacultyMaterialsTab } from '@/components/lms/FacultyMaterialsTab';
 import { FacultyAssignmentsTab } from '@/components/lms/FacultyAssignmentsTab';
 import { LmsExtendedTabs } from '@/components/lms/LmsExtendedTabs';
 import { useAuthedApi } from '@/lib/api';
 import type { FacultyWorkspace } from '@/lib/api/lms';
 
+type WorkspaceTab = 'materials' | 'assignments' | 'live';
+
 export default function FacultyCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
   const api = useAuthedApi();
   const [workspace, setWorkspace] = useState<FacultyWorkspace | null>(null);
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState('materials');
+  const [tab, setTab] = useState<WorkspaceTab>('materials');
 
   useEffect(() => {
     const t = searchParams.get('tab');
@@ -33,22 +41,35 @@ export default function FacultyCourseWorkspacePage() {
   }, [load]);
 
   if (!workspace) {
-    return <p className="p-8 text-center text-sm text-muted-foreground">Loading course workspace…</p>;
+    return <FacultyPageLoading label="Loading course workspace…" branded />;
   }
 
+  const materialsCount = workspace.modules.reduce((sum, m) => sum + m.materials.length, 0);
+
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+    <FacultyPageShell>
       <FacultyPageHeader
-        title={`${workspace.course.course_code} — ${workspace.course.course_name}`}
-        description="Reference materials (notes/PPT) and digital assignments (DA) for this subject."
+        description={`${workspace.course.course_name} — reference materials (notes/PPT) and digital assignments (DA).`}
+        meta={
+          <>
+            <FacultyMetricChip label="Course" value={workspace.course.course_code} emphasis />
+            <FacultyMetricChip label="Credits" value={workspace.course.credits} />
+            <FacultyMetricChip label="Units" value={workspace.modules.length} />
+            <FacultyMetricChip label="Materials" value={materialsCount} />
+          </>
+        }
         actions={
-          <Link href="/faculty/courses" className="text-sm font-medium text-sgvu-navy underline">
+          <Link
+            href="/faculty/courses"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-sgvu-navy hover:underline"
+          >
+            <ArrowLeft className="h-4 w-4" />
             All courses
           </Link>
         }
       />
 
-      <CourseWorkspaceTabs
+      <FacultyTabBar
         active={tab}
         onChange={setTab}
         tabs={[
@@ -65,6 +86,6 @@ export default function FacultyCourseWorkspacePage() {
       ) : (
         <LmsExtendedTabs courseId={courseId!} mode="faculty" />
       )}
-    </div>
+    </FacultyPageShell>
   );
 }

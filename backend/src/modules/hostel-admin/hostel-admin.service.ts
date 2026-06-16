@@ -9,6 +9,7 @@ import { DataSource } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { FinanceService } from '../finance/finance.service';
 import { FalconNotificationsService } from '../../core/notifications/falcon-notifications.service';
+import { hostelBroadcastMessage } from '../../core/notifications/notification-message.catalog';
 import { HostelAdminGateway } from './hostel-admin.gateway';
 import {
   DEFAULT_PAGE_LIMIT,
@@ -589,14 +590,19 @@ export class HostelAdminService {
       [dto.hostel_ids],
     );
 
+    const broadcastMsg = hostelBroadcastMessage({ title: dto.title, message: dto.message });
+
     for (const s of students) {
       await this.falconNotify.create({
         tenantId: ctx.tenantId,
         userId: s.user_id,
-        title: dto.title,
-        message: dto.message,
-        category: 'HOSTEL',
-        actionLink: '/student/hostel',
+        category: broadcastMsg.category,
+        title: broadcastMsg.title,
+        message: broadcastMsg.message,
+        actionLink: broadcastMsg.actionLink,
+        severity: broadcastMsg.severity,
+        intent: broadcastMsg.intent,
+        actionLabel: broadcastMsg.actionLabel,
       });
     }
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

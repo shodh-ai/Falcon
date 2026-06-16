@@ -3,7 +3,6 @@ import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LEADERSHIP_ANOMALY_QUEUE } from '../../common/constants/leadership-queue.constants';
 import { RedisModule } from '../../core/redis/redis.module';
-import { FalconNotification } from '../../entities/falcon-notification.entity';
 import { User } from '../../entities/user.entity';
 import { LeadershipController } from './leadership.controller';
 import { LeadershipService } from './leadership.service';
@@ -20,7 +19,7 @@ import { OwnerAccessGuard } from '../../common/guards/owner-access.guard';
 @Module({
   imports: [
     BullModule.registerQueue({ name: LEADERSHIP_ANOMALY_QUEUE }),
-    TypeOrmModule.forFeature([FalconNotification, User]),
+    TypeOrmModule.forFeature([User]),
     RedisModule,
     BudgetFpaModule,
   ],

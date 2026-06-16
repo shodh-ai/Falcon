@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Bell } from 'lucide-react';
+import { Bell, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -12,45 +12,38 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
+import {
+  NotificationEmptyState,
+  NotificationItem,
+} from '@/components/notifications/NotificationItem';
+import type { AppNotification } from '@/hooks/useNotifications';
+import { HEADER_ICON_CONTROL_CLASS } from '@/components/layout/header-styles';
 import { cn } from '@/lib/utils';
 
-export interface AppNotification {
-  id: string;
-  title: string;
-  body: string;
-  type: 'fee' | 'warning' | 'success' | 'info';
-  unread: boolean;
-  actionLink?: string | null;
-  createdAt?: string;
-}
+export type { AppNotification };
 
 interface NotificationBellProps {
   notifications: AppNotification[];
-  /** Live unread total from API (overrides counting from list). */
   unreadCount?: number;
+  isLoading?: boolean;
   onSelect?: (notification: AppNotification) => void;
   viewAllHref?: string;
 }
 
-const typeStyles: Record<AppNotification['type'], string> = {
-  fee: 'bg-amber-100 text-amber-800',
-  warning: 'bg-red-100 text-red-800',
-  success: 'bg-emerald-100 text-emerald-800',
-  info: 'bg-blue-100 text-blue-800',
-};
-
 export function NotificationBell({
   notifications,
   unreadCount,
+  isLoading = false,
   onSelect,
   viewAllHref = '/notifications',
 }: NotificationBellProps) {
   const unread = unreadCount ?? notifications.filter((n) => n.unread).length;
+  const actionRequired = notifications.filter((n) => n.intent === 'action_required' && n.unread);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" className="relative shrink-0">
+        <Button variant="outline" size="icon" className={cn('relative', HEADER_ICON_CONTROL_CLASS)}>
           <Bell className="h-5 w-5" />
           {unread > 0 && (
             <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white">
@@ -60,39 +53,49 @@ export function NotificationBell({
           <span className="sr-only">Notifications</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[min(100vw-2rem,20rem)]">
-        <DropdownMenuLabel className="flex items-center justify-between">
-          Notifications
-          {unread > 0 && <Badge variant="destructive">{unread} new</Badge>}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {notifications.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">You&apos;re all caught up.</p>
-        ) : (
-          notifications.map((n) => (
-            <DropdownMenuItem
-              key={n.id}
-              className="flex cursor-pointer flex-col items-start gap-1 py-3"
-              onSelect={(e) => {
-                e.preventDefault();
-                onSelect?.(n);
-              }}
-            >
-              <div className="flex w-full items-center gap-2">
-                <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase', typeStyles[n.type])}>
-                  {n.type}
-                </span>
-                {n.unread && <span className="ml-auto h-2 w-2 rounded-full bg-destructive" />}
-              </div>
-              <span className="font-medium text-foreground">{n.title}</span>
-              <span className="line-clamp-2 text-xs text-muted-foreground">{n.body}</span>
-            </DropdownMenuItem>
-          ))
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href={viewAllHref} className="w-full justify-center text-center font-medium text-sgvu-navy">
-            View all notifications
+      <DropdownMenuContent align="end" className="w-[min(100vw-2rem,24rem)] p-0">
+        <div className="border-b px-4 py-3">
+          <DropdownMenuLabel className="flex items-center justify-between p-0 text-base">
+            Notifications
+            {unread > 0 && <Badge variant="destructive">{unread} unread</Badge>}
+          </DropdownMenuLabel>
+          {actionRequired.length > 0 && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {actionRequired.length} item{actionRequired.length === 1 ? '' : 's'} need your action
+            </p>
+          )}
+        </div>
+
+        <div className="max-h-[min(60vh,22rem)] overflow-y-auto p-2">
+          {isLoading && (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading…
+            </div>
+          )}
+          {!isLoading && notifications.length === 0 && <NotificationEmptyState compact />}
+          {!isLoading &&
+            notifications.map((n) => (
+              <DropdownMenuItem
+                key={n.id}
+                className="cursor-pointer p-0 focus:bg-transparent"
+                onSelect={(e) => {
+                  e.preventDefault();
+                  onSelect?.(n);
+                }}
+              >
+                <NotificationItem notification={n} compact className="border-0 shadow-none" />
+              </DropdownMenuItem>
+            ))}
+        </div>
+
+        <DropdownMenuSeparator className="m-0" />
+        <DropdownMenuItem asChild className="p-0">
+          <Link
+            href={viewAllHref}
+            className="flex w-full justify-center px-4 py-3 text-center text-sm font-semibold text-sgvu-navy hover:bg-muted/50"
+          >
+            Open notification center
           </Link>
         </DropdownMenuItem>
       </DropdownMenuContent>

@@ -2,12 +2,20 @@
 
 import { ChangeEvent, useEffect, useState } from 'react';
 import { Loader2, Upload } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyPageLoading,
+  FacultyEmptyState,
+  FacultyPanel,
+  FacultyMetricChip,
+} from '@/components/faculty';
+import { cn } from '@/lib/utils';
 
 type Assignment = {
   assignment_id: string;
@@ -97,93 +105,118 @@ export default function FacultyIqacPage() {
   }
 
   const selectedAssignment = assignments.find((item) => item.assignment_id === selectedAssignmentId);
+  const submissionCount = assignments.reduce((n, a) => n + (a.submissions?.length ?? 0), 0);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy sm:text-3xl">IQAC Compliance Tasks</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Upload evidence and track AI audit status from your faculty workspace.</p>
-      </section>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        description="Upload evidence and track AI audit status from your faculty workspace."
+        meta={
+          !loading ? (
+            <>
+              <FacultyMetricChip label="Tasks" value={assignments.length} emphasis />
+              <FacultyMetricChip label="Submissions" value={submissionCount} />
+            </>
+          ) : null
+        }
+      />
 
-      {loading && (
-        <Card>
-          <CardContent className="flex items-center justify-center py-10">
-            <Loader2 className="h-7 w-7 animate-spin" />
-          </CardContent>
-        </Card>
-      )}
+      {loading && <FacultyPageLoading label="Loading IQAC tasks…" branded />}
 
       {!loading && (
         <div className="grid gap-4 lg:grid-cols-3">
-          <Card>
-            <CardHeader>
-              <CardTitle>Task List</CardTitle>
-              <CardDescription>Your assigned compliance duties</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
+          <FacultyPanel title="Task list" count={assignments.length} description="Your assigned compliance duties">
+            <div className="space-y-2">
               {assignments.map((assignment) => (
                 <button
                   key={assignment.assignment_id}
                   type="button"
                   onClick={() => setSelectedAssignmentId(assignment.assignment_id)}
-                  className={`w-full rounded-xl border p-3 text-left text-sm ${
-                    selectedAssignmentId === assignment.assignment_id ? 'border-sgvu-gold bg-accent' : ''
-                  }`}
+                  className={cn(
+                    'w-full rounded-xl border p-3 text-left text-sm transition-colors',
+                    selectedAssignmentId === assignment.assignment_id
+                      ? 'border-sgvu-gold/50 bg-sgvu-gold/10 shadow-sm'
+                      : 'border-border/60 hover:bg-muted/30',
+                  )}
                 >
                   <p className="font-semibold text-sgvu-navy">{assignment.task?.task_name ?? 'Compliance task'}</p>
                   <p className="text-xs text-muted-foreground">{assignment.task?.month ?? 'Current cycle'}</p>
-                  <Badge className="mt-2" variant={assignment.status === 'COMPLETED' ? 'success' : 'secondary'}>
+                  <Badge
+                    className="mt-2"
+                    variant={assignment.status === 'COMPLETED' ? 'default' : 'secondary'}
+                  >
                     {assignment.status}
                   </Badge>
                 </button>
               ))}
-              {assignments.length === 0 && <p className="text-sm text-muted-foreground">No IQAC tasks assigned.</p>}
-            </CardContent>
-          </Card>
-
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>File Upload Dropzone</CardTitle>
-              <CardDescription>{selectedAssignment?.task?.task_description ?? 'Choose a task and upload supporting evidence.'}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border border-dashed p-6 text-center">
-                <Upload className="mx-auto h-8 w-8 text-sgvu-gold" />
-                <p className="mt-2 font-semibold">Upload compliance evidence</p>
-                <Input
-                  className="mt-4"
-                  type="file"
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)}
-                />
-              </div>
-              <Button className="w-full" onClick={uploadEvidence} disabled={uploading || !file || !selectedAssignmentId}>
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit Evidence'}
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="lg:col-span-3">
-            <CardHeader>
-              <CardTitle>AI Audit Status</CardTitle>
-              <CardDescription>Recent submissions and validation results</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-2">
-              {assignments.flatMap((assignment) =>
-                (assignment.submissions ?? []).map((submission) => (
-                  <div key={submission.submission_id} className="rounded-xl border p-3 text-sm">
-                    <p className="font-semibold text-sgvu-navy">{submission.file_name ?? 'Uploaded evidence'}</p>
-                    <p className="text-xs text-muted-foreground">{assignment.task?.task_name}</p>
-                    <Badge className="mt-2" variant={submission.ai_status === 'VALIDATED' ? 'success' : submission.ai_status === 'REJECTED_MISMATCH' ? 'destructive' : 'warning'}>
-                      {submission.ai_status ?? 'PENDING'}
-                    </Badge>
-                    {submission.ai_remarks && <p className="mt-2 text-xs text-muted-foreground">{submission.ai_remarks}</p>}
-                  </div>
-                )),
+              {assignments.length === 0 && (
+                <FacultyEmptyState description="No IQAC tasks assigned." className="py-6" />
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </FacultyPanel>
+
+          <FacultyPanel
+            title="Upload evidence"
+            description={selectedAssignment?.task?.task_description ?? 'Choose a task and upload supporting files'}
+            className="lg:col-span-2"
+          >
+            <div className="rounded-xl border border-dashed border-border/80 bg-muted/20 p-6 text-center">
+              <Upload className="mx-auto h-8 w-8 text-sgvu-gold" />
+              <p className="mt-2 text-sm font-medium text-sgvu-navy">Upload compliance evidence</p>
+              <Input
+                className="mt-4 max-w-md mx-auto"
+                type="file"
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)}
+              />
+            </div>
+            <Button
+              className="mt-4 w-full sm:w-auto gap-1.5"
+              onClick={uploadEvidence}
+              disabled={uploading || !file || !selectedAssignmentId}
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              Submit evidence
+            </Button>
+          </FacultyPanel>
+
+          <FacultyPanel
+            title="AI audit status"
+            count={submissionCount}
+            description="Recent submissions and validation results"
+            className="lg:col-span-3"
+          >
+            {submissionCount === 0 ? (
+              <FacultyEmptyState description="No evidence submitted yet." className="py-6" />
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {assignments.flatMap((assignment) =>
+                  (assignment.submissions ?? []).map((submission) => (
+                    <div key={submission.submission_id} className="rounded-xl border border-border/60 p-4 text-sm">
+                      <p className="font-semibold text-sgvu-navy">{submission.file_name ?? 'Uploaded evidence'}</p>
+                      <p className="text-xs text-muted-foreground">{assignment.task?.task_name}</p>
+                      <Badge
+                        className="mt-2"
+                        variant={
+                          submission.ai_status === 'VALIDATED'
+                            ? 'default'
+                            : submission.ai_status === 'REJECTED_MISMATCH'
+                              ? 'destructive'
+                              : 'secondary'
+                        }
+                      >
+                        {submission.ai_status ?? 'PENDING'}
+                      </Badge>
+                      {submission.ai_remarks && (
+                        <p className="mt-2 text-xs text-muted-foreground">{submission.ai_remarks}</p>
+                      )}
+                    </div>
+                  )),
+                )}
+              </div>
+            )}
+          </FacultyPanel>
         </div>
       )}
-    </div>
+    </FacultyPageShell>
   );
 }

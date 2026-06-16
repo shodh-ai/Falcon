@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import { Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { Card, CardContent } from '@/components/ui/card';

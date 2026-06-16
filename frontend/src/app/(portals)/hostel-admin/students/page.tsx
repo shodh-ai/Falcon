@@ -9,7 +9,7 @@ import { PaginationBar } from '@/components/ui/PaginationBar';
 import { useAuthedApi } from '@/lib/api';
 import { DEFAULT_PAGE_SIZE, type PaginatedResponse } from '@/lib/api/pagination';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 type StudentRow = {
   student_user_id: string;

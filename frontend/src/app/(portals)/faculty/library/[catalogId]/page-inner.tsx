@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { FacultyPageShell, FacultyPageLoading } from '@/components/faculty';
 
 type CatalogDetail = {
   catalog_id: string;
@@ -42,10 +43,10 @@ export default function FacultyLibraryBookPage({ catalogId }: { catalogId: strin
     }
   }
 
-  if (!book) return <p className="p-6 text-sm text-muted-foreground">Loading…</p>;
+  if (!book) return <FacultyPageLoading label="Loading book details…" branded />;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+    <FacultyPageShell>
       <Link href="/faculty/library" className="inline-flex items-center gap-1 text-sm text-sgvu-navy hover:underline">
         <ArrowLeft className="h-4 w-4" /> Back to OPAC
       </Link>
@@ -83,13 +84,13 @@ export default function FacultyLibraryBookPage({ catalogId }: { catalogId: strin
       </div>
 
       {book.synopsis && (
-        <Card>
+        <Card className="border-border/60 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Synopsis</CardTitle>
           </CardHeader>
           <CardContent className="text-sm leading-relaxed text-muted-foreground">{book.synopsis}</CardContent>
         </Card>
       )}
-    </div>
+    </FacultyPageShell>
   );
 }

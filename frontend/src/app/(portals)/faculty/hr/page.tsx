@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,13 @@ import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
 import { workforceDateInputProps, workforceMinDate } from '@/lib/workforce-dates';
+import {
+  FacultyPageHeader,
+  FacultyPageShell,
+  FacultyPanel,
+  FacultyPageLoading,
+  FacultyEmptyState,
+} from '@/components/faculty';
 
 type TodayWidget = {
   shift: { start: string; end: string; progress_percent: number };
@@ -128,22 +135,17 @@ export default function FacultyHrHubPage() {
   const remaining = (b: Balance) => Math.max(0, Number(b.entitled) - Number(b.used));
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy">HR & Employee Hub</h2>
-        <p className="text-sm text-muted-foreground">
-          Biometric attendance (read-only), leave balances, holidays, and formal requests.
-        </p>
-      </section>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        eyebrow="My HR & Operations"
+        title="HR & Employee Hub"
+        description="Biometric attendance (read-only), leave balances, holidays, and formal requests."
+      />
 
-      {loading && (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
-      )}
+      {loading && <FacultyPageLoading label="Loading HR workspace…" branded />}
 
       {!loading && today && (
-        <Card className="border-sgvu-gold/30 bg-gradient-to-br from-slate-50 to-white">
+        <Card className="border-sgvu-gold/30 bg-gradient-to-br from-slate-50/80 to-card shadow-sm">
           <CardHeader>
             <CardTitle>Let&apos;s get to work</CardTitle>
             <CardDescription>
@@ -162,11 +164,8 @@ export default function FacultyHrHubPage() {
       )}
 
       {!loading && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Action center</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
+        <FacultyPanel title="Action center" description="Submit leave, gate pass, and attendance requests">
+          <div className="flex flex-wrap gap-2">
             <Button onClick={() => setModal('LEAVE')}>Apply leave</Button>
             <Button variant="outline" onClick={() => setModal('GATE_PASS')}>
               Request Gate Pass (Mid-Duty Exit)
@@ -180,8 +179,8 @@ export default function FacultyHrHubPage() {
             <Button variant="outline" onClick={() => setModal('COMP_OFF_CREDIT')}>
               Request comp-off
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </FacultyPanel>
       )}
 
       {!loading && (
@@ -201,7 +200,9 @@ export default function FacultyHrHubPage() {
                 </div>
               ))}
               {!balances.length && (
-                <p className="text-sm text-muted-foreground col-span-2">No balances on file.</p>
+                <div className="col-span-2">
+                  <FacultyEmptyState description="No leave balances on file." />
+                </div>
               )}
             </CardContent>
           </Card>
@@ -256,14 +257,14 @@ export default function FacultyHrHubPage() {
                 <Badge variant="secondary">{r.status}</Badge>
               </div>
             ))}
-            {!requests.length && <p className="text-sm text-muted-foreground">No requests yet.</p>}
+            {!requests.length && <FacultyEmptyState description="No requests submitted yet." />}
           </CardContent>
         </Card>
       )}
 
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <Card className="w-full max-w-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-md border-border/60 shadow-lg">
             <CardHeader>
               <CardTitle className="text-base">
                 {modal === 'LEAVE' && 'Apply leave'}
@@ -376,6 +377,6 @@ export default function FacultyHrHubPage() {
           </Card>
         </div>
       )}
-    </div>
+    </FacultyPageShell>
   );
 }

@@ -36,11 +36,14 @@ import { CertificatesController } from './certificates.controller';
 import { CertificatesService } from './certificates.service';
 import { AssignmentsService } from './assignments.service';
 import { FacultyWorkspacesService } from './faculty-workspaces.service';
+import { FacultyProfileService } from './faculty-profile.service';
+import { FacultyProfileController } from './faculty-profile.controller';
 import { CourseLmsService } from './course-lms.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
+import { HrModule } from '../hr/hr.module';
 
 import { EarlyWarningService } from './early-warning.service';
 import { EarlyWarningController } from './early-warning.controller';
@@ -49,6 +52,7 @@ import { EarlyWarningController } from './early-warning.controller';
   imports: [
     StorageModule,
     HelpdeskModule,
+    HrModule,
     TypeOrmModule.forFeature([
       Subject,
       Batch,
@@ -77,7 +81,7 @@ import { EarlyWarningController } from './early-warning.controller';
       HelpdeskTicket,
     ]),
   ],
-  controllers: [AcademicsController, ProctorController, CertificatesController, EarlyWarningController],
+  controllers: [AcademicsController, ProctorController, CertificatesController, EarlyWarningController, FacultyProfileController],
   providers: [
     AcademicsService,
     AcademicsFacultyService,
@@ -87,6 +91,7 @@ import { EarlyWarningController } from './early-warning.controller';
     CertificatesService,
     AssignmentsService,
     FacultyWorkspacesService,
+    FacultyProfileService,
     CourseLmsService,
     MarksheetPdfService,
     MarksHistoryService,
@@ -99,6 +104,7 @@ import { EarlyWarningController } from './early-warning.controller';
     CertificatesService,
     AssignmentsService,
     FacultyWorkspacesService,
+    FacultyProfileService,
     CourseLmsService,
     MarksheetPdfService,
     MarksHistoryService,
