@@ -71,6 +71,15 @@ export class HostelAdminController {
     return this.hostelAdmin.markRollCall(this.ctx(req), dto as Parameters<HostelAdminService['markRollCall']>[1]);
   }
 
+  @Get('roll-call/monthly')
+  getMonthlyRollCall(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId: string,
+    @Query('month') month: string,
+  ) {
+    return this.hostelAdmin.getMonthlyRollCall(this.ctx(req), hostelId, month);
+  }
+
   @Get('roll-call')
   listRollCall(
     @Req() req: { user: AuthUser },

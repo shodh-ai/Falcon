@@ -187,13 +187,13 @@ export class LeadershipController {
   }
 
   @Get('issues')
-  @Roles('Chairman', 'President', 'SuperAdmin', 'Registrar')
+  @Roles('Chairman', 'President', 'SuperAdmin', 'Registrar', 'Vice Chancellor')
   issues(@Req() req: { user: AuthUser }) {
     return this.leadership.getIssuesDashboard(req.user.tenant_id);
   }
 
   @Post('issues/:ticketId/escalate')
-  @Roles('Chairman', 'President', 'SuperAdmin', 'Registrar')
+  @Roles('Chairman', 'President', 'SuperAdmin', 'Registrar', 'Vice Chancellor')
   escalate(@Req() req: { user: AuthUser }, @Param('ticketId') ticketId: string) {
     return this.leadership.escalateIssue(req.user.tenant_id, ticketId, req.user.user_id);
   }
