@@ -1,7 +1,6 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 const HrAttendanceDonutChart = dynamic(
@@ -20,8 +19,8 @@ import { FalconLoader } from '@/components/brand/FalconLoader';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
 import { HrStatCard } from '@/components/hr/HrStatCard';
 import { HrEmptyState } from '@/components/hr/HrEmptyState';
-import { useHrApi } from '@/lib/api/use-hr-api';
 import { useHrEntity } from '@/context/HrEntityContext';
+import { useHrSWR } from '@/hooks/useHrSWR';
 
 type MasterDashboard = {
   headcount_snapshot: {
@@ -60,27 +59,13 @@ const ATTENDANCE_STATS = [
 ];
 
 export default function HrMasterDashboardPage() {
-  const api = useHrApi();
   const { entityReady, loading: entityLoading, entities } = useHrEntity();
-  const [data, setData] = useState<MasterDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, error, isLoading } = useHrSWR<MasterDashboard>(
+    'hr-dashboard-master',
+    '/api/hr/dashboard/master',
+  );
 
-  useEffect(() => {
-    if (!entityReady) return;
-    setLoading(true);
-    setError(null);
-    void api
-      .get<MasterDashboard>('/api/hr/dashboard/master')
-      .then((d) => setData(d))
-      .catch((e: unknown) => {
-        setData(null);
-        setError(e instanceof Error ? e.message : 'Failed to load dashboard');
-      })
-      .finally(() => setLoading(false));
-  }, [api, entityReady]);
-
-  if (entityLoading || (entityReady && loading && !data && !error)) {
+  if (entityLoading || (entityReady && isLoading && !data && !error)) {
     return <FalconLoader label="Loading HR Master Dashboard…" />;
   }
 
@@ -101,7 +86,9 @@ export default function HrMasterDashboardPage() {
     return (
       <>
         <p className="text-lg font-semibold text-red-700">Could not load dashboard</p>
-        <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {error instanceof Error ? error.message : 'Failed to load dashboard'}
+        </p>
       </>
     );
   }

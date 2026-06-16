@@ -1031,29 +1031,15 @@ export class CampusEventsService {
 
   @Interval(30_000)
   async expireStalePaymentHolds() {
-
-    let expired: Array<{
-      registration_id: string;
-      event_id: string;
-      student_user_id: string;
-      tenant_id: string;
-    }>;
-    try {
-      const updateResult = await this.dataSource.query(
-        `UPDATE event_registrations r
-         SET status = 'EXPIRED', payment_status = 'EXPIRED'
-         FROM campus_events e
-         WHERE r.event_id = e.event_id
-           AND r.status = 'PENDING_PAYMENT'
-           AND r.hold_expires_at < NOW()
-         RETURNING r.registration_id, r.event_id, r.student_user_id, e.tenant_id`,
-      );
-      expired = Array.isArray(updateResult?.[0]) ? updateResult[0] : updateResult;
-
-    } catch (err: unknown) {
-
-      throw err;
-    }
+    const [expired] = await this.dataSource.query(
+      `UPDATE event_registrations r
+       SET status = 'EXPIRED', payment_status = 'EXPIRED'
+       FROM campus_events e
+       WHERE r.event_id = e.event_id
+         AND r.status = 'PENDING_PAYMENT'
+         AND r.hold_expires_at < NOW()
+       RETURNING r.registration_id, r.event_id, r.student_user_id, e.tenant_id`,
+    );
     for (const row of expired) {
       await this.redis.releaseEventPayLock(row.event_id, row.student_user_id);
       await this.dataSource.query(

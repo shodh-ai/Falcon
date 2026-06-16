@@ -34,6 +34,14 @@ export class HostelTatkalService {
   }
 
   async getActiveSale(tenantId: string) {
+    const settingsRows = await this.dataSource.query<Array<{ settings: Record<string, unknown> | null }>>(
+      `SELECT settings FROM tenants WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    if (settingsRows[0]?.settings?.is_hostel_sale_active !== true) {
+      return null;
+    }
+
     const rows = await this.dataSource.query(
       `SELECT * FROM hostel_tatkal_sales
        WHERE tenant_id = $1 AND is_active = true AND starts_at <= NOW() AND ends_at >= NOW()
@@ -100,6 +108,25 @@ export class HostelTatkalService {
   }
 
   async lockBed(tenantId: string, studentUserId: string, bedId: string) {
+    const activeBooking = await this.dataSource.query<Array<{ hold_id: string }>>(
+      `SELECT hold_id FROM hostel_booking_holds
+       WHERE student_user_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+       LIMIT 1`,
+      [studentUserId, tenantId],
+    );
+    if (activeBooking[0]) {
+      throw new BadRequestException('You already booked a room!');
+    }
+
+    const activeAllocation = await this.dataSource.query<Array<{ allocation_id: string }>>(
+      `SELECT allocation_id FROM hostel_allocations
+       WHERE student_user_id = $1 AND status = 'ACTIVE' LIMIT 1`,
+      [studentUserId],
+    );
+    if (activeAllocation[0]) {
+      throw new BadRequestException('You already booked a room!');
+    }
+
     const sale = await this.getActiveSale(tenantId);
     if (!sale) throw new BadRequestException('No active hostel sale window');
 

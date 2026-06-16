@@ -77,6 +77,10 @@ export class AuthController {
   }
 
   private async buildProfilePayload(user: AuthProfileUser) {
+    const dbUser = await this.userRepository.findOne({
+      where: { user_id: user.user_id },
+      select: ['onboarding_status'],
+    });
     const caps = user.tenant_id
       ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
       : null;
@@ -87,6 +91,7 @@ export class AuthController {
       : [];
     return {
       ...user,
+      onboarding_status: dbUser?.onboarding_status ?? 'ACTIVE',
       hr_capabilities: caps ?? {},
       permissions,
       allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),

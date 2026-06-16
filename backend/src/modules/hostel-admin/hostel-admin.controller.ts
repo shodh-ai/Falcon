@@ -198,4 +198,14 @@ export class HostelAdminController {
   setPermission(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
     return this.hostelAdmin.setRolePermission(this.ctx(req), dto as Parameters<HostelAdminService['setRolePermission']>[1]);
   }
+
+  @Get('campus-settings')
+  campusSettings(@Req() req: { user: AuthUser }) {
+    return this.hostelAdmin.getCampusSettings(this.ctx(req));
+  }
+
+  @Patch('campus-settings')
+  updateCampusSettings(@Req() req: { user: AuthUser }, @Body() dto: { is_hostel_sale_active?: boolean }) {
+    return this.hostelAdmin.setCampusSettings(this.ctx(req), dto);
+  }
 }

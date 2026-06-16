@@ -14,7 +14,7 @@ export default function AlumniAdminDashboardPage() {
       />
       <div className="grid gap-4 sm:grid-cols-2">
         {[
-          { href: '/alumni-admin/verification', label: 'Verification queue' },
+          { href: '/alumni-admin/verification', label: 'Pending verifications' },
           { href: '/alumni-admin/donations', label: 'Donation ledger' },
           { href: '/alumni-admin/analytics', label: 'Engagement analytics' },
           { href: '/alumni-admin/events', label: 'Event manager' },

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -23,6 +23,32 @@ export class AdmissionsCrmController {
     return this.admissions.kanbanBoard(this.tenant(req));
   }
 
+  @Get('enrolled-students')
+  @Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'Accountant', 'FinanceManager')
+  getEnrolledStudents(
+    @Req() req: { user: AuthUser },
+    @Query('q') q?: string,
+    @Query('year') year?: string,
+    @Query('branch') branch?: string,
+  ) {
+    return this.admissions.getEnrolledStudents(this.tenant(req), q, year, branch);
+  }
+
+  @Patch('transactions/:id/receipt')
+  @Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'Accountant', 'FinanceManager')
+  uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
+    return this.admissions.uploadTransactionReceipt(id, dto.receipt_url);
+  }
+
+  @Post('enrolled-students/:id/documents')
+  uploadEnrolledStudentDocument(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: { title: string; file_path: string },
+  ) {
+    return this.admissions.uploadEnrolledStudentDocument(this.tenant(req), id, dto);
+  }
+
   @Get('leads/:id/timeline')
   timeline(@Param('id') id: string) {
     return this.admissions.getLeadTimeline(id);
@@ -45,6 +71,15 @@ export class AdmissionsCrmController {
     @Body() dto: { channel: string; direction?: string; subject?: string; body?: string; metadata?: Record<string, unknown> },
   ) {
     return this.admissions.logLeadActivity(this.tenant(req), id, dto);
+  }
+
+  @Post('leads/:id/documents')
+  uploadDocument(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: { title: string; file_path: string },
+  ) {
+    return this.admissions.uploadLeadDocument(this.tenant(req), id, dto);
   }
 
   @Get('counseling/seats')

@@ -20,12 +20,19 @@ export class HrRulesService {
   ) {}
 
   async getRules(tenantId: string, entityId: number) {
-    const rows = await this.dataSource.query(
-      `SELECT * FROM hr_attendance_rules WHERE tenant_id = $1 AND entity_id = $2`,
-      [tenantId, entityId],
+    const cacheKey = `hr_rules:${tenantId}:${entityId}`;
+    return this.cache.getOrSet(
+      cacheKey,
+      async () => {
+        const rows = await this.dataSource.query(
+          `SELECT * FROM hr_attendance_rules WHERE tenant_id = $1 AND entity_id = $2`,
+          [tenantId, entityId],
+        );
+        if (!rows[0]) throw new NotFoundException('Attendance rules not configured for entity');
+        return rows[0];
+      },
+      43_200,
     );
-    if (!rows[0]) throw new NotFoundException('Attendance rules not configured for entity');
-    return rows[0];
   }
 
   async upsertRules(
@@ -117,6 +124,62 @@ export class HrRulesService {
       ],
     );
     return rows[0];
+  }
+
+  /** Batch-resolve shift context for many users in one round-trip (avoids N+1 in matrix views). */
+  async getShiftsForUsers(tenantId: string, entityId: number, userIds: string[]) {
+    if (!userIds.length) return new Map<string, Record<string, unknown>>();
+
+    const rows = await this.dataSource.query<
+      Array<{
+        user_id: string;
+        shift_id: string;
+        shift_name: string;
+        start_time: string;
+        end_time: string;
+        grace_period_mins: number;
+        half_day_min_hours: number;
+        full_day_min_hours: number;
+        week_off_day: number;
+      }>
+    >(
+      `SELECT ep.user_id, s.shift_id, s.shift_name, s.start_time::text, s.end_time::text,
+              s.grace_period_mins, s.half_day_min_hours, s.full_day_min_hours,
+              COALESCE(ep.week_off_day, 0) AS week_off_day
+       FROM hr_employee_profiles ep
+       JOIN users u ON u.user_id = ep.user_id
+       LEFT JOIN hr_shift_allocations ua ON ua.user_id = ep.user_id
+         AND ua.tenant_id = $1 AND ua.entity_id = $2
+         AND ua.effective_from <= CURRENT_DATE
+         AND (ua.effective_to IS NULL OR ua.effective_to >= CURRENT_DATE)
+       LEFT JOIN hr_shift_allocations dept_alloc ON dept_alloc.department_id = u.dept_id
+         AND dept_alloc.tenant_id = $1 AND dept_alloc.entity_id = $2
+         AND dept_alloc.effective_from <= CURRENT_DATE
+         AND (dept_alloc.effective_to IS NULL OR dept_alloc.effective_to >= CURRENT_DATE)
+       LEFT JOIN hr_shifts s ON s.shift_id = COALESCE(ua.shift_id, dept_alloc.shift_id, ep.shift_id)
+       WHERE ep.tenant_id = $1 AND ep.user_id = ANY($3::uuid[])`,
+      [tenantId, entityId, userIds],
+    );
+
+    const map = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      if (row.shift_id) map.set(row.user_id, row);
+    }
+
+    const missing = userIds.filter((id) => !map.has(id));
+    if (missing.length) {
+      const fallback = await this.dataSource.query(
+        `SELECT shift_id, shift_name, start_time::text, end_time::text,
+                grace_period_mins, half_day_min_hours, full_day_min_hours, 0 AS week_off_day
+         FROM hr_shifts WHERE entity_id = $1 ORDER BY shift_name LIMIT 1`,
+        [entityId],
+      );
+      if (fallback[0]) {
+        for (const userId of missing) map.set(userId, { ...fallback[0], user_id: userId });
+      }
+    }
+
+    return map;
   }
 
   async getShiftForUser(tenantId: string, entityId: number, userId: string) {

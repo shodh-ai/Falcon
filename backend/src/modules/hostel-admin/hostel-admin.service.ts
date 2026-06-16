@@ -785,4 +785,29 @@ export class HostelAdminService {
     this.gateway.emitToHostel(dto.hostel_id, 'leave.created', row);
     return row;
   }
+
+  async getCampusSettings(ctx: AuthCtx) {
+    const rows = await this.db.query<Array<{ settings: Record<string, unknown> | null }>>(
+      `SELECT settings FROM tenants WHERE tenant_id = $1`,
+      [ctx.tenantId],
+    );
+    const settings = rows[0]?.settings ?? {};
+    return { is_hostel_sale_active: settings.is_hostel_sale_active === true };
+  }
+
+  async setCampusSettings(ctx: AuthCtx, dto: { is_hostel_sale_active?: boolean }) {
+    if (!ctx.roles.some((r) => ['Warden', 'SuperAdmin', 'Registrar'].includes(r))) {
+      throw new ForbiddenException('Only Chief Warden can change campus settings');
+    }
+    if (dto.is_hostel_sale_active === undefined) {
+      return this.getCampusSettings(ctx);
+    }
+    await this.db.query(
+      `UPDATE tenants
+       SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('is_hostel_sale_active', $2::boolean)
+       WHERE tenant_id = $1`,
+      [ctx.tenantId, dto.is_hostel_sale_active],
+    );
+    return { is_hostel_sale_active: dto.is_hostel_sale_active };
+  }
 }

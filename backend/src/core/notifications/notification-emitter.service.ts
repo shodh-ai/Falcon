@@ -25,6 +25,10 @@ import {
   type OnboardingCredentialsPayload,
   type HrExportReadyPayload,
   type HrExportFailedPayload,
+  type AlumniConversionRequestedPayload,
+  type AlumniWelcomeEmailPayload,
+  type AlumniConversionApprovedPayload,
+  type StudentOnboardingApprovedPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -130,5 +134,21 @@ export class NotificationEmitterService {
 
   exportFailed(payload: HrExportFailedPayload) {
     this.events.emit(NotificationEvents.HR_EXPORT_FAILED, payload);
+  }
+
+  alumniConversionRequested(payload: AlumniConversionRequestedPayload) {
+    this.events.emit(NotificationEvents.ALUMNI_CONVERSION_REQUESTED, payload);
+  }
+
+  alumniWelcomeEmail(payload: AlumniWelcomeEmailPayload) {
+    this.events.emit(NotificationEvents.ALUMNI_WELCOME_EMAIL, payload);
+  }
+
+  alumniConversionApproved(payload: AlumniConversionApprovedPayload) {
+    this.events.emit(NotificationEvents.ALUMNI_CONVERSION_APPROVED, payload);
+  }
+
+  studentOnboardingApproved(payload: StudentOnboardingApprovedPayload) {
+    this.events.emit(NotificationEvents.STUDENT_ONBOARDING_APPROVED, payload);
   }
 }

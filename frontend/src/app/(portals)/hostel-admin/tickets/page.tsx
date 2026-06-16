@@ -9,14 +9,7 @@ import { useAuthedApi } from '@/lib/api';
 import { HostelScopeBar } from '@/components/hostel/HostelScopeBar';
 import { toast } from 'sonner';
 
-type Ticket = {
-  ticket_id: string;
-  subject: string;
-  description: string;
-  status: string;
-  student_name: string;
-  created_at: string;
-};
+
 
 type Fine = {
   fine_id: string;
@@ -30,7 +23,7 @@ type Fine = {
 export default function HostelTicketsFinesPage() {
   const api = useAuthedApi();
   const [hostelId, setHostelId] = useState('');
-  const [tickets, setTickets] = useState<Ticket[]>([]);
+
   const [fines, setFines] = useState<Fine[]>([]);
   const [fineForm, setFineForm] = useState({
     student_user_id: '',
@@ -40,7 +33,7 @@ export default function HostelTicketsFinesPage() {
   });
 
   useEffect(() => {
-    void api.get<Ticket[]>('/api/hostel-admin/tickets').then(setTickets);
+
     const q = hostelId ? `?hostelId=${hostelId}` : '';
     void api.get<Fine[]>(`/api/hostel-admin/fines${q}`).then(setFines);
   }, [api, hostelId]);
@@ -67,20 +60,7 @@ export default function HostelTicketsFinesPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <h1 className="text-2xl font-bold text-sgvu-navy">Support Tickets &amp; Fines</h1>
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Hostel Tickets</h2>
-        <DataTable
-          columns={[
-            { key: 'sub', header: 'Subject', render: (r) => r.subject },
-            { key: 'student', header: 'Student', render: (r) => r.student_name },
-            { key: 'status', header: 'Status', render: (r) => <Badge>{r.status}</Badge> },
-          ]}
-          rows={tickets}
-          rowKey={(r) => r.ticket_id}
-        />
-      </section>
+      <h1 className="text-2xl font-bold text-sgvu-navy">Fines &amp; Damages</h1>
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

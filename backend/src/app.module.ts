@@ -40,6 +40,7 @@ import { OperationsModule } from './modules/operations/operations.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module';
+import { StudentOnboardingModule } from './modules/student-onboarding/student-onboarding.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { LmsExtendedModule } from './modules/lms-extended/lms-extended.module';
@@ -93,10 +94,16 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
         subscribers: [EntityScopeSubscriber, SystemAuditSubscriber],
         synchronize: configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
         logging:
-          configService.get('TYPEORM_LOGGING', 'true') === 'true'
+          configService.get('TYPEORM_LOGGING', 'false') === 'true'
             ? ['query', 'error', 'warn']
             : configService.get('NODE_ENV') === 'development',
         maxQueryExecutionTime: Number(configService.get('TYPEORM_SLOW_MS', '200')),
+        extra: {
+          max: Number(configService.get('DB_POOL_MAX', '20')),
+          min: Number(configService.get('DB_POOL_MIN', '2')),
+          idleTimeoutMillis: Number(configService.get('DB_POOL_IDLE_MS', '30000')),
+          connectionTimeoutMillis: Number(configService.get('DB_POOL_CONNECT_MS', '5000')),
+        },
       }),
       inject: [ConfigService],
     }),
@@ -138,6 +145,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     SettingsModule,
     HelpdeskModule,
     StudentPortalModule,
+    StudentOnboardingModule,
     ReportsModule,
     SuperAdminModule,
     LmsExtendedModule,

@@ -336,3 +336,45 @@ export function canRoleAccessPath(
   }
   return roles.some((role) => portalRoles[portal].includes(role));
 }
+
+export const STUDENT_ONBOARDING_STATUSES = [
+  'PENDING_PASSWORD_RESET',
+  'PENDING_DOCUMENTS',
+  'PENDING_ADMIN_APPROVAL',
+] as const;
+
+export function isStudentRole(role: string | undefined | null): boolean {
+  const r = (role ?? '').trim().toLowerCase();
+  return r === 'student' || r === 'applicant';
+}
+
+export function isStudentOnboardingComplete(status: string | undefined | null): boolean {
+  const s = (status ?? 'ACTIVE').trim();
+  return s === 'COMPLETED' || s === 'ACTIVE';
+}
+
+export function getStudentOnboardingPath(status: string | undefined | null): string | null {
+  switch ((status ?? '').trim()) {
+    case 'PENDING_PASSWORD_RESET':
+      return '/student/onboarding/step-1';
+    case 'PENDING_DOCUMENTS':
+      return '/student/onboarding/step-2';
+    case 'PENDING_ADMIN_APPROVAL':
+      return '/student/onboarding/step-3';
+    default:
+      return null;
+  }
+}
+
+export function getPostLoginPath(user: {
+  role?: string;
+  primaryRole?: string;
+  onboarding_status?: string;
+}): string {
+  const role = user.primaryRole ?? user.role;
+  if (isStudentRole(role) && user.onboarding_status) {
+    const onboardingPath = getStudentOnboardingPath(user.onboarding_status);
+    if (onboardingPath) return onboardingPath;
+  }
+  return getDashboardPathForRole(role);
+}

@@ -5,6 +5,7 @@ import {
   GraduationCap,
   ClipboardCheck,
   ClipboardList,
+  FileCheck2,
   CalendarDays,
   CalendarRange,
   ListChecks,
@@ -220,8 +221,8 @@ export function filterPortalConfigForHrCapabilities(
 }
 
 export const studentPortal: PortalConfig = {
-  personaLabel: 'Student Portal',
-  personaTitle: 'SGVU Student Life',
+  personaLabel: 'Falcon Student',
+  personaTitle: 'Falcon Student Life',
   homeHref: '/student/dashboard',
   navGroups: [
     {
@@ -249,13 +250,10 @@ export const studentPortal: PortalConfig = {
       title: 'Campus Services',
       items: [
         { label: 'My Financial Ledger', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
-        { label: 'Hostel & Mess', href: '/student/hostel', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'room'] },
-        { label: 'Smart Mess & Wallet', href: '/student/dining', icon: UtensilsCrossed, keywords: ['dining', 'mess', 'wallet', 'add-on', 'qr', 'falcon pay'] },
-        { label: 'Hostel Bed Booking', href: '/student/hostel-booking', icon: BedDouble, keywords: ['tatkal', 'bed', 'allocation'] },
+        { label: 'Campus Life', href: '/student/campus-life', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'wallet', 'campus'] },
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
-        { label: 'Extra-Curriculars', href: '/student/extracurriculars', icon: Medal, keywords: ['ncc', 'nss', 'sodeca', 'credits'] },
-        { label: 'Falcon Events', href: '/student/events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'workshop', 'dj'] },
+        { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'ncc', 'nss', 'fest'] },
       ],
     },
     {
@@ -276,9 +274,8 @@ export const studentPortal: PortalConfig = {
     { label: 'Marks', href: '/student/marks', icon: TrendingUp },
     { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
     { label: 'Financial Ledger', href: '/student/finance', icon: Wallet },
-    { label: 'Hostel', href: '/student/hostel', icon: Bus },
-    { label: 'Smart Mess', href: '/student/dining', icon: UtensilsCrossed },
-    { label: 'Falcon Events', href: '/student/events', icon: PartyPopper },
+    { label: 'Campus Life', href: '/student/campus-life', icon: Bus },
+    { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
 };
@@ -551,8 +548,9 @@ export const hostelAdminPortal: PortalConfig = {
     {
       title: 'Services',
       items: [
-        { label: 'Tickets & Fines', href: '/hostel-admin/tickets', icon: Ticket, keywords: ['damage', 'maintenance'] },
+        { label: 'Fines & Damages', href: '/hostel-admin/tickets', icon: Ticket, keywords: ['damage', 'maintenance'] },
         { label: 'Mess Management', href: '/hostel-admin/mess', icon: UtensilsCrossed, keywords: ['menu', 'weekly'] },
+        { label: 'Grievance Escalations', href: '/hostel-admin/grievances', icon: LifeBuoy, keywords: ['maintenance', 'ticket', 'escalation'] },
         { label: 'Notifications', href: '/hostel-admin/notifications', icon: Bell, keywords: ['broadcast', 'sms', 'email'] },
         { label: 'Mess Scanner', href: '/hostel-admin/scanner', icon: QrCode, keywords: ['wallet', 'meal'] },
       ],
@@ -593,7 +591,8 @@ export const financePortal: PortalConfig = {
       title: 'Receivables (Student Revenue)',
       items: [
         { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
-        { label: 'Collections & Receipts', href: '/finance/collections', icon: Banknote, keywords: ['razorpay', 'payu', 'gateway'] },
+        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
+        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
         { label: 'Club Event Approvals', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'ledger'] },
         { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
       ],
@@ -906,10 +905,38 @@ export const placementPortal: PortalConfig = {
   ],
 };
 
-/** Legacy portal key — routes redirect to IQAC; nav mirrors iqacPortal. */
+/** Alumni Officer portal — conversion verifications, donations, events. */
 export const alumniAdminPortal: PortalConfig = {
-  ...iqacPortal,
-  homeHref: '/iqac/alumni/verification',
+  personaLabel: 'Alumni Relations',
+  personaTitle: 'Alumni Admin Portal',
+  homeHref: '/alumni-admin/verification',
+  navGroups: [
+    {
+      title: 'Conversion Workflow',
+      items: [
+        {
+          label: 'Pending Verifications',
+          href: '/alumni-admin/verification',
+          icon: CheckCircle,
+          keywords: ['approve', 'no-dues', 'graduate', 'alumni'],
+        },
+      ],
+    },
+    {
+      title: 'Engagement',
+      items: [
+        { label: 'Donation Ledger', href: '/alumni-admin/donations', icon: DollarSign, keywords: ['80g', 'endowment'] },
+        { label: 'Engagement Analytics', href: '/alumni-admin/analytics', icon: BarChart3, keywords: ['retention', 'mentorship'] },
+        { label: 'Event Manager', href: '/alumni-admin/events', icon: Calendar, keywords: ['rsvp', 'reunion'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Pending Verifications', href: '/alumni-admin/verification', icon: CheckCircle },
+    { label: 'Donation Ledger', href: '/alumni-admin/donations', icon: DollarSign },
+    { label: 'Analytics', href: '/alumni-admin/analytics', icon: BarChart3 },
+    { label: 'Events', href: '/alumni-admin/events', icon: Calendar },
+  ],
 };
 
 export const adminPortal: PortalConfig = {
@@ -929,6 +956,7 @@ export const adminPortal: PortalConfig = {
       items: [
         { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield, roles: ['SuperAdmin', 'Registrar'] },
         { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
+        { label: 'Student Verifications', href: '/admin/verifications', icon: FileCheck2, roles: ['SuperAdmin', 'AdmissionsOfficer', 'Registrar'] },
         { label: 'Academics', href: '/admin/academics', icon: GraduationCap, roles: ['SuperAdmin', 'Registrar'] },
         { label: 'Finance', href: '/admin/finance', icon: Wallet, roles: ['SuperAdmin', 'Accountant', 'President'] },
         { label: 'HR & Payroll', href: '/admin/hr', icon: Users, roles: ['SuperAdmin', 'HR', 'President'] },

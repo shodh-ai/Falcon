@@ -495,4 +495,29 @@ export class TransportService {
     const stop = stops[idx];
     return this.ingestGpsPing(tenantId, routeId, Number(stop.latitude), Number(stop.longitude), 28);
   }
+
+  async requestRouteChange(tenantId: string, studentUserId: string, reason: string) {
+    if (!reason?.trim() || reason.trim().length < 10) {
+      throw new BadRequestException('Please provide a reason (10+ characters) for the route change');
+    }
+    const allocation = await this.getMyAllocation(tenantId, studentUserId);
+    if (!allocation || allocation.payment_status !== 'PAID') {
+      throw new BadRequestException('You must have an active paid transport allocation to request a route change');
+    }
+    const pending = await this.dataSource.query<Array<{ request_id: string }>>(
+      `SELECT request_id FROM transport_route_change_requests
+       WHERE student_user_id = $1 AND status = 'PENDING' LIMIT 1`,
+      [studentUserId],
+    );
+    if (pending[0]) {
+      throw new BadRequestException('You already have a pending route change request');
+    }
+    const rows = await this.dataSource.query(
+      `INSERT INTO transport_route_change_requests (
+         tenant_id, student_user_id, current_route_id, current_stop_id, reason, status
+       ) VALUES ($1, $2, $3, $4, $5, 'PENDING') RETURNING *`,
+      [tenantId, studentUserId, allocation.route_id, allocation.stop_id, reason.trim()],
+    );
+    return rows[0];
+  }
 }

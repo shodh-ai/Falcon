@@ -1,14 +1,32 @@
 'use client';
 
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { PremiumKPICards, GlassCard } from '@/components/leadership/intelligence/PremiumKPICards';
-import {
-  CashFlowAreaChart,
-  RevenueDonutChart,
-  DefaultersReceivablesChart,
-  DepartmentHealthChart,
-} from '@/components/leadership/intelligence/IntelligenceCharts';
+
+const CashFlowAreaChart = dynamic(
+  () => import('@/components/leadership/intelligence/IntelligenceCharts').then((m) => m.CashFlowAreaChart),
+  { ssr: false, loading: () => <div className="h-64 animate-pulse rounded-xl bg-slate-800/40" /> },
+);
+const RevenueDonutChart = dynamic(
+  () => import('@/components/leadership/intelligence/IntelligenceCharts').then((m) => m.RevenueDonutChart),
+  { ssr: false, loading: () => <div className="h-64 animate-pulse rounded-xl bg-slate-800/40" /> },
+);
+const DefaultersReceivablesChart = dynamic(
+  () =>
+    import('@/components/leadership/intelligence/IntelligenceCharts').then(
+      (m) => m.DefaultersReceivablesChart,
+    ),
+  { ssr: false, loading: () => <div className="h-64 animate-pulse rounded-xl bg-slate-800/40" /> },
+);
+const DepartmentHealthChart = dynamic(
+  () =>
+    import('@/components/leadership/intelligence/IntelligenceCharts').then(
+      (m) => m.DepartmentHealthChart,
+    ),
+  { ssr: false, loading: () => <div className="h-64 animate-pulse rounded-xl bg-slate-800/40" /> },
+);
 import { LiveFeedColumn } from '@/components/leadership/intelligence/LiveFeedColumn';
 import { FalconAiChat } from '@/components/leadership/intelligence/FalconAiChat';
 import { useLeadershipIntelligence } from '@/components/leadership/intelligence/LeadershipIntelligenceProvider';

@@ -125,6 +125,7 @@ export class AuthService {
         hr_capabilities: caps ?? {},
         permissions,
         allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
+        onboarding_status: tokenUser.onboarding_status,
       },
     };
   }

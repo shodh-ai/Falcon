@@ -62,6 +62,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       dept_id: user.dept_id,
       tenant_id: payload.tenantId,
       tenant_schema: payload.tenantSchema ?? 'public',
+      onboarding_status: user.onboarding_status,
     };
 
     if (payload.impersonator_user_id) {
