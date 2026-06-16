@@ -773,6 +773,7 @@ export const presidentPortal: PortalConfig = {
         { label: 'Finance', href: '/president/finance', icon: Wallet, keywords: ['collected', 'pending', 'charts'] },
         { label: 'Compliance', href: '/president/compliance', icon: Shield, keywords: ['iqac', 'defaulting'] },
         { label: 'HR Analytics', href: '/president/hr-analytics', icon: Users, keywords: ['retention', 'faculty student ratio', 'payroll'] },
+        { label: 'Grievances Escalation', href: '/president/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'compliance'] },
       ],
     },
   ],
@@ -782,6 +783,7 @@ export const presidentPortal: PortalConfig = {
     { label: 'Finance', href: '/president/finance', icon: Wallet },
     { label: 'Compliance', href: '/president/compliance', icon: Shield },
     { label: 'HR Analytics', href: '/president/hr-analytics', icon: Users },
+    { label: 'Grievances Escalation', href: '/president/issues', icon: AlertTriangle },
   ],
 };
 
@@ -804,7 +806,7 @@ export const leadershipPortal: PortalConfig = {
         { label: 'Pillar 3 · Academic & Brand Value', href: '/leadership/academics', icon: GraduationCap, keywords: ['placements heatmap', 'naac', 'iqac', 'faculty phd'] },
         { label: 'Pillar 4 · HR & Payroll Economics', href: '/leadership/hr-ops', icon: Users, keywords: ['payroll', 'attrition', 'cost vs revenue'] },
         { label: 'Pillar 5 · Infrastructure & Assets', href: '/leadership/infrastructure', icon: Building2, keywords: ['hostel occupancy', 'assets', 'maintenance'] },
-        { label: 'Pillar 6 · Risk & Compliance', href: '/leadership/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'compliance'] },
+        { label: 'Pillar 6 · Grievances Escalation', href: '/leadership/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'compliance'] },
         { label: 'University Directory', href: '/directory', icon: Contact, keywords: ['students', 'faculty', 'browse', 'export', '360'] },
       ],
     },
@@ -822,7 +824,7 @@ export const leadershipPortal: PortalConfig = {
     { label: 'Placements', href: '/leadership/placements', icon: Briefcase },
     { label: 'HR Economics', href: '/leadership/hr-ops', icon: Users },
     { label: 'Infrastructure', href: '/leadership/infrastructure', icon: Building2 },
-    { label: 'Risk & Compliance', href: '/leadership/issues', icon: AlertTriangle },
+    { label: 'Grievances Escalation', href: '/leadership/issues', icon: AlertTriangle },
     { label: 'University Directory', href: '/directory', icon: Contact },
   ],
 };

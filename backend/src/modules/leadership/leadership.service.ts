@@ -449,18 +449,34 @@ export class LeadershipService {
 
   async processSlaEscalations(tenantId?: string) {
     const tid = this.tenantId(tenantId);
-    const breached = await this.db.query(
+    
+    // Escalate to Leadership (Level 4) if open for 48h+
+    const breached48 = await this.db.query(
       `SELECT ticket_id FROM helpdesk_tickets
-       WHERE tenant_id = $1 AND status != 'RESOLVED' AND sla_deadline < NOW() AND escalation_level < 2`,
+       WHERE tenant_id = $1 AND status != 'RESOLVED' AND created_at < NOW() - INTERVAL '48 hours' AND escalation_level < 4`,
       [tid],
     );
-    for (const row of breached as Array<{ ticket_id: string }>) {
+    for (const row of breached48 as Array<{ ticket_id: string }>) {
       await this.db.query(
-        `UPDATE helpdesk_tickets SET escalation_level = escalation_level + 1, updated_at = NOW()
+        `UPDATE helpdesk_tickets SET escalation_level = 4, updated_at = NOW()
          WHERE ticket_id = $1`,
         [row.ticket_id],
       );
     }
-    return { processed: breached.length };
+
+    // Escalate to VC (Level 3) if open for 24h+
+    const breached24 = await this.db.query(
+      `SELECT ticket_id FROM helpdesk_tickets
+       WHERE tenant_id = $1 AND status != 'RESOLVED' AND created_at < NOW() - INTERVAL '24 hours' AND escalation_level < 3`,
+      [tid],
+    );
+    for (const row of breached24 as Array<{ ticket_id: string }>) {
+      await this.db.query(
+        `UPDATE helpdesk_tickets SET escalation_level = 3, updated_at = NOW()
+         WHERE ticket_id = $1`,
+        [row.ticket_id],
+      );
+    }
+    return { processed: breached24.length + breached48.length };
   }
 }
