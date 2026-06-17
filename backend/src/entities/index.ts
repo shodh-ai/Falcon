@@ -27,6 +27,7 @@ export { AcademicTimetable } from './academic-timetable.entity';
 export { AcademicAssignment } from './academic-assignment.entity';
 export { AssignmentSubmission } from './assignment-submission.entity';
 export { CourseAttendanceLog } from './course-attendance-log.entity';
+export { CourseAttendanceOverride } from './course-attendance-override.entity';
 export { CourseMaterial } from './course-material.entity';
 export { CourseModule } from './course-module.entity';
 export { AttendanceRecord } from './attendance-record.entity';

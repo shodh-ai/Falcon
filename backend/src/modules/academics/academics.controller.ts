@@ -108,6 +108,21 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/course/:courseId/attendance/monthly')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getFacultyCourseAttendanceMonthly(
+    @Param('courseId') courseId: string,
+    @Query('month') month: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.facultyAcademics.getMonthlyCourseAttendance(
+      courseId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      month,
+    );
+  }
+
   @Post('faculty/attendance')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   saveFacultyAttendance(
@@ -115,6 +130,19 @@ export class AcademicsController {
     @Body() dto: { course_id: string; date?: string; attendance_data: { student_id: string; status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED' }[] },
   ) {
     return this.facultyAcademics.saveCourseAttendanceLog(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      dto,
+    );
+  }
+
+  @Post('faculty/attendance/override')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  requestAttendanceOverride(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { course_id: string; date: string; student_user_id: string; status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED' },
+  ) {
+    return this.facultyAcademics.requestAttendanceOverride(
       req.user.user_id,
       this.resolveTenantId(req.user),
       dto,

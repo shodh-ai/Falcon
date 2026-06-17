@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+<<<<<<< Updated upstream
 import { BookOpen, Check, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -18,17 +19,20 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+=======
+import { Loader2, Check, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { toast } from 'sonner';
+import { FacultyPageHeader } from '@/components/faculty/FacultyPageHeader';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+>>>>>>> Stashed changes
 import { useAuthedApi } from '@/lib/api';
 
 type FacultyClass = {
-  timetable_id: string;
   course_id: string;
   course_code: string;
   course_name: string;
-  room: string | null;
-  start_time: string;
-  end_time: string;
-  student_count: number;
+  credits: number;
 };
 
 type Student = {
@@ -37,30 +41,48 @@ type Student = {
   roll_number: string;
 };
 
-type UiStatus = 'PRESENT' | 'ABSENT';
+type UiStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
 
-function todayIso() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+function localDateString(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return localDateString(d);
+}
+
+function daysDiff(d1: string, d2: string): number {
+  const t1 = new Date(d1).getTime();
+  const t2 = new Date(d2).getTime();
+  return Math.floor((t1 - t2) / (1000 * 60 * 60 * 24));
 }
 
 function MarkAttendanceContent() {
   const api = useAuthedApi();
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
+  
   const [classes, setClasses] = useState<FacultyClass[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(initialCourseId);
+  
   const [students, setStudents] = useState<Student[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, UiStatus>>({});
-  const [selectedDate, setSelectedDate] = useState(todayIso());
-  const [locked, setLocked] = useState(false);
+  // dateStr -> student_id -> status
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, Record<string, UiStatus>>>({});
+  
+  const [windowEndDate, setWindowEndDate] = useState(localDateString());
   const [loading, setLoading] = useState(true);
+<<<<<<< Updated upstream
   const [rosterLoading, setRosterLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+=======
+  const [fetchingData, setFetchingData] = useState(false);
+>>>>>>> Stashed changes
 
   const selectedClass = useMemo(
     () => classes.find((c) => c.course_id === selectedCourseId) ?? null,
@@ -88,6 +110,7 @@ function MarkAttendanceContent() {
   );
 
   useEffect(() => {
+<<<<<<< Updated upstream
     void api
       .get<FacultyClass[]>('/api/academics/faculty/timetable/today')
       .then((data) => {
@@ -101,27 +124,39 @@ function MarkAttendanceContent() {
       })
       .finally(() => setLoading(false));
   }, [api, initialCourseId]);
+=======
+    void api.get<FacultyClass[]>('/api/academics/faculty/workspaces/courses').then(setClasses).finally(() => setLoading(false));
+  }, [api]);
+>>>>>>> Stashed changes
 
   useEffect(() => {
-    if (!selectedCourseId) return;
+    if (!selectedCourseId || !windowEndDate) return;
+    const windowMonth = windowEndDate.slice(0, 7);
     let cancelled = false;
+<<<<<<< Updated upstream
     setRosterLoading(true);
+=======
+    setFetchingData(true);
+>>>>>>> Stashed changes
     (async () => {
       try {
-        const [roster, state] = await Promise.all([
-          api.get<Student[]>(`/api/academics/faculty/course/${selectedCourseId}/students`),
-          api.get<{ locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null }>(
-            `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
-          ),
-        ]);
+        const res = await api.get<{
+          students: Student[];
+          logs: { date: string; attendance_data: { student_id: string; status: UiStatus }[] }[];
+        }>(`/api/academics/faculty/course/${selectedCourseId}/attendance/monthly?month=${windowMonth}`);
         if (cancelled) return;
-        setStudents(roster);
-        setLocked(state.locked);
-        const map: Record<string, UiStatus> = {};
-        for (const s of roster) map[s.student_id] = 'PRESENT';
-        for (const row of state.attendance_data ?? []) {
-          if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
+        setStudents(res.students);
+        
+        const map: Record<string, Record<string, UiStatus>> = {};
+        for (const log of res.logs || []) {
+          // log.date from db might be "YYYY-MM-DD" or "YYYY-MM-DDT..."
+          const dateStr = log.date.split('T')[0];
+          map[dateStr] = {};
+          for (const item of log.attendance_data || []) {
+            map[dateStr][item.student_id] = item.status;
+          }
         }
+<<<<<<< Updated upstream
         setAttendance(map);
         setSearchQuery('');
       } catch (e) {
@@ -129,13 +164,21 @@ function MarkAttendanceContent() {
         setStudents([]);
       } finally {
         if (!cancelled) setRosterLoading(false);
+=======
+        setAttendanceMap(map);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load attendance');
+      } finally {
+        if (!cancelled) setFetchingData(false);
+>>>>>>> Stashed changes
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [api, selectedCourseId, selectedDate]);
+  }, [api, selectedCourseId, windowEndDate]);
 
+<<<<<<< Updated upstream
   function markAll(status: UiStatus) {
     if (locked) return;
     const next: Record<string, UiStatus> = {};
@@ -144,51 +187,88 @@ function MarkAttendanceContent() {
   }
 
   async function save() {
+=======
+  const displayDays = useMemo(() => {
+    return [addDays(windowEndDate, -2), addDays(windowEndDate, -1), windowEndDate];
+  }, [windowEndDate]);
+
+  const handleToggle = async (studentId: string, dateStr: string, currentStatus: string | undefined) => {
+>>>>>>> Stashed changes
     if (!selectedCourseId) return;
-    if (students.length === 0) {
-      toast.error('No students on the roster — cannot save attendance.');
-      return;
-    }
-    const payload = Object.entries(attendance).map(([student_id, status]) => ({ student_id, status }));
-    if (payload.length === 0) {
-      toast.error('Mark at least one student before saving.');
-      return;
-    }
-    setSaving(true);
-    try {
-      const result = await api.post<{ saved: number; attendance_updated?: { attendance_percent: string }[] }>(
-        '/api/academics/faculty/attendance',
-        {
+
+    const today = localDateString();
+    const isLocked = daysDiff(today, dateStr) > 3;
+
+    const newStatus = currentStatus === 'PRESENT' ? 'ABSENT' : 'PRESENT';
+
+    if (isLocked) {
+      try {
+        await api.post('/api/academics/faculty/attendance/override', {
           course_id: selectedCourseId,
-          date: selectedDate,
-          attendance_data: payload,
-        },
-      );
-      const state = await api.get<{ locked: boolean }>(
-        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
-      );
-      setLocked(state.locked);
-      const synced = result.attendance_updated?.length ?? 0;
-      if (synced === 0) {
-        toast.warning('Attendance saved to session log but no enrollment percentages were updated. Check student IDs.');
-      } else {
-        toast.success(`Attendance saved · ${synced} student${synced === 1 ? '' : 's'} synced to enrollment %`);
+          date: dateStr,
+          student_user_id: studentId,
+          status: newStatus,
+        });
+        toast.success('Attendance locked. Sending request to HOD.');
+      } catch (e) {
+        toast.error('Failed to request attendance override');
       }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed');
-    } finally {
-      setSaving(false);
+      return;
     }
-  }
+    
+    // Optimistic update
+    setAttendanceMap((prev) => {
+      const dayMap = prev[dateStr] || {};
+      return {
+        ...prev,
+        [dateStr]: { ...dayMap, [studentId]: newStatus },
+      };
+    });
+
+    try {
+      // Build payload for the full day
+      const dayMap = attendanceMap[dateStr] || {};
+      const updatedDayMap = { ...dayMap, [studentId]: newStatus };
+      const payload = Object.entries(updatedDayMap).map(([sId, status]) => ({ student_id: sId, status }));
+
+      await api.post('/api/academics/faculty/attendance', {
+        course_id: selectedCourseId,
+        date: dateStr,
+        attendance_data: payload,
+      });
+    } catch (e) {
+      toast.error('Failed to update attendance');
+      // Revert optimistic update
+      setAttendanceMap((prev) => {
+        const dayMap = { ...prev[dateStr] };
+        if (currentStatus) {
+          dayMap[studentId] = currentStatus as UiStatus;
+        } else {
+          delete dayMap[studentId];
+        }
+        return {
+          ...prev,
+          [dateStr]: dayMap,
+        };
+      });
+    }
+  };
 
   if (loading) {
     return <FacultyPageLoading label="Loading attendance…" branded />;
   }
 
   return (
+<<<<<<< Updated upstream
     <FacultyPageShell>
       <FacultyPageHeader
         description="Select today's class, mark present or absent, then log the lecture in your class logbook."
+=======
+    <div className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
+      <FacultyPageHeader
+        title="Mark Attendance"
+        description="Dedicated attendance workspace — select a class, choose the month, and toggle attendance directly in the grid."
+>>>>>>> Stashed changes
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/faculty/logbook">
@@ -199,6 +279,7 @@ function MarkAttendanceContent() {
         }
       />
 
+<<<<<<< Updated upstream
       {classes.length === 0 ? (
         <FacultyEmptyState
           title="No classes today"
@@ -338,6 +419,149 @@ function MarkAttendanceContent() {
             )}
           </FacultyPanel>
         </div>
+=======
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {classes.map((c) => (
+          <Card
+            key={c.course_id}
+            className={`cursor-pointer transition ${selectedCourseId === c.course_id ? 'ring-2 ring-sgvu-gold' : ''}`}
+            onClick={() => setSelectedCourseId(c.course_id)}
+          >
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">
+                {c.course_code} — {c.course_name}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground">
+              {c.credits} Credits
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {selectedClass ? (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-base">{selectedClass.course_name} — Monthly Roll Call</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setWindowEndDate(addDays(windowEndDate, -1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="rounded-md border px-3 py-2 text-sm font-medium">
+                {new Date(addDays(windowEndDate, -2)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                {' - '}
+                {new Date(windowEndDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </div>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setWindowEndDate(addDays(windowEndDate, 1))}
+                disabled={windowEndDate >= localDateString()}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {fetchingData ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : students.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                No active students found in this course.
+              </div>
+            ) : (
+              <div className="relative w-full overflow-x-auto rounded-lg border shadow-sm">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr>
+                      <th className="sticky left-0 z-20 min-w-[200px] bg-muted/90 px-4 py-3 font-medium backdrop-blur">
+                        Student Name
+                      </th>
+                      <th className="sticky left-[200px] z-20 min-w-[120px] bg-muted/90 px-4 py-3 font-medium backdrop-blur border-r">
+                        Roll Number
+                      </th>
+                      <th className="sticky left-[320px] z-20 min-w-[80px] bg-muted/90 px-4 py-3 font-medium text-center backdrop-blur border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                        Present
+                      </th>
+                      {displayDays.map((d) => {
+                        const isToday = d === localDateString();
+                        return (
+                          <th key={d} className="min-w-[40px] px-2 py-3 text-center font-medium">
+                            {isToday ? (
+                              <span className="font-bold">Today</span>
+                            ) : (
+                              new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                            )}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y bg-background">
+                    {students.map((student) => {
+                      let totalPresent = 0;
+                      // Calculate from attendanceMap for all days loaded in the month
+                      Object.values(attendanceMap).forEach((dayMap) => {
+                        if (dayMap[student.student_id] === 'PRESENT') {
+                          totalPresent++;
+                        }
+                      });
+
+                      return (
+                        <tr key={student.student_id} className="hover:bg-muted/30">
+                          <td className="sticky left-0 z-10 bg-background/95 px-4 py-2 font-medium backdrop-blur">
+                            {student.name}
+                          </td>
+                          <td className="sticky left-[200px] z-10 bg-background/95 px-4 py-2 text-muted-foreground backdrop-blur border-r">
+                            {student.roll_number}
+                          </td>
+                          <td className="sticky left-[320px] z-10 bg-background/95 px-4 py-2 text-center font-semibold text-sgvu-navy backdrop-blur border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                            {totalPresent}
+                          </td>
+                          {displayDays.map((dateStr) => {
+                            const status = attendanceMap[dateStr]?.[student.student_id];
+                            const isPresent = status === 'PRESENT';
+                            const today = localDateString();
+                            const isLocked = daysDiff(today, dateStr) > 3;
+                            
+                            return (
+                              <td key={dateStr} className="px-2 py-2 text-center relative">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggle(student.student_id, dateStr, status)}
+                                  className={`
+                                    flex h-6 w-6 items-center justify-center rounded border transition-colors mx-auto relative
+                                    ${isPresent && !isLocked ? 'border-primary bg-primary text-primary-foreground' : ''}
+                                    ${isPresent && isLocked ? 'border-primary/50 bg-primary/50 text-primary-foreground' : ''}
+                                    ${!isPresent && !isLocked ? 'border-input bg-transparent hover:bg-muted' : ''}
+                                    ${!isPresent && isLocked ? 'border-input/50 bg-muted/50 cursor-pointer' : ''}
+                                  `}
+                                >
+                                  {isPresent && <Check className="h-4 w-4" />}
+                                  {isLocked && !isPresent && <Lock className="h-3 w-3 text-muted-foreground absolute" />}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <p className="text-center text-sm text-muted-foreground">Select a class above to mark attendance.</p>
+>>>>>>> Stashed changes
       )}
     </FacultyPageShell>
   );

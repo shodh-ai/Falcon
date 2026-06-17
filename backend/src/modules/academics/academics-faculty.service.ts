@@ -11,6 +11,7 @@ import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity
 import { CourseMaterial } from '../../entities/course-material.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 export interface FacultyTodayClassDto {
   classId: number;
@@ -58,6 +59,7 @@ export class AcademicsFacultyService {
     @InjectRepository(CourseMaterial)
     private readonly courseMaterials: Repository<CourseMaterial>,
     private readonly objectStorage: ObjectStorageService,
+    private readonly notify: NotificationEmitterService,
   ) {}
 
   async getFacultyTodayClasses(facultyUserId: string): Promise<FacultyTodayClassDto[]> {
@@ -287,6 +289,33 @@ export class AcademicsFacultyService {
     };
   }
 
+  async getMonthlyCourseAttendance(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+    month: string, // YYYY-MM format
+  ) {
+    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    
+    // Get students
+    const students = await this.getCourseStudents(courseId, facultyUserId, tenantId);
+    
+    // Get logs for the month
+    const logs = await this.dataSource.query<{ date: string; attendance_data: { student_id: string; status: string }[] }>(
+      `SELECT date::text as date, attendance_data 
+       FROM course_attendance_logs 
+       WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND date::text LIKE $4`,
+      [tenantId, courseId, facultyUserId, `${month}-%`]
+    );
+
+    return {
+      course_id: courseId,
+      month,
+      students,
+      logs,
+    };
+  }
+
   async saveCourseAttendanceLog(
     facultyUserId: string,
     tenantId: string,
@@ -324,6 +353,51 @@ export class AcademicsFacultyService {
     }
 
     return { saved: dto.attendance_data.length, date, attendance_updated: updated };
+  }
+
+  async requestAttendanceOverride(
+    facultyUserId: string,
+    tenantId: string,
+    dto: { course_id: string; date: string; student_user_id: string; status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED' }
+  ) {
+    await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
+
+    // Validate student is enrolled
+    const studentEnrollment = await this.enrollmentRepo.findOne({
+      where: { tenant_id: tenantId, course_id: dto.course_id, student_user_id: dto.student_user_id, status: 'ENROLLED' },
+    });
+    if (!studentEnrollment) {
+      throw new BadRequestException('Student is not enrolled in this course');
+    }
+
+    // Insert request
+    const rows = await this.dataSource.query(
+      `INSERT INTO course_attendance_overrides (tenant_id, faculty_user_id, student_user_id, course_id, date, status)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING')
+       RETURNING *`,
+      [tenantId, facultyUserId, dto.student_user_id, dto.course_id, dto.date]
+    );
+
+    // Find HOD of the faculty's department to notify
+    const hodRows = await this.dataSource.query<{ hod_user_id: string }>(
+      `SELECT d.hod_user_id FROM departments d
+       INNER JOIN users u ON u.dept_id = d.dept_id
+       WHERE u.user_id = $1`,
+      [facultyUserId]
+    );
+
+    const hodUserId = hodRows[0]?.hod_user_id;
+    if (hodUserId) {
+      this.notify.approvalRequired({
+        tenantId,
+        userId: hodUserId,
+        title: 'Attendance Override Request',
+        message: 'A faculty member has requested to override locked attendance.',
+        actionLink: '/hod/inbox?tab=ATTENDANCE_OVERRIDE',
+      });
+    }
+
+    return rows[0];
   }
 
   private async recalculateCourseAttendancePercents(tenantId: string, courseId: string) {

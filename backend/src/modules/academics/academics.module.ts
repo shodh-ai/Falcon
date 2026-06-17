@@ -12,6 +12,7 @@ import { AcademicTimetable } from '../../entities/academic-timetable.entity';
 import { AcademicAssignment } from '../../entities/academic-assignment.entity';
 import { AssignmentSubmission } from '../../entities/assignment-submission.entity';
 import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity';
+import { CourseAttendanceOverride } from '../../entities/course-attendance-override.entity';
 import { CourseMaterial } from '../../entities/course-material.entity';
 import { CourseModule } from '../../entities/course-module.entity';
 import { FeeDemand } from '../../entities/fee-demand.entity';
@@ -66,6 +67,7 @@ import { EarlyWarningController } from './early-warning.controller';
       AcademicAssignment,
       AssignmentSubmission,
       CourseAttendanceLog,
+      CourseAttendanceOverride,
       CourseMaterial,
       CourseModule,
       FeeDemand,
