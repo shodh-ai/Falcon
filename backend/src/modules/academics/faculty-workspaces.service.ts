@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
@@ -455,16 +456,229 @@ export class FacultyWorkspacesService {
     );
   }
 
+  async assignProjectGuide(
+    facultyUserId: string,
+    tenantId: string,
+    data: { project_title: string; program?: string; start_date?: string; end_date?: string; funding_allocated?: number; student_ids: string[] },
+  ) {
+    // Validate max 4 active projects
+    const countRes = await this.dataSource.query(
+      `SELECT COUNT(*) AS active_count FROM faculty_project_guides 
+       WHERE tenant_id = $1 AND faculty_user_id = $2 AND status = 'ACTIVE'`,
+      [tenantId, facultyUserId]
+    );
+    if (parseInt(countRes[0].active_count) >= 4) {
+      throw new BadRequestException('Faculty member cannot have more than 4 active projects simultaneously.');
+    }
+
+    const guideId = crypto.randomUUID();
+
+    // Start transaction
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      await queryRunner.query(
+        `INSERT INTO faculty_project_guides 
+          (guide_id, tenant_id, faculty_user_id, project_title, program, status, start_date, end_date, funding_allocated, funding_consumed, created_at)
+         VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7, $8, 0, NOW())`,
+        [guideId, tenantId, facultyUserId, data.project_title, data.program, data.start_date, data.end_date, data.funding_allocated || 0]
+      );
+
+      for (const studentId of data.student_ids) {
+        await queryRunner.query(
+          `INSERT INTO project_guide_students (guide_id, student_user_id, tenant_id) VALUES ($1, $2, $3)`,
+          [guideId, studentId, tenantId]
+        );
+      }
+
+      await queryRunner.commitTransaction();
+      return { guide_id: guideId };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   async listProjectGuides(facultyUserId: string, tenantId: string) {
     const guides = await this.dataSource.query(
-      `SELECT g.*, u.name AS student_name
+      `SELECT 
+         g.*,
+         (
+           SELECT COALESCE(json_agg(
+             json_build_object(
+               'student_user_id', pgs.student_user_id,
+               'name', u.name,
+               'official_email', u.official_email,
+               'department', d.dept_name,
+               'grade', pgs.grade
+             )
+           ) FILTER (WHERE pgs.student_user_id IS NOT NULL), '[]')
+           FROM project_guide_students pgs
+           LEFT JOIN users u ON u.user_id = pgs.student_user_id
+           LEFT JOIN departments d ON d.dept_id = u.dept_id
+           WHERE pgs.guide_id = g.guide_id
+         ) AS students,
+         (
+           SELECT COALESCE(json_agg(fr.* ORDER BY fr.created_at ASC), '[]')
+           FROM project_funding_requests fr
+           WHERE fr.guide_id = g.guide_id
+         ) AS funding_requests
        FROM faculty_project_guides g
-       INNER JOIN users u ON u.user_id = g.student_user_id
        WHERE g.tenant_id = $1 AND g.faculty_user_id = $2
-       ORDER BY g.created_at DESC`,
+       ORDER BY CASE g.status WHEN 'COMPLETED' THEN 1 ELSE 0 END, g.created_at DESC`,
       [tenantId, facultyUserId],
     );
     return guides;
+  }
+
+  async updateProjectStudents(
+    guideId: string,
+    facultyUserId: string,
+    tenantId: string,
+    students: { student_user_id: string; grade?: string }[]
+  ) {
+    await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
+    
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      await queryRunner.query(
+        `DELETE FROM project_guide_students WHERE guide_id = $1 AND tenant_id = $2`,
+        [guideId, tenantId]
+      );
+      for (const st of students) {
+        await queryRunner.query(
+          `INSERT INTO project_guide_students (guide_id, student_user_id, grade, tenant_id) VALUES ($1, $2, $3, $4)`,
+          [guideId, st.student_user_id, st.grade || null, tenantId]
+        );
+      }
+      await queryRunner.commitTransaction();
+      return { success: true };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async completeProject(guideId: string, facultyUserId: string, tenantId: string) {
+    await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
+    await this.dataSource.query(
+      `UPDATE faculty_project_guides SET status = 'COMPLETED', end_date = CURRENT_DATE WHERE guide_id = $1 AND tenant_id = $2`,
+      [guideId, tenantId]
+    );
+    return { success: true };
+  }
+
+  async requestFunding(
+    guideId: string,
+    facultyUserId: string,
+    tenantId: string,
+    amount: number,
+    purpose: string
+  ) {
+    await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
+    // Check if there's already a pending request
+    const existing = await this.dataSource.query(
+      `SELECT 1 FROM project_funding_requests WHERE guide_id = $1 AND status IN ('PENDING_HOD', 'APPROVED_HOD')`,
+      [guideId]
+    );
+    if (existing.length > 0) {
+      throw new BadRequestException('A funding request is already pending or approved and awaiting transfer.');
+    }
+
+    const rows = await this.dataSource.query(
+      `INSERT INTO project_funding_requests (tenant_id, guide_id, requested_by, amount, purpose)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [tenantId, guideId, facultyUserId, amount, purpose]
+    );
+
+    const hodRows = await this.dataSource.query(
+      `SELECT d.hod_user_id, u.name as faculty_name
+       FROM users u 
+       JOIN departments d ON u.dept_id = d.dept_id 
+       WHERE u.user_id = $1 AND u.tenant_id = $2`,
+      [facultyUserId, tenantId]
+    );
+
+    if (hodRows.length > 0 && hodRows[0].hod_user_id) {
+      this.notify.approvalRequired({
+        tenantId,
+        userId: hodRows[0].hod_user_id,
+        category: 'Funding',
+        requestType: 'Project Funding Request',
+        requesterName: hodRows[0].faculty_name || 'Faculty',
+        title: 'New Project Funding Request',
+        message: `A new funding request of ₹${amount} requires your approval.`,
+        actionLink: '/hod/inbox'
+      });
+    }
+
+    return rows[0];
+  }
+
+  async listHodFundingRequests(hodUserId: string, tenantId: string) {
+    // Only return requests for departments where this user is HOD
+    return this.dataSource.query(
+      `SELECT fr.*, g.project_title, u.name AS faculty_name, d.dept_name
+       FROM project_funding_requests fr
+       INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
+       INNER JOIN users u ON u.user_id = fr.requested_by
+       INNER JOIN departments d ON d.dept_id = u.dept_id
+       WHERE fr.tenant_id = $1 AND d.hod_user_id = $2
+       ORDER BY fr.created_at DESC`,
+      [tenantId, hodUserId]
+    );
+  }
+
+  async updateHodFundingRequest(
+    requestId: string,
+    status: 'APPROVED_HOD' | 'REJECTED_HOD',
+    commitMessage: string,
+    hodUserId: string,
+    tenantId: string
+  ) {
+    const rows = await this.dataSource.query(
+      `UPDATE project_funding_requests
+       SET status = $1, hod_commit_message = $2, hod_user_id = $3, updated_at = NOW()
+       WHERE request_id = $4 AND tenant_id = $5 AND status = 'PENDING_HOD'
+       RETURNING *`,
+      [status, commitMessage, hodUserId, requestId, tenantId]
+    );
+    if (!rows.length) {
+      throw new NotFoundException('Pending funding request not found or unauthorized');
+    }
+    
+    const updatedRequest = rows[0];
+
+    if (status === 'APPROVED_HOD') {
+      const financeUsers = await this.dataSource.query(
+        `SELECT u.user_id FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.tenant_id = $1 AND r.role_name IN ('FinanceAdmin', 'FinanceAccountant', 'Finance', 'Accountant')`,
+        [tenantId]
+      );
+      
+      for (const f of financeUsers) {
+        this.notify.approvalRequired({
+          tenantId,
+          userId: f.user_id,
+          category: 'Funding',
+          requestType: 'Project Funding Request',
+          requesterName: 'HOD',
+          title: 'Funding Request HOD Approved',
+          message: `A funding request of ₹${updatedRequest.amount} was approved by HOD and requires your transfer.`,
+          actionLink: '/finance/funding-requests'
+        });
+      }
+    }
+
+    return updatedRequest;
   }
 
   async listProjectReports(guideId: string, facultyUserId: string, tenantId: string) {
