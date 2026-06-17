@@ -6,6 +6,8 @@ export type HelpdeskTicketCategory =
   | 'ACADEMICS'
   | 'IT'
   | 'HOSTEL'
+  | 'HR'
+  | 'FACILITIES'
   | 'MENTORSHIP'
   | 'STUDENT_PROFILE';
 export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'REJECTED';
