@@ -14,8 +14,12 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/faculty/dashboard';
   }
 
-  if (r === 'hod' || r === 'dean') {
+  if (r === 'hod') {
     return '/hod/dashboard';
+  }
+
+  if (r === 'dean') {
+    return '/dean/dashboard';
   }
 
   if (r === 'student' || r === 'applicant') {
@@ -88,7 +92,8 @@ export function getWorkspaceLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return 'Student Workspace';
   if (r === 'faculty') return 'Faculty Workspace';
-  if (r === 'hod' || r === 'dean') return 'HOD Workspace';
+  if (r === 'hod') return 'HOD Workspace';
+  if (r === 'dean') return 'Dean Workspace';
   if (r === 'hr' || r === 'hradmin') return 'HR Workspace';
   if (r === 'warden') return 'Hostel Workspace';
   if (r === 'accountant') return 'Finance Workspace';
@@ -107,7 +112,8 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return 'Student';
   if (r === 'faculty') return 'Faculty';
-  if (r === 'hod' || r === 'dean') return 'HOD';
+  if (r === 'hod') return 'HOD';
+  if (r === 'dean') return 'Dean';
   if (r === 'hr' || r === 'hradmin') return 'HR';
   if (r === 'warden') return 'Hostel';
   if (r === 'accountant') return 'Finance';
@@ -260,6 +266,7 @@ const portalRoles: Record<string, string[]> = {
   '/student': ['student', 'applicant'],
   '/faculty': ['faculty'],
   '/hod': ['hod', 'dean'],
+  '/dean': ['dean'],
   '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
   '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],

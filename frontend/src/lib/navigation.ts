@@ -545,6 +545,31 @@ export const hodPortal: PortalConfig = {
   ]),
 };
 
+export const deanPortal: PortalConfig = {
+  personaLabel: 'Dean',
+  personaTitle: 'Dean Workspace',
+  homeHref: '/dean/dashboard',
+  navGroups: [
+    {
+      title: 'Approvals & Requests',
+      items: [
+        { label: 'Inbox (Funding Approvals)', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'funding', 'projects'] },
+      ],
+    },
+    {
+      title: 'Overview',
+      items: [
+        { label: 'Dashboard', href: '/dean/dashboard', icon: LayoutDashboard, keywords: ['metrics'] },
+      ],
+    },
+    myHrOperationsNavGroup('dean'),
+  ].filter(Boolean) as any,
+  commandItems: [
+    { label: 'Inbox (Funding Approvals)', href: '/dean/inbox', icon: Inbox },
+    { label: 'Dashboard', href: '/dean/dashboard', icon: LayoutDashboard },
+  ],
+};
+
 export const hostelAdminPortal: PortalConfig = {
   personaLabel: 'Hostel Administration',
   personaTitle: 'Residential Operations',

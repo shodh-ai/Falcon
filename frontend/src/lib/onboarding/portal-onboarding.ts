@@ -32,6 +32,14 @@ export const HOD_ONBOARDING_CONFIG: PortalOnboardingConfig = {
   kind: 'staff',
 };
 
+export const DEAN_ONBOARDING_CONFIG: PortalOnboardingConfig = {
+  portalPrefix: '/dean' as any,
+  apiPrefix: '/api/staff/onboarding',
+  portalLabel: 'Dean',
+  dashboardPath: '/dean/dashboard',
+  kind: 'staff',
+};
+
 export const STAFF_DOC_LABELS: Record<string, string> = {
   PHOTO: 'Passport Size Photo',
   AADHAAR: 'Aadhaar Card',
@@ -90,7 +98,8 @@ export function isStaffOnboardingRole(role: string | undefined | null): boolean 
 
 export function getStaffOnboardingConfig(role: string | undefined | null): PortalOnboardingConfig {
   const r = (role ?? '').trim().toLowerCase();
-  if (r === 'hod' || r === 'dean') return HOD_ONBOARDING_CONFIG;
+  if (r === 'dean') return DEAN_ONBOARDING_CONFIG;
+  if (r === 'hod') return HOD_ONBOARDING_CONFIG;
   return FACULTY_ONBOARDING_CONFIG;
 }
 
