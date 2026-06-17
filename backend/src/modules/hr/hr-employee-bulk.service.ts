@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import {
   getInitialOnboardingStatusForRole,
 } from '../student-onboarding/onboarding-portal.util';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 export type EmployeeRowInput = {
   name: string;

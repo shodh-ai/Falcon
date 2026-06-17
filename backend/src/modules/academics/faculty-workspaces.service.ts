@@ -638,6 +638,19 @@ export class FacultyWorkspacesService {
     );
   }
 
+  async listDeanFundingRequests(tenantId: string) {
+    return this.dataSource.query(
+      `SELECT fr.*, g.project_title, u.name AS faculty_name, d.dept_name
+       FROM project_funding_requests fr
+       INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
+       INNER JOIN users u ON u.user_id = fr.requested_by
+       INNER JOIN departments d ON d.dept_id = u.dept_id
+       WHERE fr.tenant_id = $1 AND fr.status IN ('APPROVED_HOD', 'APPROVED_DEAN', 'REJECTED_DEAN')
+       ORDER BY fr.created_at DESC`,
+      [tenantId]
+    );
+  }
+
   async updateHodFundingRequest(
     requestId: string,
     status: 'APPROVED_HOD' | 'REJECTED_HOD',
@@ -659,6 +672,49 @@ export class FacultyWorkspacesService {
     const updatedRequest = rows[0];
 
     if (status === 'APPROVED_HOD') {
+      const deanUsers = await this.dataSource.query(
+        `SELECT u.user_id FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.tenant_id = $1 AND r.role_name = 'Dean'`,
+        [tenantId]
+      );
+      
+      for (const d of deanUsers) {
+        this.notify.approvalRequired({
+          tenantId,
+          userId: d.user_id,
+          category: 'Funding',
+          requestType: 'Project Funding Request',
+          requesterName: 'HOD',
+          title: 'Funding Request Pending Dean Approval',
+          message: `A funding request of ₹${updatedRequest.amount} was approved by HOD and requires your final approval.`,
+          actionLink: '/dean/inbox'
+        });
+      }
+    }
+
+    return updatedRequest;
+  }
+
+  async updateDeanFundingRequest(
+    requestId: string,
+    status: 'APPROVED_DEAN' | 'REJECTED_DEAN',
+    commitMessage: string,
+    deanUserId: string,
+    tenantId: string
+  ) {
+    const rows = await this.dataSource.query(
+      `UPDATE project_funding_requests
+       SET status = $1, dean_commit_message = $2, dean_user_id = $3, updated_at = NOW()
+       WHERE request_id = $4 AND tenant_id = $5 AND status = 'APPROVED_HOD'
+       RETURNING *`,
+      [status, commitMessage, deanUserId, requestId, tenantId]
+    );
+    if (!rows.length) {
+      throw new NotFoundException('Pending funding request not found or unauthorized');
+    }
+    
+    const updatedRequest = rows[0];
+
+    if (status === 'APPROVED_DEAN') {
       const financeUsers = await this.dataSource.query(
         `SELECT u.user_id FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.tenant_id = $1 AND r.role_name IN ('FinanceAdmin', 'FinanceAccountant', 'Finance', 'Accountant')`,
         [tenantId]
@@ -670,9 +726,9 @@ export class FacultyWorkspacesService {
           userId: f.user_id,
           category: 'Funding',
           requestType: 'Project Funding Request',
-          requesterName: 'HOD',
-          title: 'Funding Request HOD Approved',
-          message: `A funding request of ₹${updatedRequest.amount} was approved by HOD and requires your transfer.`,
+          requesterName: 'Dean',
+          title: 'Funding Request Dean Approved',
+          message: `A funding request of ₹${updatedRequest.amount} was approved by the Dean and requires your transfer.`,
           actionLink: '/finance/funding-requests'
         });
       }

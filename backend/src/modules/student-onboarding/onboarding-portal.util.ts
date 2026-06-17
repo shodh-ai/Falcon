@@ -41,7 +41,8 @@ export function getRequiredDocTypes(kind: OnboardingPortalKind): readonly string
 
 export function getDashboardPathForRoleName(roleName: string | undefined | null): string {
   const role = (roleName ?? '').trim().toLowerCase();
-  if (role === 'hod' || role === 'dean') return '/hod/dashboard';
+  if (role === 'dean') return '/dean/dashboard';
+  if (role === 'hod') return '/hod/dashboard';
   if (role === 'faculty') return '/faculty/dashboard';
   if (role === 'student' || role === 'applicant') return '/student/dashboard';
   return '/dashboard';

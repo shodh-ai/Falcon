@@ -719,6 +719,30 @@ export class AcademicsController {
     );
   }
 
+  @Get('dean/funding-requests')
+  @Roles('Dean', 'SuperAdmin')
+  listDeanFundingRequests(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listDeanFundingRequests(
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Patch('dean/funding-requests/:requestId')
+  @Roles('Dean', 'SuperAdmin')
+  updateDeanFundingRequest(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+    @Body() body: { status: 'APPROVED_DEAN' | 'REJECTED_DEAN'; commitMessage: string }
+  ) {
+    return this.facultyWorkspaces.updateDeanFundingRequest(
+      requestId,
+      body.status,
+      body.commitMessage,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
   @Post('faculty/workspaces/projects/reports/:reportId/review')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   reviewProjectReport(

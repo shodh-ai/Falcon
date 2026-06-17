@@ -264,7 +264,7 @@ export class FinanceService {
        INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
        INNER JOIN users u ON u.user_id = fr.requested_by
        INNER JOIN departments d ON d.dept_id = u.dept_id
-       WHERE fr.tenant_id = $1 AND fr.status IN ('APPROVED_HOD', 'TRANSFERRED')
+       WHERE fr.tenant_id = $1 AND fr.status IN ('APPROVED_DEAN', 'TRANSFERRED')
        ORDER BY CASE fr.status WHEN 'TRANSFERRED' THEN 1 ELSE 0 END, fr.created_at DESC`,
       [tenantId]
     );
@@ -279,13 +279,13 @@ export class FinanceService {
       const requestRows = await queryRunner.query(
         `UPDATE project_funding_requests
          SET status = 'TRANSFERRED', accountant_user_id = $1, updated_at = NOW()
-         WHERE request_id = $2 AND tenant_id = $3 AND status = 'APPROVED_HOD'
+         WHERE request_id = $2 AND tenant_id = $3 AND status = 'APPROVED_DEAN'
          RETURNING *`,
         [accountantUserId, requestId, tenantId]
       );
 
       if (!requestRows.length) {
-        throw new BadRequestException('Funding request not found or not approved by HOD');
+        throw new BadRequestException('Funding request not found or not approved by Dean');
       }
 
       const request = requestRows[0];
