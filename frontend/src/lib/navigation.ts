@@ -418,6 +418,12 @@ export const hrPortal: PortalConfig = {
       ],
     },
     {
+      title: 'Grievances & Support',
+      items: [
+        { label: 'Grievances Escalation', href: '/hr/grievances', icon: AlertTriangle, keywords: ['ticket', 'escalation', 'sla', 'hr', 'payroll', 'grievance'], roles: ['HRAdmin', 'HR', 'SuperAdmin'] },
+      ],
+    },
+    {
       title: 'Performance & Lifecycle',
       items: [
         { label: 'Onboarding Pipeline', href: '/hr/onboarding', icon: Kanban, keywords: ['kanban', 'hired', 'new hire'], hrModule: 'onboarding' },

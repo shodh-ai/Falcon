@@ -12,7 +12,7 @@ import { useAuthedApi } from '@/lib/api';
 const categories = [
   { label: 'IT / WiFi', value: 'IT' },
   { label: 'HR / Payroll', value: 'HR' },
-  { label: 'Facilities', value: 'HOSTEL' },
+  { label: 'Facilities', value: 'FACILITIES' },
   { label: 'Other', value: 'ACADEMICS' },
 ] as const;
 

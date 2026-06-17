@@ -209,6 +209,7 @@ const hrPathModules: Array<{ prefix: string; module: string }> = [
   { prefix: '/hr/policies', module: 'policies' },
   { prefix: '/hr/appraisals', module: 'directory' },
   { prefix: '/hr/promotions', module: 'directory' },
+  { prefix: '/hr/grievances', module: 'dashboard' },
 ];
 
 function hasAnyHrCapability(caps?: HrCapabilities | null): boolean {
@@ -241,7 +242,7 @@ function canAccessHrPath(
     return roles.some((r) => ['hradmin', 'superadmin'].includes(r));
   }
 
-  if (pathname.startsWith('/hr/me/attendance-holidays')) {
+  if (pathname.startsWith('/hr/me/') || pathname.startsWith('/hr/inbox')) {
     return true; // Accessible to all roles permitted into the /hr portal
   }
 
