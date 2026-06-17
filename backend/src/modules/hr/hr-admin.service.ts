@@ -9,6 +9,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
+import { getInitialOnboardingStatusForRole } from '../student-onboarding/onboarding-portal.util';
 import { HrEntityContextService } from './hr-entity-context.service';
 import { HrChecklistService } from './hr-checklist.service';
 import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
@@ -574,24 +575,37 @@ export class HrAdminService {
       `SELECT role_id FROM roles WHERE role_name = 'Faculty' LIMIT 1`,
     );
     const passwordHash = await bcrypt.hash('Welcome@123', 10);
+    const onboardingStatus = getInitialOnboardingStatusForRole('Faculty');
     const userRows = await this.dataSource.query(
-      `INSERT INTO users (tenant_id, name, official_email, role_id, password_hash, is_active, entity_id, onboarding_status)
-       VALUES ($1, $2, $3, $4, $5, true, $6, 'PENDING_ONBOARDING')
+      `INSERT INTO users (tenant_id, name, official_email, role_id, password_hash, is_active, entity_id, onboarding_status, onboarding_profile)
+       VALUES ($1, $2, $3, $4, $5, true, $6, $7, '{}'::jsonb)
        ON CONFLICT (tenant_id, official_email) DO UPDATE SET
          name = EXCLUDED.name,
          is_active = true,
          entity_id = COALESCE(users.entity_id, EXCLUDED.entity_id),
-         onboarding_status = 'PENDING_ONBOARDING'
+         onboarding_status = EXCLUDED.onboarding_status
        RETURNING user_id`,
-      [tenantId, a.name, email, role[0]?.role_id ?? 2, passwordHash, entityId],
+      [tenantId, a.name, email, role[0]?.role_id ?? 2, passwordHash, entityId, onboardingStatus],
     );
     const userId = userRows[0].user_id;
+    await this.dataSource.query(
+      `INSERT INTO user_roles (user_id, role_id, is_primary)
+       SELECT $1, $2, true
+       ON CONFLICT (user_id, role_id) DO UPDATE SET is_primary = EXCLUDED.is_primary`,
+      [userId, role[0]?.role_id ?? 2],
+    );
     await this.upsertEmployeeProfile(tenantId, userId, {
       employee_id: `SGVU-${applicantId.replace(/-/g, '').slice(0, 8).toUpperCase()}`,
       designation: 'Assistant Professor',
       joining_date: new Date().toISOString().slice(0, 10),
       entity_id: entityId,
     });
+    await this.dataSource.query(
+      `INSERT INTO user_entity_access (user_id, entity_id)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id, entity_id) DO NOTHING`,
+      [userId, entityId],
+    );
     await this.dataSource.query(
       `UPDATE hr_applicants SET stage = 'HIRED', hired_user_id = $2, updated_at = NOW() WHERE applicant_id = $1`,
       [applicantId, userId],

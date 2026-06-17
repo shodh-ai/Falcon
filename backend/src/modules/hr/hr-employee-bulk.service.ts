@@ -7,7 +7,9 @@ import { DataSource, QueryRunner } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as ExcelJS from 'exceljs';
 import { randomBytes } from 'crypto';
-import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import {
+  getInitialOnboardingStatusForRole,
+} from '../student-onboarding/onboarding-portal.util';
 
 export type EmployeeRowInput = {
   name: string;
@@ -248,12 +250,13 @@ export class HrEmployeeBulkService {
       throw new BadRequestException(`Email already exists: ${email}`);
     }
 
+    const roleName = row.role ?? 'Faculty';
     const roleRows = await qr.query(
       `SELECT role_id FROM roles WHERE lower(role_name) = lower($1) LIMIT 1`,
-      [row.role ?? 'Faculty'],
+      [roleName],
     );
     const roleId = roleRows[0]?.role_id;
-    if (!roleId) throw new BadRequestException(`Unknown role: ${row.role}`);
+    if (!roleId) throw new BadRequestException(`Unknown role: ${roleName}`);
 
     let deptId: number | null = null;
     if (row.department) {
@@ -270,13 +273,22 @@ export class HrEmployeeBulkService {
       row.employee_id ||
       `SGVU-${randomBytes(4).toString('hex').toUpperCase()}`;
 
+    const onboardingStatus = getInitialOnboardingStatusForRole(roleName);
+
     const userRows = await qr.query(
-      `INSERT INTO users (tenant_id, name, official_email, role_id, dept_id, password_hash, is_active, entity_id, phone, onboarding_status)
-       VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, 'PENDING_ONBOARDING')
+      `INSERT INTO users (tenant_id, name, official_email, role_id, dept_id, password_hash, is_active, entity_id, phone, onboarding_status, onboarding_profile)
+       VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9, '{}'::jsonb)
        RETURNING user_id`,
-      [tenantId, row.name, email, roleId, deptId, passwordHash, entityId, row.phone ?? null],
+      [tenantId, row.name, email, roleId, deptId, passwordHash, entityId, row.phone ?? null, onboardingStatus],
     );
     const userId = userRows[0].user_id as string;
+
+    await qr.query(
+      `INSERT INTO user_roles (user_id, role_id, is_primary)
+       VALUES ($1, $2, true)
+       ON CONFLICT (user_id, role_id) DO UPDATE SET is_primary = EXCLUDED.is_primary`,
+      [userId, roleId],
+    );
 
     await qr.query(
       `INSERT INTO hr_employee_profiles (tenant_id, user_id, employee_id, designation, joining_date, entity_id)
@@ -294,6 +306,13 @@ export class HrEmployeeBulkService {
         row.joining_date ?? new Date().toISOString().slice(0, 10),
         entityId,
       ],
+    );
+
+    await qr.query(
+      `INSERT INTO user_entity_access (user_id, entity_id)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id, entity_id) DO NOTHING`,
+      [userId, entityId],
     );
 
     const templates = await qr.query(

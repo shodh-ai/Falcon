@@ -7,6 +7,7 @@ import {
   getOnboardingConfigForRole,
   getOnboardingStepPath,
   isFirstLoginOnboardingComplete,
+  normalizeOnboardingStatus,
   type PortalOnboardingConfig,
 } from '@/lib/onboarding/portal-onboarding';
 import { FalconLoader } from '@/components/brand/FalconLoader';
@@ -29,10 +30,11 @@ export function PortalOnboardingGuard({
     const activeConfig = getOnboardingConfigForRole(user.primaryRole ?? user.role);
     if (!activeConfig || activeConfig.portalPrefix !== config.portalPrefix) return;
 
-    const status = user.onboarding_status ?? 'ACTIVE';
+    const role = user.primaryRole ?? user.role;
+    const status = normalizeOnboardingStatus(user.onboarding_status, role);
     const onboardingPrefix = `${config.portalPrefix}/onboarding`;
     const onOnboardingRoute = pathname.startsWith(onboardingPrefix);
-    const requiredPath = getOnboardingStepPath(config.portalPrefix, status);
+    const requiredPath = getOnboardingStepPath(config.portalPrefix, status, role);
 
     if (requiredPath && pathname !== requiredPath) {
       redirectingRef.current = true;
@@ -40,7 +42,7 @@ export function PortalOnboardingGuard({
       return;
     }
 
-    if (isFirstLoginOnboardingComplete(status) && onOnboardingRoute) {
+    if (isFirstLoginOnboardingComplete(status, role) && onOnboardingRoute) {
       redirectingRef.current = true;
       router.replace(config.dashboardPath);
     }

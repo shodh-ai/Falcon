@@ -20,6 +20,7 @@ import { Public } from '../common/decorators/roles.decorator';
 import { AuthService } from './auth.service';
 import { TenantService } from '../tenant/tenant.service';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
+import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { LocalLoginDto } from './dto/local-login.dto';
 
 type AuthProfileUser = {
@@ -89,9 +90,13 @@ export class AuthController {
     const allowedRows = user.tenant_id
       ? await this.hrEntityCtx.listAllowedEntities(user.tenant_id, user.user_id, roles)
       : [];
+    const primaryRole = user.primaryRole ?? user.role ?? roles[0];
     return {
       ...user,
-      onboarding_status: dbUser?.onboarding_status ?? 'ACTIVE',
+      onboarding_status: normalizeOnboardingStatusForWizard(
+        dbUser?.onboarding_status ?? 'ACTIVE',
+        primaryRole,
+      ),
       hr_capabilities: caps ?? {},
       permissions,
       allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),

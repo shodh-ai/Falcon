@@ -10,6 +10,7 @@ import {
 } from './interfaces/auth-provider.interface';
 import { TenantService } from '../tenant/tenant.service';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
+import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 
 type LoginCredentialRow = {
   user_id: string;
@@ -125,7 +126,10 @@ export class AuthService {
         hr_capabilities: caps ?? {},
         permissions,
         allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
-        onboarding_status: tokenUser.onboarding_status,
+        onboarding_status: normalizeOnboardingStatusForWizard(
+          tokenUser.onboarding_status,
+          roleClaims.primaryRole,
+        ),
       },
     };
   }

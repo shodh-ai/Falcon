@@ -51,8 +51,10 @@ export const STUDENT_DOC_LABELS: Record<string, string> = {
 export function getOnboardingStepPath(
   portalPrefix: PortalOnboardingConfig['portalPrefix'],
   status: string | undefined | null,
+  role?: string | null,
 ): string | null {
-  switch ((status ?? '').trim()) {
+  const normalized = normalizeOnboardingStatus(status, role);
+  switch (normalized) {
     case 'PENDING_PASSWORD_RESET':
       return `${portalPrefix}/onboarding/step-1`;
     case 'PENDING_DOCUMENTS':
@@ -64,9 +66,21 @@ export function getOnboardingStepPath(
   }
 }
 
-export function isFirstLoginOnboardingComplete(status: string | undefined | null): boolean {
-  const value = (status ?? 'ACTIVE').trim();
+export function isFirstLoginOnboardingComplete(status: string | undefined | null, role?: string | null): boolean {
+  const value = normalizeOnboardingStatus(status, role);
   return value === 'COMPLETED' || value === 'ACTIVE';
+}
+
+/** Map legacy HR statuses (PENDING_ONBOARDING) onto wizard steps for student/faculty/HOD. */
+export function normalizeOnboardingStatus(
+  status: string | undefined | null,
+  role?: string | null,
+): string {
+  const value = (status ?? 'ACTIVE').trim();
+  if (!getOnboardingConfigForRole(role)) return value;
+  if (value === 'PENDING_ONBOARDING') return 'PENDING_PASSWORD_RESET';
+  if (value === 'IN_PROGRESS') return 'PENDING_DOCUMENTS';
+  return value;
 }
 
 export function isStaffOnboardingRole(role: string | undefined | null): boolean {
