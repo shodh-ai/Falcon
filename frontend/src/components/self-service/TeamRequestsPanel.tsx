@@ -17,7 +17,8 @@ type TabId =
   | 'ON_DUTY'
   | 'COMP_OFF_CREDIT'
   | 'DOCUMENT'
-  | 'APPRAISAL';
+  | 'APPRAISAL'
+  | 'ATTENDANCE_OVERRIDE';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'LEAVE', label: 'Leaves' },
@@ -26,6 +27,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'COMP_OFF_CREDIT', label: 'Comp-Off' },
   { id: 'DOCUMENT', label: 'Document Approvals' },
   { id: 'APPRAISAL', label: 'Probation / Appraisals' },
+  { id: 'ATTENDANCE_OVERRIDE', label: 'Attendance' },
 ];
 
 type RequestItem = {
@@ -53,6 +55,7 @@ type PendingCounts = {
   compOff: number;
   documents: number;
   appraisals: number;
+  attendanceOverrides: number;
 };
 
 const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
@@ -75,6 +78,7 @@ const TAB_COUNT_KEY: Record<TabId, keyof PendingCounts> = {
   COMP_OFF_CREDIT: 'compOff',
   DOCUMENT: 'documents',
   APPRAISAL: 'appraisals',
+  ATTENDANCE_OVERRIDE: 'attendanceOverrides',
 };
 
 type Props = {
@@ -112,6 +116,7 @@ function RequestsContent({ defaultScope }: Props) {
         compOff: 0,
         documents: 0,
         appraisals: 0,
+        attendanceOverrides: 0,
       });
     }
   }
