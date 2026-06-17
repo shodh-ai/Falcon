@@ -68,12 +68,18 @@ export class TicketService {
       } as Partial<HelpdeskTicket>),
     );
 
+    const actionLink = dto.category === 'HR'
+      ? `/hr/grievances/${ticket.ticket_id}`
+      : dto.category === 'FACILITIES'
+        ? `/hr/grievances/${ticket.ticket_id}`
+        : `/helpdesk/tickets/${ticket.ticket_id}`;
+
     this.workflowNotify.notifyApprover({
       tenantId,
       approver: assignee,
       title: `Helpdesk: ${dto.subject}`,
       message: `${student?.name ?? 'Student'} opened a ${dto.category} ticket.`,
-      actionLink: `/helpdesk/tickets/${ticket.ticket_id}`,
+      actionLink,
       category: 'HELPDESK',
       requesterName: student?.name,
     });
@@ -145,6 +151,55 @@ export class TicketService {
 
   listTicketsForAssignee(assigneeUserId: string) {
     return this.ticketProvider.listTicketsForAssignee(assigneeUserId);
+  }
+
+  /** List all HR / Facilities grievance tickets for a tenant. */
+  async listHrGrievances(tenantId: string) {
+    return this.dataSource.query(
+      `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description,
+              t.status, t.escalation_level, t.created_at, t.sla_deadline, t.resolved_at,
+              t.rejection_reason,
+              u.name AS raised_by_name, u.official_email AS raised_by_email,
+              COALESCE(r.role_name, 'Staff') AS raised_by_role,
+              au.name AS assigned_to_name,
+              t.conversation
+       FROM helpdesk_tickets t
+       JOIN users u ON u.user_id = t.student_user_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN users au ON au.user_id = t.assigned_to_user_id
+       WHERE t.category IN ('HR', 'FACILITIES')
+         AND COALESCE(t.tenant_id, u.tenant_id) = $1
+         AND t.deleted_at IS NULL
+       ORDER BY
+         CASE t.status WHEN 'PENDING' THEN 0 WHEN 'IN_PROGRESS' THEN 1 ELSE 2 END,
+         t.created_at DESC`,
+      [tenantId],
+    );
+  }
+
+  /** Get a single HR grievance ticket by ID for the detail view. */
+  async getHrGrievance(ticketId: string, tenantId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description,
+              t.status, t.escalation_level, t.created_at, t.sla_deadline, t.resolved_at,
+              t.rejection_reason,
+              u.name AS raised_by_name, u.official_email AS raised_by_email,
+              COALESCE(r.role_name, 'Staff') AS raised_by_role,
+              au.name AS assigned_to_name,
+              t.conversation
+       FROM helpdesk_tickets t
+       JOIN users u ON u.user_id = t.student_user_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN users au ON au.user_id = t.assigned_to_user_id
+       WHERE t.ticket_id = $1
+         AND t.category IN ('HR', 'FACILITIES')
+         AND COALESCE(t.tenant_id, u.tenant_id) = $2
+         AND t.deleted_at IS NULL
+       LIMIT 1`,
+      [ticketId, tenantId],
+    );
+    if (!rows.length) throw new NotFoundException('Grievance ticket not found');
+    return rows[0];
   }
 
   async listProfileCorrectionTickets(tenantId: string, limit = 20) {
@@ -224,6 +279,8 @@ export class TicketService {
       'HOD',
       'Dean',
       'Faculty',
+      'HR',
+      'HRAdmin',
     ].includes(actorRole);
     if (!isStudentOwner && !isAdminActor) {
       throw new ForbiddenException('You are not allowed to post messages in this ticket');

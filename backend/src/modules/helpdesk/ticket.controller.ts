@@ -1,9 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { FeatureGuard } from '../../common/guards/feature.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { RequiresFeature } from '../../common/decorators/requires-feature.decorator';
 import { TicketService } from './ticket.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
@@ -26,8 +24,7 @@ const HELPDESK_REQUESTER_ROLES = [
 ] as const;
 
 @Controller('api/helpdesk/tickets')
-@UseGuards(JwtAuthGuard, RolesGuard, FeatureGuard)
-@RequiresFeature('helpdesk')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class TicketController {
   constructor(private readonly tickets: TicketService) {}
 
@@ -66,6 +63,18 @@ export class TicketController {
     );
   }
 
+  @Get('hr-grievances')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  listHrGrievances(@Req() req: { user: AuthUser }) {
+    return this.tickets.listHrGrievances(this.tenant(req));
+  }
+
+  @Get('hr-grievances/:ticketId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  getHrGrievance(@Req() req: { user: AuthUser }, @Param('ticketId') ticketId: string) {
+    return this.tickets.getHrGrievance(ticketId, this.tenant(req));
+  }
+
   @Get('profile-corrections')
   @Roles('SuperAdmin', 'Registrar', 'HOD', 'Dean', 'Admin')
   listProfileCorrections(@Req() req: { user: AuthUser }) {
@@ -77,7 +86,7 @@ export class TicketController {
   }
 
   @Patch(':ticketId/status')
-  @Roles('SuperAdmin', 'Registrar', 'Accountant', 'Warden', 'HOD', 'Dean')
+  @Roles('SuperAdmin', 'Registrar', 'Accountant', 'Warden', 'HOD', 'Dean', 'HR', 'HRAdmin')
   updateStatus(@Param('ticketId') ticketId: string, @Body() dto: UpdateTicketStatusDto) {
     return this.tickets.updateStatus(ticketId, dto);
   }

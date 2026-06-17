@@ -159,6 +159,18 @@ export class WorkflowRoutingService {
         if (admin) return admin;
         return this.getItAdmin(tenantId);
       }
+      case 'HR': {
+        const hrAdmin = await this.resolveUserByRole('HRAdmin', tenantId) || await this.resolveUserByRole('HR', tenantId);
+        if (hrAdmin) return hrAdmin;
+        return this.getHrAdmin(tenantId);
+      }
+      case 'FACILITIES': {
+        const facAdmin = await this.resolveUserByRole('Warden', tenantId) || await this.resolveUserByRole('SuperAdmin', tenantId);
+        if (facAdmin) return facAdmin;
+        const superAdmin = await this.resolveUserByRole('SuperAdmin', tenantId);
+        if (superAdmin) return superAdmin;
+        throw new NotFoundException('No facilities admin found for helpdesk routing');
+      }
       case 'HOSTEL': {
         try {
           return await this.getWardenForStudent(studentUserId);
