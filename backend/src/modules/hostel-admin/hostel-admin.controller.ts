@@ -127,19 +127,19 @@ export class HostelAdminController {
     return this.hostelAdmin.approveHostelRequest(this.ctx(req), requestId);
   }
 
-  @Patch('requests/:requestId/reject')
-  rejectRequest(@Req() req: { user: AuthUser }, @Param('requestId') requestId: string) {
-    return this.hostelAdmin.rejectHostelRequest(this.ctx(req), requestId);
-  }
+  // @Patch('requests/:requestId/reject')
+  // rejectRequest(@Req() req: { user: AuthUser }, @Param('requestId') requestId: string) {
+  //   return this.hostelAdmin.rejectHostelRequest(this.ctx(req), requestId);
+  // }
 
-  @Patch('gate-passes/:passId')
-  updateGatePass(
-    @Req() req: { user: AuthUser },
-    @Param('passId') passId: string,
-    @Body() dto: { status: 'APPROVED' | 'REJECTED' },
-  ) {
-    return this.hostelAdmin.updateGatePassStatus(this.ctx(req), passId, dto.status);
-  }
+  // @Patch('gate-passes/:passId')
+  // updateGatePass(
+  //   @Req() req: { user: AuthUser },
+  //   @Param('passId') passId: string,
+  //   @Body() dto: { status: 'APPROVED' | 'REJECTED' },
+  // ) {
+  //   return this.hostelAdmin.updateGatePassStatus(this.ctx(req), passId, dto.status);
+  // }
 
   @Get('visitors')
   visitors(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId: string) {

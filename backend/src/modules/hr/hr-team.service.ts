@@ -15,7 +15,8 @@ export type TeamRequestTab =
   | 'ON_DUTY'
   | 'COMP_OFF_CREDIT'
   | 'DOCUMENT'
-  | 'APPRAISAL';
+  | 'APPRAISAL'
+  | 'ATTENDANCE_OVERRIDE';
 
 const TAB_TO_TYPE: Record<TeamRequestTab, string> = {
   LEAVE: 'LEAVE',
@@ -24,6 +25,7 @@ const TAB_TO_TYPE: Record<TeamRequestTab, string> = {
   COMP_OFF_CREDIT: 'COMP_OFF_CREDIT',
   DOCUMENT: 'DOCUMENT',
   APPRAISAL: 'APPRAISAL',
+  ATTENDANCE_OVERRIDE: 'ATTENDANCE_OVERRIDE',
 };
 
 @Injectable()
@@ -388,6 +390,7 @@ export class HrTeamService {
       compOff: 0,
       documents: 0,
       appraisals: 0,
+      attendanceOverrides: 0,
     };
 
     if (!userIds.length) {
@@ -425,6 +428,15 @@ export class HrTeamService {
       [tenantId, ...params],
     );
 
+    const [attendanceOverrideRow] = await this.dataSource.query<Array<{ count: string }>>(
+      `SELECT COUNT(*)::text AS count
+       FROM course_attendance_overrides o
+       WHERE o.tenant_id = $1
+         AND o.status = 'PENDING'
+         AND o.faculty_user_id IN (SELECT u.user_id FROM users u WHERE 1=1 ${clause})`,
+      [tenantId, ...params],
+    );
+
     const byType = Object.fromEntries(workflowRows.map((r) => [r.request_type, Number(r.count)]));
 
     return {
@@ -435,6 +447,7 @@ export class HrTeamService {
       compOff: byType.COMP_OFF_CREDIT ?? 0,
       documents: Number(docRow?.count ?? 0),
       appraisals: Number(appraisalRow?.count ?? 0),
+      attendanceOverrides: Number(attendanceOverrideRow?.count ?? 0),
     };
   }
 
@@ -454,6 +467,9 @@ export class HrTeamService {
     }
     if (tabKey === 'APPRAISAL') {
       return this.listAppraisalApprovals(managerId, tenantId, scope);
+    }
+    if (tabKey === 'ATTENDANCE_OVERRIDE') {
+      return this.listAttendanceOverrides(managerId, tenantId, scope);
     }
 
     const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
@@ -578,6 +594,47 @@ export class HrTeamService {
     };
   }
 
+  private async listAttendanceOverrides(managerId: string, tenantId: string, scope: TeamScope) {
+    const { clause, params } = this.scope.scopeUserFilterSql(managerId, tenantId, scope, 'u', 2);
+    const rows = await this.dataSource.query(
+      `SELECT o.request_id, o.date, o.status, o.created_at,
+              c.course_name, c.course_code,
+              u.name AS employee_name, u.official_email AS employee_email, p.employee_id,
+              s.name AS student_name
+       FROM course_attendance_overrides o
+       JOIN users u ON u.user_id = o.faculty_user_id
+       JOIN users s ON s.user_id = o.student_user_id
+       JOIN academic_courses c ON c.course_id = o.course_id
+       LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = o.tenant_id
+       WHERE o.tenant_id = $1
+         AND o.status = 'PENDING'
+         AND o.faculty_user_id IN (SELECT u.user_id FROM users u WHERE 1=1 ${clause})
+       ORDER BY o.created_at ASC`,
+      [tenantId, ...params],
+    );
+
+    return {
+      scope,
+      tab: 'ATTENDANCE_OVERRIDE',
+      count: rows.length,
+      items: rows.map((r: Record<string, unknown>) => ({
+        id: r.request_id,
+        request_id: r.request_id,
+        request_type: 'ATTENDANCE_OVERRIDE',
+        leave_type: 'Attendance Adjustment',
+        applied_date: r.date,
+        raised_on: r.created_at,
+        reason: `${r.student_name} in ${r.course_code}`,
+        status: r.status,
+        employee: {
+          name: r.employee_name,
+          email: r.employee_email,
+          employee_id: r.employee_id,
+        },
+      })),
+    };
+  }
+
   async bulkActOnRequests(
     managerId: string,
     tenantId: string,
@@ -604,6 +661,90 @@ export class HrTeamService {
         `UPDATE hr_employee_appraisals SET hr_final_status = $1 WHERE appraisal_record_id = ANY($2::uuid[])`,
         [status, ids],
       );
+      return { processed: ids.length, action, tab: tabKey };
+    }
+
+    if (tabKey === 'ATTENDANCE_OVERRIDE') {
+      const status = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+      await this.dataSource.query(
+        `UPDATE course_attendance_overrides SET status = $1 WHERE request_id = ANY($2::uuid[])`,
+        [status, ids],
+      );
+
+      if (action === 'APPROVE') {
+        const rows = await this.dataSource.query<Array<{ request_id: string; tenant_id: string; course_id: string; faculty_user_id: string; student_user_id: string; date: string }>>(
+          `SELECT request_id, tenant_id, course_id, faculty_user_id, student_user_id, date FROM course_attendance_overrides WHERE request_id = ANY($1::uuid[])`,
+          [ids]
+        );
+
+        for (const r of rows) {
+          // Log it as present
+          await this.dataSource.query(
+            `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, attendance_data)
+             VALUES ($1, $2, $3, $4, $5::jsonb)
+             ON CONFLICT (tenant_id, course_id, faculty_user_id, date) DO UPDATE SET
+               attendance_data = (
+                 SELECT jsonb_agg(
+                   CASE
+                     WHEN elem->>'student_id' = $6 THEN jsonb_build_object('student_id', $6, 'status', 'PRESENT')
+                     ELSE elem
+                   END
+                 )
+                 FROM jsonb_array_elements(
+                   CASE
+                     WHEN jsonb_typeof(course_attendance_logs.attendance_data) = 'array' THEN course_attendance_logs.attendance_data
+                     ELSE '[]'::jsonb
+                   END
+                 ) AS elem
+               ) || (
+                 SELECT CASE
+                   WHEN NOT EXISTS (
+                     SELECT 1 FROM jsonb_array_elements(
+                       CASE
+                         WHEN jsonb_typeof(course_attendance_logs.attendance_data) = 'array' THEN course_attendance_logs.attendance_data
+                         ELSE '[]'::jsonb
+                       END
+                     ) AS e WHERE e->>'student_id' = $6
+                   )
+                   THEN jsonb_build_array(jsonb_build_object('student_id', $6, 'status', 'PRESENT'))
+                   ELSE '[]'::jsonb
+                 END
+               )`,
+            [r.tenant_id, r.course_id, r.faculty_user_id, r.date, JSON.stringify([{ student_id: r.student_user_id, status: 'PRESENT' }]), r.student_user_id]
+          );
+
+          // Need to recalculate percents. Let's just do it directly.
+          await this.dataSource.query(
+            `WITH session_data AS (
+               SELECT elem.value AS entry
+               FROM course_attendance_logs cal
+               CROSS JOIN LATERAL jsonb_array_elements(cal.attendance_data) AS elem
+               WHERE cal.tenant_id = $1 AND cal.course_id = $2
+             ),
+             student_stats AS (
+               SELECT
+                 entry->>'student_id' AS student_id,
+                 COUNT(*)::int AS total_sessions,
+                 SUM(
+                   CASE WHEN entry->>'status' IN ('PRESENT', 'LATE', 'EXCUSED') THEN 1 ELSE 0 END
+                 )::int AS present_sessions
+               FROM session_data
+               GROUP BY entry->>'student_id'
+             )
+             UPDATE student_course_enrollments e
+             SET attendance_percent = CASE
+                 WHEN s.total_sessions = 0 THEN 0
+                 ELSE ROUND((s.present_sessions::numeric / s.total_sessions) * 100, 2)
+               END
+             FROM student_stats s
+             WHERE e.tenant_id = $1
+               AND e.course_id = $2
+               AND e.student_user_id::text = s.student_id`,
+            [r.tenant_id, r.course_id]
+          );
+        }
+      }
+
       return { processed: ids.length, action, tab: tabKey };
     }
 
