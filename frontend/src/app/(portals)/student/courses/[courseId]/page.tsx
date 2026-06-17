@@ -72,7 +72,7 @@ export default function StudentCourseWorkspacePage() {
       />
 
       {tab === 'materials' ? (
-        <StudentMaterialsTab modules={data.modules} />
+        <StudentMaterialsTab modules={data.modules} syllabusMaterials={data.syllabus_materials} />
       ) : tab === 'assignments' ? (
         <StudentAssignmentsTab assignments={data.assignments} onSubmitted={load} />
       ) : (

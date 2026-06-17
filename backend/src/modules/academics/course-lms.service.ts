@@ -47,6 +47,7 @@ export class CourseLmsService {
     });
     return {
       course,
+      syllabus_materials: this.mapMaterials(materials.filter((m) => m.material_type === 'SYLLABUS')),
       modules: moduleRows.map((m) => this.mapModule(m, materials)),
       syllabus_configured: moduleRows.length > 0,
     };
@@ -192,6 +193,74 @@ export class CourseLmsService {
     return { module: mod, material };
   }
 
+  async uploadModuleMaterials(
+    facultyUserId: string,
+    tenantId: string,
+    moduleId: string,
+    files: Express.Multer.File[],
+    dto: { title?: string; material_type?: string },
+  ) {
+    const mod = await this.getModuleForFaculty(moduleId, facultyUserId, tenantId);
+    if (!files?.length) throw new BadRequestException('At least one file is required');
+
+    const course = await this.getCourseOrFail(mod.course_id, tenantId);
+    const materialType = (dto.material_type ?? 'NOTES').toUpperCase();
+    const materials = await Promise.all(
+      files.map(async (file) => {
+        const stored = await this.persistFile(tenantId, file);
+        return this.materials.save(
+          this.materials.create({
+            tenant_id: tenantId,
+            course_id: mod.course_id,
+            faculty_user_id: facultyUserId,
+            module_id: mod.module_id,
+            title: files.length === 1 && dto.title?.trim()
+              ? dto.title.trim()
+              : file.originalname.replace(/\.[^.]+$/, ''),
+            file_path: stored.filePath,
+            file_key: stored.fileKey,
+            material_type: materialType,
+          }),
+        );
+      }),
+    );
+
+    await Promise.all(
+      materials.map((material) =>
+        this.notifyEnrolledStudents(tenantId, mod.course_id, course.course_name, material.title),
+      ),
+    );
+
+    return { module: mod, materials };
+  }
+
+  async uploadCourseSyllabus(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    file: Express.Multer.File,
+    dto: { title?: string },
+  ) {
+    await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    if (!file) throw new BadRequestException('Syllabus file is required');
+    const course = await this.getCourseOrFail(courseId, tenantId);
+    const stored = await this.persistFile(tenantId, file);
+    const material = await this.materials.save(
+      this.materials.create({
+        tenant_id: tenantId,
+        course_id: courseId,
+        faculty_user_id: facultyUserId,
+        module_id: null,
+        title: dto.title?.trim() || 'Course Syllabus & Lesson Plan',
+        file_path: stored.filePath,
+        file_key: stored.fileKey,
+        material_type: 'SYLLABUS',
+      }),
+    );
+    await this.notifyEnrolledStudents(tenantId, courseId, course.course_name, material.title);
+    return { material };
+  }
+
   async getStudentWorkspace(studentUserId: string, tenantId: string, courseId: string) {
     const enrollment = await this.enrollments
       .createQueryBuilder('e')
@@ -233,6 +302,7 @@ export class CourseLmsService {
         percent: total > 0 ? Math.round((completed / total) * 100) : 0,
       },
       modules: modules.map((m) => this.mapModule(m, materials)),
+      syllabus_materials: this.mapMaterials(materials.filter((m) => m.material_type === 'SYLLABUS')),
       assignments: courseAssignments,
     };
   }
@@ -274,7 +344,7 @@ export class CourseLmsService {
   }
 
   private mapModule(mod: CourseModule, materials: CourseMaterial[]) {
-    const linked = materials.filter((m) => m.module_id === mod.module_id);
+    const linked = materials.filter((m) => m.module_id === mod.module_id && m.material_type !== 'SYLLABUS');
     return {
       module_id: mod.module_id,
       module_number: mod.module_number,
@@ -282,13 +352,17 @@ export class CourseLmsService {
       description: mod.description,
       status: mod.status,
       completed_at: mod.completed_at,
-      materials: linked.map((m) => ({
-        material_id: m.material_id,
-        title: m.title,
-        material_type: m.material_type,
-        uploaded_at: m.uploaded_at,
-      })),
+      materials: this.mapMaterials(linked),
     };
+  }
+
+  private mapMaterials(materials: CourseMaterial[]) {
+    return materials.map((m) => ({
+      material_id: m.material_id,
+      title: m.title,
+      material_type: m.material_type,
+      uploaded_at: m.uploaded_at,
+    }));
   }
 
   private async getCourseOrFail(courseId: string, tenantId: string) {

@@ -6,18 +6,19 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
-import type { LmsModule } from '@/lib/api/lms';
+import type { LmsMaterial, LmsModule } from '@/lib/api/lms';
 import { downloadWithAuth } from '@/lib/api/lms';
 
 type Props = {
   modules: LmsModule[];
+  syllabusMaterials?: LmsMaterial[];
 };
 
-export function StudentMaterialsTab({ modules }: Props) {
+export function StudentMaterialsTab({ modules, syllabusMaterials = [] }: Props) {
   const { token } = useAuth();
   const [openId, setOpenId] = useState<string | null>(modules[0]?.module_id ?? null);
 
-  if (!modules.length) {
+  if (!modules.length && syllabusMaterials.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
         Faculty has not published course materials yet.
@@ -27,6 +28,36 @@ export function StudentMaterialsTab({ modules }: Props) {
 
   return (
     <div className="space-y-2">
+      {syllabusMaterials.length > 0 ? (
+        <Card className="border-sgvu-gold/40 bg-sgvu-gold/10">
+          <CardContent className="space-y-2 p-4">
+            <p className="text-sm font-semibold text-sgvu-navy">Course Syllabus & Lesson Plan</p>
+            {syllabusMaterials.map((m) => (
+              <div key={m.material_id} className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <FileText className="h-4 w-4 text-sgvu-gold" />
+                  <span>{m.title}</span>
+                  <span className="text-xs text-muted-foreground">(SYLLABUS)</span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!token}
+                  onClick={() =>
+                    void downloadWithAuth(
+                      `/api/academics/student/courses/materials/${m.material_id}/download`,
+                      token!,
+                      m.title,
+                    )
+                  }
+                >
+                  Download
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
       {modules.map((mod) => {
         const expanded = openId === mod.module_id;
         return (
