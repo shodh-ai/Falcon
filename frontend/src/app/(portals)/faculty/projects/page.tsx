@@ -230,11 +230,15 @@ export default function FacultyProjectsPage() {
   };
 
   if (loading) {
-    return <FacultyPageShell title="Project & Lab Guides"><div className="p-8 text-center animate-pulse text-slate-500">Loading guides...</div></FacultyPageShell>;
+    return (
+      <FacultyPageShell>
+        <div className="p-8 text-center animate-pulse text-slate-500">Loading guides...</div>
+      </FacultyPageShell>
+    );
   }
 
   return (
-    <FacultyPageShell title="Project & Lab Guides">
+    <FacultyPageShell>
       <div className="flex justify-between items-center mb-6">
         <FacultyPageHeader description="Final-year B.Tech/MBA project supervision — track progress, students, and funding." />
         <Button onClick={() => setCreateModalOpen(true)} className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white shadow-lg shadow-sgvu-navy/20">
@@ -244,7 +248,7 @@ export default function FacultyProjectsPage() {
       </div>
 
       {guides.length === 0 ? (
-        <FacultyEmptyState message="No guided projects assigned currently." />
+        <FacultyEmptyState description="No guided projects assigned currently." />
       ) : (
         <div className="space-y-10">
           {/* Ongoing Projects Section */}
@@ -342,7 +346,7 @@ export default function FacultyProjectsPage() {
 
                     <CardFooter className="bg-slate-50 border-t border-slate-100 p-4 gap-2 flex-wrap">
                       <Button size="sm" variant="outline" className="text-indigo-600 border-indigo-200 hover:bg-indigo-50" onClick={() => {
-                        setSelectedStudents(g.students.map(s => ({ id: s.student_user_id, name: s.name, grade: s.grade })));
+                        setSelectedStudents(g.students.map(s => ({ id: s.student_user_id, name: s.name, grade: s.grade ?? undefined })));
                         setStudentModalOpen(g.guide_id);
                       }}>
                         <Users className="w-4 h-4 mr-2" /> Edit Students & Grades

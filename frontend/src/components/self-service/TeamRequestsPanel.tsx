@@ -115,6 +115,7 @@ function RequestsContent({ defaultScope }: Props) {
         compOff: Number(res.compOff) || 0,
         documents: Number(res.documents) || 0,
         appraisals: Number(res.appraisals) || 0,
+        attendanceOverrides: Number(res.attendanceOverrides) || 0,
         fundingRequests: pendingFunding,
       });
     } catch {

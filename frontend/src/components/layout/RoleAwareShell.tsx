@@ -13,7 +13,6 @@ import {
   facultyPortal,
   financePortal,
   hodPortal,
-  deanPortal,
   hostelAdminPortal,
   hrPortal,
   iqacPortal,

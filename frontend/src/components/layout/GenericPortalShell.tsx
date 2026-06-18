@@ -14,7 +14,6 @@ import {
   presidentPortal,
   alumniPortal,
   alumniAdminPortal,
-  deanPortal,
   adminOpsPortal,
   placementPortal,
 } from '@/lib/navigation';
