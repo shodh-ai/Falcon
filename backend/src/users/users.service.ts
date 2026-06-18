@@ -86,6 +86,13 @@ export class UsersService {
     return this.userRepository.save(user);
   }
 
+  async updateDeviceToken(userId: string, deviceToken: string): Promise<{ success: boolean }> {
+    const user = await this.findOneUser(userId);
+    user.expo_push_token = deviceToken;
+    await this.userRepository.save(user);
+    return { success: true };
+  }
+
   async deactivateUser(userId: string): Promise<User> {
     const user = await this.findOneUser(userId);
     user.is_active = false;

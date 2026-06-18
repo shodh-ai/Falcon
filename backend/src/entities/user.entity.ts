@@ -60,6 +60,9 @@ export class User extends BaseTenantEntity {
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone: string | null;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  expo_push_token: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 

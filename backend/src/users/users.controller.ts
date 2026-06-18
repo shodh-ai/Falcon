@@ -1,12 +1,13 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateDeviceTokenDto } from './dto/update-device-token.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 
-@Controller('users')
+@Controller(['users', 'api/users'])
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -44,6 +45,11 @@ export class UsersController {
   @Get('me')
   getMyProfile(@Req() req: any) {
     return this.usersService.findOneUser(req.user.user_id);
+  }
+
+  @Patch('me/device-token')
+  updateMyDeviceToken(@Req() req: any, @Body() dto: UpdateDeviceTokenDto) {
+    return this.usersService.updateDeviceToken(req.user.user_id, dto.device_token);
   }
 
   @Get('stats')
