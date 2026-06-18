@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import {
   financePortal,
   hodPortal,
+  deanPortal,
   hostelAdminPortal,
   iqacPortal,
   libraryPortal,
@@ -19,6 +20,7 @@ import {
 
 type PortalKey =
   | 'hod'
+  | 'dean'
   | 'hostel-admin'
   | 'finance'
   | 'iqac'
@@ -33,6 +35,7 @@ type PortalKey =
 
 const configs = {
   hod: hodPortal,
+  dean: deanPortal,
   'hostel-admin': hostelAdminPortal,
   finance: financePortal,
   iqac: iqacPortal,

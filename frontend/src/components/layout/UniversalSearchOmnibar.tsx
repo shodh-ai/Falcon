@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { GraduationCap, Search, Ticket, UserRound } from 'lucide-react';
 import {
@@ -18,6 +18,7 @@ import {
   HEADER_SEARCH_CLASS,
   HEADER_SEARCH_MOBILE_CLASS,
 } from '@/components/layout/header-styles';
+import type { NavGroup, NavItem } from '@/lib/navigation';
 
 type SearchItem = {
   id: string;
@@ -43,7 +44,11 @@ type SearchResponse = {
 const EXACT_TICKET = /^TKT-\d+$/i;
 const DEBOUNCE_MS = 300;
 
-export function UniversalSearchOmnibar() {
+interface UniversalSearchOmnibarProps {
+  navGroups?: NavGroup[];
+}
+
+export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmnibarProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -117,6 +122,25 @@ export function UniversalSearchOmnibar() {
     [api],
   );
 
+  /** Client-side nav filtering — instant, no API needed */
+  const matchedNavGroups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return navGroups
+      .map((group) => {
+        const filtered = !q
+          ? group.items                                 // show all when empty
+          : group.items.filter((item) => {
+              if (item.label.toLowerCase().includes(q)) return true;
+              if (item.keywords?.some((kw) => kw.toLowerCase().includes(q))) return true;
+              return false;
+            });
+        return { ...group, items: filtered };
+      })
+      .filter((group) => group.items.length > 0);
+  }, [query, navGroups]);
+
+  const hasMatchedNav = matchedNavGroups.some((g) => g.items.length > 0);
+
   const handleEnter = async () => {
     const q = query.trim();
     if (q.length < 2) return;
@@ -149,6 +173,10 @@ export function UniversalSearchOmnibar() {
       navigate(profile360Path((first as SearchItem).id));
     }
   };
+
+  const hasAnyResults =
+    hasMatchedNav ||
+    (results && (results.students.length > 0 || results.staff.length > 0 || results.tickets.length > 0));
 
   const emptyMessage =
     loading
@@ -183,15 +211,15 @@ export function UniversalSearchOmnibar() {
 
       <CommandDialog open={open} onOpenChange={setOpen}>
         <CommandInput
-          placeholder="Search students, staff, or tickets…"
+          placeholder="Search pages, people, or tickets…"
           value={query}
           onValueChange={setQuery}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void handleEnter();
           }}
         />
-        <CommandList className="max-h-[min(60vh,420px)]">
-          <CommandEmpty>{emptyMessage}</CommandEmpty>
+        <CommandList className="max-h-[min(70vh,540px)] overflow-y-auto">
+          {!hasAnyResults && <CommandEmpty>{emptyMessage}</CommandEmpty>}
 
           {results && results.students.length > 0 ? (
             <CommandGroup heading="Students">
@@ -251,6 +279,28 @@ export function UniversalSearchOmnibar() {
               ))}
             </CommandGroup>
           ) : null}
+
+          {matchedNavGroups.map((group) => (
+            <CommandGroup key={group.title} heading={group.title}>
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <CommandItem
+                    key={item.href}
+                    value={`nav-${item.href}-${item.label} ${item.keywords?.join(' ') ?? ''}`}
+                    onSelect={() => navigate(item.href)}
+                    className="cursor-pointer"
+                  >
+                    <Icon className="h-4 w-4 text-sgvu-gold" />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate font-medium">{item.label}</span>
+                    </div>
+                    <CommandShortcut>↵</CommandShortcut>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          ))}
         </CommandList>
       </CommandDialog>
     </>

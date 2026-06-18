@@ -13,7 +13,7 @@ INSERT INTO users (
   password_hash, is_active
 )
 SELECT
-  'b000000c-0000-4000-8000-00000000000c'::uuid,
+  gen_random_uuid(),
   t.tenant_id,
   'Super Admin',
   'superadmin@mygyanvihar.com',
@@ -22,6 +22,9 @@ SELECT
   p.hash,
   true
 FROM tenant t, pwd p, super_role sr, dept d
+WHERE NOT EXISTS (
+  SELECT 1 FROM users WHERE lower(official_email) = 'superadmin@mygyanvihar.com'
+)
 ON CONFLICT (tenant_id, official_email) DO UPDATE SET
   name = EXCLUDED.name,
   role_id = EXCLUDED.role_id,

@@ -39,4 +39,9 @@ export class ProposeEventDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   ticket_price?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  funds_needed?: number;
 }

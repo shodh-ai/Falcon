@@ -16,6 +16,15 @@ import {
   FacultyEmptyState,
 } from '@/components/faculty';
 
+function registrationBadge(ev: CampusEvent) {
+  return ev.is_paid ? `Paid registration — ₹${ev.ticket_price}` : 'Free registration';
+}
+
+function fundsBadge(ev: CampusEvent) {
+  const amount = Number(ev.funds_needed ?? 0);
+  return amount > 0 ? `Funds requested — ₹${amount}` : 'No university funds requested';
+}
+
 export default function FacultyEventApprovalsPage() {
   const api = useAuthedApi();
   const eventsApi = useMemo(() => createCampusEventsApi(api), [api]);
@@ -26,7 +35,7 @@ export default function FacultyEventApprovalsPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const rows = await eventsApi.pendingApprovals();
+    const rows = await eventsApi.facultyPending();
     setPending(rows);
   }, [eventsApi]);
 
@@ -40,7 +49,7 @@ export default function FacultyEventApprovalsPage() {
     setBusy(eventId);
     try {
       await eventsApi.approveAdvisor(eventId);
-      toast.success('Tier 1 approved — sent to Estate');
+      toast.success('Approved — sent to HOD for review');
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Approve failed');
@@ -76,11 +85,11 @@ export default function FacultyEventApprovalsPage() {
     <FacultyPageShell>
       <FacultyPageHeader
         title="Event Approvals"
-        description="Tier 1 — review content and relevance before Estate and Finance sign off."
+        description="Faculty coordinator — review club proposals before HOD and Dean sign-off."
       />
 
       {pending.length === 0 ? (
-        <FacultyEmptyState description="No pending event proposals." />
+        <FacultyEmptyState description="No pending event proposals for your clubs." />
       ) : (
         pending.map((ev) => (
           <Card key={ev.event_id} className="border-border/60 shadow-sm">
@@ -89,7 +98,10 @@ export default function FacultyEventApprovalsPage() {
                 <CardTitle className="text-lg">{ev.title}</CardTitle>
                 <p className="text-sm text-muted-foreground">{ev.club_name}</p>
               </div>
-              <Badge>{ev.is_paid ? `₹${ev.ticket_price}` : 'Free'}</Badge>
+              <div className="flex flex-col items-end gap-1">
+                <Badge variant="outline">{registrationBadge(ev)}</Badge>
+                <Badge>{fundsBadge(ev)}</Badge>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p>
@@ -97,6 +109,7 @@ export default function FacultyEventApprovalsPage() {
                 slots
               </p>
               {ev.description ? <p className="text-muted-foreground">{ev.description}</p> : null}
+              {ev.guest_speakers ? <p>Guests: {ev.guest_speakers}</p> : null}
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
@@ -111,6 +124,7 @@ export default function FacultyEventApprovalsPage() {
                   <X className="mr-1 h-4 w-4" />
                   Reject
                 </Button>
+                <Badge className="bg-sgvu-navy">→ HOD review next</Badge>
               </div>
               {rejectId === ev.event_id ? (
                 <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">

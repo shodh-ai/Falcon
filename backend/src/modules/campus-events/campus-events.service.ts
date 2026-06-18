@@ -18,8 +18,9 @@ import { FinanceService } from '../finance/finance.service';
 import { ProposeEventDto } from './dto/propose-event.dto';
 import { UpsertMasterCalendarDto } from './dto/master-calendar.dto';
 import { EstateApproveDto } from './dto/estate-approve.dto';
+import { FundTransferDto } from './dto/fund-transfer.dto';
 
-const HELD_VENUE_STATUSES = ['PENDING_ESTATE', 'PENDING_FINANCE', 'LIVE'];
+const HELD_VENUE_STATUSES = ['PENDING_HOD', 'PENDING_DEAN', 'PENDING_FINANCE', 'LIVE'];
 
 @Injectable()
 export class CampusEventsService {
@@ -37,18 +38,24 @@ export class CampusEventsService {
     return `FALCON-EVT-${registrationId.replace(/-/g, '').slice(0, 16).toUpperCase()}`;
   }
 
+  /** Skip blocked-date validation when master calendar table is not migrated yet. */
   private async assertDateNotBlocked(tenantId: string, eventDate: string) {
     const day = eventDate.slice(0, 10);
-    const blocked = await this.dataSource.query(
-      `SELECT title FROM campus_master_calendar
-       WHERE tenant_id = $1 AND date = $2::date AND is_blocked_for_events = true
-       LIMIT 1`,
-      [tenantId, day],
-    );
-    if (blocked[0]) {
-      throw new BadRequestException(
-        `This date is blocked on the master calendar (${blocked[0].title}). Choose another date.`,
+    try {
+      const blocked = await this.dataSource.query(
+        `SELECT title FROM campus_master_calendar
+         WHERE tenant_id = $1 AND date = $2::date AND is_blocked_for_events = true
+         LIMIT 1`,
+        [tenantId, day],
       );
+      if (blocked[0]) {
+        throw new BadRequestException(
+          `This date is blocked on the master calendar (${blocked[0].title}). Choose another date.`,
+        );
+      }
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      this.logger.warn(`Master calendar check skipped (schema): ${err}`);
     }
   }
 
@@ -121,7 +128,8 @@ export class CampusEventsService {
          AND DATE(e.event_date) = DATE($3::timestamptz)
          AND e.status = ANY($4::text[])
          AND e.advisor_approval = 'APPROVED'
-         AND e.estate_approval != 'REJECTED'
+         AND e.hod_approval != 'REJECTED'
+         AND e.dean_approval != 'REJECTED'
          AND ($5::uuid IS NULL OR e.event_id != $5::uuid)`,
       [tenantId, venueId, eventDate, HELD_VENUE_STATUSES, excludeEventId ?? null],
     );
@@ -152,7 +160,7 @@ export class CampusEventsService {
     }
   }
 
-  private async notifyFinanceHolders(tenantId: string, eventTitle: string, eventId: string) {
+  private async notifyFinanceHolders(tenantId: string, eventTitle: string, eventId: string, amount: number) {
     const users = await this.dataSource.query(
       `SELECT u.user_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
@@ -165,9 +173,59 @@ export class CampusEventsService {
         userId: u.user_id,
         eventId,
         eventTitle,
-        title: 'Paid club event — finance approval',
-        message: `"${eventTitle}" is ready for ledger mapping before going live.`,
+        title: 'Club event fund transfer required',
+        message: `"${eventTitle}" needs ₹${amount} transferred before going live.`,
         actionLink: '/finance/events',
+      });
+    }
+  }
+
+  private async notifyDepartmentHod(
+    tenantId: string,
+    facultyAdvisorId: string,
+    payload: { eventId: string; eventTitle: string; clubName: string },
+  ) {
+    const rows = await this.dataSource.query(
+      `SELECT d.hod_user_id FROM users fa
+       JOIN departments d ON d.dept_id = fa.dept_id
+       WHERE fa.user_id = $1 AND d.hod_user_id IS NOT NULL`,
+      [facultyAdvisorId],
+    );
+    const hodUserId = rows[0]?.hod_user_id;
+    if (!hodUserId) return;
+    this.notify.eventPendingEstate({
+      tenantId,
+      userId: hodUserId,
+      eventId: payload.eventId,
+      eventTitle: payload.eventTitle,
+      title: 'Club event needs HOD approval',
+      message: `${payload.clubName} — "${payload.eventTitle}" awaits your review.`,
+      actionLink: '/hod/events',
+    });
+  }
+
+  private async notifySchoolDean(
+    tenantId: string,
+    facultyAdvisorId: string,
+    payload: { eventId: string; eventTitle: string; clubName: string },
+  ) {
+    const rows = await this.dataSource.query(
+      `SELECT DISTINCT s.dean_user_id
+       FROM users fa
+       JOIN iam_programs p ON p.dept_id = fa.dept_id AND p.deleted_at IS NULL
+       JOIN schools s ON s.school_id = p.school_id AND s.deleted_at IS NULL
+       WHERE fa.user_id = $1 AND s.dean_user_id IS NOT NULL`,
+      [facultyAdvisorId],
+    );
+    for (const row of rows) {
+      this.notify.eventPendingEstate({
+        tenantId,
+        userId: row.dean_user_id,
+        eventId: payload.eventId,
+        eventTitle: payload.eventTitle,
+        title: 'Club event needs Dean approval',
+        message: `${payload.clubName} — "${payload.eventTitle}" awaits Dean sign-off.`,
+        actionLink: '/dean/events',
       });
     }
   }
@@ -179,13 +237,15 @@ export class CampusEventsService {
     );
     const e = rows[0];
     if (!e) return null;
-    const financeOk =
-      !e.is_paid || e.finance_approval === 'APPROVED' || e.finance_approval === 'NOT_REQUIRED';
+    const fundsNeeded = Number(e.funds_needed ?? 0);
+    const financeOk = fundsNeeded <= 0 || e.finance_approval === 'APPROVED';
     if (
       e.advisor_approval === 'APPROVED' &&
-      e.estate_approval === 'APPROVED' &&
+      e.hod_approval === 'APPROVED' &&
+      e.dean_approval === 'APPROVED' &&
       financeOk &&
-      e.status !== 'LIVE'
+      e.status !== 'LIVE' &&
+      e.status !== 'REJECTED'
     ) {
       const updated = await this.dataSource.query(
         `UPDATE campus_events SET status = 'LIVE', approved_at = COALESCE(approved_at, NOW())
@@ -220,7 +280,7 @@ export class CampusEventsService {
     roles: string[],
     eventId: string,
   ) {
-    if (roles.includes('SuperAdmin') || roles.includes('Dean')) return;
+    if (roles.includes('SuperAdmin')) return;
 
     const rows = await this.dataSource.query(
       `SELECT c.faculty_advisor_id
@@ -232,7 +292,7 @@ export class CampusEventsService {
     const event = rows[0];
     if (!event) throw new NotFoundException('Event not found');
     if (event.faculty_advisor_id !== userId) {
-      throw new ForbiddenException('Only the club faculty advisor or Dean may approve this event');
+      throw new ForbiddenException('Only the club faculty coordinator may approve this event');
     }
   }
 
@@ -260,6 +320,11 @@ export class CampusEventsService {
       throw new BadRequestException('Paid events require a ticket price greater than zero');
     }
 
+    const fundsNeeded = Number(dto.funds_needed ?? 0);
+    if (fundsNeeded < 0) {
+      throw new BadRequestException('Funds needed cannot be negative');
+    }
+
     let venueLabel = dto.venue ?? null;
     if (dto.venue_id) {
       const venueRows = await this.dataSource.query(
@@ -276,27 +341,26 @@ export class CampusEventsService {
       }
     }
 
-    const financeApproval = dto.is_paid ? 'PENDING' : 'NOT_REQUIRED';
+    const financeApproval = fundsNeeded > 0 ? 'PENDING' : 'NOT_REQUIRED';
 
     const inserted = await this.dataSource.query(
       `INSERT INTO campus_events (
-        tenant_id, club_id, title, description, guest_speakers, venue, venue_id, event_date,
-        total_slots, available_slots, is_paid, ticket_price, status,
-        advisor_approval, estate_approval, finance_approval
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,'PENDING_ADVISOR','PENDING','PENDING',$12)
+        tenant_id, club_id, title, description, venue, event_date,
+        total_slots, available_slots, is_paid, ticket_price, funds_needed, status,
+        advisor_approval, hod_approval, dean_approval, estate_approval, finance_approval
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,$10,'PENDING_ADVISOR','PENDING','PENDING','PENDING','NOT_REQUIRED',$11)
       RETURNING *`,
       [
         tenantId,
         dto.club_id,
         dto.title,
         dto.description ?? null,
-        dto.guest_speakers ?? null,
         venueLabel,
-        dto.venue_id ?? null,
         dto.event_date,
         dto.total_slots,
         dto.is_paid,
         price,
+        fundsNeeded,
         financeApproval,
       ],
     );
@@ -311,7 +375,7 @@ export class CampusEventsService {
         eventTitle: dto.title,
         clubName: club.name,
         title: 'New club event proposal',
-        message: `${club.name} proposed "${dto.title}" for faculty approval.`,
+        message: `${club.name} proposed "${dto.title}" for faculty coordinator approval.`,
         actionLink: '/faculty/event-approvals',
       });
     }
@@ -325,26 +389,95 @@ export class CampusEventsService {
   }
 
   async listPendingApprovals(tenantId: string, advisorId: string, roles: string[]) {
-    if (roles.includes('SuperAdmin') || roles.includes('Dean')) {
+    const allScope = roles.includes('SuperAdmin');
+    const params = allScope ? [tenantId] : [tenantId, advisorId];
+    const clubJoin = allScope
+      ? 'LEFT JOIN campus_clubs c ON c.club_id = e.club_id'
+      : 'JOIN campus_clubs c ON c.club_id = e.club_id';
+    const advisorFilter = allScope ? '' : ' AND c.faculty_advisor_id = $2';
+    const baseSelect = `SELECT e.*, c.name AS club_name, e.venue AS venue_asset_name
+       FROM campus_events e
+       ${clubJoin}`;
+
+    try {
+      return await this.dataSource.query(
+        `${baseSelect}
+         WHERE e.tenant_id = $1 AND e.status = 'PENDING_ADVISOR' AND e.advisor_approval = 'PENDING'${advisorFilter}
+         ORDER BY e.created_at ASC`,
+        params,
+      );
+    } catch (err) {
+      this.logger.warn(`Pending approvals query fallback (schema): ${err}`);
       return this.dataSource.query(
-        `SELECT e.*, c.name AS club_name, a.name AS venue_asset_name
+        `${baseSelect}
+         WHERE e.tenant_id = $1 AND e.status = 'PENDING_ADVISOR'${advisorFilter}
+         ORDER BY e.created_at ASC`,
+        params,
+      );
+    }
+  }
+
+  async listPendingHodApprovals(tenantId: string, hodUserId: string, roles: string[]) {
+    const allScope = roles.includes('SuperAdmin');
+    const params = allScope ? [tenantId] : [tenantId, hodUserId];
+    const hodFilter = allScope
+      ? ''
+      : ` AND EXISTS (
+           SELECT 1 FROM campus_clubs c
+           JOIN users fa ON fa.user_id = c.faculty_advisor_id
+           JOIN departments d ON d.dept_id = fa.dept_id
+           WHERE c.club_id = e.club_id AND d.hod_user_id = $2
+         )`;
+
+    return this.dataSource.query(
+      `SELECT e.*, c.name AS club_name, e.venue AS venue_asset_name
+       FROM campus_events e
+       LEFT JOIN campus_clubs c ON c.club_id = e.club_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'PENDING_HOD'
+         AND e.hod_approval = 'PENDING'
+         AND e.advisor_approval = 'APPROVED'${hodFilter}
+       ORDER BY e.created_at ASC`,
+      params,
+    );
+  }
+
+  async listPendingDeanApprovals(tenantId: string, deanUserId: string, roles: string[]) {
+    const allScope = roles.includes('SuperAdmin');
+    if (allScope) {
+      return this.dataSource.query(
+        `SELECT e.*, c.name AS club_name, e.venue AS venue_asset_name
          FROM campus_events e
          LEFT JOIN campus_clubs c ON c.club_id = e.club_id
-         LEFT JOIN university_assets a ON a.asset_id = e.venue_id
-         WHERE e.tenant_id = $1 AND e.status = 'PENDING_ADVISOR' AND e.advisor_approval = 'PENDING'
+         WHERE e.tenant_id = $1
+           AND e.status = 'PENDING_DEAN'
+           AND e.dean_approval = 'PENDING'
+           AND e.hod_approval = 'APPROVED'
          ORDER BY e.created_at ASC`,
         [tenantId],
       );
     }
+
     return this.dataSource.query(
-      `SELECT e.*, c.name AS club_name, a.name AS venue_asset_name
+      `SELECT e.*, c.name AS club_name, e.venue AS venue_asset_name
        FROM campus_events e
-       JOIN campus_clubs c ON c.club_id = e.club_id
-       LEFT JOIN university_assets a ON a.asset_id = e.venue_id
-       WHERE e.tenant_id = $1 AND e.status = 'PENDING_ADVISOR' AND e.advisor_approval = 'PENDING'
-         AND c.faculty_advisor_id = $2
+       LEFT JOIN campus_clubs c ON c.club_id = e.club_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'PENDING_DEAN'
+         AND e.dean_approval = 'PENDING'
+         AND e.hod_approval = 'APPROVED'
+         AND (
+           EXISTS (
+             SELECT 1 FROM campus_clubs c2
+             JOIN users fa ON fa.user_id = c2.faculty_advisor_id
+             JOIN iam_programs p ON p.dept_id = fa.dept_id AND p.deleted_at IS NULL
+             JOIN schools s ON s.school_id = p.school_id AND s.deleted_at IS NULL
+             WHERE c2.club_id = e.club_id AND s.dean_user_id = $2
+           )
+           OR EXISTS (SELECT 1 FROM schools s WHERE s.dean_user_id = $2 AND s.deleted_at IS NULL)
+         )
        ORDER BY e.created_at ASC`,
-      [tenantId, advisorId],
+      [tenantId, deanUserId],
     );
   }
 
@@ -352,7 +485,7 @@ export class CampusEventsService {
     await this.assertCanModerateEvent(tenantId, userId, roles, eventId);
     const rows = await this.dataSource.query(
       `UPDATE campus_events
-       SET advisor_approval = 'APPROVED', status = 'PENDING_ESTATE',
+       SET advisor_approval = 'APPROVED', status = 'PENDING_HOD',
            approved_by = $3, approved_at = NOW(), rejection_comment = NULL
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_ADVISOR' AND advisor_approval = 'PENDING'
        RETURNING *`,
@@ -361,16 +494,17 @@ export class CampusEventsService {
     if (!rows[0]) throw new BadRequestException('Event not found or already processed');
     const event = rows[0];
     const clubRows = await this.dataSource.query(
-      `SELECT name FROM campus_clubs WHERE club_id = $1`,
+      `SELECT name, faculty_advisor_id FROM campus_clubs WHERE club_id = $1`,
       [event.club_id],
     );
-    await this.notifyRoleHolders(tenantId, ['Registrar', 'Dean', 'SuperAdmin'], {
-      eventId,
-      eventTitle: event.title,
-      title: 'Venue & security approval needed',
-      message: `${clubRows[0]?.name ?? 'Club'} — "${event.title}" awaits estate sign-off.`,
-      actionLink: '/admin-ops/events',
-    });
+    const clubName = clubRows[0]?.name ?? 'Club';
+    if (clubRows[0]?.faculty_advisor_id) {
+      await this.notifyDepartmentHod(tenantId, clubRows[0].faculty_advisor_id, {
+        eventId,
+        eventTitle: event.title,
+        clubName,
+      });
+    }
     return event;
   }
 
@@ -387,6 +521,156 @@ export class CampusEventsService {
        SET status = 'REJECTED', advisor_approval = 'REJECTED', rejection_comment = $3,
            approved_by = $4, approved_at = NOW()
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_ADVISOR'
+       RETURNING *`,
+      [eventId, tenantId, comment, userId],
+    );
+    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    return rows[0];
+  }
+
+  private async assertCanApproveHod(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    eventId: string,
+  ) {
+    if (roles.includes('SuperAdmin')) return;
+    const rows = await this.dataSource.query(
+      `SELECT d.hod_user_id
+       FROM campus_events e
+       JOIN campus_clubs c ON c.club_id = e.club_id
+       JOIN users fa ON fa.user_id = c.faculty_advisor_id
+       JOIN departments d ON d.dept_id = fa.dept_id
+       WHERE e.event_id = $1 AND e.tenant_id = $2`,
+      [eventId, tenantId],
+    );
+    if (!rows[0]) throw new NotFoundException('Event not found');
+    if (rows[0].hod_user_id !== userId) {
+      throw new ForbiddenException('Only the department HOD may approve this event');
+    }
+  }
+
+  async approveHodEvent(tenantId: string, userId: string, roles: string[], eventId: string) {
+    await this.assertCanApproveHod(tenantId, userId, roles, eventId);
+    const rows = await this.dataSource.query(
+      `UPDATE campus_events
+       SET hod_approval = 'APPROVED', status = 'PENDING_DEAN',
+           hod_approved_by = $3, hod_approved_at = NOW(), rejection_comment = NULL
+       WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_HOD' AND hod_approval = 'PENDING'
+       RETURNING *`,
+      [eventId, tenantId, userId],
+    );
+    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    const event = rows[0];
+    const clubRows = await this.dataSource.query(
+      `SELECT name, faculty_advisor_id FROM campus_clubs WHERE club_id = $1`,
+      [event.club_id],
+    );
+    if (clubRows[0]?.faculty_advisor_id) {
+      await this.notifySchoolDean(tenantId, clubRows[0].faculty_advisor_id, {
+        eventId,
+        eventTitle: event.title,
+        clubName: clubRows[0]?.name ?? 'Club',
+      });
+    }
+    return event;
+  }
+
+  async rejectHodEvent(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    eventId: string,
+    comment: string,
+  ) {
+    await this.assertCanApproveHod(tenantId, userId, roles, eventId);
+    const rows = await this.dataSource.query(
+      `UPDATE campus_events
+       SET status = 'REJECTED', hod_approval = 'REJECTED', rejection_comment = $3,
+           hod_approved_by = $4, hod_approved_at = NOW()
+       WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_HOD'
+       RETURNING *`,
+      [eventId, tenantId, comment, userId],
+    );
+    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    return rows[0];
+  }
+
+  private async assertCanApproveDean(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    eventId: string,
+  ) {
+    if (roles.includes('SuperAdmin')) return;
+    const rows = await this.dataSource.query(
+      `SELECT e.event_id,
+              EXISTS (
+                SELECT 1 FROM campus_clubs c
+                JOIN users fa ON fa.user_id = c.faculty_advisor_id
+                JOIN iam_programs p ON p.dept_id = fa.dept_id AND p.deleted_at IS NULL
+                JOIN schools s ON s.school_id = p.school_id AND s.deleted_at IS NULL
+                WHERE c.club_id = e.club_id AND s.dean_user_id = $3
+              ) AS scoped_match,
+              EXISTS (
+                SELECT 1 FROM schools s
+                WHERE s.dean_user_id = $3 AND s.deleted_at IS NULL
+              ) AS is_dean
+       FROM campus_events e
+       WHERE e.event_id = $1 AND e.tenant_id = $2`,
+      [eventId, tenantId, userId],
+    );
+    if (!rows[0]) throw new NotFoundException('Event not found');
+    if (!rows[0].scoped_match && !rows[0].is_dean) {
+      throw new ForbiddenException('Only the school Dean may approve this event');
+    }
+  }
+
+  async approveDeanEvent(tenantId: string, userId: string, roles: string[], eventId: string) {
+    await this.assertCanApproveDean(tenantId, userId, roles, eventId);
+    const current = await this.dataSource.query(
+      `SELECT * FROM campus_events WHERE event_id = $1 AND tenant_id = $2`,
+      [eventId, tenantId],
+    );
+    if (!current[0] || current[0].status !== 'PENDING_DEAN') {
+      throw new BadRequestException('Event not awaiting Dean approval');
+    }
+    const fundsNeeded = Number(current[0].funds_needed ?? 0);
+
+    const rows = await this.dataSource.query(
+      `UPDATE campus_events
+       SET dean_approval = 'APPROVED',
+           dean_approved_by = $3,
+           dean_approved_at = NOW(),
+           rejection_comment = NULL,
+           status = $4,
+           finance_approval = CASE WHEN $5 > 0 THEN 'PENDING' ELSE finance_approval END
+       WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_DEAN' AND dean_approval = 'PENDING'
+       RETURNING *`,
+      [eventId, tenantId, userId, fundsNeeded > 0 ? 'PENDING_FINANCE' : 'PENDING_DEAN', fundsNeeded],
+    );
+    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    const event = rows[0];
+    if (fundsNeeded > 0) {
+      await this.notifyFinanceHolders(tenantId, event.title, eventId, fundsNeeded);
+      return event;
+    }
+    return this.tryPublishLive(tenantId, eventId);
+  }
+
+  async rejectDeanEvent(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    eventId: string,
+    comment: string,
+  ) {
+    await this.assertCanApproveDean(tenantId, userId, roles, eventId);
+    const rows = await this.dataSource.query(
+      `UPDATE campus_events
+       SET status = 'REJECTED', dean_approval = 'REJECTED', rejection_comment = $3,
+           dean_approved_by = $4, dean_approved_at = NOW()
+       WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_DEAN'
        RETURNING *`,
       [eventId, tenantId, comment, userId],
     );
@@ -467,7 +751,7 @@ export class CampusEventsService {
         [eventId],
       );
       event.status = 'PENDING_FINANCE';
-      await this.notifyFinanceHolders(tenantId, event.title, eventId);
+      await this.notifyFinanceHolders(tenantId, event.title, eventId, Number(event.funds_needed ?? event.ticket_price ?? 0));
     } else {
       await this.tryPublishLive(tenantId, eventId);
     }
@@ -488,27 +772,50 @@ export class CampusEventsService {
 
   async listFinancePending(tenantId: string) {
     return this.dataSource.query(
-      `SELECT e.*, c.name AS club_name, cl.name AS club_ledger
+      `SELECT e.*, c.name AS club_name
        FROM campus_events e
        LEFT JOIN campus_clubs c ON c.club_id = e.club_id
-       WHERE e.tenant_id = $1 AND e.status = 'PENDING_FINANCE' AND e.is_paid = true
-         AND e.advisor_approval = 'APPROVED' AND e.estate_approval = 'APPROVED'
+       WHERE e.tenant_id = $1
+         AND e.status = 'PENDING_FINANCE'
+         AND COALESCE(e.funds_needed, 0) > 0
+         AND e.advisor_approval = 'APPROVED'
+         AND e.hod_approval = 'APPROVED'
+         AND e.dean_approval = 'APPROVED'
+         AND e.finance_approval = 'PENDING'
        ORDER BY e.created_at ASC`,
       [tenantId],
     );
   }
 
-  async approveFinance(tenantId: string, userId: string, eventId: string, ledgerCode?: string) {
+  async approveFinance(tenantId: string, userId: string, eventId: string, dto: FundTransferDto) {
+    const current = await this.dataSource.query(
+      `SELECT * FROM campus_events WHERE event_id = $1 AND tenant_id = $2`,
+      [eventId, tenantId],
+    );
+    if (!current[0] || current[0].status !== 'PENDING_FINANCE') {
+      throw new BadRequestException('Event not found or not awaiting fund transfer');
+    }
+    const fundsNeeded = Number(current[0].funds_needed ?? 0);
+    if (dto.transfer_amount <= 0) {
+      throw new BadRequestException('Transfer amount must be greater than zero');
+    }
+    if (dto.transfer_amount > fundsNeeded) {
+      throw new BadRequestException(`Transfer amount cannot exceed requested funds (₹${fundsNeeded})`);
+    }
+
     const rows = await this.dataSource.query(
       `UPDATE campus_events
        SET finance_approval = 'APPROVED',
            finance_ledger_code = COALESCE($3, finance_ledger_code, 'EVENTS_CLUB'),
-           approved_by = $4
+           fund_transfer_amount = $4,
+           fund_transfer_ref = $5,
+           fund_transferred_by = $6,
+           fund_transferred_at = NOW()
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_FINANCE'
        RETURNING *`,
-      [eventId, tenantId, ledgerCode ?? null, userId],
+      [eventId, tenantId, dto.ledger_code ?? null, dto.transfer_amount, dto.transfer_ref, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or not awaiting finance');
+    if (!rows[0]) throw new BadRequestException('Event not found or not awaiting fund transfer');
     return this.tryPublishLive(tenantId, eventId);
   }
 

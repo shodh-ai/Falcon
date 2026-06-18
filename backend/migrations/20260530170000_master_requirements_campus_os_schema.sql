@@ -344,9 +344,14 @@ CREATE TABLE IF NOT EXISTS student_grievance_tickets (
   resolved_at TIMESTAMPTZ
 );
 
-ALTER TABLE student_exit_clearance_tasks ADD COLUMN IF NOT EXISTS approved_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL;
-ALTER TABLE student_exit_clearance_tasks ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
-ALTER TABLE student_exit_clearance_tasks ADD COLUMN IF NOT EXISTS due_date DATE;
+DO $$
+BEGIN
+  IF to_regclass('public.student_exit_clearance_tasks') IS NOT NULL THEN
+    ALTER TABLE student_exit_clearance_tasks ADD COLUMN IF NOT EXISTS approved_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL;
+    ALTER TABLE student_exit_clearance_tasks ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+    ALTER TABLE student_exit_clearance_tasks ADD COLUMN IF NOT EXISTS due_date DATE;
+  END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Placement & Training Module
@@ -367,9 +372,14 @@ CREATE TABLE IF NOT EXISTS company_master (
   UNIQUE (tenant_id, company_name)
 );
 
-ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS company_master_id UUID REFERENCES company_master(company_id) ON DELETE SET NULL;
-ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS designation VARCHAR(120);
-ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS is_primary_contact BOOLEAN NOT NULL DEFAULT TRUE;
+DO $$
+BEGIN
+  IF to_regclass('public.placement_companies') IS NOT NULL THEN
+    ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS company_master_id UUID REFERENCES company_master(company_id) ON DELETE SET NULL;
+    ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS designation VARCHAR(120);
+    ALTER TABLE placement_companies ADD COLUMN IF NOT EXISTS is_primary_contact BOOLEAN NOT NULL DEFAULT TRUE;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS hr_contact_database (
   contact_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

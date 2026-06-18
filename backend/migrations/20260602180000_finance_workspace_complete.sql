@@ -180,6 +180,12 @@ CREATE TABLE IF NOT EXISTS finance_bulk_jobs (
   completed_at TIMESTAMPTZ NULL
 );
 
+-- Legacy DBs may lack inline UNIQUE; ON CONFLICT requires a matching unique index
+CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_ledger_accounts_tenant_code
+  ON finance_ledger_accounts(tenant_id, account_code);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_expense_heads_tenant_code
+  ON finance_expense_heads(tenant_id, head_code);
+
 -- Seed default ledger accounts for tenant SGVU demo
 INSERT INTO finance_ledger_accounts (tenant_id, account_code, account_name, account_type)
 SELECT t.tenant_id, v.code, v.name, v.typ

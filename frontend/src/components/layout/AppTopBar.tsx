@@ -76,7 +76,7 @@ export function AppTopBar({
           <div className="hidden sm:flex">
             <WorkspaceSwitcher />
           </div>
-          <UniversalSearchOmnibar />
+          <UniversalSearchOmnibar navGroups={config.navGroups} />
           <QuickActionMenu />
           <LiveNotificationBell />
           <ProfileMenu profileHref={profileHref} />

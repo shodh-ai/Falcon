@@ -83,9 +83,8 @@ export class HrEntityContextService {
              SELECT uea.entity_id FROM user_entity_access uea WHERE uea.user_id = $2
            )
            OR oe.entity_id = (
-             SELECT COALESCE(u.entity_id, p.entity_id)
+             SELECT u.entity_id
              FROM users u
-             LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
              WHERE u.user_id = $2 AND u.tenant_id = $1
            )
          )

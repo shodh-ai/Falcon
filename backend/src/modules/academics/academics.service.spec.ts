@@ -29,7 +29,11 @@ describe('AcademicsService', () => {
 
   const mockUsers = {
     find: jest.fn(),
+    findOne: jest.fn(),
     update: jest.fn(),
+    manager: {
+      query: jest.fn(),
+    },
   };
 
   const mockStudentProfiles = {
@@ -80,6 +84,33 @@ describe('AcademicsService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('Dean scope resolution', () => {
+    it('resolves departments from assigned schools via programs', async () => {
+      mockUsers.manager.query
+        .mockResolvedValueOnce([
+          { school_id: 1, school_name: 'School of Engineering & Technology', school_code: 'SOET' },
+        ])
+        .mockResolvedValueOnce([{ dept_id: 10 }, { dept_id: 11 }]);
+      mockUsers.findOne.mockResolvedValue(null);
+
+      const scope = await (service as any).resolveDeanScope('dean-user-id');
+
+      expect(scope.schoolIds).toEqual([1]);
+      expect(scope.departmentIds).toEqual([10, 11]);
+      expect(scope.schools[0].school_name).toBe('School of Engineering & Technology');
+    });
+
+    it('falls back to dean dept_id when no school programs are linked', async () => {
+      mockUsers.manager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockUsers.findOne.mockResolvedValue({ user_id: 'dean-user-id', dept_id: 5 });
+
+      const scope = await (service as any).resolveDeanScope('dean-user-id');
+
+      expect(scope.schoolIds).toEqual([]);
+      expect(scope.departmentIds).toEqual([5]);
+    });
   });
 
   describe('listProfileUpdateRequests', () => {
