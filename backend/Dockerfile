@@ -1,6 +1,6 @@
 # Build stage — force devDependencies even when Coolify injects NODE_ENV=production at build time
-# Default to AWS Public ECR (Docker Hub mirror); override with node:20-alpine if your host has reliable Hub access
-ARG NODE_IMAGE=public.ecr.aws/docker/library/node:20-alpine
+# Default: Docker Hub. Override NODE_IMAGE at build time if your host prefers a mirror (e.g. public.ecr.aws/docker/library/node:20-alpine).
+ARG NODE_IMAGE=node:20-alpine
 FROM ${NODE_IMAGE} AS builder
 
 WORKDIR /app
@@ -15,7 +15,7 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 
 # Production stage — reuse pruned node_modules from builder (avoids a second full npm ci)
-ARG NODE_IMAGE=public.ecr.aws/docker/library/node:20-alpine
+ARG NODE_IMAGE=node:20-alpine
 FROM ${NODE_IMAGE} AS production
 
 WORKDIR /app

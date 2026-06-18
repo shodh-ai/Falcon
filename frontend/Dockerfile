@@ -1,5 +1,5 @@
 # Optional — Coolify should use Nixpacks (see nixpacks.toml). Base Directory: frontend
-ARG NODE_IMAGE=public.ecr.aws/docker/library/node:20-alpine
+ARG NODE_IMAGE=node:20-alpine
 FROM ${NODE_IMAGE} AS builder
 
 WORKDIR /app
@@ -13,7 +13,7 @@ RUN npm ci --include=dev
 COPY . .
 RUN NODE_ENV=production npm run build
 
-ARG NODE_IMAGE=public.ecr.aws/docker/library/node:20-alpine
+ARG NODE_IMAGE=node:20-alpine
 FROM ${NODE_IMAGE} AS production
 
 WORKDIR /app
