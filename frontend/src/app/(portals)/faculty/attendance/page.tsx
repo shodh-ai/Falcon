@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { BookOpen, Check, X } from 'lucide-react';
+import { AlertTriangle, BookOpen, Check, Send, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 import {
@@ -37,6 +37,36 @@ type Student = {
   roll_number: string;
 };
 
+type MissingAttendanceAlert = {
+  timetable_id: string;
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  start_time: string;
+  end_time: string;
+  student_count: number;
+};
+
+type AttendanceAnalytics = {
+  health: {
+    scheduled_classes: number;
+    conducted_classes: number;
+    average_attendance_percent: number;
+  };
+  defaulters: {
+    student_user_id: string;
+    name: string;
+    roll_number: string;
+    attendance_percent: string;
+  }[];
+  habitual_absentees: {
+    student_user_id: string;
+    name: string;
+    roll_number: string;
+    missed_count: number;
+  }[];
+};
+
 type UiStatus = 'PRESENT' | 'ABSENT';
 
 function todayIso() {
@@ -52,8 +82,10 @@ function MarkAttendanceContent() {
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
   const [classes, setClasses] = useState<FacultyClass[]>([]);
+  const [missingAlerts, setMissingAlerts] = useState<MissingAttendanceAlert[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(initialCourseId);
   const [students, setStudents] = useState<Student[]>([]);
+  const [analytics, setAnalytics] = useState<AttendanceAnalytics | null>(null);
   const [attendance, setAttendance] = useState<Record<string, UiStatus>>({});
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [locked, setLocked] = useState(false);
@@ -90,8 +122,10 @@ function MarkAttendanceContent() {
   useEffect(() => {
     void api
       .get<FacultyClass[]>('/api/academics/faculty/timetable/today')
-      .then((data) => {
+      .then(async (data) => {
+        const missing = await api.get<MissingAttendanceAlert[]>('/api/academics/faculty/attendance/missing').catch(() => []);
         setClasses(data);
+        setMissingAlerts(missing);
         if (data.length === 0) {
           setSelectedCourseId(null);
           return;
@@ -114,8 +148,12 @@ function MarkAttendanceContent() {
             `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
           ),
         ]);
+        const courseAnalytics = await api
+          .get<AttendanceAnalytics>(`/api/academics/faculty/course/${selectedCourseId}/attendance/analytics`)
+          .catch(() => null);
         if (cancelled) return;
         setStudents(roster);
+        setAnalytics(courseAnalytics);
         setLocked(state.locked);
         const map: Record<string, UiStatus> = {};
         for (const s of roster) map[s.student_id] = 'PRESENT';
@@ -174,10 +212,28 @@ function MarkAttendanceContent() {
       } else {
         toast.success(`Attendance saved · ${synced} student${synced === 1 ? '' : 's'} synced to enrollment %`);
       }
+      setMissingAlerts((prev) => prev.filter((row) => row.course_id !== selectedCourseId));
+      const courseAnalytics = await api
+        .get<AttendanceAnalytics>(`/api/academics/faculty/course/${selectedCourseId}/attendance/analytics`)
+        .catch(() => null);
+      setAnalytics(courseAnalytics);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function sendWarnings() {
+    if (!selectedCourseId || !analytics?.defaulters.length) return;
+    try {
+      const result = await api.post<{ notified: number }>(
+        `/api/academics/faculty/course/${selectedCourseId}/attendance/warnings`,
+        { student_ids: analytics.defaulters.map((row) => row.student_user_id) },
+      );
+      toast.success(`Warning sent to ${result.notified} student${result.notified === 1 ? '' : 's'} and linked parents`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Warning failed');
     }
   }
 
@@ -198,6 +254,33 @@ function MarkAttendanceContent() {
           </Button>
         }
       />
+
+      {missingAlerts.length > 0 ? (
+        <div className="sticky top-3 z-20 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-red-950 shadow-lg">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-700" />
+              <div>
+                <p className="font-bold">ACTION REQUIRED: Unmarked attendance</p>
+                <p className="text-sm">
+                  You have unmarked attendance for {missingAlerts[0].course_code} from{' '}
+                  {String(missingAlerts[0].start_time).slice(0, 5)} today.
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                setSelectedCourseId(missingAlerts[0].course_id);
+                setSelectedDate(todayIso());
+              }}
+            >
+              Click here to mark now
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {classes.length === 0 ? (
         <FacultyEmptyState
@@ -244,6 +327,84 @@ function MarkAttendanceContent() {
               <FacultyInlineLoading label="Loading roster…" />
             ) : (
               <div className="space-y-4">
+                {analytics ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <FacultyMetricChip
+                        label="Scheduled classes"
+                        value={`${analytics.health.scheduled_classes}`}
+                      />
+                      <FacultyMetricChip
+                        label="Conducted"
+                        value={`${analytics.health.conducted_classes}`}
+                        emphasis
+                      />
+                      <FacultyMetricChip
+                        label="Avg attendance"
+                        value={`${analytics.health.average_attendance_percent}%`}
+                      />
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      <div className="rounded-xl border border-red-200 bg-red-50/80 p-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-bold text-red-950">Danger Zone: Below 75%</p>
+                            <p className="text-xs text-red-900/80">Pre-filtered defaulters list</p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            disabled={analytics.defaulters.length === 0}
+                            onClick={() => void sendWarnings()}
+                            className="gap-1.5"
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                            Send Warning Alert
+                          </Button>
+                        </div>
+                        {analytics.defaulters.length === 0 ? (
+                          <p className="text-sm text-red-900/80">No student is below 75%.</p>
+                        ) : (
+                          <div className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-background">
+                            <table className="w-full text-xs">
+                              <tbody>
+                                {analytics.defaulters.map((row) => (
+                                  <tr key={row.student_user_id} className="border-b last:border-0">
+                                    <td className="px-2 py-1.5 font-medium text-sgvu-navy">{row.name}</td>
+                                    <td className="px-2 py-1.5 text-muted-foreground">{row.roll_number}</td>
+                                    <td className="px-2 py-1.5 text-right font-bold text-red-700">
+                                      {Number(row.attendance_percent).toFixed(2)}%
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+                        <p className="text-sm font-bold text-amber-950">Habitual Absentees</p>
+                        <p className="mb-2 text-xs text-amber-900/80">Missed the last 3 consecutive classes</p>
+                        {analytics.habitual_absentees.length === 0 ? (
+                          <p className="text-sm text-amber-900/80">No habitual absentees in the last 3 classes.</p>
+                        ) : (
+                          <ul className="space-y-1 text-sm">
+                            {analytics.habitual_absentees.map((row) => (
+                              <li key={row.student_user_id} className="rounded-lg border bg-background px-3 py-2">
+                                <span className="font-medium text-sgvu-navy">{row.name}</span>
+                                <span className="ml-2 text-xs text-muted-foreground">{row.roll_number}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <input
                     type="date"

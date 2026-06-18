@@ -46,11 +46,13 @@ import { HrPayrollProcessor } from './hr-payroll.processor';
 import { HrTeamScopeService } from './hr-team-scope.service';
 import { HrTeamService } from './hr-team.service';
 import { FinanceModule } from '../finance/finance.module';
+import { NotificationsModule } from '../../core/notifications/notifications.module';
 
 @Module({
   imports: [
     ConfigModule,
     FinanceModule,
+    NotificationsModule,
     BullModule.registerQueue({ name: HR_DOCUMENT_EXPORT_QUEUE }),
     BullModule.registerQueue({ name: HR_PAYROLL_QUEUE }),
     TypeOrmModule.forFeature([

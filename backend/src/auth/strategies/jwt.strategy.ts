@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../auth.service';
+import { normalizeOnboardingStatusForWizard } from '../../modules/student-onboarding/onboarding-portal.util';
 import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
 
 @Injectable()
@@ -62,7 +63,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       dept_id: user.dept_id,
       tenant_id: payload.tenantId,
       tenant_schema: payload.tenantSchema ?? 'public',
-      onboarding_status: user.onboarding_status,
+      onboarding_status: normalizeOnboardingStatusForWizard(
+        user.onboarding_status,
+        roleClaims.primaryRole,
+      ),
     };
 
     if (payload.impersonator_user_id) {

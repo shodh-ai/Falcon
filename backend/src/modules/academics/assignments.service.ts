@@ -60,6 +60,7 @@ export class AssignmentsService {
       title?: string;
       description?: string;
       max_marks?: string | number;
+      start_date?: string;
       due_date?: string;
     },
     file?: Express.Multer.File,
@@ -69,6 +70,11 @@ export class AssignmentsService {
     }
 
     await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
+    const startDate = dto.start_date ? new Date(dto.start_date) : new Date();
+    const dueDate = new Date(dto.due_date);
+    if (startDate > dueDate) {
+      throw new BadRequestException('Publish date must be before the deadline');
+    }
 
     const stored = file ? await this.persistAssignmentFile(tenantId, 'assignment-references', file) : null;
     const row = this.assignments.create({
@@ -80,10 +86,51 @@ export class AssignmentsService {
       reference_file_path: stored?.filePath ?? null,
       reference_file_key: stored?.fileKey ?? null,
       max_marks: Number(dto.max_marks),
-      due_date: new Date(dto.due_date),
+      start_date: startDate,
+      due_date: dueDate,
     });
 
     return this.assignments.save(row);
+  }
+
+  async updateFacultyAssignment(
+    facultyUserId: string,
+    tenantId: string,
+    assignmentId: string,
+    dto: {
+      title?: string;
+      description?: string;
+      max_marks?: string | number;
+      start_date?: string;
+      due_date?: string;
+    },
+    file?: Express.Multer.File,
+  ) {
+    const assignment = await this.assignments.findOne({
+      where: { tenant_id: tenantId, assignment_id: assignmentId, faculty_user_id: facultyUserId },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+
+    if (dto.title?.trim()) assignment.title = dto.title.trim();
+    if (dto.description !== undefined) assignment.description = dto.description?.trim() || null;
+    if (dto.max_marks !== undefined) {
+      const maxMarks = Number(dto.max_marks);
+      if (Number.isNaN(maxMarks) || maxMarks <= 0) throw new BadRequestException('Invalid max_marks');
+      assignment.max_marks = maxMarks;
+    }
+    if (dto.start_date) assignment.start_date = new Date(dto.start_date);
+    if (dto.due_date) assignment.due_date = new Date(dto.due_date);
+    if (assignment.start_date > assignment.due_date) {
+      throw new BadRequestException('Publish date must be before the deadline');
+    }
+
+    if (file) {
+      const stored = await this.persistAssignmentFile(tenantId, 'assignment-references', file);
+      assignment.reference_file_path = stored.filePath;
+      assignment.reference_file_key = stored.fileKey;
+    }
+
+    return this.assignments.save(assignment);
   }
 
   async listAssignmentRoster(facultyUserId: string, tenantId: string, assignmentId: string) {
@@ -188,6 +235,7 @@ export class AssignmentsService {
       .leftJoinAndSelect('assignment.course', 'course')
       .where('assignment.tenant_id = :tenantId', { tenantId })
       .andWhere('assignment.course_id IN (:...courseIds)', { courseIds })
+      .andWhere('assignment.start_date <= NOW()')
       .orderBy('assignment.due_date', 'ASC')
       .getMany();
 
@@ -223,6 +271,10 @@ export class AssignmentsService {
       where: { tenant_id: tenantId, assignment_id: assignmentId },
     });
     if (!assignment) throw new NotFoundException('Assignment not found');
+
+    if (new Date() < new Date(assignment.start_date)) {
+      throw new ForbiddenException('This assignment is not visible yet.');
+    }
 
     if (new Date() > new Date(assignment.due_date)) {
       throw new ForbiddenException('The deadline for this assignment has passed.');

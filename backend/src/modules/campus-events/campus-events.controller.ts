@@ -7,6 +7,7 @@ import { ProposeEventDto } from './dto/propose-event.dto';
 import { RejectEventDto } from './dto/reject-event.dto';
 import { UpsertMasterCalendarDto } from './dto/master-calendar.dto';
 import { EstateApproveDto } from './dto/estate-approve.dto';
+import { FundTransferDto } from './dto/fund-transfer.dto';
 
 type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
 
@@ -155,7 +156,7 @@ export class CampusEventsController {
   }
 
   @Get('approvals/pending')
-  @Roles('Faculty', 'Dean', 'SuperAdmin')
+  @Roles('Faculty', 'SuperAdmin')
   pendingApprovals(@Req() req: { user: AuthUser }) {
     return this.events.listPendingApprovals(
       this.tenant(req),
@@ -164,8 +165,18 @@ export class CampusEventsController {
     );
   }
 
+  @Get('approvals/faculty/pending')
+  @Roles('Faculty', 'SuperAdmin')
+  facultyPending(@Req() req: { user: AuthUser }) {
+    return this.events.listPendingApprovals(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles ?? [],
+    );
+  }
+
   @Post('approvals/:id/approve')
-  @Roles('Faculty', 'Dean', 'SuperAdmin')
+  @Roles('Faculty', 'SuperAdmin')
   approve(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     return this.events.approveEvent(
       this.tenant(req),
@@ -176,9 +187,75 @@ export class CampusEventsController {
   }
 
   @Post('approvals/:id/reject')
-  @Roles('Faculty', 'Dean', 'SuperAdmin')
+  @Roles('Faculty', 'SuperAdmin')
   reject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
     return this.events.rejectEvent(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles ?? [],
+      id,
+      dto.comment,
+    );
+  }
+
+  @Get('approvals/hod/pending')
+  @Roles('HOD', 'SuperAdmin')
+  hodPending(@Req() req: { user: AuthUser }) {
+    return this.events.listPendingHodApprovals(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles ?? [],
+    );
+  }
+
+  @Post('approvals/hod/:id/approve')
+  @Roles('HOD', 'SuperAdmin')
+  hodApprove(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.events.approveHodEvent(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles ?? [],
+      id,
+    );
+  }
+
+  @Post('approvals/hod/:id/reject')
+  @Roles('HOD', 'SuperAdmin')
+  hodReject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
+    return this.events.rejectHodEvent(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles ?? [],
+      id,
+      dto.comment,
+    );
+  }
+
+  @Get('approvals/dean/pending')
+  @Roles('Dean', 'SuperAdmin')
+  deanPending(@Req() req: { user: AuthUser }) {
+    return this.events.listPendingDeanApprovals(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles ?? [],
+    );
+  }
+
+  @Post('approvals/dean/:id/approve')
+  @Roles('Dean', 'SuperAdmin')
+  deanApprove(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.events.approveDeanEvent(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles ?? [],
+      id,
+    );
+  }
+
+  @Post('approvals/dean/:id/reject')
+  @Roles('Dean', 'SuperAdmin')
+  deanReject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
+    return this.events.rejectDeanEvent(
       this.tenant(req),
       req.user.user_id,
       req.user.roles ?? [],
@@ -211,14 +288,22 @@ export class CampusEventsController {
     return this.events.listFinancePending(this.tenant(req));
   }
 
+  @Get('funding/pending')
+  @Roles('Accountant', 'SuperAdmin')
+  fundingPending(@Req() req: { user: AuthUser }) {
+    return this.events.listFinancePending(this.tenant(req));
+  }
+
   @Post('finance-approvals/:id/approve')
   @Roles('Accountant', 'SuperAdmin')
-  financeApprove(
-    @Req() req: { user: AuthUser },
-    @Param('id') id: string,
-    @Body() dto: { ledger_code?: string },
-  ) {
-    return this.events.approveFinance(this.tenant(req), req.user.user_id, id, dto.ledger_code);
+  financeApprove(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: FundTransferDto) {
+    return this.events.approveFinance(this.tenant(req), req.user.user_id, id, dto);
+  }
+
+  @Post('funding/:id/transfer')
+  @Roles('Accountant', 'SuperAdmin')
+  fundingTransfer(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: FundTransferDto) {
+    return this.events.approveFinance(this.tenant(req), req.user.user_id, id, dto);
   }
 
   @Post('finance-approvals/:id/reject')

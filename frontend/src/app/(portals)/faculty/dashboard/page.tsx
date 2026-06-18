@@ -34,6 +34,16 @@ type FacultyClass = {
   student_count: number;
 };
 
+type MissingAttendanceAlert = {
+  timetable_id: string;
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  start_time: string;
+  end_time: string;
+  student_count: number;
+};
+
 type HrSummary = {
   today: { check_in_at: string | null; check_out_at: string | null } | null;
   week_hours: number;
@@ -60,6 +70,7 @@ const PROFILE_COMPLIANCE_KEY = 'faculty-profile-compliance-dismissed';
 export default function FacultyDashboardPage() {
   const api = useAuthedApi();
   const [classes, setClasses] = useState<FacultyClass[]>([]);
+  const [missingAttendance, setMissingAttendance] = useState<MissingAttendanceAlert[]>([]);
   const [hrSummary, setHrSummary] = useState<HrSummary | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovals>({ certificates: [] });
   const [gatePassApprovals, setGatePassApprovals] = useState<GatePassApproval[]>([]);
@@ -81,8 +92,9 @@ export default function FacultyDashboardPage() {
       try {
         setLoading(true);
         setError(null);
-        const [classData, hrData, approvalData, gatePassData, balanceData, complianceData] = await Promise.all([
+        const [classData, missingAttendanceData, hrData, approvalData, gatePassData, balanceData, complianceData] = await Promise.all([
           api.get<FacultyClass[]>('/api/academics/faculty/timetable/today').catch(() => []),
+          api.get<MissingAttendanceAlert[]>('/api/academics/faculty/attendance/missing').catch(() => []),
           api.get<HrSummary>('/api/hr/workforce/today').catch(() =>
             api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null),
           ),
@@ -95,6 +107,7 @@ export default function FacultyDashboardPage() {
         ]);
         if (!cancelled) {
           setClasses(classData);
+          setMissingAttendance(missingAttendanceData);
           setHrSummary(hrData);
           setPendingApprovals(approvalData);
           setGatePassApprovals(gatePassData);
@@ -145,6 +158,27 @@ export default function FacultyDashboardPage() {
         title="Good morning — here is your day"
         description="Classes, attendance, approvals, and HR at a glance."
       />
+
+      {missingAttendance.length > 0 ? (
+        <div className="sticky top-3 z-20 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-red-950 shadow-lg">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-700" />
+              <div>
+                <p className="font-bold">ACTION REQUIRED: You have unmarked attendance</p>
+                <p className="text-sm">
+                  {missingAttendance[0].course_code} from {String(missingAttendance[0].start_time).slice(0, 5)} today has not been marked.
+                </p>
+              </div>
+            </div>
+            <Button variant="destructive" asChild>
+              <Link href={`/faculty/attendance?courseId=${encodeURIComponent(missingAttendance[0].course_id)}`}>
+                Click here to mark now
+              </Link>
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {!complianceDismissed && profileCompliance?.needs_academic_profile && (
         <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-amber-300/80 bg-amber-50 px-4 py-3 text-sm text-amber-950">

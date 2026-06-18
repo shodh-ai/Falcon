@@ -10,6 +10,7 @@ import { StudentCourseEnrollment } from '../../entities/student-course-enrollmen
 import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity';
 import { CourseMaterial } from '../../entities/course-material.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 
 export interface FacultyTodayClassDto {
@@ -34,7 +35,12 @@ export interface ClassStudentDto {
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const ROLL_NUMBER_SQL = `COALESCE(sp.enrollment_number, sp.admission_number, sp.enrollment_no, u.user_id::text)`;
+const ROLL_NUMBER_SQL = `COALESCE(
+  NULLIF(BTRIM(sp.enrollment_no), ''),
+  NULLIF(BTRIM(sp.enrollment_number), ''),
+  NULLIF(BTRIM(sp.admission_number), ''),
+  u.user_id::text
+)`;
 
 function localDateString(date = new Date()): string {
   const y = date.getFullYear();
@@ -58,6 +64,7 @@ export class AcademicsFacultyService {
     @InjectRepository(CourseMaterial)
     private readonly courseMaterials: Repository<CourseMaterial>,
     private readonly objectStorage: ObjectStorageService,
+    private readonly notificationEmitter: NotificationEmitterService,
   ) {}
 
   async getFacultyTodayClasses(facultyUserId: string): Promise<FacultyTodayClassDto[]> {
@@ -287,6 +294,175 @@ export class AcademicsFacultyService {
     };
   }
 
+  async getMissingAttendanceAlerts(facultyUserId: string, tenantId: string) {
+    const isoDay = new Date().getDay() === 0 ? 7 : new Date().getDay();
+    return this.dataSource.query(
+      `SELECT
+         t.timetable_id,
+         t.course_id,
+         c.course_code,
+         c.course_name,
+         t.start_time,
+         t.end_time,
+         COUNT(e.enrollment_id)::int AS student_count
+       FROM academic_timetables t
+       INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       LEFT JOIN student_course_enrollments e
+         ON e.tenant_id = t.tenant_id
+        AND e.course_id = t.course_id
+        AND e.status = 'ENROLLED'
+       LEFT JOIN course_attendance_logs cal
+         ON cal.tenant_id = t.tenant_id
+        AND cal.course_id = t.course_id
+        AND cal.faculty_user_id = t.faculty_user_id
+        AND cal.date = CURRENT_DATE
+       WHERE t.tenant_id = $1
+         AND t.faculty_user_id = $2
+         AND t.day_of_week = $3
+         AND t.end_time < CURRENT_TIME
+         AND cal.log_id IS NULL
+       GROUP BY t.timetable_id, t.course_id, c.course_code, c.course_name, t.start_time, t.end_time
+       ORDER BY t.start_time ASC`,
+      [tenantId, facultyUserId, isoDay],
+    );
+  }
+
+  async getAttendanceAnalytics(courseId: string, facultyUserId: string, tenantId: string) {
+    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const [health] = await this.dataSource.query<
+      Array<{ scheduled_classes: string; conducted_classes: string; average_attendance_percent: string | null }>
+    >(
+      `WITH conducted AS (
+         SELECT
+           cal.log_id,
+           COUNT(entries.value)::numeric AS total_students,
+           COUNT(entries.value) FILTER (
+             WHERE entries.value->>'status' IN ('PRESENT', 'LATE', 'EXCUSED')
+           )::numeric AS present_students
+         FROM course_attendance_logs cal
+         CROSS JOIN LATERAL jsonb_array_elements(cal.attendance_data) entries(value)
+         WHERE cal.tenant_id = $1
+           AND cal.course_id = $2
+           AND cal.faculty_user_id = $3
+         GROUP BY cal.log_id
+       )
+       SELECT
+         (SELECT COUNT(*)::text FROM academic_timetables WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3) AS scheduled_classes,
+         COUNT(*)::text AS conducted_classes,
+         ROUND(AVG((present_students / NULLIF(total_students, 0)) * 100), 2)::text AS average_attendance_percent
+       FROM conducted`,
+      [tenantId, courseId, facultyUserId],
+    );
+
+    const defaulters = await this.dataSource.query(
+      `SELECT
+         e.student_user_id,
+         u.name,
+         ${ROLL_NUMBER_SQL} AS roll_number,
+         COALESCE(e.attendance_percent, 0)::numeric(5,2)::text AS attendance_percent
+       FROM student_course_enrollments e
+       INNER JOIN users u ON u.user_id = e.student_user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       WHERE e.tenant_id = $1
+         AND e.course_id = $2
+         AND e.status = 'ENROLLED'
+         AND COALESCE(e.attendance_percent, 0) < 75
+       ORDER BY COALESCE(e.attendance_percent, 0) ASC, u.name ASC`,
+      [tenantId, courseId],
+    );
+
+    const habitualAbsentees = await this.dataSource.query(
+      `WITH last_logs AS (
+         SELECT log_id, attendance_data, date
+         FROM course_attendance_logs
+         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+         ORDER BY date DESC
+         LIMIT 3
+       ),
+       absences AS (
+         SELECT entry.value->>'student_id' AS student_user_id, COUNT(*)::int AS missed_count
+         FROM last_logs
+         CROSS JOIN LATERAL jsonb_array_elements(attendance_data) entry(value)
+         WHERE entry.value->>'status' = 'ABSENT'
+         GROUP BY entry.value->>'student_id'
+       )
+       SELECT
+         a.student_user_id,
+         u.name,
+         ${ROLL_NUMBER_SQL} AS roll_number,
+         a.missed_count
+       FROM absences a
+       INNER JOIN users u ON u.user_id::text = a.student_user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       WHERE a.missed_count >= 3
+       ORDER BY u.name ASC`,
+      [tenantId, courseId, facultyUserId],
+    );
+
+    return {
+      health: {
+        scheduled_classes: Number(health?.scheduled_classes ?? 0),
+        conducted_classes: Number(health?.conducted_classes ?? 0),
+        average_attendance_percent: Number(health?.average_attendance_percent ?? 0),
+      },
+      defaulters,
+      habitual_absentees: habitualAbsentees,
+    };
+  }
+
+  async sendAttendanceWarnings(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+    studentIds: string[],
+  ) {
+    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+    const ids = [...new Set((studentIds ?? []).filter(Boolean))];
+    if (!ids.length) throw new BadRequestException('Select at least one student');
+
+    const rows = await this.dataSource.query<
+      Array<{ student_user_id: string; attendance_percent: string; course_name: string }>
+    >(
+      `SELECT e.student_user_id, COALESCE(e.attendance_percent, 0)::text AS attendance_percent, c.course_name
+       FROM student_course_enrollments e
+       INNER JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       WHERE e.tenant_id = $1
+         AND e.course_id = $2
+         AND e.student_user_id = ANY($3::uuid[])`,
+      [tenantId, courseId, ids],
+    );
+
+    const parentRows = await this.dataSource.query<Array<{ student_user_id: string; parent_user_id: string }>>(
+      `SELECT student_user_id, parent_user_id
+       FROM parent_student_links
+       WHERE tenant_id = $1 AND student_user_id = ANY($2::uuid[]) AND parent_user_id IS NOT NULL`,
+      [tenantId, ids],
+    ).catch(() => []);
+    const parentsByStudent = new Map<string, string[]>();
+    for (const row of parentRows) {
+      const list = parentsByStudent.get(row.student_user_id) ?? [];
+      list.push(row.parent_user_id);
+      parentsByStudent.set(row.student_user_id, list);
+    }
+
+    for (const row of rows) {
+      const percent = Number(row.attendance_percent ?? 0);
+      const payload = {
+        tenantId,
+        attendancePercent: percent,
+        title: 'Attendance warning',
+        message: `Your attendance in ${row.course_name} is ${percent.toFixed(2)}%. Please attend upcoming classes.`,
+        actionLink: '/student/attendance',
+      };
+      this.notificationEmitter.attendanceWarning({ ...payload, userId: row.student_user_id });
+      for (const parentUserId of parentsByStudent.get(row.student_user_id) ?? []) {
+        this.notificationEmitter.attendanceWarning({ ...payload, userId: parentUserId });
+      }
+    }
+
+    return { notified: rows.length };
+  }
+
   async saveCourseAttendanceLog(
     facultyUserId: string,
     tenantId: string,
@@ -368,21 +544,38 @@ export class AcademicsFacultyService {
     dto: { course_id?: string; title?: string },
     file: Express.Multer.File,
   ) {
+    const result = await this.uploadCourseMaterials(facultyUserId, tenantId, dto, [file]);
+    return result.materials[0];
+  }
+
+  async uploadCourseMaterials(
+    facultyUserId: string,
+    tenantId: string,
+    dto: { course_id?: string; title?: string; material_type?: string },
+    files: Express.Multer.File[],
+  ) {
     if (!dto.course_id || !dto.title?.trim()) {
       throw new NotFoundException('Course and title are required');
     }
+    if (!files?.length) throw new BadRequestException('At least one file is required');
     await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
-    const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
-    const stored = await this.persistMaterialFile(tenantId, uniqueName, file);
-    const row = this.courseMaterials.create({
-      tenant_id: tenantId,
-      course_id: dto.course_id,
-      faculty_user_id: facultyUserId,
-      title: dto.title.trim(),
-      file_path: stored.filePath,
-      file_key: stored.fileKey,
-    });
-    return this.courseMaterials.save(row);
+    const materials = await Promise.all(
+      files.map(async (file) => {
+        const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
+        const stored = await this.persistMaterialFile(tenantId, uniqueName, file);
+        const row = this.courseMaterials.create({
+          tenant_id: tenantId,
+          course_id: dto.course_id,
+          faculty_user_id: facultyUserId,
+          title: files.length === 1 ? dto.title!.trim() : file.originalname.replace(/\.[^.]+$/, ''),
+          file_path: stored.filePath,
+          file_key: stored.fileKey,
+          material_type: (dto.material_type ?? 'NOTES').toUpperCase(),
+        });
+        return this.courseMaterials.save(row);
+      }),
+    );
+    return { materials };
   }
 
   private formatTime12h(hhmm: string): string {

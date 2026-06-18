@@ -256,4 +256,79 @@ export class FinanceService {
       return total - paid > 0;
     });
   }
+
+  async listFundingRequests(tenantId: string) {
+    return this.demands.manager.query(
+      `SELECT fr.*, g.project_title, u.name AS faculty_name, d.dept_name
+       FROM project_funding_requests fr
+       INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
+       INNER JOIN users u ON u.user_id = fr.requested_by
+       INNER JOIN departments d ON d.dept_id = u.dept_id
+       WHERE fr.tenant_id = $1 AND fr.status IN ('APPROVED_DEAN', 'TRANSFERRED')
+       ORDER BY CASE fr.status WHEN 'TRANSFERRED' THEN 1 ELSE 0 END, fr.created_at DESC`,
+      [tenantId]
+    );
+  }
+
+  async transferFunding(requestId: string, accountantUserId: string, tenantId: string) {
+    const queryRunner = this.demands.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const requestRows = await queryRunner.query(
+        `UPDATE project_funding_requests
+         SET status = 'TRANSFERRED', accountant_user_id = $1, updated_at = NOW()
+         WHERE request_id = $2 AND tenant_id = $3 AND status = 'APPROVED_DEAN'
+         RETURNING *`,
+        [accountantUserId, requestId, tenantId]
+      );
+
+      if (!requestRows.length) {
+        throw new BadRequestException('Funding request not found or not approved by Dean');
+      }
+
+      const request = requestRows[0];
+
+      await queryRunner.query(
+        `UPDATE faculty_project_guides
+         SET funding_allocated = COALESCE(funding_allocated, 0) + $1
+         WHERE guide_id = $2 AND tenant_id = $3`,
+        [request.amount, request.guide_id, tenantId]
+      );
+
+      await queryRunner.commitTransaction();
+
+      // Trigger notifications concurrently
+      this.notify.approvalRequired({
+        tenantId,
+        userId: request.requested_by,
+        category: 'Funding',
+        requestType: 'Fund Transfer',
+        requesterName: 'Accounts Team',
+        title: 'Funding Transferred',
+        message: `₹${request.amount} has been transferred to your bank account for project funding.`,
+        actionLink: '/faculty/projects',
+      });
+      if (request.hod_user_id) {
+        this.notify.approvalRequired({
+          tenantId,
+          userId: request.hod_user_id,
+          category: 'Funding',
+          requestType: 'Fund Transfer',
+          requesterName: 'Accounts Team',
+          title: 'Funding Transferred',
+          message: `Funding of ₹${request.amount} for faculty project has been transferred.`,
+          actionLink: '/hod/dashboard',
+        });
+      }
+
+      return request;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
 }

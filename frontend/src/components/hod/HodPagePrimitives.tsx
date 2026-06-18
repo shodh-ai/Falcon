@@ -20,18 +20,20 @@ export function HodPageHeader({
   description,
   meta,
   actions,
+  workspaceLabel,
 }: {
   title: string;
   description?: string;
   meta?: ReactNode;
   actions?: ReactNode;
+  workspaceLabel?: string;
 }) {
   return (
     <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
       <div className="relative flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6">
         <div className="absolute left-0 top-0 h-full w-1 bg-sgvu-gold" />
         <div className="pl-3">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-sgvu-gold">HOD Workspace</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-sgvu-gold">{workspaceLabel ?? 'HOD Workspace'}</p>
           <h1 className="mt-1 text-2xl font-black tracking-tight text-sgvu-navy">{title}</h1>
           {description ? (
             <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p>

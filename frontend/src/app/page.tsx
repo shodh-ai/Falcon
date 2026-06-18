@@ -190,7 +190,8 @@ export default function Home() {
               </form>
 
               <p className="text-center text-xs font-medium text-muted-foreground">
-                Google: @mygyanvihar.com / @mygyanvihar.org · QA personas use password123
+                Google: @mygyanvihar.com / @mygyanvihar.org · QA: library@ / registrar@ /
+                dev.librarian@ / dev.registrar@ — password123
               </p>
             </div>
           </div>

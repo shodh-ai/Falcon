@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import {
   financePortal,
   hodPortal,
+  deanPortal,
   hostelAdminPortal,
   iqacPortal,
   libraryPortal,
@@ -13,12 +14,14 @@ import {
   presidentPortal,
   alumniPortal,
   alumniAdminPortal,
+  deanPortal,
   adminOpsPortal,
   placementPortal,
 } from '@/lib/navigation';
 
 type PortalKey =
   | 'hod'
+  | 'dean'
   | 'hostel-admin'
   | 'finance'
   | 'iqac'
@@ -33,6 +36,7 @@ type PortalKey =
 
 const configs = {
   hod: hodPortal,
+  dean: deanPortal,
   'hostel-admin': hostelAdminPortal,
   finance: financePortal,
   iqac: iqacPortal,
@@ -51,7 +55,7 @@ export function GenericPortalShell({
   portal,
 }: {
   children: ReactNode;
-  portal: PortalKey;
+  portal: PortalKey | 'dean';
 }) {
   const config = configs[portal];
   return (

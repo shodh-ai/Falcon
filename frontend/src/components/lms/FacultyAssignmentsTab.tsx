@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { ChevronRight, Plus, X } from 'lucide-react';
+import { ChevronRight, Edit3, Plus, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   FacultyPanel,
@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { AssignmentRosterRow, FacultyAssignment } from '@/lib/api/lms';
-import { downloadWithAuth, postMultipart } from '@/lib/api/lms';
+import { downloadWithAuth, patchMultipart, postMultipart } from '@/lib/api/lms';
 
 type Props = {
   courseId: string;
@@ -29,9 +29,14 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   const [selectedTitle, setSelectedTitle] = useState('');
   const [selectedMaxMarks, setSelectedMaxMarks] = useState(10);
   const [maxMarks, setMaxMarks] = useState('10');
+  const [publishAt, setPublishAt] = useState('');
   const [dueAt, setDueAt] = useState('');
   const [daTitle, setDaTitle] = useState('');
   const [refFile, setRefFile] = useState<File | null>(null);
+  const [editing, setEditing] = useState<FacultyAssignment | null>(null);
+  const [editStartAt, setEditStartAt] = useState('');
+  const [editDueAt, setEditDueAt] = useState('');
+  const [editFile, setEditFile] = useState<File | null>(null);
   const [gradeMarks, setGradeMarks] = useState<Record<string, string>>({});
 
   function loadAssignments() {
@@ -66,6 +71,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     form.append('course_id', courseId);
     form.append('title', daTitle.trim());
     form.append('max_marks', maxMarks);
+    form.append('start_date', publishAt ? new Date(publishAt).toISOString() : new Date().toISOString());
     form.append('due_date', new Date(dueAt).toISOString());
     if (refFile) form.append('file', refFile);
     try {
@@ -73,6 +79,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       toast.success('Digital assignment created');
       setCreateOpen(false);
       setDaTitle('');
+      setPublishAt('');
       setRefFile(null);
       loadAssignments();
     } catch (err) {
@@ -95,6 +102,96 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Grading failed');
     }
+  }
+
+  function toDateTimeLocal(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const offsetMs = date.getTimezoneOffset() * 60_000;
+    return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+  }
+
+  function openEdit(assignment: FacultyAssignment) {
+    setEditing(assignment);
+    setEditStartAt(toDateTimeLocal(assignment.start_date));
+    setEditDueAt(toDateTimeLocal(assignment.due_date));
+    setEditFile(null);
+  }
+
+  async function saveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!token || !editing) return;
+    const form = new FormData();
+    form.append('start_date', new Date(editStartAt).toISOString());
+    form.append('due_date', new Date(editDueAt).toISOString());
+    if (editFile) form.append('file', editFile);
+    try {
+      await patchMultipart(`/api/academics/faculty/assignments/${editing.assignment_id}`, token, form);
+      toast.success('Assignment updated');
+      setEditing(null);
+      loadAssignments();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Update failed');
+    }
+  }
+
+  const now = Date.now();
+  const scheduledAssignments = assignments.filter((a) => new Date(a.start_date).getTime() > now);
+  const activeAssignments = assignments.filter(
+    (a) => new Date(a.start_date).getTime() <= now && new Date(a.due_date).getTime() >= now,
+  );
+  const closedAssignments = assignments.filter((a) => new Date(a.due_date).getTime() < now);
+
+  function AssignmentSection({
+    title,
+    description,
+    rows,
+  }: {
+    title: string;
+    description: string;
+    rows: FacultyAssignment[];
+  }) {
+    return (
+      <FacultyPanel title={title} count={rows.length} description={description}>
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No assignments in this section.</p>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((a) => (
+              <div
+                key={a.assignment_id}
+                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border/60 bg-background p-4 text-left shadow-sm transition hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5 hover:shadow-md"
+              >
+                <button
+                  type="button"
+                  onClick={() => void openRoster(a.assignment_id, a.title, a.max_marks)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <p className="font-semibold text-sgvu-navy">{a.title}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Publishes {new Date(a.start_date).toLocaleString()} · Due {new Date(a.due_date).toLocaleString()} · Max {a.max_marks}
+                  </p>
+                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge variant="outline">{a.submission_count ?? 0} submitted</Badge>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openEdit(a)}
+                    className="gap-1.5"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-sgvu-navy" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </FacultyPanel>
+    );
   }
 
   if (selectedId) {
@@ -200,33 +297,23 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
           description="Create a DA to collect PDF submissions from enrolled students with a strict deadline."
         />
       ) : (
-        <FacultyPanel
-          title="Digital assignments"
-          count={assignments.length}
-          description="Click an assignment to view submissions and grade"
-        >
-          <div className="space-y-2">
-            {assignments.map((a) => (
-              <button
-                key={a.assignment_id}
-                type="button"
-                onClick={() => void openRoster(a.assignment_id, a.title, a.max_marks)}
-                className="group flex w-full items-center justify-between gap-3 rounded-xl border border-border/60 bg-background p-4 text-left shadow-sm transition hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5 hover:shadow-md"
-              >
-                <div className="min-w-0">
-                  <p className="font-semibold text-sgvu-navy">{a.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Max {a.max_marks} marks · Due {new Date(a.due_date).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Badge variant="outline">{a.submission_count ?? 0} submitted</Badge>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-sgvu-navy" />
-                </div>
-              </button>
-            ))}
-          </div>
-        </FacultyPanel>
+        <div className="space-y-4">
+          <AssignmentSection
+            title="Scheduled / Archived"
+            description="Future publish date. Students cannot see these yet."
+            rows={scheduledAssignments}
+          />
+          <AssignmentSection
+            title="Active"
+            description="Visible to students now and still before deadline."
+            rows={activeAssignments}
+          />
+          <AssignmentSection
+            title="Closed"
+            description="Deadline has passed. Faculty can still edit dates or the reference PDF."
+            rows={closedAssignments}
+          />
+        </div>
       )}
 
       {createOpen && (
@@ -265,6 +352,14 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
               </div>
               <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Publish Date (Visible to Students)</label>
+                <Input
+                  type="datetime-local"
+                  value={publishAt}
+                  onChange={(e) => setPublishAt(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Strict deadline</label>
                 <Input
                   type="datetime-local"
@@ -285,6 +380,62 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
               <div className="flex gap-2 pt-1">
                 <Button type="submit">Create</Button>
                 <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
+            <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-5 py-4">
+              <div>
+                <p className="text-sm font-bold text-sgvu-navy">Edit digital assignment</p>
+                <p className="text-xs text-muted-foreground">{editing.title}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-sgvu-navy"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={saveEdit} className="space-y-4 p-5">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Publish Date (Visible to Students)</label>
+                <Input
+                  type="datetime-local"
+                  value={editStartAt}
+                  onChange={(e) => setEditStartAt(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Strict deadline</label>
+                <Input
+                  type="datetime-local"
+                  value={editDueAt}
+                  onChange={(e) => setEditDueAt(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Replace question paper (optional)</label>
+                <Input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={(e) => setEditFile(e.target.files?.[0] ?? null)}
+                />
+                <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button type="submit">Save changes</Button>
+                <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   Cancel
                 </Button>
               </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { DragEvent, FormEvent, useState } from 'react';
 import { FileText, Plus, Upload, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -47,7 +47,9 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [addingModule, setAddingModule] = useState(false);
   const [uploadModuleId, setUploadModuleId] = useState<string | null>(null);
   const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [syllabusFile, setSyllabusFile] = useState<File | null>(null);
+  const [syllabusUploading, setSyllabusUploading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   async function addModule(e: FormEvent) {
@@ -70,10 +72,10 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
 
   async function submitMaterial(e: FormEvent) {
     e.preventDefault();
-    if (!uploadModuleId || !uploadFile || !token) return;
+    if (!uploadModuleId || uploadFiles.length === 0 || !token) return;
     const form = new FormData();
-    form.append('file', uploadFile);
-    form.append('title', uploadTitle.trim() || uploadFile.name);
+    uploadFiles.forEach((file) => form.append('files', file));
+    if (uploadFiles.length === 1) form.append('title', uploadTitle.trim() || uploadFiles[0].name);
     form.append('material_type', 'NOTES');
     setUploading(true);
     try {
@@ -82,9 +84,9 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
         token,
         form,
       );
-      toast.success('Material uploaded — students notified');
+      toast.success(`${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded — students notified`);
       setUploadModuleId(null);
-      setUploadFile(null);
+      setUploadFiles([]);
       setUploadTitle('');
       onRefresh();
     } catch (err) {
@@ -95,6 +97,37 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   }
 
   const uploadModule = workspace.modules.find((m) => m.module_id === uploadModuleId);
+  const syllabusMaterials = workspace.syllabus_materials ?? [];
+
+  function addUploadFiles(files: FileList | File[]) {
+    const accepted = Array.from(files).filter((file) =>
+      /\.(pdf|ppt|pptx)$/i.test(file.name),
+    );
+    setUploadFiles((prev) => [...prev, ...accepted]);
+  }
+
+  function handleDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    addUploadFiles(e.dataTransfer.files);
+  }
+
+  async function uploadSyllabus() {
+    if (!token || !syllabusFile) return;
+    const form = new FormData();
+    form.append('file', syllabusFile);
+    form.append('title', 'Course Syllabus & Lesson Plan');
+    setSyllabusUploading(true);
+    try {
+      await postMultipart(`/api/academics/faculty/courses/${courseId}/syllabus-material`, token, form);
+      toast.success('Syllabus uploaded');
+      setSyllabusFile(null);
+      onRefresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Syllabus upload failed');
+    } finally {
+      setSyllabusUploading(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -114,6 +147,49 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
             Add unit
           </Button>
         </form>
+      </FacultyPanel>
+
+      <FacultyPanel
+        title="Course Syllabus & Lesson Plan"
+        description="Pinned above all units for faculty and students"
+        count={syllabusMaterials.length}
+      >
+        <div className="space-y-3">
+          {syllabusMaterials.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No syllabus file uploaded yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {syllabusMaterials.map((m) => (
+                <li
+                  key={m.material_id}
+                  className="flex items-center gap-2 rounded-lg border border-sgvu-gold/40 bg-sgvu-gold/10 px-3 py-2 text-sm"
+                >
+                  <FileText className="h-4 w-4 shrink-0 text-sgvu-gold" />
+                  <span className="font-medium text-sgvu-navy">{m.title}</span>
+                  <Badge variant="secondary" className="ml-auto text-[10px]">
+                    SYLLABUS
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              type="file"
+              accept=".pdf,.ppt,.pptx,application/pdf"
+              onChange={(e) => setSyllabusFile(e.target.files?.[0] ?? null)}
+            />
+            <Button
+              type="button"
+              className="gap-1.5"
+              disabled={!syllabusFile || syllabusUploading}
+              onClick={() => void uploadSyllabus()}
+            >
+              <Upload className="h-4 w-4" />
+              {syllabusUploading ? 'Uploading…' : 'Upload syllabus'}
+            </Button>
+          </div>
+        </div>
       </FacultyPanel>
 
       {workspace.modules.length === 0 ? (
@@ -198,7 +274,10 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
               </div>
               <button
                 type="button"
-                onClick={() => setUploadModuleId(null)}
+                onClick={() => {
+                  setUploadModuleId(null);
+                  setUploadFiles([]);
+                }}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-sgvu-navy"
                 aria-label="Close"
               >
@@ -213,24 +292,62 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   value={uploadTitle}
                   onChange={(e) => setUploadTitle(e.target.value)}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Used only for a single file. Multiple files keep their filenames as titles.
+                </p>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">File</label>
+                <label className="text-xs font-medium text-muted-foreground">Files</label>
+                <div
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDrop}
+                  className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm transition hover:border-sgvu-gold/60 hover:bg-sgvu-gold/5"
+                >
+                  <Upload className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+                  <p className="font-medium text-sgvu-navy">Drag PDFs/PPTs here, or select below</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Multiple files · Max 10MB each</p>
+                </div>
                 <Input
                   type="file"
+                  multiple
                   accept=".pdf,.ppt,.pptx,application/pdf"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    if (e.target.files) addUploadFiles(e.target.files);
+                  }}
                 />
+                {uploadFiles.length > 0 ? (
+                  <ul className="space-y-1 rounded-lg bg-muted/30 p-2 text-xs">
+                    {uploadFiles.map((file) => (
+                      <li key={`${file.name}-${file.size}`} className="flex items-center justify-between gap-2">
+                        <span className="truncate">{file.name}</span>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-red-600"
+                          onClick={() => setUploadFiles((prev) => prev.filter((f) => f !== file))}
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
                   PDF or PPT · Max 10MB · Notifies enrolled students
                 </p>
               </div>
               <div className="flex gap-2 pt-1">
-                <Button type="submit" disabled={!uploadFile || uploading} className="gap-1.5">
+                <Button type="submit" disabled={uploadFiles.length === 0 || uploading} className="gap-1.5">
                   <Upload className="h-4 w-4" />
-                  {uploading ? 'Uploading…' : 'Upload'}
+                  {uploading ? 'Uploading…' : `Upload ${uploadFiles.length || ''}`}
                 </Button>
-                <Button type="button" variant="outline" onClick={() => setUploadModuleId(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setUploadModuleId(null);
+                    setUploadFiles([]);
+                  }}
+                >
                   Cancel
                 </Button>
               </div>

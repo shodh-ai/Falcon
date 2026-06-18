@@ -240,6 +240,25 @@ export class FinanceController {
     });
   }
 
+  @Get('funding-requests')
+  @Roles('SuperAdmin', 'Accountant')
+  listFundingRequests(@Req() req: { user: AuthUser }) {
+    return this.finance.listFundingRequests(this.tenant(req));
+  }
+
+  @Patch('funding-requests/:requestId/transfer')
+  @Roles('SuperAdmin', 'Accountant')
+  transferFunding(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+  ) {
+    return this.finance.transferFunding(
+      requestId,
+      req.user.user_id,
+      this.tenant(req)
+    );
+  }
+
   @Get('ledger-accounts')
   @Roles('SuperAdmin', 'Accountant')
   ledgerAccounts(@Req() req: { user: AuthUser }) {
