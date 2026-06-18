@@ -17,6 +17,7 @@ export default function FinanceEventsPage() {
   const [loading, setLoading] = useState(true);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [comment, setComment] = useState('');
+  const [transferForms, setTransferForms] = useState<Record<string, { amount: string; ref: string }>>({});
 
   const load = useCallback(async () => {
     setPending(await eventsApi.financePending());
@@ -24,17 +25,35 @@ export default function FinanceEventsPage() {
 
   useEffect(() => {
     void load()
-      .catch(() => toast.error('Could not load finance queue'))
+      .catch(() => toast.error('Could not load fund transfer queue'))
       .finally(() => setLoading(false));
   }, [load]);
 
-  async function approve(eventId: string) {
+  function formFor(eventId: string, requested: number) {
+    return transferForms[eventId] ?? { amount: String(requested), ref: '' };
+  }
+
+  async function transfer(eventId: string, requested: number) {
+    const form = formFor(eventId, requested);
+    const amount = Number(form.amount);
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error('Enter a valid transfer amount');
+      return;
+    }
+    if (form.ref.trim().length < 3) {
+      toast.error('Transfer reference is required (min 3 characters)');
+      return;
+    }
     try {
-      await eventsApi.approveFinance(eventId, 'EVENTS_CLUB');
-      toast.success('Ledger mapped — event is LIVE');
+      await eventsApi.approveFinance(eventId, {
+        transfer_amount: amount,
+        transfer_ref: form.ref.trim(),
+        ledger_code: 'EVENTS_CLUB',
+      });
+      toast.success('Fund transfer recorded — event is now LIVE for registration');
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Approve failed');
+      toast.error(e instanceof Error ? e.message : 'Transfer failed');
     }
   }
 
@@ -43,6 +62,7 @@ export default function FinanceEventsPage() {
     await eventsApi.rejectFinance(eventId, comment.trim());
     setRejectId(null);
     setComment('');
+    toast.success('Event rejected');
     await load();
   }
 
@@ -59,45 +79,85 @@ export default function FinanceEventsPage() {
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-sgvu-navy">
           <Wallet className="h-7 w-7" />
-          Club Event Finance Approvals
+          Club Event Fund Transfers
         </h1>
         <p className="text-sm text-muted-foreground">
-          Tier 3 — map paid events to the Events/Clubs ledger before tickets go live.
+          Transfer approved club funds after Dean sign-off. Events go LIVE for student registration once transfer is recorded.
         </p>
       </div>
 
       {pending.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No paid events awaiting finance approval.</p>
+        <p className="text-sm text-muted-foreground">No events awaiting fund transfer.</p>
       ) : (
-        pending.map((ev) => (
-          <Card key={ev.event_id}>
-            <CardHeader className="flex flex-row justify-between">
-              <div>
-                <CardTitle>{ev.title}</CardTitle>
-                <p className="text-sm text-muted-foreground">{ev.club_name}</p>
-              </div>
-              <Badge>₹{Number(ev.ticket_price)}</Badge>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <Button size="sm" className="bg-emerald-600" onClick={() => void approve(ev.event_id)}>
-                <Check className="mr-1 h-4 w-4" />
-                Approve ledger (EVENTS_CLUB)
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setRejectId(ev.event_id)}>
-                <X className="mr-1 h-4 w-4" />
-                Reject
-              </Button>
-              {rejectId === ev.event_id ? (
-                <div className="w-full space-y-2">
-                  <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Reason" />
-                  <Button size="sm" variant="destructive" onClick={() => void reject(ev.event_id)}>
-                    Confirm
+        pending.map((ev) => {
+          const requested = Number(ev.funds_needed ?? 0);
+          const form = formFor(ev.event_id, requested);
+          return (
+            <Card key={ev.event_id}>
+              <CardHeader className="flex flex-row justify-between gap-4">
+                <div>
+                  <CardTitle>{ev.title}</CardTitle>
+                  <p className="text-sm text-muted-foreground">{ev.club_name}</p>
+                </div>
+                <Badge>Requested ₹{requested}</Badge>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {new Date(ev.event_date).toLocaleString('en-IN')} · {ev.venue ?? 'Venue TBD'}
+                </p>
+                <Badge variant="outline">{ev.is_paid ? `Paid registration — ₹${ev.ticket_price}` : 'Free registration'}</Badge>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">Transfer amount (₹)</label>
+                    <Input
+                      type="number"
+                      min={0.01}
+                      max={requested}
+                      value={form.amount}
+                      onChange={(e) =>
+                        setTransferForms((prev) => ({
+                          ...prev,
+                          [ev.event_id]: { ...formFor(ev.event_id, requested), amount: e.target.value },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">Transfer reference / UTR</label>
+                    <Input
+                      value={form.ref}
+                      onChange={(e) =>
+                        setTransferForms((prev) => ({
+                          ...prev,
+                          [ev.event_id]: { ...formFor(ev.event_id, requested), ref: e.target.value },
+                        }))
+                      }
+                      placeholder="Bank ref, voucher no., etc."
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" className="bg-emerald-600" onClick={() => void transfer(ev.event_id, requested)}>
+                    <Check className="mr-1 h-4 w-4" />
+                    Confirm fund transfer
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setRejectId(ev.event_id)}>
+                    <X className="mr-1 h-4 w-4" />
+                    Reject
                   </Button>
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        ))
+                {rejectId === ev.event_id ? (
+                  <div className="space-y-2">
+                    <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Reason" />
+                    <Button size="sm" variant="destructive" onClick={() => void reject(ev.event_id)}>
+                      Confirm reject
+                    </Button>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          );
+        })
       )}
     </div>
   );

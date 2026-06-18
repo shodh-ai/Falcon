@@ -50,13 +50,13 @@ export default function FalconEventsPage() {
     void load().catch(() => toast.error('Could not load Falcon Events')).finally(() => setLoading(false));
   }, [load]);
 
-  async function register(eventId: string, isPaid: boolean) {
-    if (isPaid) {
-      router.push(`/student/events/checkout?eventId=${eventId}`);
-      return;
-    }
+  async function register(eventId: string) {
     try {
-      await eventsApi.register(eventId);
+      const res = await eventsApi.register(eventId);
+      if (res.checkout_required && res.registration.registration_id) {
+        router.push(`/student/events/checkout?registrationId=${res.registration.registration_id}`);
+        return;
+      }
       toast.success('Registered for event!');
       await load();
     } catch (e) {
@@ -95,7 +95,7 @@ export default function FalconEventsPage() {
                     <p className="text-sm text-muted-foreground">{ev.club_name ?? 'Campus Club'} · {new Date(ev.event_date).toLocaleString()}</p>
                     {ev.is_paid ? <Badge className="mt-2">Paid — ₹{ev.ticket_price}</Badge> : <Badge variant="success" className="mt-2">Free</Badge>}
                   </div>
-                  <Button onClick={() => void register(ev.event_id, ev.is_paid)}>Register</Button>
+                  <Button onClick={() => void register(ev.event_id)}>Register</Button>
                 </CardContent>
               </Card>
             ))
@@ -104,7 +104,10 @@ export default function FalconEventsPage() {
             <StudentSectionCard title="My tickets" icon={Ticket}>
               <div className="space-y-2">
                 {tickets.map((t) => (
-                  <p key={t.registration_id} className="text-sm">{t.event_id.slice(0, 8)}… — {t.status}</p>
+                  <p key={t.registration_id} className="text-sm">
+                    {t.title ?? 'Event'} · {t.event_date ? new Date(t.event_date).toLocaleString() : '—'} — {t.status}
+                    {t.qr_code ? ` · QR ${t.qr_code}` : ''}
+                  </p>
                 ))}
               </div>
             </StudentSectionCard>

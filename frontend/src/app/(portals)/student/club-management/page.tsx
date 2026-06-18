@@ -16,7 +16,7 @@ import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi, type BlockedDate, type CampusEvent, type Venue } from '@/lib/api/api.campus-events';
 
 function tierLabel(ev: CampusEvent) {
-  return `Advisor:${ev.advisor_approval ?? '—'} · Estate:${ev.estate_approval ?? '—'} · Finance:${ev.finance_approval ?? '—'}`;
+  return `Faculty:${ev.advisor_approval ?? '—'} · HOD:${ev.hod_approval ?? '—'} · Dean:${ev.dean_approval ?? '—'} · Finance:${ev.finance_approval ?? '—'}`;
 }
 
 export default function ClubManagementPage() {
@@ -42,6 +42,8 @@ export default function ClubManagementPage() {
     total_slots: 50,
     is_paid: false,
     ticket_price: 500,
+    funds_needed: 0,
+    venue_text: '',
   });
 
   const blockedSet = useMemo(() => new Set(blocked.map((b) => b.date.slice(0, 10))), [blocked]);
@@ -85,7 +87,7 @@ export default function ClubManagementPage() {
 
   async function propose(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.club_id || !form.title || !form.event_date || !form.venue_id) {
+    if (!form.club_id || !form.title || !form.event_date || (!form.venue_id && !form.venue_text.trim())) {
       toast.error('Club, title, venue, and date are required');
       return;
     }
@@ -97,13 +99,15 @@ export default function ClubManagementPage() {
         title: form.title,
         description: form.description || undefined,
         guest_speakers: form.guest_speakers || undefined,
-        venue_id: form.venue_id,
+        venue_id: form.venue_id || undefined,
+        venue: form.venue_text.trim() || undefined,
         event_date: new Date(form.event_date).toISOString(),
         total_slots: Number(form.total_slots),
         is_paid: form.is_paid,
         ticket_price: form.is_paid ? Number(form.ticket_price) : 0,
+        funds_needed: Number(form.funds_needed) || 0,
       });
-      toast.success('Submitted — Tier 1 faculty advisor will review');
+      toast.success('Submitted — faculty coordinator will review');
       setForm((f) => ({ ...f, title: '', description: '', guest_speakers: '', event_date: '' }));
       await load();
     } catch (err) {
@@ -208,19 +212,25 @@ export default function ClubManagementPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Venue</label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={form.venue_id}
-                  onChange={(e) => setForm((f) => ({ ...f, venue_id: e.target.value }))}
-                  required
-                >
-                  <option value="">Select venue</option>
-                  {venues.map((v) => (
-                    <option key={v.venue_id} value={v.venue_id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
+                {venues.length > 0 ? (
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.venue_id}
+                    onChange={(e) => setForm((f) => ({ ...f, venue_id: e.target.value }))}
+                  >
+                    <option value="">Select venue or enter below</option>
+                    {venues.map((v) => (
+                      <option key={v.venue_id} value={v.venue_id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <Input
+                  value={form.venue_text}
+                  onChange={(e) => setForm((f) => ({ ...f, venue_text: e.target.value }))}
+                  placeholder="Venue name (e.g. Innovation Lab)"
+                />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Date & time (unblocked only)</label>
@@ -248,7 +258,7 @@ export default function ClubManagementPage() {
                   checked={form.is_paid}
                   onChange={(e) => setForm((f) => ({ ...f, is_paid: e.target.checked }))}
                 />
-                <label htmlFor="paid" className="text-sm font-medium">Paid event</label>
+                <label htmlFor="paid" className="text-sm font-medium">Paid registration for attendees</label>
               </div>
               {form.is_paid ? (
                 <div className="space-y-2">
@@ -261,8 +271,20 @@ export default function ClubManagementPage() {
                   />
                 </div>
               ) : null}
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">Funds needed from university (₹)</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.funds_needed}
+                  onChange={(e) => setForm((f) => ({ ...f, funds_needed: Number(e.target.value) }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Internal budget for logistics, equipment, etc. Separate from attendee ticket pricing. Leave 0 if no transfer needed.
+                </p>
+              </div>
               <Button type="submit" className="md:col-span-2 bg-sgvu-navy" disabled={submitting}>
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit for Tier 1 approval'}
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit for faculty coordinator approval'}
               </Button>
             </form>
           </CardContent>
