@@ -13,6 +13,48 @@ CREATE TABLE IF NOT EXISTS smoke_seed_manifest (
   seeded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DO $$
+BEGIN
+  IF to_regclass('public.org_entities') IS NOT NULL THEN
+    CREATE TABLE IF NOT EXISTS hr_policy_documents (
+      policy_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
+      entity_id INT NOT NULL REFERENCES org_entities(entity_id) ON DELETE CASCADE,
+      title VARCHAR(180) NOT NULL,
+      category VARCHAR(60) NOT NULL DEFAULT 'GENERAL',
+      file_url TEXT NULL,
+      version VARCHAR(20) NOT NULL DEFAULT '1.0',
+      is_mandatory BOOLEAN NOT NULL DEFAULT TRUE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by_user_id UUID NULL REFERENCES users(user_id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS hr_policy_acknowledgements (
+      ack_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id UUID NOT NULL REFERENCES public.tenants(tenant_id) ON DELETE CASCADE,
+      policy_id UUID NOT NULL REFERENCES hr_policy_documents(policy_id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ip_address VARCHAR(64) NULL,
+      UNIQUE (policy_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS hr_policy_polls (
+      policy_id UUID NOT NULL REFERENCES hr_policy_documents(policy_id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+      vote VARCHAR(10) NOT NULL CHECK (vote IN ('YES', 'NO')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (policy_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_hr_policy_documents_entity_active
+      ON hr_policy_documents(tenant_id, entity_id, is_active);
+    CREATE INDEX IF NOT EXISTS idx_hr_policy_polls_policy
+      ON hr_policy_polls(policy_id);
+  END IF;
+END $$;
+
 INSERT INTO smoke_seed_manifest (smoke_key, portal, role_email, feature_area, sample_record, notes)
 VALUES
   ('auth.qa-personas', 'auth', 'dev.librarian@mygyanvihar.com', 'Local QA logins', 'dev.* and master QA persona credentials', 'Password for QA personas is password123.'),
@@ -59,6 +101,7 @@ DECLARE
   v_transport UUID;
   v_placement UUID;
   v_superadmin UUID;
+  v_entity INT;
   v_dept INT;
   v_course UUID;
   v_catalog UUID;
@@ -100,6 +143,108 @@ BEGIN
   SELECT user_id INTO v_placement FROM users WHERE tenant_id = v_tenant AND lower(official_email) = 'dev.placementcell@mygyanvihar.com' LIMIT 1;
   SELECT user_id INTO v_superadmin FROM users WHERE tenant_id = v_tenant AND lower(official_email) = 'superadmin@mygyanvihar.com' LIMIT 1;
   SELECT dept_id INTO v_dept FROM departments WHERE dept_name = 'Computer Science' LIMIT 1;
+
+  -- Entity scope is required by HR self-service and many operations portals.
+  IF to_regclass('public.org_entities') IS NOT NULL THEN
+    INSERT INTO org_entities (tenant_id, entity_code, entity_name, is_active)
+    SELECT v_tenant, 'SGVU_UNIVERSITY', 'SGVU University', true
+    WHERE NOT EXISTS (
+      SELECT 1 FROM org_entities WHERE tenant_id = v_tenant AND entity_code = 'SGVU_UNIVERSITY'
+    );
+
+    SELECT entity_id INTO v_entity
+    FROM org_entities
+    WHERE tenant_id = v_tenant AND entity_code = 'SGVU_UNIVERSITY'
+    LIMIT 1;
+  END IF;
+
+  IF v_entity IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'entity_id'
+    )
+  THEN
+    UPDATE users
+    SET entity_id = v_entity
+    WHERE tenant_id = v_tenant
+      AND lower(official_email) IN (
+        'faculty1@mygyanvihar.com',
+        'hod@mygyanvihar.com',
+        'hr@mygyanvihar.com',
+        'hr.admin@mygyanvihar.com',
+        'warden@mygyanvihar.com',
+        'finance@mygyanvihar.com',
+        'iqac@mygyanvihar.com',
+        'library@mygyanvihar.com',
+        'registrar@mygyanvihar.com',
+        'president@mygyanvihar.com',
+        'dev.faculty@mygyanvihar.com',
+        'dev.hod@mygyanvihar.com',
+        'dev.hr@mygyanvihar.com',
+        'dev.librarian@mygyanvihar.com',
+        'dev.registrar@mygyanvihar.com',
+        'dev.transportofficer@mygyanvihar.com',
+        'dev.placementcell@mygyanvihar.com',
+        'dev.warden@mygyanvihar.com'
+      )
+      AND (entity_id IS NULL OR entity_id <> v_entity);
+  END IF;
+
+  IF v_entity IS NOT NULL AND to_regclass('public.user_entity_access') IS NOT NULL THEN
+    INSERT INTO user_entity_access (user_id, entity_id)
+    SELECT u.user_id, v_entity
+    FROM users u
+    WHERE u.tenant_id = v_tenant
+      AND lower(u.official_email) IN (
+        'faculty1@mygyanvihar.com',
+        'hod@mygyanvihar.com',
+        'hr@mygyanvihar.com',
+        'hr.admin@mygyanvihar.com',
+        'warden@mygyanvihar.com',
+        'finance@mygyanvihar.com',
+        'iqac@mygyanvihar.com',
+        'library@mygyanvihar.com',
+        'registrar@mygyanvihar.com',
+        'president@mygyanvihar.com',
+        'dev.faculty@mygyanvihar.com',
+        'dev.hod@mygyanvihar.com',
+        'dev.hr@mygyanvihar.com',
+        'dev.librarian@mygyanvihar.com',
+        'dev.registrar@mygyanvihar.com',
+        'dev.transportofficer@mygyanvihar.com',
+        'dev.placementcell@mygyanvihar.com',
+        'dev.warden@mygyanvihar.com'
+      )
+    ON CONFLICT (user_id, entity_id) DO NOTHING;
+  END IF;
+
+  IF v_entity IS NOT NULL
+    AND to_regclass('public.hr_employee_profiles') IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'hr_employee_profiles' AND column_name = 'entity_id'
+    )
+  THEN
+    UPDATE hr_employee_profiles ep
+    SET entity_id = v_entity
+    FROM users u
+    WHERE ep.user_id = u.user_id
+      AND ep.tenant_id = v_tenant
+      AND u.tenant_id = v_tenant
+      AND lower(u.official_email) IN (
+        'faculty1@mygyanvihar.com',
+        'hod@mygyanvihar.com',
+        'hr@mygyanvihar.com',
+        'hr.admin@mygyanvihar.com',
+        'warden@mygyanvihar.com',
+        'finance@mygyanvihar.com',
+        'iqac@mygyanvihar.com',
+        'library@mygyanvihar.com',
+        'registrar@mygyanvihar.com',
+        'president@mygyanvihar.com'
+      )
+      AND (ep.entity_id IS NULL OR ep.entity_id <> v_entity);
+  END IF;
 
   -- Admissions CRM
   IF to_regclass('public.student_applications') IS NOT NULL THEN
@@ -236,6 +381,10 @@ BEGIN
       SELECT 1 FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'finance_fee_demands' AND column_name = 'tenant_id'
     )
+    AND EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'finance_fee_demands' AND column_name = 'template_id'
+    )
   THEN
     INSERT INTO finance_fee_demands (tenant_id, student_user_id, fee_head, academic_year, semester, total_amount, paid_amount, due_date, status, fee_breakup, template_id)
     SELECT v_tenant, v_student, 'SMOKE-FEE-2026-001', '2026-27', 3, 49000, 15000, CURRENT_DATE + 20, 'PARTIAL',
@@ -297,6 +446,40 @@ BEGIN
   END IF;
 
   -- HR
+  IF v_entity IS NOT NULL AND to_regclass('public.hr_policy_documents') IS NOT NULL THEN
+    INSERT INTO hr_policy_documents (tenant_id, entity_id, title, category, file_url, is_mandatory, is_active)
+    SELECT v_tenant, v_entity, data.title, data.category, data.file_url, data.is_mandatory, true
+    FROM (VALUES
+      ('SMOKE Leave Policy 2026', 'LEAVE', '/policies/smoke-leave-policy-2026.pdf', true),
+      ('SMOKE POSH Act Guidelines', 'COMPLIANCE', '/policies/smoke-posh-guidelines.pdf', true),
+      ('SMOKE Travel Allowance Policy', 'TRAVEL', '/policies/smoke-travel-allowance.pdf', false)
+    ) AS data(title, category, file_url, is_mandatory)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM hr_policy_documents p
+      WHERE p.tenant_id = v_tenant AND p.entity_id = v_entity AND p.title = data.title
+    );
+
+    IF v_faculty IS NOT NULL AND to_regclass('public.hr_policy_polls') IS NOT NULL THEN
+      INSERT INTO hr_policy_polls (policy_id, user_id, vote)
+      SELECT p.policy_id, v_faculty, 'YES'
+      FROM hr_policy_documents p
+      WHERE p.tenant_id = v_tenant
+        AND p.entity_id = v_entity
+        AND p.title = 'SMOKE Travel Allowance Policy'
+      ON CONFLICT (policy_id, user_id) DO UPDATE SET vote = EXCLUDED.vote, created_at = NOW();
+    END IF;
+
+    IF v_faculty IS NOT NULL AND to_regclass('public.hr_policy_acknowledgements') IS NOT NULL THEN
+      INSERT INTO hr_policy_acknowledgements (tenant_id, policy_id, user_id, ip_address)
+      SELECT v_tenant, p.policy_id, v_faculty, '127.0.0.1'
+      FROM hr_policy_documents p
+      WHERE p.tenant_id = v_tenant
+        AND p.entity_id = v_entity
+        AND p.title = 'SMOKE Leave Policy 2026'
+      ON CONFLICT (policy_id, user_id) DO UPDATE SET acknowledged_at = NOW();
+    END IF;
+  END IF;
+
   IF v_faculty IS NOT NULL AND to_regclass('public.hr_daily_attendance') IS NOT NULL THEN
     INSERT INTO hr_daily_attendance (user_id, date, first_in_time, last_out_time, total_hours, status, calculated_status)
     SELECT v_faculty, CURRENT_DATE, CURRENT_DATE + TIME '09:12', CURRENT_DATE + TIME '16:05', 6.88, 'PRESENT', 'LATE_COMING'
@@ -448,17 +631,26 @@ BEGIN
     END IF;
   END IF;
 
-  -- Placement
+  -- Placement (JD FK targets placement_companies, not company_master)
+  IF to_regclass('public.placement_companies') IS NOT NULL THEN
+    INSERT INTO placement_companies (tenant_id, company_name, hr_name, hr_email, hr_mobile)
+    SELECT v_tenant, 'SmokeSoft Labs', 'Smoke HR', 'smoke.hr@smokesoft.example', '9000000001'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM placement_companies WHERE tenant_id = v_tenant AND company_name = 'SmokeSoft Labs'
+    );
+    SELECT company_id INTO v_company FROM placement_companies
+    WHERE tenant_id = v_tenant AND company_name = 'SmokeSoft Labs' LIMIT 1;
+  END IF;
+
   IF to_regclass('public.company_master') IS NOT NULL THEN
     INSERT INTO company_master (tenant_id, company_name, industry, website_url)
     SELECT v_tenant, 'SmokeSoft Labs', 'Software', 'https://example.com/smokesoft'
     WHERE NOT EXISTS (SELECT 1 FROM company_master WHERE tenant_id = v_tenant AND company_name = 'SmokeSoft Labs');
-    SELECT company_id INTO v_company FROM company_master WHERE tenant_id = v_tenant AND company_name = 'SmokeSoft Labs' LIMIT 1;
   END IF;
 
   IF v_company IS NOT NULL AND to_regclass('public.placement_job_descriptions') IS NOT NULL THEN
     INSERT INTO placement_job_descriptions (tenant_id, company_id, title, package_lpa, skills_required, eligibility_criteria, status, min_cgpa, max_active_backlogs, application_deadline)
-    SELECT v_tenant, v_company, 'Smoke Software Engineer', 6.50, 'SQL, TypeScript, APIs', 'CGPA >= 7.0', 'OPEN', 7.00, 1, NOW() + INTERVAL '15 days'
+    SELECT v_tenant, v_company, 'Smoke Software Engineer', 6.50, ARRAY['SQL', 'TypeScript', 'APIs']::text[], 'CGPA >= 7.0', 'OPEN', 7.00, 1, NOW() + INTERVAL '15 days'
     WHERE NOT EXISTS (SELECT 1 FROM placement_job_descriptions WHERE tenant_id = v_tenant AND company_id = v_company AND title = 'Smoke Software Engineer');
     SELECT jd_id INTO v_jd FROM placement_job_descriptions WHERE tenant_id = v_tenant AND company_id = v_company AND title = 'Smoke Software Engineer' LIMIT 1;
   END IF;
