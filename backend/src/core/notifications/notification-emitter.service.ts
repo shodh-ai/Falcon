@@ -13,6 +13,7 @@ import {
   type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
   type ExamResultsPublishedPayload,
+  type ExamRevaluationPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
@@ -62,6 +63,22 @@ export class NotificationEmitterService {
 
   examResultsPublished(payload: ExamResultsPublishedPayload) {
     this.events.emit(NotificationEvents.EXAM_RESULTS_PUBLISHED, payload);
+  }
+
+  examRevaluationAssigned(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_ASSIGNED, payload);
+  }
+
+  examRevaluationReportReady(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_REPORT_READY, payload);
+  }
+
+  examRevaluationPublished(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_PUBLISHED, payload);
+  }
+
+  examRevaluationFeePaid(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_FEE_PAID, payload);
   }
 
   courseMaterialAdded(payload: CourseMaterialAddedPayload) {

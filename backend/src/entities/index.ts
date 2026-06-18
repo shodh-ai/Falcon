@@ -95,3 +95,5 @@ export { OwnerDailyBrief } from './owner-daily-brief.entity';
 export { PortalMeeting } from './portal-meeting.entity';
 export { PortalMeetingParticipant } from './portal-meeting-participant.entity';
 export { PortalMeetingMinutes } from './portal-meeting-minutes.entity';
+export { ExamResultSession } from './exam-result-session.entity';
+export { StudentExamReport } from './student-exam-report.entity';

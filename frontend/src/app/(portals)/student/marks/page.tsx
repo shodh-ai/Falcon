@@ -46,6 +46,21 @@ type MarksHistory = {
   total_credits_earned: number;
   semesters: SemesterRow[];
   component_marks_by_semester: { semester_number: number; subjects: ComponentSubject[] }[];
+  exam_reports?: Array<{
+    report_id: string;
+    session_id: string;
+    course_code: string;
+    course_name: string;
+    exam_type: string;
+    marks_obtained: string | number;
+    max_marks: string | number;
+    percent: string | number | null;
+    grade: string | null;
+    result_status: string;
+    report_summary: string | null;
+    declaration_note?: string | null;
+    declared_at: string;
+  }>;
   backlogs: {
     uncleared: { course_id: string; course_code: string; course_name: string; semester: number }[];
     cleared: { course_code: string; course_name: string; semester: number }[];
@@ -155,6 +170,34 @@ export default function StudentMarksPage() {
         <StudentStatCard label="CGPA" value={data?.cgpa?.toFixed(2) ?? '—'} helper="Cumulative grade point average" tone="gold" />
         <StudentStatCard label="Credits earned" value={data?.total_credits_earned ?? '—'} helper="Total credits completed" />
       </div>
+
+      {(data?.exam_reports?.length ?? 0) > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Declared exam reports</CardTitle>
+            <p className="text-sm text-muted-foreground">Individual result reports published by Exam Cell after declaration.</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {data!.exam_reports!.map((report) => (
+              <div key={report.report_id} className="rounded-xl border border-green-200 bg-green-50/60 p-4 text-sm">
+                <p className="font-semibold text-sgvu-navy">
+                  {report.course_name} ({report.course_code}) · {report.exam_type.replace('_', ' ')}
+                </p>
+                <p className="mt-1">
+                  Marks: {report.marks_obtained}/{report.max_marks}
+                  {report.percent != null ? ` (${report.percent}%)` : ''}
+                  {report.grade ? ` · Grade ${report.grade}` : ''}
+                  {' · '}
+                  {report.result_status}
+                </p>
+                {report.report_summary ? <p className="mt-2 text-muted-foreground">{report.report_summary}</p> : null}
+                {report.declaration_note ? <p className="mt-1 text-xs text-muted-foreground">{report.declaration_note}</p> : null}
+                <p className="mt-2 text-xs text-muted-foreground">Declared {String(report.declared_at).slice(0, 10)}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

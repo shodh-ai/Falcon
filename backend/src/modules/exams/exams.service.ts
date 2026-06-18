@@ -1,6 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ExamSchedule } from '../../entities/exam-schedule.entity';
 import { ExamApplication } from '../../entities/exam-application.entity';
 import { AttendanceRecord } from '../../entities/attendance-record.entity';
@@ -22,6 +22,7 @@ export class ExamsService {
     @InjectRepository(ExamApplication) private applications: Repository<ExamApplication>,
     @InjectRepository(AttendanceRecord) private attendanceRepo: Repository<AttendanceRecord>,
     @InjectRepository(User) private users: Repository<User>,
+    @InjectDataSource() private readonly db: DataSource,
     private readonly finance: FinanceService,
     private readonly pdf: AdmitCardPdfService,
   ) {}
@@ -36,8 +37,19 @@ export class ExamsService {
       .getMany();
   }
 
-  async listMyApplications(studentUserId: string): Promise<ExamApplication[]> {
-    return this.applications.find({ where: { student_user_id: studentUserId }, order: { created_at: 'DESC' } });
+  async listMyApplications(studentUserId: string) {
+    return this.db.query(
+      `SELECT a.*,
+              sub.subject_name,
+              sub.subject_code,
+              f.name AS faculty_name
+       FROM exam_applications a
+       LEFT JOIN academic_subjects sub ON sub.subject_id = a.subject_id
+       LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
+       WHERE a.student_user_id = $1
+       ORDER BY a.created_at DESC`,
+      [studentUserId],
+    );
   }
 
   async createApplication(studentUserId: string, dto: CreateExamApplicationDto): Promise<ExamApplication> {

@@ -2,6 +2,10 @@ export const NotificationEvents = {
   FINANCE_FEE_GENERATED: 'finance.fee_generated',
   FINANCE_ADMIT_CARD_LOCKED: 'finance.admit_card_locked',
   EXAM_RESULTS_PUBLISHED: 'exam.results_published',
+  EXAM_REVALUATION_ASSIGNED: 'exam.revaluation_assigned',
+  EXAM_REVALUATION_REPORT_READY: 'exam.revaluation_report_ready',
+  EXAM_REVALUATION_PUBLISHED: 'exam.revaluation_published',
+  EXAM_REVALUATION_FEE_PAID: 'exam.revaluation_fee_paid',
   ACADEMICS_ATTENDANCE_WARNING: 'academics.attendance_warning',
   ACADEMICS_TIMETABLE_CHANGED: 'academics.timetable_changed',
   ACADEMICS_MARKS_PUBLISHED: 'academics.marks_published',
@@ -76,6 +80,16 @@ export type MarksPublishedPayload = BaseNotificationPayload & {
 export type ExamResultsPublishedPayload = BaseNotificationPayload & {
   courseName: string;
   examType: string;
+};
+
+export type ExamRevaluationPayload = BaseNotificationPayload & {
+  applicationId: string;
+  subjectName: string;
+  subjectCode?: string;
+  studentName?: string;
+  originalMarks?: number | null;
+  revisedMarks?: number | null;
+  reportNotes?: string | null;
 };
 
 export type CourseMaterialAddedPayload = BaseNotificationPayload & {

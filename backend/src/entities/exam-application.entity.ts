@@ -3,7 +3,14 @@ import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type ExamApplicationType = 'RE_EVALUATION' | 'BACKLOG';
 export type ExamApplicationFeeStatus = 'PENDING' | 'PAID' | 'WAIVED';
-export type ExamApplicationStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ExamApplicationStatus =
+  | 'DRAFT'
+  | 'PENDING'
+  | 'ASSIGNED'
+  | 'UNDER_REVIEW'
+  | 'COMPLETED'
+  | 'APPROVED'
+  | 'REJECTED';
 
 @Entity('exam_applications')
 @Index(['student_user_id'])
@@ -29,6 +36,33 @@ export class ExamApplication extends BaseSoftDeleteEntity {
 
   @Column({ type: 'uuid', nullable: true })
   finance_demand_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  assigned_faculty_user_id: string | null;
+
+  @Column({ type: 'numeric', precision: 6, scale: 2, nullable: true })
+  original_marks: number | null;
+
+  @Column({ type: 'numeric', precision: 6, scale: 2, nullable: true })
+  revised_marks: number | null;
+
+  @Column({ type: 'text', nullable: true })
+  report_notes: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  assigned_at: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  assigned_by: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  report_submitted_at: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  published_at: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  published_by: string | null;
 
   @CreateDateColumn()
   created_at: Date;

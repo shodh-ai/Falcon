@@ -8,6 +8,7 @@ import type {
   EventRejectedPayload,
   EventLivePayload,
   EventFundsTransferredPayload,
+  ExamRevaluationPayload,
   MeetingPortalPayload,
   FeeGeneratedPayload,
   GatePassUpdatedPayload,
@@ -165,6 +166,92 @@ export function examResultsPublishedMessage(
       severity: 'success',
       intent: 'status_update',
       metadata: { courseName: payload.courseName, examType: payload.examType },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationAssignedMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Re-evaluation assigned — ${payload.subjectName}`,
+      message: `Exam Cell assigned you to reassess ${payload.studentName ?? 'a student'} for ${payload.subjectName}. Submit your report when done.`,
+      actionLink: '/faculty/re-evaluations',
+      actionLabel: 'Open reassessment',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: { applicationId: payload.applicationId, subjectName: payload.subjectName },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationReportReadyMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Re-evaluation report ready — ${payload.subjectName}`,
+      message: `${payload.studentName ?? 'A student'}'s reassessment for ${payload.subjectName} is ready for review and publishing.`,
+      actionLink: '/exam-cell/re-evaluations',
+      actionLabel: 'Review report',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: { applicationId: payload.applicationId },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationPublishedMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const revised =
+    payload.revisedMarks != null && payload.originalMarks != null
+      ? ` Marks updated from ${payload.originalMarks} to ${payload.revisedMarks}.`
+      : payload.revisedMarks != null
+        ? ` Revised marks: ${payload.revisedMarks}.`
+        : '';
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Re-evaluation report — ${payload.subjectName}`,
+      message: `Your re-evaluation for ${payload.subjectName} has been published.${revised}`,
+      actionLink: '/student/exams?intent=revaluation',
+      actionLabel: 'View report',
+      severity: 'success',
+      intent: 'status_update',
+      metadata: {
+        applicationId: payload.applicationId,
+        originalMarks: payload.originalMarks,
+        revisedMarks: payload.revisedMarks,
+      },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationFeePaidMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Paid re-evaluation — ${payload.subjectName}`,
+      message: `${payload.studentName ?? 'A student'} paid the re-evaluation fee for ${payload.subjectName}. Assign a faculty member to begin reassessment.`,
+      actionLink: '/exam-cell/re-evaluations',
+      actionLabel: 'Open queue',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: { applicationId: payload.applicationId },
     },
     overrides,
   );

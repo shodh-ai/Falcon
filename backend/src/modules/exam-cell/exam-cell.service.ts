@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -31,7 +33,8 @@ export class ExamCellService {
       ),
       this.db.query(
         `SELECT COUNT(*)::int AS c FROM exam_applications
-         WHERE application_type = 'RE_EVALUATION' AND fee_status = 'PAID' AND status = 'PENDING'`,
+         WHERE application_type = 'RE_EVALUATION' AND fee_status = 'PAID'
+           AND status IN ('PENDING', 'ASSIGNED', 'UNDER_REVIEW')`,
       ),
       this.db.query(
         `SELECT COUNT(*)::int AS c FROM ufm_cases WHERE tenant_id = $1 AND status != 'CLOSED'`,
@@ -480,12 +483,334 @@ export class ExamCellService {
 
   listReEvaluations() {
     return this.db.query(
-      `SELECT a.*, u.name AS student_name, sub.subject_name, sub.subject_code
+      `SELECT a.*,
+              u.name AS student_name,
+              u.official_email AS student_email,
+              sub.subject_name,
+              sub.subject_code,
+              f.name AS faculty_name
        FROM exam_applications a
        JOIN users u ON u.user_id = a.student_user_id
        JOIN academic_subjects sub ON sub.subject_id = a.subject_id
-       WHERE a.application_type = 'RE_EVALUATION' AND a.fee_status = 'PAID' AND a.status = 'PENDING'
-       ORDER BY a.created_at ASC`,
+       LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
+       WHERE a.application_type = 'RE_EVALUATION'
+         AND a.fee_status = 'PAID'
+         AND a.status NOT IN ('DRAFT', 'REJECTED')
+       ORDER BY
+         CASE a.status
+           WHEN 'PENDING' THEN 1
+           WHEN 'ASSIGNED' THEN 2
+           WHEN 'UNDER_REVIEW' THEN 3
+           WHEN 'COMPLETED' THEN 4
+           ELSE 5
+         END,
+         a.created_at ASC`,
+    );
+  }
+
+  async getReEvaluation(applicationId: string) {
+    const rows = await this.db.query(
+      `SELECT a.*,
+              u.name AS student_name,
+              sub.subject_name,
+              sub.subject_code,
+              f.name AS faculty_name
+       FROM exam_applications a
+       JOIN users u ON u.user_id = a.student_user_id
+       JOIN academic_subjects sub ON sub.subject_id = a.subject_id
+       LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
+       WHERE a.exam_application_id = $1
+         AND a.application_type = 'RE_EVALUATION'`,
+      [applicationId],
+    );
+    if (!rows[0]) throw new NotFoundException('Re-evaluation application not found');
+    return rows[0];
+  }
+
+  private async loadOriginalMarks(studentUserId: string, subjectId: number) {
+    const rows = await this.db.query<Array<{ marks_obtained: string | null }>>(
+      `SELECT marks_obtained
+       FROM academic_exam_results
+       WHERE student_user_id = $1 AND subject_id = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [studentUserId, subjectId],
+    );
+    if (rows[0]?.marks_obtained != null) return Number(rows[0].marks_obtained);
+    const markRows = await this.db.query<Array<{ marks_obtained: string | null }>>(
+      `SELECT m.marks_obtained
+       FROM academic_marks m
+       JOIN academic_courses c ON c.course_id = m.course_id
+       JOIN academic_subjects s ON s.subject_code = c.course_code
+       WHERE m.student_user_id = $1
+         AND s.subject_id = $2
+         AND m.status = 'PUBLISHED'
+       ORDER BY m.published_at DESC NULLS LAST
+       LIMIT 1`,
+      [studentUserId, subjectId],
+    );
+    return markRows[0]?.marks_obtained != null ? Number(markRows[0].marks_obtained) : null;
+  }
+
+  private reEvalNotifyPayload(
+    tenantId: string,
+    row: {
+      exam_application_id: string;
+      student_user_id: string;
+      student_name?: string;
+      subject_name?: string;
+      subject_code?: string;
+      original_marks?: number | null;
+      revised_marks?: number | null;
+      report_notes?: string | null;
+    },
+  ) {
+    return {
+      tenantId,
+      userId: row.student_user_id,
+      applicationId: row.exam_application_id,
+      subjectName: row.subject_name ?? 'Subject',
+      subjectCode: row.subject_code,
+      studentName: row.student_name,
+      originalMarks: row.original_marks ?? null,
+      revisedMarks: row.revised_marks ?? null,
+      reportNotes: row.report_notes ?? null,
+    };
+  }
+
+  async assignReEvaluation(
+    tenantId: string,
+    actorUserId: string,
+    applicationId: string,
+    facultyUserId: string,
+  ) {
+    const application = await this.getReEvaluation(applicationId);
+    if (application.status !== 'PENDING') {
+      throw new BadRequestException('Only pending applications can be assigned');
+    }
+
+    const facultyRows = await this.db.query(
+      `SELECT 1 FROM users u
+       JOIN user_roles ur ON ur.user_id = u.user_id
+       JOIN roles r ON r.role_id = ur.role_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND lower(r.role_name) = 'faculty'`,
+      [facultyUserId, tenantId],
+    );
+    if (!facultyRows[0]) throw new BadRequestException('Selected faculty is invalid');
+
+    const originalMarks = await this.loadOriginalMarks(application.student_user_id, application.subject_id);
+
+    const rows = await this.db.query(
+      `UPDATE exam_applications
+       SET status = 'ASSIGNED',
+           assigned_faculty_user_id = $2,
+           assigned_by = $3,
+           assigned_at = NOW(),
+           original_marks = $4
+       WHERE exam_application_id = $1
+       RETURNING *`,
+      [applicationId, facultyUserId, actorUserId, originalMarks],
+    );
+    const updated = { ...application, ...rows[0], original_marks: originalMarks };
+
+    this.notify.examRevaluationAssigned({
+      ...this.reEvalNotifyPayload(tenantId, updated),
+      userId: facultyUserId,
+    });
+
+    return this.getReEvaluation(applicationId);
+  }
+
+  async submitReEvaluationReport(
+    facultyUserId: string,
+    applicationId: string,
+    dto: { revised_marks: number; report_notes: string },
+  ) {
+    const application = await this.getReEvaluation(applicationId);
+    if (application.assigned_faculty_user_id !== facultyUserId) {
+      throw new ForbiddenException('You are not assigned to this re-evaluation');
+    }
+    if (application.status !== 'ASSIGNED') {
+      throw new BadRequestException('Report can only be submitted for assigned applications');
+    }
+
+    await this.db.query(
+      `UPDATE exam_applications
+       SET status = 'UNDER_REVIEW',
+           revised_marks = $2,
+           report_notes = $3,
+           report_submitted_at = NOW()
+       WHERE exam_application_id = $1`,
+      [applicationId, dto.revised_marks, dto.report_notes.trim()],
+    );
+
+    const refreshed = await this.getReEvaluation(applicationId);
+    const [student] = await this.db.query<Array<{ tenant_id: string }>>(
+      `SELECT tenant_id FROM users WHERE user_id = $1`,
+      [refreshed.student_user_id],
+    );
+    const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+
+    this.notify.examRevaluationReportReady({
+      ...this.reEvalNotifyPayload(tenantId, {
+        ...refreshed,
+        revised_marks: dto.revised_marks,
+        report_notes: dto.report_notes,
+      }),
+      userId: refreshed.student_user_id,
+    });
+
+    return refreshed;
+  }
+
+  async publishReEvaluation(tenantId: string, actorUserId: string, applicationId: string) {
+    const application = await this.getReEvaluation(applicationId);
+    if (application.status !== 'UNDER_REVIEW') {
+      throw new BadRequestException('Only applications with a submitted report can be published');
+    }
+
+    await this.db.query(
+      `UPDATE exam_applications
+       SET status = 'COMPLETED',
+           published_at = NOW(),
+           published_by = $2
+       WHERE exam_application_id = $1`,
+      [applicationId, actorUserId],
+    );
+
+    if (application.revised_marks != null) {
+      await this.db.query(
+        `UPDATE academic_exam_results
+         SET marks_obtained = $3, updated_at = NOW()
+         WHERE student_user_id = $1 AND subject_id = $2`,
+        [application.student_user_id, application.subject_id, application.revised_marks],
+      );
+    }
+
+    const refreshed = await this.getReEvaluation(applicationId);
+    const payload = this.reEvalNotifyPayload(tenantId, refreshed);
+
+    this.notify.examRevaluationPublished({
+      ...payload,
+      userId: refreshed.student_user_id,
+      actionLink: '/student/exams?intent=revaluation',
+    });
+
+    const parentRows = await this.db.query<Array<{ parent_mobile: string; parent_name: string }>>(
+      `SELECT parent_mobile, parent_name
+       FROM parent_student_links
+       WHERE student_user_id = $1`,
+      [refreshed.student_user_id],
+    );
+    for (const parent of parentRows) {
+      const revisedText =
+        refreshed.revised_marks != null && refreshed.original_marks != null
+          ? `Marks updated from ${refreshed.original_marks} to ${refreshed.revised_marks}.`
+          : refreshed.revised_marks != null
+            ? `Revised marks: ${refreshed.revised_marks}.`
+            : 'Report published.';
+      await this.db.query(
+        `INSERT INTO integration_jobs (tenant_id, integration_type, entity_type, payload)
+         VALUES ($1, 'WHATSAPP', 'revaluation_report', $2::jsonb)`,
+        [
+          tenantId,
+          JSON.stringify({
+            to: parent.parent_mobile,
+            message: `Re-evaluation report for ${refreshed.student_name} (${refreshed.subject_name}): ${revisedText}`,
+            provider: 'MSG91',
+          }),
+        ],
+      );
+    }
+
+    return refreshed;
+  }
+
+  async rejectReEvaluation(
+    tenantId: string,
+    actorUserId: string,
+    applicationId: string,
+    reason?: string,
+  ) {
+    const application = await this.getReEvaluation(applicationId);
+    if (!['PENDING', 'ASSIGNED', 'UNDER_REVIEW'].includes(application.status)) {
+      throw new BadRequestException('This application cannot be rejected');
+    }
+
+    await this.db.query(
+      `UPDATE exam_applications
+       SET status = 'REJECTED',
+           report_notes = COALESCE($2, report_notes),
+           published_at = NOW(),
+           published_by = $3
+       WHERE exam_application_id = $1`,
+      [applicationId, reason?.trim() || null, actorUserId],
+    );
+
+    const refreshed = await this.getReEvaluation(applicationId);
+    this.notify.examRevaluationPublished({
+      ...this.reEvalNotifyPayload(tenantId, refreshed),
+      userId: refreshed.student_user_id,
+      title: `Re-evaluation declined — ${refreshed.subject_name}`,
+      message: reason?.trim()
+        ? `Your re-evaluation request for ${refreshed.subject_name} was declined. Reason: ${reason.trim()}`
+        : `Your re-evaluation request for ${refreshed.subject_name} was declined by Exam Cell.`,
+      actionLink: '/student/exams?intent=revaluation',
+    });
+
+    return refreshed;
+  }
+
+  listFacultyReEvaluations(facultyUserId: string) {
+    return this.db.query(
+      `SELECT a.*,
+              u.name AS student_name,
+              sub.subject_name,
+              sub.subject_code
+       FROM exam_applications a
+       JOIN users u ON u.user_id = a.student_user_id
+       JOIN academic_subjects sub ON sub.subject_id = a.subject_id
+       WHERE a.application_type = 'RE_EVALUATION'
+         AND a.assigned_faculty_user_id = $1
+         AND a.status IN ('ASSIGNED', 'UNDER_REVIEW', 'COMPLETED')
+       ORDER BY a.assigned_at DESC NULLS LAST, a.created_at DESC`,
+      [facultyUserId],
+    );
+  }
+
+  listStudentReEvaluations(studentUserId: string) {
+    return this.db.query(
+      `SELECT a.*,
+              sub.subject_name,
+              sub.subject_code,
+              f.name AS faculty_name
+       FROM exam_applications a
+       JOIN academic_subjects sub ON sub.subject_id = a.subject_id
+       LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
+       WHERE a.student_user_id = $1
+         AND a.application_type = 'RE_EVALUATION'
+       ORDER BY a.created_at DESC`,
+      [studentUserId],
+    );
+  }
+
+  listParentReEvaluations(studentUserId: string) {
+    return this.db.query(
+      `SELECT a.exam_application_id,
+              a.status,
+              a.original_marks,
+              a.revised_marks,
+              a.report_notes,
+              a.published_at,
+              sub.subject_name,
+              sub.subject_code
+       FROM exam_applications a
+       JOIN academic_subjects sub ON sub.subject_id = a.subject_id
+       WHERE a.student_user_id = $1
+         AND a.application_type = 'RE_EVALUATION'
+         AND a.status = 'COMPLETED'
+       ORDER BY a.published_at DESC NULLS LAST`,
+      [studentUserId],
     );
   }
 

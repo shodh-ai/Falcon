@@ -23,14 +23,30 @@ export interface ExamEligibilityResult {
 
 export type ExamApplicationType = 'RE_EVALUATION' | 'BACKLOG';
 
+export type ExamApplicationStatus =
+  | 'DRAFT'
+  | 'PENDING'
+  | 'ASSIGNED'
+  | 'UNDER_REVIEW'
+  | 'COMPLETED'
+  | 'APPROVED'
+  | 'REJECTED';
+
 export interface ExamApplication {
   exam_application_id: string;
   student_user_id: string;
   subject_id: number;
+  subject_name?: string;
+  subject_code?: string;
   application_type: ExamApplicationType;
   fee_status: 'PENDING' | 'PAID' | 'WAIVED';
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: ExamApplicationStatus;
   finance_demand_id?: string | null;
+  original_marks?: number | string | null;
+  revised_marks?: number | string | null;
+  report_notes?: string | null;
+  faculty_name?: string | null;
+  published_at?: string | null;
   created_at: string;
 }
 

@@ -1,8 +1,20 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ExamCellService } from './exam-cell.service';
+import {
+  AssignReEvaluationDto,
+  RejectReEvaluationDto,
+} from './dto/re-evaluations.dto';
+import {
+  ConfigureSessionRulesDto,
+  CreateResultSessionDto,
+  DeclareResultSessionDto,
+  OpenResultEntryDto,
+  ReopenResultEntryDto,
+} from './dto/result-control.dto';
+import { ResultControlService } from './result-control.service';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
@@ -10,7 +22,10 @@ type AuthUser = { user_id: string; tenant_id?: string };
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ExamCell', 'SuperAdmin')
 export class ExamCellController {
-  constructor(private readonly examCell: ExamCellService) {}
+  constructor(
+    private readonly examCell: ExamCellService,
+    private readonly resultControl: ResultControlService,
+  ) {}
 
   @Get('dashboard')
   dashboard(@Req() req: { user: AuthUser }) {
@@ -99,6 +114,44 @@ export class ExamCellController {
     return this.examCell.listReEvaluations();
   }
 
+  @Get('re-evaluations/:applicationId')
+  reEvaluationDetail(@Param('applicationId') applicationId: string) {
+    return this.examCell.getReEvaluation(applicationId);
+  }
+
+  @Post('re-evaluations/:applicationId/assign')
+  assignReEvaluation(
+    @Req() req: { user: AuthUser },
+    @Param('applicationId') applicationId: string,
+    @Body() dto: AssignReEvaluationDto,
+  ) {
+    return this.examCell.assignReEvaluation(
+      this.tenant(req),
+      req.user.user_id,
+      applicationId,
+      dto.faculty_user_id,
+    );
+  }
+
+  @Post('re-evaluations/:applicationId/publish')
+  publishReEvaluation(@Req() req: { user: AuthUser }, @Param('applicationId') applicationId: string) {
+    return this.examCell.publishReEvaluation(this.tenant(req), req.user.user_id, applicationId);
+  }
+
+  @Post('re-evaluations/:applicationId/reject')
+  rejectReEvaluation(
+    @Req() req: { user: AuthUser },
+    @Param('applicationId') applicationId: string,
+    @Body() dto: RejectReEvaluationDto,
+  ) {
+    return this.examCell.rejectReEvaluation(
+      this.tenant(req),
+      req.user.user_id,
+      applicationId,
+      dto.reason,
+    );
+  }
+
   @Get('grade-cards')
   gradeCards() {
     return this.examCell.listGradeCards();
@@ -117,6 +170,87 @@ export class ExamCellController {
   @Post('transcripts/generate')
   transcripts(@Req() req: { user: AuthUser }, @Body() dto: { semester: number }) {
     return this.examCell.generateTranscripts(this.tenant(req), dto.semester);
+  }
+
+  @Get('result-control/sessions')
+  listResultSessions(@Req() req: { user: AuthUser }) {
+    return this.resultControl.listSessions(this.tenant(req));
+  }
+
+  @Post('result-control/sessions')
+  createResultSession(@Req() req: { user: AuthUser }, @Body() dto: CreateResultSessionDto) {
+    return this.resultControl.createSession(this.tenant(req), dto);
+  }
+
+  @Get('result-control/sessions/:sessionId')
+  getResultSession(@Req() req: { user: AuthUser }, @Param('sessionId') sessionId: string) {
+    return this.resultControl.getSession(this.tenant(req), sessionId);
+  }
+
+  @Post('result-control/sessions/:sessionId/open-entry')
+  openResultEntry(
+    @Req() req: { user: AuthUser },
+    @Param('sessionId') sessionId: string,
+    @Body() dto: OpenResultEntryDto,
+  ) {
+    return this.resultControl.openEntry(this.tenant(req), sessionId, dto);
+  }
+
+  @Post('result-control/sessions/:sessionId/close-entry')
+  closeResultEntry(@Req() req: { user: AuthUser }, @Param('sessionId') sessionId: string) {
+    return this.resultControl.closeEntry(this.tenant(req), sessionId);
+  }
+
+  @Post('result-control/sessions/:sessionId/lock-marks')
+  lockResultMarks(@Req() req: { user: AuthUser }, @Param('sessionId') sessionId: string) {
+    return this.resultControl.lockMarks(this.tenant(req), sessionId, req.user.user_id);
+  }
+
+  @Post('result-control/sessions/:sessionId/reopen-entry')
+  reopenResultEntry(
+    @Req() req: { user: AuthUser },
+    @Param('sessionId') sessionId: string,
+    @Body() dto: ReopenResultEntryDto,
+  ) {
+    return this.resultControl.reopenEntry(this.tenant(req), sessionId, dto);
+  }
+
+  @Post('result-control/sessions/:sessionId/configure-rules')
+  configureResultRules(
+    @Req() req: { user: AuthUser },
+    @Param('sessionId') sessionId: string,
+    @Body() dto: ConfigureSessionRulesDto,
+  ) {
+    return this.resultControl.configureRules(this.tenant(req), sessionId, dto);
+  }
+
+  @Get('result-control/courses')
+  listResultCourses(@Req() req: { user: AuthUser }) {
+    return this.resultControl.listCourses(this.tenant(req));
+  }
+
+  @Get('result-control/grading-policies')
+  listGradingPolicies() {
+    return this.resultControl.listGradingPolicies();
+  }
+
+  @Post('result-control/sessions/:sessionId/process')
+  processResultSession(@Req() req: { user: AuthUser }, @Param('sessionId') sessionId: string) {
+    return this.resultControl.processSession(this.tenant(req), sessionId, req.user.user_id);
+  }
+
+  @Post('result-control/sessions/:sessionId/declare')
+  declareResultSession(
+    @Req() req: { user: AuthUser },
+    @Param('sessionId') sessionId: string,
+    @Body() dto: DeclareResultSessionDto,
+  ) {
+    return this.resultControl.declareSession(this.tenant(req), sessionId, req.user.user_id, dto);
+  }
+
+  @Get('result-control/sessions/:sessionId/reports')
+  listSessionReports(@Req() req: { user: AuthUser }, @Param('sessionId') sessionId: string) {
+    return this.resultControl.listSessionReports(this.tenant(req), sessionId);
   }
 
   private tenant(req: { user: AuthUser }) {

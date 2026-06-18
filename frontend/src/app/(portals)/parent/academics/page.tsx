@@ -28,6 +28,28 @@ type AcademicsSummary = {
     end_max: string | null;
   }>;
   attendance_summary: Array<{ course_code: string; course_name: string; attendance_percent: string }>;
+  revaluation_reports?: Array<{
+    exam_application_id: string;
+    subject_name: string;
+    subject_code: string;
+    original_marks: string | number | null;
+    revised_marks: string | number | null;
+    report_notes: string | null;
+    published_at: string | null;
+  }>;
+  exam_reports?: Array<{
+    report_id: string;
+    course_code: string;
+    course_name: string;
+    exam_type: string;
+    marks_obtained: string | number;
+    max_marks: string | number;
+    percent: string | number | null;
+    grade: string | null;
+    result_status: string;
+    report_summary: string | null;
+    declared_at: string;
+  }>;
 };
 
 type ProctorInfo = {
@@ -118,6 +140,59 @@ export default function ParentAcademicsPage() {
           ))}
         </CardContent>
       </Card>
+
+      {(academics?.revaluation_reports?.length ?? 0) > 0 ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Re-evaluation Reports</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {academics!.revaluation_reports!.map((report) => (
+              <div key={report.exam_application_id} className="rounded-xl border px-3 py-3 text-sm">
+                <p className="font-semibold text-sgvu-navy">
+                  {report.subject_name} ({report.subject_code})
+                </p>
+                {report.original_marks != null || report.revised_marks != null ? (
+                  <p className="mt-1 text-muted-foreground">
+                    Marks: {report.original_marks ?? '—'} → {report.revised_marks ?? '—'}
+                  </p>
+                ) : null}
+                {report.report_notes ? (
+                  <p className="mt-2 whitespace-pre-wrap">{report.report_notes}</p>
+                ) : null}
+                {report.published_at ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Published {String(report.published_at).slice(0, 10)}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {(academics?.exam_reports?.length ?? 0) > 0 ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Declared Exam Reports</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {academics!.exam_reports!.map((report) => (
+              <div key={report.report_id} className="rounded-xl border px-3 py-3 text-sm">
+                <p className="font-semibold text-sgvu-navy">
+                  {report.course_name} ({report.course_code}) · {report.exam_type.replace('_', ' ')}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  Marks: {report.marks_obtained}/{report.max_marks}
+                  {report.percent != null ? ` (${report.percent}%)` : ''}
+                  {report.grade ? ` · Grade ${report.grade}` : ''}
+                </p>
+                {report.report_summary ? <p className="mt-2">{report.report_summary}</p> : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="border-sgvu-gold/30 bg-gradient-to-br from-white to-amber-50/40">
         <CardHeader className="pb-2">

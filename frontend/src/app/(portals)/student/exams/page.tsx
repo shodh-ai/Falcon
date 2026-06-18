@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, FileDown, ListChecks, Lock, RefreshCcw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { academicsApi } from '@/lib/api/api.academics';
 import { API_URL } from '@/lib/api/client';
-import { examsApi, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
+import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
 import { useAuthedApi } from '@/lib/api';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -16,6 +17,25 @@ import { StudentTabBar } from '@/components/student/StudentTabBar';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 
 type TabKey = 'schedule' | 'admit' | 'reeval';
+
+function reEvalStatusLabel(status: string) {
+  switch (status) {
+    case 'DRAFT':
+      return 'Fee pending';
+    case 'PENDING':
+      return 'With Exam Cell';
+    case 'ASSIGNED':
+      return 'Faculty reassessing';
+    case 'UNDER_REVIEW':
+      return 'Report under review';
+    case 'COMPLETED':
+      return 'Report published';
+    case 'REJECTED':
+      return 'Declined';
+    default:
+      return status.replace('_', ' ');
+  }
+}
 
 function formatTime(hhmmss: string) {
   return String(hhmmss).slice(0, 5);
@@ -37,13 +57,16 @@ type ExamDesk = {
 export default function StudentExamsPage() {
   const { token, user } = useAuth();
   const api = useAuthedApi();
-  const [tab, setTab] = useState<TabKey>('schedule');
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<TabKey>(
+    searchParams.get('intent') === 'revaluation' ? 'reeval' : 'schedule',
+  );
   const [examDesk, setExamDesk] = useState<ExamDesk | null>(null);
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [eligibility, setEligibility] = useState<ExamEligibilityResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [applications, setApplications] = useState<unknown[]>([]);
+  const [applications, setApplications] = useState<ExamApplication[]>([]);
   const [results, setResults] = useState<unknown[]>([]);
 
   const ineligibleMessage = useMemo(() => {
@@ -66,6 +89,10 @@ export default function StudentExamsPage() {
     }
     return lines.join(' ');
   }, [eligibility]);
+
+  useEffect(() => {
+    if (searchParams.get('intent') === 'revaluation') setTab('reeval');
+  }, [searchParams]);
 
   useEffect(() => {
     const load = async () => {
@@ -335,27 +362,53 @@ export default function StudentExamsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-sgvu-navy">My applications</p>
-                  {applications.length === 0 ? (
+                  <p className="text-sm font-semibold text-sgvu-navy">My re-evaluation requests</p>
+                  {applications.filter((app) => app.application_type === 'RE_EVALUATION').length === 0 ? (
                     <p className="text-sm text-muted-foreground">No applications yet.</p>
                   ) : (
-                    <div className="space-y-2">
-                      {applications.slice(0, 8).map((app: any) => (
-                        <div key={String(app.exam_application_id)} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3 text-sm">
-                          <div className="min-w-0">
-                            <p className="font-medium text-sgvu-navy">
-                              {String(app.application_type).replace('_', ' ')} for Subject #{app.subject_id}
-                            </p>
-                            <p className="text-xs text-muted-foreground">{app.created_at ? String(app.created_at).slice(0, 10) : ''}</p>
+                    <div className="space-y-3">
+                      {applications
+                        .filter((app) => app.application_type === 'RE_EVALUATION')
+                        .map((app) => (
+                          <div key={app.exam_application_id} className="rounded-xl border px-4 py-3 text-sm">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-medium text-sgvu-navy">
+                                  {app.subject_name ?? `Subject #${app.subject_id}`}
+                                  {app.subject_code ? ` (${app.subject_code})` : ''}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Applied {app.created_at ? String(app.created_at).slice(0, 10) : ''}
+                                  {app.faculty_name ? ` · Faculty: ${app.faculty_name}` : ''}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant={app.status === 'COMPLETED' ? 'success' : app.status === 'REJECTED' ? 'destructive' : 'secondary'}>
+                                  {reEvalStatusLabel(app.status)}
+                                </Badge>
+                                <Badge variant={app.fee_status === 'PAID' ? 'success' : 'secondary'}>{app.fee_status}</Badge>
+                              </div>
+                            </div>
+
+                            {app.status === 'COMPLETED' ? (
+                              <div className="mt-3 rounded-lg border bg-green-50 p-3 text-green-900">
+                                <p className="font-semibold">Reassessment report</p>
+                                {app.original_marks != null || app.revised_marks != null ? (
+                                  <p className="mt-1">
+                                    Marks: {app.original_marks ?? '—'} → {app.revised_marks ?? '—'}
+                                  </p>
+                                ) : null}
+                                {app.report_notes ? (
+                                  <p className="mt-2 whitespace-pre-wrap text-green-800">{app.report_notes}</p>
+                                ) : null}
+                              </div>
+                            ) : null}
+
+                            {app.status === 'REJECTED' && app.report_notes ? (
+                              <p className="mt-2 text-destructive">{app.report_notes}</p>
+                            ) : null}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant={app.status === 'APPROVED' ? 'success' : app.status === 'REJECTED' ? 'destructive' : 'secondary'}>
-                              {app.status}
-                            </Badge>
-                            <Badge variant={app.fee_status === 'PAID' ? 'success' : 'secondary'}>{app.fee_status}</Badge>
-                          </div>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   )}
                 </div>

@@ -22,6 +22,10 @@ import {
   meetingMinutesPublishedMessage,
   eventProposedMessage,
   examResultsPublishedMessage,
+  examRevaluationAssignedMessage,
+  examRevaluationFeePaidMessage,
+  examRevaluationPublishedMessage,
+  examRevaluationReportReadyMessage,
   exportFailedMessage,
   exportReadyMessage,
   feeGeneratedMessage,
@@ -53,6 +57,7 @@ import {
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
+  type ExamRevaluationPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
@@ -165,6 +170,58 @@ export class NotificationEventsListener {
       actionLink: payload.actionLink,
     });
     await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_ASSIGNED)
+  async onExamRevaluationAssigned(payload: ExamRevaluationPayload) {
+    const msg = examRevaluationAssignedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_REPORT_READY)
+  async onExamRevaluationReportReady(payload: ExamRevaluationPayload) {
+    const recipients = await this.listExamCellOfficers(payload.tenantId);
+    const msg = examRevaluationReportReadyMessage(payload);
+    for (const userId of recipients) {
+      await this.emitFromPayload(payload.tenantId, userId, msg);
+    }
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_FEE_PAID)
+  async onExamRevaluationFeePaid(payload: ExamRevaluationPayload) {
+    const recipients = await this.listExamCellOfficers(payload.tenantId);
+    const msg = examRevaluationFeePaidMessage(payload);
+    for (const userId of recipients) {
+      await this.emitFromPayload(payload.tenantId, userId, msg);
+    }
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_PUBLISHED)
+  async onExamRevaluationPublished(payload: ExamRevaluationPayload) {
+    const msg = examRevaluationPublishedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  private async listExamCellOfficers(tenantId: string) {
+    const rows = await this.dataSource.query<Array<{ user_id: string }>>(
+      `SELECT DISTINCT u.user_id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.user_id
+       JOIN roles r ON r.role_id = ur.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND lower(r.role_name) IN ('examcell', 'superadmin')`,
+      [tenantId],
+    );
+    return rows.map((row) => row.user_id);
   }
 
   @OnEvent(NotificationEvents.OPERATIONS_GATE_PASS_UPDATED)

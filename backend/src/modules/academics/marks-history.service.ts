@@ -156,11 +156,26 @@ export class MarksHistoryService {
         semester: Number(r.semester),
       }));
 
+    const examReports = await this.dataSource
+      .query(
+        `SELECT r.report_id, r.session_id, r.course_id, r.exam_type, r.marks_obtained, r.max_marks,
+                r.percent, r.grade, r.grade_points, r.result_status, r.report_summary, r.declared_at,
+                c.course_code, c.course_name, s.declaration_note, s.semester
+         FROM student_exam_reports r
+         JOIN academic_courses c ON c.course_id = r.course_id
+         JOIN exam_result_sessions s ON s.session_id = r.session_id
+         WHERE r.tenant_id = $2 AND r.student_user_id = $1
+         ORDER BY r.declared_at DESC`,
+        [studentUserId, tenantId],
+      )
+      .catch(() => []);
+
     return {
       cgpa,
       total_credits_earned: totalCreditsEarned,
       semesters,
       component_marks_by_semester: componentBySemester,
+      exam_reports: examReports,
       backlogs: {
         uncleared,
         cleared,

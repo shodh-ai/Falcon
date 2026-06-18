@@ -35,6 +35,13 @@ type MarksPayload = {
   course_id: string;
   max_marks_default: number;
   publish_status: string;
+  entry_allowed?: boolean;
+  result_session?: {
+    session_id: string;
+    entry_status: string;
+    marks_locked: boolean;
+    declared_at?: string | null;
+  } | null;
   rows: MarkRow[];
 };
 
@@ -46,6 +53,8 @@ export default function FacultyGradingPage() {
   const [maxMarks, setMaxMarks] = useState(50);
   const [rows, setRows] = useState<MarkRow[]>([]);
   const [publishStatus, setPublishStatus] = useState('DRAFT');
+  const [entryAllowed, setEntryAllowed] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -70,6 +79,8 @@ export default function FacultyGradingPage() {
           setRows(data.rows);
           setMaxMarks(data.max_marks_default ?? 50);
           setPublishStatus(data.publish_status);
+          setEntryAllowed(data.entry_allowed ?? false);
+          setSessionStatus(data.result_session?.entry_status ?? null);
         }
       } catch (e) {
         if (!cancelled) {
@@ -147,8 +158,8 @@ export default function FacultyGradingPage() {
         toast.warning('No draft marks were published. Save draft marks first.');
         return;
       }
-      toast.success(`Marks published to ${result.published} student${result.published === 1 ? '' : 's'}`);
-      setPublishStatus('PUBLISHED');
+      toast.success(`Marks submitted to Exam Cell for ${result.published} student${result.published === 1 ? '' : 's'}`);
+      setPublishStatus('PENDING_COE');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Publish failed');
     } finally {
@@ -178,6 +189,16 @@ export default function FacultyGradingPage() {
           </Button>
         }
       />
+
+      {courseId && !entryAllowed ? (
+        <FacultyErrorBanner
+          message={
+            sessionStatus
+              ? `Marks entry is ${sessionStatus.toLowerCase()}. Exam Cell must open the result session before you can enter or submit marks.`
+              : 'Exam Cell has not opened marks entry for this course and exam type yet.'
+          }
+        />
+      ) : null}
 
       <FacultyPanel title="Assessment setup" description="Choose course, exam type, and max marks">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -220,10 +241,10 @@ export default function FacultyGradingPage() {
           </label>
           <div className="flex items-end">
             <Badge
-              variant={publishStatus === 'PUBLISHED' ? 'default' : 'secondary'}
+              variant={publishStatus === 'PUBLISHED' ? 'default' : publishStatus === 'PENDING_COE' ? 'outline' : 'secondary'}
               className="text-xs font-semibold uppercase tracking-wide"
             >
-              {publishStatus}
+              {publishStatus === 'PENDING_COE' ? 'Submitted to Exam Cell' : publishStatus}
             </Badge>
           </div>
         </div>
@@ -235,13 +256,13 @@ export default function FacultyGradingPage() {
         description="Enter marks per student — CO mapping optional"
       >
         <div className="mb-4 flex flex-wrap justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={!courseId || saving} onClick={() => void saveDraft()}>
+          <Button variant="outline" size="sm" disabled={!courseId || saving || !entryAllowed || publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'} onClick={() => void saveDraft()}>
             {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
             Save draft
           </Button>
-          <Button size="sm" disabled={!courseId || saving} onClick={() => void publish()}>
+          <Button size="sm" disabled={!courseId || saving || !entryAllowed || publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'} onClick={() => void publish()}>
             <Send className="mr-1 h-4 w-4" />
-            Publish to students
+            Submit to Exam Cell
           </Button>
         </div>
 
