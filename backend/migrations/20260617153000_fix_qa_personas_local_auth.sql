@@ -173,7 +173,7 @@ BEGIN
     UPDATE users u
     SET entity_id = oe.entity_id
     FROM org_entities oe
-    JOIN public.tenants t ON t.tenant_id = u.tenant_id AND t.subdomain = 'sgvu'
+    INNER JOIN public.tenants t ON t.tenant_id = oe.tenant_id AND t.subdomain = 'sgvu'
     WHERE oe.tenant_id = u.tenant_id
       AND oe.entity_code = 'SGVU_UNIVERSITY'
       AND u.entity_id IS NULL

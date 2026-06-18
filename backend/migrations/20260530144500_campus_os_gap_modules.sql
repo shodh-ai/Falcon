@@ -351,8 +351,8 @@ WHERE NOT EXISTS (SELECT 1 FROM student_exit_clearance_tasks WHERE student_user_
 
 WITH tenant AS (SELECT tenant_id FROM public.tenants WHERE subdomain = 'sgvu' LIMIT 1),
 student AS (SELECT user_id FROM users WHERE lower(official_email) = 'student1@mygyanvihar.com' LIMIT 1)
-INSERT INTO alumni_profiles (tenant_id, student_user_id, name, email, linkedin_url, current_company, designation, graduation_year)
-SELECT tenant.tenant_id, student.user_id, 'Student One Alumni', 'student1.alumni@example.com', 'https://linkedin.com/in/student-one', 'Falcon Labs', 'Software Engineer', 2026
+INSERT INTO alumni_profiles (alumni_id, tenant_id, student_user_id, name, email, linkedin_url, current_company, designation, graduation_year)
+SELECT gen_random_uuid(), tenant.tenant_id, student.user_id, 'Student One Alumni', 'student1.alumni@example.com', 'https://linkedin.com/in/student-one', 'Falcon Labs', 'Software Engineer', 2026
 FROM tenant, student
 WHERE NOT EXISTS (SELECT 1 FROM alumni_profiles WHERE student_user_id = student.user_id);
 
