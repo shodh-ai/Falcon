@@ -14,6 +14,7 @@ import {
   presidentPortal,
   alumniPortal,
   alumniAdminPortal,
+  deanPortal,
   adminOpsPortal,
   placementPortal,
 } from '@/lib/navigation';
@@ -54,7 +55,7 @@ export function GenericPortalShell({
   portal,
 }: {
   children: ReactNode;
-  portal: PortalKey;
+  portal: PortalKey | 'dean';
 }) {
   const config = configs[portal];
   return (

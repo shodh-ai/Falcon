@@ -744,6 +744,73 @@ export class AcademicsController {
     return this.facultyWorkspaces.listInvigilation(req.user.user_id, this.resolveTenantId(req.user));
   }
 
+  @Post('faculty/workspaces/projects/assign')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  assignProjectGuide(
+    @Req() req: { user: AuthUser },
+    @Body()
+    body: {
+      faculty_user_id?: string;
+      project_title: string;
+      program?: string;
+      start_date?: string;
+      end_date?: string;
+      funding_allocated?: number;
+      student_ids: string[];
+    },
+  ) {
+    const targetFacultyId = body.faculty_user_id || req.user.user_id;
+    return this.facultyWorkspaces.assignProjectGuide(
+      targetFacultyId,
+      this.resolveTenantId(req.user),
+      { ...body, student_ids: body.student_ids || [] },
+    );
+  }
+
+  @Patch('faculty/workspaces/projects/:guideId/students')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  updateProjectStudents(
+    @Req() req: { user: AuthUser },
+    @Param('guideId') guideId: string,
+    @Body() body: { students: { student_user_id: string; grade?: string }[] }
+  ) {
+    return this.facultyWorkspaces.updateProjectStudents(
+      guideId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body.students
+    );
+  }
+
+  @Patch('faculty/workspaces/projects/:guideId/complete')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  completeProject(
+    @Req() req: { user: AuthUser },
+    @Param('guideId') guideId: string,
+  ) {
+    return this.facultyWorkspaces.completeProject(
+      guideId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Post('faculty/workspaces/projects/:guideId/funding')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  requestFunding(
+    @Req() req: { user: AuthUser },
+    @Param('guideId') guideId: string,
+    @Body() body: { amount: number; purpose: string }
+  ) {
+    return this.facultyWorkspaces.requestFunding(
+      guideId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body.amount,
+      body.purpose
+    );
+  }
+
   @Get('faculty/workspaces/projects')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listProjects(@Req() req: { user: AuthUser }) {
@@ -758,6 +825,55 @@ export class AcademicsController {
   ) {
     return this.facultyWorkspaces.listProjectReports(
       guideId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Get('hod/funding-requests')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  listHodFundingRequests(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listHodFundingRequests(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Patch('hod/funding-requests/:requestId')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  updateHodFundingRequest(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+    @Body() body: { status: 'APPROVED_HOD' | 'REJECTED_HOD'; commitMessage: string }
+  ) {
+    return this.facultyWorkspaces.updateHodFundingRequest(
+      requestId,
+      body.status,
+      body.commitMessage,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Get('dean/funding-requests')
+  @Roles('Dean', 'SuperAdmin')
+  listDeanFundingRequests(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listDeanFundingRequests(
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Patch('dean/funding-requests/:requestId')
+  @Roles('Dean', 'SuperAdmin')
+  updateDeanFundingRequest(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+    @Body() body: { status: 'APPROVED_DEAN' | 'REJECTED_DEAN'; commitMessage: string }
+  ) {
+    return this.facultyWorkspaces.updateDeanFundingRequest(
+      requestId,
+      body.status,
+      body.commitMessage,
       req.user.user_id,
       this.resolveTenantId(req.user),
     );

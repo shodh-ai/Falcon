@@ -28,6 +28,7 @@ type AuthProfileUser = {
   tenant_id?: string;
   role?: string;
   roles?: string[];
+  primaryRole?: string;
 };
 
 @Controller(['auth', 'api/auth'])

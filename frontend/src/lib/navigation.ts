@@ -418,6 +418,12 @@ export const hrPortal: PortalConfig = {
       ],
     },
     {
+      title: 'Grievances & Support',
+      items: [
+        { label: 'Grievances Escalation', href: '/hr/grievances', icon: AlertTriangle, keywords: ['ticket', 'escalation', 'sla', 'hr', 'payroll', 'grievance'], roles: ['HRAdmin', 'HR', 'SuperAdmin'] },
+      ],
+    },
+    {
       title: 'Performance & Lifecycle',
       items: [
         { label: 'Onboarding Pipeline', href: '/hr/onboarding', icon: Kanban, keywords: ['kanban', 'hired', 'new hire'], hrModule: 'onboarding' },
@@ -707,6 +713,7 @@ export const financePortal: PortalConfig = {
       items: [
         { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'] },
         { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'] },
+        { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'] },
         { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'] },
       ],
     },
@@ -724,6 +731,7 @@ export const financePortal: PortalConfig = {
     { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet },
     { label: 'Collections', href: '/finance/collections', icon: Banknote },
     { label: 'Vendors', href: '/finance/vendors', icon: Building2 },
+    { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt },
     { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet },
   ],
 };

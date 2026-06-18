@@ -231,7 +231,7 @@ export function QuickActionMenu() {
             >
               <option value="IT">IT / WiFi</option>
               <option value="HR">HR / Payroll</option>
-              <option value="HOSTEL">Facilities</option>
+              <option value="FACILITIES">Facilities</option>
             </select>
             <Input
               placeholder="Subject"

@@ -42,7 +42,7 @@ export default function LeadershipIssuesPage() {
       <LeadershipPageHeader
         eyebrow="Grievance Command Center"
         title="Issue Monitoring"
-        description="SLA-tracked helpdesk tickets · 48-hour breach escalations to department heads"
+        description="SLA-tracked helpdesk tickets · 24-hour breach escalations to Vice Chancellor"
       />
 
       <div className="grid gap-4 sm:grid-cols-3">

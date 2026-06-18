@@ -22,6 +22,10 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/hod/dashboard';
   }
 
+  if (r === 'dean') {
+    return '/dean/dashboard';
+  }
+
   if (r === 'student' || r === 'applicant') {
     return '/student/dashboard';
   }
@@ -92,8 +96,8 @@ export function getWorkspaceLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return 'Student Workspace';
   if (r === 'faculty') return 'Faculty Workspace';
-  if (r === 'dean') return 'Dean Workspace';
   if (r === 'hod') return 'HOD Workspace';
+  if (r === 'dean') return 'Dean Workspace';
   if (r === 'hr' || r === 'hradmin') return 'HR Workspace';
   if (r === 'warden') return 'Hostel Workspace';
   if (r === 'accountant') return 'Finance Workspace';
@@ -112,8 +116,8 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return 'Student';
   if (r === 'faculty') return 'Faculty';
-  if (r === 'dean') return 'Dean';
   if (r === 'hod') return 'HOD';
+  if (r === 'dean') return 'Dean';
   if (r === 'hr' || r === 'hradmin') return 'HR';
   if (r === 'warden') return 'Hostel';
   if (r === 'accountant') return 'Finance';
@@ -215,6 +219,7 @@ const hrPathModules: Array<{ prefix: string; module: string }> = [
   { prefix: '/hr/policies', module: 'policies' },
   { prefix: '/hr/appraisals', module: 'directory' },
   { prefix: '/hr/promotions', module: 'directory' },
+  { prefix: '/hr/grievances', module: 'dashboard' },
 ];
 
 function hasAnyHrCapability(caps?: HrCapabilities | null): boolean {
@@ -247,7 +252,7 @@ function canAccessHrPath(
     return roles.some((r) => ['hradmin', 'superadmin'].includes(r));
   }
 
-  if (pathname.startsWith('/hr/me/attendance-holidays')) {
+  if (pathname.startsWith('/hr/me/') || pathname.startsWith('/hr/inbox')) {
     return true; // Accessible to all roles permitted into the /hr portal
   }
 

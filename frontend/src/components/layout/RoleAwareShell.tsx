@@ -8,6 +8,7 @@ import {
   adminOpsPortal,
   adminPortal,
   alumniPortal,
+  deanPortal,
   examCellPortal,
   facultyPortal,
   financePortal,
@@ -29,8 +30,8 @@ function portalForRole(role: string): PortalConfig {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return studentPortal;
   if (r === 'faculty') return facultyPortal;
-  if (r === 'dean') return deanPortal;
   if (r === 'hod') return hodPortal;
+  if (r === 'dean') return deanPortal;
   if (r === 'hr' || r === 'hradmin') return hrPortal;
   if (r === 'warden') return hostelAdminPortal;
   if (r === 'accountant') return financePortal;

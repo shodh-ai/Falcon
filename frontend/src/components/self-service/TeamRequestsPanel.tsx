@@ -17,7 +17,9 @@ type TabId =
   | 'ON_DUTY'
   | 'COMP_OFF_CREDIT'
   | 'DOCUMENT'
-  | 'APPRAISAL';
+  | 'APPRAISAL'
+  | 'ATTENDANCE_OVERRIDE'
+  | 'FUNDING_REQUESTS';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'LEAVE', label: 'Leaves' },
@@ -26,6 +28,8 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'COMP_OFF_CREDIT', label: 'Comp-Off' },
   { id: 'DOCUMENT', label: 'Document Approvals' },
   { id: 'APPRAISAL', label: 'Probation / Appraisals' },
+  { id: 'ATTENDANCE_OVERRIDE', label: 'Attendance' },
+  { id: 'FUNDING_REQUESTS', label: 'Project Funding' },
 ];
 
 type RequestItem = {
@@ -53,6 +57,8 @@ type PendingCounts = {
   compOff: number;
   documents: number;
   appraisals: number;
+  attendanceOverrides: number;
+  fundingRequests: number;
 };
 
 const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
@@ -62,6 +68,7 @@ const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
   'compOff',
   'documents',
   'appraisals',
+  'fundingRequests',
 ];
 
 function sumPendingCounts(counts: PendingCounts): number {
@@ -75,6 +82,8 @@ const TAB_COUNT_KEY: Record<TabId, keyof PendingCounts> = {
   COMP_OFF_CREDIT: 'compOff',
   DOCUMENT: 'documents',
   APPRAISAL: 'appraisals',
+  ATTENDANCE_OVERRIDE: 'attendanceOverrides',
+  FUNDING_REQUESTS: 'fundingRequests',
 };
 
 type Props = {
@@ -93,9 +102,12 @@ function RequestsContent({ defaultScope }: Props) {
 
   async function loadCounts() {
     try {
-      const res = await api.get<PendingCounts & { scope?: string }>(
-        `/api/hr/team/pending-counts?scope=${scope}`,
-      );
+      const [res, fundingRes] = await Promise.all([
+        api.get<PendingCounts & { scope?: string }>(`/api/hr/team/pending-counts?scope=${scope}`),
+        api.get<any[]>('/api/academics/hod/funding-requests').catch(() => [])
+      ]);
+      const pendingFunding = fundingRes.filter(r => r.status === 'PENDING_HOD').length;
+
       setCounts({
         leaves: Number(res.leaves) || 0,
         regularization: Number(res.regularization) || 0,
@@ -103,6 +115,7 @@ function RequestsContent({ defaultScope }: Props) {
         compOff: Number(res.compOff) || 0,
         documents: Number(res.documents) || 0,
         appraisals: Number(res.appraisals) || 0,
+        fundingRequests: pendingFunding,
       });
     } catch {
       setCounts({
@@ -112,6 +125,8 @@ function RequestsContent({ defaultScope }: Props) {
         compOff: 0,
         documents: 0,
         appraisals: 0,
+        attendanceOverrides: 0,
+        fundingRequests: 0,
       });
     }
   }
@@ -120,10 +135,25 @@ function RequestsContent({ defaultScope }: Props) {
     setLoading(true);
     setSelected(new Set());
     try {
-      const res = await api.get<RequestsPayload>(
-        `/api/hr/ess/team/requests?scope=${scope}&tab=${active}`,
-      );
-      setData(res);
+      if (active === 'FUNDING_REQUESTS') {
+        const res = await api.get<any[]>('/api/academics/hod/funding-requests');
+        const items = res.filter(r => r.status === 'PENDING_HOD').map(r => ({
+          id: r.request_id,
+          request_type: `Project Funding (₹${r.amount})`,
+          leave_type: r.project_title,
+          applied_date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN') : null,
+          raised_on: r.created_at,
+          reason: r.purpose,
+          status: 'Pending HOD',
+          employee: { name: r.faculty_name }
+        }));
+        setData({ count: items.length, tab: active, items });
+      } else {
+        const res = await api.get<RequestsPayload>(
+          `/api/hr/ess/team/requests?scope=${scope}&tab=${active}`,
+        );
+        setData(res);
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load requests');
       setData({ count: 0, tab: active, items: [] });
@@ -179,13 +209,24 @@ function RequestsContent({ defaultScope }: Props) {
   async function runBulk(action: 'APPROVE' | 'REJECT', comment?: string) {
     setBulkActing(true);
     try {
-      await api.patch('/api/hr/ess/team/requests/bulk', {
-        ids: [...selected],
-        action,
-        comment,
-        tab,
-      });
-      toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selected.size} request(s)`);
+      if (tab === 'FUNDING_REQUESTS') {
+        const status = action === 'APPROVE' ? 'APPROVED_HOD' : 'REJECTED_HOD';
+        await Promise.all([...selected].map(id => 
+          api.patch(`/api/academics/hod/funding-requests/${id}`, {
+            status,
+            commitMessage: comment || ''
+          })
+        ));
+        toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selected.size} funding request(s)`);
+      } else {
+        await api.patch('/api/hr/ess/team/requests/bulk', {
+          ids: [...selected],
+          action,
+          comment,
+          tab,
+        });
+        toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selected.size} request(s)`);
+      }
       await Promise.all([load(tab), loadCounts()]);
       window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));
     } catch (e) {
