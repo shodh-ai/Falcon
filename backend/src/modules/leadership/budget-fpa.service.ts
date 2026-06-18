@@ -462,11 +462,12 @@ export class BudgetFpaService {
       }
     }
 
+    const approvedAt = dto.approved_by ? new Date().toISOString() : null;
     const rows = await this.db.query(
       `INSERT INTO fin_expenses
          (tenant_id, program_id, budget_id, po_id, vendor_id, invoice_id, expense_head_id,
           description, amount, expense_date, approved_by, approved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $11 IS NOT NULL THEN NOW() ELSE NULL END)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         tid,
@@ -480,6 +481,7 @@ export class BudgetFpaService {
         amount,
         dto.expense_date ?? new Date().toISOString().slice(0, 10),
         dto.approved_by ?? null,
+        approvedAt,
       ],
     );
     return rows[0];
