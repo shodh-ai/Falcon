@@ -236,6 +236,23 @@ export function filterPortalConfigForHrCapabilities(
   return { ...config, navGroups, commandItems };
 }
 
+/** Hide team-approval routes from faculty unless they manage direct reports. */
+export function filterFacultyPortalForManagerAccess(
+  config: PortalConfig,
+  canSeeTeamApprovals: boolean,
+): PortalConfig {
+  if (canSeeTeamApprovals) return config;
+  const hidden = new Set(['/faculty/inbox', '/faculty/team-requests']);
+  const navGroups = config.navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !hidden.has(item.href)),
+    }))
+    .filter((group) => group.items.length > 0);
+  const commandItems = config.commandItems.filter((item) => !hidden.has(item.href));
+  return { ...config, navGroups, commandItems };
+}
+
 export const studentPortal: PortalConfig = {
   personaLabel: 'Falcon Student',
   personaTitle: 'Falcon Student Life',

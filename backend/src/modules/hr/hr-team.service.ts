@@ -8,6 +8,7 @@ import { HrTeamScopeService, parseTeamScope, type TeamScope } from './hr-team-sc
 import { HrWorkforceService } from './hr-workforce.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { CacheService } from '../../core/redis/cache.service';
+import { canAccessTeamApprovals } from './utils/reporting-officer.util';
 
 export type TeamRequestTab =
   | 'LEAVE'
@@ -36,6 +37,19 @@ export class HrTeamService {
     private readonly notify: NotificationEmitterService,
     private readonly cache: CacheService,
   ) {}
+
+  private async assertTeamApprovalAccess(
+    managerId: string,
+    tenantId: string,
+    roles: string[] = [],
+  ): Promise<boolean> {
+    return canAccessTeamApprovals(
+      (sql, params) => this.dataSource.query(sql, params),
+      tenantId,
+      managerId,
+      roles,
+    );
+  }
 
   private monthRange(month: string) {
     const [year, monthNum] = month.split('-').map(Number);
@@ -376,11 +390,9 @@ export class HrTeamService {
     managerId: string,
     tenantId: string,
     scopeRaw?: string,
+    roles: string[] = [],
   ) {
     const scope = parseTeamScope(scopeRaw);
-    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
-    const userIds = members.map((m) => m.user_id);
-
     const empty = {
       leaves: 0,
       regularization: 0,
@@ -389,6 +401,12 @@ export class HrTeamService {
       documents: 0,
       appraisals: 0,
     };
+    if (!(await this.assertTeamApprovalAccess(managerId, tenantId, roles))) {
+      return { scope, ...empty };
+    }
+
+    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    const userIds = members.map((m) => m.user_id);
 
     if (!userIds.length) {
       return { scope, ...empty };
@@ -446,6 +464,10 @@ export class HrTeamService {
     roles: string[] = [],
   ) {
     const scope = parseTeamScope(scopeRaw);
+    if (!(await this.assertTeamApprovalAccess(managerId, tenantId, roles))) {
+      return { count: 0, tab: tab?.toUpperCase() ?? 'LEAVE', items: [] };
+    }
+
     const requestTab = (tab?.toUpperCase() ?? 'LEAVE') as TeamRequestTab;
     const tabKey = TAB_TO_TYPE[requestTab] ?? 'LEAVE';
 
@@ -585,7 +607,11 @@ export class HrTeamService {
     action: 'APPROVE' | 'REJECT',
     comment?: string,
     tab?: string,
+    roles: string[] = [],
   ) {
+    if (!(await this.assertTeamApprovalAccess(managerId, tenantId, roles))) {
+      throw new BadRequestException('Team approval features are not enabled for your account');
+    }
     if (!ids.length) throw new BadRequestException('No requests selected');
     const tabKey = (tab?.toUpperCase() ?? 'LEAVE') as TeamRequestTab;
 

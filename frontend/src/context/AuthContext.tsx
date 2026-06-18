@@ -21,6 +21,7 @@ interface User {
   permissions?: string[];
   allowed_entities?: AllowedEntity[];
   onboarding_status?: string;
+  has_direct_reports?: boolean;
 }
 
 interface AuthContextType {

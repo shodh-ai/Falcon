@@ -91,6 +91,15 @@ export class AuthController {
       ? await this.hrEntityCtx.listAllowedEntities(user.tenant_id, user.user_id, roles)
       : [];
     const primaryRole = user.role ?? roles[0];
+    const hasDirectReports = user.tenant_id
+      ? (await this.userRepository.count({
+          where: {
+            tenant_id: user.tenant_id,
+            reporting_officer_id: user.user_id,
+            is_active: true,
+          },
+        })) > 0
+      : false;
     return {
       ...user,
       onboarding_status: normalizeOnboardingStatusForWizard(
@@ -100,6 +109,7 @@ export class AuthController {
       hr_capabilities: caps ?? {},
       permissions,
       allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
+      has_direct_reports: hasDirectReports,
     };
   }
 

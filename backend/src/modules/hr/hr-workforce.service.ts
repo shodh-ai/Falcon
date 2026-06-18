@@ -18,6 +18,7 @@ import {
   assertNoOverlappingWorkforceDates,
   assertRetroactiveWorkforceLimit,
 } from '../../common/validators/workforce-request.validator';
+import { canAccessTeamApprovals } from './utils/reporting-officer.util';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -278,6 +279,14 @@ export class HrWorkforceService {
     requestType?: StaffRequestType,
     roles: string[] = [],
   ) {
+    const allowed = await canAccessTeamApprovals(
+      (sql, params) => this.dataSource.query(sql, params),
+      tenantId,
+      approverUserId,
+      roles,
+    );
+    if (!allowed) return [];
+
     const queryParams: unknown[] = [tenantId, approverUserId];
     let paramIdx = 3;
     const typeClause = requestType ? ` AND r.request_type = $${paramIdx++}` : '';
@@ -371,7 +380,7 @@ export class HrWorkforceService {
     leaveId: string,
     action: 'APPROVE' | 'REJECT',
     comment?: string,
-    options?: { adminOverride?: boolean },
+    options?: { adminOverride?: boolean; roles?: string[] },
   ) {
     const row = await this.requests.findOne({
       where: { leave_id: leaveId, tenant_id: tenantId },
@@ -385,11 +394,23 @@ export class HrWorkforceService {
        UNION SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1`,
       [reportingOfficerId],
     )) as Array<{ role_name: string }>;
-    const roleNames = roles.map((r) => r.role_name);
+    const roleNames = options?.roles?.length ? options.roles : roles.map((r) => r.role_name);
 
     const adminOverride =
       options?.adminOverride === true &&
       roleNames.some((r) => ['HRAdmin', 'SuperAdmin', 'HR'].includes(r));
+
+    if (!adminOverride) {
+      const allowed = await canAccessTeamApprovals(
+        (sql, params) => this.dataSource.query(sql, params),
+        tenantId,
+        reportingOfficerId,
+        roleNames,
+      );
+      if (!allowed) {
+        throw new ForbiddenException('Team approval features are not enabled for your account');
+      }
+    }
 
     if (!adminOverride) {
       this.hrWorkflow.assertActorIsCurrentApprover(reportingOfficerId, row.current_approver_user_id);

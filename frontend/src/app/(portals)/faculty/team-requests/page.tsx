@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { canSeeFacultyTeamApprovals } from '@/lib/faculty-manager-access';
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -36,6 +38,8 @@ const TABS: { id: Tab; label: string }[] = [
 
 export default function FacultyTeamRequestsPage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
+  const canManageTeam = canSeeFacultyTeamApprovals(user);
   const [tab, setTab] = useState<Tab>('LEAVE');
   const [rows, setRows] = useState<TeamRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +86,13 @@ export default function FacultyTeamRequestsPage() {
         description="Approve or reject requests from employees who report to you."
       />
 
+      {!canManageTeam ? (
+        <FacultyEmptyState
+          title="Team approvals not enabled"
+          description="This queue is only available when you are assigned as a reporting officer with direct reports."
+        />
+      ) : (
+        <>
       <FacultyTabBar tabs={TABS} active={tab} onChange={setTab} />
 
       <Card className="border-border/60 shadow-sm">
@@ -136,6 +147,8 @@ export default function FacultyTeamRequestsPage() {
           )}
         </CardContent>
       </Card>
+        </>
+      )}
     </FacultyPageShell>
   );
 }

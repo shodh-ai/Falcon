@@ -11,6 +11,7 @@ import {
 import { TenantService } from '../tenant/tenant.service';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
+import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
 
 type LoginCredentialRow = {
   user_id: string;
@@ -109,6 +110,11 @@ export class AuthService {
       tokenUser.user_id,
       roleClaims.roles,
     );
+    const directReports = await hasDirectReports(
+      (sql, params) => this.dataSource.query(sql, params),
+      tenant.tenant_id,
+      tokenUser.user_id,
+    );
     return {
       token,
       user: {
@@ -130,6 +136,7 @@ export class AuthService {
           tokenUser.onboarding_status,
           roleClaims.primaryRole,
         ),
+        has_direct_reports: directReports,
       },
     };
   }
