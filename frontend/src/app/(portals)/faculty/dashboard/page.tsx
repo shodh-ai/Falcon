@@ -13,6 +13,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { canSeeFacultyTeamApprovals } from '@/lib/faculty-manager-access';
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -69,6 +71,8 @@ const PROFILE_COMPLIANCE_KEY = 'faculty-profile-compliance-dismissed';
 
 export default function FacultyDashboardPage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
+  const canManageTeam = canSeeFacultyTeamApprovals(user);
   const [classes, setClasses] = useState<FacultyClass[]>([]);
   const [missingAttendance, setMissingAttendance] = useState<MissingAttendanceAlert[]>([]);
   const [hrSummary, setHrSummary] = useState<HrSummary | null>(null);
@@ -99,7 +103,9 @@ export default function FacultyDashboardPage() {
             api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null),
           ),
           api.get<PendingApprovals>('/api/academics/proctor/pending-approvals').catch(() => ({ certificates: [] })),
-          api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals').catch(() => []),
+          canManageTeam
+            ? api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals').catch(() => [])
+            : Promise.resolve([]),
           api.get<LeaveBalance[]>('/api/hr/leaves/my-balances').catch(() => []),
           api.get<{ needs_academic_profile: boolean; message: string | null }>(
             '/api/academics/faculty/profile/compliance',
@@ -127,7 +133,7 @@ export default function FacultyDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, canManageTeam]);
 
   const attendanceHref = (c: FacultyClass) =>
     `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
@@ -223,12 +229,14 @@ export default function FacultyDashboardPage() {
           accent={totalPending > 0 ? 'alert' : 'navy'}
           alert={totalPending > 0}
         />
-        <FacultyStatCard
-          label="Gate passes"
-          value={gatePassApprovals.length}
-          icon={ShieldCheck}
-          accent={gatePassApprovals.length > 0 ? 'alert' : 'navy'}
-        />
+        {canManageTeam ? (
+          <FacultyStatCard
+            label="Gate passes"
+            value={gatePassApprovals.length}
+            icon={ShieldCheck}
+            accent={gatePassApprovals.length > 0 ? 'alert' : 'navy'}
+          />
+        ) : null}
         <FacultyStatCard
           label="Biometric today"
           value={inTime}
@@ -279,12 +287,12 @@ export default function FacultyDashboardPage() {
         </FacultyPanel>
 
         <div className="space-y-4">
-          <FacultyPanel title="Pending approvals" count={totalPending} href="/faculty/inbox">
+          <FacultyPanel title="Pending approvals" count={totalPending} href="/faculty/mentorship">
             <p className="text-sm text-muted-foreground">
               Mentorship certificates, meetings, and leave requests awaiting action.
             </p>
             <Button asChild className="mt-3 w-full" variant="secondary" size="sm">
-              <Link href="/faculty/inbox">Open inbox</Link>
+              <Link href="/faculty/mentorship">Open mentorship</Link>
             </Button>
           </FacultyPanel>
 
@@ -304,30 +312,45 @@ export default function FacultyDashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <FacultyPanel title="Gate pass approvals" count={gatePassApprovals.length}>
-          {gatePassApprovals.length === 0 ? (
-            <FacultyEmptyState description="No staff gate passes awaiting your action." />
-          ) : (
-            <div className="space-y-2">
-              {gatePassApprovals.map((pass) => (
-                <div key={pass.pass_id} className="rounded-xl border border-border/60 p-3 text-sm">
-                  <p className="font-medium text-sgvu-navy">{pass.staff?.name ?? 'Staff member'}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(pass.out_time).toLocaleString()} · {pass.reason}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => actOnGatePass(pass.pass_id, 'APPROVED')}>Approve</Button>
-                    <Button size="sm" variant="destructive" onClick={() => actOnGatePass(pass.pass_id, 'REJECTED')}>
-                      Reject
-                    </Button>
+      {canManageTeam ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <FacultyPanel title="Gate pass approvals" count={gatePassApprovals.length}>
+            {gatePassApprovals.length === 0 ? (
+              <FacultyEmptyState description="No staff gate passes awaiting your action." />
+            ) : (
+              <div className="space-y-2">
+                {gatePassApprovals.map((pass) => (
+                  <div key={pass.pass_id} className="rounded-xl border border-border/60 p-3 text-sm">
+                    <p className="font-medium text-sgvu-navy">{pass.staff?.name ?? 'Staff member'}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(pass.out_time).toLocaleString()} · {pass.reason}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => actOnGatePass(pass.pass_id, 'APPROVED')}>Approve</Button>
+                      <Button size="sm" variant="destructive" onClick={() => actOnGatePass(pass.pass_id, 'REJECTED')}>
+                        Reject
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </FacultyPanel>
+                ))}
+              </div>
+            )}
+          </FacultyPanel>
 
+          <FacultyPanel
+            title="Early warning system"
+            description="Students at risk in your classes"
+            className="border-red-200/60 bg-red-50/20"
+          >
+            <p className="text-sm text-red-800">
+              Review students below attendance or performance thresholds and schedule interventions.
+            </p>
+            <Button asChild className="mt-3 w-full bg-red-700 hover:bg-red-800 text-white" size="sm">
+              <Link href="/faculty/at-risk">View at-risk students</Link>
+            </Button>
+          </FacultyPanel>
+        </div>
+      ) : (
         <FacultyPanel
           title="Early warning system"
           description="Students at risk in your classes"
@@ -340,7 +363,7 @@ export default function FacultyDashboardPage() {
             <Link href="/faculty/at-risk">View at-risk students</Link>
           </Button>
         </FacultyPanel>
-      </div>
+      )}
     </FacultyPageShell>
   );
 }

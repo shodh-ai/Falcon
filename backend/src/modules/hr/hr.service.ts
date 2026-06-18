@@ -25,6 +25,11 @@ import {
   assertRetroactiveWorkforceLimit,
 } from '../../common/validators/workforce-request.validator';
 import { FinanceLedgerService } from '../finance/finance-ledger.service';
+import {
+  fetchDepartmentHodUserId,
+  resolveDefaultReportingOfficerId,
+  canAccessTeamApprovals as canAccessTeamApprovalsUtil,
+} from './utils/reporting-officer.util';
 
 /** HOD (reporting officer) first, then HR admin — no generic HR inbox on create. */
 const APPROVAL_FLOW: Partial<Record<LeaveRequestStatus, LeaveRequestStatus>> = {
@@ -364,7 +369,27 @@ export class HrService {
     });
   }
 
-  listPendingGatePassApprovals(reportingOfficerId: string, tenantId: string) {
+  async canAccessTeamApprovals(
+    userId: string,
+    tenantId: string,
+    roles: string[],
+  ): Promise<boolean> {
+    return canAccessTeamApprovalsUtil(
+      (sql, params) => this.users.manager.query(sql, params),
+      tenantId,
+      userId,
+      roles,
+    );
+  }
+
+  async listPendingGatePassApprovals(
+    reportingOfficerId: string,
+    tenantId: string,
+    roles: string[] = [],
+  ) {
+    const allowed = await this.canAccessTeamApprovals(reportingOfficerId, tenantId, roles);
+    if (!allowed) return [];
+
     return this.gatePasses.find({
       where: {
         reporting_officer_id: reportingOfficerId,
@@ -389,6 +414,7 @@ export class HrService {
     actorUserId: string,
     tenantId: string,
     status: 'APPROVED' | 'REJECTED',
+    roles: string[] = [],
   ) {
     const pass = await this.gatePasses.findOne({
       where: { pass_id: passId, tenant_id: tenantId },
@@ -399,6 +425,10 @@ export class HrService {
     const staff = await this.users.findOne({ where: { user_id: pass.staff_user_id } });
 
     if (pass.status === 'PENDING') {
+      const allowed = await this.canAccessTeamApprovals(actorUserId, tenantId, roles);
+      if (!allowed) {
+        throw new ForbiddenException('Team approval features are not enabled for your account');
+      }
       if (pass.reporting_officer_id !== actorUserId) {
         throw new ForbiddenException('Only the assigned reporting officer can act on this pass');
       }
@@ -641,11 +671,36 @@ export class HrService {
     });
     if (!user) throw new NotFoundException('Employee not found');
 
+    const deptChanged = dto.dept_id !== undefined;
+    const roleChanged = dto.role_id !== undefined;
+    const explicitReportingOfficer = dto.reporting_officer_id;
+
     if (dto.role_id !== undefined) user.role_id = dto.role_id;
     if (dto.dept_id !== undefined) user.dept_id = dto.dept_id;
     if (dto.salary_base !== undefined) user.salary_base = dto.salary_base;
-    if (dto.reporting_officer_id !== undefined) {
-      user.reporting_officer_id = dto.reporting_officer_id;
+
+    if (explicitReportingOfficer !== undefined) {
+      user.reporting_officer_id = explicitReportingOfficer;
+    } else if (deptChanged || roleChanged) {
+      let roleName = user.role?.role_name;
+      if (roleChanged && user.role_id) {
+        const roleRows = await this.users.manager.query<Array<{ role_name: string }>>(
+          `SELECT role_name FROM roles WHERE role_id = $1 LIMIT 1`,
+          [user.role_id],
+        );
+        roleName = roleRows[0]?.role_name ?? roleName;
+      }
+
+      const hodUserId = await fetchDepartmentHodUserId(
+        (sql, params) => this.users.manager.query(sql, params),
+        user.dept_id,
+      );
+
+      user.reporting_officer_id = resolveDefaultReportingOfficerId({
+        roleName,
+        hodUserId,
+        employeeUserId: user.user_id,
+      });
     }
 
     await this.users.save(user);

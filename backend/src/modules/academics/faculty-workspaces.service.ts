@@ -56,6 +56,195 @@ export class FacultyWorkspacesService {
     );
   }
 
+  async getTimetableStats(facultyUserId: string, tenantId: string) {
+    const [summary] = await this.dataSource.query<
+      Array<{
+        term_start: string;
+        weekly_slots: string;
+        courses_taught: string;
+        expected_so_far: string;
+        conducted_classes: string;
+        todays_classes: string;
+        todays_conducted: string;
+        missing_attendance_today: string;
+        pending_adjustments: string;
+        approved_adjustments: string;
+        rejected_adjustments: string;
+        approved_extra_classes: string;
+      }>
+    >(
+      `WITH term AS (
+         SELECT CASE
+           WHEN EXTRACT(MONTH FROM CURRENT_DATE) >= 7
+           THEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, 7, 1)
+           ELSE make_date((EXTRACT(YEAR FROM CURRENT_DATE) - 1)::int, 7, 1)
+         END AS start_date
+       ),
+       faculty_slots AS (
+         SELECT t.timetable_id, t.course_id, t.day_of_week, t.start_time, t.end_time
+         FROM academic_timetables t
+         WHERE t.tenant_id = $1 AND t.faculty_user_id = $2
+       ),
+       expected AS (
+         SELECT COUNT(*)::int AS expected_so_far
+         FROM generate_series((SELECT start_date FROM term), CURRENT_DATE, '1 day'::interval) d
+         INNER JOIN faculty_slots fs ON EXTRACT(ISODOW FROM d)::int = fs.day_of_week
+       ),
+       conducted AS (
+         SELECT COUNT(*)::int AS conducted_classes
+         FROM course_attendance_logs cal
+         WHERE cal.tenant_id = $1
+           AND cal.faculty_user_id = $2
+           AND cal.date >= (SELECT start_date FROM term)
+       ),
+       today_slots AS (
+         SELECT fs.*
+         FROM faculty_slots fs
+         WHERE fs.day_of_week = EXTRACT(ISODOW FROM CURRENT_DATE)::int
+       ),
+       today_conducted AS (
+         SELECT COUNT(*)::int AS todays_conducted
+         FROM today_slots ts
+         INNER JOIN course_attendance_logs cal
+           ON cal.tenant_id = $1
+          AND cal.faculty_user_id = $2
+          AND cal.course_id = ts.course_id
+          AND cal.date = CURRENT_DATE
+       ),
+       missing_today AS (
+         SELECT COUNT(*)::int AS missing_attendance_today
+         FROM today_slots ts
+         LEFT JOIN course_attendance_logs cal
+           ON cal.tenant_id = $1
+          AND cal.faculty_user_id = $2
+          AND cal.course_id = ts.course_id
+          AND cal.date = CURRENT_DATE
+         WHERE ts.end_time < CURRENT_TIME
+           AND cal.log_id IS NULL
+       ),
+       adjustment_counts AS (
+         SELECT
+           COUNT(*) FILTER (WHERE status LIKE 'PENDING%')::int AS pending_adjustments,
+           COUNT(*) FILTER (WHERE status = 'APPROVED')::int AS approved_adjustments,
+           COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS rejected_adjustments,
+           COUNT(*) FILTER (
+             WHERE status = 'APPROVED' AND adjustment_type = 'EXTRA_CLASS'
+           )::int AS approved_extra_classes
+         FROM class_adjustments
+         WHERE tenant_id = $1 AND faculty_user_id = $2
+       )
+       SELECT
+         (SELECT start_date FROM term)::text AS term_start,
+         (SELECT COUNT(*)::text FROM faculty_slots) AS weekly_slots,
+         (SELECT COUNT(DISTINCT course_id)::text FROM faculty_slots) AS courses_taught,
+         (SELECT expected_so_far::text FROM expected) AS expected_so_far,
+         (SELECT conducted_classes::text FROM conducted) AS conducted_classes,
+         (SELECT COUNT(*)::text FROM today_slots) AS todays_classes,
+         (SELECT todays_conducted::text FROM today_conducted) AS todays_conducted,
+         (SELECT missing_attendance_today::text FROM missing_today) AS missing_attendance_today,
+         ac.pending_adjustments::text,
+         ac.approved_adjustments::text,
+         ac.rejected_adjustments::text,
+         ac.approved_extra_classes::text
+       FROM adjustment_counts ac`,
+      [tenantId, facultyUserId],
+    );
+
+    const courses = await this.dataSource.query<
+      Array<{
+        course_id: string;
+        course_code: string;
+        course_name: string;
+        weekly_slots: string;
+        expected_so_far: string;
+        conducted_classes: string;
+      }>
+    >(
+      `WITH term AS (
+         SELECT CASE
+           WHEN EXTRACT(MONTH FROM CURRENT_DATE) >= 7
+           THEN make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, 7, 1)
+           ELSE make_date((EXTRACT(YEAR FROM CURRENT_DATE) - 1)::int, 7, 1)
+         END AS start_date
+       ),
+       course_slots AS (
+         SELECT t.course_id, c.course_code, c.course_name, t.day_of_week
+         FROM academic_timetables t
+         INNER JOIN academic_courses c ON c.course_id = t.course_id
+         WHERE t.tenant_id = $1 AND t.faculty_user_id = $2
+       ),
+       course_expected AS (
+         SELECT
+           cs.course_id,
+           COUNT(*)::int AS expected_so_far
+         FROM course_slots cs
+         INNER JOIN generate_series((SELECT start_date FROM term), CURRENT_DATE, '1 day'::interval) d
+           ON EXTRACT(ISODOW FROM d)::int = cs.day_of_week
+         GROUP BY cs.course_id
+       )
+       SELECT
+         cs.course_id,
+         cs.course_code,
+         cs.course_name,
+         COUNT(DISTINCT cs.day_of_week)::text AS weekly_slots,
+         COALESCE(ce.expected_so_far, 0)::text AS expected_so_far,
+         (
+           SELECT COUNT(*)::text
+           FROM course_attendance_logs cal
+           WHERE cal.tenant_id = $1
+             AND cal.faculty_user_id = $2
+             AND cal.course_id = cs.course_id
+             AND cal.date >= (SELECT start_date FROM term)
+         ) AS conducted_classes
+       FROM course_slots cs
+       LEFT JOIN course_expected ce ON ce.course_id = cs.course_id
+       GROUP BY cs.course_id, cs.course_code, cs.course_name, ce.expected_so_far
+       ORDER BY cs.course_code`,
+      [tenantId, facultyUserId],
+    );
+
+    const expectedSoFar = Number(summary?.expected_so_far ?? 0);
+    const conductedClasses = Number(summary?.conducted_classes ?? 0);
+    const remainingClasses = Math.max(expectedSoFar - conductedClasses, 0);
+    const completionPercent =
+      expectedSoFar > 0 ? Math.round((conductedClasses / expectedSoFar) * 100) : 0;
+
+    return {
+      term_start: summary?.term_start ?? null,
+      weekly_slots: Number(summary?.weekly_slots ?? 0),
+      courses_taught: Number(summary?.courses_taught ?? 0),
+      expected_so_far: expectedSoFar,
+      conducted_classes: conductedClasses,
+      remaining_classes: remainingClasses,
+      completion_percent: completionPercent,
+      todays_classes: Number(summary?.todays_classes ?? 0),
+      todays_conducted: Number(summary?.todays_conducted ?? 0),
+      todays_remaining: Math.max(
+        Number(summary?.todays_classes ?? 0) - Number(summary?.todays_conducted ?? 0),
+        0,
+      ),
+      missing_attendance_today: Number(summary?.missing_attendance_today ?? 0),
+      pending_adjustments: Number(summary?.pending_adjustments ?? 0),
+      approved_adjustments: Number(summary?.approved_adjustments ?? 0),
+      rejected_adjustments: Number(summary?.rejected_adjustments ?? 0),
+      approved_extra_classes: Number(summary?.approved_extra_classes ?? 0),
+      courses: courses.map((course) => {
+        const expected = Number(course.expected_so_far ?? 0);
+        const conducted = Number(course.conducted_classes ?? 0);
+        return {
+          course_id: course.course_id,
+          course_code: course.course_code,
+          course_name: course.course_name,
+          weekly_slots: Number(course.weekly_slots ?? 0),
+          expected_so_far: expected,
+          conducted_classes: conducted,
+          remaining_classes: Math.max(expected - conducted, 0),
+          completion_percent: expected > 0 ? Math.round((conducted / expected) * 100) : 0,
+        };
+      }),
+    };
+  }
+
   async listMarks(
     facultyUserId: string,
     tenantId: string,

@@ -636,6 +636,12 @@ export class AcademicsController {
     return this.facultyWorkspaces.getWeeklyTimetable(req.user.user_id, this.resolveTenantId(req.user));
   }
 
+  @Get('faculty/workspaces/timetable/stats')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  facultyWorkspaceTimetableStats(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.getTimetableStats(req.user.user_id, this.resolveTenantId(req.user));
+  }
+
   @Get('faculty/workspaces/marks')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   facultyWorkspaceMarks(

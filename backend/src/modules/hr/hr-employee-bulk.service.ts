@@ -11,6 +11,10 @@ import {
   getInitialOnboardingStatusForRole,
 } from '../student-onboarding/onboarding-portal.util';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import {
+  fetchDepartmentHodUserId,
+  resolveDefaultReportingOfficerId,
+} from './utils/reporting-officer.util';
 
 export type EmployeeRowInput = {
   name: string;
@@ -268,6 +272,11 @@ export class HrEmployeeBulkService {
       deptId = deptRows[0]?.dept_id ?? null;
     }
 
+    const hodUserId = await fetchDepartmentHodUserId(
+      (sql, params) => qr.query(sql, params),
+      deptId,
+    );
+
     const tempPassword = this.generateTempPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
     const employeeId =
@@ -283,6 +292,18 @@ export class HrEmployeeBulkService {
       [tenantId, row.name, email, roleId, deptId, passwordHash, entityId, row.phone ?? null, onboardingStatus],
     );
     const userId = userRows[0].user_id as string;
+
+    const reportingOfficerId = resolveDefaultReportingOfficerId({
+      roleName,
+      hodUserId,
+      employeeUserId: userId,
+    });
+    if (reportingOfficerId) {
+      await qr.query(`UPDATE users SET reporting_officer_id = $1 WHERE user_id = $2`, [
+        reportingOfficerId,
+        userId,
+      ]);
+    }
 
     await qr.query(
       `INSERT INTO user_roles (user_id, role_id, is_primary)

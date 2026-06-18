@@ -207,7 +207,11 @@ export class HrController {
   @Get('gate-passes/pending-approvals')
   @Roles('HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin', 'Faculty')
   pendingGatePasses(@Req() req: { user: AuthUser }) {
-    return this.hr.listPendingGatePassApprovals(req.user.user_id, this.resolveTenantId(req.user));
+    return this.hr.listPendingGatePassApprovals(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      this.resolveRoles(req.user),
+    );
   }
 
   @Get('gate-passes/pending-hr')
@@ -223,7 +227,13 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('status') status: 'APPROVED' | 'REJECTED',
   ) {
-    return this.hr.actOnGatePass(passId, req.user.user_id, this.resolveTenantId(req.user), status);
+    return this.hr.actOnGatePass(
+      passId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      status,
+      this.resolveRoles(req.user),
+    );
   }
 
   @Get('dashboard/metrics')
@@ -1256,6 +1266,7 @@ export class HrController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       scope,
+      this.resolveRoles(req.user),
     );
   }
 
@@ -1290,6 +1301,7 @@ export class HrController {
       body.action,
       body.comment,
       body.tab,
+      this.resolveRoles(req.user),
     );
   }
 
@@ -1744,6 +1756,7 @@ export class HrController {
       leaveId,
       dto.action,
       dto.comment,
+      { roles: this.resolveRoles(req.user) },
     );
   }
 
