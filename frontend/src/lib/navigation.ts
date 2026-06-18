@@ -490,6 +490,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
         { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation'] },
+        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events', 'coordinator'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
       ],
     },
@@ -524,6 +525,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },
         { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['approve'] },
+        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club events'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['api'] },
       ],
     },
@@ -536,6 +538,94 @@ export const hodPortal: PortalConfig = {
       ],
     },
     myHrOperationsNavGroup('hod'),
+  ]),
+};
+
+export const deanPortal: PortalConfig = {
+  personaLabel: 'Dean Workspace',
+  personaTitle: 'School Command Center',
+  homeHref: '/dean/dashboard',
+  navGroups: [
+    {
+      title: 'School Health',
+      items: [
+        { label: 'Dashboard', href: '/dean/dashboard', icon: LayoutDashboard, keywords: ['command center', 'metrics', 'school'] },
+        { label: 'Departments', href: '/dean/departments', icon: Building2, keywords: ['hod', 'oversight', 'departments'] },
+        { label: 'School Timetable', href: '/dean/academics/timetable', icon: CalendarClock, keywords: ['schedule', 'cross-department'] },
+      ],
+    },
+    {
+      title: 'Academic Quality',
+      items: [
+        { label: 'Course Allocation Review', href: '/dean/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'review'] },
+        { label: 'Syllabus Tracking', href: '/dean/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'coverage'] },
+        { label: 'Result Analytics', href: '/dean/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'grades'] },
+      ],
+    },
+    {
+      title: 'Faculty & HODs',
+      items: [
+        { label: 'Faculty Workload', href: '/dean/faculty/workload', icon: Users, keywords: ['hours', 'teaching load'] },
+        { label: 'Appraisals & API', href: '/dean/faculty/appraisals', icon: Award, keywords: ['research', 'api', 'pms'] },
+      ],
+    },
+    {
+      title: 'Student Affairs',
+      items: [
+        { label: 'Student Monitor', href: '/dean/students/monitor', icon: GraduationCap, keywords: ['students', 'risk'] },
+        { label: 'Defaulters', href: '/dean/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades'] },
+        { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['escalation', 'ticket'] },
+      ],
+    },
+    {
+      title: 'Approvals',
+      items: [
+        { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
+        { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
+      ],
+    },
+    myHrOperationsNavGroup('dean'),
+  ],
+  commandItems: flattenNavToCommandItems([
+    {
+      title: 'School Health',
+      items: [
+        { label: 'Dashboard', href: '/dean/dashboard', icon: LayoutDashboard, keywords: ['command center'] },
+        { label: 'Departments', href: '/dean/departments', icon: Building2, keywords: ['departments'] },
+        { label: 'School Timetable', href: '/dean/academics/timetable', icon: CalendarClock, keywords: ['timetable'] },
+      ],
+    },
+    {
+      title: 'Academic Quality',
+      items: [
+        { label: 'Course Allocation Review', href: '/dean/academics/course-allocation', icon: BookOpen, keywords: ['allocation'] },
+        { label: 'Syllabus Tracking', href: '/dean/academics/syllabus-tracking', icon: ListChecks, keywords: ['syllabus'] },
+        { label: 'Result Analytics', href: '/dean/academics/result-analytics', icon: BarChart3, keywords: ['results'] },
+      ],
+    },
+    {
+      title: 'Faculty & HODs',
+      items: [
+        { label: 'Faculty Workload', href: '/dean/faculty/workload', icon: Users, keywords: ['workload'] },
+        { label: 'Appraisals & API', href: '/dean/faculty/appraisals', icon: Award, keywords: ['appraisals'] },
+      ],
+    },
+    {
+      title: 'Student Affairs',
+      items: [
+        { label: 'Student Monitor', href: '/dean/students/monitor', icon: GraduationCap, keywords: ['students'] },
+        { label: 'Defaulters', href: '/dean/students/defaulters', icon: LineChart, keywords: ['defaulters'] },
+        { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['grievances'] },
+      ],
+    },
+    {
+      title: 'Approvals',
+      items: [
+        { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['inbox'] },
+        { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['events'] },
+      ],
+    },
+    myHrOperationsNavGroup('dean'),
   ]),
 };
 
@@ -608,7 +698,7 @@ export const financePortal: PortalConfig = {
         { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
         { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
         { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
-        { label: 'Club Event Approvals', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'ledger'] },
+        { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'] },
         { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
       ],
     },

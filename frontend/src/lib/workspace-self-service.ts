@@ -1,8 +1,9 @@
 import { getDashboardPathForRole } from '@/lib/auth-routing';
 
-export type WorkspacePrefix = 'faculty' | 'hod' | 'hr';
+export type WorkspacePrefix = 'faculty' | 'hod' | 'dean' | 'hr';
 
 export function workspacePrefixFromPath(pathname: string): WorkspacePrefix | null {
+  if (pathname.startsWith('/dean')) return 'dean';
   if (pathname.startsWith('/hod')) return 'hod';
   if (pathname.startsWith('/faculty')) return 'faculty';
   if (pathname.startsWith('/hr')) return 'hr';
@@ -10,7 +11,7 @@ export function workspacePrefixFromPath(pathname: string): WorkspacePrefix | nul
 }
 
 export function defaultTeamScopeForPrefix(prefix: WorkspacePrefix): 'direct' | 'dept' {
-  return prefix === 'hod' ? 'dept' : 'direct';
+  return prefix === 'hod' || prefix === 'dean' ? 'dept' : 'direct';
 }
 
 export function selfServicePaths(prefix: WorkspacePrefix) {
@@ -32,11 +33,13 @@ export function selfServicePaths(prefix: WorkspacePrefix) {
 /** Map legacy /ess/* URLs to unified workspace routes for the signed-in role. */
 export function mapEssPathToWorkspace(pathname: string, role: string): string {
   const dash = getDashboardPathForRole(role);
-  const prefix: WorkspacePrefix = dash.startsWith('/hod')
-    ? 'hod'
-    : dash.startsWith('/hr')
-      ? 'hr'
-      : 'faculty';
+  const prefix: WorkspacePrefix = dash.startsWith('/dean')
+    ? 'dean'
+    : dash.startsWith('/hod')
+      ? 'hod'
+      : dash.startsWith('/hr')
+        ? 'hr'
+        : 'faculty';
   const paths = selfServicePaths(prefix);
   const scope = defaultTeamScopeForPrefix(prefix);
 

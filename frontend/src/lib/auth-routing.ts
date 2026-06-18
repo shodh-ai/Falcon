@@ -14,7 +14,11 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/faculty/dashboard';
   }
 
-  if (r === 'hod' || r === 'dean') {
+  if (r === 'dean') {
+    return '/dean/dashboard';
+  }
+
+  if (r === 'hod') {
     return '/hod/dashboard';
   }
 
@@ -88,7 +92,8 @@ export function getWorkspaceLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return 'Student Workspace';
   if (r === 'faculty') return 'Faculty Workspace';
-  if (r === 'hod' || r === 'dean') return 'HOD Workspace';
+  if (r === 'dean') return 'Dean Workspace';
+  if (r === 'hod') return 'HOD Workspace';
   if (r === 'hr' || r === 'hradmin') return 'HR Workspace';
   if (r === 'warden') return 'Hostel Workspace';
   if (r === 'accountant') return 'Finance Workspace';
@@ -107,7 +112,8 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return 'Student';
   if (r === 'faculty') return 'Faculty';
-  if (r === 'hod' || r === 'dean') return 'HOD';
+  if (r === 'dean') return 'Dean';
+  if (r === 'hod') return 'HOD';
   if (r === 'hr' || r === 'hradmin') return 'HR';
   if (r === 'warden') return 'Hostel';
   if (r === 'accountant') return 'Finance';
@@ -258,7 +264,8 @@ function canAccessHrPath(
 const portalRoles: Record<string, string[]> = {
   '/student': ['student', 'applicant'],
   '/faculty': ['faculty'],
-  '/hod': ['hod', 'dean'],
+  '/dean': ['dean'],
+  '/hod': ['hod'],
   '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
   '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],
@@ -346,6 +353,7 @@ export function canRoleAccessPath(
 const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
   '/student': '/student/profile',
   '/faculty': '/faculty/profile',
+  '/dean': '/dean/profile',
   '/hod': '/hod/profile',
   '/alumni': '/alumni/profile',
   '/hr': '/hr/me/documents',
@@ -355,6 +363,7 @@ const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
 export function getProfileHrefFromPath(pathname: string, role?: string | null): string {
   if (pathname.startsWith('/ess')) {
     const dash = getDashboardPathForRole(role);
+    if (dash.startsWith('/dean')) return '/dean/profile';
     if (dash.startsWith('/hod')) return '/hod/profile';
     if (dash.startsWith('/hr')) return '/hr/me/documents';
     return '/faculty/profile';
