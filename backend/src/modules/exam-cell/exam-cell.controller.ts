@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards, Delete, Param } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -38,13 +38,33 @@ export class ExamCellController {
   }
 
   @Post('seating/auto-allocate')
-  autoAllocate(@Req() req: { user: AuthUser }, @Body() dto: { exam_schedule_id: string; semester: number; rooms: string[] }) {
+  autoAllocate(@Req() req: { user: AuthUser }, @Body() dto: { allocation_strategy: string; exam_type?: string; exam_schedule_id?: string; semester: number; branch?: string; rooms: string[] }) {
     return this.examCell.autoAllocateSeating(this.tenant(req), dto);
+  }
+
+  @Get('branches')
+  getBranches(@Req() req: { user: AuthUser }, @Query('semester') semester: string) {
+    return this.examCell.getBranchesBySemester(this.tenant(req), Number(semester));
+  }
+
+  @Get('blocks-halls')
+  getBlocksHalls(@Req() req: { user: AuthUser }) {
+    return this.examCell.getBlocksAndHalls(this.tenant(req));
   }
 
   @Get('seating-allocations')
   seatingAllocations(@Req() req: { user: AuthUser }, @Query('exam_schedule_id') examScheduleId?: string) {
     return this.examCell.listSeatingAllocations(this.tenant(req), examScheduleId);
+  }
+
+  @Get('seating-runs')
+  getSeatingRuns(@Req() req: { user: AuthUser }) {
+    return this.examCell.listSeatingRuns(this.tenant(req));
+  }
+
+  @Delete('seating-runs/:id')
+  deleteSeatingRun(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.examCell.deleteSeatingRun(this.tenant(req), id);
   }
 
   @Get('seating-plans')
