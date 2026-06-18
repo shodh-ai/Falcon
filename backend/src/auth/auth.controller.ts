@@ -91,7 +91,7 @@ export class AuthController {
     const allowedRows = user.tenant_id
       ? await this.hrEntityCtx.listAllowedEntities(user.tenant_id, user.user_id, roles)
       : [];
-    const primaryRole = user.primaryRole ?? user.role ?? roles[0];
+    const primaryRole = user.role ?? roles[0];
     return {
       ...user,
       onboarding_status: normalizeOnboardingStatusForWizard(

@@ -9,7 +9,12 @@ const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM', 'INTERNAL', 'ASSIGNMENT'
 type ExamType = (typeof EXAM_TYPES)[number];
 
 /** Canonical roll-number expression aligned with student profile schema. */
-const ROLL_NUMBER_SQL = `COALESCE(sp.enrollment_no, u.user_id::text)`;
+const ROLL_NUMBER_SQL = `COALESCE(
+  NULLIF(BTRIM(sp.enrollment_no), ''),
+  NULLIF(BTRIM(sp.enrollment_number), ''),
+  NULLIF(BTRIM(sp.admission_number), ''),
+  u.user_id::text
+)`;
 
 @Injectable()
 export class FacultyWorkspacesService {

@@ -5,6 +5,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import {
   financePortal,
   hodPortal,
+  deanPortal,
   hostelAdminPortal,
   iqacPortal,
   libraryPortal,

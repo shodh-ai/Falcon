@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
 
@@ -61,6 +61,14 @@ export function courseMaterialInterceptor() {
   return FileInterceptor('file', {
     storage: memoryStorage(),
     limits: { fileSize: LMS_MATERIAL_FILE_LIMIT, files: 1 },
+    fileFilter: materialFilter,
+  });
+}
+
+export function courseMaterialsInterceptor() {
+  return FilesInterceptor('files', 20, {
+    storage: memoryStorage(),
+    limits: { fileSize: LMS_MATERIAL_FILE_LIMIT, files: 20 },
     fileFilter: materialFilter,
   });
 }

@@ -17,9 +17,20 @@ SET graduation_year = CAST(batch AS INT)
 WHERE graduation_year IS NULL
   AND batch ~ '^\d+$';
 
-UPDATE alumni_profiles
-SET current_organization = COALESCE(current_organization, current_company)
-WHERE current_organization IS NULL AND current_company IS NOT NULL;
+ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS current_company VARCHAR(180);
+ALTER TABLE alumni_profiles ADD COLUMN IF NOT EXISTS current_organization VARCHAR(180);
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'alumni_profiles' AND column_name = 'current_company'
+  ) THEN
+    UPDATE alumni_profiles
+    SET current_organization = COALESCE(current_organization, current_company)
+    WHERE current_organization IS NULL AND current_company IS NOT NULL;
+  END IF;
+END $$;
 
 UPDATE alumni_profiles
 SET batch_year = COALESCE(batch_year, graduation_year)

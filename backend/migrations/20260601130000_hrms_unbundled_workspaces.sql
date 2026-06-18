@@ -86,6 +86,19 @@ CREATE TABLE IF NOT EXISTS hr_employee_appraisals (
 CREATE INDEX IF NOT EXISTS idx_hr_employee_profiles_employee_id ON hr_employee_profiles(tenant_id, employee_id);
 CREATE INDEX IF NOT EXISTS idx_hr_employee_appraisals_year ON hr_employee_appraisals(tenant_id, appraisal_year);
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'hr_employee_profiles_tenant_id_user_id_key'
+  ) THEN
+    ALTER TABLE hr_employee_profiles
+      ADD CONSTRAINT hr_employee_profiles_tenant_id_user_id_key UNIQUE (tenant_id, user_id);
+  END IF;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
 -- Backfill employee profiles for existing staff (demo).
 DO $$
 BEGIN

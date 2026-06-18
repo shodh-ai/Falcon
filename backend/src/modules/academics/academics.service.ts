@@ -302,6 +302,188 @@ export class AcademicsService {
 
   async getHodCommandCenter(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.buildCommandCenterForDepartments(tenantId, hodUserId, deptIds);
+  }
+
+  async getDeanCommandCenter(tenantId: string, deanUserId: string) {
+    const scope = await this.resolveDeanScope(deanUserId);
+    const center = await this.buildCommandCenterForDepartments(tenantId, deanUserId, scope.departmentIds);
+    const [pendingEvents, hodCount] = await Promise.all([
+      this.countPendingAdvisorEvents(tenantId),
+      scope.departmentIds.length
+        ? this.users.manager.query(
+            `SELECT COUNT(DISTINCT hod_user_id)::int AS count
+             FROM departments
+             WHERE dept_id = ANY($1::int[]) AND hod_user_id IS NOT NULL`,
+            [scope.departmentIds],
+          )
+        : Promise.resolve([{ count: 0 }]),
+    ]);
+
+    return {
+      ...center,
+      schools: scope.schools,
+      department_count: scope.departmentIds.length,
+      hod_count: hodCount[0]?.count ?? 0,
+      pending_events_count: pendingEvents,
+    };
+  }
+
+  async listDeanDepartments(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    if (!departmentIds.length) return [];
+
+    const rows = await this.users.manager.query(
+      `SELECT d.dept_id, d.dept_name,
+              hod.name AS hod_name, hod.official_email AS hod_email,
+              (SELECT COUNT(*)::int FROM users u
+               INNER JOIN roles r ON r.role_id = u.role_id
+               WHERE u.tenant_id = $1 AND u.dept_id = d.dept_id
+                 AND r.role_name IN ('Faculty', 'HOD', 'Dean')) AS faculty_count,
+              (SELECT COUNT(*)::int FROM users u
+               INNER JOIN roles r ON r.role_id = u.role_id
+               WHERE u.tenant_id = $1 AND u.dept_id = d.dept_id
+                 AND r.role_name = 'Student') AS student_count,
+              (SELECT COUNT(DISTINCT t.course_id)::int FROM academic_timetables t
+               INNER JOIN users u ON u.user_id = t.faculty_user_id
+               WHERE t.tenant_id = $1 AND u.dept_id = d.dept_id) AS active_courses,
+              (SELECT COUNT(*)::int FROM academic_timetables t
+               INNER JOIN users u ON u.user_id = t.faculty_user_id
+               WHERE t.tenant_id = $1 AND u.dept_id = d.dept_id) AS timetable_slots
+       FROM departments d
+       LEFT JOIN users hod ON hod.user_id = d.hod_user_id
+       WHERE d.dept_id = ANY($2::int[])
+       ORDER BY d.dept_name ASC`,
+      [tenantId, departmentIds],
+    );
+
+    const riskRows = await this.users.manager.query(
+      `SELECT u.dept_id,
+              COUNT(*) FILTER (WHERE e.attendance_percent < 75)::int AS attendance_risk,
+              COUNT(*) FILTER (WHERE e.grade_points IS NOT NULL AND e.grade_points < 4)::int AS result_risk
+       FROM users u
+       INNER JOIN student_course_enrollments e ON e.student_user_id = u.user_id AND e.tenant_id = u.tenant_id
+       WHERE u.tenant_id = $1 AND u.dept_id = ANY($2::int[])
+       GROUP BY u.dept_id`,
+      [tenantId, departmentIds],
+    );
+    const syllabusRows = await this.users.manager.query(
+      `SELECT dept_id,
+              ROUND(AVG(coverage_pct)::numeric, 1) AS avg_coverage,
+              COUNT(*) FILTER (WHERE coverage_pct < 60)::int AS behind_count
+       FROM (
+         SELECT u.dept_id,
+                CASE WHEN COUNT(*) > 0
+                  THEN (COUNT(*) FILTER (WHERE m.status = 'COMPLETED')::float / COUNT(*)) * 100
+                  ELSE 0 END AS coverage_pct
+         FROM course_modules m
+         INNER JOIN users u ON u.user_id = m.faculty_user_id
+         WHERE m.tenant_id = $1 AND u.dept_id = ANY($2::int[])
+         GROUP BY u.dept_id, m.course_id
+       ) sub
+       GROUP BY dept_id`,
+      [tenantId, departmentIds],
+    );
+    const syllabusByDept = new Map<number, { avg: number; behind: number }>(
+      syllabusRows.map((row: { dept_id: number; avg_coverage: number; behind_count: number }) => [
+        Number(row.dept_id),
+        { avg: Number(row.avg_coverage ?? 0), behind: Number(row.behind_count ?? 0) },
+      ]),
+    );
+    const riskByDept = new Map<number, { attendance_risk: number; result_risk: number }>(
+      riskRows.map((row: { dept_id: number; attendance_risk: number; result_risk: number }) => [
+        Number(row.dept_id),
+        { attendance_risk: Number(row.attendance_risk ?? 0), result_risk: Number(row.result_risk ?? 0) },
+      ]),
+    );
+
+    return rows.map((row: Record<string, unknown>) => {
+      const deptId = Number(row.dept_id);
+      const cov = syllabusByDept.get(deptId) ?? { avg: 0, behind: 0 };
+      const risk = riskByDept.get(deptId) ?? { attendance_risk: 0, result_risk: 0 };
+      return {
+        dept_id: deptId,
+        dept_name: row.dept_name,
+        hod_name: row.hod_name ?? null,
+        hod_email: row.hod_email ?? null,
+        faculty_count: Number(row.faculty_count ?? 0),
+        student_count: Number(row.student_count ?? 0),
+        active_courses: Number(row.active_courses ?? 0),
+        timetable_slots: Number(row.timetable_slots ?? 0),
+        syllabus_completion_pct: cov.avg,
+        syllabus_behind_count: cov.behind,
+        attendance_risk_count: risk.attendance_risk,
+        result_risk_count: risk.result_risk,
+      };
+    });
+  }
+
+  async listDeanFacultyWorkload(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.listFacultyWorkloadForDepartments(tenantId, departmentIds);
+  }
+
+  async listDeanDepartmentTimetable(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.listDepartmentTimetableForDepartments(tenantId, departmentIds);
+  }
+
+  async listDeanCourseAllocationSlots(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    const [slots, faculty] = await Promise.all([
+      this.listDepartmentTimetableForDepartments(tenantId, departmentIds),
+      this.listDepartmentFacultyRaw(tenantId, departmentIds).then((rows) =>
+        rows.map((row) => ({
+          user_id: row.user_id,
+          name: row.name,
+          email: row.email,
+          department: row.department?.dept_name ?? null,
+        })),
+      ),
+    ]);
+    return { slots, faculty };
+  }
+
+  async listDeanSyllabusCoverage(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.fetchSyllabusCoverage(tenantId, departmentIds);
+  }
+
+  async listDeanResultAnalytics(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.listResultAnalyticsForDepartments(tenantId, departmentIds);
+  }
+
+  async listDeanGrievances(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.listGrievancesForDepartments(tenantId, departmentIds);
+  }
+
+  async listDeanSlowLearners(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.listSlowLearnersForDepartments(tenantId, departmentIds);
+  }
+
+  async listDeanAppraisals(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.listAppraisalsForDepartments(tenantId, departmentIds);
+  }
+
+  async listDeanStudents(tenantId: string, deanUserId: string, lowAttendance = false) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.listStudentsForDepartments(tenantId, departmentIds, lowAttendance);
+  }
+
+  async listDeanInbox(tenantId: string, deanUserId: string) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.buildHodPendingInbox(tenantId, deanUserId, departmentIds);
+  }
+
+  private async buildCommandCenterForDepartments(
+    tenantId: string,
+    actorUserId: string,
+    deptIds: number[],
+  ) {
     const today = new Date().toISOString().slice(0, 10);
     const todayDow = this.getIstDayOfWeek();
     const faculty = await this.listDepartmentFacultyRaw(tenantId, deptIds);
@@ -343,8 +525,8 @@ export class AcademicsService {
       this.countClassAdjustmentsToday(tenantId, deptIds, today, 'RESCHEDULE'),
       this.computeDepartmentAttendanceTrend(tenantId, deptIds),
       this.fetchSyllabusCoverage(tenantId, deptIds),
-      this.buildHodPendingInbox(tenantId, hodUserId, deptIds),
-      this.listHodStudents(tenantId, hodUserId, true).then((rows) => rows.slice(0, 5)),
+      this.buildHodPendingInbox(tenantId, actorUserId, deptIds),
+      this.listStudentsForDepartments(tenantId, deptIds, true).then((rows) => rows.slice(0, 5)),
       deptIds.length
         ? this.users.manager.query(
             `SELECT COUNT(*)::int AS count
@@ -387,6 +569,10 @@ export class AcademicsService {
 
   async listHodFacultyWorkload(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.listFacultyWorkloadForDepartments(tenantId, deptIds);
+  }
+
+  private async listFacultyWorkloadForDepartments(tenantId: string, deptIds: number[]) {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
@@ -429,6 +615,10 @@ export class AcademicsService {
 
   async listHodDepartmentTimetable(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.listDepartmentTimetableForDepartments(tenantId, deptIds);
+  }
+
+  private async listDepartmentTimetableForDepartments(tenantId: string, deptIds: number[]) {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
@@ -447,7 +637,7 @@ export class AcademicsService {
   async listHodCourseAllocationSlots(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const [slots, faculty] = await Promise.all([
-      this.listHodDepartmentTimetable(tenantId, hodUserId),
+      this.listDepartmentTimetableForDepartments(tenantId, deptIds),
       this.listDepartmentFacultyRaw(tenantId, deptIds).then((rows) =>
         rows.map((row) => ({
           user_id: row.user_id,
@@ -461,6 +651,10 @@ export class AcademicsService {
 
   async listHodResultAnalytics(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.listResultAnalyticsForDepartments(tenantId, deptIds);
+  }
+
+  private async listResultAnalyticsForDepartments(tenantId: string, deptIds: number[]) {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
@@ -499,6 +693,10 @@ export class AcademicsService {
 
   async listHodGrievances(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.listGrievancesForDepartments(tenantId, deptIds);
+  }
+
+  private async listGrievancesForDepartments(tenantId: string, deptIds: number[]) {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
@@ -517,6 +715,10 @@ export class AcademicsService {
 
   async listHodSlowLearners(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.listSlowLearnersForDepartments(tenantId, deptIds);
+  }
+
+  private async listSlowLearnersForDepartments(tenantId: string, deptIds: number[]) {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
@@ -550,6 +752,10 @@ export class AcademicsService {
 
   async listHodAppraisals(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.listAppraisalsForDepartments(tenantId, deptIds);
+  }
+
+  private async listAppraisalsForDepartments(tenantId: string, deptIds: number[]) {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
@@ -911,6 +1117,14 @@ export class AcademicsService {
 
   async listHodStudents(tenantId: string, hodUserId: string, lowAttendance = false) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.listStudentsForDepartments(tenantId, deptIds, lowAttendance);
+  }
+
+  private async listStudentsForDepartments(
+    tenantId: string,
+    deptIds: number[],
+    lowAttendance = false,
+  ) {
     const students = await this.users
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.department', 'department')
@@ -1144,6 +1358,63 @@ export class AcademicsService {
       [courseIds],
     );
     return new Map(rows.map((row) => [row.course_id, row.meeting_url]));
+  }
+
+  private async countPendingAdvisorEvents(tenantId: string): Promise<number> {
+    try {
+      const rows = await this.users.manager.query(
+        `SELECT COUNT(*)::int AS count
+         FROM campus_events
+         WHERE tenant_id = $1 AND status = 'PENDING_DEAN' AND dean_approval = 'PENDING'`,
+        [tenantId],
+      );
+      return rows[0]?.count ?? 0;
+    } catch {
+      try {
+        const rows = await this.users.manager.query(
+          `SELECT COUNT(*)::int AS count
+           FROM campus_events
+           WHERE tenant_id = $1 AND status = 'PENDING_DEAN'`,
+          [tenantId],
+        );
+        return rows[0]?.count ?? 0;
+      } catch {
+        return 0;
+      }
+    }
+  }
+
+  private async resolveDeanScope(deanUserId: string) {
+    const schoolRows = await this.users.manager.query(
+      `SELECT school_id, school_name, school_code
+       FROM schools
+       WHERE dean_user_id = $1 AND deleted_at IS NULL`,
+      [deanUserId],
+    );
+    const schoolIds = schoolRows.map((row: { school_id: number }) => Number(row.school_id));
+    let departmentIds: number[] = [];
+    if (schoolIds.length) {
+      const deptRows = await this.users.manager.query(
+        `SELECT DISTINCT dept_id
+         FROM iam_programs
+         WHERE school_id = ANY($1::int[]) AND dept_id IS NOT NULL AND deleted_at IS NULL`,
+        [schoolIds],
+      );
+      departmentIds = deptRows.map((row: { dept_id: number }) => Number(row.dept_id));
+    }
+    const dean = await this.users.findOne({ where: { user_id: deanUserId } });
+    if (dean?.dept_id) {
+      departmentIds = Array.from(new Set([...departmentIds, dean.dept_id]));
+    }
+    return {
+      schoolIds,
+      departmentIds,
+      schools: schoolRows.map((row: Record<string, unknown>) => ({
+        school_id: Number(row.school_id),
+        school_name: String(row.school_name),
+        school_code: row.school_code ? String(row.school_code) : null,
+      })),
+    };
   }
 
   private async resolveHodDepartmentIds(hodUserId: string) {

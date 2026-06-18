@@ -19,7 +19,16 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Normalize legacy demo rooms (Block A 101/102) to ground-floor G01/G02
+  -- Skip when Manikarnika block is already seeded (re-runs hit bed unique constraints)
+  IF (SELECT COUNT(*)::int FROM operations_hostel_rooms WHERE hostel_block = 'MANIKARNIKA') >= 75 THEN
+    RETURN;
+  END IF;
+
+  -- Normalize legacy demo rooms only when old numbering still exists
+  IF EXISTS (
+    SELECT 1 FROM operations_hostel_rooms
+    WHERE hostel_block = 'Block A' AND room_number IN ('101', '102')
+  ) THEN
   UPDATE operations_hostel_rooms
   SET room_number = 'G01', floor = 'Ground Floor'
   WHERE hostel_block = 'Block A' AND room_number = '101';
@@ -47,6 +56,8 @@ BEGIN
   SET bed_number = REPLACE(b.bed_number, '102-', 'G02-')
   FROM operations_hostel_rooms r
   WHERE b.room_id = r.room_id AND r.hostel_block = 'Block A' AND r.room_number = 'G02';
+
+  END IF;
 
   FOR block IN SELECT unnest(ARRAY['Block A', 'MANIKARNIKA']::text[]) LOOP
     SELECT hostel_id INTO h_id
@@ -100,8 +111,11 @@ BEGIN
       FOR b IN 1..cap LOOP
         bed_label := room_num || '-' || chr(64 + b);
         INSERT INTO hostel_beds (tenant_id, room_id, bed_number, is_premium, status)
-        VALUES (t_id, rid, bed_label, b = 1, 'AVAILABLE')
-        ON CONFLICT (room_id, bed_number) DO NOTHING;
+        SELECT t_id, rid, bed_label, b = 1, 'AVAILABLE'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM hostel_beds hb
+          WHERE hb.room_id = rid AND hb.bed_number = bed_label
+        );
       END LOOP;
     END LOOP;
   END LOOP;

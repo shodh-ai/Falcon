@@ -68,8 +68,30 @@ function listSqlFiles(seedOnly) {
   return selected.map((name) => path.join(MIGRATIONS_DIR, name));
 }
 
+async function ensureMigrationTable(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      filename VARCHAR(255) PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function isApplied(client, filename) {
+  const res = await client.query('SELECT 1 FROM schema_migrations WHERE filename = $1', [filename]);
+  return res.rows.length > 0;
+}
+
+async function markApplied(client, filename) {
+  await client.query(
+    'INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING',
+    [filename],
+  );
+}
+
 async function run() {
   const seedOnly = process.argv.includes('--seed');
+  const forceAll = process.argv.includes('--force');
   const files = listSqlFiles(seedOnly);
 
   const cfg = dbConfig();
@@ -81,8 +103,10 @@ async function run() {
 
   const client = new Client(dbConfig());
   await client.connect();
+  await ensureMigrationTable(client);
 
   let ok = 0;
+  let skipped = 0;
   let failed = 0;
   const failures = [];
 
@@ -90,9 +114,19 @@ async function run() {
     for (const file of files) {
       const sql = fs.readFileSync(file, 'utf8');
       const base = path.basename(file);
+
+      if (!forceAll && !seedOnly && (await isApplied(client, base))) {
+        skipped += 1;
+        console.log(`--- ${base} (skipped)`);
+        continue;
+      }
+
       console.log(`>>> ${base}`);
       try {
         await client.query(sql);
+        if (!seedOnly) {
+          await markApplied(client, base);
+        }
         ok += 1;
       } catch (err) {
         failed += 1;
@@ -103,13 +137,20 @@ async function run() {
     console.log(
       seedOnly
         ? `Seed complete (${ok} ok, ${failed} failed).`
-        : `Migrations complete (${ok} ok, ${failed} failed).`,
+        : `Migrations complete (${ok} ok, ${skipped} skipped, ${failed} failed).`,
     );
     if (failures.length) {
-      console.error('Failures:', JSON.stringify(failures.slice(0, 10), null, 2));
+      console.error('Failures:', JSON.stringify(failures.slice(0, 15), null, 2));
+      if (failures.length > 15) {
+        console.error(`... and ${failures.length - 15} more`);
+      }
     }
   } finally {
     await client.end();
+  }
+
+  if (failed > 0) {
+    process.exitCode = 1;
   }
 }
 

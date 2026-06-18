@@ -10,8 +10,11 @@ export type LmsModule = {
   materials: { material_id: string; title: string; material_type: string; uploaded_at?: string }[];
 };
 
+export type LmsMaterial = { material_id: string; title: string; material_type: string; uploaded_at?: string };
+
 export type FacultyWorkspace = {
   course: { course_id?: string; course_code: string; course_name: string; credits: number };
+  syllabus_materials?: LmsMaterial[];
   modules: LmsModule[];
   syllabus_configured: boolean;
 };
@@ -20,6 +23,7 @@ export type StudentAssignmentRow = {
   assignment: {
     assignment_id: string;
     title: string;
+    start_date: string;
     due_date: string;
     max_marks: number;
     description?: string | null;
@@ -37,6 +41,7 @@ export type StudentWorkspace = {
   course: { course_code: string; course_name: string };
   enrollment: { attendance_percent: number; semester: number };
   syllabus_progress: { completed: number; total: number; percent: number };
+  syllabus_materials?: LmsMaterial[];
   modules: LmsModule[];
   assignments: StudentAssignmentRow[];
 };
@@ -45,7 +50,9 @@ export type FacultyAssignment = {
   assignment_id: string;
   title: string;
   max_marks: number;
+  start_date: string;
   due_date: string;
+  description?: string | null;
   submission_count?: number;
 };
 
@@ -96,6 +103,20 @@ export async function postMultipart(path: string, token: string, form: FormData)
     body: form,
   });
   if (!res.ok) throw new Error(await res.text().catch(() => 'Upload failed'));
+  const text = await res.text();
+  return text ? (JSON.parse(text) as unknown) : null;
+}
+
+export async function patchMultipart(path: string, token: string, form: FormData) {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'x-tenant-subdomain': getSubdomainFromClient(),
+    },
+    body: form,
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => 'Update failed'));
   const text = await res.text();
   return text ? (JSON.parse(text) as unknown) : null;
 }

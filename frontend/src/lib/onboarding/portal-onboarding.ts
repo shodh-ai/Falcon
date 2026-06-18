@@ -1,7 +1,7 @@
 export type OnboardingPortalKind = 'student' | 'staff';
 
 export type PortalOnboardingConfig = {
-  portalPrefix: '/student' | '/faculty' | '/hod';
+  portalPrefix: '/student' | '/faculty' | '/hod' | '/dean';
   apiPrefix: '/api/student/onboarding' | '/api/staff/onboarding';
   portalLabel: string;
   dashboardPath: string;
@@ -21,6 +21,14 @@ export const FACULTY_ONBOARDING_CONFIG: PortalOnboardingConfig = {
   apiPrefix: '/api/staff/onboarding',
   portalLabel: 'Faculty',
   dashboardPath: '/faculty/dashboard',
+  kind: 'staff',
+};
+
+export const DEAN_ONBOARDING_CONFIG: PortalOnboardingConfig = {
+  portalPrefix: '/dean',
+  apiPrefix: '/api/staff/onboarding',
+  portalLabel: 'Dean',
+  dashboardPath: '/dean/dashboard',
   kind: 'staff',
 };
 

@@ -37,7 +37,9 @@ ALTER TABLE staff_leave_requests
   ADD COLUMN IF NOT EXISTS missed_punch_type VARCHAR(10);
 
 -- Seed Indian university holidays (2026)
-INSERT INTO hr_holidays (title, date, type, description) VALUES
+INSERT INTO hr_holidays (title, date, type, description)
+SELECT v.title, v.date::date, v.type, v.description
+FROM (VALUES
   ('Republic Day', '2026-01-26', 'MANDATORY', 'National holiday'),
   ('Holi', '2026-03-14', 'MANDATORY', 'Festival holiday'),
   ('Independence Day', '2026-08-15', 'MANDATORY', 'National holiday'),
@@ -46,7 +48,10 @@ INSERT INTO hr_holidays (title, date, type, description) VALUES
   ('Christmas', '2026-12-25', 'MANDATORY', 'Festival holiday'),
   ('Restricted Holiday (RH)', '2026-01-14', 'RESTRICTED', 'Optional — Makar Sankranti'),
   ('Restricted Holiday (RH)', '2026-08-28', 'RESTRICTED', 'Optional — Raksha Bandhan')
-;
+) AS v(title, date, type, description)
+WHERE NOT EXISTS (
+  SELECT 1 FROM hr_holidays h WHERE h.title = v.title AND h.date = v.date::date
+);
 
 -- Backfill daily attendance from legacy web/biometric punches where present
 INSERT INTO hr_daily_attendance (user_id, date, first_in_time, last_out_time, total_hours, status, is_regularized)
