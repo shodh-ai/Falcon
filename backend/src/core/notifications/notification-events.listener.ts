@@ -10,6 +10,16 @@ import {
   courseMaterialAddedMessage,
   eventPendingEstateMessage,
   eventPendingFinanceMessage,
+  eventPendingHodMessage,
+  eventPendingDeanMessage,
+  eventRejectedMessage,
+  eventLiveMessage,
+  eventFundsTransferredMessage,
+  meetingInvitedMessage,
+  meetingRequestedUpwardMessage,
+  meetingPortalRespondedMessage,
+  meetingAgendaUpdatedMessage,
+  meetingMinutesPublishedMessage,
   eventProposedMessage,
   examResultsPublishedMessage,
   exportFailedMessage,
@@ -52,6 +62,10 @@ import {
   type WorkflowApprovalRequiredPayload,
   type EventProposedPayload,
   type EventTierPayload,
+  type EventRejectedPayload,
+  type EventLivePayload,
+  type EventFundsTransferredPayload,
+  type MeetingPortalPayload,
   type OnboardingCredentialsPayload,
   type HrExportReadyPayload,
   type HrExportFailedPayload,
@@ -283,6 +297,26 @@ export class NotificationEventsListener {
     await this.emitFromPayload(payload.tenantId, payload.userId, msg);
   }
 
+  @OnEvent(NotificationEvents.EVENT_PENDING_HOD)
+  async onEventPendingHod(payload: EventTierPayload) {
+    const msg = eventPendingHodMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_PENDING_DEAN)
+  async onEventPendingDean(payload: EventTierPayload) {
+    const msg = eventPendingDeanMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
   @OnEvent(NotificationEvents.EVENT_PENDING_ESTATE)
   async onEventPendingEstate(payload: EventTierPayload) {
     const msg = eventPendingEstateMessage(payload, {
@@ -296,6 +330,86 @@ export class NotificationEventsListener {
   @OnEvent(NotificationEvents.EVENT_PENDING_FINANCE)
   async onEventPendingFinance(payload: EventTierPayload) {
     const msg = eventPendingFinanceMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_REJECTED)
+  async onEventRejected(payload: EventRejectedPayload) {
+    const msg = eventRejectedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_LIVE)
+  async onEventLive(payload: EventLivePayload) {
+    const msg = eventLiveMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_FUNDS_TRANSFERRED)
+  async onEventFundsTransferred(payload: EventFundsTransferredPayload) {
+    const msg = eventFundsTransferredMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_INVITED)
+  async onMeetingInvited(payload: MeetingPortalPayload) {
+    const msg = meetingInvitedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_REQUESTED_UPWARD)
+  async onMeetingRequestedUpward(payload: MeetingPortalPayload) {
+    const msg = meetingRequestedUpwardMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_RESPONDED)
+  async onPortalMeetingResponded(payload: MeetingPortalPayload) {
+    const msg = meetingPortalRespondedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_AGENDA_UPDATED)
+  async onMeetingAgendaUpdated(payload: MeetingPortalPayload) {
+    const msg = meetingAgendaUpdatedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_MINUTES_PUBLISHED)
+  async onMeetingMinutesPublished(payload: MeetingPortalPayload) {
+    const msg = meetingMinutesPublishedMessage(payload, {
       title: payload.title,
       message: payload.message,
       actionLink: payload.actionLink,

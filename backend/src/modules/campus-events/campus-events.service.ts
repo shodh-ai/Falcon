@@ -193,7 +193,7 @@ export class CampusEventsService {
     );
     const hodUserId = rows[0]?.hod_user_id;
     if (!hodUserId) return;
-    this.notify.eventPendingEstate({
+    this.notify.eventPendingHod({
       tenantId,
       userId: hodUserId,
       eventId: payload.eventId,
@@ -218,7 +218,7 @@ export class CampusEventsService {
       [facultyAdvisorId],
     );
     for (const row of rows) {
-      this.notify.eventPendingEstate({
+      this.notify.eventPendingDean({
         tenantId,
         userId: row.dean_user_id,
         eventId: payload.eventId,
@@ -228,6 +228,74 @@ export class CampusEventsService {
         actionLink: '/dean/events',
       });
     }
+  }
+
+  private async getEventCoordinatorUserId(clubId: string): Promise<string | null> {
+    const rows = await this.dataSource.query<Array<{ student_coordinator_id: string | null }>>(
+      `SELECT student_coordinator_id FROM campus_clubs WHERE club_id = $1 LIMIT 1`,
+      [clubId],
+    );
+    return rows[0]?.student_coordinator_id ?? null;
+  }
+
+  private async notifyCoordinatorRejected(
+    tenantId: string,
+    event: { event_id: string; title: string; club_id: string; rejection_comment?: string | null },
+    rejectedByTier: string,
+  ) {
+    const coordinatorId = await this.getEventCoordinatorUserId(event.club_id);
+    if (!coordinatorId) return;
+    const clubRows = await this.dataSource.query<Array<{ name: string }>>(
+      `SELECT name FROM campus_clubs WHERE club_id = $1`,
+      [event.club_id],
+    );
+    this.notify.eventRejected({
+      tenantId,
+      userId: coordinatorId,
+      eventId: event.event_id,
+      eventTitle: event.title,
+      clubName: clubRows[0]?.name,
+      rejectedByTier,
+      comment: event.rejection_comment ?? undefined,
+      actionLink: '/student/club-management',
+    });
+  }
+
+  private async notifyCoordinatorLive(
+    tenantId: string,
+    event: { event_id: string; title: string; club_id: string },
+  ) {
+    const coordinatorId = await this.getEventCoordinatorUserId(event.club_id);
+    if (!coordinatorId) return;
+    const clubRows = await this.dataSource.query<Array<{ name: string }>>(
+      `SELECT name FROM campus_clubs WHERE club_id = $1`,
+      [event.club_id],
+    );
+    this.notify.eventLive({
+      tenantId,
+      userId: coordinatorId,
+      eventId: event.event_id,
+      eventTitle: event.title,
+      clubName: clubRows[0]?.name,
+      actionLink: '/student/club-management',
+    });
+  }
+
+  private async notifyCoordinatorFundsTransferred(
+    tenantId: string,
+    event: { event_id: string; title: string; club_id: string; fund_transfer_amount?: string | number | null; fund_transfer_ref?: string | null },
+  ) {
+    const coordinatorId = await this.getEventCoordinatorUserId(event.club_id);
+    if (!coordinatorId) return;
+    this.notify.eventFundsTransferred({
+      tenantId,
+      userId: coordinatorId,
+      eventId: event.event_id,
+      eventTitle: event.title,
+      amount: Number(event.fund_transfer_amount ?? 0),
+      transferRef: event.fund_transfer_ref ?? undefined,
+      actionLink: '/student/club-management',
+    });
   }
 
   private async tryPublishLive(tenantId: string, eventId: string) {
@@ -252,7 +320,11 @@ export class CampusEventsService {
          WHERE event_id = $1 RETURNING *`,
         [eventId],
       );
-      return updated[0];
+      const liveEvent = updated[0];
+      if (liveEvent) {
+        await this.notifyCoordinatorLive(tenantId, liveEvent);
+      }
+      return liveEvent;
     }
     return e;
   }
@@ -525,6 +597,7 @@ export class CampusEventsService {
       [eventId, tenantId, comment, userId],
     );
     if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    await this.notifyCoordinatorRejected(tenantId, rows[0], 'Faculty Coordinator');
     return rows[0];
   }
 
@@ -593,6 +666,7 @@ export class CampusEventsService {
       [eventId, tenantId, comment, userId],
     );
     if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    await this.notifyCoordinatorRejected(tenantId, rows[0], 'HOD');
     return rows[0];
   }
 
@@ -675,6 +749,7 @@ export class CampusEventsService {
       [eventId, tenantId, comment, userId],
     );
     if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    await this.notifyCoordinatorRejected(tenantId, rows[0], 'Dean');
     return rows[0];
   }
 
@@ -816,6 +891,7 @@ export class CampusEventsService {
       [eventId, tenantId, dto.ledger_code ?? null, dto.transfer_amount, dto.transfer_ref, userId],
     );
     if (!rows[0]) throw new BadRequestException('Event not found or not awaiting fund transfer');
+    await this.notifyCoordinatorFundsTransferred(tenantId, rows[0]);
     return this.tryPublishLive(tenantId, eventId);
   }
 
@@ -828,6 +904,7 @@ export class CampusEventsService {
       [eventId, tenantId, comment, userId],
     );
     if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    await this.notifyCoordinatorRejected(tenantId, rows[0], 'Finance');
     return rows[0];
   }
 

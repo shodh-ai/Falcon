@@ -19,8 +19,18 @@ export const NotificationEvents = {
   OPERATIONS_TRANSPORT_BUS_APPROACHING: 'operations.transport_bus_approaching',
   WORKFLOW_APPROVAL_REQUIRED: 'workflow.approval_required',
   EVENT_PROPOSED: 'event.proposed',
+  EVENT_PENDING_HOD: 'event.pending_hod',
+  EVENT_PENDING_DEAN: 'event.pending_dean',
   EVENT_PENDING_ESTATE: 'event.pending_estate',
   EVENT_PENDING_FINANCE: 'event.pending_finance',
+  EVENT_REJECTED: 'event.rejected',
+  EVENT_LIVE: 'event.live',
+  EVENT_FUNDS_TRANSFERRED: 'event.funds_transferred',
+  MEETING_INVITED: 'meetings.invited',
+  MEETING_REQUESTED_UPWARD: 'meetings.requested_upward',
+  MEETING_RESPONDED: 'meetings.responded',
+  MEETING_AGENDA_UPDATED: 'meetings.agenda_updated',
+  MEETING_MINUTES_PUBLISHED: 'meetings.minutes_published',
   HR_ONBOARDING_CREDENTIALS: 'hr.onboarding_credentials',
   HR_EXPORT_READY: 'hr.export_ready',
   HR_EXPORT_FAILED: 'hr.export_failed',
@@ -143,6 +153,38 @@ export type EventTierPayload = BaseNotificationPayload & {
   eventId: string;
   eventTitle: string;
   clubName?: string;
+};
+
+export type EventRejectedPayload = BaseNotificationPayload & {
+  eventId: string;
+  eventTitle: string;
+  clubName?: string;
+  rejectedByTier: string;
+  comment?: string;
+};
+
+export type EventLivePayload = BaseNotificationPayload & {
+  eventId: string;
+  eventTitle: string;
+  clubName?: string;
+};
+
+export type EventFundsTransferredPayload = BaseNotificationPayload & {
+  eventId: string;
+  eventTitle: string;
+  amount: number;
+  transferRef?: string;
+};
+
+export type MeetingPortalPayload = BaseNotificationPayload & {
+  meetingId: string;
+  title: string;
+  organizerName?: string;
+  requesterName?: string;
+  responderName?: string;
+  startsAt?: string;
+  status?: 'ACCEPTED' | 'DECLINED';
+  remarks?: string;
 };
 
 export type OnboardingCredentialsPayload = BaseNotificationPayload & {
