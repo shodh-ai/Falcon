@@ -313,9 +313,12 @@ export class ParentService {
 
   async getDisciplineForParent(parentMobile: string, studentUserId?: string) {
     const id = await this.resolveStudentId(parentMobile, studentUserId);
-    const academics = await this.getDiscipline(id);
-    const ufm = await this.getUfmCases(id);
-    return { disciplinary: academics, ufm_cases: ufm };
+    const [academics, ufm, demeritSummary] = await Promise.all([
+      this.getDiscipline(id),
+      this.getUfmCases(id),
+      this.getDemeritSummary(id),
+    ]);
+    return { disciplinary: academics, ufm_cases: ufm, demerit_summary: demeritSummary };
   }
 
   async getAcademicsSummary(parentMobile: string, studentUserId: string) {
@@ -720,7 +723,32 @@ export class ParentService {
       `SELECT incident_date, category, description, action_taken
        FROM student_disciplinary_records WHERE student_user_id = $1 ORDER BY incident_date DESC`,
       [studentUserId],
-    );
+    ).then(async (legacy) => {
+      const demerits = await this.query<{
+        incident_date: string;
+        category: string;
+        description: string;
+        action_taken: string;
+      }>(
+        `SELECT di.updated_at::date AS incident_date,
+                di.category,
+                di.description,
+                COALESCE(di.dc_committee_remarks, di.points::text || ' demerit point(s) approved') AS action_taken
+         FROM demerit_incidents di
+         WHERE di.student_user_id = $1 AND di.status = 'APPROVED_BY_DC'
+         ORDER BY di.updated_at DESC`,
+        [studentUserId],
+      ).catch(() => []);
+      return [...demerits, ...legacy];
+    });
+  }
+
+  getDemeritSummary(studentUserId: string) {
+    return this.query(
+      `SELECT cumulative_demerit_points, is_subject_back_triggered, subject_back_triggered_at
+       FROM student_academic_summaries WHERE student_user_id = $1`,
+      [studentUserId],
+    ).then((rows) => rows[0] ?? { cumulative_demerit_points: 0, is_subject_back_triggered: false });
   }
 
   getUfmCases(studentUserId: string) {

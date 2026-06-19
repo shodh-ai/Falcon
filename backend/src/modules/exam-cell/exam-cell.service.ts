@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -1043,39 +1044,121 @@ export class ExamCellService {
     if (!dto.description?.trim()) {
       throw new BadRequestException('Incident description is required');
     }
+
+    const studentUserId = await this.resolveStudentUserId(tenantId, dto.student_user_id.trim());
+    const courseId = dto.course_id?.trim()
+      ? await this.resolveCourseId(tenantId, dto.course_id.trim())
+      : null;
+
     const rows = await this.db.query(
       `INSERT INTO ufm_cases (tenant_id, student_user_id, exam_id, description, penalty_applied, reported_by, marks_locked, status)
        VALUES ($1,$2,$3,$4,$5,$6,true,'OPEN') RETURNING *`,
       [
         tenantId,
-        dto.student_user_id,
+        studentUserId,
         dto.exam_id ?? null,
-        dto.description,
-        dto.penalty_applied ?? 'Exam cancelled — UFM',
+        dto.description.trim(),
+        dto.penalty_applied?.trim() || 'Exam cancelled — UFM',
         dto.reported_by ?? null,
       ],
     );
 
-    if (dto.course_id) {
+    if (courseId) {
       await this.db.query(
         `UPDATE academic_marks SET marks_obtained = 0, status = 'PUBLISHED', updated_at = NOW()
          WHERE student_user_id = $1 AND course_id = $2 AND tenant_id = $3`,
-        [dto.student_user_id, dto.course_id, tenantId],
+        [studentUserId, courseId, tenantId],
       );
     } else {
       await this.db.query(
         `UPDATE academic_marks SET marks_obtained = 0, status = 'PUBLISHED', updated_at = NOW()
          WHERE student_user_id = $1 AND tenant_id = $2`,
-        [dto.student_user_id, tenantId],
+        [studentUserId, tenantId],
       );
     }
 
     await this.db.query(
       `UPDATE grade_cards SET status = 'WITHHELD' WHERE student_user_id = $1 AND tenant_id = $2`,
-      [dto.student_user_id, tenantId],
+      [studentUserId, tenantId],
     );
 
     return rows[0];
+  }
+
+  listUfmFormOptions(tenantId: string) {
+    return Promise.all([
+      this.db.query(
+        `SELECT u.user_id, u.name, u.official_email,
+                COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+         FROM users u
+         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
+         ORDER BY u.name
+         LIMIT 500`,
+        [tenantId],
+      ),
+      this.db.query(
+        `SELECT course_id, course_code, course_name
+         FROM academic_courses
+         WHERE tenant_id = $1
+         ORDER BY course_code
+         LIMIT 300`,
+        [tenantId],
+      ),
+    ]).then(([students, courses]) => ({ students, courses }));
+  }
+
+  private static readonly UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  private async resolveStudentUserId(tenantId: string, identifier: string): Promise<string> {
+    const isUuid = ExamCellService.UUID_RE.test(identifier);
+    const rows = await this.db.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id
+       FROM users u
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND r.role_name = 'Student'
+         AND (
+           ($2 = true AND u.user_id = $3::uuid)
+           OR lower(u.official_email) = lower($4)
+           OR lower(COALESCE(sp.enrollment_no, '')) = lower($4)
+           OR lower(COALESCE(sp.enrollment_number, '')) = lower($4)
+           OR lower(COALESCE(sp.admission_number, '')) = lower($4)
+         )
+       LIMIT 1`,
+      [tenantId, isUuid, identifier, identifier],
+    );
+    if (!rows[0]?.user_id) {
+      throw new BadRequestException(
+        'Student not found. Use enrollment number (e.g. SGVU-2026-1004), email, or user UUID.',
+      );
+    }
+    return rows[0].user_id;
+  }
+
+  private async resolveCourseId(tenantId: string, identifier: string): Promise<string> {
+    const isUuid = ExamCellService.UUID_RE.test(identifier);
+    const rows = isUuid
+      ? await this.db.query<Array<{ course_id: string }>>(
+          `SELECT course_id FROM academic_courses
+           WHERE tenant_id = $1 AND course_id = $2::uuid
+           LIMIT 1`,
+          [tenantId, identifier],
+        )
+      : await this.db.query<Array<{ course_id: string }>>(
+          `SELECT course_id FROM academic_courses
+           WHERE tenant_id = $1 AND upper(course_code) = upper($2)
+           LIMIT 1`,
+          [tenantId, identifier],
+        );
+    if (!rows[0]?.course_id) {
+      throw new BadRequestException('Course not found. Use course code (e.g. SMOKE101) or course UUID.');
+    }
+    return rows[0].course_id;
   }
 
   async generateTranscripts(tenantId: string, semester: number) {

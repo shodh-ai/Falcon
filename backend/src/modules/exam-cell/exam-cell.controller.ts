@@ -223,9 +223,17 @@ export class ExamCellController {
     return this.examCell.listUfmCases();
   }
 
+  @Get('ufm-cases/form-options')
+  ufmFormOptions(@Req() req: { user: AuthUser }) {
+    return this.examCell.listUfmFormOptions(this.tenant(req));
+  }
+
   @Post('ufm-cases')
   createUfmCase(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.examCell.createUfmCase(this.tenant(req), dto as Parameters<ExamCellService['createUfmCase']>[1]);
+    return this.examCell.createUfmCase(this.tenant(req), {
+      ...(dto as Parameters<ExamCellService['createUfmCase']>[1]),
+      reported_by: req.user.user_id,
+    });
   }
 
   @Post('transcripts/generate')

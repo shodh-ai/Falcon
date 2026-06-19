@@ -41,6 +41,7 @@ import {
   Library,
   BusFront,
   TrendingUp,
+  Scale,
   Heart,
   Calendar,
   CheckCircle,
@@ -339,6 +340,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
         { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
+        { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
       ],
     },
     {
@@ -383,6 +385,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
         { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
+        { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
       ],
     },
     {
@@ -862,6 +865,25 @@ export const parentPortal: PortalConfig = {
     { label: 'Academics', href: '/parent/academics', icon: GraduationCap },
     { label: 'Finance', href: '/parent/finance', icon: Wallet },
     { label: 'Tracking', href: '/parent/tracking', icon: MapPin },
+  ],
+};
+
+export const disciplinaryCommitteePortal: PortalConfig = {
+  personaLabel: 'Disciplinary Committee',
+  personaTitle: 'Student Conduct & Demerits',
+  homeHref: '/disciplinary-committee/dashboard',
+  navGroups: [
+    {
+      title: 'Review',
+      items: [
+        { label: 'Command Centre', href: '/disciplinary-committee/dashboard', icon: LayoutDashboard, keywords: ['dc', 'dashboard'] },
+        { label: 'Disciplinary Queue', href: '/disciplinary-committee/queue', icon: Scale, keywords: ['pending', 'review', 'approve', 'demerit'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'DC Dashboard', href: '/disciplinary-committee/dashboard', icon: LayoutDashboard },
+    { label: 'Disciplinary Queue', href: '/disciplinary-committee/queue', icon: Scale },
   ],
 };
 

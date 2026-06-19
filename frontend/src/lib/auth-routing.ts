@@ -70,6 +70,10 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/exam-cell/dashboard';
   }
 
+  if (r === 'dc_member' || r === 'dc member') {
+    return '/disciplinary-committee/dashboard';
+  }
+
   if (r === 'placementcell' || r === 'placement cell') {
     return '/placements/dashboard';
   }
@@ -108,6 +112,7 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'parent') return 'Parent Workspace';
   if (r === 'alumni') return 'Alumni Network';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell Workspace';
+  if (r === 'dc_member' || r === 'dc member') return 'Disciplinary Committee';
   return `${role} Workspace`;
 }
 
@@ -128,6 +133,7 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'parent') return 'Parent';
   if (r === 'alumni') return 'Alumni';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell';
+  if (r === 'dc_member' || r === 'dc member') return 'DC';
   return role;
 }
 
@@ -282,6 +288,7 @@ const portalRoles: Record<string, string[]> = {
   '/leadership': ['chairman', 'president', 'superadmin', 'registrar'],
   '/parent': ['parent', 'superadmin'],
   '/exam-cell': ['examcell', 'superadmin'],
+  '/disciplinary-committee': ['dc_member', 'superadmin'],
   '/alumni': ['alumni'],
   '/alumni-admin': ['iqac', 'superadmin', 'registrar', 'president'],
   '/admin-ops': ['registrar', 'superadmin', 'transportofficer'],

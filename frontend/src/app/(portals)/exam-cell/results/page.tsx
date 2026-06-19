@@ -111,7 +111,7 @@ export default function ExamCellResultsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showSetup, setShowSetup] = useState(false);
+  const [showSetup, setShowSetup] = useState(true);
   const [createForm, setCreateForm] = useState({
     course_id: '',
     exam_type: 'INTERNAL',
@@ -370,7 +370,92 @@ export default function ExamCellResultsPage() {
         </p>
       </div>
 
-      {/* Step 1 in ideal flow: actionable pending queue */}
+      {/* Session setup — create sessions and open faculty entry */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Create result session</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Create sessions and open marks entry before faculty can submit.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowSetup((v) => !v)}>
+            {showSetup ? 'Hide' : 'Show'}
+          </Button>
+        </CardHeader>
+        {showSetup ? (
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.course_id} onChange={(e) => setCreateForm({ ...createForm, course_id: e.target.value })}>
+                <option value="">Select course</option>
+                {courses.map((c) => (
+                  <option key={c.course_id} value={c.course_id}>{c.course_code} — {c.course_name}</option>
+                ))}
+              </select>
+              <select className="rounded-md border px-3 py-2 text-sm" value={createForm.exam_type} onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}>
+                {EXAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <Input placeholder="Semester" value={createForm.semester} onChange={(e) => setCreateForm({ ...createForm, semester: e.target.value })} />
+              <Input placeholder="Max marks" value={createForm.max_marks} onChange={(e) => setCreateForm({ ...createForm, max_marks: e.target.value })} />
+              <Input placeholder="Pass marks" value={createForm.pass_marks} onChange={(e) => setCreateForm({ ...createForm, pass_marks: e.target.value })} />
+              <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.grading_policy_id} onChange={(e) => setCreateForm({ ...createForm, grading_policy_id: e.target.value })}>
+                <option value="">Default grading policy</option>
+                {policies.map((p) => <option key={p.policy_id} value={p.policy_id}>{p.policy_name}</option>)}
+              </select>
+              <Button disabled={busy} onClick={() => void createSession()}>Create session</Button>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-sgvu-navy">{sessions.length} sessions</p>
+                {sessions.map((s) => (
+                  <button
+                    key={s.session_id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(s.session_id);
+                      scrollToWorkflow();
+                    }}
+                    className={`w-full rounded-lg border p-3 text-left text-sm ${selectedId === s.session_id ? 'border-sgvu-gold bg-sgvu-gold/5' : 'hover:bg-slate-50'}`}
+                  >
+                    <p className="font-semibold text-sgvu-navy">{s.course_code} · {s.exam_type}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Badge variant={statusBadge(s.entry_status)}>{s.entry_status}</Badge>
+                      {s.declared_at ? <Badge variant="default">Declared</Badge> : null}
+                      {s.pending_coe_count > 0 ? <Badge variant="outline">{s.pending_coe_count} pending</Badge> : null}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {selected ? (
+                <div className="space-y-3 rounded-lg border p-4 text-sm">
+                  <p className="font-medium">Faculty entry window</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" disabled={busy || !!selected.declared_at} onClick={() => void runAction('open-entry', 'Marks entry opened for faculty')}>
+                      Open entry
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={busy || !!selected.declared_at} onClick={() => void runAction('close-entry', 'Marks entry closed')}>
+                      Close entry
+                    </Button>
+                  </div>
+                  {!selected.declared_at ? (
+                    <div className="space-y-2 border-t pt-3">
+                      <p className="font-medium">Reopen for corrections</p>
+                      <Input placeholder="Reason for reopening" value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} />
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void reopenEntry()}>
+                        Reopen entry
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </CardContent>
+        ) : null}
+      </Card>
+
+      {/* Actionable pending queue */}
       <div>
         <h2 className="mb-1 text-lg font-bold text-sgvu-navy">Awaiting declaration</h2>
         <p className="mb-3 text-sm text-muted-foreground">
@@ -522,7 +607,7 @@ export default function ExamCellResultsPage() {
                   {selected.course_code} · {selected.exam_type} — declared
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Results published to students. Select another item from the queue or session setup below.
+                  Results published to students. Select another item from the queue above.
                 </p>
               </div>
             </CardContent>
@@ -535,90 +620,6 @@ export default function ExamCellResultsPage() {
           </Card>
         )}
       </div>
-
-      {/* Session setup — open entry before faculty can submit */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-base">Session setup</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Create sessions and open marks entry before faculty can submit. Use this before the declaration queue fills up.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setShowSetup((v) => !v)}>
-            {showSetup ? 'Hide' : 'Show'}
-          </Button>
-        </CardHeader>
-        {showSetup ? (
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-3">
-              <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.course_id} onChange={(e) => setCreateForm({ ...createForm, course_id: e.target.value })}>
-                <option value="">Select course</option>
-                {courses.map((c) => (
-                  <option key={c.course_id} value={c.course_id}>{c.course_code} — {c.course_name}</option>
-                ))}
-              </select>
-              <select className="rounded-md border px-3 py-2 text-sm" value={createForm.exam_type} onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}>
-                {EXAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <Input placeholder="Semester" value={createForm.semester} onChange={(e) => setCreateForm({ ...createForm, semester: e.target.value })} />
-              <Input placeholder="Max marks" value={createForm.max_marks} onChange={(e) => setCreateForm({ ...createForm, max_marks: e.target.value })} />
-              <Input placeholder="Pass marks" value={createForm.pass_marks} onChange={(e) => setCreateForm({ ...createForm, pass_marks: e.target.value })} />
-              <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.grading_policy_id} onChange={(e) => setCreateForm({ ...createForm, grading_policy_id: e.target.value })}>
-                <option value="">Default grading policy</option>
-                {policies.map((p) => <option key={p.policy_id} value={p.policy_id}>{p.policy_name}</option>)}
-              </select>
-              <Button disabled={busy} onClick={() => void createSession()}>Create session</Button>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-              <div className="space-y-2">
-                {sessions.map((s) => (
-                  <button
-                    key={s.session_id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(s.session_id);
-                      scrollToWorkflow();
-                    }}
-                    className={`w-full rounded-lg border p-3 text-left text-sm ${selectedId === s.session_id ? 'border-sgvu-gold bg-sgvu-gold/5' : 'hover:bg-slate-50'}`}
-                  >
-                    <p className="font-semibold text-sgvu-navy">{s.course_code} · {s.exam_type}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <Badge variant={statusBadge(s.entry_status)}>{s.entry_status}</Badge>
-                      {s.declared_at ? <Badge variant="default">Declared</Badge> : null}
-                      {s.pending_coe_count > 0 ? <Badge variant="outline">{s.pending_coe_count} pending</Badge> : null}
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {selected ? (
-                <div className="space-y-3 rounded-lg border p-4 text-sm">
-                  <p className="font-medium">Faculty entry window</p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" disabled={busy || !!selected.declared_at} onClick={() => void runAction('open-entry', 'Marks entry opened for faculty')}>
-                      Open entry
-                    </Button>
-                    <Button size="sm" variant="outline" disabled={busy || !!selected.declared_at} onClick={() => void runAction('close-entry', 'Marks entry closed')}>
-                      Close entry
-                    </Button>
-                  </div>
-                  {!selected.declared_at ? (
-                    <div className="space-y-2 border-t pt-3">
-                      <p className="font-medium">Reopen for corrections</p>
-                      <Input placeholder="Reason for reopening" value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} />
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void reopenEntry()}>
-                        Reopen entry
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </CardContent>
-        ) : null}
-      </Card>
     </div>
   );
 }
