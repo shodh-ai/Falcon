@@ -9,3 +9,9 @@ out
 README.md
 .vscode
 .idea
+coverage
+.turbo
+*.md
+Dockerfile
+.dockerignore
+nixpacks.toml

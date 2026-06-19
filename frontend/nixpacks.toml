@@ -1,4 +1,10 @@
-# Coolify Nixpacks — Base Directory: frontend, Build Pack: Nixpacks
+# Deprecated for Coolify production — use Dockerfile instead.
+# Nixpacks runs `next build` successfully but then COPYs the full repo into the image,
+# producing a very large layer that often fails at "exporting to image" on small VPS disks.
+#
+# Coolify settings:
+#   Base Directory: frontend
+#   Build Pack: Dockerfile
 [variables]
 NIXPACKS_NODE_VERSION = "20"
 NODE_OPTIONS = "--max-old-space-size=4096"

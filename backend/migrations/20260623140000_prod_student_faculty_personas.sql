@@ -31,6 +31,8 @@ INSERT INTO departments (dept_name, description)
 VALUES ('Computer Science', 'School of Computing & IT')
 ON CONFLICT (dept_name) DO NOTHING;
 
+ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(20);
+
 -- ---------------------------------------------------------------------------
 -- Students
 -- ---------------------------------------------------------------------------

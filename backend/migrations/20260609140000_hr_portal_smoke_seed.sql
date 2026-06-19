@@ -264,6 +264,20 @@ WITH ent AS (SELECT entity_id FROM org_entities WHERE entity_code = 'SGVU_UNIVER
 UPDATE hr_applicants a SET entity_id = ent.entity_id FROM ent WHERE a.entity_id IS NULL;
 
 WITH ent AS (SELECT entity_id FROM org_entities WHERE entity_code = 'SGVU_UNIVERSITY' LIMIT 1)
+DELETE FROM hr_holidays h
+WHERE h.entity_id IS NULL
+  AND h.deleted_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM hr_holidays h2
+    WHERE h2.holiday_id <> h.holiday_id
+      AND h2.date = h.date
+      AND h2.title = h.title
+      AND h2.entity_id IS NOT NULL
+      AND h2.deleted_at IS NULL
+  );
+
+WITH ent AS (SELECT entity_id FROM org_entities WHERE entity_code = 'SGVU_UNIVERSITY' LIMIT 1)
 UPDATE hr_holidays h SET entity_id = ent.entity_id FROM ent WHERE h.entity_id IS NULL;
 
 WITH ctx AS (

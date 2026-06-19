@@ -1,4 +1,6 @@
-# Optional — Coolify should use Nixpacks (see nixpacks.toml). Base Directory: frontend
+# Coolify: Base Directory = frontend, Build Pack = Dockerfile (not Nixpacks).
+# Nixpacks copies the full source tree after build and often fails on "exporting layers"
+# when disk is tight; this multi-stage standalone image is much smaller (~200 MB vs ~1 GB+).
 ARG NODE_IMAGE=node:20-alpine
 FROM ${NODE_IMAGE} AS builder
 
@@ -22,12 +24,15 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-COPY package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 nextjs
+
 COPY --from=builder /app/public ./public
-COPY next.config.ts ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
