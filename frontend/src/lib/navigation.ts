@@ -527,7 +527,6 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
-        { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades', 'remedial'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
       ],
     },
@@ -563,7 +562,6 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students'] },
-        { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['defaulters'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
       ],
     },
