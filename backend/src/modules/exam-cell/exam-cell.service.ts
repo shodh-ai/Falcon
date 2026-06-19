@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  NotFoundException,
   Injectable,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -509,6 +510,68 @@ export class ExamCellService {
        ORDER BY es.exam_date, d.room`,
       [tenantId],
     );
+  }
+
+  async listInvigilationRequests(tenantId: string) {
+    return this.db.query(
+      `SELECT r.*, u.name AS faculty_name, a.exam_date, a.room, a.session_label
+       FROM invigilation_unavailability_requests r
+       JOIN users u ON u.user_id = r.faculty_user_id
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = r.assignment_id
+       WHERE r.tenant_id = $1
+       ORDER BY CASE WHEN r.status = 'PENDING' THEN 1 ELSE 2 END, r.created_at DESC`,
+      [tenantId],
+    );
+  }
+
+  async resolveInvigilationRequest(
+    tenantId: string,
+    requestId: string,
+    status: 'APPROVED' | 'REJECTED',
+    comment: string
+  ) {
+    const reqRow = await this.db.query(
+      `SELECT * FROM invigilation_unavailability_requests WHERE request_id = $1 AND tenant_id = $2`,
+      [requestId, tenantId]
+    );
+    const request = reqRow[0];
+    if (!request) throw new NotFoundException('Request not found');
+
+    const updated = await this.db.query(
+      `UPDATE invigilation_unavailability_requests
+       SET status = $1, exam_cell_comment = $2, updated_at = NOW()
+       WHERE request_id = $3
+       RETURNING *`,
+      [status, comment, requestId]
+    );
+
+    if (status === 'APPROVED') {
+      const assignmentRow = await this.db.query(
+        `SELECT * FROM faculty_invigilation_assignments WHERE assignment_id = $1`,
+        [request.assignment_id]
+      );
+      if (assignmentRow[0]) {
+        const assignment = assignmentRow[0];
+        
+        // Delete from faculty assignments
+        await this.db.query(
+          `DELETE FROM faculty_invigilation_assignments WHERE assignment_id = $1`,
+          [assignment.assignment_id]
+        );
+        
+        // Delete from exam_invigilation_duties
+        // We know faculty_user_id, room, exam_schedule_id
+        if (assignment.exam_schedule_id) {
+          await this.db.query(
+            `DELETE FROM exam_invigilation_duties 
+             WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3 AND faculty_user_id = $4`,
+            [tenantId, assignment.exam_schedule_id, assignment.room, assignment.faculty_user_id]
+          );
+        }
+      }
+    }
+
+    return updated[0];
   }
 
   listPendingCoeMarks(tenantId: string) {

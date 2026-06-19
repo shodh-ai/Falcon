@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards, Delete, Param } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards, Delete, Param, BadRequestException } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -85,6 +85,21 @@ export class ExamCellController {
   @Post('invigilation/publish')
   publishInvigilation(@Req() req: { user: AuthUser }, @Body() dto: { exam_schedule_id: string }) {
     return this.examCell.publishInvigilationRoster(this.tenant(req), dto.exam_schedule_id);
+  }
+
+  @Get('invigilation-requests')
+  invigilationRequests(@Req() req: { user: AuthUser }) {
+    return this.examCell.listInvigilationRequests(this.tenant(req));
+  }
+
+  @Post('invigilation-requests/:requestId/resolve')
+  resolveInvigilationRequest(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+    @Body() dto: { status: 'APPROVED' | 'REJECTED'; comment: string }
+  ) {
+    if (!dto.comment?.trim()) throw new BadRequestException('Comment is required');
+    return this.examCell.resolveInvigilationRequest(this.tenant(req), requestId, dto.status, dto.comment);
   }
 
   @Get('faculty-roster')
