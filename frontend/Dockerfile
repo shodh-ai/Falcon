@@ -1,22 +1,36 @@
-# Coolify: Base Directory = frontend, Build Pack = Dockerfile (not Nixpacks).
-# Nixpacks copies the full source tree after build and often fails on "exporting layers"
-# when disk is tight; this multi-stage standalone image is much smaller (~200 MB vs ~1 GB+).
-ARG NODE_IMAGE=node:20-alpine
-FROM ${NODE_IMAGE} AS builder
+# Coolify: Base Directory = frontend, Build Pack = Dockerfile
+#
+# Coolify env vars — set as RUNTIME ONLY (not build-time):
+#   NODE_ENV, NPM_CONFIG_PRODUCTION
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
-ENV npm_config_production=false
-ENV NODE_OPTIONS=--max-old-space-size=4096
+# Native deps for sharp / Next.js on Linux
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-COPY package*.json ./
-RUN npm ci --include=dev
+COPY package.json package-lock.json .npmrc ./
+
+# env -i clears Coolify build-time NODE_ENV / NPM_CONFIG_PRODUCTION injection
+RUN env -i \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    HOME="/root" \
+    NODE_ENV=development \
+    NODE_OPTIONS="--max-old-space-size=4096" \
+    npm ci --include=dev --no-audit --no-fund
 
 COPY . .
-RUN NODE_ENV=production npm run build
 
-ARG NODE_IMAGE=node:20-alpine
-FROM ${NODE_IMAGE} AS production
+RUN env -i \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    HOME="/root" \
+    NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=4096" \
+    npm run build
+
+FROM node:20-bookworm-slim AS production
 
 WORKDIR /app
 
@@ -24,8 +38,8 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-RUN addgroup --system --gid 1001 nodejs \
-  && adduser --system --uid 1001 nextjs
+RUN groupadd --system --gid 1001 nodejs \
+  && useradd --system --uid 1001 --gid nodejs nextjs
 
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
