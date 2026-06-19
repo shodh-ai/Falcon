@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { AlertTriangle, Headphones, MessageSquarePlus, Ticket } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { AlertTriangle, ChevronRight, Headphones, MessageSquarePlus, Ticket } from 'lucide-react';
+import { myHelpdeskTicketDetailPath } from '@/lib/helpdesk-routes';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
@@ -24,6 +26,7 @@ const categories = [
 
 type TicketRow = {
   ticket_id: string;
+  ticket_ref?: string | null;
   category: string;
   status: string;
   subject: string;
@@ -40,8 +43,10 @@ type DisciplineRecord = {
 
 export default function StudentHelpdeskPage() {
   const api = useAuthedApi();
+  const router = useRouter();
+  const pathname = '/student/helpdesk';
   const searchParams = useSearchParams();
-  const highlightTicketId = searchParams.get('ticket');
+  const ticketFromQuery = searchParams.get('ticket');
   const [form, setForm] = useState({ category: 'IT', subject: '', description: '' });
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [discipline, setDiscipline] = useState<DisciplineRecord[]>([]);
@@ -58,6 +63,12 @@ export default function StudentHelpdeskPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (ticketFromQuery) {
+      router.replace(`/student/helpdesk/${encodeURIComponent(ticketFromQuery)}`);
+    }
+  }, [ticketFromQuery, router]);
 
   useEffect(() => {
     void loadTickets();
@@ -149,26 +160,30 @@ export default function StudentHelpdeskPage() {
           ) : (
             <div className="space-y-3">
               {tickets.map((ticket) => (
-                <div
+                <Link
                   key={ticket.ticket_id}
-                  className={`rounded-2xl border p-4 transition hover:shadow-sm ${
-                    highlightTicketId === ticket.ticket_id ? 'border-sgvu-gold bg-sgvu-gold/10' : 'border-border/70 bg-white'
-                  }`}
+                  href={myHelpdeskTicketDetailPath(pathname, ticket.ticket_id)}
+                  className="group block rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-navy/30 hover:shadow-md"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-mono text-xs text-muted-foreground">{ticket.ticket_id}</p>
-                    <Badge variant={ticket.status === 'RESOLVED' ? 'success' : ticket.status === 'IN_PROGRESS' ? 'secondary' : 'outline'}>
-                      {ticket.status}
-                    </Badge>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {ticket.ticket_ref ?? ticket.ticket_id.slice(0, 8)}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={ticket.status === 'RESOLVED' ? 'success' : ticket.status === 'IN_PROGRESS' ? 'secondary' : 'outline'}>
+                        {ticket.status}
+                      </Badge>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-sgvu-navy" />
+                    </div>
                   </div>
-                  <p className="mt-2 font-semibold text-sgvu-navy">{ticket.subject}</p>
+                  <p className="mt-2 font-semibold text-sgvu-navy group-hover:text-sgvu-navy">{ticket.subject}</p>
                   <p className="text-xs text-muted-foreground">{ticket.category}</p>
                   {ticket.status === 'REJECTED' && ticket.rejection_reason && (
                     <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-800">
                       Rejection reason: {ticket.rejection_reason}
                     </p>
                   )}
-                </div>
+                </Link>
               ))}
             </div>
           )}

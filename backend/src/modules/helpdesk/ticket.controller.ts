@@ -81,6 +81,17 @@ export class TicketController {
     return this.tickets.listProfileCorrectionTickets(this.tenant(req));
   }
 
+  @Get(':ticketId')
+  @Roles(...HELPDESK_REQUESTER_ROLES, 'Chairman', 'President')
+  getTicket(@Req() req: { user: AuthUser }, @Param('ticketId') ticketId: string) {
+    return this.tickets.getTicketById(
+      ticketId,
+      req.user.user_id,
+      req.user.role ?? 'UNKNOWN',
+      this.tenant(req),
+    );
+  }
+
   private tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
