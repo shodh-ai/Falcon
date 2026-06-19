@@ -115,10 +115,10 @@ export default function ExamCellInvigilationPage() {
       </div>
 
       <Tabs defaultValue="roster" className="space-y-4">
-        <TabsList className="gap-2">
+        <TabsList>
           <TabsTrigger value="roster">Roster Management</TabsTrigger>
           <TabsTrigger value="requests">
-            Unavailability Requests 
+            Unavailability Requests
             {requests.filter(r => r.status === 'PENDING').length > 0 && (
               <Badge variant="destructive" className="ml-2 px-1.5 py-0.5 text-[10px]">
                 {requests.filter(r => r.status === 'PENDING').length}
@@ -185,17 +185,17 @@ export default function ExamCellInvigilationPage() {
                       <p className="font-medium mb-1 text-xs text-muted-foreground">Reason for Unavailability:</p>
                       <p>{r.reason}</p>
                     </div>
-                    
+
                     {r.status === 'PENDING' ? (
                       <div className="flex gap-2">
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
                           onClick={() => setResolvingRequest({ req: r, action: 'REJECTED' })}
                         >
                           Reject
                         </Button>
-                        <Button 
+                        <Button
                           className="w-full bg-sgvu-navy hover:bg-sgvu-navy/90"
                           onClick={() => setResolvingRequest({ req: r, action: 'APPROVED' })}
                         >
@@ -222,7 +222,7 @@ export default function ExamCellInvigilationPage() {
               {resolvingRequest?.action === 'APPROVED' ? 'Approve Unavailability' : 'Reject Unavailability'}
             </DialogTitle>
             <DialogDescription>
-              {resolvingRequest?.action === 'APPROVED' 
+              {resolvingRequest?.action === 'APPROVED'
                 ? 'Approving this request will excuse the faculty and delete their assignment, freeing up the room.'
                 : 'Rejecting this request will keep the assignment active.'}
             </DialogDescription>
@@ -230,7 +230,7 @@ export default function ExamCellInvigilationPage() {
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <label className="text-sm font-medium">Commit Message / Comment</label>
-              <textarea 
+              <textarea
                 className="w-full rounded-md border p-3 text-sm min-h-[100px]"
                 placeholder={resolvingRequest?.action === 'APPROVED' ? 'E.g., Approved due to medical reasons. Roster updated.' : 'E.g., Request denied. You must attend this invigilation duty.'}
                 value={resolveComment}
@@ -240,9 +240,9 @@ export default function ExamCellInvigilationPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setResolvingRequest(null)}>Cancel</Button>
-            <Button 
+            <Button
               variant={resolvingRequest?.action === 'APPROVED' ? 'default' : 'destructive'}
-              onClick={() => void submitResolution()} 
+              onClick={() => void submitResolution()}
               disabled={!resolveComment.trim()}
             >
               Confirm {resolvingRequest?.action === 'APPROVED' ? 'Approval' : 'Rejection'}
