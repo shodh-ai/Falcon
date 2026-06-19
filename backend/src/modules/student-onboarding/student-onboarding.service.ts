@@ -24,6 +24,15 @@ type OnboardingDocRow = {
   uploaded_at: string;
 };
 
+function isPgUniqueViolation(err: unknown, columnHint?: string): boolean {
+  const pgErr = err as { code?: string; detail?: string; driverError?: { code?: string; detail?: string } };
+  const code = pgErr.code ?? pgErr.driverError?.code;
+  if (code !== '23505') return false;
+  if (!columnHint) return true;
+  const detail = pgErr.detail ?? pgErr.driverError?.detail ?? '';
+  return detail.includes(columnHint);
+}
+
 type ProfileBody = {
   blood_group?: string;
   parent_contact_phone?: string;
@@ -537,37 +546,46 @@ export class StudentOnboardingService {
     if (!permanentAddress) throw new BadRequestException('Permanent address is required');
     if (!currentAddress) throw new BadRequestException('Current address is required');
 
-    await this.dataSource.query(
-      `INSERT INTO student_profiles (tenant_id, user_id, blood_group, abc_id, gender, date_of_birth, parent_info, status)
-       VALUES ($1, $2, $3, $4, $5, $6::date, $7::jsonb, 'ACTIVE')
-       ON CONFLICT (user_id) DO UPDATE SET
-         blood_group = EXCLUDED.blood_group,
-         abc_id = EXCLUDED.abc_id,
-         gender = EXCLUDED.gender,
-         date_of_birth = EXCLUDED.date_of_birth,
-         parent_info = COALESCE(student_profiles.parent_info, '{}'::jsonb) || EXCLUDED.parent_info,
-         updated_at = NOW()`,
-      [
-        tenantId,
-        userId,
-        bloodGroup,
-        abcId,
-        gender,
-        dateOfBirth,
-        JSON.stringify({
-          student_mobile: studentMobile,
-          father_name: fatherName,
-          mother_name: motherName,
-          parent_occupation: body.parent_occupation?.trim() ?? '',
-          annual_income: body.annual_income?.trim() ?? '',
-          emergency_contact_name: emergencyContactName,
-          emergency_contact_phone: parentPhone,
-          parent_contact_phone: parentPhone,
-          permanent_address: permanentAddress,
-          current_address: currentAddress,
-        }),
-      ],
-    );
+    try {
+      await this.dataSource.query(
+        `INSERT INTO student_profiles (tenant_id, user_id, blood_group, abc_id, gender, date_of_birth, parent_info, status)
+         VALUES ($1, $2, $3, $4, $5, $6::date, $7::jsonb, 'ACTIVE')
+         ON CONFLICT (user_id) DO UPDATE SET
+           blood_group = EXCLUDED.blood_group,
+           abc_id = EXCLUDED.abc_id,
+           gender = EXCLUDED.gender,
+           date_of_birth = EXCLUDED.date_of_birth,
+           parent_info = COALESCE(student_profiles.parent_info, '{}'::jsonb) || EXCLUDED.parent_info,
+           updated_at = NOW()`,
+        [
+          tenantId,
+          userId,
+          bloodGroup,
+          abcId,
+          gender,
+          dateOfBirth,
+          JSON.stringify({
+            student_mobile: studentMobile,
+            father_name: fatherName,
+            mother_name: motherName,
+            parent_occupation: body.parent_occupation?.trim() ?? '',
+            annual_income: body.annual_income?.trim() ?? '',
+            emergency_contact_name: emergencyContactName,
+            emergency_contact_phone: parentPhone,
+            parent_contact_phone: parentPhone,
+            permanent_address: permanentAddress,
+            current_address: currentAddress,
+          }),
+        ],
+      );
+    } catch (err) {
+      if (isPgUniqueViolation(err, 'abc_id')) {
+        throw new BadRequestException(
+          'This ABC ID is already registered to another student. Use your own 12-digit Academic Bank ID.',
+        );
+      }
+      throw err;
+    }
 
     return this.getStep2Profile(tenantId, userId);
   }
