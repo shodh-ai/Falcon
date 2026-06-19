@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 
-const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM'] as const;
+const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'INTERNAL', 'END_TERM'] as const;
 
 type MarkRow = {
   student_user_id: string;

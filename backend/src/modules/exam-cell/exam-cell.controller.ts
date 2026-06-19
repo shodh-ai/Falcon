@@ -127,6 +127,20 @@ export class ExamCellController {
     return this.examCell.listPendingCoeMarks(this.tenant(req));
   }
 
+  @Get('grades-aggregate/courses')
+  getGradesAggregateCourses(@Req() req: { user: AuthUser }, @Query('semester') semester: string) {
+    return this.examCell.getGradesAggregateCourses(this.tenant(req), Number(semester));
+  }
+
+  @Get('grades-aggregate/table')
+  getGradesAggregateTable(
+    @Req() req: { user: AuthUser },
+    @Query('semester') semester: string,
+    @Query('course_id') courseId: string,
+  ) {
+    return this.examCell.getGradesAggregateTable(this.tenant(req), Number(semester), courseId);
+  }
+
   @Get('results/distribution')
   distribution(
     @Req() req: { user: AuthUser },
