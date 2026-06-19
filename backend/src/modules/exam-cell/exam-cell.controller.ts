@@ -118,8 +118,8 @@ export class ExamCellController {
   }
 
   @Get('faculty-roster')
-  facultyRoster(@Req() req: { user: AuthUser }) {
-    return this.examCell.listFacultyForInvigilation(this.tenant(req));
+  getFacultyRoster(@Req() req: { user: AuthUser }, @Query('date') date?: string) {
+    return this.examCell.listFacultyForInvigilation(this.tenant(req), date);
   }
 
   @Get('results/pending')

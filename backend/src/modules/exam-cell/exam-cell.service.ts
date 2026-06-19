@@ -1171,14 +1171,22 @@ export class ExamCellService {
       }));
   }
 
-  listFacultyForInvigilation(tenantId: string) {
-    return this.db.query(
-      `SELECT user_id, name, official_email FROM users
-       WHERE tenant_id = $1 AND is_active = true
-         AND user_id IN (SELECT user_id FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id WHERE r.role_name = 'Faculty')
-       ORDER BY name LIMIT 100`,
-      [tenantId],
-    );
+  listFacultyForInvigilation(tenantId: string, examDate?: string) {
+    let query = `
+      SELECT user_id, name, official_email FROM users
+      WHERE tenant_id = $1 AND is_active = true
+        AND user_id IN (SELECT user_id FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id WHERE r.role_name = 'Faculty')
+    `;
+    const params: any[] = [tenantId];
+    if (examDate) {
+      query += ` AND user_id NOT IN (
+        SELECT requester_user_id FROM hr_leave_requests 
+        WHERE status = 'APPROVED' AND $2::date BETWEEN start_date AND end_date
+      )`;
+      params.push(examDate);
+    }
+    query += ` ORDER BY name LIMIT 100`;
+    return this.db.query(query, params);
   }
 
   listAdmitCardRuns(tenantId: string) {
