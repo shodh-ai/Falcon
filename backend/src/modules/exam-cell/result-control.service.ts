@@ -130,6 +130,25 @@ export class ResultControlService {
     return this.getSession(tenantId, sessionId);
   }
 
+  /** Close faculty entry and lock submitted marks before grade preview / declaration. */
+  async prepareForDeclaration(tenantId: string, sessionId: string, actorUserId: string) {
+    const session = await this.getSession(tenantId, sessionId);
+    if (session.declared_at) {
+      throw new BadRequestException('Results already declared');
+    }
+    const pending = await this.db.query<Array<{ c: number }>>(
+      `SELECT COUNT(*)::int AS c FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
+      [tenantId, session.course_id, session.exam_type],
+    );
+    if (!pending[0]?.c) {
+      throw new BadRequestException('No faculty submissions awaiting declaration');
+    }
+    await this.closeEntry(tenantId, sessionId);
+    await this.lockMarks(tenantId, sessionId, actorUserId);
+    return this.getSession(tenantId, sessionId);
+  }
+
   async reopenEntry(tenantId: string, sessionId: string, dto: ReopenResultEntryDto) {
     const session = await this.getSession(tenantId, sessionId);
     if (session.declared_at) {

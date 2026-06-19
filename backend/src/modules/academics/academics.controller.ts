@@ -1112,12 +1112,14 @@ export class AcademicsController {
   @Roles('Student')
   async downloadMarksheet(
     @Param('semester', ParseIntPipe) semester: number,
+    @Query('type') type: 'provisional' | 'final' | undefined,
     @Req() req: { user: AuthUser },
     @Res() res: Response,
   ) {
-    const pdf = await this.marksheetPdf.generate(req.user.user_id, this.resolveTenantId(req.user), semester);
+    const marksheetType = type === 'final' ? 'final' : 'provisional';
+    const pdf = await this.marksheetPdf.generate(req.user.user_id, this.resolveTenantId(req.user), semester, marksheetType);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="marksheet-sem${semester}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${marksheetType}-marksheet-sem${semester}.pdf"`);
     res.send(pdf);
   }
 

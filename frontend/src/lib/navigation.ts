@@ -884,6 +884,7 @@ export const examCellPortal: PortalConfig = {
       title: 'Post-Exam Operations',
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
+        { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
         { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
@@ -895,6 +896,7 @@ export const examCellPortal: PortalConfig = {
     { label: 'Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays },
     { label: 'Admit Cards', href: '/exam-cell/admit-cards', icon: Ticket },
     { label: 'Publish Results', href: '/exam-cell/results', icon: TrendingUp },
+    { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal },
     { label: 'UFM Desk', href: '/exam-cell/ufm-cases', icon: Shield },
   ],
 };

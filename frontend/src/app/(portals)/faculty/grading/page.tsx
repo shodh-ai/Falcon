@@ -28,6 +28,7 @@ type MarkRow = {
   marks_obtained: number | null;
   max_marks: number;
   co_mapped: string | null;
+  status?: string | null;
 };
 
 type MarksPayload = {
@@ -115,7 +116,12 @@ export default function FacultyGradingPage() {
   async function saveDraft(): Promise<boolean> {
     if (!courseId) return false;
     const entries = rows
-      .filter((r) => r.marks_obtained !== null)
+      .filter(
+        (r) =>
+          r.marks_obtained !== null &&
+          r.status !== 'PENDING_COE' &&
+          r.status !== 'PUBLISHED',
+      )
       .map((r) => ({
         student_user_id: r.student_user_id,
         marks_obtained: r.marks_obtained,
@@ -134,7 +140,11 @@ export default function FacultyGradingPage() {
         entries,
       });
       toast.success('Draft saved');
-      setPublishStatus('DRAFT');
+      const data = await api.get<MarksPayload>(
+        `/api/academics/faculty/workspaces/marks?courseId=${encodeURIComponent(courseId)}&examType=${examType}`,
+      );
+      setRows(data.rows);
+      setPublishStatus(data.publish_status);
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
@@ -159,7 +169,11 @@ export default function FacultyGradingPage() {
         return;
       }
       toast.success(`Marks submitted to Exam Cell for ${result.published} student${result.published === 1 ? '' : 's'}`);
-      setPublishStatus('PENDING_COE');
+      const data = await api.get<MarksPayload>(
+        `/api/academics/faculty/workspaces/marks?courseId=${encodeURIComponent(courseId)}&examType=${examType}`,
+      );
+      setRows(data.rows);
+      setPublishStatus(data.publish_status);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Publish failed');
     } finally {
@@ -168,6 +182,26 @@ export default function FacultyGradingPage() {
   }
 
   const enteredCount = rows.filter((r) => r.marks_obtained !== null).length;
+  const draftSubmitCount = rows.filter(
+    (r) => (r.status === 'DRAFT' || !r.status) && r.marks_obtained !== null,
+  ).length;
+  const editableDraftCount = rows.filter(
+    (r) =>
+      r.marks_obtained !== null &&
+      r.status !== 'PENDING_COE' &&
+      r.status !== 'PUBLISHED',
+  ).length;
+  const allSubmitted =
+    rows.length > 0 &&
+    rows.every((r) => r.status === 'PENDING_COE' || r.status === 'PUBLISHED');
+  const canSaveDraft = !!courseId && entryAllowed && publishStatus !== 'PUBLISHED' && editableDraftCount > 0;
+  const canSubmit = !!courseId && entryAllowed && draftSubmitCount > 0;
+
+  function statusLabel(status: string) {
+    if (status === 'PARTIAL') return 'Partially submitted';
+    if (status === 'PENDING_COE') return 'Submitted to Exam Cell';
+    return status;
+  }
 
   return (
     <FacultyPageShell>
@@ -241,10 +275,16 @@ export default function FacultyGradingPage() {
           </label>
           <div className="flex items-end">
             <Badge
-              variant={publishStatus === 'PUBLISHED' ? 'default' : publishStatus === 'PENDING_COE' ? 'outline' : 'secondary'}
+              variant={
+                publishStatus === 'PUBLISHED'
+                  ? 'default'
+                  : publishStatus === 'PENDING_COE' || publishStatus === 'PARTIAL'
+                    ? 'outline'
+                    : 'secondary'
+              }
               className="text-xs font-semibold uppercase tracking-wide"
             >
-              {publishStatus === 'PENDING_COE' ? 'Submitted to Exam Cell' : publishStatus}
+              {statusLabel(publishStatus)}
             </Badge>
           </div>
         </div>
@@ -255,15 +295,28 @@ export default function FacultyGradingPage() {
         count={rows.length}
         description="Enter marks per student — CO mapping optional"
       >
-        <div className="mb-4 flex flex-wrap justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={!courseId || saving || !entryAllowed || publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'} onClick={() => void saveDraft()}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          {allSubmitted ? (
+            <p className="text-xs text-muted-foreground">
+              All marks are submitted. Contact Exam Cell to reopen entry if you need changes.
+            </p>
+          ) : draftSubmitCount > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {draftSubmitCount} student{draftSubmitCount === 1 ? '' : 's'} ready to submit as draft marks.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Enter marks, save draft, then submit to Exam Cell.</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" disabled={!canSaveDraft || saving} onClick={() => void saveDraft()}>
             {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
             Save draft
           </Button>
-          <Button size="sm" disabled={!courseId || saving || !entryAllowed || publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'} onClick={() => void publish()}>
+          <Button size="sm" disabled={!canSubmit || saving} onClick={() => void publish()}>
             <Send className="mr-1 h-4 w-4" />
             Submit to Exam Cell
           </Button>
+          </div>
         </div>
 
         {loading ? (
@@ -286,19 +339,29 @@ export default function FacultyGradingPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {rows.map((row) => {
+                  const rowLocked = row.status === 'PENDING_COE' || row.status === 'PUBLISHED';
+                  return (
                   <tr key={row.student_user_id} className="border-b border-border/40">
                     <td className="py-2.5 pr-4 text-xs font-medium text-muted-foreground">
                       {row.roll_number && row.roll_number.length <= 24 && !row.roll_number.includes('0000-4000')
                         ? row.roll_number
                         : '—'}
                     </td>
-                    <td className="py-2.5 pr-4 font-medium text-sgvu-navy">{row.name}</td>
+                    <td className="py-2.5 pr-4 font-medium text-sgvu-navy">
+                      {row.name}
+                      {rowLocked ? (
+                        <Badge variant="outline" className="ml-2 text-[10px] uppercase">
+                          {row.status === 'PUBLISHED' ? 'Published' : 'Submitted'}
+                        </Badge>
+                      ) : null}
+                    </td>
                     <td className="py-2.5 pr-4">
                       <Input
                         className="h-8 w-20"
                         placeholder="CO1"
                         defaultValue={row.co_mapped ?? ''}
+                        disabled={rowLocked || !entryAllowed}
                         onBlur={(e) =>
                           setRows((prev) =>
                             prev.map((r) =>
@@ -318,13 +381,15 @@ export default function FacultyGradingPage() {
                           max={maxMarks}
                           className="h-8 w-24"
                           value={row.marks_obtained ?? ''}
+                          disabled={rowLocked || !entryAllowed}
                           onChange={(e) => updateMark(row.student_user_id, e.target.value)}
                         />
                         <span className="text-muted-foreground">/ {maxMarks}</span>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -34,23 +34,38 @@ export default function ExamCellSeatingPage() {
   const [viewingRun, setViewingRun] = useState<any | null>(null);
 
   useEffect(() => {
-    void api.get<Schedule[]>('/api/exam-cell/schedules').then((s) => {
-      setSchedules(s);
-      if (s[0]) setExamId(s[0].exam_schedule_id);
-    });
-    void api.get<Block[]>('/api/exam-cell/blocks-halls').then((b) => {
-      setBlocksData(b);
-      if (b[0]) setSelectedBlock(b[0].block);
-    });
+    void api
+      .get<Schedule[]>('/api/exam-cell/schedules')
+      .then((s) => {
+        setSchedules(s);
+        if (s[0]) setExamId(s[0].exam_schedule_id);
+      })
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Could not load schedules'));
+    void api
+      .get<Block[]>('/api/exam-cell/blocks-halls')
+      .then((b) => {
+        setBlocksData(b);
+        if (b[0]) setSelectedBlock(b[0].block);
+      })
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Could not load halls'));
   }, [api]);
 
   useEffect(() => {
     if (!semester) return;
-    void api.get<string[]>(`/api/exam-cell/branches?semester=${semester}`).then(setBranches);
+    void api
+      .get<string[]>(`/api/exam-cell/branches?semester=${semester}`)
+      .then(setBranches)
+      .catch(() => setBranches([]));
   }, [api, semester]);
 
   const loadRuns = useCallback(() => {
-    void api.get<any[]>('/api/exam-cell/seating-runs').then(setRuns);
+    void api
+      .get<any[]>('/api/exam-cell/seating-runs')
+      .then(setRuns)
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : 'Could not load seating runs');
+        setRuns([]);
+      });
   }, [api]);
 
   useEffect(() => {
@@ -277,3 +292,4 @@ export default function ExamCellSeatingPage() {
     </div>
   );
 }
+

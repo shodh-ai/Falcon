@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -580,10 +579,22 @@ export class ExamCellService {
     return this.db.query(
       `SELECT m.*, u.name AS student_name, c.course_code, c.course_name,
               m.marks_obtained, m.max_marks,
-              ROUND(100.0 * m.marks_obtained / NULLIF(m.max_marks, 0), 1) AS percent
+              ROUND(100.0 * m.marks_obtained / NULLIF(m.max_marks, 0), 1) AS percent,
+              sess.session_id,
+              sess.entry_status AS session_entry_status,
+              sess.declared_at AS session_declared_at
        FROM academic_marks m
        JOIN users u ON u.user_id = m.student_user_id
        JOIN academic_courses c ON c.course_id = m.course_id
+       LEFT JOIN LATERAL (
+         SELECT s.session_id, s.entry_status, s.declared_at
+         FROM exam_result_sessions s
+         WHERE s.tenant_id = m.tenant_id
+           AND s.course_id = m.course_id
+           AND s.exam_type = m.exam_type
+         ORDER BY s.semester DESC
+         LIMIT 1
+       ) sess ON TRUE
        WHERE m.tenant_id = $1 AND m.status = 'PENDING_COE'
        ORDER BY c.course_code, m.exam_type, u.name`,
       [tenantId],
@@ -1112,3 +1123,4 @@ export class ExamCellService {
     );
   }
 }
+
