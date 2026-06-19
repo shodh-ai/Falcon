@@ -94,6 +94,8 @@ export default function ExamCellResultsPage() {
   const [reopenReason, setReopenReason] = useState('');
   const [pendingFilterSem, setPendingFilterSem] = useState<string>('');
 
+
+
   const selected = sessions.find((s) => s.session_id === selectedId) ?? null;
 
   const load = useCallback(async () => {
@@ -137,6 +139,8 @@ export default function ExamCellResultsPage() {
     }
     return [...map.values()];
   }, [pending]);
+
+
 
   const filteredPendingGroups = useMemo(() => {
     if (!pendingFilterSem) return pendingGroups;
@@ -404,9 +408,11 @@ export default function ExamCellResultsPage() {
         )}
       </div>
 
+
+
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-sgvu-navy">Pending COE submissions</h2>
+          <h2 className="text-lg font-bold text-sgvu-navy">Faculty Marks Submissions</h2>
           <select 
             className="rounded-md border px-3 py-1.5 text-sm" 
             value={pendingFilterSem} 
@@ -417,7 +423,7 @@ export default function ExamCellResultsPage() {
           </select>
         </div>
         {filteredPendingGroups.length === 0 ? (
-          <Card><CardContent className="py-8 text-center text-muted-foreground">No marks awaiting COE approval.</CardContent></Card>
+          <Card><CardContent className="py-8 text-center text-muted-foreground">No marks submissions found.</CardContent></Card>
         ) : (
           filteredPendingGroups.map((g) => (
             <CourseResultBlock key={`${g.course_id}-${g.exam_type}`} group={g} api={api} />
@@ -464,7 +470,14 @@ function CourseResultBlock({
         onClick={() => setIsOpen(!isOpen)}
       >
         <div>
-          <CardTitle className="text-lg">{group.course_code} — {group.exam_type}</CardTitle>
+          <div className="flex items-center gap-3">
+            <CardTitle className="text-lg">{group.course_code} — {group.exam_type}</CardTitle>
+            {group.rows.some(r => r.status === 'PUBLISHED') ? (
+              <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Declared</span>
+            ) : (
+              <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">Pending</span>
+            )}
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {group.course_name}
             {group.semester ? ` · Sem ${group.semester}` : ''}

@@ -588,10 +588,89 @@ export class ExamCellService {
        JOIN academic_courses c ON c.course_id = m.course_id
        LEFT JOIN users f ON f.user_id = m.uploaded_by
        LEFT JOIN student_course_enrollments e ON e.student_user_id = m.student_user_id AND e.course_id = m.course_id
-       WHERE m.tenant_id = $1 AND m.status = 'PENDING_COE'
+       WHERE m.tenant_id = $1 AND m.status IN ('PENDING_COE', 'PUBLISHED')
        ORDER BY c.course_code, m.exam_type, u.name`,
       [tenantId],
     );
+  }
+
+  getGradesAggregateCourses(tenantId: string, semester: number) {
+    return this.db.query(
+      `SELECT DISTINCT c.course_id, c.course_code, c.course_name
+       FROM student_course_enrollments e
+       JOIN academic_courses c ON c.course_id = e.course_id
+       WHERE e.tenant_id = $1 AND e.semester = $2
+       ORDER BY c.course_code`,
+      [tenantId, semester],
+    );
+  }
+
+  async getGradesAggregateTable(tenantId: string, semester: number, courseId: string) {
+    const students = await this.db.query(
+      `SELECT e.student_user_id, u.name AS student_name
+       FROM student_course_enrollments e
+       JOIN users u ON u.user_id = e.student_user_id
+       WHERE e.tenant_id = $1 AND e.semester = $2 AND e.course_id = $3
+       ORDER BY u.name`,
+      [tenantId, semester, courseId]
+    );
+
+    const marks = await this.db.query(
+      `SELECT student_user_id, exam_type, marks_obtained
+       FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2`,
+      [tenantId, courseId]
+    );
+
+    const marksMap = new Map<string, Record<string, number>>();
+    for (const m of marks) {
+      if (!marksMap.has(m.student_user_id)) {
+        marksMap.set(m.student_user_id, {});
+      }
+      marksMap.get(m.student_user_id)![m.exam_type] = Number(m.marks_obtained) || 0;
+    }
+
+    function calculateGrade(total: number) {
+      if (total >= 90) return 'AA';
+      if (total >= 80) return 'AB';
+      if (total >= 70) return 'BB';
+      if (total >= 60) return 'BC';
+      if (total >= 50) return 'CC';
+      if (total >= 40) return 'CD';
+      if (total >= 33) return 'DD';
+      return 'F';
+    }
+
+    return students.map((s: any) => {
+      const stuMarks = marksMap.get(s.student_user_id) || {};
+      const quiz = stuMarks['QUIZ'];
+      const internal = stuMarks['INTERNAL'];
+      const cat1 = stuMarks['CAT1'];
+      const cat2 = stuMarks['CAT2'];
+      const endTerm = stuMarks['END_TERM'];
+
+      const isPending = quiz === undefined || internal === undefined || (cat1 === undefined && cat2 === undefined) || endTerm === undefined;
+      const midTerm = (cat1 || 0) + (cat2 || 0);
+      
+      let aggregate: number | string = 'Pending';
+      let grade = 'Pending';
+
+      if (!isPending) {
+        aggregate = Math.min(100, Math.round((quiz || 0) + (internal || 0) + midTerm + (endTerm || 0)));
+        grade = calculateGrade(aggregate);
+      }
+
+      return {
+        student_id: s.student_user_id,
+        student_name: s.student_name,
+        quiz_marks: quiz ?? '—',
+        internal_marks: internal ?? '—',
+        mid_term_marks: (cat1 !== undefined || cat2 !== undefined) ? midTerm : '—',
+        end_term_marks: endTerm ?? '—',
+        aggregate,
+        grade
+      };
+    });
   }
 
   marksDistribution(tenantId: string, courseId: string, examType: string) {
@@ -624,13 +703,7 @@ export class ExamCellService {
 
     if (!updated.length) throw new BadRequestException('No PENDING_COE marks to publish');
 
-    for (const row of updated) {
-      await this.db.query(
-        `INSERT INTO academic_exam_results (tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, status)
-         VALUES ($1,$2,$3,$4,$5,$6,'PUBLISHED')`,
-        [tenantId, row.student_user_id, dto.course_id, dto.exam_type, row.marks_obtained, row.max_marks],
-      );
-    }
+
 
     const courseRows = await this.db.query(
       `SELECT course_name FROM academic_courses WHERE course_id = $1`,

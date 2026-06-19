@@ -278,12 +278,6 @@ export class ResultControlService {
       );
 
       await this.db.query(
-        `INSERT INTO academic_exam_results (tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, grade, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
-        [tenantId, row.student_user_id, session.course_id, session.exam_type, obtained, max, grade],
-      );
-
-      await this.db.query(
         `INSERT INTO student_exam_reports (
            tenant_id, session_id, student_user_id, course_id, exam_type,
            marks_obtained, max_marks, percent, grade, grade_points, result_status, report_summary, declared_at
@@ -339,7 +333,7 @@ export class ResultControlService {
     const rows = await this.db.query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-       ORDER BY semester DESC LIMIT 1`,
+       ORDER BY created_at DESC LIMIT 1`,
       [tenantId, courseId, examType],
     );
     return rows[0] ?? null;

@@ -1186,7 +1186,7 @@ export class FacultyWorkspacesService {
     const rows = await this.dataSource.query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-       ORDER BY semester DESC LIMIT 1`,
+       ORDER BY created_at DESC LIMIT 1`,
       [tenantId, courseId, examType],
     );
     return rows[0] ?? null;
