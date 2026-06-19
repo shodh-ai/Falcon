@@ -10,6 +10,47 @@ import { Badge } from '@/components/ui/badge';
 import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { TeamScopeBar, useTeamScope, type TeamScope } from '@/components/self-service/TeamScopeBar';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+
+type FundingApprovalRole = 'hod' | 'dean';
+
+function resolveUserRoles(user: { role?: string; roles?: string[]; primaryRole?: string } | null): string[] {
+  if (!user) return [];
+  if (user.roles?.length) return user.roles;
+  return [user.primaryRole ?? user.role].filter(Boolean) as string[];
+}
+
+function fundingApprovalRole(user: { role?: string; roles?: string[]; primaryRole?: string } | null): FundingApprovalRole | null {
+  const roles = resolveUserRoles(user);
+  if (roles.some((r) => ['SuperAdmin', 'HOD'].includes(r))) return 'hod';
+  if (roles.includes('Dean')) return 'dean';
+  return null;
+}
+
+async function fetchPendingFundingRequests(
+  api: ReturnType<typeof useAuthedApi>,
+  role: FundingApprovalRole,
+): Promise<any[]> {
+  if (role === 'dean') {
+    const rows = await api.get<any[]>('/api/academics/dean/funding-requests');
+    return rows.filter((r) => r.status === 'APPROVED_HOD');
+  }
+  const rows = await api.get<any[]>('/api/academics/hod/funding-requests');
+  return rows.filter((r) => r.status === 'PENDING_HOD');
+}
+
+function mapFundingRows(rows: any[], role: FundingApprovalRole): RequestItem[] {
+  return rows.map((r) => ({
+    id: r.request_id,
+    request_type: `Project Funding (₹${r.amount})`,
+    leave_type: r.project_title,
+    applied_date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN') : null,
+    raised_on: r.created_at,
+    reason: r.purpose,
+    status: role === 'dean' ? 'Pending Dean' : 'Pending HOD',
+    employee: { name: r.faculty_name },
+  }));
+}
 
 type TabId =
   | 'LEAVE'
@@ -92,6 +133,9 @@ type Props = {
 
 function RequestsContent({ defaultScope }: Props) {
   const api = useAuthedApi();
+  const { user } = useAuth();
+  const fundingRole = fundingApprovalRole(user);
+  const visibleTabs = TABS.filter((t) => t.id !== 'FUNDING_REQUESTS' || fundingRole);
   const scope = useTeamScope(defaultScope);
   const [tab, setTab] = useState<TabId>('LEAVE');
   const [data, setData] = useState<RequestsPayload | null>(null);
@@ -102,11 +146,16 @@ function RequestsContent({ defaultScope }: Props) {
 
   async function loadCounts() {
     try {
-      const [res, fundingRes] = await Promise.all([
-        api.get<PendingCounts & { scope?: string }>(`/api/hr/team/pending-counts?scope=${scope}`),
-        api.get<any[]>('/api/academics/hod/funding-requests').catch(() => [])
-      ]);
-      const pendingFunding = fundingRes.filter(r => r.status === 'PENDING_HOD').length;
+      const res = await api.get<PendingCounts & { scope?: string }>(`/api/hr/team/pending-counts?scope=${scope}`);
+      let pendingFunding = 0;
+      if (fundingRole) {
+        try {
+          const fundingRows = await fetchPendingFundingRequests(api, fundingRole);
+          pendingFunding = fundingRows.length;
+        } catch {
+          pendingFunding = 0;
+        }
+      }
 
       setCounts({
         leaves: Number(res.leaves) || 0,
@@ -137,17 +186,12 @@ function RequestsContent({ defaultScope }: Props) {
     setSelected(new Set());
     try {
       if (active === 'FUNDING_REQUESTS') {
-        const res = await api.get<any[]>('/api/academics/hod/funding-requests');
-        const items = res.filter(r => r.status === 'PENDING_HOD').map(r => ({
-          id: r.request_id,
-          request_type: `Project Funding (₹${r.amount})`,
-          leave_type: r.project_title,
-          applied_date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN') : null,
-          raised_on: r.created_at,
-          reason: r.purpose,
-          status: 'Pending HOD',
-          employee: { name: r.faculty_name }
-        }));
+        if (!fundingRole) {
+          setData({ count: 0, tab: active, items: [] });
+          return;
+        }
+        const res = await fetchPendingFundingRequests(api, fundingRole);
+        const items = mapFundingRows(res, fundingRole);
         setData({ count: items.length, tab: active, items });
       } else {
         const res = await api.get<RequestsPayload>(
@@ -165,11 +209,15 @@ function RequestsContent({ defaultScope }: Props) {
 
   useEffect(() => {
     void loadCounts();
-  }, [api, scope]);
+  }, [api, scope, fundingRole]);
 
   useEffect(() => {
+    if (tab === 'FUNDING_REQUESTS' && !fundingRole && visibleTabs.length) {
+      setTab(visibleTabs[0].id);
+      return;
+    }
     void load(tab);
-  }, [api, scope, tab]);
+  }, [api, scope, tab, fundingRole]);
 
   function tabLabel(t: (typeof TABS)[number]) {
     const n = counts?.[TAB_COUNT_KEY[t.id]] ?? 0;
@@ -210,14 +258,27 @@ function RequestsContent({ defaultScope }: Props) {
   async function runBulk(action: 'APPROVE' | 'REJECT', comment?: string) {
     setBulkActing(true);
     try {
-      if (tab === 'FUNDING_REQUESTS') {
-        const status = action === 'APPROVE' ? 'APPROVED_HOD' : 'REJECTED_HOD';
-        await Promise.all([...selected].map(id => 
-          api.patch(`/api/academics/hod/funding-requests/${id}`, {
-            status,
-            commitMessage: comment || ''
-          })
-        ));
+      if (tab === 'FUNDING_REQUESTS' && fundingRole) {
+        const status =
+          fundingRole === 'dean'
+            ? action === 'APPROVE'
+              ? 'APPROVED_DEAN'
+              : 'REJECTED_DEAN'
+            : action === 'APPROVE'
+              ? 'APPROVED_HOD'
+              : 'REJECTED_HOD';
+        const endpoint =
+          fundingRole === 'dean'
+            ? '/api/academics/dean/funding-requests'
+            : '/api/academics/hod/funding-requests';
+        await Promise.all(
+          [...selected].map((id) =>
+            api.patch(`${endpoint}/${id}`, {
+              status,
+              commitMessage: comment || '',
+            }),
+          ),
+        );
         toast.success(`${action === 'APPROVE' ? 'Approved' : 'Rejected'} ${selected.size} funding request(s)`);
       } else {
         await api.patch('/api/hr/ess/team/requests/bulk', {
@@ -248,7 +309,7 @@ function RequestsContent({ defaultScope }: Props) {
       </Suspense>
 
       <div className="flex flex-wrap gap-1 rounded-xl border border-border/60 bg-muted/40 p-1">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             type="button"

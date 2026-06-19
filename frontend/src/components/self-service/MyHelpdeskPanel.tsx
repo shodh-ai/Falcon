@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Headphones, Loader2, MessageSquarePlus } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { ChevronRight, Headphones, Loader2, MessageSquarePlus } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
+import { myHelpdeskTicketDetailPath } from '@/lib/helpdesk-routes';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,12 +21,21 @@ const categories = [
 
 type TicketRow = {
   ticket_id: string;
+  ticket_ref?: string | null;
   category: string;
   status: string;
   subject: string;
 };
 
+function statusVariant(status: string): 'success' | 'secondary' | 'outline' | 'destructive' {
+  if (status === 'RESOLVED') return 'success';
+  if (status === 'IN_PROGRESS') return 'secondary';
+  if (status === 'REJECTED') return 'destructive';
+  return 'outline';
+}
+
 export function MyHelpdeskPanel() {
+  const pathname = usePathname();
   const api = useAuthedApi();
   const [form, setForm] = useState({ category: 'IT', subject: '', description: '' });
   const [tickets, setTickets] = useState<TicketRow[]>([]);
@@ -118,13 +130,24 @@ export function MyHelpdeskPanel() {
             <p className="text-sm text-muted-foreground">No tickets yet.</p>
           )}
           {tickets.map((t) => (
-            <div key={t.ticket_id} className="rounded-lg border p-3 text-sm">
+            <Link
+              key={t.ticket_id}
+              href={myHelpdeskTicketDetailPath(pathname, t.ticket_id)}
+              className="group block rounded-lg border p-3 text-sm transition hover:border-sgvu-navy/30 hover:bg-muted/20 hover:shadow-sm"
+            >
               <div className="flex items-start justify-between gap-2">
-                <p className="font-medium text-sgvu-navy">{t.subject}</p>
-                <Badge variant="outline">{t.status}</Badge>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-sgvu-navy group-hover:underline">{t.subject}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t.ticket_ref ?? t.ticket_id.slice(0, 8)} · {t.category}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Badge variant={statusVariant(t.status)}>{t.status}</Badge>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-sgvu-navy" />
+                </div>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">{t.category}</p>
-            </div>
+            </Link>
           ))}
         </CardContent>
       </Card>

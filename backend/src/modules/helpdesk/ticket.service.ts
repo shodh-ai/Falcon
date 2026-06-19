@@ -17,6 +17,10 @@ import { WorkflowNotificationService } from '../../core/workflow/workflow-notifi
 import { User } from '../../entities/user.entity';
 import { assertNoPendingRow } from '../../common/validators/pending-request.util';
 
+const TICKET_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TICKET_REF_RE = /^TKT-/i;
+
 @Injectable()
 export class TicketService {
   constructor(
@@ -114,6 +118,68 @@ export class TicketService {
          AND COALESCE(t.tenant_id, su.tenant_id) = $2
        LIMIT 1`,
       [ticketRef, tenantId],
+    );
+    if (!rows.length) throw new NotFoundException('Ticket not found');
+
+    const t = rows[0];
+    const role = actorRole.trim().toLowerCase();
+    const isOwner = t.student_user_id === actorUserId;
+    const isAssignee = t.assigned_to_user_id === actorUserId;
+    const isAdmin = [
+      'superadmin',
+      'registrar',
+      'accountant',
+      'warden',
+      'hod',
+      'dean',
+      'faculty',
+      'chairman',
+      'president',
+      'hr',
+      'hradmin',
+    ].includes(role);
+
+    if (['student', 'applicant'].includes(role) && !isOwner) {
+      throw new ForbiddenException('You can only view your own tickets');
+    }
+    if (!isOwner && !isAssignee && !isAdmin) {
+      throw new ForbiddenException('You are not allowed to view this ticket');
+    }
+
+    return t;
+  }
+
+  /** Get a single ticket by ID with access checks for requesters and assignees. */
+  async getTicketById(
+    ticketId: string,
+    actorUserId: string,
+    actorRole: string,
+    tenantId: string,
+  ) {
+    const trimmed = ticketId.trim();
+    if (!trimmed || trimmed === 'undefined' || trimmed === 'null') {
+      throw new NotFoundException('Ticket not found');
+    }
+    if (TICKET_REF_RE.test(trimmed)) {
+      return this.getTicketByRef(trimmed, actorUserId, actorRole, tenantId);
+    }
+    if (!TICKET_UUID_RE.test(trimmed)) {
+      throw new NotFoundException('Ticket not found');
+    }
+
+    const rows = await this.tickets.manager.query<Array<Record<string, unknown>>>(
+      `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
+              t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
+              t.sla_deadline, t.resolved_at, t.rejection_reason,
+              su.name AS student_name, au.name AS assigned_to_name
+       FROM helpdesk_tickets t
+       JOIN users su ON su.user_id = t.student_user_id
+       LEFT JOIN users au ON au.user_id = t.assigned_to_user_id
+       WHERE t.ticket_id = $1::uuid
+         AND COALESCE(t.tenant_id, su.tenant_id) = $2
+         AND t.deleted_at IS NULL
+       LIMIT 1`,
+      [trimmed, tenantId],
     );
     if (!rows.length) throw new NotFoundException('Ticket not found');
 
