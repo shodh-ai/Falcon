@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  NotFoundException,
   Injectable,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -238,77 +239,194 @@ export class ExamCellService {
     return reasons;
   }
 
-  /** Auto-allocate seats — no adjacent same-branch students */
-  async autoAllocateSeating(
-    tenantId: string,
-    dto: { exam_schedule_id: string; semester: number; rooms: string[] },
-  ) {
-    if (!dto.exam_schedule_id?.trim()) {
-      throw new BadRequestException('Select an exam schedule first');
-    }
-    if (!dto.rooms?.length) throw new BadRequestException('Select at least one room');
-
-    const examRows = await this.db.query(
-      `SELECT 1 FROM exam_schedules WHERE exam_schedule_id = $1`,
-      [dto.exam_schedule_id],
-    );
-    if (!examRows[0]) throw new BadRequestException('Exam schedule not found');
-
-    const students = await this.db.query(
-      `SELECT DISTINCT u.user_id,
-              COALESCE(d.dept_name, 'GEN') AS branch_code
+  async getBranchesBySemester(tenantId: string, semester: number) {
+    const rows = await this.db.query(
+      `SELECT DISTINCT COALESCE(d.dept_name, 'GEN') AS branch_code
        FROM users u
        INNER JOIN student_course_enrollments e ON e.student_user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1 AND e.semester = $2
-       ORDER BY branch_code, u.user_id`,
-      [tenantId, dto.semester],
+       ORDER BY branch_code`,
+      [tenantId, semester]
     );
+    return rows.map((r: any) => r.branch_code);
+  }
 
-    await this.db.query(`DELETE FROM exam_seating_allocations WHERE exam_schedule_id = $1`, [
-      dto.exam_schedule_id,
-    ]);
+  async getBlocksAndHalls(tenantId: string) {
+    const spaces = await this.db.query(
+      `SELECT building_name AS block, room_number AS hall, capacity
+       FROM campus_spaces
+       WHERE tenant_id = $1 AND space_type = 'CLASSROOM'
+       ORDER BY building_name, room_number`,
+      [tenantId]
+    );
+    
+    const blocksMap = new Map();
+    for (const s of spaces) {
+      if (!blocksMap.has(s.block)) blocksMap.set(s.block, { block: s.block, halls: [] });
+      const cols = 5;
+      const rows = Math.ceil(s.capacity / cols);
+      blocksMap.get(s.block).halls.push({ name: s.hall, capacity: s.capacity, rows, cols });
+    }
+    return Array.from(blocksMap.values());
+  }
 
-    const seatsPerRoom = 30;
-    let roomIdx = 0;
-    let seatNum = 1;
-    let prevBranch: string | null = null;
-    const allocated: unknown[] = [];
+  /** Auto-allocate seats — no adjacent same-branch students */
+  async autoAllocateSeating(
+    tenantId: string,
+    dto: { allocation_strategy: string; exam_type?: string; exam_schedule_id?: string; semester: number; branch?: string; rooms: string[] },
+  ) {
+    if (!dto.rooms?.length) throw new BadRequestException('Select at least one room');
 
-    for (const s of students) {
-      if (seatNum > seatsPerRoom) {
-        roomIdx = (roomIdx + 1) % dto.rooms.length;
-        seatNum = 1;
-      }
-      if (s.branch_code === prevBranch && seatNum > 1) {
-        seatNum++;
-        if (seatNum > seatsPerRoom) {
-          roomIdx = (roomIdx + 1) % dto.rooms.length;
-          seatNum = 1;
-        }
-      }
-      const room = dto.rooms[roomIdx];
-      const rows = await this.db.query(
-        `INSERT INTO exam_seating_allocations (tenant_id, exam_schedule_id, room, student_user_id, seat_number, branch_code)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [tenantId, dto.exam_schedule_id, room, s.user_id, String(seatNum).padStart(2, '0'), s.branch_code],
+    let scheduleIds: string[] = [];
+    if (dto.allocation_strategy === 'by_schedule') {
+      if (!dto.exam_schedule_id?.trim()) throw new BadRequestException('Select an exam schedule');
+      const examRows = await this.db.query(
+        `SELECT 1 FROM exam_schedules WHERE exam_schedule_id = $1`,
+        [dto.exam_schedule_id],
       );
-      allocated.push(rows[0]);
-      prevBranch = s.branch_code;
-      seatNum++;
+      if (!examRows[0]) throw new BadRequestException('Exam schedule not found');
+      scheduleIds.push(dto.exam_schedule_id);
+    } else {
+      if (!dto.exam_type?.trim()) throw new BadRequestException('Select an exam type');
+      const exams = await this.db.query(`SELECT exam_schedule_id FROM exam_schedules WHERE tenant_id = $1 AND exam_type = $2`, [tenantId, dto.exam_type]);
+      scheduleIds = exams.map((e: any) => e.exam_schedule_id);
+      if (scheduleIds.length === 0) throw new BadRequestException('No schedules found for this exam type');
     }
 
-    return { allocated: allocated.length, rooms: dto.rooms };
+    const branchFilter = dto.branch && dto.branch !== 'All Branches' ? `AND COALESCE(d.dept_name, 'GEN') = $3` : '';
+    const params: any[] = [tenantId, dto.semester];
+    if (dto.branch && dto.branch !== 'All Branches') params.push(dto.branch);
+
+    const students = await this.db.query(
+      `SELECT DISTINCT u.user_id, u.name,
+              COALESCE(d.dept_name, 'GEN') AS branch_code
+       FROM users u
+       INNER JOIN student_course_enrollments e ON e.student_user_id = u.user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE e.tenant_id = $1 AND e.semester = $2 ${branchFilter}
+       ORDER BY branch_code, u.user_id`,
+      params,
+    );
+
+    const spaces = await this.db.query(`SELECT room_number, capacity FROM campus_spaces WHERE tenant_id = $1`, [tenantId]);
+    const capMap = new Map<string, number>(spaces.map((s: any) => [s.room_number, Number(s.capacity)]));
+
+    const schedulesInfo = await this.db.query(`
+      SELECT es.exam_schedule_id, es.exam_date, sub.subject_name
+      FROM exam_schedules es
+      LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+      WHERE es.exam_schedule_id = ANY($1)
+    `, [scheduleIds]);
+    const schedMap = new Map<string, any>(schedulesInfo.map((s: any) => [s.exam_schedule_id, s]));
+
+    let totalAllocated = 0;
+    const enrichedAllocations: any[] = [];
+
+    for (const scheduleId of scheduleIds) {
+      if (!dto.branch || dto.branch === 'All Branches') {
+         await this.db.query(`DELETE FROM exam_seating_allocations WHERE exam_schedule_id = $1`, [scheduleId]);
+      } else {
+         await this.db.query(`DELETE FROM exam_seating_allocations WHERE exam_schedule_id = $1 AND branch_code = $2`, [scheduleId, dto.branch]);
+      }
+
+      const occupiedRows = await this.db.query(`SELECT room, seat_number FROM exam_seating_allocations WHERE exam_schedule_id = $1`, [scheduleId]);
+      const occupied = new Set(occupiedRows.map((r: any) => `${r.room}-${Number(r.seat_number)}`));
+
+      let roomIdx = 0;
+      let seatNum = 1;
+      let prevBranch: string | null = null;
+      const schedInfo = schedMap.get(scheduleId);
+      
+      for (const s of students) {
+        let room = dto.rooms[roomIdx];
+        let capacity = capMap.get(room) || 30;
+
+        while (true) {
+          if (seatNum > capacity) {
+            roomIdx = (roomIdx + 1) % dto.rooms.length;
+            room = dto.rooms[roomIdx];
+            capacity = capMap.get(room) || 30;
+            seatNum = 1;
+            prevBranch = null;
+          }
+          
+          if (s.branch_code === prevBranch) {
+             seatNum++;
+             prevBranch = null;
+             continue;
+          }
+
+          if (occupied.has(`${room}-${seatNum}`)) {
+             seatNum++;
+             continue;
+          }
+
+          break;
+        }
+
+        const seatString = String(seatNum).padStart(2, '0');
+
+        await this.db.query(
+          `INSERT INTO exam_seating_allocations (tenant_id, exam_schedule_id, room, student_user_id, seat_number, branch_code)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [tenantId, scheduleId, room, s.user_id, seatString, s.branch_code],
+        );
+        
+        enrichedAllocations.push({
+           student_name: s.name,
+           student_user_id: s.user_id,
+           branch_code: s.branch_code,
+           subject_name: schedInfo?.subject_name,
+           exam_date: schedInfo?.exam_date,
+           room: room,
+           seat_number: seatString
+        });
+
+        occupied.add(`${room}-${seatNum}`);
+        prevBranch = s.branch_code;
+        seatNum++;
+        totalAllocated++;
+      }
+    }
+
+    await this.db.query(
+      `INSERT INTO exam_seating_runs (tenant_id, allocation_strategy, exam_type, exam_schedule_id, semester, branch, allocations)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [tenantId, dto.allocation_strategy, dto.exam_type || null, dto.exam_schedule_id || null, dto.semester, dto.branch || 'All Branches', JSON.stringify(enrichedAllocations)]
+    );
+
+    return { allocated: totalAllocated, rooms: dto.rooms };
+  }
+
+  async listSeatingRuns(tenantId: string) {
+    return this.db.query(
+      `SELECT r.run_id, r.allocation_strategy, r.exam_type, r.exam_schedule_id, r.semester, r.branch, r.created_at,
+              jsonb_array_length(r.allocations) as total_allocated, r.allocations,
+              sub.subject_name, es.exam_date
+       FROM exam_seating_runs r
+       LEFT JOIN exam_schedules es ON es.exam_schedule_id = r.exam_schedule_id
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+       WHERE r.tenant_id = $1
+       ORDER BY r.created_at DESC`,
+       [tenantId]
+    );
+  }
+
+  async deleteSeatingRun(tenantId: string, runId: string) {
+    await this.db.query(`DELETE FROM exam_seating_runs WHERE tenant_id = $1 AND run_id = $2`, [tenantId, runId]);
+    return { success: true };
   }
 
   listSeatingAllocations(tenantId: string, examScheduleId?: string) {
     const filter = examScheduleId ? 'AND a.exam_schedule_id = $2' : '';
     const params = examScheduleId ? [tenantId, examScheduleId] : [tenantId];
     return this.db.query(
-      `SELECT a.*, u.name AS student_name, es.exam_type, es.exam_date
+      `SELECT a.*, u.name AS student_name, es.exam_type, es.exam_date, sub.subject_name, sub.subject_code
        FROM exam_seating_allocations a
        JOIN users u ON u.user_id = a.student_user_id
        JOIN exam_schedules es ON es.exam_schedule_id = a.exam_schedule_id
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
        WHERE a.tenant_id = $1 ${filter}
        ORDER BY a.room, a.seat_number`,
       params,
@@ -392,6 +510,68 @@ export class ExamCellService {
        ORDER BY es.exam_date, d.room`,
       [tenantId],
     );
+  }
+
+  async listInvigilationRequests(tenantId: string) {
+    return this.db.query(
+      `SELECT r.*, u.name AS faculty_name, a.exam_date, a.room, a.session_label
+       FROM invigilation_unavailability_requests r
+       JOIN users u ON u.user_id = r.faculty_user_id
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = r.assignment_id
+       WHERE r.tenant_id = $1
+       ORDER BY CASE WHEN r.status = 'PENDING' THEN 1 ELSE 2 END, r.created_at DESC`,
+      [tenantId],
+    );
+  }
+
+  async resolveInvigilationRequest(
+    tenantId: string,
+    requestId: string,
+    status: 'APPROVED' | 'REJECTED',
+    comment: string
+  ) {
+    const reqRow = await this.db.query(
+      `SELECT * FROM invigilation_unavailability_requests WHERE request_id = $1 AND tenant_id = $2`,
+      [requestId, tenantId]
+    );
+    const request = reqRow[0];
+    if (!request) throw new NotFoundException('Request not found');
+
+    const updated = await this.db.query(
+      `UPDATE invigilation_unavailability_requests
+       SET status = $1, exam_cell_comment = $2, updated_at = NOW()
+       WHERE request_id = $3
+       RETURNING *`,
+      [status, comment, requestId]
+    );
+
+    if (status === 'APPROVED') {
+      const assignmentRow = await this.db.query(
+        `SELECT * FROM faculty_invigilation_assignments WHERE assignment_id = $1`,
+        [request.assignment_id]
+      );
+      if (assignmentRow[0]) {
+        const assignment = assignmentRow[0];
+        
+        // Delete from faculty assignments
+        await this.db.query(
+          `DELETE FROM faculty_invigilation_assignments WHERE assignment_id = $1`,
+          [assignment.assignment_id]
+        );
+        
+        // Delete from exam_invigilation_duties
+        // We know faculty_user_id, room, exam_schedule_id
+        if (assignment.exam_schedule_id) {
+          await this.db.query(
+            `DELETE FROM exam_invigilation_duties 
+             WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3 AND faculty_user_id = $4`,
+            [tenantId, assignment.exam_schedule_id, assignment.room, assignment.faculty_user_id]
+          );
+        }
+      }
+    }
+
+    return updated[0];
   }
 
   listPendingCoeMarks(tenantId: string) {

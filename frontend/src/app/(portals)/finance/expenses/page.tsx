@@ -11,12 +11,14 @@ import { useAuthedApi } from '@/lib/api';
 type Head = { expense_head_id: string; head_name: string };
 type Vendor = { vendor_id: string; business_name: string; default_tds_rate: string };
 type Bill = { invoice_id: string; vendor_name: string; head_name: string; total_amount: string; net_payable: string; gst_amount: string; tds_amount: string };
+type Budget = { budget_id: string; department_id: number; department_name: string };
 
 export default function FinanceExpensesPage() {
   const api = useAuthedApi();
   const [heads, setHeads] = useState<Head[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [form, setForm] = useState({
     vendor_id: '',
     expense_head_id: '',
@@ -25,6 +27,7 @@ export default function FinanceExpensesPage() {
     taxable_amount: '',
     gst_rate: '18',
     department_id: '',
+    po_id: '',
   });
   const [preview, setPreview] = useState<{ gst: number; tds: number; net: number } | null>(null);
 
@@ -32,6 +35,7 @@ export default function FinanceExpensesPage() {
     void api.get<Head[]>('/finance/expense-heads').then(setHeads);
     void api.get<Vendor[]>('/finance/vendors').then(setVendors);
     void api.get<Bill[]>('/finance/expenses').then(setBills).catch(() => setBills([]));
+    void api.get<Budget[]>('/finance/budgets').then(setBudgets).catch(() => setBudgets([]));
   };
 
   useEffect(() => {
@@ -48,13 +52,18 @@ export default function FinanceExpensesPage() {
 
   async function submit() {
     try {
+      if (!form.vendor_id || !form.expense_head_id || !form.taxable_amount) {
+        throw new Error('Please fill all required fields');
+      }
       await api.post('/finance/expenses', {
         ...form,
         taxable_amount: Number(form.taxable_amount),
         gst_rate: Number(form.gst_rate),
         department_id: form.department_id ? Number(form.department_id) : undefined,
+        po_id: form.po_id || undefined,
       });
       toast.success('Bill approved with GST/TDS');
+      setForm(prev => ({ ...prev, invoice_number: '', taxable_amount: '', po_id: '' }));
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
@@ -90,8 +99,16 @@ export default function FinanceExpensesPage() {
           </select>
           <Input placeholder="Invoice number" value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} />
           <Input type="date" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} />
-          <Input placeholder="Taxable amount (₹)" value={form.taxable_amount} onChange={(e) => setForm({ ...form, taxable_amount: e.target.value })} />
-          <Input placeholder="Dept ID (budget check)" value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })} />
+          <Input placeholder="Taxable amount (₹)" type="number" value={form.taxable_amount} onChange={(e) => setForm({ ...form, taxable_amount: e.target.value })} />
+          <select className="rounded-md border px-3 py-2 text-sm" value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })}>
+            <option value="">Select Department (for budget allocation)</option>
+            {budgets.map((b) => (
+              <option key={b.budget_id} value={String(b.department_id)}>
+                {b.department_name} (ID: {b.department_id})
+              </option>
+            ))}
+          </select>
+          <Input placeholder="PO ID (Optional)" value={form.po_id} onChange={(e) => setForm({ ...form, po_id: e.target.value })} />
           {preview && (
             <p className="text-sm sm:col-span-2">
               GST {formatInr(preview.gst)} · TDS {formatInr(preview.tds)} · <strong>Net payable {formatInr(preview.net)}</strong>

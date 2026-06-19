@@ -4,9 +4,9 @@
 UPDATE users u
 SET reporting_officer_id = d.hod_user_id,
     updated_at = NOW()
-FROM departments d
-INNER JOIN roles r ON r.role_id = u.role_id
+FROM departments d, roles r
 WHERE u.dept_id = d.dept_id
+  AND r.role_id = u.role_id
   AND u.reporting_officer_id IS NULL
   AND u.is_active = true
   AND lower(r.role_name) IN ('faculty', 'hod', 'dean')

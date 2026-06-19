@@ -13,6 +13,7 @@ import {
   UploadedFiles,
   UseGuards,
   UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import {
@@ -748,6 +749,22 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listInvigilation(@Req() req: { user: AuthUser }) {
     return this.facultyWorkspaces.listInvigilation(req.user.user_id, this.resolveTenantId(req.user));
+  }
+
+  @Post('faculty/workspaces/invigilation/:assignmentId/excuse')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  requestInvigilationUnavailability(
+    @Req() req: { user: AuthUser },
+    @Param('assignmentId') assignmentId: string,
+    @Body('reason') reason: string,
+  ) {
+    if (!reason?.trim()) throw new BadRequestException('Reason is required');
+    return this.facultyWorkspaces.requestInvigilationUnavailability(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+      reason,
+    );
   }
 
   @Post('faculty/workspaces/projects/assign')
