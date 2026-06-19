@@ -1,5 +1,9 @@
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+import { apiUrlRef, getApiBaseUrl } from '@/lib/api-base-url';
+
+export { getApiBaseUrl };
+
+/** Resolves at use-time (supports runtime Coolify `API_URL` injection). */
+export const API_URL = apiUrlRef;
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 

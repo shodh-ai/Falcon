@@ -39,7 +39,8 @@ export function getSubdomainFromClient(): string {
 }
 
 export async function fetchTenantBranding(subdomain: string): Promise<TenantBranding> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+  const { getApiBaseUrl, getServerApiBaseUrl } = await import('@/lib/api-base-url');
+  const apiUrl = typeof window === 'undefined' ? getServerApiBaseUrl() : getApiBaseUrl();
   const res = await fetch(`${apiUrl}/api/tenants/resolve/${subdomain}`, {
     next: { revalidate: 300 },
   });

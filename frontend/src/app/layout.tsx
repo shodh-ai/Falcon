@@ -6,6 +6,7 @@ import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { TenantProvider } from "@/context/TenantContext";
 import { SWRProvider } from "@/components/providers/SWRProvider";
+import { RuntimeApiConfig } from "@/components/RuntimeApiConfig";
 
 export const metadata: Metadata = {
   title: "Falcon | SGVU Campus OS",
@@ -32,6 +33,7 @@ export default function RootLayout({
       className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <RuntimeApiConfig />
         <TenantProvider>
           <AuthProvider>
             <SWRProvider>{children}</SWRProvider>

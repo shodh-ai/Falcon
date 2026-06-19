@@ -2,8 +2,7 @@ import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { getSubdomainFromClient } from '@/lib/tenant';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 
 let authRedirectInFlight = false;
 
@@ -23,7 +22,7 @@ function scheduleAuthRedirect(router: ReturnType<typeof useRouter>) {
 
 function wrapFetchError(err: unknown, path: string): Error {
   if (err instanceof TypeError && err.message === 'Failed to fetch') {
-    return new Error(`Cannot reach API at ${API_URL}${path}. Start the backend with: cd backend && npm run start:dev`);
+    return new Error(`Cannot reach API at ${getApiBaseUrl()}${path}. Start the backend with: cd backend && npm run start:dev`);
   }
   return err instanceof Error ? err : new Error(String(err));
 }
@@ -46,7 +45,7 @@ async function request<T>(
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
       method,
       headers: {
         ...tenantHeaders(),
@@ -85,10 +84,10 @@ async function request<T>(
 export const api = {
   login: () => {
     const tenant = getSubdomainFromClient();
-    return `${API_URL}/auth/google?tenant=${encodeURIComponent(tenant)}`;
+    return `${getApiBaseUrl()}/auth/google?tenant=${encodeURIComponent(tenant)}`;
   },
   localLogin: async (email: string, password: string) => {
-    const response = await fetch(`${API_URL}/api/auth/local-login`, {
+    const response = await fetch(`${getApiBaseUrl()}/api/auth/local-login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

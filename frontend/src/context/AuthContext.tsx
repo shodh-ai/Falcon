@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 
 export type AllowedEntity = { id: number; name: string; code: string };
 
@@ -50,9 +51,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
         try {
-          const api = process.env.NEXT_PUBLIC_API_URL;
-          if (api) {
-            const { getSubdomainFromClient } = await import('@/lib/tenant');
+          const api = getApiBaseUrl();
+          const { getSubdomainFromClient } = await import('@/lib/tenant');
             const headers = {
               Authorization: `Bearer ${storedToken}`,
               'x-tenant-subdomain': getSubdomainFromClient(),
@@ -72,7 +72,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setUser(fresh);
               localStorage.setItem('user', JSON.stringify(fresh));
             }
-          }
         } catch {
           /* keep cached user if profile fetch fails */
         }
@@ -105,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       Authorization: `Bearer ${activeToken}`,
       'x-tenant-subdomain': getSubdomainFromClient(),
     };
-    const api = process.env.NEXT_PUBLIC_API_URL;
+    const api = getApiBaseUrl();
     const [response, permsRes] = await Promise.all([
       fetch(`${api}/api/auth/me`, { headers }).catch(() => fetch(`${api}/auth/profile`, { headers })),
       fetch(`${api}/api/auth/me/permissions`, { headers }),

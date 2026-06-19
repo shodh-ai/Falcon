@@ -3,6 +3,7 @@
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { useAuth } from '@/context/AuthContext';
 import { getPostLoginPath } from '@/lib/auth-routing';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -21,7 +22,7 @@ export default function AuthCallbackPage() {
 
     const completeLogin = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+        const apiUrl = getApiBaseUrl();
         const response = await fetch(`${apiUrl}/auth/profile`, {
           headers: {
             Authorization: `Bearer ${token}`,
