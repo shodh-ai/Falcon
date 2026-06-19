@@ -6,8 +6,12 @@ ALTER TABLE faculty_project_guides
   ADD COLUMN IF NOT EXISTS funding_allocated NUMERIC(12, 2) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS funding_consumed NUMERIC(12, 2) NOT NULL DEFAULT 0;
 
-ALTER TABLE faculty_project_guides
-  ALTER COLUMN student_user_id DROP NOT NULL;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'faculty_project_guides' AND column_name = 'student_user_id') THEN
+    ALTER TABLE faculty_project_guides ALTER COLUMN student_user_id DROP NOT NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS project_guide_students (
   guide_id UUID NOT NULL REFERENCES faculty_project_guides(guide_id) ON DELETE CASCADE,
@@ -18,11 +22,16 @@ CREATE TABLE IF NOT EXISTS project_guide_students (
   PRIMARY KEY (guide_id, student_user_id)
 );
 
-INSERT INTO project_guide_students (guide_id, student_user_id, tenant_id)
-SELECT g.guide_id, g.student_user_id, g.tenant_id
-FROM faculty_project_guides g
-WHERE g.student_user_id IS NOT NULL
-ON CONFLICT (guide_id, student_user_id) DO NOTHING;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'faculty_project_guides' AND column_name = 'student_user_id') THEN
+    EXECUTE 'INSERT INTO project_guide_students (guide_id, student_user_id, tenant_id)
+             SELECT g.guide_id, g.student_user_id, g.tenant_id
+             FROM faculty_project_guides g
+             WHERE g.student_user_id IS NOT NULL
+             ON CONFLICT (guide_id, student_user_id) DO NOTHING';
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS project_funding_requests (
   request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
