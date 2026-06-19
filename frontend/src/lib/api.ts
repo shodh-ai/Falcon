@@ -22,7 +22,7 @@ function scheduleAuthRedirect(router: ReturnType<typeof useRouter>) {
 
 function wrapFetchError(err: unknown, path: string): Error {
   if (err instanceof TypeError && err.message === 'Failed to fetch') {
-    return new Error(`Cannot reach API at ${getApiBaseUrl()}${path}. Start the backend with: cd backend && npm run start:dev`);
+    return new Error(`Cannot reach API at ${getApiBaseUrl()}${path}. Check API_URL in Coolify or start the backend locally.`);
   }
   return err instanceof Error ? err : new Error(String(err));
 }

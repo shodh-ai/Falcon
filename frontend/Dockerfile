@@ -2,8 +2,6 @@
 #
 # Coolify env vars — set as RUNTIME ONLY (not build-time):
 #   NODE_ENV, NPM_CONFIG_PRODUCTION
-# Required runtime env on the frontend service:
-#   API_URL=https://<your-backend-fqdn>   (no trailing slash)
 FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app

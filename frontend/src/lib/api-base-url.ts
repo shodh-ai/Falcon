@@ -20,13 +20,18 @@ function isLocalhostUrl(url: string): boolean {
 }
 
 function readEnvApiUrl(): string | undefined {
-  const fromPublic = process.env.NEXT_PUBLIC_API_URL?.trim();
-  if (fromPublic) return trimTrailingSlash(fromPublic);
-
   const fromServer = process.env.API_URL?.trim();
-  if (fromServer) return trimTrailingSlash(fromServer);
+  if (fromServer && !isLocalhostUrl(fromServer)) {
+    return trimTrailingSlash(fromServer);
+  }
 
-  return undefined;
+  const fromPublic = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (fromPublic && !isLocalhostUrl(fromPublic)) {
+    return trimTrailingSlash(fromPublic);
+  }
+
+  const fallback = fromServer || fromPublic;
+  return fallback ? trimTrailingSlash(fallback) : undefined;
 }
 
 function readRuntimeApiUrl(): string | undefined {
@@ -39,11 +44,6 @@ function isBrowserLocalhost(): boolean {
   if (typeof window === 'undefined') return false;
   const host = window.location.hostname;
   return host === 'localhost' || host === '127.0.0.1';
-}
-
-/** Server-side resolution (SSR / RSC). Uses runtime `API_URL` or build-time `NEXT_PUBLIC_API_URL`. */
-export function getServerApiBaseUrl(): string {
-  return readEnvApiUrl() ?? LOCAL_API;
 }
 
 /**
@@ -68,6 +68,11 @@ export function getApiBaseUrl(): string {
 
   if (env && isLocalhostUrl(env)) {
     // Build baked localhost on prod — ignore.
+  }
+
+  if (typeof window !== 'undefined') {
+    // Same-host reverse proxy (common Coolify / Traefik setup).
+    return window.location.origin;
   }
 
   throw new Error(

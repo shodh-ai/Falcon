@@ -39,8 +39,8 @@ export function getSubdomainFromClient(): string {
 }
 
 export async function fetchTenantBranding(subdomain: string): Promise<TenantBranding> {
-  const { getApiBaseUrl, getServerApiBaseUrl } = await import('@/lib/api-base-url');
-  const apiUrl = typeof window === 'undefined' ? getServerApiBaseUrl() : getApiBaseUrl();
+  const { getApiBaseUrl } = await import('./api-base-url');
+  const apiUrl = getApiBaseUrl();
   const res = await fetch(`${apiUrl}/api/tenants/resolve/${subdomain}`, {
     next: { revalidate: 300 },
   });
