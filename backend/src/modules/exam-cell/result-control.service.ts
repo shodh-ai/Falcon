@@ -173,8 +173,11 @@ export class ResultControlService {
 
   listCourses(tenantId: string) {
     return this.db.query(
-      `SELECT course_id, course_code, course_name FROM academic_courses
-       WHERE tenant_id = $1 ORDER BY course_code LIMIT 300`,
+      `SELECT DISTINCT c.course_id, c.course_code, c.course_name, COALESCE(e.semester, 0) as semester
+       FROM academic_courses c
+       LEFT JOIN student_course_enrollments e ON e.course_id = c.course_id
+       WHERE c.tenant_id = $1
+       ORDER BY c.course_code LIMIT 300`,
       [tenantId],
     );
   }
