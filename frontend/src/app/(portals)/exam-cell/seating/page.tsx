@@ -77,7 +77,7 @@ export default function ExamCellSeatingPage() {
   async function deleteRun(runId: string) {
     if (!confirm('Are you sure you want to delete this run?')) return;
     try {
-      await api.delete(`/api/exam-cell/seating-runs/${runId}`);
+      await api.del(`/api/exam-cell/seating-runs/${runId}`);
       toast.success('Run deleted');
       loadRuns();
     } catch (e) {
