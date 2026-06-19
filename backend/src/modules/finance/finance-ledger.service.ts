@@ -203,7 +203,7 @@ export class FinanceLedgerService {
     const journalEntryId = (entry[0] as { journal_entry_id: string }).journal_entry_id;
     await db.query(
       `INSERT INTO finance_journal_lines (journal_entry_id, ledger_account_id, debit_amount, credit_amount, ledger_category)
-       VALUES ($1, $2, $3, 0, 'OPERATIONS_GENERAL'), ($1, $4, 0, $3, 'BANK_OUT')`,
+       VALUES ($1, $2, $3, 0, 'OPERATIONS_GENERAL'), ($1, $4, 0, $5, 'BANK_OUT')`,
       [journalEntryId, expense, grossExpense, bank, netPayable],
     );
   }

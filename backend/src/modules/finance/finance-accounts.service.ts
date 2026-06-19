@@ -339,18 +339,35 @@ export class FinanceAccountsService {
         [tenantId, invoiceId, dto.vendor_id, gstAmount, tdsAmount, period],
       );
 
-      await this.budgetFpa.recordExpenseFromInvoice(tenantId, {
-        program_id: dto.program_id,
-        budget_id: deptBudgetId,
-        po_id: dto.po_id,
-        vendor_id: dto.vendor_id,
-        invoice_id: invoiceId,
-        expense_head_id: dto.expense_head_id,
-        description: `Invoice ${dto.invoice_number} - ${(vendors[0] as { business_name: string }).business_name}`,
-        amount: netPayable,
-        approved_by: !requiresBoard ? dto.approved_by : undefined,
-        expense_date: dto.invoice_date,
-      });
+      // Record expense inline (inside tx) to avoid cross-connection FK issues
+      const expenseApprovedBy = !requiresBoard ? (dto.approved_by ?? null) : null;
+      const expenseApprovedAt = expenseApprovedBy ? new Date().toISOString() : null;
+      if (deptBudgetId) {
+        await tx.query(
+          `UPDATE fin_dept_budgets SET utilized_amount = utilized_amount + $2 WHERE budget_id = $1`,
+          [deptBudgetId, netPayable],
+        );
+      }
+      await tx.query(
+        `INSERT INTO fin_expenses
+           (tenant_id, program_id, budget_id, po_id, vendor_id, invoice_id, expense_head_id,
+            description, amount, expense_date, approved_by, approved_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          tenantId,
+          dto.program_id ?? null,
+          deptBudgetId ?? null,
+          dto.po_id ?? null,
+          dto.vendor_id,
+          invoiceId,
+          dto.expense_head_id,
+          `Invoice ${dto.invoice_number} - ${(vendors[0] as { business_name: string }).business_name}`,
+          netPayable,
+          dto.invoice_date,
+          expenseApprovedBy,
+          expenseApprovedAt,
+        ],
+      );
 
       if (dto.department_id && !deptBudgetId) {
         await tx.query(

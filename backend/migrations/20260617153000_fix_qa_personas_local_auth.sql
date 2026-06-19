@@ -128,16 +128,18 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'hr_employee_profiles'
   ) THEN
     INSERT INTO hr_employee_profiles (
-      tenant_id, user_id, employee_id, designation, joining_date
+      tenant_id, user_id, employee_id, designation, joining_date, entity_id
     )
     SELECT
       u.tenant_id,
       u.user_id,
       data.employee_id,
       data.designation,
-      CURRENT_DATE
+      CURRENT_DATE,
+      oe.entity_id
     FROM users u
     JOIN public.tenants t ON t.tenant_id = u.tenant_id AND t.subdomain = 'sgvu'
+    JOIN org_entities oe ON oe.tenant_id = u.tenant_id AND oe.entity_code = 'SGVU_UNIVERSITY'
     JOIN (VALUES
       ('dev.accountant@mygyanvihar.com',         'Accounts Officer',     'SGVU-DEV-ACC-001'),
       ('dev.admissionsofficer@mygyanvihar.com',  'Admissions Officer',   'SGVU-DEV-ADM-001'),

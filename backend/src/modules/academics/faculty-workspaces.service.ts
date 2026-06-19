@@ -672,11 +672,34 @@ export class FacultyWorkspacesService {
 
   async listInvigilation(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
-      `SELECT * FROM faculty_invigilation_assignments
-       WHERE tenant_id = $1 AND faculty_user_id = $2
-       ORDER BY exam_date ASC`,
+      `SELECT a.*, r.status AS excuse_status, r.reason AS excuse_reason, r.exam_cell_comment
+       FROM faculty_invigilation_assignments a
+       LEFT JOIN invigilation_unavailability_requests r ON r.assignment_id = a.assignment_id
+       WHERE a.tenant_id = $1 AND a.faculty_user_id = $2
+       ORDER BY a.exam_date ASC`,
       [tenantId, facultyUserId],
     );
+  }
+
+  async requestInvigilationUnavailability(
+    facultyUserId: string,
+    tenantId: string,
+    assignmentId: string,
+    reason: string
+  ) {
+    const assignment = await this.dataSource.query(
+      `SELECT 1 FROM faculty_invigilation_assignments WHERE assignment_id = $1 AND faculty_user_id = $2 AND tenant_id = $3`,
+      [assignmentId, facultyUserId, tenantId]
+    );
+    if (!assignment[0]) throw new NotFoundException('Assignment not found');
+
+    const rows = await this.dataSource.query(
+      `INSERT INTO invigilation_unavailability_requests (tenant_id, assignment_id, faculty_user_id, reason)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [tenantId, assignmentId, facultyUserId, reason]
+    );
+    return rows[0];
   }
 
   async assignProjectGuide(

@@ -15,9 +15,15 @@ async function bootstrap() {
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
+      const isDevPrivateNetworkOrigin =
+        process.env.NODE_ENV !== 'production' &&
+        /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(
+          origin,
+        );
       const allowed =
         origin === frontendUrl ||
         origin.endsWith(`.${saasBase}`) ||
+        isDevPrivateNetworkOrigin ||
         (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost'));
       callback(allowed ? null : new Error('Not allowed by CORS'), allowed);
     },
