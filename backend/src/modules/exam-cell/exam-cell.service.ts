@@ -579,10 +579,14 @@ export class ExamCellService {
     return this.db.query(
       `SELECT m.*, u.name AS student_name, c.course_code, c.course_name,
               m.marks_obtained, m.max_marks,
-              ROUND(100.0 * m.marks_obtained / NULLIF(m.max_marks, 0), 1) AS percent
+              ROUND(100.0 * m.marks_obtained / NULLIF(m.max_marks, 0), 1) AS percent,
+              f.name AS faculty_name,
+              e.semester
        FROM academic_marks m
        JOIN users u ON u.user_id = m.student_user_id
        JOIN academic_courses c ON c.course_id = m.course_id
+       LEFT JOIN users f ON f.user_id = m.uploaded_by
+       LEFT JOIN student_course_enrollments e ON e.student_user_id = m.student_user_id AND e.course_id = m.course_id
        WHERE m.tenant_id = $1 AND m.status = 'PENDING_COE'
        ORDER BY c.course_code, m.exam_type, u.name`,
       [tenantId],
