@@ -145,7 +145,7 @@ export class ParentService {
 
     type FeedItem = {
       id: string;
-      type: 'attendance' | 'gate' | 'fee' | 'hostel_entry';
+      type: 'attendance' | 'gate' | 'fee' | 'hostel_entry' | 'exam';
       tone: 'success' | 'danger' | 'warning' | 'info';
       message: string;
       timestamp: string;
@@ -252,6 +252,45 @@ export class ParentService {
       }
     }
 
+    const reEvaluations = await this.query<{
+      exam_application_id: string;
+      subject_name: string;
+      original_marks: string | null;
+      revised_marks: string | null;
+      published_at: string;
+    }>(
+      `SELECT a.exam_application_id, sub.subject_name, a.original_marks, a.revised_marks, a.published_at
+       FROM exam_applications a
+       JOIN academic_subjects sub ON sub.subject_id = a.subject_id
+       WHERE a.student_user_id = $1
+         AND a.application_type = 'RE_EVALUATION'
+         AND a.status = 'COMPLETED'
+         AND a.published_at IS NOT NULL
+       ORDER BY a.published_at DESC
+       LIMIT 10`,
+      [studentUserId],
+    );
+
+    for (const row of reEvaluations) {
+      const original = row.original_marks != null ? Number(row.original_marks) : null;
+      const revised = row.revised_marks != null ? Number(row.revised_marks) : null;
+      const delta =
+        original != null && revised != null
+          ? ` (${original} → ${revised})`
+          : revised != null
+            ? ` (revised: ${revised})`
+            : '';
+      items.push({
+        id: `reeval-${row.exam_application_id}`,
+        type: 'exam',
+        tone: 'success',
+        message: `${childName}'s re-evaluation report for ${row.subject_name} is available${delta}.`,
+        timestamp: row.published_at,
+        action_label: 'View academics',
+        action_href: '/parent/academics',
+      });
+    }
+
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
     return { student_user_id: studentUserId, child_name: childName, feed: items.slice(0, 30) };
@@ -309,10 +348,37 @@ export class ParentService {
 
     const attendance = await this.getAttendance(studentUserId);
 
+    const revaluationReports = await this.query(
+      `SELECT a.exam_application_id,
+              a.original_marks,
+              a.revised_marks,
+              a.report_notes,
+              a.published_at,
+              sub.subject_name,
+              sub.subject_code
+       FROM exam_applications a
+       JOIN academic_subjects sub ON sub.subject_id = a.subject_id
+       WHERE a.student_user_id = $1
+         AND a.application_type = 'RE_EVALUATION'
+         AND a.status = 'COMPLETED'
+       ORDER BY a.published_at DESC NULLS LAST`,
+      [studentUserId],
+    );
+
     return {
       sgpa: sgpaRows[0]?.sgpa ?? null,
       marks_progression: marksProgression,
       attendance_summary: attendance,
+      revaluation_reports: revaluationReports,
+      exam_reports: await this.query(
+        `SELECT r.report_id, r.exam_type, r.marks_obtained, r.max_marks, r.percent, r.grade,
+                r.result_status, r.report_summary, r.declared_at, c.course_code, c.course_name
+         FROM student_exam_reports r
+         JOIN academic_courses c ON c.course_id = r.course_id
+         WHERE r.student_user_id = $1
+         ORDER BY r.declared_at DESC`,
+        [studentUserId],
+      ),
     };
   }
 

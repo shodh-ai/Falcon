@@ -252,6 +252,7 @@ export class FacultyWorkspacesService {
     examType: string,
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
+    const session = await this.getResultSession(tenantId, courseId, examType);
     const rows = await this.dataSource.query(
       `SELECT
          u.user_id AS student_user_id,
@@ -281,13 +282,32 @@ export class FacultyWorkspacesService {
       rows.find((r: { max_marks: number | null }) => r.max_marks != null)?.max_marks ?? 50;
     const publishStatus = rows.some((r: { mark_status: string | null }) => r.mark_status === 'PUBLISHED')
       ? 'PUBLISHED'
-      : 'DRAFT';
+      : rows.some((r: { mark_status: string | null }) => r.mark_status === 'PENDING_COE')
+        ? 'PENDING_COE'
+        : 'DRAFT';
+
+    const entryAllowed =
+      !!session &&
+      session.entry_status === 'OPEN' &&
+      !session.marks_locked &&
+      !session.declared_at;
 
     return {
       exam_type: examType,
       course_id: courseId,
       max_marks_default: maxMarksDefault,
       publish_status: publishStatus,
+      entry_allowed: entryAllowed,
+      result_session: session
+        ? {
+            session_id: session.session_id,
+            entry_status: session.entry_status,
+            marks_locked: session.marks_locked,
+            entry_open_at: session.entry_open_at,
+            entry_close_at: session.entry_close_at,
+            declared_at: session.declared_at,
+          }
+        : null,
       rows: rows.map(
         (s: {
           student_user_id: string;
@@ -326,13 +346,17 @@ export class FacultyWorkspacesService {
       throw new BadRequestException('Invalid exam_type');
     }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
+    const session = await this.getResultSession(tenantId, dto.course_id, dto.exam_type);
+    this.assertFacultyEntryAllowed(session);
+
     const locked = await this.dataSource.query(
       `SELECT 1 FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PUBLISHED' LIMIT 1`,
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+         AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1`,
       [tenantId, dto.course_id, dto.exam_type],
     );
     if (locked[0]) {
-      throw new ForbiddenException('Marks are COE-published and locked. Contact Exam Cell for changes.');
+      throw new ForbiddenException('Submitted marks are locked. Contact Exam Cell to reopen entry.');
     }
     const maxMarks = dto.max_marks;
     for (const entry of dto.entries) {
@@ -363,7 +387,10 @@ export class FacultyWorkspacesService {
            marks_obtained = EXCLUDED.marks_obtained,
            max_marks = EXCLUDED.max_marks,
            co_mapped = EXCLUDED.co_mapped,
-           status = 'DRAFT',
+           status = CASE
+             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
+             ELSE 'DRAFT'
+           END,
            uploaded_by = EXCLUDED.uploaded_by,
            updated_at = NOW()`,
         params,
@@ -379,6 +406,8 @@ export class FacultyWorkspacesService {
     examType: string,
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
+    const session = await this.getResultSession(tenantId, courseId, examType);
+    this.assertFacultyEntryAllowed(session);
     const result = await this.dataSource.query(
       `UPDATE academic_marks
        SET status = 'PENDING_COE', updated_at = NOW()
@@ -1150,6 +1179,44 @@ export class FacultyWorkspacesService {
     );
     if (!rows.length) {
       throw new ForbiddenException('You are not assigned to this course');
+    }
+  }
+
+  private async getResultSession(tenantId: string, courseId: string, examType: string) {
+    const rows = await this.dataSource.query(
+      `SELECT * FROM exam_result_sessions
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+       ORDER BY semester DESC LIMIT 1`,
+      [tenantId, courseId, examType],
+    );
+    return rows[0] ?? null;
+  }
+
+  private assertFacultyEntryAllowed(session: {
+    entry_status: string;
+    marks_locked: boolean;
+    entry_open_at?: string | Date | null;
+    entry_close_at?: string | Date | null;
+    declared_at?: string | Date | null;
+  } | null) {
+    if (!session) {
+      throw new BadRequestException('Marks entry has not been opened by Exam Cell for this exam.');
+    }
+    if (session.declared_at) {
+      throw new BadRequestException('Results already declared. Marks are locked.');
+    }
+    if (session.entry_status !== 'OPEN') {
+      throw new BadRequestException('Marks entry is closed. Contact Exam Cell to reopen.');
+    }
+    if (session.marks_locked) {
+      throw new BadRequestException('Marks entry is locked by Exam Cell.');
+    }
+    const now = Date.now();
+    if (session.entry_open_at && new Date(session.entry_open_at).getTime() > now) {
+      throw new BadRequestException('Marks entry window has not opened yet.');
+    }
+    if (session.entry_close_at && new Date(session.entry_close_at).getTime() < now) {
+      throw new BadRequestException('Marks entry window has closed.');
     }
   }
 

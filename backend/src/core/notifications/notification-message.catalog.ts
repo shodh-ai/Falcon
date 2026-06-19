@@ -5,6 +5,11 @@ import type {
   CourseMaterialAddedPayload,
   EventProposedPayload,
   EventTierPayload,
+  EventRejectedPayload,
+  EventLivePayload,
+  EventFundsTransferredPayload,
+  ExamRevaluationPayload,
+  MeetingPortalPayload,
   FeeGeneratedPayload,
   GatePassUpdatedPayload,
   HrExportFailedPayload,
@@ -161,6 +166,92 @@ export function examResultsPublishedMessage(
       severity: 'success',
       intent: 'status_update',
       metadata: { courseName: payload.courseName, examType: payload.examType },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationAssignedMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Re-evaluation assigned — ${payload.subjectName}`,
+      message: `Exam Cell assigned you to reassess ${payload.studentName ?? 'a student'} for ${payload.subjectName}. Submit your report when done.`,
+      actionLink: '/faculty/re-evaluations',
+      actionLabel: 'Open reassessment',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: { applicationId: payload.applicationId, subjectName: payload.subjectName },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationReportReadyMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Re-evaluation report ready — ${payload.subjectName}`,
+      message: `${payload.studentName ?? 'A student'}'s reassessment for ${payload.subjectName} is ready for review and publishing.`,
+      actionLink: '/exam-cell/re-evaluations',
+      actionLabel: 'Review report',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: { applicationId: payload.applicationId },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationPublishedMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const revised =
+    payload.revisedMarks != null && payload.originalMarks != null
+      ? ` Marks updated from ${payload.originalMarks} to ${payload.revisedMarks}.`
+      : payload.revisedMarks != null
+        ? ` Revised marks: ${payload.revisedMarks}.`
+        : '';
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Re-evaluation report — ${payload.subjectName}`,
+      message: `Your re-evaluation for ${payload.subjectName} has been published.${revised}`,
+      actionLink: '/student/exams?intent=revaluation',
+      actionLabel: 'View report',
+      severity: 'success',
+      intent: 'status_update',
+      metadata: {
+        applicationId: payload.applicationId,
+        originalMarks: payload.originalMarks,
+        revisedMarks: payload.revisedMarks,
+      },
+    },
+    overrides,
+  );
+}
+
+export function examRevaluationFeePaidMessage(
+  payload: ExamRevaluationPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: `Paid re-evaluation — ${payload.subjectName}`,
+      message: `${payload.studentName ?? 'A student'} paid the re-evaluation fee for ${payload.subjectName}. Assign a faculty member to begin reassessment.`,
+      actionLink: '/exam-cell/re-evaluations',
+      actionLabel: 'Open queue',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: { applicationId: payload.applicationId },
     },
     overrides,
   );
@@ -467,13 +558,211 @@ export function eventPendingFinanceMessage(
   return applyNotificationOverrides(
     {
       category: 'FINANCE',
-      title: 'Paid event needs finance approval',
-      message: `"${payload.eventTitle}" requires finance sign-off before tickets can go live. Review the budget and ledger entries.`,
+      title: 'Club event fund transfer required',
+      message: `"${payload.eventTitle}" needs university funds transferred before it can go live.`,
       actionLink: '/finance/events',
-      actionLabel: 'Review budget',
+      actionLabel: 'Transfer funds',
       severity: 'warning',
       intent: 'action_required',
       metadata: { eventId: payload.eventId, eventTitle: payload.eventTitle },
+    },
+    overrides,
+  );
+}
+
+export function eventPendingHodMessage(
+  payload: EventTierPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: 'Club event needs HOD approval',
+      message: `"${payload.eventTitle}" passed faculty review and awaits your HOD sign-off.`,
+      actionLink: '/hod/events',
+      actionLabel: 'Review event',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: { eventId: payload.eventId, eventTitle: payload.eventTitle },
+    },
+    overrides,
+  );
+}
+
+export function eventPendingDeanMessage(
+  payload: EventTierPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: 'Club event needs Dean approval',
+      message: `"${payload.eventTitle}" passed HOD review and awaits Dean sign-off.`,
+      actionLink: '/dean/events',
+      actionLabel: 'Review event',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: { eventId: payload.eventId, eventTitle: payload.eventTitle },
+    },
+    overrides,
+  );
+}
+
+export function eventRejectedMessage(
+  payload: EventRejectedPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: `Event rejected by ${payload.rejectedByTier}`,
+      message: payload.comment
+        ? `"${payload.eventTitle}" was rejected: ${payload.comment}`
+        : `"${payload.eventTitle}" was rejected at the ${payload.rejectedByTier} stage.`,
+      actionLink: '/student/club-management',
+      actionLabel: 'View club events',
+      severity: 'critical',
+      intent: 'status_update',
+      metadata: { eventId: payload.eventId, rejectedByTier: payload.rejectedByTier },
+    },
+    overrides,
+  );
+}
+
+export function eventLiveMessage(
+  payload: EventLivePayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: 'Club event is live',
+      message: `"${payload.eventTitle}" is now live. Students can register and you can manage attendance.`,
+      actionLink: '/student/club-management',
+      actionLabel: 'Manage event',
+      severity: 'success',
+      intent: 'status_update',
+      metadata: { eventId: payload.eventId, eventTitle: payload.eventTitle },
+    },
+    overrides,
+  );
+}
+
+export function eventFundsTransferredMessage(
+  payload: EventFundsTransferredPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'FINANCE',
+      title: 'Event funds transferred',
+      message: `₹${payload.amount.toLocaleString('en-IN')} was transferred for "${payload.eventTitle}"${payload.transferRef ? ` (ref: ${payload.transferRef})` : ''}.`,
+      actionLink: '/student/club-management',
+      actionLabel: 'View event',
+      severity: 'success',
+      intent: 'status_update',
+      metadata: { eventId: payload.eventId, amount: payload.amount },
+    },
+    overrides,
+  );
+}
+
+export function meetingInvitedMessage(
+  payload: MeetingPortalPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const when = payload.startsAt ? new Date(payload.startsAt).toLocaleString() : 'the scheduled time';
+  return applyNotificationOverrides(
+    {
+      category: 'HR',
+      title: `Meeting invitation — ${payload.title}`,
+      message: `${payload.organizerName ?? 'A colleague'} invited you to "${payload.title}" on ${when}.`,
+      actionLink: payload.actionLink ?? '/faculty/meetings',
+      actionLabel: 'View meeting',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: { meetingId: payload.meetingId, title: payload.title },
+    },
+    overrides,
+  );
+}
+
+export function meetingRequestedUpwardMessage(
+  payload: MeetingPortalPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const when = payload.startsAt ? new Date(payload.startsAt).toLocaleString() : 'the requested time';
+  return applyNotificationOverrides(
+    {
+      category: 'HR',
+      title: `Meeting request — ${payload.title}`,
+      message: `${payload.requesterName ?? 'A colleague'} requested a meeting on ${when}. Accept or decline from your meetings workspace.`,
+      actionLink: payload.actionLink ?? '/faculty/meetings',
+      actionLabel: 'Review request',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: { meetingId: payload.meetingId, title: payload.title },
+    },
+    overrides,
+  );
+}
+
+export function meetingPortalRespondedMessage(
+  payload: MeetingPortalPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const accepted = payload.status === 'ACCEPTED';
+  const when = payload.startsAt ? new Date(payload.startsAt).toLocaleString() : 'the scheduled time';
+  return applyNotificationOverrides(
+    {
+      category: 'HR',
+      title: accepted ? 'Meeting accepted' : 'Meeting declined',
+      message: accepted
+        ? `${payload.responderName ?? 'The invitee'} accepted "${payload.title}" for ${when}.${payload.remarks ? ` Note: ${payload.remarks}` : ''}`
+        : `${payload.responderName ?? 'The invitee'} declined "${payload.title}".${payload.remarks ? ` Reason: ${payload.remarks}` : ''}`,
+      actionLink: payload.actionLink ?? '/faculty/meetings',
+      actionLabel: 'View meeting',
+      severity: accepted ? 'success' : 'warning',
+      intent: 'status_update',
+      metadata: { meetingId: payload.meetingId, status: payload.status },
+    },
+    overrides,
+  );
+}
+
+export function meetingAgendaUpdatedMessage(
+  payload: MeetingPortalPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'HR',
+      title: `Agenda updated — ${payload.title}`,
+      message: `The agenda for "${payload.title}" was updated. Review the latest details before the meeting.`,
+      actionLink: payload.actionLink ?? '/faculty/meetings',
+      actionLabel: 'View agenda',
+      severity: 'info',
+      intent: 'info',
+      metadata: { meetingId: payload.meetingId },
+    },
+    overrides,
+  );
+}
+
+export function meetingMinutesPublishedMessage(
+  payload: MeetingPortalPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'HR',
+      title: `Minutes published — ${payload.title}`,
+      message: `Meeting minutes for "${payload.title}" are now available.`,
+      actionLink: payload.actionLink ?? '/faculty/meetings',
+      actionLabel: 'Read minutes',
+      severity: 'success',
+      intent: 'status_update',
+      metadata: { meetingId: payload.meetingId },
     },
     overrides,
   );

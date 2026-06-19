@@ -10,8 +10,22 @@ import {
   courseMaterialAddedMessage,
   eventPendingEstateMessage,
   eventPendingFinanceMessage,
+  eventPendingHodMessage,
+  eventPendingDeanMessage,
+  eventRejectedMessage,
+  eventLiveMessage,
+  eventFundsTransferredMessage,
+  meetingInvitedMessage,
+  meetingRequestedUpwardMessage,
+  meetingPortalRespondedMessage,
+  meetingAgendaUpdatedMessage,
+  meetingMinutesPublishedMessage,
   eventProposedMessage,
   examResultsPublishedMessage,
+  examRevaluationAssignedMessage,
+  examRevaluationFeePaidMessage,
+  examRevaluationPublishedMessage,
+  examRevaluationReportReadyMessage,
   exportFailedMessage,
   exportReadyMessage,
   feeGeneratedMessage,
@@ -43,6 +57,7 @@ import {
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
+  type ExamRevaluationPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
@@ -52,6 +67,10 @@ import {
   type WorkflowApprovalRequiredPayload,
   type EventProposedPayload,
   type EventTierPayload,
+  type EventRejectedPayload,
+  type EventLivePayload,
+  type EventFundsTransferredPayload,
+  type MeetingPortalPayload,
   type OnboardingCredentialsPayload,
   type HrExportReadyPayload,
   type HrExportFailedPayload,
@@ -151,6 +170,58 @@ export class NotificationEventsListener {
       actionLink: payload.actionLink,
     });
     await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_ASSIGNED)
+  async onExamRevaluationAssigned(payload: ExamRevaluationPayload) {
+    const msg = examRevaluationAssignedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_REPORT_READY)
+  async onExamRevaluationReportReady(payload: ExamRevaluationPayload) {
+    const recipients = await this.listExamCellOfficers(payload.tenantId);
+    const msg = examRevaluationReportReadyMessage(payload);
+    for (const userId of recipients) {
+      await this.emitFromPayload(payload.tenantId, userId, msg);
+    }
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_FEE_PAID)
+  async onExamRevaluationFeePaid(payload: ExamRevaluationPayload) {
+    const recipients = await this.listExamCellOfficers(payload.tenantId);
+    const msg = examRevaluationFeePaidMessage(payload);
+    for (const userId of recipients) {
+      await this.emitFromPayload(payload.tenantId, userId, msg);
+    }
+  }
+
+  @OnEvent(NotificationEvents.EXAM_REVALUATION_PUBLISHED)
+  async onExamRevaluationPublished(payload: ExamRevaluationPayload) {
+    const msg = examRevaluationPublishedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  private async listExamCellOfficers(tenantId: string) {
+    const rows = await this.dataSource.query<Array<{ user_id: string }>>(
+      `SELECT DISTINCT u.user_id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.user_id
+       JOIN roles r ON r.role_id = ur.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND lower(r.role_name) IN ('examcell', 'superadmin')`,
+      [tenantId],
+    );
+    return rows.map((row) => row.user_id);
   }
 
   @OnEvent(NotificationEvents.OPERATIONS_GATE_PASS_UPDATED)
@@ -283,6 +354,26 @@ export class NotificationEventsListener {
     await this.emitFromPayload(payload.tenantId, payload.userId, msg);
   }
 
+  @OnEvent(NotificationEvents.EVENT_PENDING_HOD)
+  async onEventPendingHod(payload: EventTierPayload) {
+    const msg = eventPendingHodMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_PENDING_DEAN)
+  async onEventPendingDean(payload: EventTierPayload) {
+    const msg = eventPendingDeanMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
   @OnEvent(NotificationEvents.EVENT_PENDING_ESTATE)
   async onEventPendingEstate(payload: EventTierPayload) {
     const msg = eventPendingEstateMessage(payload, {
@@ -296,6 +387,86 @@ export class NotificationEventsListener {
   @OnEvent(NotificationEvents.EVENT_PENDING_FINANCE)
   async onEventPendingFinance(payload: EventTierPayload) {
     const msg = eventPendingFinanceMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_REJECTED)
+  async onEventRejected(payload: EventRejectedPayload) {
+    const msg = eventRejectedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_LIVE)
+  async onEventLive(payload: EventLivePayload) {
+    const msg = eventLiveMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EVENT_FUNDS_TRANSFERRED)
+  async onEventFundsTransferred(payload: EventFundsTransferredPayload) {
+    const msg = eventFundsTransferredMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_INVITED)
+  async onMeetingInvited(payload: MeetingPortalPayload) {
+    const msg = meetingInvitedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_REQUESTED_UPWARD)
+  async onMeetingRequestedUpward(payload: MeetingPortalPayload) {
+    const msg = meetingRequestedUpwardMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_RESPONDED)
+  async onPortalMeetingResponded(payload: MeetingPortalPayload) {
+    const msg = meetingPortalRespondedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_AGENDA_UPDATED)
+  async onMeetingAgendaUpdated(payload: MeetingPortalPayload) {
+    const msg = meetingAgendaUpdatedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.MEETING_MINUTES_PUBLISHED)
+  async onMeetingMinutesPublished(payload: MeetingPortalPayload) {
+    const msg = meetingMinutesPublishedMessage(payload, {
       title: payload.title,
       message: payload.message,
       actionLink: payload.actionLink,

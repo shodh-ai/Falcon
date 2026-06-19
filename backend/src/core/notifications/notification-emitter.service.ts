@@ -13,6 +13,7 @@ import {
   type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
   type ExamResultsPublishedPayload,
+  type ExamRevaluationPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
@@ -22,6 +23,10 @@ import {
   type WorkflowApprovalRequiredPayload,
   type EventProposedPayload,
   type EventTierPayload,
+  type EventRejectedPayload,
+  type EventLivePayload,
+  type EventFundsTransferredPayload,
+  type MeetingPortalPayload,
   type OnboardingCredentialsPayload,
   type HrExportReadyPayload,
   type HrExportFailedPayload,
@@ -58,6 +63,22 @@ export class NotificationEmitterService {
 
   examResultsPublished(payload: ExamResultsPublishedPayload) {
     this.events.emit(NotificationEvents.EXAM_RESULTS_PUBLISHED, payload);
+  }
+
+  examRevaluationAssigned(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_ASSIGNED, payload);
+  }
+
+  examRevaluationReportReady(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_REPORT_READY, payload);
+  }
+
+  examRevaluationPublished(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_PUBLISHED, payload);
+  }
+
+  examRevaluationFeePaid(payload: ExamRevaluationPayload) {
+    this.events.emit(NotificationEvents.EXAM_REVALUATION_FEE_PAID, payload);
   }
 
   courseMaterialAdded(payload: CourseMaterialAddedPayload) {
@@ -116,12 +137,52 @@ export class NotificationEmitterService {
     this.events.emit(NotificationEvents.EVENT_PROPOSED, payload);
   }
 
+  eventPendingHod(payload: EventTierPayload) {
+    this.events.emit(NotificationEvents.EVENT_PENDING_HOD, payload);
+  }
+
+  eventPendingDean(payload: EventTierPayload) {
+    this.events.emit(NotificationEvents.EVENT_PENDING_DEAN, payload);
+  }
+
   eventPendingEstate(payload: EventTierPayload) {
     this.events.emit(NotificationEvents.EVENT_PENDING_ESTATE, payload);
   }
 
   eventPendingFinance(payload: EventTierPayload) {
     this.events.emit(NotificationEvents.EVENT_PENDING_FINANCE, payload);
+  }
+
+  eventRejected(payload: EventRejectedPayload) {
+    this.events.emit(NotificationEvents.EVENT_REJECTED, payload);
+  }
+
+  eventLive(payload: EventLivePayload) {
+    this.events.emit(NotificationEvents.EVENT_LIVE, payload);
+  }
+
+  eventFundsTransferred(payload: EventFundsTransferredPayload) {
+    this.events.emit(NotificationEvents.EVENT_FUNDS_TRANSFERRED, payload);
+  }
+
+  meetingInvited(payload: MeetingPortalPayload) {
+    this.events.emit(NotificationEvents.MEETING_INVITED, payload);
+  }
+
+  meetingRequestedUpward(payload: MeetingPortalPayload) {
+    this.events.emit(NotificationEvents.MEETING_REQUESTED_UPWARD, payload);
+  }
+
+  portalMeetingResponded(payload: MeetingPortalPayload) {
+    this.events.emit(NotificationEvents.MEETING_RESPONDED, payload);
+  }
+
+  meetingAgendaUpdated(payload: MeetingPortalPayload) {
+    this.events.emit(NotificationEvents.MEETING_AGENDA_UPDATED, payload);
+  }
+
+  meetingMinutesPublished(payload: MeetingPortalPayload) {
+    this.events.emit(NotificationEvents.MEETING_MINUTES_PUBLISHED, payload);
   }
 
   onboardingCredentials(payload: OnboardingCredentialsPayload) {

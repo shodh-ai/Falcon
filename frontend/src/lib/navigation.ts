@@ -346,6 +346,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
         { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
+        { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
       ],
     },
@@ -355,6 +356,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
+        { label: 'Meetings', href: '/faculty/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'minutes', 'agenda'] },
       ],
     },
     myHrOperationsNavGroup('faculty'),
@@ -388,6 +390,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
         { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
+        { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
       ],
     },
@@ -397,6 +400,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
+        { label: 'Meetings', href: '/faculty/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'minutes'] },
       ],
     },
     myHrOperationsNavGroup('faculty'),
@@ -424,6 +428,7 @@ export const hrPortal: PortalConfig = {
       items: [
         { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'], hrModule: 'attendance' },
         { label: 'Pending on Me', href: '/hr/inbox', icon: Inbox, keywords: ['approve', 'inbox', 'pending', 'workflow'], roles: ['HR', 'HRAdmin', 'Faculty', 'HOD', 'Dean', 'SuperAdmin'] },
+        { label: 'Meetings', href: '/hr/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes', 'agenda'] },
         { label: 'Leave Management & Balances', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval'], hrModule: 'leaves' },
       ],
     },
@@ -514,6 +519,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
         { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events', 'coordinator'] },
+        { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty', 'dean', 'minutes'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
       ],
     },
@@ -549,6 +555,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },
         { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['approve'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club events'] },
+        { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['api'] },
       ],
     },
@@ -605,6 +612,7 @@ export const deanPortal: PortalConfig = {
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
+        { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'faculty', 'minutes'] },
       ],
     },
     myHrOperationsNavGroup('dean'),
@@ -646,6 +654,7 @@ export const deanPortal: PortalConfig = {
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['inbox'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['events'] },
+        { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes'] },
       ],
     },
     myHrOperationsNavGroup('dean'),
@@ -874,7 +883,7 @@ export const examCellPortal: PortalConfig = {
     {
       title: 'Post-Exam Operations',
       items: [
-        { label: 'Result Processing', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve'] },
+        { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
         { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
@@ -904,11 +913,13 @@ export const presidentPortal: PortalConfig = {
         { label: 'Compliance', href: '/president/compliance', icon: Shield, keywords: ['iqac', 'defaulting'] },
         { label: 'HR Analytics', href: '/president/hr-analytics', icon: Users, keywords: ['retention', 'faculty student ratio', 'payroll'] },
         { label: 'Grievances Escalation', href: '/president/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'compliance'] },
+        { label: 'Meetings', href: '/president/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes', 'agenda'] },
       ],
     },
   ],
   commandItems: [
     { label: 'Executive Summary', href: '/president/executive-summary', icon: LayoutDashboard },
+    { label: 'Meetings', href: '/president/meetings', icon: CalendarClock },
     { label: 'Academics', href: '/president/academics', icon: GraduationCap },
     { label: 'Finance', href: '/president/finance', icon: Wallet },
     { label: 'Compliance', href: '/president/compliance', icon: Shield },
