@@ -583,7 +583,12 @@ export class HrAdminService {
          name = EXCLUDED.name,
          is_active = true,
          entity_id = COALESCE(users.entity_id, EXCLUDED.entity_id),
-         onboarding_status = EXCLUDED.onboarding_status
+         onboarding_status = CASE
+           WHEN users.onboarding_status IN (
+             'COMPLETED', 'PENDING_DOCUMENTS', 'PENDING_ADMIN_APPROVAL', 'PENDING_PASSWORD_RESET'
+           ) THEN users.onboarding_status
+           ELSE EXCLUDED.onboarding_status
+         END
        RETURNING user_id`,
       [tenantId, a.name, email, role[0]?.role_id ?? 2, passwordHash, entityId, onboardingStatus],
     );

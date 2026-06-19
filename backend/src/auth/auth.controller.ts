@@ -104,7 +104,7 @@ export class AuthController {
     return {
       ...user,
       onboarding_status: normalizeOnboardingStatusForWizard(
-        dbUser?.onboarding_status ?? 'ACTIVE',
+        dbUser?.onboarding_status,
         primaryRole,
       ),
       hr_capabilities: caps ?? {},

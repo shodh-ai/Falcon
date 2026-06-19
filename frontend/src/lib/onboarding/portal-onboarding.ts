@@ -75,8 +75,20 @@ export function getOnboardingStepPath(
 }
 
 export function isFirstLoginOnboardingComplete(status: string | undefined | null, role?: string | null): boolean {
-  const value = normalizeOnboardingStatus(status, role);
+  if (getOnboardingConfigForRole(role)) {
+    return normalizeOnboardingStatus(status, role) === 'COMPLETED';
+  }
+  const value = (status ?? '').trim();
   return value === 'COMPLETED' || value === 'ACTIVE';
+}
+
+export function needsPortalOnboarding(status: string | undefined | null, role?: string | null): boolean {
+  if (!getOnboardingConfigForRole(role)) return false;
+  return getOnboardingStepPath(
+    getOnboardingConfigForRole(role)!.portalPrefix,
+    status,
+    role,
+  ) != null;
 }
 
 /** Map legacy HR statuses (PENDING_ONBOARDING) onto wizard steps for student/faculty/HOD. */
@@ -84,9 +96,9 @@ export function normalizeOnboardingStatus(
   status: string | undefined | null,
   role?: string | null,
 ): string {
-  const value = (status ?? 'ACTIVE').trim();
-  if (!getOnboardingConfigForRole(role)) return value;
-  if (value === 'PENDING_ONBOARDING') return 'PENDING_PASSWORD_RESET';
+  const value = (status ?? '').trim();
+  if (!getOnboardingConfigForRole(role)) return value || 'ACTIVE';
+  if (!value || value === 'PENDING_ONBOARDING') return 'PENDING_PASSWORD_RESET';
   if (value === 'IN_PROGRESS') return 'PENDING_DOCUMENTS';
   return value;
 }

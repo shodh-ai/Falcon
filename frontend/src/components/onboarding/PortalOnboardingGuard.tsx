@@ -7,7 +7,7 @@ import {
   getOnboardingConfigForRole,
   getOnboardingStepPath,
   isFirstLoginOnboardingComplete,
-  normalizeOnboardingStatus,
+  needsPortalOnboarding,
   type PortalOnboardingConfig,
 } from '@/lib/onboarding/portal-onboarding';
 import { FalconLoader } from '@/components/brand/FalconLoader';
@@ -24,32 +24,56 @@ export function PortalOnboardingGuard({
   const router = useRouter();
   const redirectingRef = useRef(false);
 
+  const role = user?.primaryRole ?? user?.role;
+  const activeConfig = getOnboardingConfigForRole(role);
+  const applies = Boolean(activeConfig && activeConfig.portalPrefix === config.portalPrefix);
+  const onboardingPrefix = `${config.portalPrefix}/onboarding`;
+  const onOnboardingRoute = pathname.startsWith(onboardingPrefix);
+  const requiredPath = applies
+    ? getOnboardingStepPath(config.portalPrefix, user?.onboarding_status, role)
+    : null;
+  const mustRedirect = Boolean(requiredPath && pathname !== requiredPath);
+  const leaveOnboarding =
+    applies && isFirstLoginOnboardingComplete(user?.onboarding_status, role) && onOnboardingRoute;
+
   useEffect(() => {
-    if (isLoading || !user || redirectingRef.current) return;
+    if (isLoading || !user || !applies || redirectingRef.current) return;
 
-    const activeConfig = getOnboardingConfigForRole(user.primaryRole ?? user.role);
-    if (!activeConfig || activeConfig.portalPrefix !== config.portalPrefix) return;
-
-    const role = user.primaryRole ?? user.role;
-    const status = normalizeOnboardingStatus(user.onboarding_status, role);
-    const onboardingPrefix = `${config.portalPrefix}/onboarding`;
-    const onOnboardingRoute = pathname.startsWith(onboardingPrefix);
-    const requiredPath = getOnboardingStepPath(config.portalPrefix, status, role);
-
-    if (requiredPath && pathname !== requiredPath) {
+    if (mustRedirect && requiredPath) {
       redirectingRef.current = true;
       router.replace(requiredPath);
       return;
     }
 
-    if (isFirstLoginOnboardingComplete(status, role) && onOnboardingRoute) {
+    if (leaveOnboarding) {
       redirectingRef.current = true;
       router.replace(config.dashboardPath);
     }
-  }, [config.dashboardPath, config.portalPrefix, isLoading, pathname, router, user]);
+  }, [
+    applies,
+    config.dashboardPath,
+    isLoading,
+    leaveOnboarding,
+    mustRedirect,
+    requiredPath,
+    router,
+    user,
+  ]);
 
-  if (isLoading) {
+  useEffect(() => {
+    redirectingRef.current = false;
+  }, [pathname]);
+
+  if (isLoading || !user) {
     return <FalconLoader label="Loading onboarding…" className="min-h-screen" />;
+  }
+
+  if (applies && (mustRedirect || leaveOnboarding)) {
+    return <FalconLoader label="Redirecting to onboarding…" className="min-h-screen" />;
+  }
+
+  if (applies && needsPortalOnboarding(user.onboarding_status, role) && !onOnboardingRoute) {
+    return <FalconLoader label="Redirecting to onboarding…" className="min-h-screen" />;
   }
 
   return <>{children}</>;

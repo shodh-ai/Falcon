@@ -23,9 +23,11 @@ export function normalizeOnboardingStatusForWizard(
   status: string | undefined | null,
   roleName: string | undefined | null,
 ): string {
-  const value = (status ?? 'ACTIVE').trim();
-  if (!requiresFirstLoginWizard(roleName)) return value;
-  if (value === 'PENDING_ONBOARDING') return 'PENDING_PASSWORD_RESET';
+  const value = (status ?? '').trim();
+  if (!requiresFirstLoginWizard(roleName)) {
+    return value || 'ACTIVE';
+  }
+  if (!value || value === 'PENDING_ONBOARDING') return 'PENDING_PASSWORD_RESET';
   if (value === 'IN_PROGRESS') return 'PENDING_DOCUMENTS';
   return value;
 }

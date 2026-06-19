@@ -10,7 +10,7 @@ import { FalconLoader } from '@/components/brand/FalconLoader';
 import { LogIn } from 'lucide-react';
 
 export default function Home() {
-  const { isAuthenticated, login, user, isLoading } = useAuth();
+  const { isAuthenticated, login, user, isLoading, refreshUser } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,10 +18,9 @@ export default function Home() {
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isAuthenticated && user) {
-      router.push(getPostLoginPath(user));
-    }
-  }, [isAuthenticated, user, router]);
+    if (!isAuthenticated || !user || isLoading) return;
+    router.push(getPostLoginPath(user));
+  }, [isAuthenticated, user, isLoading, router]);
 
   const handleGoogleLogin = () => {
     window.location.href = api.login();
@@ -34,7 +33,8 @@ export default function Home() {
     try {
       const result = await api.localLogin(email.trim(), password);
       login(result.token, result.user);
-      router.push(getPostLoginPath(result.user));
+      const fresh = await refreshUser();
+      router.push(getPostLoginPath(fresh ?? result.user));
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : 'Login failed');
     } finally {
@@ -51,13 +51,14 @@ export default function Home() {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((res) => res.json())
-        .then((data) => {
+        .then(async (data) => {
           login(token, data);
-          router.push(getPostLoginPath(data));
+          const fresh = await refreshUser();
+          router.push(getPostLoginPath(fresh ?? data));
         })
         .catch((err) => console.error('Failed to fetch user profile', err));
     }
-  }, [login, router]);
+  }, [login, refreshUser, router]);
 
   if (isLoading) {
     return <FalconLoader label="Preparing Falcon Campus OS…" className="min-h-screen" />;

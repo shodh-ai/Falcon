@@ -114,6 +114,7 @@ export const api = {
         dept_id?: number;
         tenant_id?: string;
         tenant_schema?: string;
+        onboarding_status?: string;
       };
     }>;
   },

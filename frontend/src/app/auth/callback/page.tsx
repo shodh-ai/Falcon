@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 export default function AuthCallbackPage() {
-  const { login } = useAuth();
+  const { login, refreshUser } = useAuth();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
@@ -34,14 +34,15 @@ export default function AuthCallbackPage() {
 
         const user = await response.json();
         login(token, user);
-        router.replace(getPostLoginPath(user));
+        const fresh = await refreshUser();
+        router.replace(getPostLoginPath(fresh ?? user));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Authentication failed.');
       }
     };
 
     completeLogin();
-  }, [login, router]);
+  }, [login, refreshUser, router]);
 
   if (error) {
     return (

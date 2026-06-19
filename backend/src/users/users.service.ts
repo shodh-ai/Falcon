@@ -6,6 +6,7 @@ import { Role } from '../entities/role.entity';
 import { Department } from '../entities/department.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { getInitialOnboardingStatusForRole } from '../modules/student-onboarding/onboarding-portal.util';
 
 @Injectable()
 export class UsersService {
@@ -28,7 +29,18 @@ export class UsersService {
       throw new BadRequestException('User with this email already exists');
     }
 
-    const user = this.userRepository.create(createUserDto);
+    let roleName: string | undefined;
+    if (createUserDto.role_id) {
+      const role = await this.roleRepository.findOne({
+        where: { role_id: createUserDto.role_id },
+      });
+      roleName = role?.role_name;
+    }
+
+    const user = this.userRepository.create({
+      ...createUserDto,
+      onboarding_status: getInitialOnboardingStatusForRole(roleName),
+    });
     return this.userRepository.save(user);
   }
 

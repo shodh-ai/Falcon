@@ -1,4 +1,5 @@
--- Prod-ready personas: 5 students + 5 faculty (password: password123)
+-- Prod-ready personas: 5 students + 5 faculty
+-- Default password: password123 → first login runs onboarding wizard (set password → profile/docs → admin approval)
 -- Tenant: sgvu | Dept: Computer Science
 --
 -- STUDENTS (user_id → email → enrollment_no)
@@ -56,7 +57,7 @@ seed_students AS (
 )
 INSERT INTO users (
   user_id, tenant_id, name, official_email, role_id, dept_id,
-  password_hash, is_active, onboarding_status
+  password_hash, is_active, onboarding_status, onboarding_profile
 )
 SELECT
   ss.user_id,
@@ -67,7 +68,8 @@ SELECT
   d.dept_id,
   p.hash,
   true,
-  'COMPLETED'
+  'PENDING_PASSWORD_RESET',
+  '{}'::jsonb
 FROM seed_students ss
 CROSS JOIN tenant t
 CROSS JOIN pwd p
@@ -79,7 +81,8 @@ ON CONFLICT (tenant_id, official_email) DO UPDATE SET
   dept_id = EXCLUDED.dept_id,
   password_hash = EXCLUDED.password_hash,
   is_active = true,
-  onboarding_status = 'COMPLETED';
+  onboarding_status = 'PENDING_PASSWORD_RESET',
+  onboarding_profile = '{}'::jsonb;
 
 INSERT INTO user_roles (user_id, role_id, is_primary)
 SELECT u.user_id, u.role_id, true
@@ -95,7 +98,7 @@ ON CONFLICT (user_id, role_id) DO UPDATE SET is_primary = EXCLUDED.is_primary;
 
 INSERT INTO student_profiles (
   tenant_id, user_id, enrollment_no, enrollment_number, admission_number,
-  batch, gender, date_of_birth, nationality, admission_status, status, phone
+  nationality, admission_status, status
 )
 SELECT
   u.tenant_id,
@@ -103,34 +106,26 @@ SELECT
   data.enrollment_no,
   data.enrollment_no,
   data.admission_no,
-  '2025-29',
-  data.gender,
-  data.dob::date,
   'Indian',
   'ACTIVE',
-  'ACTIVE',
-  data.phone
+  'ACTIVE'
 FROM users u
 JOIN (VALUES
-  ('student3@mygyanvihar.com', 'SGVU-2026-2001', 'ADM-2025-CSE-2001', 'Male',   '2004-03-12', '+91-9876502001'),
-  ('student4@mygyanvihar.com', 'SGVU-2026-2002', 'ADM-2025-CSE-2002', 'Female', '2004-07-22', '+91-9876502002'),
-  ('student5@mygyanvihar.com', 'SGVU-2026-2003', 'ADM-2025-CSE-2003', 'Male',   '2004-11-05', '+91-9876502003'),
-  ('student6@mygyanvihar.com', 'SGVU-2026-2004', 'ADM-2025-CSE-2004', 'Female', '2005-01-18', '+91-9876502004'),
-  ('student7@mygyanvihar.com', 'SGVU-2026-2005', 'ADM-2025-CSE-2005', 'Male',   '2005-05-30', '+91-9876502005')
-) AS data(email, enrollment_no, admission_no, gender, dob, phone)
+  ('student3@mygyanvihar.com', 'SGVU-2026-2001', 'ADM-2025-CSE-2001'),
+  ('student4@mygyanvihar.com', 'SGVU-2026-2002', 'ADM-2025-CSE-2002'),
+  ('student5@mygyanvihar.com', 'SGVU-2026-2003', 'ADM-2025-CSE-2003'),
+  ('student6@mygyanvihar.com', 'SGVU-2026-2004', 'ADM-2025-CSE-2004'),
+  ('student7@mygyanvihar.com', 'SGVU-2026-2005', 'ADM-2025-CSE-2005')
+) AS data(email, enrollment_no, admission_no)
   ON lower(u.official_email) = lower(data.email)
 ON CONFLICT (user_id) DO UPDATE SET
   tenant_id = EXCLUDED.tenant_id,
   enrollment_no = EXCLUDED.enrollment_no,
   enrollment_number = EXCLUDED.enrollment_number,
   admission_number = EXCLUDED.admission_number,
-  batch = EXCLUDED.batch,
-  gender = EXCLUDED.gender,
-  date_of_birth = EXCLUDED.date_of_birth,
   nationality = EXCLUDED.nationality,
   admission_status = EXCLUDED.admission_status,
   status = EXCLUDED.status,
-  phone = EXCLUDED.phone,
   updated_at = NOW();
 
 -- ---------------------------------------------------------------------------
@@ -159,7 +154,7 @@ seed_faculty AS (
 )
 INSERT INTO users (
   user_id, tenant_id, name, official_email, role_id, dept_id,
-  password_hash, salary_base, reporting_officer_id, is_active, onboarding_status
+  password_hash, salary_base, reporting_officer_id, is_active, onboarding_status, onboarding_profile
 )
 SELECT
   sf.user_id,
@@ -172,7 +167,8 @@ SELECT
   sf.salary_base,
   hod.user_id,
   true,
-  'COMPLETED'
+  'PENDING_PASSWORD_RESET',
+  '{}'::jsonb
 FROM seed_faculty sf
 CROSS JOIN tenant t
 CROSS JOIN pwd p
@@ -187,7 +183,8 @@ ON CONFLICT (tenant_id, official_email) DO UPDATE SET
   salary_base = EXCLUDED.salary_base,
   reporting_officer_id = EXCLUDED.reporting_officer_id,
   is_active = true,
-  onboarding_status = 'COMPLETED';
+  onboarding_status = 'PENDING_PASSWORD_RESET',
+  onboarding_profile = '{}'::jsonb;
 
 INSERT INTO user_roles (user_id, role_id, is_primary)
 SELECT u.user_id, u.role_id, true

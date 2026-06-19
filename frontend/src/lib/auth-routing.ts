@@ -4,7 +4,7 @@
 import {
   getOnboardingConfigForRole,
   getOnboardingStepPath,
-  normalizeOnboardingStatus,
+  needsPortalOnboarding,
 } from '@/lib/onboarding/portal-onboarding';
 
 export function getDashboardPathForRole(role: string | undefined | null): string {
@@ -411,10 +411,15 @@ export function getPostLoginPath(user: {
 }): string {
   const role = user.primaryRole ?? user.role;
   const config = getOnboardingConfigForRole(role);
-  if (config && user.onboarding_status) {
-    const normalizedStatus = normalizeOnboardingStatus(user.onboarding_status, role);
-    const onboardingPath = getOnboardingStepPath(config.portalPrefix, normalizedStatus, role);
+  if (config) {
+    const onboardingPath = getOnboardingStepPath(
+      config.portalPrefix,
+      user.onboarding_status,
+      role,
+    );
     if (onboardingPath) return onboardingPath;
   }
   return getDashboardPathForRole(role);
 }
+
+export { needsPortalOnboarding };

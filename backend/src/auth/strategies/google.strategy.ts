@@ -10,6 +10,7 @@ import { Role } from '../../entities/role.entity';
 import { AuthService } from '../auth.service';
 import { TenantService } from '../../tenant/tenant.service';
 import { resolveAllowedEmailDomains } from '../utils/resolve-allowed-domains';
+import { getInitialOnboardingStatusForRole } from '../../modules/student-onboarding/onboarding-portal.util';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
@@ -92,6 +93,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         role_id: defaultRole?.role_id,
         is_active: true,
         tenant_id: tenant.tenant_id,
+        onboarding_status: getInitialOnboardingStatusForRole(defaultRole?.role_name),
       });
 
       user = await this.userRepository.save(user);
