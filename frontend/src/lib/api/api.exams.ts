@@ -18,6 +18,8 @@ export interface ExamSchedule {
 export interface ExamEligibilityResult {
   eligible: boolean;
   attendance_percent: number;
+  min_required?: number;
+  exempted?: boolean;
   reasons: Array<{ code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES'; message: string; details?: unknown }>;
 }
 

@@ -11,6 +11,7 @@ import { FinanceService } from '../finance/finance.service';
 import { AdmitCardPdfService } from '../exams/pdf/admit-card-pdf.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { NotificationEvents } from '../../core/notifications/notification.events';
+import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -22,6 +23,7 @@ export class ExamCellService {
     private readonly admitPdf: AdmitCardPdfService,
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
+    private readonly attendanceEligibility: AttendanceEligibilityService,
   ) {}
 
   private async queryOrEmpty<T extends Record<string, unknown>>(
@@ -181,7 +183,7 @@ export class ExamCellService {
     fs.mkdirSync(uploadDir, { recursive: true });
 
     for (const student of students) {
-      const reasons = await this.getAdmitBlockReasons(student.user_id);
+      const reasons = await this.getAdmitBlockReasons(student.user_id, tenantId);
       const eligible = reasons.length === 0;
 
       if (eligible) {
@@ -256,22 +258,23 @@ export class ExamCellService {
     return { run_id: runId, generated, blocked, students: results };
   }
 
-  async getAdmitBlockReasons(studentUserId: string): Promise<string[]> {
+  async getAdmitBlockReasons(
+    studentUserId: string,
+    tenantId = 'a0000000-0000-4000-8000-000000000001',
+  ): Promise<string[]> {
     const reasons: string[] = [];
     const pendingDues = await this.finance.getPendingDues(studentUserId);
     if (pendingDues.length > 0) {
       reasons.push('Blocked: Pending fee dues');
     }
 
-    const att = await this.db.query(
-      `SELECT COUNT(*) FILTER (WHERE status IN ('PRESENT','LATE'))::float AS attended,
-              COUNT(*)::float AS total
-       FROM academic_attendance_records WHERE student_user_id = $1`,
-      [studentUserId],
-    );
-    const total = Number(att[0]?.total ?? 0);
-    const pct = total > 0 ? Math.round((Number(att[0]?.attended ?? 0) / total) * 100) : 0;
-    if (pct < 75) reasons.push(`Blocked: Attendance ${pct}% (min 75%)`);
+    const attendance = await this.attendanceEligibility.evaluate(tenantId, studentUserId, {
+      context: 'ADMIT_CARD',
+      audit: true,
+    });
+    if (!attendance.eligible && attendance.reason) {
+      reasons.push(attendance.reason);
+    }
 
     const fines = await this.db.query(
       `SELECT COUNT(*)::int AS c FROM operations_hostel_fines

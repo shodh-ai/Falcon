@@ -52,6 +52,7 @@ import { HostelAdminModule } from './modules/hostel-admin/hostel-admin.module';
 import { CampusEventsModule } from './modules/campus-events/campus-events.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
 import { DemeritsModule } from './modules/demerits/demerits.module';
+import { AttendancePolicyModule } from './modules/attendance-policy/attendance-policy.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -159,6 +160,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     CampusEventsModule,
     MeetingsModule,
     DemeritsModule,
+    AttendancePolicyModule,
   ],
   controllers: [AppController],
   providers: [

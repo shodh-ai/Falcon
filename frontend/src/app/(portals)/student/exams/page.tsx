@@ -11,6 +11,7 @@ import { academicsApi } from '@/lib/api/api.academics';
 import { API_URL } from '@/lib/api/client';
 import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
 import { useAuthedApi } from '@/lib/api';
+import { StudentExemptionPanel } from '@/components/attendance/StudentExemptionPanel';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentTabBar } from '@/components/student/StudentTabBar';
@@ -76,7 +77,7 @@ export default function StudentExamsPage() {
 
     const lines: string[] = [];
     if (attendanceReason) {
-      lines.push(`Attendance is ${eligibility.attendance_percent}% (minimum 75% required).`);
+      lines.push(`Attendance is ${eligibility.attendance_percent}% (minimum ${eligibility.min_required ?? 75}% required).`);
     }
     if (duesReason && Array.isArray((duesReason as any).details)) {
       const dues = (duesReason as any).details as Array<{ fee_head: string; outstanding: number }>;
@@ -292,8 +293,10 @@ export default function StudentExamsPage() {
           <CardContent className="space-y-4">
             <div className="grid gap-2 text-sm sm:grid-cols-2">
               <div className="flex items-center justify-between rounded-xl border bg-background/60 px-4 py-3">
-                <span>Attendance (min 75%)</span>
-                {eligibility && eligibility.attendance_percent >= 75 ? (
+                <span>Attendance (min {eligibility?.min_required ?? 75}%)</span>
+                {eligibility && eligibility.exempted ? (
+                  <Badge variant="success">Exempted</Badge>
+                ) : eligibility && eligibility.attendance_percent >= (eligibility.min_required ?? 75) ? (
                   <Badge variant="success">OK</Badge>
                 ) : (
                   <Badge variant="destructive">{eligibility?.attendance_percent ?? '—'}%</Badge>
@@ -315,6 +318,8 @@ export default function StudentExamsPage() {
                 <p className="mt-1 text-destructive/90">{ineligibleMessage}</p>
               </div>
             ) : null}
+
+            <StudentExemptionPanel />
 
             <Button
               className="w-full"

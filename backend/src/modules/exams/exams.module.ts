@@ -8,9 +8,14 @@ import { FinanceModule } from '../finance/finance.module';
 import { ExamsController } from './exams.controller';
 import { ExamsService } from './exams.service';
 import { AdmitCardPdfService } from './pdf/admit-card-pdf.service';
+import { AttendancePolicyModule } from '../attendance-policy/attendance-policy.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ExamSchedule, ExamApplication, AttendanceRecord, User]), FinanceModule],
+  imports: [
+    TypeOrmModule.forFeature([ExamSchedule, ExamApplication, AttendanceRecord, User]),
+    FinanceModule,
+    AttendancePolicyModule,
+  ],
   controllers: [ExamsController],
   providers: [ExamsService, AdmitCardPdfService],
   exports: [ExamsService, AdmitCardPdfService],

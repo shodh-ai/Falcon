@@ -531,6 +531,8 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
         { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades', 'remedial'] },
+        { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
+        { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
       ],
     },
@@ -567,6 +569,8 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students'] },
         { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['defaulters'] },
+        { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical'] },
+        { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
       ],
     },
@@ -614,6 +618,7 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
+        { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'faculty', 'minutes'] },
       ],
@@ -656,6 +661,7 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['inbox'] },
+        { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes'] },
       ],
@@ -898,6 +904,7 @@ export const examCellPortal: PortalConfig = {
         { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'exam cell'] },
         { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term'] },
         { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
+        { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'low attendance', 'admit card', 'approve'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms'] },
         { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty'] },
       ],
@@ -917,6 +924,7 @@ export const examCellPortal: PortalConfig = {
     { label: 'Exam OS Dashboard', href: '/exam-cell/dashboard', icon: LayoutDashboard },
     { label: 'Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays },
     { label: 'Admit Cards', href: '/exam-cell/admit-cards', icon: Ticket },
+    { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck },
     { label: 'Publish Results', href: '/exam-cell/results', icon: TrendingUp },
     { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal },
     { label: 'UFM Desk', href: '/exam-cell/ufm-cases', icon: Shield },
