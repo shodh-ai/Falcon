@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type LeaveRequestStatus =
@@ -10,7 +17,14 @@ export type LeaveRequestStatus =
   | 'REJECTED'
   | 'CANCELLED';
 
-export type LeaveType = 'CASUAL' | 'SICK' | 'EARNED' | 'MATERNITY' | 'PATERNITY' | 'LWP' | 'OTHER';
+export type LeaveType =
+  | 'CASUAL'
+  | 'SICK'
+  | 'EARNED'
+  | 'MATERNITY'
+  | 'PATERNITY'
+  | 'LWP'
+  | 'OTHER';
 
 @Entity('hr_leave_requests')
 @Index(['requester_user_id'])

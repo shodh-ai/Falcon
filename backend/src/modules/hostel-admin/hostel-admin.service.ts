@@ -26,7 +26,7 @@ export class HostelAdminService {
     private readonly finance: FinanceService,
     private readonly falconNotify: FalconNotificationsService,
     private readonly gateway: HostelAdminGateway,
-  ) { }
+  ) {}
 
   private isGlobalAdmin(roles: string[]) {
     return roles.some((r) => ['SuperAdmin', 'Registrar'].includes(r));
@@ -138,16 +138,23 @@ export class HostelAdminService {
     );
 
     const hostels = await this.listHostels(ctx);
-    const alerts = hostels.map((h: { hostel_name: string; curfew_time: string }) => ({
-      title: `Curfew — ${h.hostel_name}`,
-      time: h.curfew_time ?? '22:00',
+    const alerts = hostels.map(
+      (h: { hostel_name: string; curfew_time: string }) => ({
+        title: `Curfew — ${h.hostel_name}`,
+        time: h.curfew_time ?? '22:00',
+        type: 'schedule',
+      }),
+    );
+    alerts.unshift({
+      title: 'Morning Roll Call',
+      time: '07:00',
       type: 'schedule',
-    }));
-    alerts.unshift({ title: 'Morning Roll Call', time: '07:00', type: 'schedule' });
+    });
 
     const totalBeds = Number(stats?.total_beds ?? 0);
     const avail = Number(stats?.available_beds ?? 0);
-    const occupiedPct = totalBeds > 0 ? Math.round(((totalBeds - avail) / totalBeds) * 100) : 0;
+    const occupiedPct =
+      totalBeds > 0 ? Math.round(((totalBeds - avail) / totalBeds) * 100) : 0;
 
     return {
       metrics: {
@@ -184,9 +191,18 @@ export class HostelAdminService {
 
   async listStudents(
     ctx: AuthCtx,
-    filters: { hostelId?: string; status?: string; limit?: number; offset?: number },
+    filters: {
+      hostelId?: string;
+      status?: string;
+      limit?: number;
+      offset?: number;
+    },
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
-    const { limit, offset } = parsePageParams(filters.limit, filters.offset, DEFAULT_PAGE_LIMIT);
+    const { limit, offset } = parsePageParams(
+      filters.limit,
+      filters.offset,
+      DEFAULT_PAGE_LIMIT,
+    );
     if (filters.hostelId) await this.assertHostelAccess(ctx, filters.hostelId);
     else if (!this.isGlobalAdmin(ctx.roles)) {
       const allowed = await this.getAccessibleHostelIds(ctx);
@@ -229,7 +245,7 @@ export class HostelAdminService {
     const total = Number(countRows[0]?.total ?? 0);
 
     params.push(limit, offset);
-    console.log("LIST STUDENTS PARAMS:", params);
+    console.log('LIST STUDENTS PARAMS:', params);
     const data = await this.db.query(
       `SELECT a.allocation_id, a.status, a.bed_number, a.mess_plan,
               u.user_id AS student_user_id, u.name, u.official_email AS email,
@@ -243,12 +259,19 @@ export class HostelAdminService {
        LIMIT $${idx++} OFFSET $${idx}`,
       params,
     );
-    console.log("LIST STUDENTS DATA LENGTH:", data.length);
+    console.log('LIST STUDENTS DATA LENGTH:', data.length);
 
     return { data, total, limit, offset };
   }
 
-  async markRollCall(ctx: AuthCtx, dto: { hostel_id: string; date?: string; records: Array<{ student_user_id: string; status: string }> }) {
+  async markRollCall(
+    ctx: AuthCtx,
+    dto: {
+      hostel_id: string;
+      date?: string;
+      records: Array<{ student_user_id: string; status: string }>;
+    },
+  ) {
     await this.assertHostelAccess(ctx, dto.hostel_id);
     const date = dto.date || new Date().toISOString().slice(0, 10);
     for (const rec of dto.records) {
@@ -339,7 +362,11 @@ export class HostelAdminService {
     );
   }
 
-  async updateLeaveStatus(ctx: AuthCtx, leaveId: string, status: 'APPROVED' | 'REJECTED') {
+  async updateLeaveStatus(
+    ctx: AuthCtx,
+    leaveId: string,
+    status: 'APPROVED' | 'REJECTED',
+  ) {
     const [leave] = await this.db.query<Array<{ hostel_id: string }>>(
       `SELECT hostel_id FROM operations_hostel_leaves WHERE leave_id = $1`,
       [leaveId],
@@ -362,7 +389,8 @@ export class HostelAdminService {
       clause = 'AND (gp.hostel_id = $2 OR r.hostel_id = $2)';
       params.push(hostelId);
     } else if (allowed) {
-      clause = 'AND (gp.hostel_id = ANY($2::uuid[]) OR r.hostel_id = ANY($2::uuid[]))';
+      clause =
+        'AND (gp.hostel_id = ANY($2::uuid[]) OR r.hostel_id = ANY($2::uuid[]))';
       params.push(allowed);
     }
 
@@ -420,7 +448,11 @@ export class HostelAdminService {
   broadcastGatePass(ctx: AuthCtx, payload: Record<string, unknown>) {
     this.gateway.emitToTenant(ctx.tenantId, 'gate_pass.updated', payload);
     if (payload.hostel_id) {
-      this.gateway.emitToHostel(String(payload.hostel_id), 'gate_pass.updated', payload);
+      this.gateway.emitToHostel(
+        String(payload.hostel_id),
+        'gate_pass.updated',
+        payload,
+      );
     }
   }
 
@@ -436,7 +468,12 @@ export class HostelAdminService {
 
   async processVisitorScan(
     ctx: AuthCtx,
-    dto: { pass_id: string; action: 'ENTRY' | 'EXIT'; hostel_id: string; visitor_name?: string },
+    dto: {
+      pass_id: string;
+      action: 'ENTRY' | 'EXIT';
+      hostel_id: string;
+      visitor_name?: string;
+    },
   ) {
     await this.assertHostelAccess(ctx, dto.hostel_id);
     const passId = dto.pass_id.trim().toUpperCase();
@@ -521,8 +558,13 @@ export class HostelAdminService {
         fee_head: 'HOSTEL_DAMAGE',
         academic_year: academicYear,
         total_amount: dto.amount,
-        due_date: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-        fee_breakup: { item: dto.item_description, severity: dto.damage_severity },
+        due_date: new Date(Date.now() + 14 * 86400000)
+          .toISOString()
+          .slice(0, 10),
+        fee_breakup: {
+          item: dto.item_description,
+          severity: dto.damage_severity,
+        },
       },
       ctx.tenantId,
     );
@@ -584,7 +626,13 @@ export class HostelAdminService {
 
   async sendBroadcast(
     ctx: AuthCtx,
-    dto: { title: string; message: string; hostel_ids: string[]; send_email: boolean; send_sms: boolean },
+    dto: {
+      title: string;
+      message: string;
+      hostel_ids: string[];
+      send_email: boolean;
+      send_sms: boolean;
+    },
   ) {
     for (const hid of dto.hostel_ids) {
       await this.assertHostelAccess(ctx, hid);
@@ -592,7 +640,15 @@ export class HostelAdminService {
     const [row] = await this.db.query(
       `INSERT INTO operations_hostel_broadcasts (tenant_id, sender_user_id, title, message, hostel_ids, send_email, send_sms)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [ctx.tenantId, ctx.userId, dto.title, dto.message, dto.hostel_ids, dto.send_email, dto.send_sms],
+      [
+        ctx.tenantId,
+        ctx.userId,
+        dto.title,
+        dto.message,
+        dto.hostel_ids,
+        dto.send_email,
+        dto.send_sms,
+      ],
     );
 
     const students = await this.db.query<Array<{ user_id: string }>>(
@@ -603,7 +659,10 @@ export class HostelAdminService {
       [dto.hostel_ids],
     );
 
-    const broadcastMsg = hostelBroadcastMessage({ title: dto.title, message: dto.message });
+    const broadcastMsg = hostelBroadcastMessage({
+      title: dto.title,
+      message: dto.message,
+    });
 
     for (const s of students) {
       await this.falconNotify.create({
@@ -619,7 +678,10 @@ export class HostelAdminService {
       });
     }
 
-    this.gateway.emitToTenant(ctx.tenantId, 'hostel.broadcast', { broadcast_id: row.broadcast_id, title: dto.title });
+    this.gateway.emitToTenant(ctx.tenantId, 'hostel.broadcast', {
+      broadcast_id: row.broadcast_id,
+      title: dto.title,
+    });
     return row;
   }
 
@@ -636,7 +698,10 @@ export class HostelAdminService {
     );
   }
 
-  async upsertMasterData(ctx: AuthCtx, dto: { category: string; label: string; meta?: Record<string, unknown> }) {
+  async upsertMasterData(
+    ctx: AuthCtx,
+    dto: { category: string; label: string; meta?: Record<string, unknown> },
+  ) {
     const [row] = await this.db.query(
       `INSERT INTO operations_hostel_master_data (tenant_id, category, label, meta)
        VALUES ($1,$2,$3,$4)
@@ -654,7 +719,10 @@ export class HostelAdminService {
     );
   }
 
-  async setRolePermission(ctx: AuthCtx, dto: { role_name: string; permission_key: string; allowed: boolean }) {
+  async setRolePermission(
+    ctx: AuthCtx,
+    dto: { role_name: string; permission_key: string; allowed: boolean },
+  ) {
     const [row] = await this.db.query(
       `INSERT INTO operations_hostel_role_permissions (tenant_id, role_name, permission_key, allowed)
        VALUES ($1,$2,$3,$4)
@@ -667,7 +735,12 @@ export class HostelAdminService {
 
   async transferStudent(
     ctx: AuthCtx,
-    dto: { student_user_id: string; room_id: number; bed_label: string; hostel_id: string },
+    dto: {
+      student_user_id: string;
+      room_id: number;
+      bed_label: string;
+      hostel_id: string;
+    },
   ) {
     await this.assertHostelAccess(ctx, dto.hostel_id);
     const [bed] = await this.db.query<Array<{ bed_id: string }>>(
@@ -683,21 +756,27 @@ export class HostelAdminService {
        WHERE student_user_id = $1`,
       [dto.student_user_id, dto.room_id, dto.bed_label, bed.bed_id],
     );
-    await this.db.query(`UPDATE operations_hostel_beds SET status = 'OCCUPIED' WHERE bed_id = $1`, [bed.bed_id]);
+    await this.db.query(
+      `UPDATE operations_hostel_beds SET status = 'OCCUPIED' WHERE bed_id = $1`,
+      [bed.bed_id],
+    );
     return { ok: true };
   }
 
   async evictStudent(ctx: AuthCtx, studentUserId: string) {
-    const [alloc] = await this.db.query<Array<{ room_id: number; ops_bed_id: string }>>(
+    const [alloc] = await this.db.query<
+      Array<{ room_id: number; ops_bed_id: string }>
+    >(
       `SELECT a.room_id, a.ops_bed_id FROM hostel_allocations a
        JOIN operations_hostel_rooms r ON r.room_id = a.room_id
        WHERE a.student_user_id = $1`,
       [studentUserId],
     );
     if (alloc?.ops_bed_id) {
-      await this.db.query(`UPDATE operations_hostel_beds SET status = 'AVAILABLE' WHERE bed_id = $1`, [
-        alloc.ops_bed_id,
-      ]);
+      await this.db.query(
+        `UPDATE operations_hostel_beds SET status = 'AVAILABLE' WHERE bed_id = $1`,
+        [alloc.ops_bed_id],
+      );
     }
     await this.db.query(
       `UPDATE hostel_allocations SET status = 'VACATED', end_date = CURRENT_DATE, updated_at = NOW()
@@ -714,10 +793,9 @@ export class HostelAdminService {
   }
 
   async approveHostelRequest(ctx: AuthCtx, requestId: string) {
-    const [req] = await this.db.query<Array<{ student_user_id: string; request_type: string; payload: unknown }>>(
-      `SELECT * FROM hostel_requests WHERE request_id = $1`,
-      [requestId],
-    );
+    const [req] = await this.db.query<
+      Array<{ student_user_id: string; request_type: string; payload: unknown }>
+    >(`SELECT * FROM hostel_requests WHERE request_id = $1`, [requestId]);
     if (!req) throw new NotFoundException('Request not found');
     const token = randomBytes(24).toString('hex');
     await this.db.query(
@@ -754,24 +832,37 @@ export class HostelAdminService {
     const [row] = await this.db.query(
       `INSERT INTO operations_hostel_leaves (student_user_id, hostel_id, leave_type, purpose, from_date, to_date)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [dto.student_user_id, dto.hostel_id, dto.leave_type, dto.purpose, dto.from_date, dto.to_date],
+      [
+        dto.student_user_id,
+        dto.hostel_id,
+        dto.leave_type,
+        dto.purpose,
+        dto.from_date,
+        dto.to_date,
+      ],
     );
     this.gateway.emitToHostel(dto.hostel_id, 'leave.created', row);
     return row;
   }
 
   async getCampusSettings(ctx: AuthCtx) {
-    const rows = await this.db.query<Array<{ settings: Record<string, unknown> | null }>>(
-      `SELECT settings FROM tenants WHERE tenant_id = $1`,
-      [ctx.tenantId],
-    );
+    const rows = await this.db.query<
+      Array<{ settings: Record<string, unknown> | null }>
+    >(`SELECT settings FROM tenants WHERE tenant_id = $1`, [ctx.tenantId]);
     const settings = rows[0]?.settings ?? {};
     return { is_hostel_sale_active: settings.is_hostel_sale_active === true };
   }
 
-  async setCampusSettings(ctx: AuthCtx, dto: { is_hostel_sale_active?: boolean }) {
-    if (!ctx.roles.some((r) => ['Warden', 'SuperAdmin', 'Registrar'].includes(r))) {
-      throw new ForbiddenException('Only Chief Warden can change campus settings');
+  async setCampusSettings(
+    ctx: AuthCtx,
+    dto: { is_hostel_sale_active?: boolean },
+  ) {
+    if (
+      !ctx.roles.some((r) => ['Warden', 'SuperAdmin', 'Registrar'].includes(r))
+    ) {
+      throw new ForbiddenException(
+        'Only Chief Warden can change campus settings',
+      );
     }
     if (dto.is_hostel_sale_active === undefined) {
       return this.getCampusSettings(ctx);

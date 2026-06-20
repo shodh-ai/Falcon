@@ -10,6 +10,8 @@ export class UploadsService {
   }
 
   getMaxFileSize(): number {
-    return parseInt(this.configService.get<string>('MAX_FILE_SIZE') || '104857600');
+    return parseInt(
+      this.configService.get<string>('MAX_FILE_SIZE') || '104857600',
+    );
   }
 }

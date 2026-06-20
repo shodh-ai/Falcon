@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -30,7 +38,10 @@ export class ExamsController {
   async admitCard(@Req() req: { user: AuthUser }, @Res() res: Response) {
     const pdf = await this.exams.generateAdmitCardOrThrow(req.user.user_id);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="admit-card.pdf"');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="admit-card.pdf"',
+    );
     res.send(pdf);
   }
 

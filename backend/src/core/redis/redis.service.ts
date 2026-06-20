@@ -25,8 +25,18 @@ export class RedisService implements OnModuleDestroy {
   }
 
   /** SET NX EX — value is student_user_id only. Returns true if lock acquired. */
-  async acquireBedLock(bedId: string, studentUserId: string, ttlSec = BED_LOCK_TTL_SEC) {
-    const result = await this.client.set(this.bedLockKey(bedId), studentUserId, 'EX', ttlSec, 'NX');
+  async acquireBedLock(
+    bedId: string,
+    studentUserId: string,
+    ttlSec = BED_LOCK_TTL_SEC,
+  ) {
+    const result = await this.client.set(
+      this.bedLockKey(bedId),
+      studentUserId,
+      'EX',
+      ttlSec,
+      'NX',
+    );
     return result === 'OK';
   }
 
@@ -56,14 +66,24 @@ export class RedisService implements OnModuleDestroy {
     payload: { lat: number; lng: number; speed?: number; timestamp: string },
     ttlSec = 120,
   ) {
-    await this.client.set(this.busLocationKey(routeId), JSON.stringify(payload), 'EX', ttlSec);
+    await this.client.set(
+      this.busLocationKey(routeId),
+      JSON.stringify(payload),
+      'EX',
+      ttlSec,
+    );
   }
 
   async getBusLocation(routeId: string) {
     const raw = await this.client.get(this.busLocationKey(routeId));
     if (!raw) return null;
     try {
-      return JSON.parse(raw) as { lat: number; lng: number; speed?: number; timestamp: string };
+      return JSON.parse(raw) as {
+        lat: number;
+        lng: number;
+        speed?: number;
+        timestamp: string;
+      };
     } catch {
       return null;
     }
@@ -74,7 +94,13 @@ export class RedisService implements OnModuleDestroy {
   }
 
   async markGeofenceAlert(allocationId: string, ttlSec = 1800) {
-    const result = await this.client.set(this.geofenceAlertKey(allocationId), '1', 'EX', ttlSec, 'NX');
+    const result = await this.client.set(
+      this.geofenceAlertKey(allocationId),
+      '1',
+      'EX',
+      ttlSec,
+      'NX',
+    );
     return result === 'OK';
   }
 
@@ -83,7 +109,12 @@ export class RedisService implements OnModuleDestroy {
   }
 
   /** SET NX EX — prevents two startups booking the same room slot concurrently. */
-  async acquireWorkspaceSlotLock(workspaceId: string, startTimeIso: string, ownerId: string, ttlSec = 30) {
+  async acquireWorkspaceSlotLock(
+    workspaceId: string,
+    startTimeIso: string,
+    ownerId: string,
+    ttlSec = 30,
+  ) {
     const result = await this.client.set(
       this.ecellWorkspaceSlotKey(workspaceId, startTimeIso),
       ownerId,
@@ -94,7 +125,11 @@ export class RedisService implements OnModuleDestroy {
     return result === 'OK';
   }
 
-  async releaseWorkspaceSlotLock(workspaceId: string, startTimeIso: string, ownerId: string) {
+  async releaseWorkspaceSlotLock(
+    workspaceId: string,
+    startTimeIso: string,
+    ownerId: string,
+  ) {
     const key = this.ecellWorkspaceSlotKey(workspaceId, startTimeIso);
     const script = `
       if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -110,7 +145,11 @@ export class RedisService implements OnModuleDestroy {
     return `event_pay_lock:${eventId}:${studentUserId}`;
   }
 
-  async acquireEventPayLock(eventId: string, studentUserId: string, ttlSec = BED_LOCK_TTL_SEC) {
+  async acquireEventPayLock(
+    eventId: string,
+    studentUserId: string,
+    ttlSec = BED_LOCK_TTL_SEC,
+  ) {
     const result = await this.client.set(
       this.eventPayLockKey(eventId, studentUserId),
       '1',

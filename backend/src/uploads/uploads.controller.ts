@@ -94,7 +94,10 @@ export class UploadsController {
   ) {
     if (objectKey && this.objectStorage.isEnabled()) {
       const stream = await this.objectStorage.getDownloadStream(objectKey);
-      res.setHeader('Content-Disposition', `attachment; filename="${basename(objectKey)}"`);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${basename(objectKey)}"`,
+      );
       return stream.pipe(res);
     }
 
@@ -109,7 +112,10 @@ export class UploadsController {
       throw new NotFoundException('File not found');
     }
 
-    res.setHeader('Content-Disposition', `attachment; filename="${basename(resolvedPath)}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${basename(resolvedPath)}"`,
+    );
     return createReadStream(resolvedPath).pipe(res);
   }
 

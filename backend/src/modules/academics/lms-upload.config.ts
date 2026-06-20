@@ -20,7 +20,10 @@ function pdfFilter(
 ) {
   const ext = extname(file.originalname).toLowerCase();
   if (ext !== '.pdf' || file.mimetype !== PDF_MIME) {
-    return cb(new BadRequestException('Only PDF files are allowed (max 5MB)') as unknown as Error, false);
+    return cb(
+      new BadRequestException('Only PDF files are allowed (max 5MB)'),
+      false,
+    );
   }
   cb(null, true);
 }
@@ -34,7 +37,9 @@ function materialFilter(
   const allowedExt = ['.pdf', '.ppt', '.pptx'];
   if (!allowedExt.includes(ext) || !MATERIAL_MIMES.has(file.mimetype)) {
     return cb(
-      new BadRequestException('Only PDF or PowerPoint files are allowed (max 10MB)') as unknown as Error,
+      new BadRequestException(
+        'Only PDF or PowerPoint files are allowed (max 10MB)',
+      ),
       false,
     );
   }

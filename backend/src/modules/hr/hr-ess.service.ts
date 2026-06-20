@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
@@ -12,7 +16,11 @@ export class HrEssService {
     private readonly checklists: HrChecklistService,
   ) {}
 
-  async getOnboardingProgress(tenantId: string, entityId: number, userId: string) {
+  async getOnboardingProgress(
+    tenantId: string,
+    entityId: number,
+    userId: string,
+  ) {
     const pipeline = await this.dataSource.query(
       `SELECT p.* FROM hr_onboarding_pipelines p
        WHERE p.tenant_id = $1 AND p.entity_id = $2 AND p.user_id = $3
@@ -20,13 +28,23 @@ export class HrEssService {
       [tenantId, entityId, userId],
     );
     if (!pipeline[0]) {
-      return { pipeline: null, steps: [], progress_percent: 100, is_new_hire: false };
+      return {
+        pipeline: null,
+        steps: [],
+        progress_percent: 100,
+        is_new_hire: false,
+      };
     }
     const steps = await this.dataSource.query(
       `SELECT * FROM hr_onboarding_steps WHERE pipeline_id = $1 ORDER BY sort_order ASC`,
       [pipeline[0].pipeline_id],
     );
-    return { pipeline: pipeline[0], steps, progress_percent: pipeline[0].progress_percent, is_new_hire: true };
+    return {
+      pipeline: pipeline[0],
+      steps,
+      progress_percent: pipeline[0].progress_percent,
+      is_new_hire: true,
+    };
   }
 
   async createOnboardingPipeline(
@@ -73,7 +91,14 @@ export class HrEssService {
     const total = counts[0]?.total ?? 4;
     const done = counts[0]?.done ?? 0;
     const pct = Math.round((done / total) * 100);
-    const stage = pct >= 100 ? 'COMPLETED' : done >= 2 ? 'POLICIES' : done >= 1 ? 'OFFER' : 'DOCUMENTS';
+    const stage =
+      pct >= 100
+        ? 'COMPLETED'
+        : done >= 2
+          ? 'POLICIES'
+          : done >= 1
+            ? 'OFFER'
+            : 'DOCUMENTS';
     await this.dataSource.query(
       `UPDATE hr_onboarding_pipelines SET progress_percent = $2, stage = $3, updated_at = NOW()
        WHERE pipeline_id = $1`,
@@ -94,13 +119,21 @@ export class HrEssService {
     );
     for (const a of applicants) {
       if (a.pipeline_id) {
-        const prog = await this.checklists.getPipelineChecklistProgress(a.pipeline_id);
+        const prog = await this.checklists.getPipelineChecklistProgress(
+          a.pipeline_id,
+        );
         a.checklist_total = prog.total;
         a.checklist_completed = prog.completed;
         a.progress_percent = prog.progress_percent || a.progress_percent;
       }
     }
-    const stages = ['APPLIED', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'HIRED'];
+    const stages = [
+      'APPLIED',
+      'SHORTLISTED',
+      'INTERVIEW_SCHEDULED',
+      'OFFERED',
+      'HIRED',
+    ];
     return {
       stages: stages.map((stage) => ({
         id: stage,
@@ -121,7 +154,10 @@ export class HrEssService {
        WHERE user_id = $1 AND status NOT IN ('FNF_COMPLETED', 'REJECTED', 'WITHDRAWN')`,
       [userId],
     );
-    if (existing[0]) throw new BadRequestException('Active resignation request already exists');
+    if (existing[0])
+      throw new BadRequestException(
+        'Active resignation request already exists',
+      );
 
     const rows = await this.dataSource.query(
       `INSERT INTO hr_resignation_requests (
@@ -155,7 +191,11 @@ export class HrEssService {
     return this.dataSource.query(sql, params);
   }
 
-  async hodClearResignation(resignationId: string, hodUserId: string, approved: boolean) {
+  async hodClearResignation(
+    resignationId: string,
+    hodUserId: string,
+    approved: boolean,
+  ) {
     const rows = await this.dataSource.query(
       `UPDATE hr_resignation_requests SET
          status = $2,
@@ -206,7 +246,11 @@ export class HrEssService {
     return { ...r, fnf_ledger_ref: fnfRef, finance_handoff: true };
   }
 
-  async listEmployeeDocuments(tenantId: string, entityId: number, userId: string) {
+  async listEmployeeDocuments(
+    tenantId: string,
+    entityId: number,
+    userId: string,
+  ) {
     return this.dataSource.query(
       `SELECT document_id, document_type, file_url, verification_status, uploaded_at
        FROM hr_employee_documents
@@ -247,7 +291,11 @@ export class HrEssService {
     );
   }
 
-  async listPoliciesForUser(tenantId: string, entityId: number, userId: string) {
+  async listPoliciesForUser(
+    tenantId: string,
+    entityId: number,
+    userId: string,
+  ) {
     return this.dataSource.query(
       `SELECT p.*,
               (SELECT vote FROM hr_policy_polls WHERE policy_id = p.policy_id AND user_id = $3) AS user_vote,
@@ -299,7 +347,12 @@ export class HrEssService {
     tenantId: string,
     entityId: number,
     createdByUserId: string,
-    dto: { title: string; category?: string; file_url?: string; is_mandatory?: boolean },
+    dto: {
+      title: string;
+      category?: string;
+      file_url?: string;
+      is_mandatory?: boolean;
+    },
   ) {
     const rows = await this.dataSource.query(
       `INSERT INTO hr_policy_documents (

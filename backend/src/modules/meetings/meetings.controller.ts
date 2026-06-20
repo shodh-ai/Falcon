@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -95,25 +105,69 @@ export class MeetingsController {
   }
 
   @Post('schedule')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'President', 'Chairman', 'Registrar', 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+    'President',
+    'Chairman',
+    'Registrar',
+    'SuperAdmin',
+  )
   schedule(@Req() req: { user: AuthUser }, @Body() dto: ScheduleMeetingDto) {
     return this.meetings.scheduleMeeting(this.actor(req), dto);
   }
 
   @Post('request')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'President', 'Chairman', 'Registrar', 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+    'President',
+    'Chairman',
+    'Registrar',
+    'SuperAdmin',
+  )
   request(@Req() req: { user: AuthUser }, @Body() dto: RequestMeetingDto) {
     return this.meetings.requestMeeting(this.actor(req), dto);
   }
 
   @Post(':id/respond')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'President', 'Chairman', 'Registrar', 'SuperAdmin')
-  respond(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RespondMeetingDto) {
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+    'President',
+    'Chairman',
+    'Registrar',
+    'SuperAdmin',
+  )
+  respond(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: RespondMeetingDto,
+  ) {
     return this.meetings.respondMeeting(this.actor(req), id, dto);
   }
 
   @Patch(':id/agenda')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'President', 'Chairman', 'Registrar', 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+    'President',
+    'Chairman',
+    'Registrar',
+    'SuperAdmin',
+  )
   updateAgenda(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
@@ -123,7 +177,17 @@ export class MeetingsController {
   }
 
   @Post(':id/minutes')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'President', 'Chairman', 'Registrar', 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+    'President',
+    'Chairman',
+    'Registrar',
+    'SuperAdmin',
+  )
   publishMinutes(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,

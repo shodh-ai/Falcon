@@ -15,8 +15,13 @@ export class WalletController {
   @Post('topup/order')
   @Roles('Student')
   topUpOrder(@Req() req: { user: AuthUser }, @Body() dto: { amount: number }) {
-    const tenantId = req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
-    return this.wallet.createWalletTopUpOrder(tenantId, req.user.user_id, dto.amount);
+    const tenantId =
+      req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return this.wallet.createWalletTopUpOrder(
+      tenantId,
+      req.user.user_id,
+      dto.amount,
+    );
   }
 
   @Post('topup')
@@ -25,7 +30,13 @@ export class WalletController {
     @Req() req: { user: AuthUser },
     @Body() dto: { amount: number; payment_id?: string; order_id?: string },
   ) {
-    const tenantId = req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
-    return this.wallet.confirmWalletTopUpMock(tenantId, req.user.user_id, dto.amount, dto.payment_id);
+    const tenantId =
+      req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    return this.wallet.confirmWalletTopUpMock(
+      tenantId,
+      req.user.user_id,
+      dto.amount,
+      dto.payment_id,
+    );
   }
 }

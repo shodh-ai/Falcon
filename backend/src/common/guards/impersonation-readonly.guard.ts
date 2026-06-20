@@ -16,10 +16,10 @@ export class ImpersonationReadOnlyGuard implements CanActivate {
     const user = req.user as { read_only_impersonation?: boolean } | undefined;
     if (!user?.read_only_impersonation) return true;
 
-    const allowed = this.reflector.getAllAndOverride<boolean>(ALLOW_IMPERSONATION_WRITE_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const allowed = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_IMPERSONATION_WRITE_KEY,
+      [context.getHandler(), context.getClass()],
+    );
     if (allowed) return true;
 
     const method = req.method?.toUpperCase();

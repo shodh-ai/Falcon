@@ -42,7 +42,9 @@ export class AttendanceEligibilityService {
       )
       .catch(() => [] as Array<{ attended: number; total: number }>);
     const total = Number(raw[0]?.total ?? 0);
-    return total > 0 ? Math.round((Number(raw[0]?.attended ?? 0) / total) * 100) : 0;
+    return total > 0
+      ? Math.round((Number(raw[0]?.attended ?? 0) / total) * 100)
+      : 0;
   }
 
   /** Effective minimum attendance for a student's department (approved policy or default). */
@@ -62,7 +64,10 @@ export class AttendanceEligibilityService {
       )
       .catch(() => [] as Array<{ requested_min_percent: number }>);
     if (rows[0]?.requested_min_percent != null) {
-      return { threshold: Number(rows[0].requested_min_percent), source: 'POLICY' };
+      return {
+        threshold: Number(rows[0].requested_min_percent),
+        source: 'POLICY',
+      };
     }
     return { threshold: DEFAULT_MIN_ATTENDANCE, source: 'DEFAULT' };
   }

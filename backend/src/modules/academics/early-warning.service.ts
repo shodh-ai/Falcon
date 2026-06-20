@@ -11,7 +11,8 @@ export type AuthCtx = { userId: string; tenantId: string; roles: string[] };
 export class EarlyWarningService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
-    @InjectRepository(MentorshipMeeting) private readonly meetings: Repository<MentorshipMeeting>,
+    @InjectRepository(MentorshipMeeting)
+    private readonly meetings: Repository<MentorshipMeeting>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly notify: NotificationEmitterService,
   ) {}
@@ -56,7 +57,7 @@ export class EarlyWarningService {
        LEFT JOIN att_stats a ON a.student_user_id = u.user_id
        LEFT JOIN exam_stats e ON e.student_user_id = u.user_id
        WHERE u.tenant_id = $2`,
-      [ctx.userId, ctx.tenantId]
+      [ctx.userId, ctx.tenantId],
     );
 
     const atRiskStudents = rows
@@ -72,7 +73,9 @@ export class EarlyWarningService {
           attendancePct = (presentSessions / totalSessions) * 100;
           if (attendancePct !== null && attendancePct < 75) {
             riskScore += 50;
-            riskFactors.push(`Critical Attendance (${Math.round(attendancePct)}%)`);
+            riskFactors.push(
+              `Critical Attendance (${Math.round(attendancePct)}%)`,
+            );
           } else if (attendancePct !== null && attendancePct < 85) {
             riskScore += 20;
             riskFactors.push(`Low Attendance (${Math.round(attendancePct)}%)`);
@@ -102,7 +105,8 @@ export class EarlyWarningService {
           department: r.dept_name,
           batch: r.batch,
           risk_score: riskScore,
-          risk_level: riskScore >= 75 ? 'HIGH' : riskScore >= 40 ? 'MEDIUM' : 'LOW',
+          risk_level:
+            riskScore >= 75 ? 'HIGH' : riskScore >= 40 ? 'MEDIUM' : 'LOW',
           risk_factors: riskFactors,
           metrics: {
             attendance_percent: attendancePct,
@@ -117,7 +121,9 @@ export class EarlyWarningService {
   }
 
   async scheduleIntervention(facultyUserId: string, studentUserId: string) {
-    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
     if (!student) {
       throw new Error('Student not found');
     }
@@ -129,7 +135,7 @@ export class EarlyWarningService {
         requested_time: new Date(Date.now() + 24 * 60 * 60 * 1000), // Request meeting for tomorrow
         topic: 'Early Warning Intervention - Low Attendance/Grades',
         status: 'PENDING',
-      })
+      }),
     );
 
     if (student.tenant_id) {
@@ -139,7 +145,8 @@ export class EarlyWarningService {
         studentName: student.name,
         meetingAt: meeting.requested_time.toLocaleString(),
         title: 'Meeting Requested by Faculty',
-        message: 'A faculty member has scheduled an intervention meeting regarding your academic performance.',
+        message:
+          'A faculty member has scheduled an intervention meeting regarding your academic performance.',
         actionLink: '/student/mentorship',
       });
     }

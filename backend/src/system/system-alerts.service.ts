@@ -4,10 +4,16 @@ import { FalconNotificationsService } from '../core/notifications/falcon-notific
 /** @deprecated Use GET /api/notifications — kept for legacy dashboard calls. */
 @Injectable()
 export class SystemAlertsService {
-  constructor(private readonly falconNotifications: FalconNotificationsService) {}
+  constructor(
+    private readonly falconNotifications: FalconNotificationsService,
+  ) {}
 
   async listUnreadForUser(userId: string, tenantId: string) {
-    const rows = await this.falconNotifications.listForUser(tenantId, userId, 20);
+    const rows = await this.falconNotifications.listForUser(
+      tenantId,
+      userId,
+      20,
+    );
     return rows
       .filter((r) => !r.is_read)
       .map((r) => ({

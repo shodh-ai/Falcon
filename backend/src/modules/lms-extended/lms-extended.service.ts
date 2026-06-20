@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -54,7 +58,10 @@ export class LmsExtendedService {
   }
 
   async startAttempt(quizId: string, studentUserId: string) {
-    const quizRows = await this.dataSource.query(`SELECT * FROM lms_quizzes WHERE quiz_id = $1`, [quizId]);
+    const quizRows = await this.dataSource.query(
+      `SELECT * FROM lms_quizzes WHERE quiz_id = $1`,
+      [quizId],
+    );
     const quiz = quizRows[0];
     if (!quiz) throw new NotFoundException('Quiz not found');
 
@@ -76,7 +83,11 @@ export class LmsExtendedService {
   async submitAttempt(
     attemptId: string,
     studentUserId: string,
-    answers: Array<{ question_id: string; selected_option_id?: string; descriptive_answer?: string }>,
+    answers: Array<{
+      question_id: string;
+      selected_option_id?: string;
+      descriptive_answer?: string;
+    }>,
     antiCheatEvents?: unknown[],
   ) {
     const attemptRows = await this.dataSource.query(
@@ -85,7 +96,8 @@ export class LmsExtendedService {
     );
     const attempt = attemptRows[0];
     if (!attempt) throw new NotFoundException('Attempt not found');
-    if (attempt.status !== 'IN_PROGRESS') throw new BadRequestException('Attempt already submitted');
+    if (attempt.status !== 'IN_PROGRESS')
+      throw new BadRequestException('Attempt already submitted');
 
     let total = 0;
     for (const ans of answers) {
@@ -105,7 +117,14 @@ export class LmsExtendedService {
       await this.dataSource.query(
         `INSERT INTO lms_attempt_answers (attempt_id, question_id, selected_option_id, descriptive_answer, is_correct, points_awarded)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [attemptId, ans.question_id, ans.selected_option_id ?? null, ans.descriptive_answer ?? null, isCorrect, points],
+        [
+          attemptId,
+          ans.question_id,
+          ans.selected_option_id ?? null,
+          ans.descriptive_answer ?? null,
+          isCorrect,
+          points,
+        ],
       );
     }
 
@@ -127,14 +146,34 @@ export class LmsExtendedService {
     );
   }
 
-  createLiveClass(tenantId: string, userId: string, dto: {
-    course_id: string; title: string; provider?: string; meeting_url: string; starts_at: string; ends_at: string;
-  }) {
-    return this.dataSource.query(
-      `INSERT INTO lms_live_classes (tenant_id, course_id, title, provider, meeting_url, starts_at, ends_at, created_by)
+  createLiveClass(
+    tenantId: string,
+    userId: string,
+    dto: {
+      course_id: string;
+      title: string;
+      provider?: string;
+      meeting_url: string;
+      starts_at: string;
+      ends_at: string;
+    },
+  ) {
+    return this.dataSource
+      .query(
+        `INSERT INTO lms_live_classes (tenant_id, course_id, title, provider, meeting_url, starts_at, ends_at, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [tenantId, dto.course_id, dto.title, dto.provider ?? 'GOOGLE_MEET', dto.meeting_url, dto.starts_at, dto.ends_at, userId],
-    ).then((r) => r[0]);
+        [
+          tenantId,
+          dto.course_id,
+          dto.title,
+          dto.provider ?? 'GOOGLE_MEET',
+          dto.meeting_url,
+          dto.starts_at,
+          dto.ends_at,
+          userId,
+        ],
+      )
+      .then((r) => r[0]);
   }
 
   listLiveClasses(courseId: string) {
@@ -154,12 +193,18 @@ export class LmsExtendedService {
     );
   }
 
-  createThread(tenantId: string, userId: string, dto: { course_id: string; title: string; body: string }) {
-    return this.dataSource.query(
-      `INSERT INTO lms_forum_threads (tenant_id, course_id, author_user_id, title, body)
+  createThread(
+    tenantId: string,
+    userId: string,
+    dto: { course_id: string; title: string; body: string },
+  ) {
+    return this.dataSource
+      .query(
+        `INSERT INTO lms_forum_threads (tenant_id, course_id, author_user_id, title, body)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [tenantId, dto.course_id, userId, dto.title, dto.body],
-    ).then((r) => r[0]);
+        [tenantId, dto.course_id, userId, dto.title, dto.body],
+      )
+      .then((r) => r[0]);
   }
 
   listThreads(courseId: string) {
@@ -172,25 +217,30 @@ export class LmsExtendedService {
   }
 
   replyToThread(threadId: string, userId: string, body: string) {
-    return this.dataSource.query(
-      `INSERT INTO lms_forum_posts (thread_id, author_user_id, body) VALUES ($1, $2, $3) RETURNING *`,
-      [threadId, userId, body],
-    ).then((r) => r[0]);
+    return this.dataSource
+      .query(
+        `INSERT INTO lms_forum_posts (thread_id, author_user_id, body) VALUES ($1, $2, $3) RETURNING *`,
+        [threadId, userId, body],
+      )
+      .then((r) => r[0]);
   }
 
   upvote(userId: string, targetType: 'THREAD' | 'POST', targetId: string) {
-    return this.dataSource.query(
-      `INSERT INTO lms_forum_votes (user_id, target_type, target_id) VALUES ($1, $2, $3)
+    return this.dataSource
+      .query(
+        `INSERT INTO lms_forum_votes (user_id, target_type, target_id) VALUES ($1, $2, $3)
        ON CONFLICT (user_id, target_type, target_id) DO NOTHING`,
-      [userId, targetType, targetId],
-    ).then(async () => {
-      const table = targetType === 'THREAD' ? 'lms_forum_threads' : 'lms_forum_posts';
-      const col = targetType === 'THREAD' ? 'thread_id' : 'post_id';
-      await this.dataSource.query(
-        `UPDATE ${table} SET upvotes = upvotes + 1 WHERE ${col} = $1`,
-        [targetId],
-      );
-      return { upvoted: true };
-    });
+        [userId, targetType, targetId],
+      )
+      .then(async () => {
+        const table =
+          targetType === 'THREAD' ? 'lms_forum_threads' : 'lms_forum_posts';
+        const col = targetType === 'THREAD' ? 'thread_id' : 'post_id';
+        await this.dataSource.query(
+          `UPDATE ${table} SET upvotes = upvotes + 1 WHERE ${col} = $1`,
+          [targetId],
+        );
+        return { upvoted: true };
+      });
   }
 }

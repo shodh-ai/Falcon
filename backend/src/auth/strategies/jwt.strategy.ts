@@ -19,7 +19,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: AuthTokenPayload & { authType?: string; parentMobile?: string }) {
+  async validate(
+    payload: AuthTokenPayload & { authType?: string; parentMobile?: string },
+  ) {
     if (!payload.tenantId) {
       throw new UnauthorizedException('Token missing tenant context');
     }
@@ -84,7 +86,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         user.email,
       );
       if (parentMobile) {
-        return { ...baseUser, auth_type: 'parent', parent_mobile: parentMobile };
+        return {
+          ...baseUser,
+          auth_type: 'parent',
+          parent_mobile: parentMobile,
+        };
       }
     }
 

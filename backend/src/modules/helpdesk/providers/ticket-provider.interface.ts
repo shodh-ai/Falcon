@@ -10,9 +10,18 @@ export const TICKET_PROVIDER = Symbol('TICKET_PROVIDER');
  */
 export interface ITicketProvider {
   readonly providerId: string;
-  createTicket(studentUserId: string, dto: CreateTicketDto): Promise<HelpdeskTicket>;
+  createTicket(
+    studentUserId: string,
+    dto: CreateTicketDto,
+  ): Promise<HelpdeskTicket>;
   listMyTickets(studentUserId: string): Promise<HelpdeskTicket[]>;
   listTicketsForAssignee(assigneeUserId: string): Promise<HelpdeskTicket[]>;
-  updateStatus(ticketId: string, dto: UpdateTicketStatusDto): Promise<HelpdeskTicket>;
-  getTicketForStudent(ticketId: string, studentUserId: string): Promise<HelpdeskTicket>;
+  updateStatus(
+    ticketId: string,
+    dto: UpdateTicketStatusDto,
+  ): Promise<HelpdeskTicket>;
+  getTicketForStudent(
+    ticketId: string,
+    studentUserId: string,
+  ): Promise<HelpdeskTicket>;
 }

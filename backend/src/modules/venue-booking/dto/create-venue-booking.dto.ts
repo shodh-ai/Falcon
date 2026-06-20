@@ -1,4 +1,10 @@
-import { IsISO8601, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import {
+  IsISO8601,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateVenueBookingDto {
   @IsUUID()

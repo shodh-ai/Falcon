@@ -1,8 +1,24 @@
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import type { HelpdeskTicketCategory } from '../../../entities/helpdesk-ticket.entity';
 
 export class CreateTicketDto {
-  @IsIn(['FINANCE', 'ACADEMICS', 'IT', 'HOSTEL', 'HR', 'FACILITIES', 'MENTORSHIP', 'STUDENT_PROFILE'])
+  @IsIn([
+    'FINANCE',
+    'ACADEMICS',
+    'IT',
+    'HOSTEL',
+    'HR',
+    'FACILITIES',
+    'MENTORSHIP',
+    'STUDENT_PROFILE',
+  ])
   category: HelpdeskTicketCategory;
 
   @IsString()

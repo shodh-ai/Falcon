@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -25,8 +33,16 @@ export class CampusWalletController {
 
   @Post('top-up')
   @Roles('Student', 'SuperAdmin')
-  topUp(@Req() req: { user: AuthUser }, @Body() dto: { amount: number; reference_id: string }) {
-    return this.wallet.topUp(this.tenant(req), req.user.user_id, dto.amount, dto.reference_id);
+  topUp(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { amount: number; reference_id: string },
+  ) {
+    return this.wallet.topUp(
+      this.tenant(req),
+      req.user.user_id,
+      dto.amount,
+      dto.reference_id,
+    );
   }
 
   @Get('mess/catalog')
@@ -61,7 +77,11 @@ export class CampusWalletController {
   @Roles('Student')
   placeOrder(
     @Req() req: { user: AuthUser },
-    @Body() dto: { order_date: string; items: { item_id: string; meal_type: string; quantity?: number }[] },
+    @Body()
+    dto: {
+      order_date: string;
+      items: { item_id: string; meal_type: string; quantity?: number }[];
+    },
   ) {
     return this.wallet.placeOrder(this.tenant(req), req.user.user_id, dto);
   }
@@ -69,7 +89,11 @@ export class CampusWalletController {
   @Get('mess/my-orders')
   @Roles('Student')
   myOrders(@Req() req: { user: AuthUser }, @Query('all') all?: string) {
-    return this.wallet.listMyOrders(this.tenant(req), req.user.user_id, all !== 'true');
+    return this.wallet.listMyOrders(
+      this.tenant(req),
+      req.user.user_id,
+      all !== 'true',
+    );
   }
 
   @Get('mess/qr')

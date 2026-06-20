@@ -38,6 +38,8 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   const [editDueAt, setEditDueAt] = useState('');
   const [editFile, setEditFile] = useState<File | null>(null);
   const [gradeMarks, setGradeMarks] = useState<Record<string, string>>({});
+  const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
+  const [returningId, setReturningId] = useState<string | null>(null);
 
   function loadAssignments() {
     void api
@@ -101,6 +103,27 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       if (selectedId) void openRoster(selectedId, selectedTitle, selectedMaxMarks);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Grading failed');
+    }
+  }
+
+  async function returnRow(submissionId: string) {
+    const remarks = returnRemarks[submissionId]?.trim();
+    if (!remarks) {
+      toast.error('Enter remarks explaining what the student must fix');
+      return;
+    }
+    setReturningId(submissionId);
+    try {
+      await api.post(`/api/academics/faculty/submissions/${submissionId}/return`, {
+        faculty_remarks: remarks,
+        revision_days: 3,
+      });
+      toast.success('Returned to student for revision');
+      if (selectedId) void openRoster(selectedId, selectedTitle, selectedMaxMarks);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Return failed');
+    } finally {
+      setReturningId(null);
     }
   }
 
@@ -223,9 +246,18 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                     <td className="py-3 pr-4 font-medium text-sgvu-navy">{row.student_name}</td>
                     <td className="py-3 pr-4">
                       {row.submitted ? (
-                        <Badge variant="secondary">{row.status}</Badge>
+                        <Badge
+                          variant={
+                            row.status === 'RETURNED_FOR_REVISION' ? 'destructive' : 'secondary'
+                          }
+                        >
+                          {row.status}
+                        </Badge>
                       ) : (
                         <span className="font-medium text-red-600">Not submitted</span>
+                      )}
+                      {row.faculty_remarks && row.status === 'RETURNED_FOR_REVISION' && (
+                        <p className="mt-1 text-xs text-muted-foreground">{row.faculty_remarks}</p>
                       )}
                     </td>
                     <td className="py-3 pr-4">
@@ -249,26 +281,53 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                     </td>
                     <td className="py-3">
                       {row.submission_id && token ? (
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              void downloadWithAuth(
-                                `/api/academics/faculty/submissions/${row.submission_id}/download`,
-                                token,
-                                `${row.student_name}-da.pdf`,
-                              ).catch((e) => toast.error(String(e)))
-                            }
-                          >
-                            Download PDF
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => void gradeRow(row.submission_id!, selectedMaxMarks)}
-                          >
-                            Save marks
-                          </Button>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void downloadWithAuth(
+                                  `/api/academics/faculty/submissions/${row.submission_id}/download`,
+                                  token,
+                                  `${row.student_name}-da.pdf`,
+                                ).catch((e) => toast.error(String(e)))
+                              }
+                            >
+                              Download PDF
+                            </Button>
+                            {row.status !== 'RETURNED_FOR_REVISION' && (
+                              <Button
+                                size="sm"
+                                onClick={() => void gradeRow(row.submission_id!, selectedMaxMarks)}
+                              >
+                                Save marks
+                              </Button>
+                            )}
+                          </div>
+                          {row.status !== 'GRADED' && (
+                            <div className="flex flex-wrap items-end gap-2">
+                              <Input
+                                className="h-8 min-w-[200px] flex-1"
+                                placeholder="Return remarks (required)"
+                                value={returnRemarks[row.submission_id] ?? ''}
+                                onChange={(e) =>
+                                  setReturnRemarks((prev) => ({
+                                    ...prev,
+                                    [row.submission_id!]: e.target.value,
+                                  }))
+                                }
+                              />
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={returningId === row.submission_id}
+                                onClick={() => void returnRow(row.submission_id!)}
+                              >
+                                Return
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       ) : null}
                     </td>

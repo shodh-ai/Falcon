@@ -20,6 +20,7 @@ import {
   leaveStatusLabel,
 } from '@/lib/workforce-dates';
 import { useShowMoreList, ShowMoreButton } from '@/components/self-service/ShowMoreList';
+import { ProxyTeachingDialog } from '@/components/faculty/ProxyTeachingDialog';
 
 type Balance = { leave_type: string; entitled: string | number; used: string | number };
 type Request = {
@@ -45,6 +46,7 @@ export function MyLeavesPanel() {
   const [requests, setRequests] = useState<Request[]>([]);
   const [form, setForm] = useState({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [proxyLeaveRange, setProxyLeaveRange] = useState<{ start: string; end: string } | null>(null);
 
   async function load() {
     if (!user?.user_id) return;
@@ -70,6 +72,7 @@ export function MyLeavesPanel() {
       });
       toast.success('Leave submitted');
       setForm({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
+      setProxyLeaveRange({ start: form.start_date, end: form.end_date });
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
@@ -147,6 +150,13 @@ export function MyLeavesPanel() {
             </Button>
           </div>
         </form>
+        {proxyLeaveRange ? (
+          <ProxyTeachingDialog
+            startDate={proxyLeaveRange.start}
+            endDate={proxyLeaveRange.end}
+            onDone={() => setProxyLeaveRange(null)}
+          />
+        ) : null}
       </FacultyPanel>
 
       <FacultyPanel title="My requests" count={requests.length}>

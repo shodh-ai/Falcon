@@ -51,11 +51,23 @@ export class ParentService {
     await this.dataSource.query(
       `INSERT INTO integration_jobs (tenant_id, integration_type, entity_type, payload)
        VALUES ('a0000000-0000-4000-8000-000000000001', 'WHATSAPP', 'parent_otp', $1::jsonb)`,
-      [JSON.stringify({ to: normalized, message: `Your Falcon Parent OTP is ${otp}`, provider: 'MSG91' })],
+      [
+        JSON.stringify({
+          to: normalized,
+          message: `Your Falcon Parent OTP is ${otp}`,
+          provider: 'MSG91',
+        }),
+      ],
     );
 
-    const devOtp = this.config.get('NODE_ENV') !== 'production' ? otp : undefined;
-    return { mobile: normalized, otp_sent: true, channel: 'WHATSAPP_SMS', dev_otp: devOtp };
+    const devOtp =
+      this.config.get('NODE_ENV') !== 'production' ? otp : undefined;
+    return {
+      mobile: normalized,
+      otp_sent: true,
+      channel: 'WHATSAPP_SMS',
+      dev_otp: devOtp,
+    };
   }
 
   async verifyOtp(mobile: string, otp: string) {
@@ -73,7 +85,8 @@ export class ParentService {
       tenant_id: string;
     };
     if (!row?.otp_hash) throw new UnauthorizedException('Request OTP first');
-    if (new Date(row.otp_expires_at) < new Date()) throw new UnauthorizedException('OTP expired');
+    if (new Date(row.otp_expires_at) < new Date())
+      throw new UnauthorizedException('OTP expired');
 
     const ok = await bcrypt.compare(otp, row.otp_hash);
     if (!ok) throw new UnauthorizedException('Invalid OTP');
@@ -103,8 +116,12 @@ export class ParentService {
     };
   }
 
-  resolveMobile(reqUser: { parent_mobile?: string; auth_type?: string }, queryMobile?: string) {
-    if (reqUser?.auth_type === 'parent' && reqUser.parent_mobile) return reqUser.parent_mobile;
+  resolveMobile(
+    reqUser: { parent_mobile?: string; auth_type?: string },
+    queryMobile?: string,
+  ) {
+    if (reqUser?.auth_type === 'parent' && reqUser.parent_mobile)
+      return reqUser.parent_mobile;
     return queryMobile ?? '';
   }
 
@@ -113,7 +130,8 @@ export class ParentService {
       `SELECT 1 FROM parent_student_links WHERE parent_mobile = $1 AND student_user_id = $2`,
       [parentMobile, studentUserId],
     );
-    if (!rows[0]) throw new ForbiddenException('Not authorized to view this student');
+    if (!rows[0])
+      throw new ForbiddenException('Not authorized to view this student');
   }
 
   async getChildOverview(parentMobile: string) {
@@ -235,7 +253,10 @@ export class ParentService {
       status: string;
     }>) {
       if (fee.status === 'PAID') continue;
-      const due = Math.max(0, Number(fee.total_amount) - Number(fee.paid_amount ?? 0));
+      const due = Math.max(
+        0,
+        Number(fee.total_amount) - Number(fee.paid_amount ?? 0),
+      );
       if (due <= 0) continue;
       const dueMs = new Date(fee.due_date).getTime();
       const daysLeft = Math.ceil((dueMs - now) / (24 * 60 * 60 * 1000));
@@ -272,8 +293,10 @@ export class ParentService {
     );
 
     for (const row of reEvaluations) {
-      const original = row.original_marks != null ? Number(row.original_marks) : null;
-      const revised = row.revised_marks != null ? Number(row.revised_marks) : null;
+      const original =
+        row.original_marks != null ? Number(row.original_marks) : null;
+      const revised =
+        row.revised_marks != null ? Number(row.revised_marks) : null;
       const delta =
         original != null && revised != null
           ? ` (${original} → ${revised})`
@@ -291,9 +314,16 @@ export class ParentService {
       });
     }
 
-    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    items.sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
 
-    return { student_user_id: studentUserId, child_name: childName, feed: items.slice(0, 30) };
+    return {
+      student_user_id: studentUserId,
+      child_name: childName,
+      feed: items.slice(0, 30),
+    };
   }
 
   async getAttendanceForParent(parentMobile: string, studentUserId?: string) {
@@ -318,7 +348,11 @@ export class ParentService {
       this.getUfmCases(id),
       this.getDemeritSummary(id),
     ]);
-    return { disciplinary: academics, ufm_cases: ufm, demerit_summary: demeritSummary };
+    return {
+      disciplinary: academics,
+      ufm_cases: ufm,
+      demerit_summary: demeritSummary,
+    };
   }
 
   async getAcademicsSummary(parentMobile: string, studentUserId: string) {
@@ -427,20 +461,24 @@ export class ParentService {
       [studentUserId],
     );
     const proctorUserId = mentorshipRows[0]?.proctor_user_id;
-    if (!proctorUserId) throw new NotFoundException('No proctor assigned to this student');
+    if (!proctorUserId)
+      throw new NotFoundException('No proctor assigned to this student');
 
     const pending = await this.query(
       `SELECT 1 FROM mentorship_meetings WHERE student_user_id = $1 AND status = 'PENDING' LIMIT 1`,
       [studentUserId],
     );
-    if (pending[0]) throw new BadRequestException('A meeting request is already pending');
+    if (pending[0])
+      throw new BadRequestException('A meeting request is already pending');
 
     const [student] = await this.query<{ name: string; tenant_id: string }>(
       `SELECT name, tenant_id FROM users WHERE user_id = $1`,
       [studentUserId],
     );
 
-    const requestedTime = preferredDate ? new Date(preferredDate) : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const requestedTime = preferredDate
+      ? new Date(preferredDate)
+      : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     if (Number.isNaN(requestedTime.getTime())) {
       throw new BadRequestException('Invalid preferred meeting date');
     }
@@ -471,7 +509,9 @@ export class ParentService {
       ],
     );
 
-    const formatted = requestedTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const formatted = requestedTime.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+    });
     this.notify.meetingRequested({
       tenantId: student?.tenant_id ?? DEFAULT_TENANT,
       userId: proctorUserId,
@@ -501,8 +541,11 @@ export class ParentService {
       [studentUserId],
     );
 
-    let transport: Awaited<ReturnType<TransportService['getMyAllocation']>> = null;
-    let live: Awaited<ReturnType<TransportService['getLiveLocationForStudent']>> | null = null;
+    let transport: Awaited<ReturnType<TransportService['getMyAllocation']>> =
+      null;
+    let live: Awaited<
+      ReturnType<TransportService['getLiveLocationForStudent']>
+    > | null = null;
 
     const [user] = await this.query<{ tenant_id: string }>(
       `SELECT tenant_id FROM users WHERE user_id = $1`,
@@ -513,17 +556,28 @@ export class ParentService {
     try {
       transport = await this.transport.getMyAllocation(tenantId, studentUserId);
       if (transport?.pass_status === 'ACTIVE') {
-        live = await this.transport.getLiveLocationForStudent(tenantId, studentUserId);
+        live = await this.transport.getLiveLocationForStudent(
+          tenantId,
+          studentUserId,
+        );
       }
     } catch {
       transport = null;
       live = null;
     }
 
-    return { gate_logs: gateLogs, transport_allocation: transport, live_bus: live };
+    return {
+      gate_logs: gateLogs,
+      transport_allocation: transport,
+      live_bus: live,
+    };
   }
 
-  async createPaymentOrder(parentMobile: string, studentUserId: string, demandId: string) {
+  async createPaymentOrder(
+    parentMobile: string,
+    studentUserId: string,
+    demandId: string,
+  ) {
     await this.assertChildLinked(parentMobile, studentUserId);
 
     const rows = await this.query<{
@@ -541,7 +595,10 @@ export class ParentService {
     if (!demand) throw new NotFoundException('Fee demand not found');
     if (demand.status === 'PAID') throw new BadRequestException('Already paid');
 
-    const outstanding = Math.max(0, Number(demand.total_amount) - Number(demand.paid_amount ?? 0));
+    const outstanding = Math.max(
+      0,
+      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
+    );
     if (outstanding <= 0) throw new BadRequestException('Nothing due');
 
     const orderId = `order_parent_${demandId.replace(/-/g, '').slice(0, 10)}_${Date.now()}`;
@@ -576,9 +633,13 @@ export class ParentService {
     );
     const demand = rows[0];
     if (!demand) throw new BadRequestException('Fee demand not found');
-    if (demand.status === 'PAID') return { already_paid: true, demand_id: demandId };
+    if (demand.status === 'PAID')
+      return { already_paid: true, demand_id: demandId };
 
-    const outstanding = Math.max(0, Number(demand.total_amount) - Number(demand.paid_amount ?? 0));
+    const outstanding = Math.max(
+      0,
+      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
+    );
     const paymentId = gatewayPaymentId ?? `pay_parent_${Date.now()}`;
 
     await this.query(
@@ -586,7 +647,13 @@ export class ParentService {
          student_user_id, demand_id, gateway, gateway_payment_id, gateway_reference,
          amount, status, payment_mode, receipt_url
        ) VALUES ($1, $2, 'RAZORPAY', $3, $3, $4, 'SUCCESS', 'UPI', $5)`,
-      [studentUserId, demandId, paymentId, outstanding, `/receipts/${paymentId}.pdf`],
+      [
+        studentUserId,
+        demandId,
+        paymentId,
+        outstanding,
+        `/receipts/${paymentId}.pdf`,
+      ],
     );
 
     await this.query(
@@ -596,10 +663,19 @@ export class ParentService {
       [demandId],
     );
 
-    return { paid: true, demand_id: demandId, payment_id: paymentId, amount: outstanding };
+    return {
+      paid: true,
+      demand_id: demandId,
+      payment_id: paymentId,
+      amount: outstanding,
+    };
   }
 
-  async generateFeeCertificate(parentMobile: string, studentUserId: string, financialYear?: string) {
+  async generateFeeCertificate(
+    parentMobile: string,
+    studentUserId: string,
+    financialYear?: string,
+  ) {
     await this.assertChildLinked(parentMobile, studentUserId);
 
     const fy = financialYear ?? this.currentFinancialYear();
@@ -621,7 +697,11 @@ export class ParentService {
       [studentUserId],
     );
 
-    const payments = await this.query<{ fee_head: string; amount: string; paid_at: string }>(
+    const payments = await this.query<{
+      fee_head: string;
+      amount: string;
+      paid_at: string;
+    }>(
       `SELECT d.fee_head, t.amount::text, t.created_at::text AS paid_at
        FROM finance_transactions t
        JOIN finance_fee_demands d ON d.demand_id = t.demand_id
@@ -639,7 +719,13 @@ export class ParentService {
     const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
     const navy = rgb(0.03, 0.14, 0.29);
 
-    page.drawText('Suresh Gyan Vihar University', { x: 50, y: 780, size: 18, font: bold, color: navy });
+    page.drawText('Suresh Gyan Vihar University', {
+      x: 50,
+      y: 780,
+      size: 18,
+      font: bold,
+      color: navy,
+    });
     page.drawText('Annual Fee Payment Certificate (Section 80C / Tuition)', {
       x: 50,
       y: 755,
@@ -647,13 +733,28 @@ export class ParentService {
       font: bold,
     });
     page.drawText(`Financial Year: ${fy}`, { x: 50, y: 730, size: 10, font });
-    page.drawText(`Student: ${student?.name ?? '—'}`, { x: 50, y: 710, size: 10, font });
+    page.drawText(`Student: ${student?.name ?? '—'}`, {
+      x: 50,
+      y: 710,
+      size: 10,
+      font,
+    });
     page.drawText(
       `Enrollment: ${student?.enrollment_number ?? student?.admission_number ?? '—'}`,
       { x: 50, y: 690, size: 10, font },
     );
-    page.drawText(`University PAN: ${UNIVERSITY_PAN}`, { x: 50, y: 670, size: 10, font });
-    page.drawText('This certifies tuition & academic fees received as below:', { x: 50, y: 645, size: 10, font });
+    page.drawText(`University PAN: ${UNIVERSITY_PAN}`, {
+      x: 50,
+      y: 670,
+      size: 10,
+      font,
+    });
+    page.drawText('This certifies tuition & academic fees received as below:', {
+      x: 50,
+      y: 645,
+      size: 10,
+      font,
+    });
 
     let y = 620;
     for (const p of payments.slice(0, 12)) {
@@ -664,15 +765,29 @@ export class ParentService {
       y -= 16;
     }
 
-    page.drawText(`Total Tuition Fees Paid: ₹${totalPaid.toLocaleString('en-IN')}`, {
+    page.drawText(
+      `Total Tuition Fees Paid: ₹${totalPaid.toLocaleString('en-IN')}`,
+      {
+        x: 50,
+        y: y - 10,
+        size: 12,
+        font: bold,
+        color: navy,
+      },
+    );
+    page.drawText('Authorized for income-tax documentation purposes.', {
       x: 50,
-      y: y - 10,
-      size: 12,
+      y: 80,
+      size: 8,
+      font,
+    });
+    page.drawText('[University Seal]', {
+      x: 400,
+      y: 100,
+      size: 10,
       font: bold,
       color: navy,
     });
-    page.drawText('Authorized for income-tax documentation purposes.', { x: 50, y: 80, size: 8, font });
-    page.drawText('[University Seal]', { x: 400, y: 100, size: 10, font: bold, color: navy });
 
     const bytes = await pdf.save();
     const relDir = path.join('parent-certificates', fy);
@@ -748,7 +863,13 @@ export class ParentService {
       `SELECT cumulative_demerit_points, is_subject_back_triggered, subject_back_triggered_at
        FROM student_academic_summaries WHERE student_user_id = $1`,
       [studentUserId],
-    ).then((rows) => rows[0] ?? { cumulative_demerit_points: 0, is_subject_back_triggered: false });
+    ).then(
+      (rows) =>
+        rows[0] ?? {
+          cumulative_demerit_points: 0,
+          is_subject_back_triggered: false,
+        },
+    );
   }
 
   getUfmCases(studentUserId: string) {
@@ -782,7 +903,10 @@ export class ParentService {
     return `${year - 1}-${year}`;
   }
 
-  private query<T = Record<string, unknown>>(sql: string, params: unknown[]): Promise<T[]> {
+  private query<T = Record<string, unknown>>(
+    sql: string,
+    params: unknown[],
+  ): Promise<T[]> {
     return this.dataSource.query(sql, params);
   }
 }

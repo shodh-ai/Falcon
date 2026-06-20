@@ -64,7 +64,12 @@ export class HrDynamicRulesService {
     return rows[0];
   }
 
-  async updateRule(tenantId: string, entityId: number, ruleId: string, dto: Partial<DynamicRuleDto>) {
+  async updateRule(
+    tenantId: string,
+    entityId: number,
+    ruleId: string,
+    dto: Partial<DynamicRuleDto>,
+  ) {
     const rows = await this.dataSource.query(
       `UPDATE hr_dynamic_rules SET
          rule_name = COALESCE($4, rule_name),
@@ -106,7 +111,11 @@ export class HrDynamicRulesService {
     return { deleted: true };
   }
 
-  private compare(operator: string, actual: number, threshold: number): boolean {
+  private compare(
+    operator: string,
+    actual: number,
+    threshold: number,
+  ): boolean {
     switch (operator) {
       case 'GT':
         return actual > threshold;
@@ -140,25 +149,43 @@ export class HrDynamicRulesService {
       let metric = 0;
 
       if (rule.condition_type === 'PUNCH_OUT_EARLY') {
-        if (!result.last_out_time || result.calculated_status === 'ABSENT') continue;
+        if (!result.last_out_time || result.calculated_status === 'ABSENT')
+          continue;
         const shiftEnd = this.shiftDateTime(date, result.shift.end_time, 0);
-        metric = Math.round((shiftEnd.getTime() - result.last_out_time.getTime()) / 60000);
-        if (metric > 0) matched = this.compare(rule.operator, metric, threshold);
+        metric = Math.round(
+          (shiftEnd.getTime() - result.last_out_time.getTime()) / 60000,
+        );
+        if (metric > 0)
+          matched = this.compare(rule.operator, metric, threshold);
       } else if (rule.condition_type === 'PUNCH_IN_LATE') {
         if (!result.first_in_time) continue;
-        const shiftStart = this.shiftDateTime(date, result.shift.start_time, result.shift.grace_period_mins);
-        metric = Math.round((result.first_in_time.getTime() - shiftStart.getTime()) / 60000);
-        if (metric > 0) matched = this.compare(rule.operator, metric, threshold);
+        const shiftStart = this.shiftDateTime(
+          date,
+          result.shift.start_time,
+          result.shift.grace_period_mins,
+        );
+        metric = Math.round(
+          (result.first_in_time.getTime() - shiftStart.getTime()) / 60000,
+        );
+        if (metric > 0)
+          matched = this.compare(rule.operator, metric, threshold);
       } else if (rule.condition_type === 'MISSED_PUNCH') {
         matched = !result.first_in_time || !result.last_out_time;
         metric = matched ? 1 : 0;
         matched = this.compare(rule.operator, metric, threshold);
       } else if (rule.condition_type === 'OCCURRENCE_COUNT') {
-        const trackType = (rule.action_payload?.track_type as string) ?? 'EARLY_GOING';
-        if (trackType === 'EARLY_GOING' && result.last_out_time && result.calculated_status !== 'ABSENT') {
+        const trackType =
+          (rule.action_payload?.track_type as string) ?? 'EARLY_GOING';
+        if (
+          trackType === 'EARLY_GOING' &&
+          result.last_out_time &&
+          result.calculated_status !== 'ABSENT'
+        ) {
           const maxMins = Number(rule.action_payload?.max_mins ?? 20);
           const shiftEnd = this.shiftDateTime(date, result.shift.end_time, 0);
-          const minutesEarly = Math.round((shiftEnd.getTime() - result.last_out_time.getTime()) / 60000);
+          const minutesEarly = Math.round(
+            (shiftEnd.getTime() - result.last_out_time.getTime()) / 60000,
+          );
           if (minutesEarly <= 0 || minutesEarly > maxMins) continue;
           const tracker = await this.legacyRules.incrementEarlyGoing(
             tenantId,
@@ -173,7 +200,15 @@ export class HrDynamicRulesService {
       }
 
       if (!matched) continue;
-      await this.applyAction(tenantId, entityId, userId, date, monthYear, rule, metric);
+      await this.applyAction(
+        tenantId,
+        entityId,
+        userId,
+        date,
+        monthYear,
+        rule,
+        metric,
+      );
     }
   }
 

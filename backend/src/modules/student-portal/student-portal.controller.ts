@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Post, Patch, Req, Res, UploadedFile, UseGuards, UseInterceptors, BadRequestException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Req,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+  BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
@@ -23,7 +35,8 @@ export class StudentPortalController {
   @Patch('profile')
   updateProfile(
     @Req() req: { user: AuthUser },
-    @Body() body: {
+    @Body()
+    body: {
       profile_photo_url?: string;
       bank_details?: Record<string, any>;
       parent_details?: Record<string, any>;
@@ -41,7 +54,11 @@ export class StudentPortalController {
     );
     const ext = filePath.split('.').pop()?.toLowerCase();
     const contentType =
-      ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      ext === 'png'
+        ? 'image/png'
+        : ext === 'webp'
+          ? 'image/webp'
+          : 'image/jpeg';
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'private, max-age=300');
     stream.pipe(res);
@@ -49,13 +66,23 @@ export class StudentPortalController {
 
   @Post('profile/photo')
   @UseInterceptors(
-    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }),
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
   )
-  uploadProfilePhoto(@Req() req: { user: AuthUser }, @UploadedFile() file?: Express.Multer.File) {
+  uploadProfilePhoto(
+    @Req() req: { user: AuthUser },
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
     if (!file) {
       throw new BadRequestException('No photo uploaded');
     }
-    return this.portal.uploadProfilePhoto(this.tenant(req), req.user.user_id, file);
+    return this.portal.uploadProfilePhoto(
+      this.tenant(req),
+      req.user.user_id,
+      file,
+    );
   }
 
   @Get('campus-settings')
@@ -100,11 +127,15 @@ export class StudentPortalController {
 
   @Post('extracurriculars')
   @UseInterceptors(
-    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } }),
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 25 * 1024 * 1024 },
+    }),
   )
   logExtracurricular(
     @Req() req: { user: AuthUser },
-    @Body() body: { activity_type?: string; description?: string; event_date?: string },
+    @Body()
+    body: { activity_type?: string; description?: string; event_date?: string },
     @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.portal.logExtracurricular(
@@ -162,7 +193,11 @@ export class StudentPortalController {
     @Req() req: { user: AuthUser },
     @Body() body: { demand_id: string; payment_id?: string },
   ) {
-    return this.portal.payDemandMock(req.user.user_id, body.demand_id, body.payment_id);
+    return this.portal.payDemandMock(
+      req.user.user_id,
+      body.demand_id,
+      body.payment_id,
+    );
   }
 
   @Get('placements')
@@ -173,13 +208,22 @@ export class StudentPortalController {
   @Post('profile/update-request')
   profileUpdateRequest(
     @Req() req: { user: AuthUser },
-    @Body() body: { subject?: string; description?: string; fields_requested?: string[] },
+    @Body()
+    body: {
+      subject?: string;
+      description?: string;
+      fields_requested?: string[];
+    },
   ) {
-    return this.portal.requestProfileUpdate(this.tenant(req), req.user.user_id, {
-      subject: body.subject ?? 'Profile update request',
-      description: body.description ?? '',
-      fields_requested: body.fields_requested,
-    });
+    return this.portal.requestProfileUpdate(
+      this.tenant(req),
+      req.user.user_id,
+      {
+        subject: body.subject ?? 'Profile update request',
+        description: body.description ?? '',
+        fields_requested: body.fields_requested,
+      },
+    );
   }
 
   @Post('exit/alumni-register')

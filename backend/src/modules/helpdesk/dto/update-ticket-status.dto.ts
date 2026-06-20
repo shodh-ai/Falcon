@@ -1,4 +1,11 @@
-import { IsIn, IsOptional, IsString, IsUUID, MinLength, ValidateIf } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 import type { HelpdeskTicketStatus } from '../../../entities/helpdesk-ticket.entity';
 
 export class UpdateTicketStatusDto {

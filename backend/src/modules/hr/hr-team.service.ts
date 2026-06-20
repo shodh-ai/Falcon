@@ -4,7 +4,11 @@ import { DataSource } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 import { AttendanceCalculationService } from './attendance-calculation.service';
-import { HrTeamScopeService, parseTeamScope, type TeamScope } from './hr-team-scope.service';
+import {
+  HrTeamScopeService,
+  parseTeamScope,
+  type TeamScope,
+} from './hr-team-scope.service';
 import { HrWorkforceService } from './hr-workforce.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { CacheService } from '../../core/redis/cache.service';
@@ -63,15 +67,27 @@ export class HrTeamService {
 
   private formatClock(d: Date | null | undefined) {
     if (!d) return null;
-    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return d.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
   }
 
-  private cellColor(status: string, bottomLine: string): 'red' | 'yellow' | 'green' | 'gray' {
+  private cellColor(
+    status: string,
+    bottomLine: string,
+  ): 'red' | 'yellow' | 'green' | 'gray' {
     if (status === 'ABSENT' || bottomLine === 'Absent') return 'red';
-    if (bottomLine.startsWith('On Duty') || bottomLine.startsWith('Leave') || status === 'PENDING_REQUEST') {
+    if (
+      bottomLine.startsWith('On Duty') ||
+      bottomLine.startsWith('Leave') ||
+      status === 'PENDING_REQUEST'
+    ) {
       return 'yellow';
     }
-    if (['FULL_DAY', 'LATE_COMING', 'EARLY_GOING', 'HALF_DAY'].includes(status)) return 'green';
+    if (['FULL_DAY', 'LATE_COMING', 'EARLY_GOING', 'HALF_DAY'].includes(status))
+      return 'green';
     if (status === 'WEEK_OFF' || status === 'HOLIDAY') return 'gray';
     return 'gray';
   }
@@ -85,7 +101,13 @@ export class HrTeamService {
     const scope = parseTeamScope(scopeRaw);
     const monthKey = month ?? new Date().toISOString().slice(0, 7);
     const { start, end } = this.monthRange(monthKey);
-    const { clause, params } = this.scope.scopeUserFilterSql(managerId, tenantId, scope, 'u', 1);
+    const { clause, params } = this.scope.scopeUserFilterSql(
+      managerId,
+      tenantId,
+      scope,
+      'u',
+      1,
+    );
 
     const metrics = await this.dataSource.query<
       Array<{
@@ -251,12 +273,23 @@ export class HrTeamService {
     monthKey: string,
   ) {
     const { daysInMonth, start, end } = this.monthRange(monthKey);
-    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    const members = await this.scope.listScopedUsers(
+      managerId,
+      tenantId,
+      scope,
+    );
     if (!members.length) {
-      return { scope, month: monthKey, days_in_month: daysInMonth, employees: [] };
+      return {
+        scope,
+        month: monthKey,
+        days_in_month: daysInMonth,
+        employees: [],
+      };
     }
 
-    const entityRows = await this.dataSource.query<Array<{ entity_id: number }>>(
+    const entityRows = await this.dataSource.query<
+      Array<{ entity_id: number }>
+    >(
       `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
       [managerId, tenantId],
     );
@@ -264,7 +297,12 @@ export class HrTeamService {
     const userIds = members.map((m) => m.user_id);
 
     const [calendars, leaveRows] = await Promise.all([
-      this.attendanceCalc.buildMonthCalendarsBatch(userIds, monthKey, tenantId, entityId),
+      this.attendanceCalc.buildMonthCalendarsBatch(
+        userIds,
+        monthKey,
+        tenantId,
+        entityId,
+      ),
       this.dataSource.query<
         Array<{
           staff_user_id: string;
@@ -311,7 +349,9 @@ export class HrTeamService {
           if (r.request_type === 'ON_DUTY') return false;
           return d.date >= r.start_date && d.date <= r.end_date;
         });
-        const od = odRows.find((r) => d.date >= r.start_date && d.date <= r.end_date);
+        const od = odRows.find(
+          (r) => d.date >= r.start_date && d.date <= r.end_date,
+        );
 
         let bottomLine: string;
         if (leave) {
@@ -331,7 +371,8 @@ export class HrTeamService {
         }
 
         const topLine =
-          d.calculated_status === 'WEEK_OFF' || d.calculated_status === 'HOLIDAY'
+          d.calculated_status === 'WEEK_OFF' ||
+          d.calculated_status === 'HOLIDAY'
             ? '—'
             : requiredLabel;
 
@@ -361,7 +402,12 @@ export class HrTeamService {
     scopeRaw?: string,
     month?: string,
   ): Promise<Buffer> {
-    const matrix = await this.getAttendanceMatrix(managerId, tenantId, scopeRaw, month);
+    const matrix = await this.getAttendanceMatrix(
+      managerId,
+      tenantId,
+      scopeRaw,
+      month,
+    );
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Team Attendance');
     const headers = [
@@ -373,12 +419,18 @@ export class HrTeamService {
     sheet.getRow(1).font = { bold: true };
 
     for (const emp of matrix.employees) {
-      const dayMap = new Map(emp.days.map((d) => [d.date.slice(8, 10), `${d.top_line} | ${d.bottom_line}`]));
+      const dayMap = new Map(
+        emp.days.map((d) => [
+          d.date.slice(8, 10),
+          `${d.top_line} | ${d.bottom_line}`,
+        ]),
+      );
       sheet.addRow([
         emp.employee_id ?? emp.user_id.slice(0, 8),
         emp.name,
-        ...Array.from({ length: matrix.days_in_month }, (_, i) =>
-          dayMap.get(String(i + 1).padStart(2, '0')) ?? '—',
+        ...Array.from(
+          { length: matrix.days_in_month },
+          (_, i) => dayMap.get(String(i + 1).padStart(2, '0')) ?? '—',
         ),
       ]);
     }
@@ -408,14 +460,20 @@ export class HrTeamService {
       return { scope, ...empty };
     }
 
-    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    const members = await this.scope.listScopedUsers(
+      managerId,
+      tenantId,
+      scope,
+    );
     const userIds = members.map((m) => m.user_id);
 
     if (!userIds.length) {
       return { scope, ...empty };
     }
 
-    const workflowRows = await this.dataSource.query<Array<{ request_type: string; count: string }>>(
+    const workflowRows = await this.dataSource.query<
+      Array<{ request_type: string; count: string }>
+    >(
       `SELECT r.request_type, COUNT(*)::text AS count
        FROM staff_leave_requests r
        WHERE r.tenant_id = $1
@@ -426,7 +484,13 @@ export class HrTeamService {
       [tenantId, managerId, userIds],
     );
 
-    const { clause, params } = this.scope.scopeUserFilterSql(managerId, tenantId, scope, 'u', 2);
+    const { clause, params } = this.scope.scopeUserFilterSql(
+      managerId,
+      tenantId,
+      scope,
+      'u',
+      2,
+    );
 
     const [docRow] = await this.dataSource.query<Array<{ count: string }>>(
       `SELECT COUNT(*)::text AS count
@@ -437,7 +501,9 @@ export class HrTeamService {
       [tenantId, ...params],
     );
 
-    const [appraisalRow] = await this.dataSource.query<Array<{ count: string }>>(
+    const [appraisalRow] = await this.dataSource.query<
+      Array<{ count: string }>
+    >(
       `SELECT COUNT(*)::text AS count
        FROM hr_employee_appraisals a
        WHERE a.tenant_id = $1
@@ -446,7 +512,9 @@ export class HrTeamService {
       [tenantId, ...params],
     );
 
-    const [attendanceOverrideRow] = await this.dataSource.query<Array<{ count: string }>>(
+    const [attendanceOverrideRow] = await this.dataSource.query<
+      Array<{ count: string }>
+    >(
       `SELECT COUNT(*)::text AS count
        FROM course_attendance_overrides o
        WHERE o.tenant_id = $1
@@ -455,7 +523,9 @@ export class HrTeamService {
       [tenantId, ...params],
     );
 
-    const byType = Object.fromEntries(workflowRows.map((r) => [r.request_type, Number(r.count)]));
+    const byType = Object.fromEntries(
+      workflowRows.map((r) => [r.request_type, Number(r.count)]),
+    );
 
     return {
       scope,
@@ -494,7 +564,11 @@ export class HrTeamService {
       return this.listAttendanceOverrides(managerId, tenantId, scope);
     }
 
-    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    const members = await this.scope.listScopedUsers(
+      managerId,
+      tenantId,
+      scope,
+    );
     const userIds = members.map((m) => m.user_id);
     if (!userIds.length) {
       return { scope, tab: tabKey, count: 0, items: [] };
@@ -542,8 +616,18 @@ export class HrTeamService {
     };
   }
 
-  private async listDocumentApprovals(managerId: string, tenantId: string, scope: TeamScope) {
-    const { clause, params } = this.scope.scopeUserFilterSql(managerId, tenantId, scope, 'u', 2);
+  private async listDocumentApprovals(
+    managerId: string,
+    tenantId: string,
+    scope: TeamScope,
+  ) {
+    const { clause, params } = this.scope.scopeUserFilterSql(
+      managerId,
+      tenantId,
+      scope,
+      'u',
+      2,
+    );
     const rows = await this.dataSource.query(
       `SELECT d.document_id, d.document_type, d.uploaded_at, d.verification_status,
               u.name AS employee_name, u.official_email AS employee_email, p.employee_id
@@ -566,7 +650,8 @@ export class HrTeamService {
         document_id: r.document_id,
         request_type: 'DOCUMENT',
         leave_type: r.document_type,
-        applied_date: (r.uploaded_at as Date)?.toISOString?.()?.slice(0, 10) ?? null,
+        applied_date:
+          (r.uploaded_at as Date)?.toISOString?.()?.slice(0, 10) ?? null,
         raised_on: r.uploaded_at,
         reason: `Document verification: ${r.document_type}`,
         status: r.verification_status,
@@ -579,8 +664,18 @@ export class HrTeamService {
     };
   }
 
-  private async listAppraisalApprovals(managerId: string, tenantId: string, scope: TeamScope) {
-    const { clause, params } = this.scope.scopeUserFilterSql(managerId, tenantId, scope, 'u', 2);
+  private async listAppraisalApprovals(
+    managerId: string,
+    tenantId: string,
+    scope: TeamScope,
+  ) {
+    const { clause, params } = this.scope.scopeUserFilterSql(
+      managerId,
+      tenantId,
+      scope,
+      'u',
+      2,
+    );
     const rows = await this.dataSource.query(
       `SELECT a.appraisal_record_id, a.appraisal_year, a.auto_api_score, a.hod_rating, a.hr_final_status,
               u.name AS employee_name, u.official_email AS employee_email, p.employee_id
@@ -616,8 +711,18 @@ export class HrTeamService {
     };
   }
 
-  private async listAttendanceOverrides(managerId: string, tenantId: string, scope: TeamScope) {
-    const { clause, params } = this.scope.scopeUserFilterSql(managerId, tenantId, scope, 'u', 2);
+  private async listAttendanceOverrides(
+    managerId: string,
+    tenantId: string,
+    scope: TeamScope,
+  ) {
+    const { clause, params } = this.scope.scopeUserFilterSql(
+      managerId,
+      tenantId,
+      scope,
+      'u',
+      2,
+    );
     const rows = await this.dataSource.query(
       `SELECT o.request_id, o.date, o.status, o.created_at,
               c.course_name, c.course_code,
@@ -667,7 +772,9 @@ export class HrTeamService {
     roles: string[] = [],
   ) {
     if (!(await this.assertTeamApprovalAccess(managerId, tenantId, roles))) {
-      throw new BadRequestException('Team approval features are not enabled for your account');
+      throw new BadRequestException(
+        'Team approval features are not enabled for your account',
+      );
     }
     if (!ids.length) throw new BadRequestException('No requests selected');
     const tabKey = (tab?.toUpperCase() ?? 'LEAVE') as TeamRequestTab;
@@ -698,9 +805,18 @@ export class HrTeamService {
       );
 
       if (action === 'APPROVE') {
-        const rows = await this.dataSource.query<Array<{ request_id: string; tenant_id: string; course_id: string; faculty_user_id: string; student_user_id: string; date: string }>>(
+        const rows = await this.dataSource.query<
+          Array<{
+            request_id: string;
+            tenant_id: string;
+            course_id: string;
+            faculty_user_id: string;
+            student_user_id: string;
+            date: string;
+          }>
+        >(
           `SELECT request_id, tenant_id, course_id, faculty_user_id, student_user_id, date FROM course_attendance_overrides WHERE request_id = ANY($1::uuid[])`,
-          [ids]
+          [ids],
         );
 
         for (const r of rows) {
@@ -736,7 +852,16 @@ export class HrTeamService {
                    ELSE '[]'::jsonb
                  END
                )`,
-            [r.tenant_id, r.course_id, r.faculty_user_id, r.date, JSON.stringify([{ student_id: r.student_user_id, status: 'PRESENT' }]), r.student_user_id]
+            [
+              r.tenant_id,
+              r.course_id,
+              r.faculty_user_id,
+              r.date,
+              JSON.stringify([
+                { student_id: r.student_user_id, status: 'PRESENT' },
+              ]),
+              r.student_user_id,
+            ],
           );
 
           // Need to recalculate percents. Let's just do it directly.
@@ -766,7 +891,7 @@ export class HrTeamService {
              WHERE e.tenant_id = $1
                AND e.course_id = $2
                AND e.student_user_id::text = s.student_id`,
-            [r.tenant_id, r.course_id]
+            [r.tenant_id, r.course_id],
           );
         }
       }
@@ -832,11 +957,17 @@ export class HrTeamService {
       });
     }
 
-    return { ok: true, action, recipient: staff[0].official_email, notified: true };
+    return {
+      ok: true,
+      action,
+      recipient: staff[0].official_email,
+      notified: true,
+    };
   }
 
   async listAllPendingForAdmin(tenantId: string, entityId?: number) {
-    const entityClause = entityId != null ? ' AND (r.entity_id = $2 OR r.entity_id IS NULL)' : '';
+    const entityClause =
+      entityId != null ? ' AND (r.entity_id = $2 OR r.entity_id IS NULL)' : '';
     const params: unknown[] = [tenantId];
     if (entityId != null) params.push(entityId);
 
@@ -864,8 +995,15 @@ export class HrTeamService {
     action: 'APPROVE' | 'REJECT',
     comment?: string,
   ) {
-    return this.workforce.actOnTeamRequest(adminUserId, tenantId, leaveId, action, comment, {
-      adminOverride: true,
-    });
+    return this.workforce.actOnTeamRequest(
+      adminUserId,
+      tenantId,
+      leaveId,
+      action,
+      comment,
+      {
+        adminOverride: true,
+      },
+    );
   }
 }

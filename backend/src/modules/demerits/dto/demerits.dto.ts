@@ -19,7 +19,10 @@ export const DEMERIT_CATEGORIES = [
 
 export type DemeritCategory = (typeof DEMERIT_CATEGORIES)[number];
 
-export const DEMERIT_REVIEW_STATUSES = ['APPROVED_BY_DC', 'REJECTED_BY_DC'] as const;
+export const DEMERIT_REVIEW_STATUSES = [
+  'APPROVED_BY_DC',
+  'REJECTED_BY_DC',
+] as const;
 
 export class SubmitDemeritIncidentDto {
   /** Student user UUID, enrollment number, or email */

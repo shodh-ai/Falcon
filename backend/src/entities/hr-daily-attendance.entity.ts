@@ -11,7 +11,11 @@ import {
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
-export type HrDailyAttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'MISSED_PUNCH';
+export type HrDailyAttendanceStatus =
+  | 'PRESENT'
+  | 'ABSENT'
+  | 'HALF_DAY'
+  | 'MISSED_PUNCH';
 
 export type CalculatedAttendanceStatus =
   | 'FULL_DAY'

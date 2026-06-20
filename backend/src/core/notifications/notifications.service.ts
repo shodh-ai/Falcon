@@ -13,15 +13,28 @@ import { Injectable, Logger } from '@nestjs/common';
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  async sendEmail(to: string | string[], subject: string, body: string): Promise<void> {
-    this.logger.log(`[email] to=${Array.isArray(to) ? to.join(',') : to} subject="${subject}"`);
+  async sendEmail(
+    to: string | string[],
+    subject: string,
+    body: string,
+  ): Promise<void> {
+    this.logger.log(
+      `[email] to=${Array.isArray(to) ? to.join(',') : to} subject="${subject}"`,
+    );
   }
 
   async sendSms(phone: string | string[], message: string): Promise<void> {
-    this.logger.log(`[sms] to=${Array.isArray(phone) ? phone.join(',') : phone} body="${message}"`);
+    this.logger.log(
+      `[sms] to=${Array.isArray(phone) ? phone.join(',') : phone} body="${message}"`,
+    );
   }
 
-  async sendInApp(userId: string, payload: Record<string, unknown>): Promise<void> {
-    this.logger.log(`[in-app] user=${userId} payload=${JSON.stringify(payload)}`);
+  async sendInApp(
+    userId: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    this.logger.log(
+      `[in-app] user=${userId} payload=${JSON.stringify(payload)}`,
+    );
   }
 }

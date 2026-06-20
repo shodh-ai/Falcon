@@ -36,7 +36,8 @@ export class VenueBookingService {
 
   private approverActionLink(approverRole: string): string {
     if (approverRole === 'LIBRARIAN') return '/library/venue-requests';
-    if (approverRole.startsWith('HOD_') || approverRole === 'HOD') return '/hod/venue-requests';
+    if (approverRole.startsWith('HOD_') || approverRole === 'HOD')
+      return '/hod/venue-requests';
     return '/admin-ops/venue-requests';
   }
 
@@ -57,13 +58,13 @@ export class VenueBookingService {
   }
 
   async listAmenityTags(tenantId: string) {
-    const rows = (await this.db.query(
+    const rows = await this.db.query(
       `SELECT DISTINCT jsonb_array_elements_text(amenities) AS tag
        FROM campus_venues
        WHERE tenant_id = $1 AND is_bookable_by_students = true
        ORDER BY tag`,
       [tenantId],
-    )) as Array<{ tag: string }>;
+    );
     return rows.map((r) => r.tag);
   }
 
@@ -102,7 +103,11 @@ export class VenueBookingService {
     );
   }
 
-  async getBookingPass(tenantId: string, studentUserId: string, bookingId: string) {
+  async getBookingPass(
+    tenantId: string,
+    studentUserId: string,
+    bookingId: string,
+  ) {
     const rows = await this.db.query(
       `SELECT b.booking_id, b.qr_token, b.start_time, b.end_time, b.status,
               v.name AS venue_name, u.name AS student_name
@@ -114,7 +119,9 @@ export class VenueBookingService {
     );
     if (!rows[0]) throw new NotFoundException('Booking not found');
     if (rows[0].status !== 'APPROVED') {
-      throw new BadRequestException('Room pass is available only for approved bookings');
+      throw new BadRequestException(
+        'Room pass is available only for approved bookings',
+      );
     }
     if (!rows[0].qr_token) {
       throw new BadRequestException('QR pass not yet generated');
@@ -151,13 +158,13 @@ export class VenueBookingService {
   }
 
   private async assertRateLimit(tenantId: string, studentUserId: string) {
-    const rows = (await this.db.query(
+    const rows = await this.db.query(
       `SELECT COUNT(*)::int AS c FROM venue_bookings
        WHERE tenant_id = $1 AND student_user_id = $2
          AND status IN ('PENDING_APPROVAL', 'APPROVED')
          AND end_time > NOW()`,
       [tenantId, studentUserId],
-    )) as Array<{ c: number }>;
+    );
     if ((rows[0]?.c ?? 0) >= MAX_ACTIVE_BOOKINGS_PER_STUDENT) {
       throw new BadRequestException(
         `You can have at most ${MAX_ACTIVE_BOOKINGS_PER_STUDENT} active or pending bookings at a time`,
@@ -165,10 +172,18 @@ export class VenueBookingService {
     }
   }
 
-  async createBooking(tenantId: string, studentUserId: string, dto: CreateVenueBookingDto) {
+  async createBooking(
+    tenantId: string,
+    studentUserId: string,
+    dto: CreateVenueBookingDto,
+  ) {
     const start = new Date(dto.start_time);
     const end = new Date(dto.end_time);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      end <= start
+    ) {
       throw new BadRequestException('Invalid time range');
     }
     if (start < new Date()) {
@@ -191,7 +206,12 @@ export class VenueBookingService {
     }
 
     await this.assertRateLimit(tenantId, studentUserId);
-    await this.assertNoOverlap(tenantId, dto.venue_id, dto.start_time, dto.end_time);
+    await this.assertNoOverlap(
+      tenantId,
+      dto.venue_id,
+      dto.start_time,
+      dto.end_time,
+    );
 
     const studentRows = await this.db.query(
       `SELECT u.name, sp.semester
@@ -208,7 +228,14 @@ export class VenueBookingService {
          (tenant_id, venue_id, student_user_id, start_time, end_time, purpose, status)
        VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6, 'PENDING_APPROVAL')
        RETURNING *`,
-      [tenantId, dto.venue_id, studentUserId, dto.start_time, dto.end_time, dto.purpose],
+      [
+        tenantId,
+        dto.venue_id,
+        studentUserId,
+        dto.start_time,
+        dto.end_time,
+        dto.purpose,
+      ],
     );
     const booking = inserted[0];
 
@@ -239,12 +266,12 @@ export class VenueBookingService {
     },
   ) {
     const dbRole = this.mapApproverRole(approverRole);
-    const users = (await this.db.query(
+    const users = await this.db.query(
       `SELECT u.user_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND r.role_name = $2 AND u.is_active = true`,
       [tenantId, dbRole],
-    )) as Array<{ user_id: string }>;
+    );
 
     const startLabel = new Date(payload.startTime).toLocaleString('en-IN', {
       hour: '2-digit',
@@ -305,9 +332,14 @@ export class VenueBookingService {
     return rows[0];
   }
 
-  private assertApproverCanAct(approverRoleKeys: string[], venueApproverRole: string) {
+  private assertApproverCanAct(
+    approverRoleKeys: string[],
+    venueApproverRole: string,
+  ) {
     if (!approverRoleKeys.includes(venueApproverRole)) {
-      throw new ForbiddenException('You are not authorized to act on this venue booking');
+      throw new ForbiddenException(
+        'You are not authorized to act on this venue booking',
+      );
     }
   }
 
@@ -323,7 +355,9 @@ export class VenueBookingService {
       throw new BadRequestException('Only pending bookings can be approved');
     }
     if (new Date(booking.start_time) <= new Date()) {
-      throw new BadRequestException('Cannot approve a booking whose start time has passed');
+      throw new BadRequestException(
+        'Cannot approve a booking whose start time has passed',
+      );
     }
     this.assertApproverCanAct(approverRoleKeys, booking.approver_role);
 

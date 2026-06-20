@@ -19,22 +19,26 @@ export class OperationsService {
     @InjectRepository(HostelRoom) private rooms: Repository<HostelRoom>,
     @InjectRepository(GatePass) private gatePasses: Repository<GatePass>,
     @InjectRepository(LibraryBook) private books: Repository<LibraryBook>,
-    @InjectRepository(TransportRoute) private routes: Repository<TransportRoute>,
+    @InjectRepository(TransportRoute)
+    private routes: Repository<TransportRoute>,
     private readonly notify: NotificationEmitterService,
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
   ) {}
 
   private async resolveStudentTenant(studentUserId: string): Promise<string> {
-    const user = await this.gatePasses.manager.query<Array<{ tenant_id: string }>>(
-      `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
-      [studentUserId],
-    );
+    const user = await this.gatePasses.manager.query<
+      Array<{ tenant_id: string }>
+    >(`SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`, [
+      studentUserId,
+    ]);
     return user[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
 
   listRooms() {
-    return this.rooms.find({ order: { hostel_block: 'ASC', room_number: 'ASC' } });
+    return this.rooms.find({
+      order: { hostel_block: 'ASC', room_number: 'ASC' },
+    });
   }
 
   async requestGatePass(dto: RequestGatePassDto) {
@@ -48,11 +52,12 @@ export class OperationsService {
 
     try {
       const tenantId = await this.resolveStudentTenant(saved.student_user_id);
-      const warden = await this.workflowRouting.getWardenForStudent(saved.student_user_id);
-      const student = await this.gatePasses.manager.query<Array<{ name: string }>>(
-        `SELECT name FROM users WHERE user_id = $1`,
-        [saved.student_user_id],
+      const warden = await this.workflowRouting.getWardenForStudent(
+        saved.student_user_id,
       );
+      const student = await this.gatePasses.manager.query<
+        Array<{ name: string }>
+      >(`SELECT name FROM users WHERE user_id = $1`, [saved.student_user_id]);
       this.workflowNotify.notifyApprover({
         tenantId,
         approver: warden,
@@ -102,7 +107,10 @@ export class OperationsService {
 
   listGatePasses(studentUserId?: string) {
     if (studentUserId) {
-      return this.gatePasses.find({ where: { student_user_id: studentUserId }, order: { created_at: 'DESC' } });
+      return this.gatePasses.find({
+        where: { student_user_id: studentUserId },
+        order: { created_at: 'DESC' },
+      });
     }
     return this.gatePasses.find({ order: { created_at: 'DESC' } });
   }

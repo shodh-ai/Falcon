@@ -21,14 +21,15 @@ export class IqacAnalyticsService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   /** Run SQL without bubbling 500s when optional tables/views are missing. */
-  private async safeQuery<T extends Record<string, unknown> = Record<string, unknown>>(
-    sql: string,
-    params: unknown[] = [],
-  ): Promise<T[]> {
+  private async safeQuery<
+    T extends Record<string, unknown> = Record<string, unknown>,
+  >(sql: string, params: unknown[] = []): Promise<T[]> {
     try {
-      return (await this.dataSource.query(sql, params)) as T[];
+      return await this.dataSource.query(sql, params);
     } catch (err) {
-      this.logger.warn(`IQAC query skipped: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(
+        `IQAC query skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
       return [];
     }
   }
@@ -43,7 +44,9 @@ export class IqacAnalyticsService {
     ];
     for (const view of views) {
       try {
-        await this.dataSource.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY ${view}`);
+        await this.dataSource.query(
+          `REFRESH MATERIALIZED VIEW CONCURRENTLY ${view}`,
+        );
       } catch {
         await this.dataSource.query(`REFRESH MATERIALIZED VIEW ${view}`);
       }
@@ -100,10 +103,18 @@ export class IqacAnalyticsService {
     const totalFaculty = Number(faculty[0]?.total_faculty ?? 0);
     const totalStudents = Number(students[0]?.total_students ?? 0);
     const phdFaculty = Number(faculty[0]?.phd_faculty ?? 0);
-    const ratio = totalFaculty > 0 ? Number((totalStudents / totalFaculty).toFixed(1)) : 0;
-    const phdPercent = totalFaculty > 0 ? Number(((phdFaculty / totalFaculty) * 100).toFixed(1)) : 0;
+    const ratio =
+      totalFaculty > 0 ? Number((totalStudents / totalFaculty).toFixed(1)) : 0;
+    const phdPercent =
+      totalFaculty > 0
+        ? Number(((phdFaculty / totalFaculty) * 100).toFixed(1))
+        : 0;
 
-    const heatmap = await this.safeQuery<{ dept_id: number; department: string; pending_reports: number }>(
+    const heatmap = await this.safeQuery<{
+      dept_id: number;
+      department: string;
+      pending_reports: number;
+    }>(
       `SELECT d.dept_id, d.dept_name AS department,
               COUNT(ta.assignment_id) FILTER (WHERE ta.status = 'Pending')::int AS pending_reports
        FROM departments d
@@ -118,18 +129,32 @@ export class IqacAnalyticsService {
       gauges: {
         faculty_student_ratio: ratio,
         phd_faculty_percent: phdPercent,
-        total_research_grants_inr: Number(faculty[0]?.total_research_grants ?? 0),
+        total_research_grants_inr: Number(
+          faculty[0]?.total_research_grants ?? 0,
+        ),
         total_faculty: totalFaculty,
         total_students: totalStudents,
         placement_rate_percent:
           totalStudents > 0
-            ? Number(((Number(placement[0]?.placed ?? 0) / totalStudents) * 100).toFixed(1))
+            ? Number(
+                (
+                  (Number(placement[0]?.placed ?? 0) / totalStudents) *
+                  100
+                ).toFixed(1),
+              )
             : 0,
         average_placement_lpa: Number(placement[0]?.avg_lpa ?? 0),
       },
-      heatmap: (heatmap as { department: string; pending_reports: number }[]).map((row) => ({
+      heatmap: (
+        heatmap as { department: string; pending_reports: number }[]
+      ).map((row) => ({
         ...row,
-        risk: row.pending_reports > 2 ? 'HIGH' : row.pending_reports > 0 ? 'MEDIUM' : 'LOW',
+        risk:
+          row.pending_reports > 2
+            ? 'HIGH'
+            : row.pending_reports > 0
+              ? 'MEDIUM'
+              : 'LOW',
       })),
       refreshed_at: new Date().toISOString(),
     };
@@ -158,7 +183,8 @@ export class IqacAnalyticsService {
 
     const nirfScoreSimulation = {
       teaching_learning: 72,
-      research_professional_practice: Number(pubLogs[0]?.total ?? 0) > 5 ? 78 : 65,
+      research_professional_practice:
+        Number(pubLogs[0]?.total ?? 0) > 5 ? 78 : 65,
       graduation_outcomes: placementByDept.length ? 74 : 60,
       outreach_inclusivity: 70,
       perception: 68,
@@ -223,7 +249,7 @@ export class IqacAnalyticsService {
       tab,
       academic_year: _academicYear ?? 'All',
       rows,
-      export_columns: rows[0] ? Object.keys(rows[0] as object) : [],
+      export_columns: rows[0] ? Object.keys(rows[0]) : [],
     };
   }
 
@@ -232,14 +258,21 @@ export class IqacAnalyticsService {
       `SELECT * FROM iqac_mv_placement_stats WHERE tenant_id = $1`,
       [tenantId],
     );
-    const alumniProgression = await this.safeQuery<{ pg_pursuing: number; total_alumni: number }>(
+    const alumniProgression = await this.safeQuery<{
+      pg_pursuing: number;
+      total_alumni: number;
+    }>(
       `SELECT COUNT(*) FILTER (WHERE higher_education_details->>'degree' IS NOT NULL)::int AS pg_pursuing,
               COUNT(*)::int AS total_alumni
        FROM alumni_profiles WHERE tenant_id = $1 AND verification_status IN ('VERIFIED', 'APPROVED')`,
       [tenantId],
     );
 
-    const batchPlaced = await this.safeQuery<{ placed: number; avg_lpa: string; max_lpa: string }>(
+    const batchPlaced = await this.safeQuery<{
+      placed: number;
+      avg_lpa: string;
+      max_lpa: string;
+    }>(
       `SELECT COUNT(DISTINCT pja.student_user_id)::int AS placed,
               ROUND(AVG(jp.ctc_lpa)::numeric, 2) AS avg_lpa,
               ROUND(MAX(jp.ctc_lpa)::numeric, 2) AS max_lpa
@@ -272,13 +305,20 @@ export class IqacAnalyticsService {
         total_placed: placed,
         average_lpa: Number(batchPlaced[0]?.avg_lpa ?? 0),
         highest_lpa: Number(batchPlaced[0]?.max_lpa ?? 0),
-        placement_percent: totalStudents > 0 ? Number(((placed / totalStudents) * 100).toFixed(1)) : 0,
+        placement_percent:
+          totalStudents > 0
+            ? Number(((placed / totalStudents) * 100).toFixed(1))
+            : 0,
         by_department: placement,
       },
     };
   }
 
-  async getRepository(tenantId: string, criterion?: number, academicYear = '2025-2026') {
+  async getRepository(
+    tenantId: string,
+    criterion?: number,
+    academicYear = '2025-2026',
+  ) {
     const params: unknown[] = [tenantId, academicYear];
     let sql = `
       SELECT document_id, naac_criterion, metric_number, title, file_path, academic_year, created_at,
@@ -293,7 +333,10 @@ export class IqacAnalyticsService {
     sql += ' ORDER BY naac_criterion, metric_number';
 
     const documents = await this.safeQuery(sql, params);
-    let health = await this.safeQuery<{ naac_criterion: number; document_count: number }>(
+    let health = await this.safeQuery<{
+      naac_criterion: number;
+      document_count: number;
+    }>(
       `SELECT naac_criterion, document_count FROM iqac_mv_repository_health
        WHERE tenant_id = $1 AND academic_year = $2`,
       [tenantId, academicYear],
@@ -309,10 +352,9 @@ export class IqacAnalyticsService {
     }
 
     const healthMap = new Map(
-      (health as { naac_criterion: number; document_count: number }[]).map((h) => [
-        h.naac_criterion,
-        h.document_count,
-      ]),
+      (health as { naac_criterion: number; document_count: number }[]).map(
+        (h) => [h.naac_criterion, h.document_count],
+      ),
     );
 
     return {
@@ -392,13 +434,21 @@ export class IqacAnalyticsService {
       kpi: kpi.gauges,
       placements: outcomes.placement,
       publication_count: faculty.rows.length,
-      sections: dto.report_type === 'AQAR' ? this.aqarSections() : this.ssrSections(),
+      sections:
+        dto.report_type === 'AQAR' ? this.aqarSections() : this.ssrSections(),
     };
 
     await this.safeQuery(
       `INSERT INTO iqac_report_jobs (job_id, tenant_id, report_type, academic_year, status, payload, requested_by, completed_at)
        VALUES ($1, $2, $3, $4, 'COMPLETED', $5::jsonb, $6, NOW())`,
-      [jobId, tenantId, dto.report_type, dto.academic_year, JSON.stringify(payload), userId],
+      [
+        jobId,
+        tenantId,
+        dto.report_type,
+        dto.academic_year,
+        JSON.stringify(payload),
+        userId,
+      ],
     );
 
     return {
@@ -434,7 +484,11 @@ export class IqacAnalyticsService {
   }
 
   private ssrSections() {
-    return [...this.aqarSections(), 'Five-Year Trends', 'Benchmarking', 'Best Practices'];
+    return [
+      ...this.aqarSections(),
+      'Five-Year Trends',
+      'Benchmarking',
+      'Best Practices',
+    ];
   }
-
 }

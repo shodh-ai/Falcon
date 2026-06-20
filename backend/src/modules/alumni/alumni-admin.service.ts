@@ -11,13 +11,17 @@ const ALUMNI_ID = `COALESCE(p.alumni_id, p.alumni_profile_id)`;
 export class AlumniAdminService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    @InjectRepository(AlumniEvent) private readonly events: Repository<AlumniEvent>,
+    @InjectRepository(AlumniEvent)
+    private readonly events: Repository<AlumniEvent>,
     private readonly conversion: AlumniConversionService,
   ) {}
 
-  private async safeQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
+  private async safeQuery<T = Record<string, unknown>>(
+    sql: string,
+    params: unknown[] = [],
+  ) {
     try {
-      return (await this.dataSource.query(sql, params)) as T[];
+      return await this.dataSource.query(sql, params);
     } catch {
       return [] as T[];
     }
@@ -75,7 +79,11 @@ export class AlumniAdminService {
     });
   }
 
-  async approveConversion(tenantId: string, alumniId: string, adminUserId: string) {
+  async approveConversion(
+    tenantId: string,
+    alumniId: string,
+    adminUserId: string,
+  ) {
     return this.conversion.approveAndConvert(tenantId, alumniId, adminUserId);
   }
 
@@ -157,7 +165,10 @@ export class AlumniAdminService {
       [tenantId],
     );
 
-    const mentorship = await this.safeQuery<{ mentors_opted_in: number; mentorship_sessions_completed: number }>(
+    const mentorship = await this.safeQuery<{
+      mentors_opted_in: number;
+      mentorship_sessions_completed: number;
+    }>(
       `SELECT COUNT(*) FILTER (WHERE opt_in_mentorship = true)::int AS mentors_opted_in,
               0::int AS mentorship_sessions_completed
        FROM alumni_profiles WHERE tenant_id = $1`,
@@ -167,7 +178,10 @@ export class AlumniAdminService {
     return {
       corporate_retention: corporate,
       higher_education: higherEd,
-      mentorship: mentorship[0] ?? { mentors_opted_in: 0, mentorship_sessions_completed: 0 },
+      mentorship: mentorship[0] ?? {
+        mentors_opted_in: 0,
+        mentorship_sessions_completed: 0,
+      },
     };
   }
 
@@ -186,7 +200,13 @@ export class AlumniAdminService {
 
   createEvent(
     tenantId: string,
-    dto: { title: string; event_date: string; venue?: string; description?: string; is_published?: boolean },
+    dto: {
+      title: string;
+      event_date: string;
+      venue?: string;
+      description?: string;
+      is_published?: boolean;
+    },
   ) {
     return this.events.save(
       this.events.create({
@@ -203,9 +223,17 @@ export class AlumniAdminService {
   async updateEvent(
     tenantId: string,
     eventId: string,
-    dto: Partial<{ title: string; event_date: string; venue: string; description: string; is_published: boolean }>,
+    dto: Partial<{
+      title: string;
+      event_date: string;
+      venue: string;
+      description: string;
+      is_published: boolean;
+    }>,
   ) {
-    const event = await this.events.findOne({ where: { event_id: eventId, tenant_id: tenantId } });
+    const event = await this.events.findOne({
+      where: { event_id: eventId, tenant_id: tenantId },
+    });
     if (!event) throw new NotFoundException('Event not found');
     if (dto.title) event.title = dto.title;
     if (dto.event_date) event.event_date = new Date(dto.event_date);

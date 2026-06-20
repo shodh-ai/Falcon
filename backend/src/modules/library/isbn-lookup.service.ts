@@ -29,7 +29,9 @@ export class IsbnLookupService {
     return this.fetchOpenLibrary(normalized);
   }
 
-  private async fetchGoogleBooks(isbn: string): Promise<IsbnLookupResult | null> {
+  private async fetchGoogleBooks(
+    isbn: string,
+  ): Promise<IsbnLookupResult | null> {
     const apiKey = this.config.get<string>('GOOGLE_BOOKS_API_KEY');
     const url = apiKey
       ? `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${apiKey}`
@@ -60,7 +62,8 @@ export class IsbnLookupService {
         publisher: info.publisher,
         category: info.categories?.[0],
         synopsis: info.description?.slice(0, 2000),
-        cover_image_url: info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail,
+        cover_image_url:
+          info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail,
         source: 'google_books',
       };
     } catch (e) {
@@ -69,7 +72,9 @@ export class IsbnLookupService {
     }
   }
 
-  private async fetchOpenLibrary(isbn: string): Promise<IsbnLookupResult | null> {
+  private async fetchOpenLibrary(
+    isbn: string,
+  ): Promise<IsbnLookupResult | null> {
     const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
     try {
       const res = await fetch(url);
@@ -90,7 +95,9 @@ export class IsbnLookupService {
       return {
         isbn,
         title: entry.title,
-        author: (entry.authors ?? [{ name: 'Unknown' }]).map((a) => a.name).join(', '),
+        author: (entry.authors ?? [{ name: 'Unknown' }])
+          .map((a) => a.name)
+          .join(', '),
         publisher: entry.publishers?.[0]?.name,
         category: entry.subjects?.[0]?.name,
         cover_image_url: entry.cover?.medium,

@@ -46,14 +46,21 @@ export class AlumniWelcomeEmailListener {
 
     try {
       await this.transporter.sendMail({
-        from: this.config.get('EMAIL_FROM', 'Falcon Campus OS <noreply@falcon.local>'),
+        from: this.config.get(
+          'EMAIL_FROM',
+          'Falcon Campus OS <noreply@falcon.local>',
+        ),
         to: payload.officialEmail,
         subject: `Congratulations ${firstName}! Welcome to the Falcon Alumni Network`,
         html,
       });
-      this.logger.log(`Alumni conversion welcome email sent to ${payload.officialEmail}`);
+      this.logger.log(
+        `Alumni conversion welcome email sent to ${payload.officialEmail}`,
+      );
     } catch (err) {
-      this.logger.warn(`Alumni welcome email failed for ${payload.officialEmail}: ${err}`);
+      this.logger.warn(
+        `Alumni welcome email failed for ${payload.officialEmail}: ${err}`,
+      );
     }
   }
 }

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../entities/user.entity';
@@ -92,13 +96,19 @@ export class UsersService {
     return user;
   }
 
-  async updateUser(userId: string, updateUserDto: UpdateUserDto): Promise<User> {
+  async updateUser(
+    userId: string,
+    updateUserDto: UpdateUserDto,
+  ): Promise<User> {
     const user = await this.findOneUser(userId);
     Object.assign(user, updateUserDto);
     return this.userRepository.save(user);
   }
 
-  async updateDeviceToken(userId: string, deviceToken: string): Promise<{ success: boolean }> {
+  async updateDeviceToken(
+    userId: string,
+    deviceToken: string,
+  ): Promise<{ success: boolean }> {
     const user = await this.findOneUser(userId);
     user.expo_push_token = deviceToken;
     await this.userRepository.save(user);
@@ -147,7 +157,9 @@ export class UsersService {
 
   async getUserStatistics(): Promise<any> {
     const totalUsers = await this.userRepository.count();
-    const activeUsers = await this.userRepository.count({ where: { is_active: true } });
+    const activeUsers = await this.userRepository.count({
+      where: { is_active: true },
+    });
     const inactiveUsers = totalUsers - activeUsers;
 
     const roles = await this.roleRepository.find();

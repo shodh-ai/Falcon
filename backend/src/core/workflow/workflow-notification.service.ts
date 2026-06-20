@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { NotificationEmitterService } from '../notifications/notification-emitter.service';
 import type { FalconNotificationCategory } from '../../entities/falcon-notification.entity';
 import type { RoutedApprover } from './workflow-routing.service';
-import { formatDateRange, humanizeRequestType } from '../notifications/notification-message.types';
+import {
+  formatDateRange,
+  humanizeRequestType,
+} from '../notifications/notification-message.types';
 
 export type WorkflowApprovalNotifyInput = {
   tenantId: string;

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -23,7 +31,10 @@ export class VenueBookingApprovalsController {
   @Get('librarian/pending')
   @Roles('Librarian', 'SuperAdmin')
   librarianPending(@Req() req: { user: AuthUser }) {
-    return this.venueBooking.listPendingForApprover(this.tenant(req), LIBRARIAN_ROLES);
+    return this.venueBooking.listPendingForApprover(
+      this.tenant(req),
+      LIBRARIAN_ROLES,
+    );
   }
 
   @Post('librarian/:bookingId/approve')
@@ -61,7 +72,10 @@ export class VenueBookingApprovalsController {
   @Get('hod/pending')
   @Roles('HOD', 'SuperAdmin')
   hodPending(@Req() req: { user: AuthUser }) {
-    return this.venueBooking.listPendingForApprover(this.tenant(req), HOD_ROLES);
+    return this.venueBooking.listPendingForApprover(
+      this.tenant(req),
+      HOD_ROLES,
+    );
   }
 
   @Post('hod/:bookingId/approve')
@@ -99,7 +113,10 @@ export class VenueBookingApprovalsController {
   @Get('estate/pending')
   @Roles('Registrar', 'Dean', 'SuperAdmin')
   estatePending(@Req() req: { user: AuthUser }) {
-    return this.venueBooking.listPendingForApprover(this.tenant(req), ESTATE_ROLES);
+    return this.venueBooking.listPendingForApprover(
+      this.tenant(req),
+      ESTATE_ROLES,
+    );
   }
 
   @Post('estate/:bookingId/approve')

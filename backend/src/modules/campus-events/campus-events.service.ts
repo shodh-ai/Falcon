@@ -11,7 +11,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { BED_LOCK_GRACE_SEC, BED_LOCK_TTL_SEC } from '../../common/constants/hostel-tatkal.constants';
+import {
+  BED_LOCK_GRACE_SEC,
+  BED_LOCK_TTL_SEC,
+} from '../../common/constants/hostel-tatkal.constants';
 import { RedisService } from '../../core/redis/redis.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { FinanceService } from '../finance/finance.service';
@@ -20,7 +23,12 @@ import { UpsertMasterCalendarDto } from './dto/master-calendar.dto';
 import { EstateApproveDto } from './dto/estate-approve.dto';
 import { FundTransferDto } from './dto/fund-transfer.dto';
 
-const HELD_VENUE_STATUSES = ['PENDING_HOD', 'PENDING_DEAN', 'PENDING_FINANCE', 'LIVE'];
+const HELD_VENUE_STATUSES = [
+  'PENDING_HOD',
+  'PENDING_DEAN',
+  'PENDING_FINANCE',
+  'LIVE',
+];
 
 @Injectable()
 export class CampusEventsService {
@@ -78,7 +86,10 @@ export class CampusEventsService {
     return rows;
   }
 
-  async upsertMasterCalendarEntry(tenantId: string, dto: UpsertMasterCalendarDto) {
+  async upsertMasterCalendarEntry(
+    tenantId: string,
+    dto: UpsertMasterCalendarDto,
+  ) {
     const rows = await this.dataSource.query(
       `INSERT INTO campus_master_calendar (tenant_id, date, title, description, is_blocked_for_events, academic_year)
        VALUES ($1, $2::date, $3, $4, COALESCE($5, true), $6)
@@ -119,7 +130,12 @@ export class CampusEventsService {
     );
   }
 
-  async checkVenueClash(tenantId: string, venueId: string, eventDate: string, excludeEventId?: string) {
+  async checkVenueClash(
+    tenantId: string,
+    venueId: string,
+    eventDate: string,
+    excludeEventId?: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT e.event_id, e.title, e.event_date, e.venue, a.name AS venue_name
        FROM campus_events e
@@ -131,7 +147,13 @@ export class CampusEventsService {
          AND e.hod_approval != 'REJECTED'
          AND e.dean_approval != 'REJECTED'
          AND ($5::uuid IS NULL OR e.event_id != $5::uuid)`,
-      [tenantId, venueId, eventDate, HELD_VENUE_STATUSES, excludeEventId ?? null],
+      [
+        tenantId,
+        venueId,
+        eventDate,
+        HELD_VENUE_STATUSES,
+        excludeEventId ?? null,
+      ],
     );
     return { has_clash: rows.length > 0, conflicts: rows };
   }
@@ -139,7 +161,13 @@ export class CampusEventsService {
   private async notifyRoleHolders(
     tenantId: string,
     roleNames: string[],
-    payload: { title: string; message: string; actionLink: string; eventTitle: string; eventId: string },
+    payload: {
+      title: string;
+      message: string;
+      actionLink: string;
+      eventTitle: string;
+      eventId: string;
+    },
   ) {
     const users = await this.dataSource.query(
       `SELECT u.user_id FROM users u
@@ -160,7 +188,12 @@ export class CampusEventsService {
     }
   }
 
-  private async notifyFinanceHolders(tenantId: string, eventTitle: string, eventId: string, amount: number) {
+  private async notifyFinanceHolders(
+    tenantId: string,
+    eventTitle: string,
+    eventId: string,
+    amount: number,
+  ) {
     const users = await this.dataSource.query(
       `SELECT u.user_id FROM users u
        JOIN roles r ON r.role_id = u.role_id
@@ -230,8 +263,12 @@ export class CampusEventsService {
     }
   }
 
-  private async getEventCoordinatorUserId(clubId: string): Promise<string | null> {
-    const rows = await this.dataSource.query<Array<{ student_coordinator_id: string | null }>>(
+  private async getEventCoordinatorUserId(
+    clubId: string,
+  ): Promise<string | null> {
+    const rows = await this.dataSource.query<
+      Array<{ student_coordinator_id: string | null }>
+    >(
       `SELECT student_coordinator_id FROM campus_clubs WHERE club_id = $1 LIMIT 1`,
       [clubId],
     );
@@ -240,7 +277,12 @@ export class CampusEventsService {
 
   private async notifyCoordinatorRejected(
     tenantId: string,
-    event: { event_id: string; title: string; club_id: string; rejection_comment?: string | null },
+    event: {
+      event_id: string;
+      title: string;
+      club_id: string;
+      rejection_comment?: string | null;
+    },
     rejectedByTier: string,
   ) {
     const coordinatorId = await this.getEventCoordinatorUserId(event.club_id);
@@ -283,7 +325,13 @@ export class CampusEventsService {
 
   private async notifyCoordinatorFundsTransferred(
     tenantId: string,
-    event: { event_id: string; title: string; club_id: string; fund_transfer_amount?: string | number | null; fund_transfer_ref?: string | null },
+    event: {
+      event_id: string;
+      title: string;
+      club_id: string;
+      fund_transfer_amount?: string | number | null;
+      fund_transfer_ref?: string | null;
+    },
   ) {
     const coordinatorId = await this.getEventCoordinatorUserId(event.club_id);
     if (!coordinatorId) return;
@@ -329,7 +377,10 @@ export class CampusEventsService {
     return e;
   }
 
-  private async resolveAdvisorUserId(tenantId: string, clubId: string): Promise<string | null> {
+  private async resolveAdvisorUserId(
+    tenantId: string,
+    clubId: string,
+  ): Promise<string | null> {
     const clubRows = await this.dataSource.query(
       `SELECT faculty_advisor_id FROM campus_clubs WHERE club_id = $1 AND tenant_id = $2`,
       [clubId, tenantId],
@@ -364,7 +415,9 @@ export class CampusEventsService {
     const event = rows[0];
     if (!event) throw new NotFoundException('Event not found');
     if (event.faculty_advisor_id !== userId) {
-      throw new ForbiddenException('Only the club faculty coordinator may approve this event');
+      throw new ForbiddenException(
+        'Only the club faculty coordinator may approve this event',
+      );
     }
   }
 
@@ -376,20 +429,27 @@ export class CampusEventsService {
     return { is_coordinator: rows.length > 0 };
   }
 
-  async proposeEvent(tenantId: string, coordinatorId: string, dto: ProposeEventDto) {
+  async proposeEvent(
+    tenantId: string,
+    coordinatorId: string,
+    dto: ProposeEventDto,
+  ) {
     const clubRows = await this.dataSource.query(
       `SELECT club_id, name, faculty_advisor_id FROM campus_clubs
        WHERE club_id = $1 AND tenant_id = $2 AND student_coordinator_id = $3`,
       [dto.club_id, tenantId, coordinatorId],
     );
     const club = clubRows[0];
-    if (!club) throw new ForbiddenException('You are not the coordinator for this club');
+    if (!club)
+      throw new ForbiddenException('You are not the coordinator for this club');
 
     await this.assertDateNotBlocked(tenantId, dto.event_date);
 
     const price = dto.is_paid ? Number(dto.ticket_price ?? 0) : 0;
     if (dto.is_paid && price <= 0) {
-      throw new BadRequestException('Paid events require a ticket price greater than zero');
+      throw new BadRequestException(
+        'Paid events require a ticket price greater than zero',
+      );
     }
 
     const fundsNeeded = Number(dto.funds_needed ?? 0);
@@ -403,9 +463,14 @@ export class CampusEventsService {
         `SELECT name FROM university_assets WHERE asset_id = $1 AND tenant_id = $2`,
         [dto.venue_id, tenantId],
       );
-      if (!venueRows[0]) throw new BadRequestException('Selected venue not found');
+      if (!venueRows[0])
+        throw new BadRequestException('Selected venue not found');
       venueLabel = venueRows[0].name;
-      const clash = await this.checkVenueClash(tenantId, dto.venue_id, dto.event_date);
+      const clash = await this.checkVenueClash(
+        tenantId,
+        dto.venue_id,
+        dto.event_date,
+      );
       if (clash.has_clash) {
         throw new ConflictException(
           `${venueLabel} may already be booked on this date. Estate will review availability.`,
@@ -437,7 +502,10 @@ export class CampusEventsService {
       ],
     );
     const event = inserted[0];
-    const advisorUserId = await this.resolveAdvisorUserId(tenantId, dto.club_id);
+    const advisorUserId = await this.resolveAdvisorUserId(
+      tenantId,
+      dto.club_id,
+    );
     if (advisorUserId) {
       this.notify.eventProposed({
         tenantId,
@@ -460,7 +528,11 @@ export class CampusEventsService {
     return event;
   }
 
-  async listPendingApprovals(tenantId: string, advisorId: string, roles: string[]) {
+  async listPendingApprovals(
+    tenantId: string,
+    advisorId: string,
+    roles: string[],
+  ) {
     const allScope = roles.includes('SuperAdmin');
     const params = allScope ? [tenantId] : [tenantId, advisorId];
     const clubJoin = allScope
@@ -489,7 +561,11 @@ export class CampusEventsService {
     }
   }
 
-  async listPendingHodApprovals(tenantId: string, hodUserId: string, roles: string[]) {
+  async listPendingHodApprovals(
+    tenantId: string,
+    hodUserId: string,
+    roles: string[],
+  ) {
     const allScope = roles.includes('SuperAdmin');
     const params = allScope ? [tenantId] : [tenantId, hodUserId];
     const hodFilter = allScope
@@ -514,7 +590,11 @@ export class CampusEventsService {
     );
   }
 
-  async listPendingDeanApprovals(tenantId: string, deanUserId: string, roles: string[]) {
+  async listPendingDeanApprovals(
+    tenantId: string,
+    deanUserId: string,
+    roles: string[],
+  ) {
     const allScope = roles.includes('SuperAdmin');
     if (allScope) {
       return this.dataSource.query(
@@ -553,7 +633,12 @@ export class CampusEventsService {
     );
   }
 
-  async approveEvent(tenantId: string, userId: string, roles: string[], eventId: string) {
+  async approveEvent(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    eventId: string,
+  ) {
     await this.assertCanModerateEvent(tenantId, userId, roles, eventId);
     const rows = await this.dataSource.query(
       `UPDATE campus_events
@@ -563,7 +648,8 @@ export class CampusEventsService {
        RETURNING *`,
       [eventId, tenantId, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
     const event = rows[0];
     const clubRows = await this.dataSource.query(
       `SELECT name, faculty_advisor_id FROM campus_clubs WHERE club_id = $1`,
@@ -596,8 +682,13 @@ export class CampusEventsService {
        RETURNING *`,
       [eventId, tenantId, comment, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
-    await this.notifyCoordinatorRejected(tenantId, rows[0], 'Faculty Coordinator');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
+    await this.notifyCoordinatorRejected(
+      tenantId,
+      rows[0],
+      'Faculty Coordinator',
+    );
     return rows[0];
   }
 
@@ -619,11 +710,18 @@ export class CampusEventsService {
     );
     if (!rows[0]) throw new NotFoundException('Event not found');
     if (rows[0].hod_user_id !== userId) {
-      throw new ForbiddenException('Only the department HOD may approve this event');
+      throw new ForbiddenException(
+        'Only the department HOD may approve this event',
+      );
     }
   }
 
-  async approveHodEvent(tenantId: string, userId: string, roles: string[], eventId: string) {
+  async approveHodEvent(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    eventId: string,
+  ) {
     await this.assertCanApproveHod(tenantId, userId, roles, eventId);
     const rows = await this.dataSource.query(
       `UPDATE campus_events
@@ -633,7 +731,8 @@ export class CampusEventsService {
        RETURNING *`,
       [eventId, tenantId, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
     const event = rows[0];
     const clubRows = await this.dataSource.query(
       `SELECT name, faculty_advisor_id FROM campus_clubs WHERE club_id = $1`,
@@ -665,7 +764,8 @@ export class CampusEventsService {
        RETURNING *`,
       [eventId, tenantId, comment, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
     await this.notifyCoordinatorRejected(tenantId, rows[0], 'HOD');
     return rows[0];
   }
@@ -696,11 +796,18 @@ export class CampusEventsService {
     );
     if (!rows[0]) throw new NotFoundException('Event not found');
     if (!rows[0].scoped_match && !rows[0].is_dean) {
-      throw new ForbiddenException('Only the school Dean may approve this event');
+      throw new ForbiddenException(
+        'Only the school Dean may approve this event',
+      );
     }
   }
 
-  async approveDeanEvent(tenantId: string, userId: string, roles: string[], eventId: string) {
+  async approveDeanEvent(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    eventId: string,
+  ) {
     await this.assertCanApproveDean(tenantId, userId, roles, eventId);
     const current = await this.dataSource.query(
       `SELECT * FROM campus_events WHERE event_id = $1 AND tenant_id = $2`,
@@ -721,12 +828,24 @@ export class CampusEventsService {
            finance_approval = CASE WHEN $5 > 0 THEN 'PENDING' ELSE finance_approval END
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_DEAN' AND dean_approval = 'PENDING'
        RETURNING *`,
-      [eventId, tenantId, userId, fundsNeeded > 0 ? 'PENDING_FINANCE' : 'PENDING_DEAN', fundsNeeded],
+      [
+        eventId,
+        tenantId,
+        userId,
+        fundsNeeded > 0 ? 'PENDING_FINANCE' : 'PENDING_DEAN',
+        fundsNeeded,
+      ],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
     const event = rows[0];
     if (fundsNeeded > 0) {
-      await this.notifyFinanceHolders(tenantId, event.title, eventId, fundsNeeded);
+      await this.notifyFinanceHolders(
+        tenantId,
+        event.title,
+        eventId,
+        fundsNeeded,
+      );
       return event;
     }
     return this.tryPublishLive(tenantId, eventId);
@@ -748,7 +867,8 @@ export class CampusEventsService {
        RETURNING *`,
       [eventId, tenantId, comment, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
     await this.notifyCoordinatorRejected(tenantId, rows[0], 'Dean');
     return rows[0];
   }
@@ -764,16 +884,33 @@ export class CampusEventsService {
       [tenantId],
     );
     const enriched = await Promise.all(
-      rows.map(async (e: { venue_id?: string; event_date: string; event_id: string }) => {
-        if (!e.venue_id) return { ...e, venue_clash: { has_clash: false, conflicts: [] } };
-        const clash = await this.checkVenueClash(tenantId, e.venue_id, e.event_date, e.event_id);
-        return { ...e, venue_clash: clash };
-      }),
+      rows.map(
+        async (e: {
+          venue_id?: string;
+          event_date: string;
+          event_id: string;
+        }) => {
+          if (!e.venue_id)
+            return { ...e, venue_clash: { has_clash: false, conflicts: [] } };
+          const clash = await this.checkVenueClash(
+            tenantId,
+            e.venue_id,
+            e.event_date,
+            e.event_id,
+          );
+          return { ...e, venue_clash: clash };
+        },
+      ),
     );
     return enriched;
   }
 
-  async approveEstate(tenantId: string, userId: string, eventId: string, dto: EstateApproveDto) {
+  async approveEstate(
+    tenantId: string,
+    userId: string,
+    eventId: string,
+    dto: EstateApproveDto,
+  ) {
     const current = await this.dataSource.query(
       `SELECT * FROM campus_events WHERE event_id = $1 AND tenant_id = $2`,
       [eventId, tenantId],
@@ -795,7 +932,12 @@ export class CampusEventsService {
     }
 
     if (venueId) {
-      const clash = await this.checkVenueClash(tenantId, venueId, current[0].event_date, eventId);
+      const clash = await this.checkVenueClash(
+        tenantId,
+        venueId,
+        current[0].event_date,
+        eventId,
+      );
       if (clash.has_clash) {
         throw new ConflictException(
           `Venue clash: ${clash.conflicts[0]?.title ?? 'another event'} is already scheduled.`,
@@ -826,14 +968,29 @@ export class CampusEventsService {
         [eventId],
       );
       event.status = 'PENDING_FINANCE';
-      await this.notifyFinanceHolders(tenantId, event.title, eventId, Number(event.funds_needed ?? event.ticket_price ?? 0));
+      await this.notifyFinanceHolders(
+        tenantId,
+        event.title,
+        eventId,
+        Number(event.funds_needed ?? event.ticket_price ?? 0),
+      );
     } else {
       await this.tryPublishLive(tenantId, eventId);
     }
-    return (await this.dataSource.query(`SELECT * FROM campus_events WHERE event_id = $1`, [eventId]))[0];
+    return (
+      await this.dataSource.query(
+        `SELECT * FROM campus_events WHERE event_id = $1`,
+        [eventId],
+      )
+    )[0];
   }
 
-  async rejectEstate(tenantId: string, userId: string, eventId: string, comment: string) {
+  async rejectEstate(
+    tenantId: string,
+    userId: string,
+    eventId: string,
+    comment: string,
+  ) {
     const rows = await this.dataSource.query(
       `UPDATE campus_events
        SET status = 'REJECTED', estate_approval = 'REJECTED', rejection_comment = $3, approved_by = $4
@@ -841,7 +998,8 @@ export class CampusEventsService {
        RETURNING *`,
       [eventId, tenantId, comment, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
     return rows[0];
   }
 
@@ -862,20 +1020,31 @@ export class CampusEventsService {
     );
   }
 
-  async approveFinance(tenantId: string, userId: string, eventId: string, dto: FundTransferDto) {
+  async approveFinance(
+    tenantId: string,
+    userId: string,
+    eventId: string,
+    dto: FundTransferDto,
+  ) {
     const current = await this.dataSource.query(
       `SELECT * FROM campus_events WHERE event_id = $1 AND tenant_id = $2`,
       [eventId, tenantId],
     );
     if (!current[0] || current[0].status !== 'PENDING_FINANCE') {
-      throw new BadRequestException('Event not found or not awaiting fund transfer');
+      throw new BadRequestException(
+        'Event not found or not awaiting fund transfer',
+      );
     }
     const fundsNeeded = Number(current[0].funds_needed ?? 0);
     if (dto.transfer_amount <= 0) {
-      throw new BadRequestException('Transfer amount must be greater than zero');
+      throw new BadRequestException(
+        'Transfer amount must be greater than zero',
+      );
     }
     if (dto.transfer_amount > fundsNeeded) {
-      throw new BadRequestException(`Transfer amount cannot exceed requested funds (₹${fundsNeeded})`);
+      throw new BadRequestException(
+        `Transfer amount cannot exceed requested funds (₹${fundsNeeded})`,
+      );
     }
 
     const rows = await this.dataSource.query(
@@ -888,14 +1057,29 @@ export class CampusEventsService {
            fund_transferred_at = NOW()
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_FINANCE'
        RETURNING *`,
-      [eventId, tenantId, dto.ledger_code ?? null, dto.transfer_amount, dto.transfer_ref, userId],
+      [
+        eventId,
+        tenantId,
+        dto.ledger_code ?? null,
+        dto.transfer_amount,
+        dto.transfer_ref,
+        userId,
+      ],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or not awaiting fund transfer');
+    if (!rows[0])
+      throw new BadRequestException(
+        'Event not found or not awaiting fund transfer',
+      );
     await this.notifyCoordinatorFundsTransferred(tenantId, rows[0]);
     return this.tryPublishLive(tenantId, eventId);
   }
 
-  async rejectFinance(tenantId: string, userId: string, eventId: string, comment: string) {
+  async rejectFinance(
+    tenantId: string,
+    userId: string,
+    eventId: string,
+    comment: string,
+  ) {
     const rows = await this.dataSource.query(
       `UPDATE campus_events
        SET status = 'REJECTED', finance_approval = 'REJECTED', rejection_comment = $3, approved_by = $4
@@ -903,7 +1087,8 @@ export class CampusEventsService {
        RETURNING *`,
       [eventId, tenantId, comment, userId],
     );
-    if (!rows[0]) throw new BadRequestException('Event not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Event not found or already processed');
     await this.notifyCoordinatorRejected(tenantId, rows[0], 'Finance');
     return rows[0];
   }
@@ -968,10 +1153,16 @@ export class CampusEventsService {
       [eventId, studentId],
     );
     if (existing[0]?.status === 'PAID' || existing[0]?.status === 'FREE') {
-      throw new BadRequestException('You are already registered for this event');
+      throw new BadRequestException(
+        'You are already registered for this event',
+      );
     }
     if (existing[0]?.status === 'PENDING_PAYMENT') {
-      return this.getPendingRegistration(tenantId, studentId, existing[0].registration_id);
+      return this.getPendingRegistration(
+        tenantId,
+        studentId,
+        existing[0].registration_id,
+      );
     }
 
     if (event.is_paid) {
@@ -980,7 +1171,11 @@ export class CampusEventsService {
     return this.registerFree(tenantId, studentId, event);
   }
 
-  private async registerFree(tenantId: string, studentId: string, event: { event_id: string }) {
+  private async registerFree(
+    tenantId: string,
+    studentId: string,
+    event: { event_id: string },
+  ) {
     await this.dataSource.query('BEGIN');
     try {
       const slotRows = await this.dataSource.query(
@@ -1024,9 +1219,15 @@ export class CampusEventsService {
       club_name?: string;
     },
   ) {
-    const acquired = await this.redis.acquireEventPayLock(event.event_id, studentId, BED_LOCK_TTL_SEC);
+    const acquired = await this.redis.acquireEventPayLock(
+      event.event_id,
+      studentId,
+      BED_LOCK_TTL_SEC,
+    );
     if (!acquired) {
-      throw new ConflictException('You already have an active checkout for this event.');
+      throw new ConflictException(
+        'You already have an active checkout for this event.',
+      );
     }
 
     const serverNow = new Date();
@@ -1132,7 +1333,11 @@ export class CampusEventsService {
     }
   }
 
-  async getPendingRegistration(tenantId: string, studentId: string, registrationId: string) {
+  async getPendingRegistration(
+    tenantId: string,
+    studentId: string,
+    registrationId: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT r.*, e.title, e.venue, e.event_date, e.ticket_price, e.event_id, c.name AS club_name
        FROM event_registrations r
@@ -1144,7 +1349,9 @@ export class CampusEventsService {
     const reg = rows[0];
     if (!reg) throw new NotFoundException('Registration not found');
 
-    const expiresMs = reg.hold_expires_at ? new Date(reg.hold_expires_at).getTime() : 0;
+    const expiresMs = reg.hold_expires_at
+      ? new Date(reg.hold_expires_at).getTime()
+      : 0;
     const remaining = reg.hold_expires_at
       ? Math.max(0, Math.floor((expiresMs - Date.now()) / 1000))
       : 0;
@@ -1159,7 +1366,8 @@ export class CampusEventsService {
             amount_paise: Math.round(amount * 100),
             currency: 'INR',
             fee_head: 'EVENTS_CLUB',
-            razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
+            razorpay_key:
+              process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
             mock: true,
             notes: {
               fee_head: 'EVENTS_CLUB',
@@ -1188,7 +1396,12 @@ export class CampusEventsService {
     registrationId: string,
     paymentRef: string,
   ) {
-    return this.finalizePaidRegistration(tenantId, studentId, registrationId, paymentRef);
+    return this.finalizePaidRegistration(
+      tenantId,
+      studentId,
+      registrationId,
+      paymentRef,
+    );
   }
 
   async finalizePaidRegistration(
@@ -1213,10 +1426,14 @@ export class CampusEventsService {
       throw new BadRequestException('Registration is not awaiting payment');
     }
 
-    const expiresMs = reg.hold_expires_at ? new Date(reg.hold_expires_at).getTime() : 0;
+    const expiresMs = reg.hold_expires_at
+      ? new Date(reg.hold_expires_at).getTime()
+      : 0;
     const graceEnd = expiresMs + BED_LOCK_GRACE_SEC * 1000;
     if (Date.now() > graceEnd) {
-      throw new ConflictException('Checkout session expired. Please register again.');
+      throw new ConflictException(
+        'Checkout session expired. Please register again.',
+      );
     }
 
     await this.dataSource.query('BEGIN');
@@ -1230,7 +1447,9 @@ export class CampusEventsService {
         [reg.event_id, tenantId],
       );
       if (!slotRows[0]) {
-        throw new BadRequestException('Could not confirm slot — event may be full.');
+        throw new BadRequestException(
+          'Could not confirm slot — event may be full.',
+        );
       }
 
       const qr = this.qrCode(registrationId);
@@ -1256,7 +1475,12 @@ export class CampusEventsService {
     registrationId: string,
     paymentId: string,
   ) {
-    return this.finalizePaidRegistration(tenantId, studentUserId, registrationId, paymentId);
+    return this.finalizePaidRegistration(
+      tenantId,
+      studentUserId,
+      registrationId,
+      paymentId,
+    );
   }
 
   async getMyClubs(tenantId: string, studentId: string) {
@@ -1281,7 +1505,11 @@ export class CampusEventsService {
     );
   }
 
-  async exportAttendeesCsv(tenantId: string, studentId: string, eventId: string) {
+  async exportAttendeesCsv(
+    tenantId: string,
+    studentId: string,
+    eventId: string,
+  ) {
     const access = await this.dataSource.query(
       `SELECT e.event_id, e.title
        FROM campus_events e
@@ -1289,7 +1517,8 @@ export class CampusEventsService {
        WHERE e.event_id = $1 AND e.tenant_id = $2 AND c.student_coordinator_id = $3`,
       [eventId, tenantId, studentId],
     );
-    if (!access[0]) throw new ForbiddenException('Not authorized for this event');
+    if (!access[0])
+      throw new ForbiddenException('Not authorized for this event');
 
     const rows = await this.dataSource.query(
       `SELECT u.name, u.official_email AS email, r.status, r.qr_code, r.registered_at
@@ -1302,7 +1531,13 @@ export class CampusEventsService {
 
     const header = 'name,email,status,qr_code,registered_at';
     const lines = rows.map(
-      (r: { name: string; email: string; status: string; qr_code: string; registered_at: string }) =>
+      (r: {
+        name: string;
+        email: string;
+        status: string;
+        qr_code: string;
+        registered_at: string;
+      }) =>
         `"${(r.name ?? '').replace(/"/g, '""')}","${r.email ?? ''}",${r.status},${r.qr_code ?? ''},${r.registered_at}`,
     );
     return `${header}\n${lines.join('\n')}`;
@@ -1321,9 +1556,12 @@ export class CampusEventsService {
        WHERE e.event_id = $1 AND e.tenant_id = $2 AND c.student_coordinator_id = $3`,
       [eventId, tenantId, coordinatorId],
     );
-    if (!access[0]) throw new ForbiddenException('Not authorized to scan for this event');
+    if (!access[0])
+      throw new ForbiddenException('Not authorized to scan for this event');
     if (access[0].status !== 'LIVE') {
-      throw new BadRequestException('Event must be live before scanning attendance');
+      throw new BadRequestException(
+        'Event must be live before scanning attendance',
+      );
     }
 
     const regRows = await this.dataSource.query(
@@ -1336,7 +1574,12 @@ export class CampusEventsService {
     const reg = regRows[0];
     if (!reg) throw new NotFoundException('Invalid ticket QR for this event');
     if (reg.attended) {
-      return { scanned: true, duplicate: true, student_name: reg.student_name, registration: reg };
+      return {
+        scanned: true,
+        duplicate: true,
+        student_name: reg.student_name,
+        registration: reg,
+      };
     }
 
     const updated = await this.dataSource.query(

@@ -24,7 +24,9 @@ export class PortalMeetingParticipant {
   @Column({ type: 'uuid' })
   meeting_id: string;
 
-  @ManyToOne(() => PortalMeeting, (m) => m.participants, { onDelete: 'CASCADE' })
+  @ManyToOne(() => PortalMeeting, (m) => m.participants, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'meeting_id' })
   meeting: PortalMeeting;
 

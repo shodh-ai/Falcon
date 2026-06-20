@@ -11,4 +11,7 @@ export const REQUIRE_HR_POWER_KEY = 'require_hr_power';
 
 /** Granular capability check against hr_access_controls (Layer 1). */
 export const RequireHrPower = (module: string, action: HrPowerAction) =>
-  SetMetadata(REQUIRE_HR_POWER_KEY, { module, action } satisfies RequireHrPowerMeta);
+  SetMetadata(REQUIRE_HR_POWER_KEY, {
+    module,
+    action,
+  } satisfies RequireHrPowerMeta);

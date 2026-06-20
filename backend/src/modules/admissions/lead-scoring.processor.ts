@@ -1,7 +1,11 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
-import { LEAD_SCORING_QUEUE, LeadScoreJob, LeadScoringService } from './lead-scoring.service';
+import {
+  LEAD_SCORING_QUEUE,
+  LeadScoreJob,
+  LeadScoringService,
+} from './lead-scoring.service';
 
 @Processor(LEAD_SCORING_QUEUE)
 export class LeadScoringProcessor extends WorkerHost {

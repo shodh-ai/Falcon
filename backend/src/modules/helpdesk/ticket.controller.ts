@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -54,14 +63,25 @@ export class TicketController {
   }
 
   @Get('assigned')
-  @Roles('SuperAdmin', 'Registrar', 'Accountant', 'Warden', 'HOD', 'Dean', 'Faculty')
+  @Roles(
+    'SuperAdmin',
+    'Registrar',
+    'Accountant',
+    'Warden',
+    'HOD',
+    'Dean',
+    'Faculty',
+  )
   listAssigned(@Req() req: { user: AuthUser }) {
     return this.tickets.listTicketsForAssignee(req.user.user_id);
   }
 
   @Get('ref/:ticketRef')
   @Roles(...HELPDESK_REQUESTER_ROLES, 'Chairman', 'President')
-  getByRef(@Req() req: { user: AuthUser }, @Param('ticketRef') ticketRef: string) {
+  getByRef(
+    @Req() req: { user: AuthUser },
+    @Param('ticketRef') ticketRef: string,
+  ) {
     return this.tickets.getTicketByRef(
       ticketRef,
       req.user.user_id,
@@ -78,7 +98,10 @@ export class TicketController {
 
   @Get('hr-grievances/:ticketId')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  getHrGrievance(@Req() req: { user: AuthUser }, @Param('ticketId') ticketId: string) {
+  getHrGrievance(
+    @Req() req: { user: AuthUser },
+    @Param('ticketId') ticketId: string,
+  ) {
     return this.tickets.getHrGrievance(ticketId, this.tenant(req));
   }
 
@@ -90,7 +113,10 @@ export class TicketController {
 
   @Get(':ticketId')
   @Roles(...HELPDESK_REQUESTER_ROLES, 'Chairman', 'President')
-  getTicket(@Req() req: { user: AuthUser }, @Param('ticketId') ticketId: string) {
+  getTicket(
+    @Req() req: { user: AuthUser },
+    @Param('ticketId') ticketId: string,
+  ) {
     return this.tickets.getTicketById(
       ticketId,
       req.user.user_id,
@@ -104,13 +130,34 @@ export class TicketController {
   }
 
   @Patch(':ticketId/status')
-  @Roles('SuperAdmin', 'Registrar', 'Accountant', 'Warden', 'HOD', 'Dean', 'HR', 'HRAdmin')
-  updateStatus(@Param('ticketId') ticketId: string, @Body() dto: UpdateTicketStatusDto) {
+  @Roles(
+    'SuperAdmin',
+    'Registrar',
+    'Accountant',
+    'Warden',
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+  )
+  updateStatus(
+    @Param('ticketId') ticketId: string,
+    @Body() dto: UpdateTicketStatusDto,
+  ) {
     return this.tickets.updateStatus(ticketId, dto);
   }
 
   @Post(':ticketId/messages')
-  addMessage(@Param('ticketId') ticketId: string, @Req() req: { user: AuthUser }, @Body() dto: AddTicketMessageDto) {
-    return this.tickets.addMessage(ticketId, req.user.user_id, req.user.role ?? 'UNKNOWN', dto.message);
+  addMessage(
+    @Param('ticketId') ticketId: string,
+    @Req() req: { user: AuthUser },
+    @Body() dto: AddTicketMessageDto,
+  ) {
+    return this.tickets.addMessage(
+      ticketId,
+      req.user.user_id,
+      req.user.role ?? 'UNKNOWN',
+      dto.message,
+    );
   }
 }

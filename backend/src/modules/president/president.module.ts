@@ -9,7 +9,15 @@ import { PresidentController } from './president.controller';
 import { PresidentService } from './president.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, FeeDemand, StudentCourseEnrollment, TaskAssignment, StaffPayslip])],
+  imports: [
+    TypeOrmModule.forFeature([
+      User,
+      FeeDemand,
+      StudentCourseEnrollment,
+      TaskAssignment,
+      StaffPayslip,
+    ]),
+  ],
   controllers: [PresidentController],
   providers: [PresidentService],
 })

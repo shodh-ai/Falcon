@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { mkdirSync, writeFileSync } from 'fs';
@@ -33,7 +38,15 @@ export interface ClassStudentDto {
   photo_url: string | null;
 }
 
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
 
 const ROLL_NUMBER_SQL = `COALESCE(
   NULLIF(BTRIM(sp.enrollment_no), ''),
@@ -67,7 +80,9 @@ export class AcademicsFacultyService {
     private readonly notificationEmitter: NotificationEmitterService,
   ) {}
 
-  async getFacultyTodayClasses(facultyUserId: string): Promise<FacultyTodayClassDto[]> {
+  async getFacultyTodayClasses(
+    facultyUserId: string,
+  ): Promise<FacultyTodayClassDto[]> {
     const dayOfWeek = DAY_NAMES[new Date().getDay()];
 
     const rows: Array<{
@@ -197,13 +212,21 @@ export class AcademicsFacultyService {
         return row;
       });
 
-      await repo.createQueryBuilder().insert().into(AttendanceRecord).values(values).execute();
+      await repo
+        .createQueryBuilder()
+        .insert()
+        .into(AttendanceRecord)
+        .values(values)
+        .execute();
 
       return { saved: values.length, session_date: sessionDate };
     });
   }
 
-  async getFacultyAcademicTimetableToday(facultyUserId: string, tenantId: string) {
+  async getFacultyAcademicTimetableToday(
+    facultyUserId: string,
+    tenantId: string,
+  ) {
     const day = new Date().getDay();
     const isoDay = day === 0 ? 7 : day;
     const rows = await this.timetableRepo.find({
@@ -236,7 +259,11 @@ export class AcademicsFacultyService {
     );
   }
 
-  async getCourseStudents(courseId: string, facultyUserId: string, tenantId: string) {
+  async getCourseStudents(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+  ) {
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
     const rows = await this.enrollmentRepo.find({
       where: {
@@ -275,22 +302,86 @@ export class AcademicsFacultyService {
     facultyUserId: string,
     tenantId: string,
     date = localDateString(),
+    timetableId?: string,
   ) {
-    await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
-    const log = await this.courseAttendanceLogs.findOne({
-      where: {
-        tenant_id: tenantId,
-        course_id: courseId,
-        faculty_user_id: facultyUserId,
-        date,
-      },
-    });
+    await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date);
+    const effectiveFacultyId = await this.resolveAttendanceFacultyId(
+      courseId,
+      facultyUserId,
+      tenantId,
+      date,
+    );
+
+    const log = timetableId
+      ? await this.dataSource.query(
+          `SELECT attendance_data FROM course_attendance_logs
+           WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+             AND date = $4::date AND timetable_id = $5::uuid`,
+          [tenantId, courseId, effectiveFacultyId, date, timetableId],
+        )
+      : await this.dataSource.query(
+          `SELECT attendance_data FROM course_attendance_logs
+           WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+             AND date = $4::date AND timetable_id IS NULL`,
+          [tenantId, courseId, effectiveFacultyId, date],
+        );
 
     return {
       course_id: courseId,
       date,
+      timetable_id: timetableId ?? null,
       locked: this.isAttendanceLocked(date),
-      attendance_data: log?.attendance_data ?? null,
+      attendance_data: log[0]?.attendance_data ?? null,
+    };
+  }
+
+  async getPreviousSessionAttendance(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    date: string,
+    beforeTimetableId: string,
+  ) {
+    await this.assertCanMarkAttendance(courseId, facultyUserId, tenantId, date);
+    const effectiveFacultyId = await this.resolveAttendanceFacultyId(
+      courseId,
+      facultyUserId,
+      tenantId,
+      date,
+    );
+
+    const slot = await this.timetableRepo.findOne({
+      where: { tenant_id: tenantId, timetable_id: beforeTimetableId },
+    });
+    if (!slot) throw new NotFoundException('Timetable slot not found');
+
+    const isoDay =
+      new Date(`${date}T00:00:00`).getDay() === 0
+        ? 7
+        : new Date(`${date}T00:00:00`).getDay();
+    const prevSlot = await this.dataSource.query(
+      `SELECT t.timetable_id FROM academic_timetables t
+       WHERE t.tenant_id = $1 AND t.faculty_user_id = $2 AND t.course_id = $3
+         AND t.day_of_week = $4 AND t.start_time < $5::time
+       ORDER BY t.start_time DESC LIMIT 1`,
+      [tenantId, slot.faculty_user_id, courseId, isoDay, slot.start_time],
+    );
+
+    if (!prevSlot[0]) {
+      return { attendance_data: null, source_timetable_id: null };
+    }
+
+    const prevId = prevSlot[0].timetable_id;
+    const log = await this.dataSource.query(
+      `SELECT attendance_data FROM course_attendance_logs
+       WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+         AND date = $4::date AND timetable_id = $5::uuid`,
+      [tenantId, courseId, effectiveFacultyId, date, prevId],
+    );
+
+    return {
+      attendance_data: log[0]?.attendance_data ?? null,
+      source_timetable_id: prevId,
     };
   }
 
@@ -316,6 +407,7 @@ export class AcademicsFacultyService {
         AND cal.course_id = t.course_id
         AND cal.faculty_user_id = t.faculty_user_id
         AND cal.date = CURRENT_DATE
+        AND cal.timetable_id = t.timetable_id
        WHERE t.tenant_id = $1
          AND t.faculty_user_id = $2
          AND t.day_of_week = $3
@@ -327,10 +419,18 @@ export class AcademicsFacultyService {
     );
   }
 
-  async getAttendanceAnalytics(courseId: string, facultyUserId: string, tenantId: string) {
+  async getAttendanceAnalytics(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+  ) {
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
     const [health] = await this.dataSource.query<
-      Array<{ scheduled_classes: string; conducted_classes: string; average_attendance_percent: string | null }>
+      Array<{
+        scheduled_classes: string;
+        conducted_classes: string;
+        average_attendance_percent: string | null;
+      }>
     >(
       `WITH conducted AS (
          SELECT
@@ -403,7 +503,9 @@ export class AcademicsFacultyService {
       health: {
         scheduled_classes: Number(health?.scheduled_classes ?? 0),
         conducted_classes: Number(health?.conducted_classes ?? 0),
-        average_attendance_percent: Number(health?.average_attendance_percent ?? 0),
+        average_attendance_percent: Number(
+          health?.average_attendance_percent ?? 0,
+        ),
       },
       defaulters,
       habitual_absentees: habitualAbsentees,
@@ -418,10 +520,15 @@ export class AcademicsFacultyService {
   ) {
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
     const ids = [...new Set((studentIds ?? []).filter(Boolean))];
-    if (!ids.length) throw new BadRequestException('Select at least one student');
+    if (!ids.length)
+      throw new BadRequestException('Select at least one student');
 
     const rows = await this.dataSource.query<
-      Array<{ student_user_id: string; attendance_percent: string; course_name: string }>
+      Array<{
+        student_user_id: string;
+        attendance_percent: string;
+        course_name: string;
+      }>
     >(
       `SELECT e.student_user_id, COALESCE(e.attendance_percent, 0)::text AS attendance_percent, c.course_name
        FROM student_course_enrollments e
@@ -432,12 +539,14 @@ export class AcademicsFacultyService {
       [tenantId, courseId, ids],
     );
 
-    const parentRows = await this.dataSource.query<Array<{ student_user_id: string; parent_user_id: string }>>(
-      `SELECT student_user_id, parent_user_id
+    const parentRows = await this.dataSource
+      .query<Array<{ student_user_id: string; parent_user_id: string }>>(
+        `SELECT student_user_id, parent_user_id
        FROM parent_student_links
        WHERE tenant_id = $1 AND student_user_id = ANY($2::uuid[]) AND parent_user_id IS NOT NULL`,
-      [tenantId, ids],
-    ).catch(() => []);
+        [tenantId, ids],
+      )
+      .catch(() => []);
     const parentsByStudent = new Map<string, string[]>();
     for (const row of parentRows) {
       const list = parentsByStudent.get(row.student_user_id) ?? [];
@@ -454,9 +563,16 @@ export class AcademicsFacultyService {
         message: `Your attendance in ${row.course_name} is ${percent.toFixed(2)}%. Please attend upcoming classes.`,
         actionLink: '/student/attendance',
       };
-      this.notificationEmitter.attendanceWarning({ ...payload, userId: row.student_user_id });
-      for (const parentUserId of parentsByStudent.get(row.student_user_id) ?? []) {
-        this.notificationEmitter.attendanceWarning({ ...payload, userId: parentUserId });
+      this.notificationEmitter.attendanceWarning({
+        ...payload,
+        userId: row.student_user_id,
+      });
+      for (const parentUserId of parentsByStudent.get(row.student_user_id) ??
+        []) {
+        this.notificationEmitter.attendanceWarning({
+          ...payload,
+          userId: parentUserId,
+        });
       }
     }
 
@@ -469,11 +585,26 @@ export class AcademicsFacultyService {
     dto: {
       course_id: string;
       date?: string;
-      attendance_data: { student_id: string; status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED' }[];
+      timetable_id?: string;
+      attendance_data: {
+        student_id: string;
+        status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
+      }[];
     },
   ) {
-    await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
     const date = dto.date ?? localDateString();
+    await this.assertCanMarkAttendance(
+      dto.course_id,
+      facultyUserId,
+      tenantId,
+      date,
+    );
+    const effectiveFacultyId = await this.resolveAttendanceFacultyId(
+      dto.course_id,
+      facultyUserId,
+      tenantId,
+      date,
+    );
     if (this.isAttendanceLocked(date)) {
       throw new ForbiddenException(
         'Attendance locked. Contact Admin to modify records older than 3 days.',
@@ -483,15 +614,48 @@ export class AcademicsFacultyService {
       throw new BadRequestException('Attendance data cannot be empty');
     }
 
-    await this.dataSource.query(
-      `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, attendance_data)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
-       ON CONFLICT (tenant_id, course_id, faculty_user_id, date) DO UPDATE SET
-         attendance_data = EXCLUDED.attendance_data`,
-      [tenantId, dto.course_id, facultyUserId, date, JSON.stringify(dto.attendance_data)],
-    );
+    const timetableId = dto.timetable_id ?? null;
+    if (timetableId) {
+      await this.dataSource.query(
+        `DELETE FROM course_attendance_logs
+         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND date = $4::date AND timetable_id = $5::uuid`,
+        [tenantId, dto.course_id, effectiveFacultyId, date, timetableId],
+      );
+      await this.dataSource.query(
+        `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, timetable_id, attendance_data)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [
+          tenantId,
+          dto.course_id,
+          effectiveFacultyId,
+          date,
+          timetableId,
+          JSON.stringify(dto.attendance_data),
+        ],
+      );
+    } else {
+      await this.dataSource.query(
+        `DELETE FROM course_attendance_logs
+         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND date = $4::date AND timetable_id IS NULL`,
+        [tenantId, dto.course_id, effectiveFacultyId, date],
+      );
+      await this.dataSource.query(
+        `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, attendance_data)
+         VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        [
+          tenantId,
+          dto.course_id,
+          effectiveFacultyId,
+          date,
+          JSON.stringify(dto.attendance_data),
+        ],
+      );
+    }
 
-    const updated = await this.recalculateCourseAttendancePercents(tenantId, dto.course_id);
+    const updated = await this.recalculateCourseAttendancePercents(
+      tenantId,
+      dto.course_id,
+    );
 
     if (dto.attendance_data.length > 0 && updated.length === 0) {
       throw new BadRequestException(
@@ -499,11 +663,20 @@ export class AcademicsFacultyService {
       );
     }
 
-    return { saved: dto.attendance_data.length, date, attendance_updated: updated };
+    return {
+      saved: dto.attendance_data.length,
+      date,
+      attendance_updated: updated,
+    };
   }
 
-  private async recalculateCourseAttendancePercents(tenantId: string, courseId: string) {
-    const rows = await this.dataSource.query<Array<{ student_user_id: string; attendance_percent: string }>>(
+  private async recalculateCourseAttendancePercents(
+    tenantId: string,
+    courseId: string,
+  ) {
+    const rows = await this.dataSource.query<
+      Array<{ student_user_id: string; attendance_percent: string }>
+    >(
       `WITH session_data AS (
          SELECT elem.value AS entry
          FROM course_attendance_logs cal
@@ -544,7 +717,12 @@ export class AcademicsFacultyService {
     dto: { course_id?: string; title?: string },
     file: Express.Multer.File,
   ) {
-    const result = await this.uploadCourseMaterials(facultyUserId, tenantId, dto, [file]);
+    const result = await this.uploadCourseMaterials(
+      facultyUserId,
+      tenantId,
+      dto,
+      [file],
+    );
     return result.materials[0];
   }
 
@@ -557,17 +735,29 @@ export class AcademicsFacultyService {
     if (!dto.course_id || !dto.title?.trim()) {
       throw new NotFoundException('Course and title are required');
     }
-    if (!files?.length) throw new BadRequestException('At least one file is required');
-    await this.assertFacultyTeachesCourse(dto.course_id, facultyUserId, tenantId);
+    if (!files?.length)
+      throw new BadRequestException('At least one file is required');
+    await this.assertFacultyTeachesCourse(
+      dto.course_id,
+      facultyUserId,
+      tenantId,
+    );
     const materials = await Promise.all(
       files.map(async (file) => {
         const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
-        const stored = await this.persistMaterialFile(tenantId, uniqueName, file);
+        const stored = await this.persistMaterialFile(
+          tenantId,
+          uniqueName,
+          file,
+        );
         const row = this.courseMaterials.create({
           tenant_id: tenantId,
           course_id: dto.course_id,
           faculty_user_id: facultyUserId,
-          title: files.length === 1 ? dto.title!.trim() : file.originalname.replace(/\.[^.]+$/, ''),
+          title:
+            files.length === 1
+              ? dto.title!.trim()
+              : file.originalname.replace(/\.[^.]+$/, ''),
           file_path: stored.filePath,
           file_key: stored.fileKey,
           material_type: (dto.material_type ?? 'NOTES').toUpperCase(),
@@ -588,7 +778,12 @@ export class AcademicsFacultyService {
     return `${h}:${m} ${ampm}`;
   }
 
-  private async assertFacultyTeachesCourse(courseId: string, facultyUserId: string, tenantId: string) {
+  private async assertCanMarkAttendance(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+    date?: string,
+  ) {
     const row = await this.timetableRepo.findOne({
       where: {
         tenant_id: tenantId,
@@ -596,14 +791,66 @@ export class AcademicsFacultyService {
         faculty_user_id: facultyUserId,
       },
     });
-    if (!row) throw new NotFoundException('Course not found in your teaching timetable');
+    if (row) return;
+
+    if (date) {
+      const proxy = await this.dataSource.query(
+        `SELECT 1 FROM academic_proxy_requests
+         WHERE tenant_id = $1 AND proxy_faculty_id = $2 AND course_id = $3
+           AND date_of_proxy = $4::date AND status = 'APPROVED' LIMIT 1`,
+        [tenantId, facultyUserId, courseId, date],
+      );
+      if (proxy.length) return;
+    }
+    throw new NotFoundException('Course not found in your teaching timetable');
+  }
+
+  private async resolveAttendanceFacultyId(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+    date: string,
+  ): Promise<string> {
+    const teaches = await this.timetableRepo.findOne({
+      where: {
+        tenant_id: tenantId,
+        course_id: courseId,
+        faculty_user_id: facultyUserId,
+      },
+    });
+    if (teaches) return facultyUserId;
+
+    const proxy = await this.dataSource.query<
+      Array<{ absent_faculty_id: string }>
+    >(
+      `SELECT absent_faculty_id FROM academic_proxy_requests
+       WHERE tenant_id = $1 AND proxy_faculty_id = $2 AND course_id = $3
+         AND date_of_proxy = $4::date AND status = 'APPROVED' LIMIT 1`,
+      [tenantId, facultyUserId, courseId, date],
+    );
+    return proxy[0]?.absent_faculty_id ?? facultyUserId;
+  }
+
+  private async assertFacultyTeachesCourse(
+    courseId: string,
+    facultyUserId: string,
+    tenantId: string,
+  ) {
+    await this.assertCanMarkAttendance(
+      courseId,
+      facultyUserId,
+      tenantId,
+      localDateString(),
+    );
   }
 
   private isAttendanceLocked(date: string) {
     const selected = new Date(`${date}T00:00:00`);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor((today.getTime() - selected.getTime()) / 86_400_000);
+    const diffDays = Math.floor(
+      (today.getTime() - selected.getTime()) / 86_400_000,
+    );
     return diffDays > 3;
   }
 
@@ -614,7 +861,12 @@ export class AcademicsFacultyService {
   ): Promise<{ filePath: string; fileKey: string | null }> {
     if (this.objectStorage.isEnabled()) {
       const key = this.objectStorage.buildKey(tenantId, uniqueName);
-      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      const stored = await this.objectStorage.upload(
+        tenantId,
+        key,
+        file.buffer,
+        file.mimetype,
+      );
       return { filePath: stored.url, fileKey: stored.key };
     }
     const uploadPath = process.env.UPLOAD_PATH || './uploads';

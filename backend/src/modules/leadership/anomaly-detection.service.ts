@@ -18,8 +18,14 @@ export class AnomalyDetectionService {
     private readonly notifyDispatch: NotificationDispatchService,
   ) {}
 
-  duplicateHash(vendorId: string, invoiceNumber: string, amount: number): string {
-    return createHash('sha256').update(`${vendorId}:${invoiceNumber}:${amount}`).digest('hex');
+  duplicateHash(
+    vendorId: string,
+    invoiceNumber: string,
+    amount: number,
+  ): string {
+    return createHash('sha256')
+      .update(`${vendorId}:${invoiceNumber}:${amount}`)
+      .digest('hex');
   }
 
   async checkDuplicateInvoice(tenantId: string, invoiceId: string) {
@@ -40,11 +46,15 @@ export class AnomalyDetectionService {
     const invoiceNumber = String(inv.invoice_number ?? '').trim();
     if (!invoiceNumber) return;
 
-    const hash = this.duplicateHash(inv.vendor_id, invoiceNumber, Number(inv.taxable_amount));
-    await this.db.query(`UPDATE fin_vendor_invoices SET duplicate_hash = $1 WHERE invoice_id = $2`, [
-      hash,
-      invoiceId,
-    ]);
+    const hash = this.duplicateHash(
+      inv.vendor_id,
+      invoiceNumber,
+      Number(inv.taxable_amount),
+    );
+    await this.db.query(
+      `UPDATE fin_vendor_invoices SET duplicate_hash = $1 WHERE invoice_id = $2`,
+      [hash, invoiceId],
+    );
 
     const dupes = await this.db.query(
       `SELECT invoice_id FROM fin_vendor_invoices
@@ -68,7 +78,11 @@ export class AnomalyDetectionService {
        WHERE i.invoice_id = $1 AND i.tenant_id = $2`,
       [invoiceId, tenantId],
     );
-    const inv = rows[0] as { taxable_amount: string; expense_head_id: string; head_name: string };
+    const inv = rows[0] as {
+      taxable_amount: string;
+      expense_head_id: string;
+      head_name: string;
+    };
     if (!inv?.expense_head_id) return;
 
     const avgRows = await this.db.query(
@@ -116,8 +130,12 @@ export class AnomalyDetectionService {
       [tenantId, departmentId],
     );
     if (!rows[0]) return;
-    const allocated = Number((rows[0] as { allocated_amount: string }).allocated_amount);
-    const utilized = Number((rows[0] as { utilized_amount: string }).utilized_amount);
+    const allocated = Number(
+      (rows[0] as { allocated_amount: string }).allocated_amount,
+    );
+    const utilized = Number(
+      (rows[0] as { utilized_amount: string }).utilized_amount,
+    );
     if (allocated <= 0) return;
 
     const pct = utilized / allocated;
@@ -135,7 +153,11 @@ export class AnomalyDetectionService {
     }
   }
 
-  async checkApprovalBypass(tenantId: string, invoiceId: string, amount: number) {
+  async checkApprovalBypass(
+    tenantId: string,
+    invoiceId: string,
+    amount: number,
+  ) {
     if (amount <= 2500000) return;
     const rows = await this.db.query(
       `SELECT invoice_id FROM fin_vendor_invoices
@@ -162,7 +184,11 @@ export class AnomalyDetectionService {
     if (row?.department_id) {
       await this.checkBudgetThresholds(tenantId, row.department_id);
     }
-    await this.checkApprovalBypass(tenantId, invoiceId, Number(row?.net_payable ?? 0));
+    await this.checkApprovalBypass(
+      tenantId,
+      invoiceId,
+      Number(row?.net_payable ?? 0),
+    );
   }
 
   private async raiseFlag(
@@ -206,6 +232,8 @@ export class AnomalyDetectionService {
         queueDelivery: false,
       });
     }
-    this.logger.warn(`Anomaly ${ruleCode} (${severity}) for tenant ${tenantId}`);
+    this.logger.warn(
+      `Anomaly ${ruleCode} (${severity}) for tenant ${tenantId}`,
+    );
   }
 }

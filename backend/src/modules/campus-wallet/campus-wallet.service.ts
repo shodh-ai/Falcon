@@ -1,9 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
 import { DataSource, QueryRunner } from 'typeorm';
 
-const MEAL_CUTOFFS: Record<string, { hour: number; minute: number; label: string }> = {
+const MEAL_CUTOFFS: Record<
+  string,
+  { hour: number; minute: number; label: string }
+> = {
   BREAKFAST: { hour: 7, minute: 0, label: '7:00 AM' },
   LUNCH: { hour: 10, minute: 0, label: '10:00 AM' },
   DINNER: { hour: 17, minute: 0, label: '5:00 PM' },
@@ -29,7 +36,12 @@ export class CampusWalletService {
     return rows[0];
   }
 
-  async topUp(tenantId: string, studentUserId: string, amount: number, referenceId: string) {
+  async topUp(
+    tenantId: string,
+    studentUserId: string,
+    amount: number,
+    referenceId: string,
+  ) {
     if (amount <= 0) throw new BadRequestException('Invalid amount');
     const wallet = await this.getOrCreateWallet(tenantId, studentUserId);
     const newBalance = Number(wallet.current_balance) + amount;
@@ -66,7 +78,15 @@ export class CampusWalletService {
 
   async getDailyMenu(tenantId: string, dateStr: string) {
     const date = new Date(`${dateStr}T12:00:00`);
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
     const dayKey = dayNames[date.getDay()];
 
     const rows = await this.dataSource.query(
@@ -77,7 +97,11 @@ export class CampusWalletService {
     );
 
     const menu = rows[0] as
-      | { meal_plan: Record<string, Record<string, string>>; alternative_options?: string; special_notes?: string }
+      | {
+          meal_plan: Record<string, Record<string, string>>;
+          alternative_options?: string;
+          special_notes?: string;
+        }
       | undefined;
     const dayPlan = menu?.meal_plan?.[dayKey] ?? {};
 
@@ -92,7 +116,10 @@ export class CampusWalletService {
       alternative_options: menu?.alternative_options ?? null,
       special_notes: menu?.special_notes ?? null,
       cutoffs: Object.fromEntries(
-        Object.entries(MEAL_CUTOFFS).map(([meal, cfg]) => [meal, { time: cfg.label, passed: this.isCutoffPassed(dateStr, meal) }]),
+        Object.entries(MEAL_CUTOFFS).map(([meal, cfg]) => [
+          meal,
+          { time: cfg.label, passed: this.isCutoffPassed(dateStr, meal) },
+        ]),
       ),
     };
   }
@@ -105,7 +132,11 @@ export class CampusWalletService {
       d.setDate(d.getDate() + i);
       const date = d.toISOString().slice(0, 10);
       const label =
-        i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-IN', { weekday: 'long' });
+        i === 0
+          ? 'Today'
+          : i === 1
+            ? 'Tomorrow'
+            : d.toLocaleDateString('en-IN', { weekday: 'long' });
       dates.push({ date, label });
     }
     return { max_advance_days: MAX_ADVANCE_DAYS, dates, cutoffs: MEAL_CUTOFFS };
@@ -125,7 +156,10 @@ export class CampusWalletService {
   async placeOrder(
     tenantId: string,
     studentUserId: string,
-    dto: { order_date: string; items: { item_id: string; meal_type: string; quantity?: number }[] },
+    dto: {
+      order_date: string;
+      items: { item_id: string; meal_type: string; quantity?: number }[];
+    },
   ) {
     if (!dto.items?.length) throw new BadRequestException('Cart is empty');
     this.assertAdvanceWindow(dto.order_date);
@@ -149,8 +183,11 @@ export class CampusWalletService {
       }
 
       let total = 0;
-      const lines: { item: { item_id: string; item_name: string; price: string }; qty: number; meal_type: string }[] =
-        [];
+      const lines: {
+        item: { item_id: string; item_name: string; price: string };
+        qty: number;
+        meal_type: string;
+      }[] = [];
 
       for (const line of dto.items) {
         this.assertNotPastCutoff(dto.order_date, line.meal_type);
@@ -159,7 +196,8 @@ export class CampusWalletService {
           [line.item_id, tenantId],
         );
         const item = itemRows[0];
-        if (!item) throw new BadRequestException(`Item not found: ${line.item_id}`);
+        if (!item)
+          throw new BadRequestException(`Item not found: ${line.item_id}`);
         const qty = Math.max(1, line.quantity ?? 1);
         total += Number(item.price) * qty;
         lines.push({ item, qty, meal_type: line.meal_type.toUpperCase() });
@@ -213,10 +251,10 @@ export class CampusWalletService {
         }
       }
 
-      await qr.query(`UPDATE campus_wallets SET current_balance = $2, last_updated = NOW() WHERE wallet_id = $1`, [
-        wallet.wallet_id,
-        newBalance,
-      ]);
+      await qr.query(
+        `UPDATE campus_wallets SET current_balance = $2, last_updated = NOW() WHERE wallet_id = $1`,
+        [wallet.wallet_id, newBalance],
+      );
 
       await qr.commitTransaction();
       return { orders, total_deducted: total, new_balance: newBalance };
@@ -228,8 +266,13 @@ export class CampusWalletService {
     }
   }
 
-  createWalletTopUpOrder(tenantId: string, studentUserId: string, amount: number) {
-    if (amount <= 0 || amount > 50_000) throw new BadRequestException('Invalid top-up amount');
+  createWalletTopUpOrder(
+    tenantId: string,
+    studentUserId: string,
+    amount: number,
+  ) {
+    if (amount <= 0 || amount > 50_000)
+      throw new BadRequestException('Invalid top-up amount');
     const orderId = `wallet_${studentUserId.replace(/-/g, '').slice(0, 8)}_${Date.now()}`;
     return {
       order_id: orderId,
@@ -239,7 +282,11 @@ export class CampusWalletService {
       fee_head: 'WALLET_TOPUP',
       razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
       mock: true,
-      notes: { student_user_id: studentUserId, tenant_id: tenantId, fee_head: 'WALLET_TOPUP' },
+      notes: {
+        student_user_id: studentUserId,
+        tenant_id: tenantId,
+        fee_head: 'WALLET_TOPUP',
+      },
     };
   }
 
@@ -255,7 +302,9 @@ export class CampusWalletService {
 
   async generateMealToken(tenantId: string, studentUserId: string) {
     const nonce = randomBytes(16).toString('hex');
-    const tokenHash = createHash('sha256').update(`${studentUserId}:${nonce}:${Date.now()}`).digest('hex');
+    const tokenHash = createHash('sha256')
+      .update(`${studentUserId}:${nonce}:${Date.now()}`)
+      .digest('hex');
     const totp = this.generateTotp(studentUserId);
     const expiresAt = new Date(Date.now() + 30_000);
     await this.dataSource.query(
@@ -285,7 +334,8 @@ export class CampusWalletService {
 
   async redeemOrder(tenantId: string, claimPinOrQrData: string) {
     const input = claimPinOrQrData.trim().replace(/^#/, '');
-    if (!input) throw new BadRequestException('Enter a claim PIN or scan the order QR');
+    if (!input)
+      throw new BadRequestException('Enter a claim PIN or scan the order QR');
 
     const rows = await this.dataSource.query(
       `SELECT o.*, u.name AS student_name
@@ -307,7 +357,8 @@ export class CampusWalletService {
       | undefined;
 
     if (!order) throw new NotFoundException('Invalid Order.');
-    if (order.is_redeemed) throw new BadRequestException('This order has already been claimed!');
+    if (order.is_redeemed)
+      throw new BadRequestException('This order has already been claimed!');
 
     await this.dataSource.query(
       `UPDATE mess_addon_orders SET is_redeemed = true, redeemed_at = NOW() WHERE order_id = $1`,
@@ -330,9 +381,12 @@ export class CampusWalletService {
     const studentUserId = parts[0];
     const tokenHash = parts[1];
     const totp = parts[2];
-    if (!studentUserId || !tokenHash) throw new BadRequestException('Invalid QR');
+    if (!studentUserId || !tokenHash)
+      throw new BadRequestException('Invalid QR');
     if (totp && !this.validateTotp(studentUserId, totp)) {
-      throw new BadRequestException('QR security code expired — ask student to refresh');
+      throw new BadRequestException(
+        'QR security code expired — ask student to refresh',
+      );
     }
 
     const tokenRows = await this.dataSource.query(
@@ -352,12 +406,16 @@ export class CampusWalletService {
       [studentUserId],
     );
     if (!allocationRows[0]) {
-      throw new BadRequestException('No active hostel allocation — buffet entry denied');
+      throw new BadRequestException(
+        'No active hostel allocation — buffet entry denied',
+      );
     }
 
     const mealType = this.inferCurrentMealType();
     if (!mealType) {
-      throw new BadRequestException('Mess is not serving right now — try during meal hours');
+      throw new BadRequestException(
+        'Mess is not serving right now — try during meal hours',
+      );
     }
 
     const existingEntry = await this.dataSource.query(
@@ -366,7 +424,9 @@ export class CampusWalletService {
       [tenantId, studentUserId, mealType],
     );
     if (existingEntry[0]) {
-      throw new BadRequestException(`Already checked in for ${mealType.toLowerCase()} today`);
+      throw new BadRequestException(
+        `Already checked in for ${mealType.toLowerCase()} today`,
+      );
     }
 
     await this.dataSource.query(
@@ -375,8 +435,14 @@ export class CampusWalletService {
       [tenantId, studentUserId, mealType],
     );
 
-    const studentRows = await this.dataSource.query(`SELECT name FROM users WHERE user_id = $1`, [studentUserId]);
-    const room = allocationRows[0] as { room_number?: string; hostel_block?: string };
+    const studentRows = await this.dataSource.query(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [studentUserId],
+    );
+    const room = allocationRows[0] as {
+      room_number?: string;
+      hostel_block?: string;
+    };
     const roomLabel = room?.room_number ? `Room ${room.room_number}` : null;
     const studentName = studentRows[0]?.name ?? 'Student';
 
@@ -399,9 +465,10 @@ export class CampusWalletService {
     const static_qr_data = `FALCON:ORDER:${orderId}`;
     for (let attempt = 0; attempt < 15; attempt++) {
       const claim_pin = String(Math.floor(1000 + Math.random() * 9000));
-      const existing = await qr.query(`SELECT 1 FROM mess_addon_orders WHERE claim_pin = $1 LIMIT 1`, [
-        claim_pin,
-      ]);
+      const existing = await qr.query(
+        `SELECT 1 FROM mess_addon_orders WHERE claim_pin = $1 LIMIT 1`,
+        [claim_pin],
+      );
       if (!existing[0]) return { claim_pin, static_qr_data };
     }
     throw new BadRequestException('Could not generate claim PIN — try again');
@@ -428,10 +495,15 @@ export class CampusWalletService {
     today.setHours(0, 0, 0, 0);
     const target = new Date(`${orderDate}T12:00:00`);
     target.setHours(0, 0, 0, 0);
-    const diffDays = Math.round((target.getTime() - today.getTime()) / 86_400_000);
-    if (diffDays < 0) throw new BadRequestException('Cannot order for past dates');
+    const diffDays = Math.round(
+      (target.getTime() - today.getTime()) / 86_400_000,
+    );
+    if (diffDays < 0)
+      throw new BadRequestException('Cannot order for past dates');
     if (diffDays >= MAX_ADVANCE_DAYS) {
-      throw new BadRequestException(`Pre-orders are limited to ${MAX_ADVANCE_DAYS} days in advance`);
+      throw new BadRequestException(
+        `Pre-orders are limited to ${MAX_ADVANCE_DAYS} days in advance`,
+      );
     }
   }
 
@@ -468,7 +540,8 @@ export class CampusWalletService {
 
   private validateTotp(studentUserId: string, totp: string): boolean {
     return (
-      totp === this.generateTotp(studentUserId, 0) || totp === this.generateTotp(studentUserId, -1)
+      totp === this.generateTotp(studentUserId, 0) ||
+      totp === this.generateTotp(studentUserId, -1)
     );
   }
 }

@@ -20,7 +20,10 @@ export class TenantSchemaInterceptor implements NestInterceptor {
     private readonly tenantContext: TenantContextService,
   ) {}
 
-  intercept(_context: ExecutionContext, next: CallHandler): Observable<unknown> {
+  intercept(
+    _context: ExecutionContext,
+    next: CallHandler,
+  ): Observable<unknown> {
     const schema = this.tenantContext.getPgSchema();
     if (!schema || schema === 'public') {
       return next.handle();

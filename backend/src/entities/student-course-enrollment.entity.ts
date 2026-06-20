@@ -1,4 +1,11 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BaseTenantEntity } from './base-tenant.entity';
 import { AcademicCourse } from './academic-course.entity';
 import { User } from './user.entity';
@@ -40,4 +47,8 @@ export class StudentCourseEnrollment extends BaseTenantEntity {
 
   @Column({ type: 'numeric', precision: 5, scale: 2, default: 0 })
   attendance_percent: string;
+
+  /** Semester roll number — may change each term (sections / electives). */
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  roll_number: string | null;
 }
