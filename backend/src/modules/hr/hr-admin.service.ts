@@ -29,6 +29,27 @@ const API_POINTS: Record<string, number> = {
   OTHER: 3,
 };
 
+const DEFAULT_BIOMETRIC_TENANT_ID = 'a0000000-0000-4000-8000-000000000001';
+
+export type BiometricPunchInput = {
+  employee_id: string;
+  punch_time: string;
+  device_id?: string;
+  punch_type?: 'IN' | 'OUT';
+  entity_id?: number;
+};
+
+export type BiometricSyncBody = {
+  secret?: string;
+  employee_id?: string;
+  punch_time?: string;
+  emp_id?: string;
+  timestamp?: string;
+  device_id?: string;
+  punch_type?: 'IN' | 'OUT';
+  punches?: BiometricPunchInput[];
+};
+
 @Injectable()
 export class HrAdminService {
   constructor(
@@ -391,28 +412,63 @@ export class HrAdminService {
     };
   }
 
+  resolveBiometricTenantId(): string {
+    return (
+      this.config.get<string>('HR_BIOMETRIC_TENANT_ID') ??
+      DEFAULT_BIOMETRIC_TENANT_ID
+    );
+  }
+
+  normalizeBiometricPunches(body: BiometricSyncBody): BiometricPunchInput[] {
+    if (body.punches?.length) {
+      return body.punches.map((punch) => this.normalizeBiometricPunch(punch));
+    }
+
+    const employeeId = body.employee_id ?? body.emp_id;
+    const punchTime = body.punch_time ?? body.timestamp;
+    if (employeeId && punchTime) {
+      return [
+        this.normalizeBiometricPunch({
+          employee_id: employeeId,
+          punch_time: punchTime,
+          device_id: body.device_id,
+          punch_type: body.punch_type,
+        }),
+      ];
+    }
+
+    return [];
+  }
+
+  private normalizeBiometricPunch(
+    punch: BiometricPunchInput,
+  ): BiometricPunchInput {
+    return {
+      employee_id: punch.employee_id.trim(),
+      punch_time: punch.punch_time,
+      device_id: punch.device_id?.trim(),
+      punch_type: punch.punch_type === 'OUT' ? 'OUT' : 'IN',
+      entity_id: punch.entity_id,
+    };
+  }
+
   async ingestBiometricPunches(
     tenantId: string,
-    punches: {
-      employee_id: string;
-      punch_time: string;
-      device_id?: string;
-      punch_type: 'IN' | 'OUT';
-      entity_id?: number;
-    }[],
+    punches: BiometricPunchInput[],
     entityId?: number,
   ) {
     for (const punch of punches) {
+      const normalized = this.normalizeBiometricPunch(punch);
       await this.dataSource.query(
         `INSERT INTO hr_biometric_logs (tenant_id, entity_id, employee_id, punch_time, device_id, punch_type)
          VALUES ($1, $2, $3, $4::timestamptz, $5, $6)`,
         [
           tenantId,
-          punch.entity_id ?? entityId ?? null,
-          punch.employee_id,
-          punch.punch_time,
-          punch.device_id ?? null,
-          punch.punch_type,
+          normalized.entity_id ?? entityId ?? null,
+          normalized.employee_id,
+          normalized.punch_time,
+          normalized.device_id ?? null,
+          normalized.punch_type,
         ],
       );
     }
@@ -717,6 +773,17 @@ export class HrAdminService {
     if (!expected) return true;
     if (secret !== expected)
       throw new ForbiddenException('Invalid biometric webhook secret');
+    return true;
+  }
+
+  validateBiometricApiKey(apiKey?: string) {
+    const expected = this.config.get<string>('HR_BIOMETRIC_API_KEY');
+    if (!expected) {
+      throw new ForbiddenException('Biometric API key not configured');
+    }
+    if (!apiKey || apiKey !== expected) {
+      throw new ForbiddenException('Invalid biometric API key');
+    }
     return true;
   }
 }

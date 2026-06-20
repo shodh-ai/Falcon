@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -31,11 +32,11 @@ import {
 } from './hr-access-control.service';
 import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
 import { SkipEntityScope } from '../../common/decorators/skip-entity-scope.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Roles, Public } from '../../common/decorators/roles.decorator';
 import { HrPermission } from '../../common/decorators/hr-permission.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { HrService } from './hr.service';
-import { HrAdminService } from './hr-admin.service';
+import { HrAdminService, type BiometricSyncBody } from './hr-admin.service';
 import { HrWorkforceService } from './hr-workforce.service';
 import { AttendanceCalculationService } from './attendance-calculation.service';
 import {
@@ -822,40 +823,24 @@ export class HrController {
   }
 
   @Post('biometrics/sync')
+  @Public()
+  @SkipEntityScope()
   @HttpCode(HttpStatus.OK)
   async biometricsSyncAlias(
-    @Req() req: { user: AuthUser },
+    @Headers('x-api-key') apiKey: string | undefined,
     @Query('entity_id') entityId: string | undefined,
-    @Body()
-    body: {
-      secret?: string;
-      emp_id?: string;
-      timestamp?: string;
-      device_id?: string;
-      punches?: {
-        employee_id: string;
-        punch_time: string;
-        device_id?: string;
-        punch_type: 'IN' | 'OUT';
-      }[];
-    },
+    @Body() body: BiometricSyncBody,
   ) {
-    const normalized =
-      body.punches ??
-      (body.emp_id && body.timestamp
-        ? [
-            {
-              employee_id: body.emp_id,
-              punch_time: body.timestamp,
-              device_id: body.device_id,
-              punch_type: 'IN' as const,
-            },
-          ]
-        : []);
-    return this.biometricSync(req, entityId, {
-      secret: body.secret,
-      punches: normalized,
-    });
+    this.hrAdmin.validateBiometricApiKey(apiKey);
+    const tenantId = this.hrAdmin.resolveBiometricTenantId();
+    const punches = this.hrAdmin.normalizeBiometricPunches(body);
+    if (!punches.length) {
+      throw new BadRequestException('No biometric punches supplied');
+    }
+    const entity = entityId
+      ? await this.entityCtx.resolveEntityId(tenantId, entityId)
+      : undefined;
+    return this.hrAdmin.ingestBiometricPunches(tenantId, punches, entity);
   }
 
   @Get('payroll/packages')

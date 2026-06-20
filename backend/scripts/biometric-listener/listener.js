@@ -11,7 +11,7 @@ const path = require('path');
 
 const LOG_FILE = process.env.BIOMETRIC_LOG_FILE || './biometric-punches.log';
 const API_URL = process.env.FALCON_API_URL || 'http://localhost:4000/api/hr/biometrics/sync';
-const WEBHOOK_SECRET = process.env.HR_BIOMETRIC_WEBHOOK_SECRET || '';
+const API_KEY = process.env.HR_BIOMETRIC_API_KEY || '';
 const ENTITY_ID = process.env.ENTITY_ID || '1';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 5 * 60 * 1000);
 const STATE_FILE = process.env.STATE_FILE || './listener-state.json';
@@ -50,11 +50,17 @@ function parseLine(line) {
 
 async function postPunches(punches) {
   if (!punches.length) return;
+  if (!API_KEY) {
+    throw new Error('HR_BIOMETRIC_API_KEY is not configured');
+  }
 
   const res = await fetch(`${API_URL}?entity_id=${ENTITY_ID}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ secret: WEBHOOK_SECRET, punches }),
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-KEY': API_KEY,
+    },
+    body: JSON.stringify({ punches }),
   });
 
   if (!res.ok) {
