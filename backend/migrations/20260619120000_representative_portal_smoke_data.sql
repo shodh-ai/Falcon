@@ -114,6 +114,8 @@ DECLARE
   v_jd UUID;
   v_job UUID;
   v_app UUID;
+  v_placement_drive UUID;
+  v_student_profile UUID;
   v_alumni UUID;
   v_club UUID;
   v_template UUID;
@@ -656,9 +658,44 @@ BEGIN
   END IF;
 
   IF v_jd IS NOT NULL AND v_student IS NOT NULL AND to_regclass('public.placement_applications') IS NOT NULL THEN
-    INSERT INTO placement_applications (tenant_id, jd_id, student_user_id, cgpa_at_apply, active_backlogs_at_apply, eligibility_status, status)
-    SELECT v_tenant, v_jd, v_student, 8.25, 0, 'ELIGIBLE', 'SHORTLISTED'
-    WHERE NOT EXISTS (SELECT 1 FROM placement_applications WHERE jd_id = v_jd AND student_user_id = v_student);
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'placement_applications' AND column_name = 'placement_drive_id'
+    ) AND EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'placement_applications' AND column_name = 'student_profile_id'
+    ) THEN
+      IF to_regclass('public.placement_drives') IS NOT NULL THEN
+        INSERT INTO placement_drives (company_name, role_title, description, deadline, job_role, package_lpa, max_active_backlogs, status)
+        SELECT 'SmokeSoft Labs', 'Smoke Software Engineer', 'Representative placement drive for smoke testing.',
+               NOW() + INTERVAL '15 days', 'Smoke Software Engineer', 6.50, 1, 'OPEN'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM placement_drives WHERE company_name = 'SmokeSoft Labs' AND role_title = 'Smoke Software Engineer'
+        );
+        SELECT placement_drive_id INTO v_placement_drive FROM placement_drives
+        WHERE company_name = 'SmokeSoft Labs' AND role_title = 'Smoke Software Engineer' LIMIT 1;
+      END IF;
+
+      SELECT student_profile_id INTO v_student_profile
+      FROM student_profiles WHERE user_id = v_student LIMIT 1;
+
+      IF v_placement_drive IS NOT NULL AND v_student_profile IS NOT NULL THEN
+        INSERT INTO placement_applications (
+          placement_drive_id, student_profile_id, student_user_id, tenant_id, jd_id,
+          cgpa_at_apply, active_backlogs_at_apply, eligibility_status, status
+        )
+        SELECT v_placement_drive, v_student_profile, v_student, v_tenant, v_jd,
+               8.25, 0, 'ELIGIBLE', 'SHORTLISTED'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM placement_applications
+          WHERE placement_drive_id = v_placement_drive AND student_profile_id = v_student_profile
+        );
+      END IF;
+    ELSE
+      INSERT INTO placement_applications (tenant_id, jd_id, student_user_id, cgpa_at_apply, active_backlogs_at_apply, eligibility_status, status)
+      SELECT v_tenant, v_jd, v_student, 8.25, 0, 'ELIGIBLE', 'SHORTLISTED'
+      WHERE NOT EXISTS (SELECT 1 FROM placement_applications WHERE jd_id = v_jd AND student_user_id = v_student);
+    END IF;
   END IF;
 
   IF to_regclass('public.placement_job_postings') IS NOT NULL THEN
