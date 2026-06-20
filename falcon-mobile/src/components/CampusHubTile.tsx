@@ -39,6 +39,14 @@ export const HUB_TILES: HubTile[] = [
     route: '/campus/events',
   },
   {
+    id: 'ecell',
+    label: 'E-Cell Hub',
+    icon: 'rocket-outline',
+    color: '#08234a',
+    bg: '#fff7ed',
+    route: '/campus/ecell',
+  },
+  {
     id: 'mentorship',
     label: 'Mentorship',
     icon: 'chatbubbles-outline',

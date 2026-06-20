@@ -78,6 +78,10 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/placements/dashboard';
   }
 
+  if (r === 'ecelladmin' || r === 'e-cell admin' || r === 'incubation_admin' || r === 'incubation admin') {
+    return '/incubation/dashboard';
+  }
+
   if (r === 'transportofficer' || r === 'transport officer') {
     return '/admin-ops/fleet';
   }
@@ -113,6 +117,7 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'alumni') return 'Alumni Network';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell Workspace';
   if (r === 'dc_member' || r === 'dc member') return 'Disciplinary Committee';
+  if (r === 'incubation_admin' || r === 'ecelladmin') return 'Incubation Workspace';
   return `${role} Workspace`;
 }
 
@@ -134,6 +139,7 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'alumni') return 'Alumni';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell';
   if (r === 'dc_member' || r === 'dc member') return 'DC';
+  if (r === 'incubation_admin' || r === 'ecelladmin') return 'Incubation';
   return role;
 }
 
@@ -293,6 +299,8 @@ const portalRoles: Record<string, string[]> = {
   '/alumni-admin': ['iqac', 'superadmin', 'registrar', 'president'],
   '/admin-ops': ['registrar', 'superadmin', 'transportofficer'],
   '/placements': ['placementcell', 'superadmin', 'registrar'],
+  '/incubation': ['incubation_admin', 'ecelladmin', 'superadmin', 'hod', 'dean', 'president'],
+  '/ecell-admin': ['incubation_admin', 'ecelladmin', 'superadmin'],
   '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'parent'],
   '/reports': ['registrar', 'superadmin', 'president', 'accountant'],
   '/admin': ['superadmin', 'registrar'],

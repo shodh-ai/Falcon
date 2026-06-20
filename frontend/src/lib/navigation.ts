@@ -58,6 +58,7 @@ import {
   QrCode,
   BedDouble,
   PartyPopper,
+  Rocket,
   ClipboardPen,
   MapPin,
   AlertTriangle,
@@ -288,6 +289,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
         { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'ncc', 'nss', 'fest'] },
+        { label: 'E-Cell & Incubation', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
       ],
     },
     {
@@ -310,6 +312,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Financial Ledger', href: '/student/finance', icon: Wallet },
     { label: 'Campus Life', href: '/student/campus-life', icon: Bus },
     { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper },
+    { label: 'E-Cell Hub', href: '/student/e-cell', icon: Rocket },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
   ],
 };
@@ -530,7 +533,6 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
-        { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades', 'remedial'] },
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
@@ -568,7 +570,6 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students'] },
-        { label: 'Defaulters & Slow Learners', href: '/hod/students/defaulters', icon: LineChart, keywords: ['defaulters'] },
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
@@ -722,6 +723,95 @@ export const hostelAdminPortal: PortalConfig = {
   ],
 };
 
+export const incubationPortal: PortalConfig = {
+  personaLabel: 'Incubation Workspace',
+  personaTitle: 'Entrepreneurship & Incubation Cell',
+  homeHref: '/incubation/dashboard',
+  navGroups: [
+    {
+      title: 'Incubation Dashboard',
+      items: [
+        {
+          label: 'Overview',
+          href: '/incubation/dashboard',
+          icon: LayoutDashboard,
+          keywords: ['startups', 'funds', 'cohorts', 'metrics'],
+        },
+      ],
+    },
+    {
+      title: 'Startup Pipeline',
+      items: [
+        {
+          label: 'New Applications',
+          href: '/incubation/pipeline/applications',
+          icon: Inbox,
+          keywords: ['triage', 'pitch', 'submit'],
+        },
+        {
+          label: 'L1 & L2 Approvals',
+          href: '/incubation/pipeline/approvals',
+          icon: Kanban,
+          keywords: ['kanban', 'approve', 'review'],
+        },
+        {
+          label: 'Active Portfolio',
+          href: '/incubation/portfolio',
+          icon: Briefcase,
+          keywords: ['funded', 'operating', 'startups'],
+        },
+      ],
+    },
+    {
+      title: 'Finance & Mentoring',
+      items: [
+        {
+          label: 'Grant Management',
+          href: '/incubation/grants',
+          icon: DollarSign,
+          keywords: ['disbursement', 'milestone', 'funding'],
+        },
+        {
+          label: 'Mentor Network',
+          href: '/incubation/mentors',
+          icon: Handshake,
+          keywords: ['alumni', 'industry', 'experts'],
+        },
+      ],
+    },
+    {
+      title: 'Settings & Reports',
+      items: [
+        {
+          label: 'Cohort Configurations',
+          href: '/incubation/settings/cohort',
+          icon: Settings,
+          keywords: ['window', 'approver', 'open', 'close'],
+        },
+        {
+          label: 'NAAC / NIRF Exports',
+          href: '/incubation/reports',
+          icon: FileSpreadsheet,
+          keywords: ['export', 'government', 'seed funding'],
+        },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Incubation Overview', href: '/incubation/dashboard', icon: LayoutDashboard },
+    { label: 'New Applications', href: '/incubation/pipeline/applications', icon: Inbox },
+    { label: 'L1 & L2 Approvals', href: '/incubation/pipeline/approvals', icon: Kanban },
+    { label: 'Active Portfolio', href: '/incubation/portfolio', icon: Briefcase },
+    { label: 'Grant Management', href: '/incubation/grants', icon: DollarSign },
+    { label: 'Mentor Network', href: '/incubation/mentors', icon: Handshake },
+    { label: 'Cohort Settings', href: '/incubation/settings/cohort', icon: Settings },
+    { label: 'NAAC / NIRF Export', href: '/incubation/reports', icon: FileSpreadsheet },
+  ],
+};
+
+/** @deprecated Use incubationPortal — legacy alias for redirects */
+export const ecellAdminPortal = incubationPortal;
+
 export const financePortal: PortalConfig = {
   personaLabel: 'Finance Office',
   personaTitle: 'Finance & Accounts',
@@ -740,6 +830,7 @@ export const financePortal: PortalConfig = {
         { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
         { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
         { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'] },
+        { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'] },
         { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
       ],
     },
@@ -914,6 +1005,7 @@ export const examCellPortal: PortalConfig = {
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
+        { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
         { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },

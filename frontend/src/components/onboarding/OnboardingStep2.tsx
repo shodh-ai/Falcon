@@ -243,7 +243,13 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
               {!isStaff && (
                 <div className="space-y-2">
                   <label htmlFor="id-field" className="text-sm font-medium">ABC ID</label>
-                  <Input id="id-field" value={abcId} onChange={(e) => setAbcId(e.target.value)} required />
+                  <Input
+                    id="id-field"
+                    value={abcId}
+                    onChange={(e) => setAbcId(e.target.value)}
+                    placeholder="Your 12-digit Academic Bank ID (unique per student)"
+                    required
+                  />
                 </div>
               )}
               <div className="space-y-2">

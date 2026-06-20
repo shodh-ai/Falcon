@@ -1,6 +1,17 @@
 -- Smoke data for Result Control Centre (SGVU tenant / SMOKE101 course).
 -- Idempotent: safe to re-run after representative portal smoke seed.
 
+CREATE TABLE IF NOT EXISTS smoke_seed_manifest (
+  smoke_key VARCHAR(120) PRIMARY KEY,
+  portal VARCHAR(80) NOT NULL,
+  role_email VARCHAR(255),
+  feature_area VARCHAR(160) NOT NULL,
+  sample_record VARCHAR(255) NOT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'SEEDED',
+  notes TEXT,
+  seeded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 INSERT INTO smoke_seed_manifest (smoke_key, portal, role_email, feature_area, sample_record, notes)
 VALUES (
   'exam-cell.result-control',

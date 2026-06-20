@@ -53,25 +53,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const api = getApiBaseUrl();
           const { getSubdomainFromClient } = await import('@/lib/tenant');
-            const headers = {
-              Authorization: `Bearer ${storedToken}`,
-              'x-tenant-subdomain': getSubdomainFromClient(),
-            };
-            const [profileRes, permsRes] = await Promise.all([
-              fetch(`${api}/api/auth/me`, { headers }).catch(() => fetch(`${api}/auth/profile`, { headers })),
-              fetch(`${api}/api/auth/me/permissions`, { headers }),
-            ]);
-            if (profileRes.ok) {
-              const fresh = await profileRes.json();
-              if (permsRes.ok) {
-                const perms = await permsRes.json();
-                fresh.permissions = perms.permissions ?? fresh.permissions;
-                fresh.hr_capabilities = perms.hr_capabilities ?? fresh.hr_capabilities;
-                fresh.allowed_entities = perms.allowed_entities ?? fresh.allowed_entities;
-              }
-              setUser(fresh);
-              localStorage.setItem('user', JSON.stringify(fresh));
+          const headers = {
+            Authorization: `Bearer ${storedToken}`,
+            'x-tenant-subdomain': getSubdomainFromClient(),
+          };
+          const [profileRes, permsRes] = await Promise.all([
+            fetch(`${api}/api/auth/me`, { headers }).catch(() => fetch(`${api}/auth/profile`, { headers })),
+            fetch(`${api}/api/auth/me/permissions`, { headers }),
+          ]);
+          if (profileRes.ok) {
+            const fresh = await profileRes.json();
+            if (permsRes.ok) {
+              const perms = await permsRes.json();
+              fresh.permissions = perms.permissions ?? fresh.permissions;
+              fresh.hr_capabilities = perms.hr_capabilities ?? fresh.hr_capabilities;
+              fresh.allowed_entities = perms.allowed_entities ?? fresh.allowed_entities;
             }
+            setUser(fresh);
+            localStorage.setItem('user', JSON.stringify(fresh));
+          }
         } catch {
           /* keep cached user if profile fetch fails */
         }

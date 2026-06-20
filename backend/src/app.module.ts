@@ -50,6 +50,7 @@ import { TransportModule } from './modules/transport/transport.module';
 import { LibraryModule } from './modules/library/library.module';
 import { HostelAdminModule } from './modules/hostel-admin/hostel-admin.module';
 import { CampusEventsModule } from './modules/campus-events/campus-events.module';
+import { EcellModule } from './modules/ecell/ecell.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
 import { DemeritsModule } from './modules/demerits/demerits.module';
 import { AttendancePolicyModule } from './modules/attendance-policy/attendance-policy.module';
@@ -158,6 +159,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     LibraryModule,
     HostelAdminModule,
     CampusEventsModule,
+    EcellModule,
     MeetingsModule,
     DemeritsModule,
     AttendancePolicyModule,

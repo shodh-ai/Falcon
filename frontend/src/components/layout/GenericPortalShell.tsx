@@ -7,6 +7,7 @@ import {
   hodPortal,
   deanPortal,
   hostelAdminPortal,
+  incubationPortal,
   iqacPortal,
   libraryPortal,
   parentPortal,
@@ -23,6 +24,7 @@ type PortalKey =
   | 'hod'
   | 'dean'
   | 'hostel-admin'
+  | 'incubation'
   | 'finance'
   | 'iqac'
   | 'library'
@@ -39,6 +41,7 @@ const configs = {
   hod: hodPortal,
   dean: deanPortal,
   'hostel-admin': hostelAdminPortal,
+  incubation: incubationPortal,
   finance: financePortal,
   iqac: iqacPortal,
   library: libraryPortal,

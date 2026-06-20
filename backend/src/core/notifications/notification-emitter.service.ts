@@ -34,6 +34,10 @@ import {
   type AlumniWelcomeEmailPayload,
   type AlumniConversionApprovedPayload,
   type StudentOnboardingApprovedPayload,
+  type EcellStatusUpdatedPayload,
+  type EcellMentorMeetingRequestedPayload,
+  type EcellMentorMeetingRespondedPayload,
+  type EcellMentorFeedbackRequestedPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -211,5 +215,21 @@ export class NotificationEmitterService {
 
   studentOnboardingApproved(payload: StudentOnboardingApprovedPayload) {
     this.events.emit(NotificationEvents.STUDENT_ONBOARDING_APPROVED, payload);
+  }
+
+  ecellStatusUpdated(payload: EcellStatusUpdatedPayload) {
+    this.events.emit(NotificationEvents.ECELL_STATUS_UPDATED, payload);
+  }
+
+  ecellMentorMeetingRequested(payload: EcellMentorMeetingRequestedPayload) {
+    this.events.emit(NotificationEvents.ECELL_MENTOR_MEETING_REQUESTED, payload);
+  }
+
+  ecellMentorMeetingResponded(payload: EcellMentorMeetingRespondedPayload) {
+    this.events.emit(NotificationEvents.ECELL_MENTOR_MEETING_RESPONDED, payload);
+  }
+
+  ecellMentorFeedbackRequested(payload: EcellMentorFeedbackRequestedPayload) {
+    this.events.emit(NotificationEvents.ECELL_MENTOR_FEEDBACK_REQUESTED, payload);
   }
 }
