@@ -9,6 +9,8 @@ import type {
 import type { FalconNotification } from '@/types/notifications';
 import type {
   CampusEvent,
+  EcellConfig,
+  EcellProject,
   CampusWallet,
   HelpdeskTicket,
   HostelAllocation,
@@ -125,6 +127,26 @@ export function useCampusEvents() {
     queryKey: ['campus-events'],
     queryFn: async () => {
       const { data } = await api.get<CampusEvent[]>('/api/campus-events/events');
+      return data;
+    },
+  });
+}
+
+export function useEcellProjects() {
+  return useQuery({
+    queryKey: ['ecell', 'projects'],
+    queryFn: async () => {
+      const { data } = await api.get<EcellProject[]>('/api/ecell/projects/mine');
+      return data;
+    },
+  });
+}
+
+export function useEcellConfig() {
+  return useQuery({
+    queryKey: ['ecell', 'config'],
+    queryFn: async () => {
+      const { data } = await api.get<EcellConfig | null>('/api/ecell/config/active');
       return data;
     },
   });
