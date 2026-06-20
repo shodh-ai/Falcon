@@ -111,7 +111,13 @@ const ENHANCED_ERRORS: Array<{
     category: 'OPERATIONS',
   },
   {
-    pattern: /unauthorized|forbidden|sign in|logged in/i,
+    pattern: /^Forbidden resource$/i,
+    title: 'Action not allowed',
+    body: () => 'Your current role cannot use this self-service action.',
+    category: 'OPERATIONS',
+  },
+  {
+    pattern: /unauthorized|sign in|logged in/i,
     title: 'Sign in required',
     body: (raw) => raw,
     category: 'OPERATIONS',

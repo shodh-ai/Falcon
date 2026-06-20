@@ -24,6 +24,34 @@ export class ExamCellService {
     private readonly events: EventEmitter2,
   ) {}
 
+  private async queryOrEmpty<T extends Record<string, unknown>>(
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<T[]> {
+    try {
+      return (await this.db.query(sql, params)) as T[];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  private normalizeSeatingAllocations(value: unknown): Array<Record<string, unknown>> {
+    if (Array.isArray(value)) return value as Array<Record<string, unknown>>;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+
   async dashboard(tenantId: string) {
     const [[schedules], [pendingMarks], [reEvals], [ufmOpen], [duties]] = await Promise.all([
       this.db.query(`SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`, [tenantId]),
@@ -55,15 +83,29 @@ export class ExamCellService {
     };
   }
 
-  listSchedules(tenantId: string) {
-    return this.db.query(
-      `SELECT es.*, sub.subject_name, sub.subject_code
-       FROM exam_schedules es
-       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-       WHERE es.tenant_id = $1 OR es.tenant_id IS NULL
-       ORDER BY es.exam_date ASC, es.start_time ASC`,
-      [tenantId],
-    );
+  async listSchedules(tenantId: string) {
+    try {
+      return await this.db.query(
+        `SELECT es.*, sub.subject_name, sub.subject_code
+         FROM exam_schedules es
+         LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+         WHERE es.tenant_id = $1 OR es.tenant_id IS NULL
+         ORDER BY es.exam_date ASC, es.start_time ASC`,
+        [tenantId],
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/relation .* does not exist|column .* does not exist/i.test(message)) {
+        throw err;
+      }
+      return this.queryOrEmpty(
+        `SELECT es.*, NULL::text AS subject_name, NULL::text AS subject_code
+         FROM exam_schedules es
+         WHERE es.tenant_id = $1 OR es.tenant_id IS NULL
+         ORDER BY es.exam_date ASC, es.start_time ASC`,
+        [tenantId],
+      );
+    }
   }
 
   createSchedule(
@@ -242,33 +284,39 @@ export class ExamCellService {
   }
 
   async getBranchesBySemester(tenantId: string, semester: number) {
-    const rows = await this.db.query(
+    const rows = await this.queryOrEmpty<{ branch_code: string }>(
       `SELECT DISTINCT COALESCE(d.dept_name, 'GEN') AS branch_code
        FROM users u
        INNER JOIN student_course_enrollments e ON e.student_user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1 AND e.semester = $2
        ORDER BY branch_code`,
-      [tenantId, semester]
+      [tenantId, semester],
     );
-    return rows.map((r: any) => r.branch_code);
+    return rows.map((r) => r.branch_code);
   }
 
   async getBlocksAndHalls(tenantId: string) {
-    const spaces = await this.db.query(
+    const spaces = await this.queryOrEmpty<{
+      block: string;
+      hall: string;
+      capacity: number | null;
+    }>(
       `SELECT building_name AS block, room_number AS hall, capacity
        FROM campus_spaces
        WHERE tenant_id = $1 AND space_type = 'CLASSROOM'
        ORDER BY building_name, room_number`,
-      [tenantId]
+      [tenantId],
     );
-    
-    const blocksMap = new Map();
+
+    const blocksMap = new Map<string, { block: string; halls: Array<{ name: string; capacity: number; rows: number; cols: number }> }>();
     for (const s of spaces) {
+      if (!s.block || !s.hall) continue;
       if (!blocksMap.has(s.block)) blocksMap.set(s.block, { block: s.block, halls: [] });
       const cols = 5;
-      const rows = Math.ceil(s.capacity / cols);
-      blocksMap.get(s.block).halls.push({ name: s.hall, capacity: s.capacity, rows, cols });
+      const capacity = Number(s.capacity) > 0 ? Number(s.capacity) : 30;
+      const rows = Math.max(1, Math.ceil(capacity / cols));
+      blocksMap.get(s.block)!.halls.push({ name: s.hall, capacity, rows, cols });
     }
     return Array.from(blocksMap.values());
   }
@@ -402,17 +450,50 @@ export class ExamCellService {
   }
 
   async listSeatingRuns(tenantId: string) {
-    return this.db.query(
-      `SELECT r.run_id, r.allocation_strategy, r.exam_type, r.exam_schedule_id, r.semester, r.branch, r.created_at,
-              jsonb_array_length(r.allocations) as total_allocated, r.allocations,
-              sub.subject_name, es.exam_date
-       FROM exam_seating_runs r
-       LEFT JOIN exam_schedules es ON es.exam_schedule_id = r.exam_schedule_id
-       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-       WHERE r.tenant_id = $1
-       ORDER BY r.created_at DESC`,
-       [tenantId]
-    );
+    const baseSql = (withSubjectJoin: boolean) => `
+      SELECT r.run_id, r.allocation_strategy, r.exam_type, r.exam_schedule_id, r.semester, r.branch, r.created_at,
+             CASE
+               WHEN jsonb_typeof(r.allocations) = 'array' THEN jsonb_array_length(r.allocations)
+               ELSE 0
+             END AS total_allocated,
+             r.allocations,
+             ${withSubjectJoin ? 'sub.subject_name, es.exam_date' : 'NULL::text AS subject_name, es.exam_date'}
+      FROM exam_seating_runs r
+      LEFT JOIN exam_schedules es ON es.exam_schedule_id = r.exam_schedule_id
+      ${withSubjectJoin ? 'LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id' : ''}
+      WHERE r.tenant_id = $1
+      ORDER BY r.created_at DESC`;
+
+    let rows: Array<{
+      run_id: string;
+      allocation_strategy: string;
+      exam_type: string | null;
+      exam_schedule_id: string | null;
+      semester: number;
+      branch: string;
+      created_at: string;
+      total_allocated: number | null;
+      allocations: unknown;
+      subject_name: string | null;
+      exam_date: string | null;
+    }> = [];
+
+    try {
+      rows = (await this.db.query(baseSql(true), [tenantId])) as typeof rows;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+        rows = await this.queryOrEmpty(baseSql(false), [tenantId]);
+      } else {
+        throw err;
+      }
+    }
+
+    return rows.map((row) => ({
+      ...row,
+      total_allocated: Number(row.total_allocated ?? 0),
+      allocations: this.normalizeSeatingAllocations(row.allocations),
+    }));
   }
 
   async deleteSeatingRun(tenantId: string, runId: string) {

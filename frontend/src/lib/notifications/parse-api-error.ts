@@ -138,10 +138,19 @@ export function parseApiError(raw: string, fallbackTitle = 'Action could not be 
 
   if (/^API \d{3}/.test(text)) {
     const status = Number(text.match(/^API (\d{3})/)?.[1] ?? 0);
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       return {
         title: 'Sign in required',
         message: 'Your session may have expired. Sign in again and retry this action.',
+        category: 'OPERATIONS',
+        severity: 'warning',
+        intent: 'action_required',
+      };
+    }
+    if (status === 403) {
+      return {
+        title: 'Action not allowed',
+        message: 'Your current role does not have permission for this action.',
         category: 'OPERATIONS',
         severity: 'warning',
         intent: 'action_required',

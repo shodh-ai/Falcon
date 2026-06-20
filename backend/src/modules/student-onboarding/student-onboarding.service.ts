@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
@@ -57,6 +57,8 @@ type ProfileBody = {
   specialization?: string;
 };
 
+const DEFAULT_TENANT_ID = 'a0000000-0000-4000-8000-000000000001';
+
 @Injectable()
 export class StudentOnboardingService {
   constructor(
@@ -64,6 +66,11 @@ export class StudentOnboardingService {
     private readonly notifications: NotificationEmitterService,
     private readonly crypto: HrFieldEncryptionService,
   ) {}
+
+  resolveTenantId(tenantId?: string | null) {
+    const value = tenantId?.trim();
+    return value || DEFAULT_TENANT_ID;
+  }
 
   async getStatus(tenantId: string, userId: string) {
     const user = await this.getUserRow(tenantId, userId);
@@ -283,17 +290,22 @@ export class StudentOnboardingService {
       throw new BadRequestException(`Missing documents: ${missing.join(', ')}`);
     }
 
-    await this.dataSource.query(
+    const submitted = await this.dataSource.query<Array<{ user_id: string }>>(
       `UPDATE users
        SET onboarding_status = 'PENDING_ADMIN_APPROVAL', updated_at = NOW()
-       WHERE user_id = $1 AND tenant_id = $2`,
+       WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_DOCUMENTS'
+       RETURNING user_id`,
       [userId, tenantId],
     );
+    if (!submitted.length) {
+      throw new BadRequestException('Could not submit profile for verification');
+    }
 
     return { onboarding_status: 'PENDING_ADMIN_APPROVAL' };
   }
 
   async getVerificationQueue(tenantId: string, portalKind?: OnboardingPortalKind | 'all') {
+    const tenant = this.resolveTenantId(tenantId);
     const rows = await this.dataSource.query<
       Array<{
         user_id: string;
@@ -324,7 +336,7 @@ export class StudentOnboardingService {
        WHERE u.tenant_id = $1
          AND u.onboarding_status = 'PENDING_ADMIN_APPROVAL'
        ORDER BY submitted_at DESC NULLS LAST, u.name ASC`,
-      [tenantId],
+      [tenant],
     );
 
     if (!portalKind || portalKind === 'all') return rows;
@@ -332,10 +344,11 @@ export class StudentOnboardingService {
   }
 
   async getVerificationDetail(tenantId: string, targetUserId: string) {
-    const user = await this.getUserRow(tenantId, targetUserId);
+    const tenant = this.resolveTenantId(tenantId);
+    const user = await this.getUserRow(tenant, targetUserId);
     const kind = resolveOnboardingPortalKind(user.role_name);
-    const profile = await this.getStep2Profile(tenantId, targetUserId);
-    const docs = await this.listDocs(tenantId, targetUserId, kind);
+    const profile = await this.getStep2Profile(tenant, targetUserId);
+    const docs = await this.listDocs(tenant, targetUserId, kind);
 
     const [employee] = await this.dataSource.query<
       Array<{ employee_id: string | null; designation: string | null }>
@@ -343,7 +356,7 @@ export class StudentOnboardingService {
       `SELECT employee_id, designation
        FROM hr_employee_profiles
        WHERE tenant_id = $1 AND user_id = $2`,
-      [tenantId, targetUserId],
+      [tenant, targetUserId],
     );
 
     return {
@@ -353,89 +366,165 @@ export class StudentOnboardingService {
         name: user.name,
         email: user.official_email,
         role_name: user.role_name,
-        onboarding_status: user.onboarding_status,
         employee_id: employee?.employee_id ?? null,
         designation: employee?.designation ?? null,
         ...profile,
+        onboarding_status: user.onboarding_status,
       },
       documents: docs,
     };
   }
 
   async approve(tenantId: string, targetUserId: string) {
-    const detail = await this.getVerificationDetail(tenantId, targetUserId);
-    if (detail.person.onboarding_status !== 'PENDING_ADMIN_APPROVAL') {
-      throw new BadRequestException('User is not awaiting admin approval');
+    const tenant = this.resolveTenantId(tenantId);
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    try {
+      const locked = (await qr.query(
+        `SELECT u.user_id, u.name, u.official_email, u.onboarding_status, r.role_name
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.user_id = $1 AND u.tenant_id = $2
+         FOR UPDATE`,
+        [targetUserId, tenant],
+      )) as Array<{
+        user_id: string;
+        name: string;
+        official_email: string;
+        onboarding_status: string;
+        role_name: string;
+      }>;
+
+      const user = locked[0];
+      if (!user) throw new NotFoundException('User not found');
+
+      const status = (user.onboarding_status ?? '').trim();
+      if (status === 'COMPLETED') {
+        throw new BadRequestException('User has already been approved');
+      }
+      if (status !== 'PENDING_ADMIN_APPROVAL') {
+        throw new BadRequestException(
+          `User is not awaiting admin approval (current status: ${status || 'UNKNOWN'})`,
+        );
+      }
+
+      const kind = resolveOnboardingPortalKind(user.role_name);
+      const updated = (await qr.query(
+        `UPDATE users
+         SET onboarding_status = 'COMPLETED', updated_at = NOW()
+         WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'
+         RETURNING user_id`,
+        [targetUserId, tenant],
+      )) as Array<{ user_id: string }>;
+      if (!updated.length) {
+        throw new BadRequestException('User is not awaiting admin approval');
+      }
+
+      if (kind === 'staff') {
+        await qr.query(
+          `UPDATE staff_onboarding_docs
+           SET status = 'APPROVED', admin_remarks = NULL
+           WHERE staff_user_id = $1 AND tenant_id = $2`,
+          [targetUserId, tenant],
+        );
+        await this.finalizeStaffOnboarding(tenant, targetUserId, qr);
+      } else {
+        await qr.query(
+          `UPDATE student_onboarding_docs
+           SET status = 'APPROVED', admin_remarks = NULL
+           WHERE student_user_id = $1 AND tenant_id = $2`,
+          [targetUserId, tenant],
+        );
+      }
+
+      await qr.commitTransaction();
+
+      this.notifications.studentOnboardingApproved({
+        tenantId: tenant,
+        userId: targetUserId,
+        studentName: user.name,
+        officialEmail: user.official_email,
+        dashboardPath: getDashboardPathForRoleName(user.role_name),
+      });
+
+      return { onboarding_status: 'COMPLETED' };
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally {
+      await qr.release();
     }
-
-    await this.dataSource.query(
-      `UPDATE users
-       SET onboarding_status = 'COMPLETED', updated_at = NOW()
-       WHERE user_id = $1 AND tenant_id = $2`,
-      [targetUserId, tenantId],
-    );
-
-    if (detail.portal_kind === 'staff') {
-      await this.dataSource.query(
-        `UPDATE staff_onboarding_docs
-         SET status = 'APPROVED', admin_remarks = NULL
-         WHERE staff_user_id = $1 AND tenant_id = $2`,
-        [targetUserId, tenantId],
-      );
-      await this.finalizeStaffOnboarding(tenantId, targetUserId);
-    } else {
-      await this.dataSource.query(
-        `UPDATE student_onboarding_docs
-         SET status = 'APPROVED', admin_remarks = NULL
-         WHERE student_user_id = $1 AND tenant_id = $2`,
-        [targetUserId, tenantId],
-      );
-    }
-
-    this.notifications.studentOnboardingApproved({
-      tenantId,
-      userId: targetUserId,
-      studentName: detail.person.name,
-      officialEmail: detail.person.email,
-      dashboardPath: getDashboardPathForRoleName(detail.person.role_name),
-    });
-
-    return { onboarding_status: 'COMPLETED' };
   }
 
   async reject(tenantId: string, targetUserId: string, remarks: string) {
     const reason = remarks?.trim();
     if (!reason) throw new BadRequestException('Rejection reason is required');
 
-    const detail = await this.getVerificationDetail(tenantId, targetUserId);
-    if (detail.person.onboarding_status !== 'PENDING_ADMIN_APPROVAL') {
-      throw new BadRequestException('User is not awaiting admin approval');
+    const tenant = this.resolveTenantId(tenantId);
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    try {
+      const locked = (await qr.query(
+        `SELECT u.user_id, u.onboarding_status, r.role_name
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.user_id = $1 AND u.tenant_id = $2
+         FOR UPDATE`,
+        [targetUserId, tenant],
+      )) as Array<{ user_id: string; onboarding_status: string; role_name: string }>;
+
+      const user = locked[0];
+      if (!user) throw new NotFoundException('User not found');
+
+      const status = (user.onboarding_status ?? '').trim();
+      if (status !== 'PENDING_ADMIN_APPROVAL') {
+        throw new BadRequestException(
+          status === 'COMPLETED'
+            ? 'User has already been approved'
+            : `User is not awaiting admin approval (current status: ${status || 'UNKNOWN'})`,
+        );
+      }
+
+      const kind = resolveOnboardingPortalKind(user.role_name);
+      const updated = (await qr.query(
+        `UPDATE users
+         SET onboarding_status = 'PENDING_DOCUMENTS', updated_at = NOW()
+         WHERE user_id = $1 AND tenant_id = $2 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'
+         RETURNING user_id`,
+        [targetUserId, tenant],
+      )) as Array<{ user_id: string }>;
+      if (!updated.length) {
+        throw new BadRequestException('User is not awaiting admin approval');
+      }
+
+      if (kind === 'staff') {
+        await qr.query(
+          `UPDATE staff_onboarding_docs
+           SET status = 'REJECTED', admin_remarks = $3
+           WHERE staff_user_id = $1 AND tenant_id = $2`,
+          [targetUserId, tenant, reason],
+        );
+      } else {
+        await qr.query(
+          `UPDATE student_onboarding_docs
+           SET status = 'REJECTED', admin_remarks = $3
+           WHERE student_user_id = $1 AND tenant_id = $2`,
+          [targetUserId, tenant, reason],
+        );
+      }
+
+      await qr.commitTransaction();
+      return { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason };
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally {
+      await qr.release();
     }
-
-    await this.dataSource.query(
-      `UPDATE users
-       SET onboarding_status = 'PENDING_DOCUMENTS', updated_at = NOW()
-       WHERE user_id = $1 AND tenant_id = $2`,
-      [targetUserId, tenantId],
-    );
-
-    if (detail.portal_kind === 'staff') {
-      await this.dataSource.query(
-        `UPDATE staff_onboarding_docs
-         SET status = 'REJECTED', admin_remarks = $3
-         WHERE staff_user_id = $1 AND tenant_id = $2`,
-        [targetUserId, tenantId, reason],
-      );
-    } else {
-      await this.dataSource.query(
-        `UPDATE student_onboarding_docs
-         SET status = 'REJECTED', admin_remarks = $3
-         WHERE student_user_id = $1 AND tenant_id = $2`,
-        [targetUserId, tenantId, reason],
-      );
-    }
-
-    return { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason };
   }
 
   async getDocumentPath(tenantId: string, targetUserId: string, docType: string) {
@@ -665,8 +754,9 @@ export class StudentOnboardingService {
     return this.getStep2Profile(tenantId, userId);
   }
 
-  private async finalizeStaffOnboarding(tenantId: string, userId: string) {
-    const [user] = await this.dataSource.query<
+  private async finalizeStaffOnboarding(tenantId: string, userId: string, runner?: QueryRunner) {
+    const db = runner ?? this.dataSource;
+    const [user] = await db.query<
       Array<{
         onboarding_profile: Record<string, unknown> | null;
         role_name: string;
@@ -691,7 +781,7 @@ export class StudentOnboardingService {
     const employeeId =
       user.employee_id ?? `SGVU-${userId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
     const designation = user.designation ?? user.role_name;
-    const [entityRow] = await this.dataSource.query<Array<{ entity_id: number }>>(
+    const [entityRow] = await db.query<Array<{ entity_id: number }>>(
       `SELECT COALESCE(
          $2::int,
          (SELECT entity_id FROM org_entities WHERE tenant_id = $1 AND is_active = true ORDER BY entity_id LIMIT 1)
@@ -700,7 +790,7 @@ export class StudentOnboardingService {
     );
     const resolvedEntityId = entityRow?.entity_id ?? null;
 
-    await this.dataSource.query(
+    await db.query(
       `INSERT INTO hr_employee_profiles (
          tenant_id, user_id, employee_id, designation, joining_date, entity_id,
          pan_encrypted, aadhaar_encrypted, bank_account_encrypted, ifsc_code, pf_uan,
@@ -742,7 +832,7 @@ export class StudentOnboardingService {
       ],
     );
 
-    const [degreeDoc] = await this.dataSource.query<Array<{ file_path: string }>>(
+    const [degreeDoc] = await db.query<Array<{ file_path: string }>>(
       `SELECT file_path FROM staff_onboarding_docs
        WHERE tenant_id = $1 AND staff_user_id = $2 AND doc_type = 'HIGHEST_DEGREE'
        ORDER BY uploaded_at DESC LIMIT 1`,
@@ -752,14 +842,14 @@ export class StudentOnboardingService {
     const university = String(qualification.university ?? '').trim();
     const passingYear = Number(qualification.passing_year);
     if (university && passingYear) {
-      const existing = await this.dataSource.query(
+      const existing = await db.query(
         `SELECT qual_id FROM hr_academic_qualifications
          WHERE tenant_id = $1 AND user_id = $2 AND university = $3 AND passing_year = $4
          LIMIT 1`,
         [tenantId, userId, university, passingYear],
       );
       if (!existing.length) {
-        await this.dataSource.query(
+        await db.query(
           `INSERT INTO hr_academic_qualifications (
              tenant_id, user_id, degree_level, degree_name, university, passing_year,
              specialization, document_proof_url, updated_at
@@ -779,14 +869,14 @@ export class StudentOnboardingService {
     }
 
     if (resolvedEntityId) {
-      await this.dataSource.query(
+      await db.query(
         `UPDATE users
          SET entity_id = $3, updated_at = NOW()
          WHERE user_id = $2 AND tenant_id = $1
            AND (entity_id IS NULL OR entity_id IS DISTINCT FROM $3)`,
         [tenantId, userId, resolvedEntityId],
       );
-      await this.dataSource.query(
+      await db.query(
         `INSERT INTO user_entity_access (user_id, entity_id)
          VALUES ($1, $2)
          ON CONFLICT (user_id, entity_id) DO NOTHING`,

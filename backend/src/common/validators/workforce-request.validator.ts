@@ -44,9 +44,9 @@ export function assertRetroactiveWorkforceLimit(
 
   const today = new Date();
   const earliest = earliestDate(requestType, startDate, endDate, regularizationDate);
-  const diff = calendarDaysDiff(parseDateOnly(earliest), today);
+  const daysSinceEarliest = calendarDaysDiff(today, parseDateOnly(earliest));
 
-  if (diff > WORKFORCE_RETROACTIVE_DAYS) {
+  if (daysSinceEarliest > WORKFORCE_RETROACTIVE_DAYS) {
     throw new ForbiddenException(
       'You cannot apply for OD/leaves older than 3 days. Please contact HR to unlock past dates.',
     );

@@ -13,6 +13,32 @@ import autoTable from 'jspdf-autotable';
 type Schedule = { exam_schedule_id: string; exam_type: string; exam_date: string; venue: string; subject_name?: string; subject_code?: string };
 type Hall = { name: string; capacity: number; rows: number; cols: number };
 type Block = { block: string; halls: Hall[] };
+type SeatingAllocation = {
+  student_name: string;
+  student_user_id: string;
+  branch_code: string;
+  subject_name?: string | null;
+  exam_date?: string | null;
+  room: string;
+  seat_number: string;
+};
+type SeatingRun = {
+  run_id: string;
+  allocation_strategy: string;
+  exam_type?: string | null;
+  exam_schedule_id?: string | null;
+  semester: number;
+  branch: string;
+  created_at: string;
+  total_allocated: number;
+  allocations: SeatingAllocation[];
+  subject_name?: string | null;
+  exam_date?: string | null;
+};
+
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value : [];
+}
 
 export default function ExamCellSeatingPage() {
   const api = useAuthedApi();
@@ -30,46 +56,82 @@ export default function ExamCellSeatingPage() {
   const [selectedBlock, setSelectedBlock] = useState('');
   const [selectedHalls, setSelectedHalls] = useState<string[]>([]);
   
-  const [runs, setRuns] = useState<any[]>([]);
-  const [viewingRun, setViewingRun] = useState<any | null>(null);
+  const [runs, setRuns] = useState<SeatingRun[]>([]);
+  const [viewingRun, setViewingRun] = useState<SeatingRun | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void api
-      .get<Schedule[]>('/api/exam-cell/schedules')
-      .then((s) => {
-        setSchedules(s);
-        if (s[0]) setExamId(s[0].exam_schedule_id);
-      })
-      .catch((e) => toast.error(e instanceof Error ? e.message : 'Could not load schedules'));
-    void api
-      .get<Block[]>('/api/exam-cell/blocks-halls')
-      .then((b) => {
-        setBlocksData(b);
-        if (b[0]) setSelectedBlock(b[0].block);
-      })
-      .catch((e) => toast.error(e instanceof Error ? e.message : 'Could not load halls'));
+    let cancelled = false;
+
+    async function loadInitial() {
+      setLoading(true);
+      try {
+        const [scheduleRows, blockRows] = await Promise.all([
+          api.get<Schedule[]>('/api/exam-cell/schedules'),
+          api.get<Block[]>('/api/exam-cell/blocks-halls'),
+        ]);
+        if (cancelled) return;
+
+        const nextSchedules = asArray<Schedule>(scheduleRows);
+        const nextBlocks = asArray<Block>(blockRows);
+        setSchedules(nextSchedules);
+        setBlocksData(nextBlocks);
+        if (nextSchedules[0]) setExamId(nextSchedules[0].exam_schedule_id);
+        if (nextBlocks[0]?.block) setSelectedBlock(nextBlocks[0].block);
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(err instanceof Error ? err.message : 'Could not load seating planner data');
+          setSchedules([]);
+          setBlocksData([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadInitial();
+    return () => {
+      cancelled = true;
+    };
   }, [api]);
 
   useEffect(() => {
     if (!semester) return;
-    void api
-      .get<string[]>(`/api/exam-cell/branches?semester=${semester}`)
-      .then(setBranches)
-      .catch(() => setBranches([]));
+    let cancelled = false;
+
+    async function loadBranches() {
+      try {
+        const rows = await api.get<string[]>(`/api/exam-cell/branches?semester=${semester}`);
+        if (!cancelled) setBranches(asArray<string>(rows));
+      } catch {
+        if (!cancelled) setBranches([]);
+      }
+    }
+
+    void loadBranches();
+    return () => {
+      cancelled = true;
+    };
   }, [api, semester]);
 
-  const loadRuns = useCallback(() => {
-    void api
-      .get<any[]>('/api/exam-cell/seating-runs')
-      .then(setRuns)
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : 'Could not load seating runs');
-        setRuns([]);
-      });
+  const loadRuns = useCallback(async () => {
+    try {
+      const rows = await api.get<SeatingRun[]>('/api/exam-cell/seating-runs');
+      setRuns(
+        asArray<SeatingRun>(rows).map((run) => ({
+          ...run,
+          allocations: asArray<SeatingAllocation>(run.allocations),
+          total_allocated: Number(run.total_allocated ?? run.allocations?.length ?? 0),
+        })),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not load seating runs');
+      setRuns([]);
+    }
   }, [api]);
 
   useEffect(() => {
-    loadRuns();
+    void loadRuns();
   }, [loadRuns]);
 
   async function allocate() {
@@ -83,7 +145,7 @@ export default function ExamCellSeatingPage() {
         rooms: selectedHalls,
       });
       toast.success(`Allocated ${res.allocated} seats across rooms`);
-      loadRuns();
+      await loadRuns();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Allocation failed');
     }
@@ -94,17 +156,18 @@ export default function ExamCellSeatingPage() {
     try {
       await api.del(`/api/exam-cell/seating-runs/${runId}`);
       toast.success('Run deleted');
-      loadRuns();
+      await loadRuns();
     } catch (e) {
       toast.error('Failed to delete run');
     }
   }
 
-  function exportPDF(run: any) {
+  function exportPDF(run: SeatingRun) {
+    const allocations = asArray<SeatingAllocation>(run.allocations);
     const doc = new jsPDF();
     doc.text(`Seating Plan - ${run.allocation_strategy === 'by_exam_type' ? 'Entire Exam' : 'Specific Schedule'}`, 14, 15);
     
-    const tableData = run.allocations.map((a: any) => [
+    const tableData = allocations.map((a) => [
       a.student_name,
       `${a.student_user_id.split('-')[0]} (${a.branch_code})`,
       ...(run.allocation_strategy === 'by_schedule' ? [a.subject_name || 'N/A', a.exam_date ? String(a.exam_date).slice(0, 10) : 'N/A'] : []),
@@ -127,6 +190,7 @@ export default function ExamCellSeatingPage() {
         <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
         <h1 className="text-2xl font-bold text-sgvu-navy">Seating Planner</h1>
         <p className="text-sm text-muted-foreground">Auto-allocate ensures adjacent seats are not the same branch.</p>
+        {loading ? <p className="mt-2 text-xs text-muted-foreground">Loading exam schedules and halls…</p> : null}
       </div>
 
       <div className="flex gap-4 border-b pb-4">
@@ -270,7 +334,7 @@ export default function ExamCellSeatingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {viewingRun.allocations.map((a: any, i: number) => (
+                  {asArray<SeatingAllocation>(viewingRun.allocations).map((a, i) => (
                     <tr key={i} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
                       <td className="py-2">{a.student_name}</td>
                       <td className="py-2 text-muted-foreground">{a.student_user_id.split('-')[0]} ({a.branch_code})</td>
