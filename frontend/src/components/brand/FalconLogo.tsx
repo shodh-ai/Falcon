@@ -21,21 +21,32 @@ export function FalconLogo({
   const height = size;
   const width = Math.round(size * LOGO_ASPECT);
 
+  if (compact) {
+    return (
+      <div
+        className={cn('relative inline-flex shrink-0 overflow-hidden', className)}
+        style={{ width: size, height: size }}
+      >
+        <Image
+          src={LOGO_PATH}
+          alt="Falcon"
+          fill
+          sizes={`${size}px`}
+          loading="eager"
+          className="scale-[2.15] object-cover object-[center_18%] drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]"
+        />
+      </div>
+    );
+  }
+
   const image = (
     <Image
       src={LOGO_PATH}
       alt="Falcon"
       width={width}
       height={height}
-      priority={variant === 'full'}
-      className={cn(
-        'object-contain drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]',
-        compact
-          ? 'h-full w-full scale-[2.15] object-cover object-[center_18%]'
-          : 'h-auto w-full max-w-full',
-        variant === 'mark' && className,
-      )}
-      style={compact ? undefined : { height: size, width: 'auto', maxWidth: '100%' }}
+      loading="eager"
+      className="object-contain drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]"
     />
   );
 
@@ -46,17 +57,6 @@ export function FalconLogo({
         <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sgvu-gold/90">
           Campus OS
         </p>
-      </div>
-    );
-  }
-
-  if (compact) {
-    return (
-      <div
-        className={cn('inline-flex shrink-0 overflow-hidden', className)}
-        style={{ width: size, height: size }}
-      >
-        {image}
       </div>
     );
   }

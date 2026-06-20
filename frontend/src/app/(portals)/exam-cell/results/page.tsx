@@ -20,6 +20,9 @@ type PendingMark = {
   max_marks: string;
   percent: string;
   session_id?: string | null;
+  semester: number | null;
+  faculty_name: string | null;
+  status?: string;
 };
 
 type Distribution = {

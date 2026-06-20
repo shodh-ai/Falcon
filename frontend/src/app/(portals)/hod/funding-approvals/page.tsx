@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { HodPageShell, HodPageHeader } from '@/components/hod';
+import { HodPageFrame, HodPageHeader } from '@/components/hod/HodPagePrimitives';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -58,11 +58,11 @@ export default function HodFundingApprovalsPage() {
   const pastRequests = requests.filter(r => r.status !== 'PENDING_HOD');
 
   if (loading) {
-    return <HodPageShell><div className="p-8 text-center animate-pulse text-slate-500">Loading funding requests...</div></HodPageShell>;
+    return <HodPageFrame><div className="p-8 text-center animate-pulse text-slate-500">Loading funding requests...</div></HodPageFrame>;
   }
 
   return (
-    <HodPageShell>
+    <HodPageFrame>
       <HodPageHeader 
         title="Project Funding Approvals" 
         description="Review and approve funding requests from faculty for their student projects." 
@@ -174,6 +174,6 @@ export default function HodFundingApprovalsPage() {
           </section>
         )}
       </div>
-    </HodPageShell>
+    </HodPageFrame>
   );
 }
