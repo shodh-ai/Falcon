@@ -26,10 +26,9 @@ export class HrPowerGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const meta = this.reflector.getAllAndOverride<RequireHrPowerMeta | undefined>(
-      REQUIRE_HR_POWER_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const meta = this.reflector.getAllAndOverride<
+      RequireHrPowerMeta | undefined
+    >(REQUIRE_HR_POWER_KEY, [context.getHandler(), context.getClass()]);
     if (!meta) return true;
 
     const req = context.switchToHttp().getRequest<{ user?: AuthUser }>();
@@ -39,7 +38,13 @@ export class HrPowerGuard implements CanActivate {
     const roles = user.roles ?? (user.role ? [user.role] : []);
     const tenantId = user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
 
-    await this.access.assertPower(tenantId, user.user_id, roles, meta.module, meta.action);
+    await this.access.assertPower(
+      tenantId,
+      user.user_id,
+      roles,
+      meta.module,
+      meta.action,
+    );
     return true;
   }
 }

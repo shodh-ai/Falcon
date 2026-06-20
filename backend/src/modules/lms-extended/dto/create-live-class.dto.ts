@@ -1,4 +1,11 @@
-import { IsDateString, IsOptional, IsString, IsUrl, IsUUID, MinLength } from 'class-validator';
+import {
+  IsDateString,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+  MinLength,
+} from 'class-validator';
 
 export class CreateLiveClassDto {
   @IsUUID()

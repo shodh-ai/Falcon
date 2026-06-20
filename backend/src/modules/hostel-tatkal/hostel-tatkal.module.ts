@@ -6,7 +6,11 @@ import { HostelTatkalPaymentListener } from './hostel-tatkal-payment.listener';
 
 @Module({
   controllers: [HostelTatkalController],
-  providers: [HostelTatkalService, HostelTatkalGateway, HostelTatkalPaymentListener],
+  providers: [
+    HostelTatkalService,
+    HostelTatkalGateway,
+    HostelTatkalPaymentListener,
+  ],
   exports: [HostelTatkalService, HostelTatkalGateway],
 })
 export class HostelTatkalModule {}

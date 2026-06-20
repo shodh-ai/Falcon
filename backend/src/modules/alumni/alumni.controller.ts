@@ -80,19 +80,31 @@ export class AlumniController {
     @Req() req: { user: AuthUser },
     @Body() dto: { amount: number; purpose?: string; fund_code?: string },
   ) {
-    return this.portal.initiateDonation(this.tenant(req), req.user.user_id, dto);
+    return this.portal.initiateDonation(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Post('donations/:id/confirm-mock')
   @Roles('Alumni')
   confirmDonation(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.portal.confirmDonationMock(this.tenant(req), req.user.user_id, id);
+    return this.portal.confirmDonationMock(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+    );
   }
 
   @Get('donations/:id/receipt')
   @Roles('Alumni')
   receipt(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.portal.getDonationReceipt(this.tenant(req), req.user.user_id, id);
+    return this.portal.getDonationReceipt(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+    );
   }
 
   @Get('events')
@@ -117,7 +129,12 @@ export class AlumniController {
   @Roles('Alumni')
   createService(
     @Req() req: { user: AuthUser },
-    @Body() dto: { service_type: string; remarks?: string; dispatch_details?: Record<string, unknown> },
+    @Body()
+    dto: {
+      service_type: string;
+      remarks?: string;
+      dispatch_details?: Record<string, unknown>;
+    },
   ) {
     return this.portal.createServiceRequest(req.user.user_id, dto);
   }
@@ -125,7 +142,10 @@ export class AlumniController {
   @Get('conversion-eligibility')
   @Roles('Student')
   conversionEligibility(@Req() req: { user: AuthUser }) {
-    return this.conversion.getConversionEligibility(this.tenant(req), req.user.user_id);
+    return this.conversion.getConversionEligibility(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Post('register')
@@ -146,12 +166,16 @@ export class AlumniController {
       dto.higher_education_details ??
       (dto.higher_ed?.trim() ? { pursuing: dto.higher_ed.trim() } : undefined);
 
-    return this.conversion.submitConversionRequest(this.tenant(req), req.user.user_id, {
-      linkedin_url: dto.linkedin_url,
-      organization: dto.placement_organization ?? dto.organization,
-      higher_education_details: higherEd,
-      personal_email: dto.personal_email,
-    });
+    return this.conversion.submitConversionRequest(
+      this.tenant(req),
+      req.user.user_id,
+      {
+        linkedin_url: dto.linkedin_url,
+        organization: dto.placement_organization ?? dto.organization,
+        higher_education_details: higherEd,
+        personal_email: dto.personal_email,
+      },
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

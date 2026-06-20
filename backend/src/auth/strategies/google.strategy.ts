@@ -24,8 +24,11 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     private tenantService: TenantService,
   ) {
     super({
-      clientID: configService.get('GOOGLE_CLIENT_ID') || 'local-placeholder-client-id',
-      clientSecret: configService.get('GOOGLE_CLIENT_SECRET') || 'local-placeholder-client-secret',
+      clientID:
+        configService.get('GOOGLE_CLIENT_ID') || 'local-placeholder-client-id',
+      clientSecret:
+        configService.get('GOOGLE_CLIENT_SECRET') ||
+        'local-placeholder-client-secret',
       callbackURL:
         configService.get('GOOGLE_CALLBACK_URL') ||
         'http://localhost:4000/auth/google/callback',
@@ -38,13 +41,19 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     req: { headers?: Record<string, string | string[] | undefined> },
     _accessToken: string,
     _refreshToken: string,
-    profile: { name: { givenName: string; familyName: string }; emails: { value: string }[]; id: string },
+    profile: {
+      name: { givenName: string; familyName: string };
+      emails: { value: string }[];
+      id: string;
+    },
     done: VerifyCallback,
   ): Promise<void> {
     const { name, emails, id } = profile;
     const email = emails[0].value;
 
-    const reqWithCookies = req as Request & { cookies?: Record<string, string> };
+    const reqWithCookies = req as Request & {
+      cookies?: Record<string, string>;
+    };
     const subdomain =
       reqWithCookies.cookies?.tenant_subdomain ??
       (typeof req.headers?.['x-tenant-subdomain'] === 'string'
@@ -93,7 +102,9 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         role_id: defaultRole?.role_id,
         is_active: true,
         tenant_id: tenant.tenant_id,
-        onboarding_status: getInitialOnboardingStatusForRole(defaultRole?.role_name),
+        onboarding_status: getInitialOnboardingStatusForRole(
+          defaultRole?.role_name,
+        ),
       });
 
       user = await this.userRepository.save(user);
@@ -107,7 +118,9 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     if (!user) {
-      throw new UnauthorizedException('Could not create or locate user account');
+      throw new UnauthorizedException(
+        'Could not create or locate user account',
+      );
     }
 
     if (!user.is_active) {
@@ -115,8 +128,15 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     await this.authService.ensurePrimaryRoleMapping(user);
-    const refreshed = await this.authService.findById(user.user_id, tenant.tenant_id);
-    const token = this.authService.signToken(refreshed ?? user, tenant.tenant_id, tenant.pg_schema);
+    const refreshed = await this.authService.findById(
+      user.user_id,
+      tenant.tenant_id,
+    );
+    const token = this.authService.signToken(
+      refreshed ?? user,
+      tenant.tenant_id,
+      tenant.pg_schema,
+    );
     done(null, { user, token, tenant });
   }
 }

@@ -17,10 +17,16 @@ export class IntegrationsService {
   }
 
   jobs() {
-    return this.dataSource.query('SELECT * FROM integration_jobs ORDER BY created_at DESC LIMIT 50');
+    return this.dataSource.query(
+      'SELECT * FROM integration_jobs ORDER BY created_at DESC LIMIT 50',
+    );
   }
 
-  queueGovernmentPush(type: 'DIGILOCKER' | 'NAD' | 'ABC', entityType: string, entityId?: string) {
+  queueGovernmentPush(
+    type: 'DIGILOCKER' | 'NAD' | 'ABC',
+    entityType: string,
+    entityId?: string,
+  ) {
     return this.dataSource.query(
       `INSERT INTO integration_jobs (tenant_id, integration_type, entity_type, entity_id, payload)
        VALUES ('a0000000-0000-4000-8000-000000000001', $1, $2, $3, '{}'::jsonb)
@@ -30,8 +36,13 @@ export class IntegrationsService {
   }
 
   moodleSsoToken(userId: string, email: string) {
-    const base = this.config.get('MOODLE_SSO_URL', 'https://lms.example.edu/auth/oauth2/login.php');
-    const token = Buffer.from(JSON.stringify({ sub: userId, email, ts: Date.now() })).toString('base64url');
+    const base = this.config.get(
+      'MOODLE_SSO_URL',
+      'https://lms.example.edu/auth/oauth2/login.php',
+    );
+    const token = Buffer.from(
+      JSON.stringify({ sub: userId, email, ts: Date.now() }),
+    ).toString('base64url');
     return {
       redirect_url: `${base}?falcon_token=${token}`,
       expires_in: 300,

@@ -14,8 +14,15 @@ export class FacultyDemeritsController {
 
   @Post('submit')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  submit(@Req() req: { user: AuthUser }, @Body() dto: SubmitDemeritIncidentDto) {
-    return this.demerits.submitIncident(this.tenant(req), req.user.user_id, dto);
+  submit(
+    @Req() req: { user: AuthUser },
+    @Body() dto: SubmitDemeritIncidentDto,
+  ) {
+    return this.demerits.submitIncident(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Get('faculty/history')

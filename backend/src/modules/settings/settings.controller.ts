@@ -1,4 +1,12 @@
-import { BadRequestException, Body, Controller, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Post,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -31,7 +39,10 @@ export class SettingsController {
       },
     }),
   )
-  importUsers(@UploadedFile() file: Express.Multer.File, @Body() _dto: ImportUsersDto) {
+  importUsers(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() _dto: ImportUsersDto,
+  ) {
     if (!file) throw new BadRequestException('CSV file is required');
     return this.settings.importUsers(file.buffer);
   }

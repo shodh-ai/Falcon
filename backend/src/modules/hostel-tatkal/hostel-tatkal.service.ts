@@ -8,7 +8,10 @@ import {
 import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { BED_LOCK_GRACE_SEC, BED_LOCK_TTL_SEC } from '../../common/constants/hostel-tatkal.constants';
+import {
+  BED_LOCK_GRACE_SEC,
+  BED_LOCK_TTL_SEC,
+} from '../../common/constants/hostel-tatkal.constants';
 import { RedisService } from '../../core/redis/redis.service';
 import { HostelTatkalGateway } from './hostel-tatkal.gateway';
 
@@ -34,10 +37,9 @@ export class HostelTatkalService {
   }
 
   async getActiveSale(tenantId: string) {
-    const settingsRows = await this.dataSource.query<Array<{ settings: Record<string, unknown> | null }>>(
-      `SELECT settings FROM tenants WHERE tenant_id = $1`,
-      [tenantId],
-    );
+    const settingsRows = await this.dataSource.query<
+      Array<{ settings: Record<string, unknown> | null }>
+    >(`SELECT settings FROM tenants WHERE tenant_id = $1`, [tenantId]);
     if (settingsRows[0]?.settings?.is_hostel_sale_active !== true) {
       return null;
     }
@@ -57,7 +59,13 @@ export class HostelTatkalService {
       string,
       {
         hostel_block: string;
-        floors: Record<string, { floor: string; rooms: Record<string, { room_number: string; beds: typeof beds }> }>;
+        floors: Record<
+          string,
+          {
+            floor: string;
+            rooms: Record<string, { room_number: string; beds: typeof beds }>;
+          }
+        >;
       }
     > = {};
 
@@ -66,7 +74,8 @@ export class HostelTatkalService {
       const floor = bed.floor ?? 'Ground Floor';
       const room = bed.room_number ?? '—';
       if (!tree[block]) tree[block] = { hostel_block: block, floors: {} };
-      if (!tree[block].floors[floor]) tree[block].floors[floor] = { floor, rooms: {} };
+      if (!tree[block].floors[floor])
+        tree[block].floors[floor] = { floor, rooms: {} };
       if (!tree[block].floors[floor].rooms[room]) {
         tree[block].floors[floor].rooms[room] = { room_number: room, beds: [] };
       }
@@ -108,7 +117,9 @@ export class HostelTatkalService {
   }
 
   async lockBed(tenantId: string, studentUserId: string, bedId: string) {
-    const activeBooking = await this.dataSource.query<Array<{ hold_id: string }>>(
+    const activeBooking = await this.dataSource.query<
+      Array<{ hold_id: string }>
+    >(
       `SELECT hold_id FROM hostel_booking_holds
        WHERE student_user_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
        LIMIT 1`,
@@ -118,7 +129,9 @@ export class HostelTatkalService {
       throw new BadRequestException('You already booked a room!');
     }
 
-    const activeAllocation = await this.dataSource.query<Array<{ allocation_id: string }>>(
+    const activeAllocation = await this.dataSource.query<
+      Array<{ allocation_id: string }>
+    >(
       `SELECT allocation_id FROM hostel_allocations
        WHERE student_user_id = $1 AND status = 'ACTIVE' LIMIT 1`,
       [studentUserId],
@@ -140,15 +153,23 @@ export class HostelTatkalService {
 
     const existingLock = await this.redis.getBedLock(bedId);
     if (existingLock && existingLock !== studentUserId) {
-      throw new ConflictException('This bed is currently in checkout by another student.');
+      throw new ConflictException(
+        'This bed is currently in checkout by another student.',
+      );
     }
 
     const serverNow = new Date();
     const expiresAt = new Date(serverNow.getTime() + BED_LOCK_TTL_SEC * 1000);
 
-    const acquired = await this.redis.acquireBedLock(bedId, studentUserId, BED_LOCK_TTL_SEC);
+    const acquired = await this.redis.acquireBedLock(
+      bedId,
+      studentUserId,
+      BED_LOCK_TTL_SEC,
+    );
     if (!acquired) {
-      throw new ConflictException('This bed is currently in checkout by another student.');
+      throw new ConflictException(
+        'This bed is currently in checkout by another student.',
+      );
     }
 
     let hold: { hold_id: string };
@@ -219,7 +240,11 @@ export class HostelTatkalService {
     return { released: true, bed_id: hold.bed_id };
   }
 
-  async createPaymentOrder(tenantId: string, studentUserId: string, holdId: string) {
+  async createPaymentOrder(
+    tenantId: string,
+    studentUserId: string,
+    holdId: string,
+  ) {
     const hold = await this.getHold(tenantId, studentUserId, holdId);
     if (hold.status !== 'PENDING') {
       throw new BadRequestException('Hold is no longer active');
@@ -227,7 +252,9 @@ export class HostelTatkalService {
     const expiresMs = new Date(hold.expires_at).getTime();
     const inWindow = Date.now() <= expiresMs + BED_LOCK_GRACE_SEC * 1000;
     if (!inWindow) {
-      throw new ConflictException('Checkout session expired. Please select the bed again.');
+      throw new ConflictException(
+        'Checkout session expired. Please select the bed again.',
+      );
     }
 
     const orderId = `hostel_${holdId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
@@ -255,7 +282,12 @@ export class HostelTatkalService {
   }
 
   private async assertCanFinalize(
-    hold: { bed_id: string; student_user_id: string; expires_at: string; status: string },
+    hold: {
+      bed_id: string;
+      student_user_id: string;
+      expires_at: string;
+      status: string;
+    },
     studentUserId: string,
   ) {
     if (hold.status === 'CONFIRMED') return { alreadyConfirmed: true };
@@ -315,12 +347,14 @@ export class HostelTatkalService {
          ON CONFLICT (student_user_id) DO UPDATE SET room_id = EXCLUDED.room_id, bed_number = EXCLUDED.bed_number`,
         [studentUserId, bedInfo[0].room_id, bedInfo[0].bed_number],
       );
-      await this.dataSource.query(
-        `UPDATE operations_hostel_beds ob SET status = 'OCCUPIED'
+      await this.dataSource
+        .query(
+          `UPDATE operations_hostel_beds ob SET status = 'OCCUPIED'
          FROM operations_hostel_rooms r
          WHERE ob.room_id = r.room_id AND r.room_id = $1 AND ob.bed_label ILIKE '%' || $2 || '%'`,
-        [bedInfo[0].room_id, bedInfo[0].bed_number],
-      ).catch(() => undefined);
+          [bedInfo[0].room_id, bedInfo[0].bed_number],
+        )
+        .catch(() => undefined);
       await this.dataSource.query(
         `UPDATE operations_hostel_rooms SET occupied = LEAST(capacity, occupied + 1) WHERE room_id = $1`,
         [bedInfo[0].room_id],
@@ -336,7 +370,12 @@ export class HostelTatkalService {
     return { confirmed: true, hold_id: holdId };
   }
 
-  async confirmPayment(tenantId: string, studentUserId: string, holdId: string, paymentRef: string) {
+  async confirmPayment(
+    tenantId: string,
+    studentUserId: string,
+    holdId: string,
+    paymentRef: string,
+  ) {
     return this.finalizeBooking(tenantId, studentUserId, holdId, paymentRef);
   }
 
@@ -373,7 +412,10 @@ export class HostelTatkalService {
     }
     fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': 'f13440',
+      },
       body: JSON.stringify({
         sessionId: 'f13440',
         runId: 'pre-fix',
@@ -403,44 +445,60 @@ export class HostelTatkalService {
          WHERE status = 'PENDING' AND expires_at < NOW()
          RETURNING hold_id, bed_id, student_user_id, tenant_id`,
       );
-      expired = Array.isArray(updateResult?.[0]) ? updateResult[0] : updateResult;
+      expired = Array.isArray(updateResult?.[0])
+        ? updateResult[0]
+        : updateResult;
       // #region agent log
-      fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
-        body: JSON.stringify({
-          sessionId: 'f13440',
-          runId: 'post-fix',
-          hypothesisId: 'H6',
-          location: 'hostel-tatkal.service.ts:expireStaleHolds',
-          message: 'update result normalized',
-          data: {
-            rawLength: Array.isArray(updateResult) ? updateResult.length : null,
-            expiredCount: expired.length,
+      fetch(
+        'http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'f13440',
           },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
+          body: JSON.stringify({
+            sessionId: 'f13440',
+            runId: 'post-fix',
+            hypothesisId: 'H6',
+            location: 'hostel-tatkal.service.ts:expireStaleHolds',
+            message: 'update result normalized',
+            data: {
+              rawLength: Array.isArray(updateResult)
+                ? updateResult.length
+                : null,
+              expiredCount: expired.length,
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
       // #endregion
     } catch (err: unknown) {
       // #region agent log
-      fetch('http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f13440' },
-        body: JSON.stringify({
-          sessionId: 'f13440',
-          runId: 'pre-fix',
-          hypothesisId: 'H1-H4',
-          location: 'hostel-tatkal.service.ts:expireStaleHolds',
-          message: 'scheduler query failed',
-          data: {
-            code: (err as { code?: string })?.code,
-            message: err instanceof Error ? err.message : String(err),
-            tableExists,
+      fetch(
+        'http://127.0.0.1:7347/ingest/49af9d07-dff1-41aa-8030-fc7e328235dc',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'f13440',
           },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
+          body: JSON.stringify({
+            sessionId: 'f13440',
+            runId: 'pre-fix',
+            hypothesisId: 'H1-H4',
+            location: 'hostel-tatkal.service.ts:expireStaleHolds',
+            message: 'scheduler query failed',
+            data: {
+              code: (err as { code?: string })?.code,
+              message: err instanceof Error ? err.message : String(err),
+              tableExists,
+            },
+            timestamp: Date.now(),
+          }),
+        },
+      ).catch(() => {});
       // #endregion
       throw err;
     }
@@ -448,6 +506,7 @@ export class HostelTatkalService {
       await this.redis.releaseBedLock(row.bed_id, row.student_user_id);
       this.broadcastBed(row.tenant_id, row.bed_id, 'AVAILABLE');
     }
-    if (expired.length) this.logger.debug(`Expired ${expired.length} hostel hold(s)`);
+    if (expired.length)
+      this.logger.debug(`Expired ${expired.length} hostel hold(s)`);
   }
 }

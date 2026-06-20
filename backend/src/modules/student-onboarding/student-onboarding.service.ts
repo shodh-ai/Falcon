@@ -25,7 +25,11 @@ type OnboardingDocRow = {
 };
 
 function isPgUniqueViolation(err: unknown, columnHint?: string): boolean {
-  const pgErr = err as { code?: string; detail?: string; driverError?: { code?: string; detail?: string } };
+  const pgErr = err as {
+    code?: string;
+    detail?: string;
+    driverError?: { code?: string; detail?: string };
+  };
   const code = pgErr.code ?? pgErr.driverError?.code;
   if (code !== '23505') return false;
   if (!columnHint) return true;
@@ -102,10 +106,14 @@ export class StudentOnboardingService {
     newPassword: string,
   ) {
     if (!newPassword || newPassword.length < 8) {
-      throw new BadRequestException('New password must be at least 8 characters');
+      throw new BadRequestException(
+        'New password must be at least 8 characters',
+      );
     }
     if (newPassword === 'password123') {
-      throw new BadRequestException('Please choose a password different from the default');
+      throw new BadRequestException(
+        'Please choose a password different from the default',
+      );
     }
 
     const [row] = await this.dataSource.query<
@@ -116,9 +124,12 @@ export class StudentOnboardingService {
        WHERE user_id = $1 AND tenant_id = $2`,
       [userId, tenantId],
     );
-    if (!row?.password_hash) throw new UnauthorizedException('Invalid current password');
+    if (!row?.password_hash)
+      throw new UnauthorizedException('Invalid current password');
     if (row.onboarding_status !== 'PENDING_PASSWORD_RESET') {
-      throw new BadRequestException('Password reset is not required at this stage');
+      throw new BadRequestException(
+        'Password reset is not required at this stage',
+      );
     }
 
     const valid = await bcrypt.compare(currentPassword, row.password_hash);
@@ -141,8 +152,11 @@ export class StudentOnboardingService {
     const docs = await this.listDocs(tenantId, userId, kind);
 
     if (kind === 'staff') {
-      const profile = (user.onboarding_profile ?? {}) as Record<string, unknown>;
-      const qualification = (profile.qualification ?? {}) as Record<string, unknown>;
+      const profile = user.onboarding_profile ?? {};
+      const qualification = (profile.qualification ?? {}) as Record<
+        string,
+        unknown
+      >;
       return {
         portal_kind: kind,
         blood_group: (profile.blood_group as string | undefined) ?? '',
@@ -152,26 +166,42 @@ export class StudentOnboardingService {
         ifsc_code: (profile.ifsc_code as string | undefined) ?? '',
         pf_uan: (profile.pf_uan as string | undefined) ?? '',
         gender: (profile.gender as string | undefined) ?? '',
-        date_of_birth: profile.date_of_birth ? String(profile.date_of_birth).slice(0, 10) : '',
-        staff_mobile: user.phone ?? (profile.staff_mobile as string | undefined) ?? '',
-        emergency_contact_name: (profile.emergency_contact_name as string | undefined) ?? '',
-        emergency_contact_phone: (profile.emergency_contact_phone as string | undefined) ?? '',
-        permanent_address: (profile.permanent_address as string | undefined) ?? '',
+        date_of_birth: profile.date_of_birth
+          ? String(profile.date_of_birth).slice(0, 10)
+          : '',
+        staff_mobile:
+          user.phone ?? (profile.staff_mobile as string | undefined) ?? '',
+        emergency_contact_name:
+          (profile.emergency_contact_name as string | undefined) ?? '',
+        emergency_contact_phone:
+          (profile.emergency_contact_phone as string | undefined) ?? '',
+        permanent_address:
+          (profile.permanent_address as string | undefined) ?? '',
         current_address: (profile.current_address as string | undefined) ?? '',
         orcid_id: (profile.orcid_id as string | undefined) ?? '',
         scopus_id: (profile.scopus_id as string | undefined) ?? '',
-        google_scholar_url: (profile.google_scholar_url as string | undefined) ?? '',
+        google_scholar_url:
+          (profile.google_scholar_url as string | undefined) ?? '',
         total_experience_years:
-          profile.total_experience_years != null ? String(profile.total_experience_years) : '',
+          profile.total_experience_years != null
+            ? String(profile.total_experience_years)
+            : '',
         industry_experience_years:
-          profile.industry_experience_years != null ? String(profile.industry_experience_years) : '0',
+          profile.industry_experience_years != null
+            ? String(profile.industry_experience_years)
+            : '0',
         degree_level: (qualification.degree_level as string | undefined) ?? '',
         degree_name: (qualification.degree_name as string | undefined) ?? '',
         university: (qualification.university as string | undefined) ?? '',
-        passing_year: qualification.passing_year != null ? String(qualification.passing_year) : '',
-        specialization: (qualification.specialization as string | undefined) ?? '',
+        passing_year:
+          qualification.passing_year != null
+            ? String(qualification.passing_year)
+            : '',
+        specialization:
+          (qualification.specialization as string | undefined) ?? '',
         documents: docs,
-        admin_remarks: docs.find((d) => d.status === 'REJECTED')?.admin_remarks ?? null,
+        admin_remarks:
+          docs.find((d) => d.status === 'REJECTED')?.admin_remarks ?? null,
       };
     }
 
@@ -196,21 +226,27 @@ export class StudentOnboardingService {
       blood_group: profile?.blood_group ?? '',
       abc_id: profile?.abc_id ?? '',
       gender: profile?.gender ?? '',
-      date_of_birth: profile?.date_of_birth ? String(profile.date_of_birth).slice(0, 10) : '',
+      date_of_birth: profile?.date_of_birth
+        ? String(profile.date_of_birth).slice(0, 10)
+        : '',
       student_mobile: (parentInfo.student_mobile as string | undefined) ?? '',
       father_name: (parentInfo.father_name as string | undefined) ?? '',
       mother_name: (parentInfo.mother_name as string | undefined) ?? '',
-      parent_occupation: (parentInfo.parent_occupation as string | undefined) ?? '',
+      parent_occupation:
+        (parentInfo.parent_occupation as string | undefined) ?? '',
       annual_income: (parentInfo.annual_income as string | undefined) ?? '',
-      emergency_contact_name: (parentInfo.emergency_contact_name as string | undefined) ?? '',
-      permanent_address: (parentInfo.permanent_address as string | undefined) ?? '',
+      emergency_contact_name:
+        (parentInfo.emergency_contact_name as string | undefined) ?? '',
+      permanent_address:
+        (parentInfo.permanent_address as string | undefined) ?? '',
       current_address: (parentInfo.current_address as string | undefined) ?? '',
       parent_contact_phone:
         (parentInfo.emergency_contact_phone as string | undefined) ??
         (parentInfo.parent_contact_phone as string | undefined) ??
         '',
       documents: docs,
-      admin_remarks: docs.find((d) => d.status === 'REJECTED')?.admin_remarks ?? null,
+      admin_remarks:
+        docs.find((d) => d.status === 'REJECTED')?.admin_remarks ?? null,
     };
   }
 
@@ -284,7 +320,9 @@ export class StudentOnboardingService {
   async submitForVerification(tenantId: string, userId: string) {
     const user = await this.getUserRow(tenantId, userId);
     if (user.onboarding_status !== 'PENDING_DOCUMENTS') {
-      throw new BadRequestException('Profile submission is not available at this stage');
+      throw new BadRequestException(
+        'Profile submission is not available at this stage',
+      );
     }
 
     const kind = resolveOnboardingPortalKind(user.role_name);
@@ -307,13 +345,18 @@ export class StudentOnboardingService {
       [userId, tenantId],
     );
     if (!submitted.length) {
-      throw new BadRequestException('Could not submit profile for verification');
+      throw new BadRequestException(
+        'Could not submit profile for verification',
+      );
     }
 
     return { onboarding_status: 'PENDING_ADMIN_APPROVAL' };
   }
 
-  async getVerificationQueue(tenantId: string, portalKind?: OnboardingPortalKind | 'all') {
+  async getVerificationQueue(
+    tenantId: string,
+    portalKind?: OnboardingPortalKind | 'all',
+  ) {
     const tenant = this.resolveTenantId(tenantId);
     const rows = await this.dataSource.query<
       Array<{
@@ -484,7 +527,11 @@ export class StudentOnboardingService {
          WHERE u.user_id = $1 AND u.tenant_id = $2
          FOR UPDATE`,
         [targetUserId, tenant],
-      )) as Array<{ user_id: string; onboarding_status: string; role_name: string }>;
+      )) as Array<{
+        user_id: string;
+        onboarding_status: string;
+        role_name: string;
+      }>;
 
       const user = locked[0];
       if (!user) throw new NotFoundException('User not found');
@@ -536,7 +583,11 @@ export class StudentOnboardingService {
     }
   }
 
-  async getDocumentPath(tenantId: string, targetUserId: string, docType: string) {
+  async getDocumentPath(
+    tenantId: string,
+    targetUserId: string,
+    docType: string,
+  ) {
     const user = await this.getUserRow(tenantId, targetUserId);
     const kind = resolveOnboardingPortalKind(user.role_name);
 
@@ -563,7 +614,10 @@ export class StudentOnboardingService {
     return row.file_path;
   }
 
-  private validateProfileComplete(kind: OnboardingPortalKind, profile: Record<string, unknown>) {
+  private validateProfileComplete(
+    kind: OnboardingPortalKind,
+    profile: Record<string, unknown>,
+  ) {
     if (kind === 'staff') {
       const required = [
         'blood_group',
@@ -584,9 +638,13 @@ export class StudentOnboardingService {
         'university',
         'passing_year',
       ];
-      const missing = required.filter((field) => !String(profile[field] ?? '').trim());
+      const missing = required.filter(
+        (field) => !String(profile[field] ?? '').trim(),
+      );
       if (missing.length) {
-        throw new BadRequestException(`Please complete all profile fields before submitting`);
+        throw new BadRequestException(
+          `Please complete all profile fields before submitting`,
+        );
       }
       return;
     }
@@ -604,13 +662,21 @@ export class StudentOnboardingService {
       'permanent_address',
       'current_address',
     ];
-    const missing = required.filter((field) => !String(profile[field] ?? '').trim());
+    const missing = required.filter(
+      (field) => !String(profile[field] ?? '').trim(),
+    );
     if (missing.length) {
-      throw new BadRequestException(`Please complete all profile fields before submitting`);
+      throw new BadRequestException(
+        `Please complete all profile fields before submitting`,
+      );
     }
   }
 
-  private async saveStudentProfile(tenantId: string, userId: string, body: ProfileBody) {
+  private async saveStudentProfile(
+    tenantId: string,
+    userId: string,
+    body: ProfileBody,
+  ) {
     const bloodGroup = body.blood_group?.trim();
     const parentPhone = body.parent_contact_phone?.trim();
     const abcId = body.abc_id?.trim();
@@ -624,16 +690,22 @@ export class StudentOnboardingService {
     const currentAddress = body.current_address?.trim();
 
     if (!bloodGroup) throw new BadRequestException('Blood group is required');
-    if (!parentPhone) throw new BadRequestException('Parent contact number is required');
+    if (!parentPhone)
+      throw new BadRequestException('Parent contact number is required');
     if (!abcId) throw new BadRequestException('ABC ID is required');
-    if (!studentMobile) throw new BadRequestException('Student mobile number is required');
+    if (!studentMobile)
+      throw new BadRequestException('Student mobile number is required');
     if (!gender) throw new BadRequestException('Gender is required');
-    if (!dateOfBirth) throw new BadRequestException('Date of birth is required');
+    if (!dateOfBirth)
+      throw new BadRequestException('Date of birth is required');
     if (!fatherName) throw new BadRequestException("Father's name is required");
     if (!motherName) throw new BadRequestException("Mother's name is required");
-    if (!emergencyContactName) throw new BadRequestException('Emergency contact name is required');
-    if (!permanentAddress) throw new BadRequestException('Permanent address is required');
-    if (!currentAddress) throw new BadRequestException('Current address is required');
+    if (!emergencyContactName)
+      throw new BadRequestException('Emergency contact name is required');
+    if (!permanentAddress)
+      throw new BadRequestException('Permanent address is required');
+    if (!currentAddress)
+      throw new BadRequestException('Current address is required');
 
     try {
       await this.dataSource.query(
@@ -679,7 +751,11 @@ export class StudentOnboardingService {
     return this.getStep2Profile(tenantId, userId);
   }
 
-  private async saveStaffProfile(tenantId: string, userId: string, body: ProfileBody) {
+  private async saveStaffProfile(
+    tenantId: string,
+    userId: string,
+    body: ProfileBody,
+  ) {
     const bloodGroup = body.blood_group?.trim();
     const staffMobile = (body.staff_mobile ?? body.student_mobile)?.trim();
     const panNumber = body.pan_number?.trim().toUpperCase();
@@ -690,45 +766,70 @@ export class StudentOnboardingService {
     const gender = body.gender?.trim();
     const dateOfBirth = body.date_of_birth?.trim();
     const emergencyContactName = body.emergency_contact_name?.trim();
-    const emergencyContactPhone = (body.emergency_contact_phone ?? body.parent_contact_phone)?.trim();
+    const emergencyContactPhone = (
+      body.emergency_contact_phone ?? body.parent_contact_phone
+    )?.trim();
     const permanentAddress = body.permanent_address?.trim();
     const currentAddress = body.current_address?.trim();
     const orcidId = body.orcid_id?.trim();
     const scopusId = body.scopus_id?.trim();
     const googleScholarUrl = body.google_scholar_url?.trim();
-    const totalExperienceYears = body.total_experience_years != null && body.total_experience_years !== ''
-      ? Number(body.total_experience_years)
-      : null;
-    const industryExperienceYears = body.industry_experience_years != null && body.industry_experience_years !== ''
-      ? Number(body.industry_experience_years)
-      : 0;
+    const totalExperienceYears =
+      body.total_experience_years != null && body.total_experience_years !== ''
+        ? Number(body.total_experience_years)
+        : null;
+    const industryExperienceYears =
+      body.industry_experience_years != null &&
+      body.industry_experience_years !== ''
+        ? Number(body.industry_experience_years)
+        : 0;
     const degreeLevel = body.degree_level?.trim();
     const degreeName = body.degree_name?.trim();
     const university = body.university?.trim();
-    const passingYear = body.passing_year != null && body.passing_year !== ''
-      ? Number(body.passing_year)
-      : null;
+    const passingYear =
+      body.passing_year != null && body.passing_year !== ''
+        ? Number(body.passing_year)
+        : null;
     const specialization = body.specialization?.trim();
 
     if (!bloodGroup) throw new BadRequestException('Blood group is required');
-    if (!staffMobile) throw new BadRequestException('Mobile number is required');
+    if (!staffMobile)
+      throw new BadRequestException('Mobile number is required');
     if (!panNumber) throw new BadRequestException('PAN number is required');
-    if (!aadhaarNumber) throw new BadRequestException('Aadhaar number is required');
-    if (!bankAccountNo) throw new BadRequestException('Bank account number is required');
+    if (!aadhaarNumber)
+      throw new BadRequestException('Aadhaar number is required');
+    if (!bankAccountNo)
+      throw new BadRequestException('Bank account number is required');
     if (!ifscCode) throw new BadRequestException('IFSC code is required');
     if (!gender) throw new BadRequestException('Gender is required');
-    if (!dateOfBirth) throw new BadRequestException('Date of birth is required');
-    if (!emergencyContactName) throw new BadRequestException('Emergency contact name is required');
-    if (!emergencyContactPhone) throw new BadRequestException('Emergency contact phone is required');
-    if (!permanentAddress) throw new BadRequestException('Permanent address is required');
-    if (!currentAddress) throw new BadRequestException('Current address is required');
-    if (!orcidId) throw new BadRequestException('ORCID ID is required for IQAC compliance');
-    if (totalExperienceYears == null || Number.isNaN(totalExperienceYears) || totalExperienceYears < 0) {
+    if (!dateOfBirth)
+      throw new BadRequestException('Date of birth is required');
+    if (!emergencyContactName)
+      throw new BadRequestException('Emergency contact name is required');
+    if (!emergencyContactPhone)
+      throw new BadRequestException('Emergency contact phone is required');
+    if (!permanentAddress)
+      throw new BadRequestException('Permanent address is required');
+    if (!currentAddress)
+      throw new BadRequestException('Current address is required');
+    if (!orcidId)
+      throw new BadRequestException('ORCID ID is required for IQAC compliance');
+    if (
+      totalExperienceYears == null ||
+      Number.isNaN(totalExperienceYears) ||
+      totalExperienceYears < 0
+    ) {
       throw new BadRequestException('Teaching experience (years) is required');
     }
-    if (!degreeLevel) throw new BadRequestException('Highest degree level is required');
+    if (!degreeLevel)
+      throw new BadRequestException('Highest degree level is required');
     if (!university) throw new BadRequestException('University is required');
-    if (!passingYear || Number.isNaN(passingYear) || passingYear < 1950 || passingYear > new Date().getFullYear() + 1) {
+    if (
+      !passingYear ||
+      Number.isNaN(passingYear) ||
+      passingYear < 1950 ||
+      passingYear > new Date().getFullYear() + 1
+    ) {
       throw new BadRequestException('Valid passing year is required');
     }
 
@@ -772,7 +873,11 @@ export class StudentOnboardingService {
     return this.getStep2Profile(tenantId, userId);
   }
 
-  private async finalizeStaffOnboarding(tenantId: string, userId: string, runner?: QueryRunner) {
+  private async finalizeStaffOnboarding(
+    tenantId: string,
+    userId: string,
+    runner?: QueryRunner,
+  ) {
     const db = runner ?? this.dataSource;
     const [user] = await db.query<
       Array<{
@@ -795,9 +900,13 @@ export class StudentOnboardingService {
     if (!user) return;
 
     const profile = (user.onboarding_profile ?? {}) as Record<string, unknown>;
-    const qualification = (profile.qualification ?? {}) as Record<string, unknown>;
+    const qualification = (profile.qualification ?? {}) as Record<
+      string,
+      unknown
+    >;
     const employeeId =
-      user.employee_id ?? `SGVU-${userId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+      user.employee_id ??
+      `SGVU-${userId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
     const designation = user.designation ?? user.role_name;
     const [entityRow] = await db.query<Array<{ entity_id: number }>>(
       `SELECT COALESCE(

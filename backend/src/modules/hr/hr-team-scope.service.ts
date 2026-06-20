@@ -57,8 +57,16 @@ export class HrTeamScopeService {
     managerId: string,
     tenantId: string,
     scope: TeamScope,
-  ): Promise<Array<{ user_id: string; name: string; employee_id: string | null }>> {
-    const { clause, params } = this.scopeUserFilterSql(managerId, tenantId, scope, 'u', 1);
+  ): Promise<
+    Array<{ user_id: string; name: string; employee_id: string | null }>
+  > {
+    const { clause, params } = this.scopeUserFilterSql(
+      managerId,
+      tenantId,
+      scope,
+      'u',
+      1,
+    );
     return this.dataSource.query(
       `SELECT u.user_id, u.name, p.employee_id
        FROM users u

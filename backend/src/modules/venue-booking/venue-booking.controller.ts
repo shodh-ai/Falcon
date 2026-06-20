@@ -46,7 +46,11 @@ export class VenueBookingController {
     @Query('date') date: string,
   ) {
     if (!date) throw new BadRequestException('date query param required');
-    return this.venueBooking.getVenueAvailability(this.tenant(req), venueId, date);
+    return this.venueBooking.getVenueAvailability(
+      this.tenant(req),
+      venueId,
+      date,
+    );
   }
 
   @Get('my')
@@ -61,12 +65,20 @@ export class VenueBookingController {
     @Req() req: { user: AuthUser },
     @Param('bookingId') bookingId: string,
   ) {
-    return this.venueBooking.getBookingPass(this.tenant(req), req.user.user_id, bookingId);
+    return this.venueBooking.getBookingPass(
+      this.tenant(req),
+      req.user.user_id,
+      bookingId,
+    );
   }
 
   @Post()
   @Roles('Student')
   create(@Req() req: { user: AuthUser }, @Body() dto: CreateVenueBookingDto) {
-    return this.venueBooking.createBooking(this.tenant(req), req.user.user_id, dto);
+    return this.venueBooking.createBooking(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 }

@@ -37,7 +37,13 @@ export class AdminOpsService {
            status = COALESCE($5, status)
        WHERE asset_id = $1 AND tenant_id = $2
        RETURNING *`,
-      [assetId, this.tenant(tenantId), dto.assigned_user_id ?? null, dto.assigned_room ?? null, dto.status ?? 'ASSIGNED'],
+      [
+        assetId,
+        this.tenant(tenantId),
+        dto.assigned_user_id ?? null,
+        dto.assigned_room ?? null,
+        dto.status ?? 'ASSIGNED',
+      ],
     );
   }
 
@@ -216,7 +222,10 @@ export class AdminOpsService {
   }
 
   transportZones(tenantId?: string) {
-    return this.db.query(`SELECT * FROM admin_transport_zones WHERE tenant_id = $1`, [this.tenant(tenantId)]);
+    return this.db.query(
+      `SELECT * FROM admin_transport_zones WHERE tenant_id = $1`,
+      [this.tenant(tenantId)],
+    );
   }
 
   private async checkFacultyWorkload(
@@ -237,7 +246,10 @@ export class AdminOpsService {
       return (eh * 60 + em - (sh * 60 + sm)) / 60;
     };
     let weeklyHours = toHours(newStart, newEnd);
-    for (const slot of slots as Array<{ start_time: string; end_time: string }>) {
+    for (const slot of slots as Array<{
+      start_time: string;
+      end_time: string;
+    }>) {
       weeklyHours += toHours(slot.start_time, slot.end_time);
     }
     const facultyRows = await this.db.query(

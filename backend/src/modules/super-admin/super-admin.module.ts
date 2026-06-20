@@ -20,7 +20,12 @@ import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
     AuthModule,
   ],
   controllers: [SuperAdminController],
-  providers: [SuperAdminService, ImpersonationService, OrgEntityService, EntityCreatorGuard],
+  providers: [
+    SuperAdminService,
+    ImpersonationService,
+    OrgEntityService,
+    EntityCreatorGuard,
+  ],
   exports: [SuperAdminService, ImpersonationService, OrgEntityService],
 })
 export class SuperAdminModule {}

@@ -80,9 +80,17 @@ export class MarksHistoryService {
       bucket.credits += credits;
 
       const grade = row.grade ?? '—';
-      const status = row.status === 'FAILED' ? 'FAIL' : row.status === 'COMPLETED' ? 'PASS' : 'IN_PROGRESS';
+      const status =
+        row.status === 'FAILED'
+          ? 'FAIL'
+          : row.status === 'COMPLETED'
+            ? 'PASS'
+            : 'IN_PROGRESS';
 
-      if ((row.status === 'COMPLETED' || row.status === 'FAILED') && row.grade_points != null) {
+      if (
+        (row.status === 'COMPLETED' || row.status === 'FAILED') &&
+        row.grade_points != null
+      ) {
         bucket.points += Number(row.grade_points) * credits;
         bucket.completedCredits += credits;
       }
@@ -122,12 +130,16 @@ export class MarksHistoryService {
     let cgpaPoints = 0;
     let cgpaCredits = 0;
     for (const row of enrollments) {
-      if ((row.status === 'COMPLETED' || row.status === 'FAILED') && row.grade_points != null) {
+      if (
+        (row.status === 'COMPLETED' || row.status === 'FAILED') &&
+        row.grade_points != null
+      ) {
         cgpaPoints += Number(row.grade_points) * Number(row.credits);
         cgpaCredits += Number(row.credits);
       }
     }
-    const cgpa = cgpaCredits > 0 ? Number((cgpaPoints / cgpaCredits).toFixed(2)) : 0;
+    const cgpa =
+      cgpaCredits > 0 ? Number((cgpaPoints / cgpaCredits).toFixed(2)) : 0;
 
     const componentBySemester = this.buildComponentMarks(
       enrollments,
@@ -137,12 +149,19 @@ export class MarksHistoryService {
 
     const uncleared = enrollments
       .filter((r: { status: string }) => r.status === 'FAILED')
-      .map((r: { course_id: string; course_code: string; course_name: string; semester: number }) => ({
-        course_id: r.course_id,
-        course_code: r.course_code,
-        course_name: r.course_name,
-        semester: Number(r.semester),
-      }));
+      .map(
+        (r: {
+          course_id: string;
+          course_code: string;
+          course_name: string;
+          semester: number;
+        }) => ({
+          course_id: r.course_id,
+          course_code: r.course_code,
+          course_name: r.course_name,
+          semester: Number(r.semester),
+        }),
+      );
 
     const failedCodes = new Set(uncleared.map((b) => b.course_code));
     const cleared = enrollments
@@ -150,11 +169,17 @@ export class MarksHistoryService {
         (r: { status: string; course_code: string }) =>
           r.status === 'COMPLETED' && failedCodes.has(r.course_code),
       )
-      .map((r: { course_code: string; course_name: string; semester: number }) => ({
-        course_code: r.course_code,
-        course_name: r.course_name,
-        semester: Number(r.semester),
-      }));
+      .map(
+        (r: {
+          course_code: string;
+          course_name: string;
+          semester: number;
+        }) => ({
+          course_code: r.course_code,
+          course_name: r.course_name,
+          semester: Number(r.semester),
+        }),
+      );
 
     const examReports = await this.dataSource
       .query(
@@ -194,7 +219,11 @@ export class MarksHistoryService {
     };
   }
 
-  private inferCourseType(row: { course_code: string; credits: number; is_elective: boolean }) {
+  private inferCourseType(row: {
+    course_code: string;
+    credits: number;
+    is_elective: boolean;
+  }) {
     const code = row.course_code.toUpperCase();
     if (code.includes('LAB') || Number(row.credits) <= 1) return 'Lab';
     if (code.includes('PROJ') || code.includes('MINI')) return 'Project';
@@ -202,7 +231,12 @@ export class MarksHistoryService {
   }
 
   private buildComponentMarks(
-    enrollments: { course_id: string; course_code: string; course_name: string; semester: number }[],
+    enrollments: {
+      course_id: string;
+      course_code: string;
+      course_name: string;
+      semester: number;
+    }[],
     publishedMarks: {
       course_id: string;
       exam_type: string;
@@ -218,16 +252,24 @@ export class MarksHistoryService {
       semester: number;
     }[],
   ) {
-    const semesters = [...new Set(enrollments.map((e) => Number(e.semester)))].sort((a, b) => a - b);
+    const semesters = [
+      ...new Set(enrollments.map((e) => Number(e.semester))),
+    ].sort((a, b) => a - b);
 
     return semesters.map((semesterNumber) => {
-      const coursesInSem = enrollments.filter((e) => Number(e.semester) === semesterNumber);
+      const coursesInSem = enrollments.filter(
+        (e) => Number(e.semester) === semesterNumber,
+      );
       const subjects = coursesInSem.map((course) => {
         const examRows = publishedMarks.filter(
-          (m) => m.course_id === course.course_id && Number(m.semester) === semesterNumber,
+          (m) =>
+            m.course_id === course.course_id &&
+            Number(m.semester) === semesterNumber,
         );
         const assignRows = assignmentMarks.filter(
-          (m) => m.course_id === course.course_id && Number(m.semester) === semesterNumber,
+          (m) =>
+            m.course_id === course.course_id &&
+            Number(m.semester) === semesterNumber,
         );
 
         const components: {
@@ -266,14 +308,26 @@ export class MarksHistoryService {
           daIndex += 1;
         }
 
-        const order = ['DA1', 'DA2', 'ASSIGNMENT', 'CAT1', 'CAT2', 'QUIZ', 'INTERNAL', 'END_TERM'];
+        const order = [
+          'DA1',
+          'DA2',
+          'ASSIGNMENT',
+          'CAT1',
+          'CAT2',
+          'QUIZ',
+          'INTERNAL',
+          'END_TERM',
+        ];
         components.sort((a, b) => {
           const ai = order.findIndex((k) => a.key.startsWith(k));
           const bi = order.findIndex((k) => b.key.startsWith(k));
           return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
         });
 
-        const totalObtained = components.reduce((s, c) => s + c.marks_obtained, 0);
+        const totalObtained = components.reduce(
+          (s, c) => s + c.marks_obtained,
+          0,
+        );
         const totalMax = components.reduce((s, c) => s + c.max_marks, 0);
 
         return {

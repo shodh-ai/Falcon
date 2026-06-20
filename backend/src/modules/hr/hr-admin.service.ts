@@ -62,18 +62,25 @@ export class HrAdminService {
     viewerRoles: string[] = [],
     options?: { limit?: number; offset?: number; q?: string },
   ): Promise<PaginatedResponse<Record<string, unknown>>> {
-    const { limit, offset } = parsePageParams(options?.limit, options?.offset, DEFAULT_PAGE_LIMIT);
+    const { limit, offset } = parsePageParams(
+      options?.limit,
+      options?.offset,
+      DEFAULT_PAGE_LIMIT,
+    );
     const roleKey = [...viewerRoles].sort().join(',');
     const cacheKey = `hr_dir:${tenantId}:${entityId}:${viewerUserId ?? 'all'}:${roleKey}:${limit}:${offset}:${options?.q?.trim().toLowerCase() ?? ''}`;
-    return this.cache.getOrSet(cacheKey, () =>
-      this.fetchDirectoryPage(
-        tenantId,
-        entityId,
-        { limit, offset, q: options?.q },
-        viewerUserId,
-        viewerRoles,
-      ),
-    900);
+    return this.cache.getOrSet(
+      cacheKey,
+      () =>
+        this.fetchDirectoryPage(
+          tenantId,
+          entityId,
+          { limit, offset, q: options?.q },
+          viewerUserId,
+          viewerRoles,
+        ),
+      900,
+    );
   }
 
   private async fetchDirectoryPage(
@@ -88,7 +95,9 @@ export class HrAdminService {
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     let deptClause = '';
     if (viewerUserId) {
-      const scope = await this.dataSource.query<Array<{ department_scope: number[] | null }>>(
+      const scope = await this.dataSource.query<
+        Array<{ department_scope: number[] | null }>
+      >(
         `SELECT department_scope FROM hr_access_controls
          WHERE tenant_id = $1 AND user_id = $2 AND department_scope IS NOT NULL
          LIMIT 1`,
@@ -148,7 +157,11 @@ export class HrAdminService {
     return { data, total, limit, offset };
   }
 
-  async getEmployee360(tenantId: string, userId: string, includeSensitive = false) {
+  async getEmployee360(
+    tenantId: string,
+    userId: string,
+    includeSensitive = false,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.is_active, u.reporting_officer_id,
               r.role_name AS role, d.dept_name AS department,
@@ -166,9 +179,15 @@ export class HrAdminService {
     );
     if (!rows[0]) throw new NotFoundException('Employee not found');
     const row = rows[0];
-    const pan = includeSensitive ? this.crypto.decrypt(row.pan_encrypted) : null;
-    const aadhaar = includeSensitive ? this.crypto.decrypt(row.aadhaar_encrypted) : null;
-    const bank = includeSensitive ? this.crypto.decrypt(row.bank_account_encrypted) : null;
+    const pan = includeSensitive
+      ? this.crypto.decrypt(row.pan_encrypted)
+      : null;
+    const aadhaar = includeSensitive
+      ? this.crypto.decrypt(row.aadhaar_encrypted)
+      : null;
+    const bank = includeSensitive
+      ? this.crypto.decrypt(row.bank_account_encrypted)
+      : null;
 
     const documents = await this.dataSource.query(
       `SELECT d.document_id, d.document_type, d.file_name, d.verification_status, d.uploaded_at,
@@ -197,8 +216,12 @@ export class HrAdminService {
       pf_uan: row.pf_uan,
       kyc: {
         pan_masked: this.crypto.maskPan(this.crypto.decrypt(row.pan_encrypted)),
-        aadhaar_masked: this.crypto.maskAadhaar(this.crypto.decrypt(row.aadhaar_encrypted)),
-        bank_masked: this.crypto.maskBank(this.crypto.decrypt(row.bank_account_encrypted)),
+        aadhaar_masked: this.crypto.maskAadhaar(
+          this.crypto.decrypt(row.aadhaar_encrypted),
+        ),
+        bank_masked: this.crypto.maskBank(
+          this.crypto.decrypt(row.bank_account_encrypted),
+        ),
         pan: includeSensitive ? pan : undefined,
         aadhaar: includeSensitive ? aadhaar : undefined,
         bank_account: includeSensitive ? bank : undefined,
@@ -222,7 +245,10 @@ export class HrAdminService {
     return this.getEmployee360(tenantId, targetUserId, true);
   }
 
-  private async resolveEntityId(tenantId: string, preferred?: number | null): Promise<number> {
+  private async resolveEntityId(
+    tenantId: string,
+    preferred?: number | null,
+  ): Promise<number> {
     if (preferred != null) return preferred;
     const rows = await this.dataSource.query<Array<{ entity_id: number }>>(
       `SELECT entity_id FROM org_entities WHERE tenant_id = $1 AND is_active = true ORDER BY entity_id LIMIT 1`,
@@ -230,7 +256,9 @@ export class HrAdminService {
     );
     const entityId = rows[0]?.entity_id;
     if (!entityId) {
-      throw new BadRequestException('No organization entity configured for this tenant');
+      throw new BadRequestException(
+        'No organization entity configured for this tenant',
+      );
     }
     return entityId;
   }
@@ -252,11 +280,21 @@ export class HrAdminService {
     },
   ) {
     const entityId = await this.resolveEntityId(tenantId, dto.entity_id);
-    const pan = dto.pan_number !== undefined ? this.crypto.encrypt(dto.pan_number) : undefined;
-    const aadhaar = dto.aadhaar_number !== undefined ? this.crypto.encrypt(dto.aadhaar_number) : undefined;
-    const bank = dto.bank_account_no !== undefined ? this.crypto.encrypt(dto.bank_account_no) : undefined;
+    const pan =
+      dto.pan_number !== undefined
+        ? this.crypto.encrypt(dto.pan_number)
+        : undefined;
+    const aadhaar =
+      dto.aadhaar_number !== undefined
+        ? this.crypto.encrypt(dto.aadhaar_number)
+        : undefined;
+    const bank =
+      dto.bank_account_no !== undefined
+        ? this.crypto.encrypt(dto.bank_account_no)
+        : undefined;
     const employeeId =
-      dto.employee_id ?? `SGVU-${userId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+      dto.employee_id ??
+      `SGVU-${userId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
 
     const rows = await this.dataSource.query(
       `INSERT INTO hr_employee_profiles (
@@ -300,7 +338,11 @@ export class HrAdminService {
     return rows[0];
   }
 
-  async listLeaveBalancesGrid(tenantId: string, year: number, entityId: number) {
+  async listLeaveBalancesGrid(
+    tenantId: string,
+    year: number,
+    entityId: number,
+  ) {
     return this.dataSource.query(
       `SELECT u.user_id, u.name, p.employee_id,
               MAX(CASE WHEN b.leave_type = 'CL' THEN b.entitled - b.used END) AS cl_balance,
@@ -342,19 +384,36 @@ export class HrAdminService {
         [userId, dto.leave_type, dto.year, dto.delta],
       );
     }
-    return { user_id: userId, leave_type: dto.leave_type, adjustment: dto.delta };
+    return {
+      user_id: userId,
+      leave_type: dto.leave_type,
+      adjustment: dto.delta,
+    };
   }
 
   async ingestBiometricPunches(
     tenantId: string,
-    punches: { employee_id: string; punch_time: string; device_id?: string; punch_type: 'IN' | 'OUT'; entity_id?: number }[],
+    punches: {
+      employee_id: string;
+      punch_time: string;
+      device_id?: string;
+      punch_type: 'IN' | 'OUT';
+      entity_id?: number;
+    }[],
     entityId?: number,
   ) {
     for (const punch of punches) {
       await this.dataSource.query(
         `INSERT INTO hr_biometric_logs (tenant_id, entity_id, employee_id, punch_time, device_id, punch_type)
          VALUES ($1, $2, $3, $4::timestamptz, $5, $6)`,
-        [tenantId, punch.entity_id ?? entityId ?? null, punch.employee_id, punch.punch_time, punch.device_id ?? null, punch.punch_type],
+        [
+          tenantId,
+          punch.entity_id ?? entityId ?? null,
+          punch.employee_id,
+          punch.punch_time,
+          punch.device_id ?? null,
+          punch.punch_type,
+        ],
       );
     }
     return this.processBiometricLogs(tenantId);
@@ -402,7 +461,10 @@ export class HrAdminService {
           [userId, workDate, log.punch_time],
         );
       }
-      await this.dataSource.query(`UPDATE hr_biometric_logs SET processed = TRUE WHERE log_id = $1`, [log.log_id]);
+      await this.dataSource.query(
+        `UPDATE hr_biometric_logs SET processed = TRUE WHERE log_id = $1`,
+        [log.log_id],
+      );
       processed += 1;
     }
     return { processed, pending: logs.length - processed };
@@ -432,10 +494,12 @@ export class HrAdminService {
       other_deductions?: number;
     },
   ) {
-    const gross =
-      dto.basic_pay + (dto.hra ?? 0) + (dto.da ?? 0);
+    const gross = dto.basic_pay + (dto.hra ?? 0) + (dto.da ?? 0);
     const net =
-      gross - (dto.pf_deduction ?? 0) - (dto.tds_deduction ?? 0) - (dto.other_deductions ?? 0);
+      gross -
+      (dto.pf_deduction ?? 0) -
+      (dto.tds_deduction ?? 0) -
+      (dto.other_deductions ?? 0);
     const rows = await this.dataSource.query(
       `INSERT INTO hr_employee_pay_packages (
          tenant_id, user_id, basic_pay, hra, da, pf_deduction, tds_deduction, other_deductions, net_salary, updated_at
@@ -473,7 +537,8 @@ export class HrAdminService {
       let pts = API_POINTS[log.publication_type] ?? 3;
       if (log.indexing_type === 'SCOPUS') pts += 2;
       score += pts;
-      breakdown[log.publication_type] = (breakdown[log.publication_type] ?? 0) + pts;
+      breakdown[log.publication_type] =
+        (breakdown[log.publication_type] ?? 0) + pts;
     }
     const rows = await this.dataSource.query(
       `INSERT INTO hr_employee_appraisals (tenant_id, user_id, appraisal_year, auto_api_score, api_breakdown, calculated_at)
@@ -488,7 +553,11 @@ export class HrAdminService {
     return rows[0];
   }
 
-  async listAppraisalsWithApi(tenantId: string, year: number, entityId: number) {
+  async listAppraisalsWithApi(
+    tenantId: string,
+    year: number,
+    entityId: number,
+  ) {
     const faculty = await this.dataSource.query(
       `SELECT u.user_id, u.name, p.employee_id, r.role_name
        FROM users u
@@ -542,7 +611,11 @@ export class HrAdminService {
     );
   }
 
-  async hireApplicant(tenantId: string, applicantId: string, _hrUserId: string) {
+  async hireApplicant(
+    tenantId: string,
+    applicantId: string,
+    _hrUserId: string,
+  ) {
     const applicant = await this.dataSource.query(
       `SELECT * FROM hr_applicants WHERE applicant_id = $1 AND tenant_id = $2`,
       [applicantId, tenantId],
@@ -553,7 +626,10 @@ export class HrAdminService {
       throw new BadRequestException('Move candidate to OFFERED or HIRED first');
     }
 
-    const entityId = await this.resolveEntityId(tenantId, a.entity_id as number | null);
+    const entityId = await this.resolveEntityId(
+      tenantId,
+      a.entity_id as number | null,
+    );
     const email = String(a.email).toLowerCase();
 
     if (a.hired_user_id) {
@@ -590,7 +666,15 @@ export class HrAdminService {
            ELSE EXCLUDED.onboarding_status
          END
        RETURNING user_id`,
-      [tenantId, a.name, email, role[0]?.role_id ?? 2, passwordHash, entityId, onboardingStatus],
+      [
+        tenantId,
+        a.name,
+        email,
+        role[0]?.role_id ?? 2,
+        passwordHash,
+        entityId,
+        onboardingStatus,
+      ],
     );
     const userId = userRows[0].user_id;
     await this.dataSource.query(
@@ -615,7 +699,11 @@ export class HrAdminService {
       `UPDATE hr_applicants SET stage = 'HIRED', hired_user_id = $2, updated_at = NOW() WHERE applicant_id = $1`,
       [applicantId, userId],
     );
-    const spawn = await this.onboardingWorkflow.spawnTasksForEmployee(tenantId, entityId, userId);
+    const spawn = await this.onboardingWorkflow.spawnTasksForEmployee(
+      tenantId,
+      entityId,
+      userId,
+    );
     return {
       user_id: userId,
       email,
@@ -627,7 +715,8 @@ export class HrAdminService {
   validateBiometricWebhook(secret?: string) {
     const expected = this.config.get<string>('HR_BIOMETRIC_WEBHOOK_SECRET');
     if (!expected) return true;
-    if (secret !== expected) throw new ForbiddenException('Invalid biometric webhook secret');
+    if (secret !== expected)
+      throw new ForbiddenException('Invalid biometric webhook secret');
     return true;
   }
 }

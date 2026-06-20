@@ -25,7 +25,11 @@ export class FalconNotificationsController {
   @Get()
   list(@Req() req: { user: AuthUser }, @Query('limit') limit?: string) {
     const { tenantId, userId } = this.ctx(req);
-    return this.notifications.listForUser(tenantId, userId, this.notifications.clampLimit(Number(limit)));
+    return this.notifications.listForUser(
+      tenantId,
+      userId,
+      this.notifications.clampLimit(Number(limit)),
+    );
   }
 
   @Get('recent')
@@ -37,7 +41,9 @@ export class FalconNotificationsController {
   @Get('unread-count')
   unreadCount(@Req() req: { user: AuthUser }) {
     const { tenantId, userId } = this.ctx(req);
-    return this.notifications.unreadCount(tenantId, userId).then((count) => ({ count }));
+    return this.notifications
+      .unreadCount(tenantId, userId)
+      .then((count) => ({ count }));
   }
 
   @Patch(':id/read')

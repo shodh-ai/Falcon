@@ -57,20 +57,50 @@ describe('AcademicsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AcademicsService,
-        { provide: getRepositoryToken(HelpdeskTicket), useValue: mockHelpdeskTickets },
+        {
+          provide: getRepositoryToken(HelpdeskTicket),
+          useValue: mockHelpdeskTickets,
+        },
         { provide: getRepositoryToken(User), useValue: mockUsers },
-        { provide: getRepositoryToken(StudentProfile), useValue: mockStudentProfiles },
-        { provide: getRepositoryToken(StudentCourseEnrollment), useValue: mockRepository },
+        {
+          provide: getRepositoryToken(StudentProfile),
+          useValue: mockStudentProfiles,
+        },
+        {
+          provide: getRepositoryToken(StudentCourseEnrollment),
+          useValue: mockRepository,
+        },
         { provide: getRepositoryToken(Subject), useValue: mockRepository },
         { provide: getRepositoryToken(Batch), useValue: mockRepository },
-        { provide: getRepositoryToken(AttendanceRecord), useValue: mockRepository },
+        {
+          provide: getRepositoryToken(AttendanceRecord),
+          useValue: mockRepository,
+        },
         { provide: getRepositoryToken(ExamResult), useValue: mockRepository },
-        { provide: getRepositoryToken(GradingPolicy), useValue: mockRepository },
-        { provide: getRepositoryToken(AcademicCourse), useValue: mockRepository },
-        { provide: getRepositoryToken(AcademicTimetable), useValue: mockRepository },
-        { provide: getRepositoryToken(StaffAttendance), useValue: mockRepository },
-        { provide: getRepositoryToken(StaffLeaveRequest), useValue: mockRepository },
-        { provide: getRepositoryToken(StaffGatePass), useValue: mockRepository },
+        {
+          provide: getRepositoryToken(GradingPolicy),
+          useValue: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(AcademicCourse),
+          useValue: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(AcademicTimetable),
+          useValue: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(StaffAttendance),
+          useValue: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(StaffLeaveRequest),
+          useValue: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(StaffGatePass),
+          useValue: mockRepository,
+        },
         { provide: NotificationEmitterService, useValue: mockNotify },
       ],
     }).compile();
@@ -90,7 +120,11 @@ describe('AcademicsService', () => {
     it('resolves departments from assigned schools via programs', async () => {
       mockUsers.manager.query
         .mockResolvedValueOnce([
-          { school_id: 1, school_name: 'School of Engineering & Technology', school_code: 'SOET' },
+          {
+            school_id: 1,
+            school_name: 'School of Engineering & Technology',
+            school_code: 'SOET',
+          },
         ])
         .mockResolvedValueOnce([{ dept_id: 10 }, { dept_id: 11 }]);
       mockUsers.findOne.mockResolvedValue(null);
@@ -99,12 +133,19 @@ describe('AcademicsService', () => {
 
       expect(scope.schoolIds).toEqual([1]);
       expect(scope.departmentIds).toEqual([10, 11]);
-      expect(scope.schools[0].school_name).toBe('School of Engineering & Technology');
+      expect(scope.schools[0].school_name).toBe(
+        'School of Engineering & Technology',
+      );
     });
 
     it('falls back to dean dept_id when no school programs are linked', async () => {
-      mockUsers.manager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
-      mockUsers.findOne.mockResolvedValue({ user_id: 'dean-user-id', dept_id: 5 });
+      mockUsers.manager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      mockUsers.findOne.mockResolvedValue({
+        user_id: 'dean-user-id',
+        dept_id: 5,
+      });
 
       const scope = await (service as any).resolveDeanScope('dean-user-id');
 
@@ -116,9 +157,9 @@ describe('AcademicsService', () => {
   describe('listProfileUpdateRequests', () => {
     it('should return empty array if no pending tickets', async () => {
       mockHelpdeskTickets.find.mockResolvedValue([]);
-      
+
       const result = await service.listProfileUpdateRequests();
-      
+
       expect(result).toEqual([]);
       expect(mockHelpdeskTickets.find).toHaveBeenCalledWith({
         where: { category: 'ACADEMICS', status: 'PENDING' },
@@ -129,13 +170,29 @@ describe('AcademicsService', () => {
 
     it('should map tickets with student and profile data', async () => {
       const tickets = [
-        { ticket_id: 't1', student_user_id: 's1', subject: 'sub', description: 'desc', status: 'PENDING', created_at: new Date('2026-06-09') }
+        {
+          ticket_id: 't1',
+          student_user_id: 's1',
+          subject: 'sub',
+          description: 'desc',
+          status: 'PENDING',
+          created_at: new Date('2026-06-09'),
+        },
       ];
       const students = [
-        { user_id: 's1', name: 'John Doe', email: 'john@example.com', department: { dept_name: 'Computer Science' } }
+        {
+          user_id: 's1',
+          name: 'John Doe',
+          email: 'john@example.com',
+          department: { dept_name: 'Computer Science' },
+        },
       ];
       const profiles = [
-        { user_id: 's1', enrollment_no: 'EN123', parent_info: { mobile: '1234567890', address: '123 Main St' } }
+        {
+          user_id: 's1',
+          enrollment_no: 'EN123',
+          parent_info: { mobile: '1234567890', address: '123 Main St' },
+        },
       ];
 
       mockHelpdeskTickets.find.mockResolvedValue(tickets);
@@ -158,13 +215,20 @@ describe('AcademicsService', () => {
     it('should throw NotFoundException if ticket not found', async () => {
       mockHelpdeskTickets.findOne.mockResolvedValue(null);
 
-      await expect(service.resolveProfileUpdateRequest('admin1', 't1', { action: 'APPROVE' }))
-        .rejects
-        .toThrow(NotFoundException);
+      await expect(
+        service.resolveProfileUpdateRequest('admin1', 't1', {
+          action: 'APPROVE',
+        }),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('should resolve and update profile on APPROVE', async () => {
-      const ticket = { ticket_id: 't1', student_user_id: 's1', status: 'PENDING', conversation: [] };
+      const ticket = {
+        ticket_id: 't1',
+        student_user_id: 's1',
+        status: 'PENDING',
+        conversation: [],
+      };
       const profile = { user_id: 's1', parent_info: { mobile: 'old' } };
 
       mockHelpdeskTickets.findOne.mockResolvedValue(ticket);
@@ -180,19 +244,24 @@ describe('AcademicsService', () => {
       expect(ticket.status).toBe('RESOLVED');
       expect(ticket.conversation).toHaveLength(1);
       expect(ticket.conversation[0].message).toContain('approved and applied');
-      
+
       expect(mockUsers.update).toHaveBeenCalledWith(
         { user_id: 's1' },
-        { name: 'New Name' }
+        { name: 'New Name' },
       );
-      
+
       expect(profile.parent_info.mobile).toBe('new mobile');
       expect(mockStudentProfiles.save).toHaveBeenCalledWith(profile);
       expect(mockHelpdeskTickets.save).toHaveBeenCalledWith(ticket);
     });
 
     it('should reject without updating profile on REJECT', async () => {
-      const ticket = { ticket_id: 't1', student_user_id: 's1', status: 'PENDING', conversation: [] };
+      const ticket = {
+        ticket_id: 't1',
+        student_user_id: 's1',
+        status: 'PENDING',
+        conversation: [],
+      };
 
       mockHelpdeskTickets.findOne.mockResolvedValue(ticket);
 
@@ -205,7 +274,7 @@ describe('AcademicsService', () => {
       expect(ticket.status).toBe('RESOLVED');
       expect(ticket.conversation[0].message).toContain('rejected');
       expect(ticket.conversation[0].message).toContain('Invalid document');
-      
+
       expect(mockUsers.update).not.toHaveBeenCalled();
       expect(mockStudentProfiles.save).not.toHaveBeenCalled();
       expect(mockHelpdeskTickets.save).toHaveBeenCalledWith(ticket);

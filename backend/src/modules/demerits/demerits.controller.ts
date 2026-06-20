@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -31,7 +39,12 @@ export class DemeritsController {
     @Param('id') id: string,
     @Body() dto: ReviewDemeritIncidentDto,
   ) {
-    return this.demerits.reviewIncident(this.tenant(req), id, req.user.user_id, dto);
+    return this.demerits.reviewIncident(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      dto,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

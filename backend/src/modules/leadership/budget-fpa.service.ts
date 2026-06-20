@@ -49,7 +49,9 @@ export class BudgetFpaService {
          ORDER BY d.dept_name`,
         [tid, fy],
       ),
-      this.db.query(`SELECT dept_id, dept_name FROM departments WHERE deleted_at IS NULL ORDER BY dept_name`),
+      this.db.query(
+        `SELECT dept_id, dept_name FROM departments WHERE deleted_at IS NULL ORDER BY dept_name`,
+      ),
     ]);
 
     return {
@@ -58,7 +60,8 @@ export class BudgetFpaService {
       departments: departments as { dept_id: number; dept_name: string }[],
       dept_budgets: depts,
       total_dept_allocated: depts.reduce(
-        (s: number, r: { allocated_amount: string }) => s + Number(r.allocated_amount),
+        (s: number, r: { allocated_amount: string }) =>
+          s + Number(r.allocated_amount),
         0,
       ),
     };
@@ -67,7 +70,11 @@ export class BudgetFpaService {
   async saveDraftAllocation(
     tenantId: string,
     userId: string,
-    dto: { financial_year: string; total_university_budget: number; departments: DeptAllocation[] },
+    dto: {
+      financial_year: string;
+      total_university_budget: number;
+      departments: DeptAllocation[];
+    },
   ) {
     const tid = this.tenantId(tenantId);
     const deptSum = dto.departments.reduce((s, d) => s + d.allocated_amount, 0);
@@ -85,7 +92,8 @@ export class BudgetFpaService {
        RETURNING university_budget_id`,
       [tid, dto.financial_year, dto.total_university_budget],
     );
-    const universityBudgetId = (univRows[0] as { university_budget_id: string }).university_budget_id;
+    const universityBudgetId = (univRows[0] as { university_budget_id: string })
+      .university_budget_id;
 
     for (const dept of dto.departments) {
       await this.db.query(
@@ -97,14 +105,25 @@ export class BudgetFpaService {
            allocated_amount = EXCLUDED.allocated_amount,
            university_budget_id = EXCLUDED.university_budget_id,
            allocated_by = EXCLUDED.allocated_by`,
-        [tid, universityBudgetId, dto.financial_year, dept.department_id, dept.allocated_amount, userId],
+        [
+          tid,
+          universityBudgetId,
+          dto.financial_year,
+          dept.department_id,
+          dept.allocated_amount,
+          userId,
+        ],
       );
     }
 
     return { saved: true, university_budget_id: universityBudgetId };
   }
 
-  async lockFinancialYear(tenantId: string, userId: string, financialYear: string) {
+  async lockFinancialYear(
+    tenantId: string,
+    userId: string,
+    financialYear: string,
+  ) {
     const tid = this.tenantId(tenantId);
     await this.db.query(
       `UPDATE fin_university_budgets SET status = 'LOCKED', locked_at = NOW(), locked_by = $3
@@ -134,7 +153,12 @@ export class BudgetFpaService {
 
   async createProgramBudget(
     tenantId: string,
-    dto: { budget_id: string; program_name: string; allocated_amount: number; program_type?: string },
+    dto: {
+      budget_id: string;
+      program_name: string;
+      allocated_amount: number;
+      program_type?: string;
+    },
   ) {
     const tid = this.tenantId(tenantId);
     const deptRows = await this.db.query(
@@ -144,17 +168,30 @@ export class BudgetFpaService {
        FROM fin_dept_budgets WHERE budget_id = $1 AND tenant_id = $2`,
       [dto.budget_id, tid],
     );
-    if (!deptRows[0]) throw new NotFoundException('Department budget not found');
-    const deptAlloc = Number((deptRows[0] as { allocated_amount: string }).allocated_amount);
-    const programTotal = Number((deptRows[0] as { program_total: string }).program_total);
+    if (!deptRows[0])
+      throw new NotFoundException('Department budget not found');
+    const deptAlloc = Number(
+      (deptRows[0] as { allocated_amount: string }).allocated_amount,
+    );
+    const programTotal = Number(
+      (deptRows[0] as { program_total: string }).program_total,
+    );
     if (programTotal + dto.allocated_amount > deptAlloc) {
-      throw new BadRequestException('Program allocations exceed department budget cap');
+      throw new BadRequestException(
+        'Program allocations exceed department budget cap',
+      );
     }
 
     const rows = await this.db.query(
       `INSERT INTO fin_program_budgets (tenant_id, budget_id, program_name, program_type, allocated_amount)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [tid, dto.budget_id, dto.program_name, dto.program_type ?? 'EVENT', dto.allocated_amount],
+      [
+        tid,
+        dto.budget_id,
+        dto.program_name,
+        dto.program_type ?? 'EVENT',
+        dto.allocated_amount,
+      ],
     );
     return rows[0];
   }
@@ -178,7 +215,10 @@ export class BudgetFpaService {
       `SELECT total_allocated FROM fin_university_budgets WHERE tenant_id = $1 AND financial_year = $2`,
       [tid, fy],
     );
-    const total = Number((univ[0] as { total_allocated: string } | undefined)?.total_allocated ?? 1000000000);
+    const total = Number(
+      (univ[0] as { total_allocated: string } | undefined)?.total_allocated ??
+        1000000000,
+    );
     addNode('University');
     addNode('Unallocated');
 
@@ -191,7 +231,11 @@ export class BudgetFpaService {
     );
 
     let allocatedSum = 0;
-    for (const d of depts as { budget_id: string; allocated_amount: string; dept_name: string }[]) {
+    for (const d of depts as {
+      budget_id: string;
+      allocated_amount: string;
+      dept_name: string;
+    }[]) {
       const amt = Number(d.allocated_amount);
       allocatedSum += amt;
       const deptName = d.dept_name ?? 'Dept';
@@ -203,20 +247,36 @@ export class BudgetFpaService {
          WHERE budget_id = $1 AND deleted_at IS NULL`,
         [d.budget_id],
       );
-      for (const p of programs as { program_name: string; allocated_amount: string; utilized_amount: string }[]) {
+      for (const p of programs as {
+        program_name: string;
+        allocated_amount: string;
+        utilized_amount: string;
+      }[]) {
         const pName = `${deptName} › ${p.program_name}`;
         addNode(pName);
-        links.push({ source: deptName, target: pName, value: Number(p.allocated_amount) });
+        links.push({
+          source: deptName,
+          target: pName,
+          value: Number(p.allocated_amount),
+        });
         if (Number(p.utilized_amount) > 0) {
           const spentName = `${p.program_name} (Spent)`;
           addNode(spentName);
-          links.push({ source: pName, target: spentName, value: Number(p.utilized_amount) });
+          links.push({
+            source: pName,
+            target: spentName,
+            value: Number(p.utilized_amount),
+          });
         }
       }
     }
 
     if (total > allocatedSum) {
-      links.push({ source: 'University', target: 'Unallocated', value: total - allocatedSum });
+      links.push({
+        source: 'University',
+        target: 'Unallocated',
+        value: total - allocatedSum,
+      });
     }
 
     return { nodes, links, financial_year: fy };
@@ -271,7 +331,11 @@ export class BudgetFpaService {
     return { program: programs[0], breakdown };
   }
 
-  async getExpenseGroundTruth(tenantId: string, programId: string, category?: string) {
+  async getExpenseGroundTruth(
+    tenantId: string,
+    programId: string,
+    category?: string,
+  ) {
     let query = `
       SELECT e.expense_id, e.description, e.amount, e.expense_date, e.approved_at,
              v.business_name AS vendor_name, u.name AS approved_by_name, h.head_name AS category
@@ -306,7 +370,12 @@ export class BudgetFpaService {
         [programId, tid],
       );
       if (!rows[0]) return { allowed: true };
-      const r = rows[0] as { allocated_amount: string; encumbered_amount: string; utilized_amount: string; program_name: string };
+      const r = rows[0] as {
+        allocated_amount: string;
+        encumbered_amount: string;
+        utilized_amount: string;
+        program_name: string;
+      };
       const allocated = Number(r.allocated_amount);
       const committed = Number(r.encumbered_amount) + Number(r.utilized_amount);
       if (committed + amount > allocated) {
@@ -327,7 +396,11 @@ export class BudgetFpaService {
         [budgetId, tid],
       );
       if (!rows[0]) return { allowed: true };
-      const r = rows[0] as { allocated_amount: string; encumbered_amount: string; utilized_amount: string };
+      const r = rows[0] as {
+        allocated_amount: string;
+        encumbered_amount: string;
+        utilized_amount: string;
+      };
       const allocated = Number(r.allocated_amount);
       const committed = Number(r.encumbered_amount) + Number(r.utilized_amount);
       if (committed + amount > allocated) {
@@ -381,7 +454,12 @@ export class BudgetFpaService {
         userId,
       ],
     );
-    const po = rows[0] as { po_id: string; program_id: string; budget_id: string; amount: string };
+    const po = rows[0] as {
+      po_id: string;
+      program_id: string;
+      budget_id: string;
+      amount: string;
+    };
 
     if (po.program_id) {
       await this.db.query(
@@ -418,10 +496,16 @@ export class BudgetFpaService {
     const amount = dto.amount;
 
     if (dto.po_id) {
-      const poRows = await this.db.query(`SELECT amount, program_id, budget_id, status FROM fin_purchase_orders WHERE po_id = $1`, [
-        dto.po_id,
-      ]);
-      const po = poRows[0] as { amount: string; program_id: string; budget_id: string; status: string };
+      const poRows = await this.db.query(
+        `SELECT amount, program_id, budget_id, status FROM fin_purchase_orders WHERE po_id = $1`,
+        [dto.po_id],
+      );
+      const po = poRows[0] as {
+        amount: string;
+        program_id: string;
+        budget_id: string;
+        status: string;
+      };
       if (po?.status && po.status !== 'APPROVED') {
         throw new ForbiddenException({
           statusCode: 403,
@@ -445,9 +529,17 @@ export class BudgetFpaService {
           [po.budget_id, Number(po.amount)],
         );
       }
-      await this.db.query(`UPDATE fin_purchase_orders SET status = 'PAID' WHERE po_id = $1`, [dto.po_id]);
+      await this.db.query(
+        `UPDATE fin_purchase_orders SET status = 'PAID' WHERE po_id = $1`,
+        [dto.po_id],
+      );
     } else {
-      await this.checkEncumbrance({ tenantId: tid, programId: dto.program_id, budgetId: dto.budget_id, amount });
+      await this.checkEncumbrance({
+        tenantId: tid,
+        programId: dto.program_id,
+        budgetId: dto.budget_id,
+        amount,
+      });
       if (dto.program_id) {
         await this.db.query(
           `UPDATE fin_program_budgets SET utilized_amount = utilized_amount + $2 WHERE program_id = $1`,
@@ -490,16 +582,32 @@ export class BudgetFpaService {
   async requestBudgetExpansion(
     tenantId: string,
     userId: string,
-    dto: { budget_id?: string; program_id?: string; requested_amount: number; reason?: string },
+    dto: {
+      budget_id?: string;
+      program_id?: string;
+      requested_amount: number;
+      reason?: string;
+    },
   ) {
     const tid = this.tenantId(tenantId);
     const rows = await this.db.query(
       `INSERT INTO fin_budget_expansion_requests
          (tenant_id, budget_id, program_id, requested_amount, reason, requested_by)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [tid, dto.budget_id ?? null, dto.program_id ?? null, dto.requested_amount, dto.reason ?? null, userId],
+      [
+        tid,
+        dto.budget_id ?? null,
+        dto.program_id ?? null,
+        dto.requested_amount,
+        dto.reason ?? null,
+        userId,
+      ],
     );
-    const req = rows[0] as { request_id: string; requested_amount: string; reason: string };
+    const req = rows[0] as {
+      request_id: string;
+      requested_amount: string;
+      reason: string;
+    };
 
     const chairmen = await this.db.query(
       `SELECT u.user_id FROM users u JOIN roles r ON r.role_id = u.role_id
@@ -508,7 +616,10 @@ export class BudgetFpaService {
     );
     const programName = dto.program_id
       ? (
-          await this.db.query(`SELECT program_name FROM fin_program_budgets WHERE program_id = $1`, [dto.program_id])
+          await this.db.query(
+            `SELECT program_name FROM fin_program_budgets WHERE program_id = $1`,
+            [dto.program_id],
+          )
         )[0]?.program_name
       : 'Department';
     for (const c of chairmen as { user_id: string }[]) {
@@ -546,7 +657,8 @@ export class BudgetFpaService {
       status: string;
     };
     if (!req) throw new NotFoundException('Request not found');
-    if (req.status !== 'PENDING') throw new BadRequestException('Request already reviewed');
+    if (req.status !== 'PENDING')
+      throw new BadRequestException('Request already reviewed');
 
     const status = approve ? 'APPROVED' : 'REJECTED';
     await this.db.query(
@@ -562,9 +674,10 @@ export class BudgetFpaService {
           `UPDATE fin_program_budgets SET allocated_amount = allocated_amount + $2 WHERE program_id = $1`,
           [req.program_id, amt],
         );
-        const prog = await this.db.query(`SELECT budget_id FROM fin_program_budgets WHERE program_id = $1`, [
-          req.program_id,
-        ]);
+        const prog = await this.db.query(
+          `SELECT budget_id FROM fin_program_budgets WHERE program_id = $1`,
+          [req.program_id],
+        );
         const budgetId = (prog[0] as { budget_id: string })?.budget_id;
         if (budgetId) {
           await this.db.query(

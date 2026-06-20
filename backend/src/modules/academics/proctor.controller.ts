@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -43,13 +52,23 @@ export class ProctorController {
 
   @Patch('profile/me')
   @Roles('Student')
-  updateMyProfile(@Req() req: { user: AuthUser }, @Body() dto: UpdateStudentProfileDto) {
-    return this.proctor.updateStudentProfile(req.user.user_id, req.user.user_id, dto);
+  updateMyProfile(
+    @Req() req: { user: AuthUser },
+    @Body() dto: UpdateStudentProfileDto,
+  ) {
+    return this.proctor.updateStudentProfile(
+      req.user.user_id,
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Post('meetings')
   @Roles('Student')
-  bookMeeting(@Req() req: { user: AuthUser }, @Body() dto: BookProctorMeetingDto) {
+  bookMeeting(
+    @Req() req: { user: AuthUser },
+    @Body() dto: BookProctorMeetingDto,
+  ) {
     return this.proctor.bookMeeting(req.user.user_id, dto.meeting_at, dto.note);
   }
 
@@ -88,7 +107,10 @@ export class ProctorController {
 
   @Get('chat/thread/:studentUserId')
   @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
-  chatThread(@Param('studentUserId') studentUserId: string, @Req() req: { user: AuthUser }) {
+  chatThread(
+    @Param('studentUserId') studentUserId: string,
+    @Req() req: { user: AuthUser },
+  ) {
     return this.chat.getThread(req.user.user_id, studentUserId, true);
   }
 
@@ -96,7 +118,11 @@ export class ProctorController {
   @Roles('Student', 'Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
   sendChat(@Req() req: { user: AuthUser }, @Body() dto: SendMentorshipChatDto) {
     if (dto.student_user_id) {
-      return this.chat.sendFacultyMessage(req.user.user_id, dto.student_user_id, dto.message);
+      return this.chat.sendFacultyMessage(
+        req.user.user_id,
+        dto.student_user_id,
+        dto.message,
+      );
     }
     return this.chat.sendStudentMessage(req.user.user_id, dto.message);
   }
@@ -110,7 +136,10 @@ export class ProctorController {
   /** @deprecated Use POST /chat — kept for backward compatibility */
   @Post('messages')
   @Roles('Student')
-  sendMessage(@Req() req: { user: AuthUser }, @Body() dto: SendProctorMessageDto) {
+  sendMessage(
+    @Req() req: { user: AuthUser },
+    @Body() dto: SendProctorMessageDto,
+  ) {
     return this.chat.sendStudentMessage(req.user.user_id, dto.message);
   }
 
@@ -130,7 +159,10 @@ export class ProctorController {
 
   @Post('leave-requests')
   @Roles('Student')
-  submitLeaveRequest(@Req() req: { user: AuthUser }, @Body() dto: SubmitMentorLeaveRequestDto) {
+  submitLeaveRequest(
+    @Req() req: { user: AuthUser },
+    @Body() dto: SubmitMentorLeaveRequestDto,
+  ) {
     return this.proctor.submitLeaveRequest(
       req.user.user_id,
       dto.reason,
@@ -185,7 +217,12 @@ export class ProctorController {
   @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
   approveCertificate(
     @Req() req: { user: AuthUser },
-    @Body() dto: { certificate_id: string; status?: 'VERIFIED' | 'REJECTED'; rejection_reason?: string },
+    @Body()
+    dto: {
+      certificate_id: string;
+      status?: 'VERIFIED' | 'REJECTED';
+      rejection_reason?: string;
+    },
   ) {
     return this.proctor.approveCertificate(
       req.user.user_id,
@@ -199,5 +236,4 @@ export class ProctorController {
   private resolveTenantId(user: AuthUser) {
     return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
-
 }

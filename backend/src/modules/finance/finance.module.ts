@@ -14,6 +14,7 @@ import { FinanceReceiptService } from './finance-receipt.service';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { FinanceAccountsService } from './finance-accounts.service';
 import { FinanceApprovalsService } from './finance-approvals.service';
+import { FinanceChequeService } from './finance-cheque.service';
 import { FinanceBulkDemandProcessor } from './finance-bulk-demand.processor';
 import { BudgetFpaModule } from '../leadership/budget-fpa.module';
 
@@ -33,6 +34,7 @@ import { BudgetFpaModule } from '../leadership/budget-fpa.module';
     FinanceLedgerService,
     FinanceAccountsService,
     FinanceApprovalsService,
+    FinanceChequeService,
     FinanceBulkDemandProcessor,
   ],
   exports: [FinanceService, FinanceLedgerService, FinanceReceiptService],

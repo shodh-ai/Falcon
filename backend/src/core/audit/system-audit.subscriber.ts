@@ -15,7 +15,12 @@ export class SystemAuditSubscriber implements EntitySubscriberInterface {
   private readonly logger = new Logger(SystemAuditSubscriber.name);
 
   afterInsert(event: InsertEvent<object>) {
-    void this.logChange(event, 'INSERT', null, event.entity as Record<string, unknown>);
+    void this.logChange(
+      event,
+      'INSERT',
+      null,
+      event.entity as Record<string, unknown>,
+    );
   }
 
   afterUpdate(event: UpdateEvent<object>) {
@@ -45,7 +50,10 @@ export class SystemAuditSubscriber implements EntitySubscriberInterface {
     const tableName = event.metadata.tableName;
     if (SKIP_TABLES.has(tableName)) return;
 
-    const recordId = this.extractRecordId(event.metadata.primaryColumns, newValue ?? oldValue);
+    const recordId = this.extractRecordId(
+      event.metadata.primaryColumns,
+      newValue ?? oldValue,
+    );
     const changedBy = this.extractUserId(newValue ?? oldValue);
 
     try {
@@ -62,7 +70,9 @@ export class SystemAuditSubscriber implements EntitySubscriberInterface {
         ],
       );
     } catch (err) {
-      this.logger.warn(`Audit log failed for ${tableName}: ${(err as Error).message}`);
+      this.logger.warn(
+        `Audit log failed for ${tableName}: ${(err as Error).message}`,
+      );
     }
   }
 

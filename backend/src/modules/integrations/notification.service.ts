@@ -36,7 +36,11 @@ export class NotificationService {
        GROUP BY e.student_user_id, u.name
        HAVING MIN(e.attendance_percent) < 75`,
     );
-    for (const row of low as Array<{ student_user_id: string; name: string; min_att: string }>) {
+    for (const row of low as Array<{
+      student_user_id: string;
+      name: string;
+      min_att: string;
+    }>) {
       await this.notifyParent(
         row.student_user_id,
         `Attendance alert: ${row.name} is below 75% (${row.min_att}%).`,

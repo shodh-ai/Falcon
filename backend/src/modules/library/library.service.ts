@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -187,10 +192,14 @@ export class LibraryService {
     );
 
     const total = copies.length;
-    const available = copies.filter((c: { status: string }) => c.status === 'AVAILABLE').length;
+    const available = copies.filter(
+      (c: { status: string }) => c.status === 'AVAILABLE',
+    ).length;
     const shelf =
-      copies.find((c: { status: string; shelf_location: string }) => c.status === 'AVAILABLE')
-        ?.shelf_location ?? copies[0]?.shelf_location;
+      copies.find(
+        (c: { status: string; shelf_location: string }) =>
+          c.status === 'AVAILABLE',
+      )?.shelf_location ?? copies[0]?.shelf_location;
 
     return {
       ...catalog[0],
@@ -204,7 +213,9 @@ export class LibraryService {
   async placeHold(tenantId: string, userId: string, catalogId: string) {
     const detail = await this.getCatalogDetail(tenantId, catalogId);
     if (detail.available_copies > 0) {
-      throw new BadRequestException('Copies are available — visit the desk to issue instead of placing a hold.');
+      throw new BadRequestException(
+        'Copies are available — visit the desk to issue instead of placing a hold.',
+      );
     }
 
     const existing = await this.dataSource.query(
@@ -212,7 +223,8 @@ export class LibraryService {
        WHERE tenant_id = $1 AND catalog_id = $2 AND user_id = $3 AND status IN ('WAITING', 'READY_FOR_PICKUP')`,
       [tenantId, catalogId, userId],
     );
-    if (existing[0]) throw new BadRequestException('You already have a hold on this title.');
+    if (existing[0])
+      throw new BadRequestException('You already have a hold on this title.');
 
     const posRows = await this.dataSource.query(
       `SELECT COALESCE(MAX(queue_position), 0) + 1 AS next_pos
@@ -302,7 +314,8 @@ export class LibraryService {
     );
     const loan = rows[0];
     if (!loan) throw new NotFoundException('Active loan not found');
-    if (loan.renewed_count >= 2) throw new BadRequestException('Maximum renewals reached');
+    if (loan.renewed_count >= 2)
+      throw new BadRequestException('Maximum renewals reached');
 
     const waitingHolds = await this.dataSource.query(
       `SELECT 1 FROM lib_reservations
@@ -311,12 +324,16 @@ export class LibraryService {
       [loan.catalog_id, userId],
     );
     if (waitingHolds[0]) {
-      throw new BadRequestException('Another patron has placed a hold — renewal blocked.');
+      throw new BadRequestException(
+        'Another patron has placed a hold — renewal blocked.',
+      );
     }
 
     const rules = await this.getBorrowingRulesForUser(userId);
     const renewalDays =
-      rules.max_days_allowed >= 90 ? RENEWAL_DAYS_FACULTY : RENEWAL_DAYS_STUDENT;
+      rules.max_days_allowed >= 90
+        ? RENEWAL_DAYS_FACULTY
+        : RENEWAL_DAYS_STUDENT;
     const newDue = new Date(loan.due_date);
     newDue.setDate(newDue.getDate() + renewalDays);
 
@@ -327,7 +344,10 @@ export class LibraryService {
        RETURNING *`,
       [transactionId, newDue.toISOString()],
     );
-    return { loan: updated[0], message: `Due date extended to ${newDue.toISOString().slice(0, 10)}` };
+    return {
+      loan: updated[0],
+      message: `Due date extended to ${newDue.toISOString().slice(0, 10)}`,
+    };
   }
 
   listDigitalResources(tenantId: string) {
@@ -382,7 +402,12 @@ export class LibraryService {
         `INSERT INTO lib_inventory_copies (tenant_id, catalog_id, accession_number, shelf_location, status)
          VALUES ($1, $2, $3, $4, 'AVAILABLE')
          ON CONFLICT (tenant_id, accession_number) DO UPDATE SET shelf_location = EXCLUDED.shelf_location`,
-        [tenantId, catalog.catalog_id, copy.accession_number, copy.shelf_location],
+        [
+          tenantId,
+          catalog.catalog_id,
+          copy.accession_number,
+          copy.shelf_location,
+        ],
       );
     }
 
@@ -400,7 +425,8 @@ export class LibraryService {
        LIMIT 1`,
       [tenantId, trimmed],
     );
-    if (!rows[0]) throw new NotFoundException('Patron not found — scan student/faculty ID');
+    if (!rows[0])
+      throw new NotFoundException('Patron not found — scan student/faculty ID');
 
     const rules = await this.getBorrowingRulesForUser(rows[0].user_id);
     const activeCount = await this.dataSource.query(
@@ -419,7 +445,12 @@ export class LibraryService {
     };
   }
 
-  async issueCopy(tenantId: string, userId: string, accessionNumber: string, librarianId: string) {
+  async issueCopy(
+    tenantId: string,
+    userId: string,
+    accessionNumber: string,
+    librarianId: string,
+  ) {
     const copyRows = await this.dataSource.query(
       `SELECT ic.*, c.title FROM lib_inventory_copies ic
        JOIN lib_catalog c ON c.catalog_id = ic.catalog_id
@@ -428,7 +459,8 @@ export class LibraryService {
     );
     const copy = copyRows[0];
     if (!copy) throw new NotFoundException('Book barcode not found');
-    if (copy.status !== 'AVAILABLE') throw new BadRequestException(`Copy status: ${copy.status}`);
+    if (copy.status !== 'AVAILABLE')
+      throw new BadRequestException(`Copy status: ${copy.status}`);
 
     const userRole = await this.getPatronRoleName(userId);
     const rules = await this.getBorrowingRulesForUser(userId);
@@ -459,7 +491,9 @@ export class LibraryService {
       [copy.copy_id],
     );
 
-    this.logger.log(`Issued ${accessionNumber} to ${userId} by librarian ${librarianId}`);
+    this.logger.log(
+      `Issued ${accessionNumber} to ${userId} by librarian ${librarianId}`,
+    );
     return {
       transaction: txn[0],
       book_title: copy.title,
@@ -496,7 +530,9 @@ export class LibraryService {
     const finePerDay = Number(rules.fine_per_day);
     let fine = Number(loan.fine_amount ?? 0);
     if (now > due && finePerDay > 0) {
-      const daysLate = Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+      const daysLate = Math.ceil(
+        (now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24),
+      );
       fine = Math.max(fine, daysLate * finePerDay);
     }
 
@@ -518,11 +554,18 @@ export class LibraryService {
       transaction: updated[0],
       book_title: copy.title,
       fine_amount: fine,
-      days_late: now > due ? Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24)) : 0,
+      days_late:
+        now > due
+          ? Math.ceil((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24))
+          : 0,
     };
   }
 
-  private async fulfillNextReservation(tenantId: string, catalogId: string, bookTitle: string) {
+  private async fulfillNextReservation(
+    tenantId: string,
+    catalogId: string,
+    bookTitle: string,
+  ) {
     const next = await this.dataSource.query(
       `SELECT r.*, u.name FROM lib_reservations r
        JOIN users u ON u.user_id = r.user_id
@@ -575,9 +618,12 @@ export class LibraryService {
 
     const fine = Number(loan.fine_amount ?? 0);
     if (fine <= 0) throw new BadRequestException('No fine to push');
-    if (loan.fine_pushed_to_finance) throw new BadRequestException('Fine already pushed to finance');
+    if (loan.fine_pushed_to_finance)
+      throw new BadRequestException('Fine already pushed to finance');
 
-    const dueDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString().slice(0, 10);
+    const dueDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7)
+      .toISOString()
+      .slice(0, 10);
     const demand = await this.finance.createDemand(
       {
         student_user_id: loan.student_id,
@@ -595,7 +641,10 @@ export class LibraryService {
       [transactionId, demand.demand_id],
     );
 
-    return { demand, message: `Library fine ₹${fine} posted to student account` };
+    return {
+      demand,
+      message: `Library fine ₹${fine} posted to student account`,
+    };
   }
 
   async gateCheckIn(tenantId: string, userId: string) {
@@ -634,7 +683,10 @@ export class LibraryService {
        FROM lib_gate_visits WHERE tenant_id = $1 AND DATE(entered_at) = $2`,
       [tenantId, today],
     );
-    return { currently_inside: inside[0]?.c ?? 0, entries_today: todayVisits[0]?.entries ?? 0 };
+    return {
+      currently_inside: inside[0]?.c ?? 0,
+      entries_today: todayVisits[0]?.entries ?? 0,
+    };
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -662,7 +714,8 @@ export class LibraryService {
       const rules = await this.getBorrowingRulesForUser(loan.user_id);
       const finePerDay = Number(rules.fine_per_day);
       const daysLate = Math.ceil(
-        (Date.now() - new Date(loan.due_date).getTime()) / (1000 * 60 * 60 * 24),
+        (Date.now() - new Date(loan.due_date).getTime()) /
+          (1000 * 60 * 60 * 24),
       );
       const fine = finePerDay > 0 ? daysLate * finePerDay : 0;
 

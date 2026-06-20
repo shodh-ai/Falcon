@@ -49,7 +49,10 @@ export class AuthController {
 
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
-  googleCallback(@Req() req: { user: { token: string } }, @Res() res: Response) {
+  googleCallback(
+    @Req() req: { user: { token: string } },
+    @Res() res: Response,
+  ) {
     const { token } = req.user;
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendUrl}/auth/callback?token=${token}`);
@@ -87,9 +90,17 @@ export class AuthController {
       ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
       : null;
     const permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
-    const roles = user.roles?.length ? user.roles : user.role ? [user.role] : [];
+    const roles = user.roles?.length
+      ? user.roles
+      : user.role
+        ? [user.role]
+        : [];
     const allowedRows = user.tenant_id
-      ? await this.hrEntityCtx.listAllowedEntities(user.tenant_id, user.user_id, roles)
+      ? await this.hrEntityCtx.listAllowedEntities(
+          user.tenant_id,
+          user.user_id,
+          roles,
+        )
       : [];
     const primaryRole = user.role ?? roles[0];
     const hasDirectReports = user.tenant_id
@@ -120,7 +131,11 @@ export class AuthController {
     @Body() dto: LocalLoginDto,
     @Headers('x-tenant-subdomain') tenantSubdomain: string | undefined,
   ) {
-    return this.authService.localLogin(dto.email, dto.password, tenantSubdomain);
+    return this.authService.localLogin(
+      dto.email,
+      dto.password,
+      tenantSubdomain,
+    );
   }
 
   @Public()
@@ -134,7 +149,8 @@ export class AuthController {
       throw new UnauthorizedException('Dev login is disabled in production');
     }
 
-    const subdomain = tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+    const subdomain =
+      tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
     const tenant = await this.tenantService.findBySubdomain(subdomain);
 
     const user = await this.userRepository.findOne({
@@ -143,7 +159,9 @@ export class AuthController {
     });
 
     if (!user) {
-      throw new NotFoundException(`User with email ${email} not found for tenant ${subdomain}`);
+      throw new NotFoundException(
+        `User with email ${email} not found for tenant ${subdomain}`,
+      );
     }
 
     if (!user.is_active) {
@@ -151,8 +169,15 @@ export class AuthController {
     }
 
     await this.authService.ensurePrimaryRoleMapping(user);
-    const refreshed = await this.authService.findById(user.user_id, tenant.tenant_id);
-    const token = this.authService.signToken(refreshed ?? user, tenant.tenant_id, tenant.pg_schema);
+    const refreshed = await this.authService.findById(
+      user.user_id,
+      tenant.tenant_id,
+    );
+    const token = this.authService.signToken(
+      refreshed ?? user,
+      tenant.tenant_id,
+      tenant.pg_schema,
+    );
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendUrl}/auth/callback?token=${token}`);
   }

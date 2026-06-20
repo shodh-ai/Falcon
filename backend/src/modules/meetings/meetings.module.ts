@@ -9,7 +9,12 @@ import { MeetingsService } from './meetings.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, PortalMeeting, PortalMeetingParticipant, PortalMeetingMinutes]),
+    TypeOrmModule.forFeature([
+      User,
+      PortalMeeting,
+      PortalMeetingParticipant,
+      PortalMeetingMinutes,
+    ]),
   ],
   controllers: [MeetingsController],
   providers: [MeetingsService],

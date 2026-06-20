@@ -1,4 +1,11 @@
-import { IsDateString, IsInt, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsDateString,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateGradingPolicyDto {
   @IsString()

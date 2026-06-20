@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { READ_ONLY_PORTAL_KEY } from '../decorators/read-only-portal.decorator';
 import { PARENT_WRITE_ACTION_KEY } from '../decorators/parent-write-action.decorator';
@@ -17,20 +22,21 @@ export class ReadOnlyPortalGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const readOnly = this.reflector.getAllAndOverride<boolean>(READ_ONLY_PORTAL_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const readOnly = this.reflector.getAllAndOverride<boolean>(
+      READ_ONLY_PORTAL_KEY,
+      [context.getHandler(), context.getClass()],
+    );
     if (!readOnly) return true;
 
     const req = context.switchToHttp().getRequest();
     const method = String(req.method ?? 'GET').toUpperCase();
-    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS')
+      return true;
 
-    const parentWrite = this.reflector.getAllAndOverride<boolean>(PARENT_WRITE_ACTION_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const parentWrite = this.reflector.getAllAndOverride<boolean>(
+      PARENT_WRITE_ACTION_KEY,
+      [context.getHandler(), context.getClass()],
+    );
     if (parentWrite && req.user?.auth_type === 'parent') return true;
 
     const role = req.user?.role ?? req.user?.primaryRole;

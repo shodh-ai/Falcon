@@ -43,7 +43,14 @@ export class SchedulerService {
     this.logger.log('Computing owner financial ratios…');
 
     try {
-      const [marketingRows, revenueRows, payrollRows, demandedRows, collectedRows, enrolledRows] = await Promise.all([
+      const [
+        marketingRows,
+        revenueRows,
+        payrollRows,
+        demandedRows,
+        collectedRows,
+        enrolledRows,
+      ] = await Promise.all([
         this.ownerBriefRepository.manager
           .query(
             `SELECT COALESCE(SUM(jl.debit_amount), 0)::numeric AS total
@@ -147,7 +154,8 @@ export class SchedulerService {
       const opex = Number(opexRows[0]?.total ?? 0);
       const opexRatio = revenue > 0 ? opex / revenue : null;
 
-      const feeCollectionEfficiency = demanded > 0 ? collected / demanded : null;
+      const feeCollectionEfficiency =
+        demanded > 0 ? collected / demanded : null;
 
       await this.ownerBriefRepository.manager.query(
         `INSERT INTO owner_financial_ratios_daily
@@ -195,7 +203,9 @@ export class SchedulerService {
     const today = new Date().toISOString().slice(0, 10);
 
     try {
-      const yesterday = new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString().slice(0, 10);
+      const yesterday = new Date(Date.now() - 1000 * 60 * 60 * 24)
+        .toISOString()
+        .slice(0, 10);
 
       const [collectedRows, payrollRows, placementsRows] = await Promise.all([
         this.ownerBriefRepository.manager.query(
@@ -245,9 +255,16 @@ export class SchedulerService {
           tenant_id: tenantId,
           brief_date: today,
           bullets,
-          sources: { collected_yesterday: collected, payroll_week: payrollWeek, hires_yesterday: hires },
+          sources: {
+            collected_yesterday: collected,
+            payroll_week: payrollWeek,
+            hires_yesterday: hires,
+          },
         })
-        .orUpdate(['bullets', 'sources', 'generated_at'], ['tenant_id', 'brief_date'])
+        .orUpdate(
+          ['bullets', 'sources', 'generated_at'],
+          ['tenant_id', 'brief_date'],
+        )
         .execute();
 
       this.logger.log('Falcon Owner’s Brief generated');
@@ -285,7 +302,9 @@ export class SchedulerService {
   async generateCashFlowForecasts() {
     this.logger.log('Generating cash flow forecasts…');
     try {
-      await this.financialGemini.generateForecasts('a0000000-0000-4000-8000-000000000001');
+      await this.financialGemini.generateForecasts(
+        'a0000000-0000-4000-8000-000000000001',
+      );
     } catch (error) {
       this.logger.error('Cash flow forecast failed', error);
     }
@@ -319,13 +338,18 @@ export class SchedulerService {
   @Cron(CronExpression.EVERY_1ST_DAY_OF_MONTH_AT_MIDNIGHT)
   async distributeMonthlyTasks() {
     this.logger.log('Starting monthly task distribution...');
-    
+
     try {
-      const currentMonth = new Date().toLocaleString('en-US', { month: 'long' });
-      const assignments = await this.tasksService.distributeTasksForMonth(currentMonth);
-      
-      this.logger.log(`Successfully distributed ${assignments.length} task assignments for ${currentMonth}`);
-      
+      const currentMonth = new Date().toLocaleString('en-US', {
+        month: 'long',
+      });
+      const assignments =
+        await this.tasksService.distributeTasksForMonth(currentMonth);
+
+      this.logger.log(
+        `Successfully distributed ${assignments.length} task assignments for ${currentMonth}`,
+      );
+
       // Send notification to IQAC
       await this.sendNotificationEmail(
         this.configService.get('EMAIL_FROM') || 'noreply@mygyanvihar.org',
@@ -341,19 +365,23 @@ export class SchedulerService {
   @Cron('0 9 15 * *')
   async sendReminderEmails() {
     this.logger.log('Starting reminder email process...');
-    
+
     try {
-      const currentMonth = new Date().toLocaleString('en-US', { month: 'long' });
+      const currentMonth = new Date().toLocaleString('en-US', {
+        month: 'long',
+      });
       const pendingAssignments = await this.taskAssignmentRepository.find({
         where: { status: 'Pending' },
         relations: ['assigned_user', 'task'],
       });
 
       const tasksForCurrentMonth = pendingAssignments.filter(
-        assignment => assignment.task.month === currentMonth
+        (assignment) => assignment.task.month === currentMonth,
       );
 
-      this.logger.log(`Found ${tasksForCurrentMonth.length} pending tasks for ${currentMonth}`);
+      this.logger.log(
+        `Found ${tasksForCurrentMonth.length} pending tasks for ${currentMonth}`,
+      );
 
       for (const assignment of tasksForCurrentMonth) {
         if (assignment.assigned_user) {
@@ -363,13 +391,15 @@ export class SchedulerService {
             assignment.task.task_name,
             assignment.due_date,
           );
-          
+
           // Add delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
 
-      this.logger.log(`Reminder emails sent for ${tasksForCurrentMonth.length} pending tasks`);
+      this.logger.log(
+        `Reminder emails sent for ${tasksForCurrentMonth.length} pending tasks`,
+      );
     } catch (error) {
       this.logger.error('Error during reminder email process', error);
     }
@@ -379,9 +409,10 @@ export class SchedulerService {
   @Cron('0 17 30 * *')
   async generateDefaulterReport(month?: string) {
     this.logger.log('Generating defaulter report...');
-    
+
     try {
-      const currentMonth = month || new Date().toLocaleString('en-US', { month: 'long' });
+      const currentMonth =
+        month || new Date().toLocaleString('en-US', { month: 'long' });
       const overdueAssignments = await this.taskAssignmentRepository
         .createQueryBuilder('assignment')
         .leftJoinAndSelect('assignment.assigned_user', 'user')
@@ -400,16 +431,21 @@ export class SchedulerService {
       }
 
       // Generate report
-      const report = this.generateDefaulterReportContent(overdueAssignments, currentMonth);
-      
+      const report = this.generateDefaulterReportContent(
+        overdueAssignments,
+        currentMonth,
+      );
+
       // Send report to IQAC and Top Management
       const iqacUsers = await this.userRepository.find({
         where: { is_active: true },
         relations: ['role'],
       });
-      
+
       const managementUsers = iqacUsers.filter(
-        user => user.role?.role_name === 'IQAC' || user.role?.role_name === 'President'
+        (user) =>
+          user.role?.role_name === 'IQAC' ||
+          user.role?.role_name === 'President',
       );
 
       for (const user of managementUsers) {
@@ -418,11 +454,13 @@ export class SchedulerService {
           `Monthly Defaulter Report - ${currentMonth}`,
           report,
         );
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
-      this.logger.log(`Defaulter report generated and sent. Total defaulters: ${overdueAssignments.length}`);
+      this.logger.log(
+        `Defaulter report generated and sent. Total defaulters: ${overdueAssignments.length}`,
+      );
     } catch (error) {
       this.logger.error('Error during defaulter report generation', error);
     }
@@ -434,8 +472,9 @@ export class SchedulerService {
     taskName: string,
     dueDate: Date,
   ) {
-    const frontendUrl = this.configService.get('FRONTEND_URL') || 'http://localhost:3000';
-    
+    const frontendUrl =
+      this.configService.get('FRONTEND_URL') || 'http://localhost:3000';
+
     const bodyHtml = `
         <h2 style="margin-top:0;color:#08234a;">Falcon Core Reminder</h2>
         <p>Dear ${userName},</p>
@@ -462,7 +501,8 @@ export class SchedulerService {
     subject: string,
     content: string,
   ) {
-    const frontendUrl = this.configService.get('FRONTEND_URL') || 'http://localhost:3000';
+    const frontendUrl =
+      this.configService.get('FRONTEND_URL') || 'http://localhost:3000';
     const bodyHtml = `
         <h2 style="margin-top:0;color:#08234a;">${subject}</h2>
         <div>${content}</div>
@@ -479,7 +519,10 @@ export class SchedulerService {
     await this.emailTransporter.sendMail(mailOptions);
   }
 
-  private generateDefaulterReportContent(overdueAssignments: TaskAssignment[], month: string): string {
+  private generateDefaulterReportContent(
+    overdueAssignments: TaskAssignment[],
+    month: string,
+  ): string {
     let report = '';
     report += `<p>Total Defaulters: ${overdueAssignments.length}</p>`;
     report += `<table border="1" cellpadding="5" cellspacing="0">`;
@@ -488,7 +531,7 @@ export class SchedulerService {
     for (const assignment of overdueAssignments) {
       const user = assignment.assigned_user;
       const task = assignment.task;
-      
+
       report += `<tr>`;
       report += `<td>${user?.name || 'N/A'}</td>`;
       report += `<td>${user?.email || 'N/A'}</td>`;
@@ -501,7 +544,7 @@ export class SchedulerService {
 
     report += `</table>`;
     report += `<p>Please take necessary action to ensure timely completion of tasks.</p>`;
-    
+
     return report;
   }
 
@@ -519,7 +562,7 @@ export class SchedulerService {
     });
 
     const tasksForMonth = pendingAssignments.filter(
-      assignment => assignment.task.month === month
+      (assignment) => assignment.task.month === month,
     );
 
     for (const assignment of tasksForMonth) {
@@ -530,7 +573,7 @@ export class SchedulerService {
           assignment.task.task_name,
           assignment.due_date,
         );
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 

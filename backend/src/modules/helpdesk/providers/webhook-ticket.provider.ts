@@ -16,13 +16,20 @@ export class WebhookTicketProvider implements ITicketProvider {
 
   constructor(private readonly local: LocalTicketProvider) {}
 
-  createTicket(studentUserId: string, dto: CreateTicketDto): Promise<HelpdeskTicket> {
+  createTicket(
+    studentUserId: string,
+    dto: CreateTicketDto,
+  ): Promise<HelpdeskTicket> {
     const webhookUrl = process.env.HELPDESK_WEBHOOK_URL;
     if (!webhookUrl) {
-      this.logger.warn('HELPDESK_WEBHOOK_URL not set — falling back to local tickets');
+      this.logger.warn(
+        'HELPDESK_WEBHOOK_URL not set — falling back to local tickets',
+      );
       return this.local.createTicket(studentUserId, dto);
     }
-    throw new NotImplementedException('Webhook ticket sync not yet implemented');
+    throw new NotImplementedException(
+      'Webhook ticket sync not yet implemented',
+    );
   }
 
   listMyTickets(studentUserId: string) {

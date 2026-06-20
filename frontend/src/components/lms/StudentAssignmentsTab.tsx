@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { Clock, CheckCircle2 } from 'lucide-react';
+import { Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -42,8 +42,12 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
     return <p className="text-sm text-muted-foreground">No digital assignments for this course.</p>;
   }
 
-  const pending = assignments.filter((a) => a.status === 'PENDING');
-  const done = assignments.filter((a) => a.status !== 'PENDING');
+  const pending = assignments.filter(
+    (a) => a.status === 'PENDING' || a.status === 'RETURNED_FOR_REVISION',
+  );
+  const done = assignments.filter(
+    (a) => a.status !== 'PENDING' && a.status !== 'RETURNED_FOR_REVISION',
+  );
 
   return (
     <div className="space-y-6">
@@ -52,7 +56,15 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
           <h3 className="text-sm font-semibold text-muted-foreground">Pending</h3>
           {pending.map((row) => {
             const expanded = activeId === row.assignment.assignment_id;
-            const pastDue = new Date(row.assignment.due_date).getTime() < Date.now();
+            const returned = row.status === 'RETURNED_FOR_REVISION';
+            const pastDue =
+              !returned && new Date(row.assignment.due_date).getTime() < Date.now();
+            const canUpload = returned ? row.can_resubmit : !pastDue;
+            const revisionLabel =
+              row.submission?.revision_due_at
+                ? formatDeadlineCountdown(row.submission.revision_due_at)
+                : null;
+
             return (
               <Card key={row.assignment.assignment_id}>
                 <CardContent className="p-4">
@@ -69,23 +81,40 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                         <p className="text-xs text-muted-foreground">
                           Max marks: {row.assignment.max_marks}
                         </p>
-                        <p className="mt-1 flex items-center gap-1 text-sm text-amber-800">
-                          <Clock className="h-3.5 w-3.5" />
-                          {formatDeadlineCountdown(row.assignment.due_date)}
-                        </p>
+                        {returned ? (
+                          <p className="mt-1 flex items-center gap-1 text-sm text-amber-800">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Returned for revision — {revisionLabel ?? 're-upload window open'}
+                          </p>
+                        ) : (
+                          <p className="mt-1 flex items-center gap-1 text-sm text-amber-800">
+                            <Clock className="h-3.5 w-3.5" />
+                            {formatDeadlineCountdown(row.assignment.due_date)}
+                          </p>
+                        )}
+                        {returned && row.submission?.faculty_remarks && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            Faculty note: {row.submission.faculty_remarks}
+                          </p>
+                        )}
                       </div>
-                      <Badge variant="secondary">Pending</Badge>
+                      <Badge variant={returned ? 'destructive' : 'secondary'}>
+                        {returned ? 'Return for revision' : 'Pending'}
+                      </Badge>
                     </div>
                   </button>
-                  {expanded && !pastDue && (
+                  {expanded && canUpload && (
                     <div className="mt-4">
+                      <p className="mb-2 text-sm font-medium text-sgvu-navy">
+                        {returned ? 'Check and Re-Upload' : 'Upload PDF'}
+                      </p>
                       <PdfDropzone
                         disabled={uploading}
                         onFile={(file) => void submit(row.assignment.assignment_id, file)}
                       />
                     </div>
                   )}
-                  {expanded && pastDue && (
+                  {expanded && !canUpload && (
                     <p className="mt-3 text-sm font-medium text-red-600">Deadline has passed.</p>
                   )}
                 </CardContent>

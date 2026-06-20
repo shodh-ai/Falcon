@@ -1,4 +1,8 @@
-import { computeGradeFromPercent, computePassFail, parseGradeBands } from './grading-engine';
+import {
+  computeGradeFromPercent,
+  computePassFail,
+  parseGradeBands,
+} from './grading-engine';
 
 describe('grading-engine', () => {
   it('assigns grade from percent using default bands', () => {

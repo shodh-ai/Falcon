@@ -32,7 +32,13 @@ type EligibleUser = {
   email: string;
   role_name: string;
   dept_name?: string | null;
-  relation: 'direct_report' | 'manager' | 'department_peer' | 'hod' | 'dean' | 'executive';
+  relation:
+    | 'direct_report'
+    | 'manager'
+    | 'department_peer'
+    | 'hod'
+    | 'dean'
+    | 'executive';
 };
 
 const EXECUTIVE_ROLES = new Set([
@@ -62,7 +68,8 @@ export class MeetingsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(User) private readonly users: Repository<User>,
-    @InjectRepository(PortalMeeting) private readonly meetings: Repository<PortalMeeting>,
+    @InjectRepository(PortalMeeting)
+    private readonly meetings: Repository<PortalMeeting>,
     @InjectRepository(PortalMeetingParticipant)
     private readonly participants: Repository<PortalMeetingParticipant>,
     @InjectRepository(PortalMeetingMinutes)
@@ -83,7 +90,8 @@ export class MeetingsService {
     if (r === 'hod') return `/hod/meetings?meeting=${meetingId}`;
     if (r === 'dean') return `/dean/meetings?meeting=${meetingId}`;
     if (r === 'president') return `/president/meetings?meeting=${meetingId}`;
-    if (r === 'hr' || r === 'hradmin') return `/hr/meetings?meeting=${meetingId}`;
+    if (r === 'hr' || r === 'hradmin')
+      return `/hr/meetings?meeting=${meetingId}`;
     return `/faculty/meetings?meeting=${meetingId}`;
   }
 
@@ -118,10 +126,9 @@ export class MeetingsService {
   }
 
   private async resolveHodDepartmentIds(hodUserId: string) {
-    const directDepartments = await this.dataSource.query<Array<{ dept_id: number }>>(
-      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
-      [hodUserId],
-    );
+    const directDepartments = await this.dataSource.query<
+      Array<{ dept_id: number }>
+    >(`SELECT dept_id FROM departments WHERE hod_user_id = $1`, [hodUserId]);
     const hod = await this.users.findOne({ where: { user_id: hodUserId } });
     return Array.from(
       new Set<number>([
@@ -132,7 +139,9 @@ export class MeetingsService {
   }
 
   private async resolveDeanScope(deanUserId: string) {
-    const schoolRows = await this.dataSource.query<Array<{ school_id: number }>>(
+    const schoolRows = await this.dataSource.query<
+      Array<{ school_id: number }>
+    >(
       `SELECT school_id FROM schools WHERE dean_user_id = $1 AND deleted_at IS NULL`,
       [deanUserId],
     );
@@ -173,7 +182,12 @@ export class MeetingsService {
          AND lower(r.role_name) = ANY($3::text[])
          AND ($4::uuid IS NULL OR u.user_id <> $4)
        ORDER BY u.name ASC`,
-      [tenantId, deptIds, roleNames.map((r) => r.toLowerCase()), excludeUserId ?? null],
+      [
+        tenantId,
+        deptIds,
+        roleNames.map((r) => r.toLowerCase()),
+        excludeUserId ?? null,
+      ],
     );
   }
 
@@ -184,7 +198,12 @@ export class MeetingsService {
     deptIds?: number[],
   ) {
     if (deptIds?.length) {
-      return this.listUsersInDepartments(tenantId, deptIds, [roleName], actorUserId);
+      return this.listUsersInDepartments(
+        tenantId,
+        deptIds,
+        [roleName],
+        actorUserId,
+      );
     }
     return this.dataSource.query<EligibleUser[]>(
       `SELECT u.user_id, u.name, u.official_email AS email, r.role_name, d.dept_name,
@@ -219,10 +238,14 @@ export class MeetingsService {
   }
 
   private async syncMeetingStatus(meetingId: string) {
-    const meeting = await this.meetings.findOne({ where: { meeting_id: meetingId } });
+    const meeting = await this.meetings.findOne({
+      where: { meeting_id: meetingId },
+    });
     if (!meeting) return;
 
-    const rows = await this.participants.find({ where: { meeting_id: meetingId } });
+    const rows = await this.participants.find({
+      where: { meeting_id: meetingId },
+    });
     const invitees = rows.filter((p) => p.participant_role === 'INVITEE');
     const decisionTargets =
       meeting.meeting_mode === 'REQUESTED'
@@ -245,10 +268,18 @@ export class MeetingsService {
     await this.meetings.save(meeting);
   }
 
-  async listEligibleParticipants(actor: ActorContext, direction: 'schedule' | 'request') {
+  async listEligibleParticipants(
+    actor: ActorContext,
+    direction: 'schedule' | 'request',
+  ) {
     const roles = this.normalizeRoles(actor.roles);
     const user = await this.loadActor(actor.userId, actor.tenantId);
-    const primary = (actor.primaryRole ?? user.role?.role_name ?? roles[0] ?? '').toLowerCase();
+    const primary = (
+      actor.primaryRole ??
+      user.role?.role_name ??
+      roles[0] ??
+      ''
+    ).toLowerCase();
 
     if (this.isExecutive(roles)) {
       const rows = await this.dataSource.query<EligibleUser[]>(
@@ -288,10 +319,17 @@ export class MeetingsService {
            ORDER BY u.name ASC`,
           [scope.departmentIds, actor.tenantId, actor.userId],
         );
-        const deanPeers = await this.listDeanPeers(actor.tenantId, actor.userId);
+        const deanPeers = await this.listDeanPeers(
+          actor.tenantId,
+          actor.userId,
+        );
         return {
           direction,
-          participants: this.dedupeParticipants([...deanPeers, ...hods, ...faculty]),
+          participants: this.dedupeParticipants([
+            ...deanPeers,
+            ...hods,
+            ...faculty,
+          ]),
         };
       }
       const deans = await this.dataSource.query<EligibleUser[]>(
@@ -318,8 +356,16 @@ export class MeetingsService {
           ['Faculty'],
           actor.userId,
         );
-        const hodPeers = await this.listRolePeers(actor.tenantId, actor.userId, 'HOD', deptIds);
-        return { direction, participants: this.dedupeParticipants([...hodPeers, ...faculty]) };
+        const hodPeers = await this.listRolePeers(
+          actor.tenantId,
+          actor.userId,
+          'HOD',
+          deptIds,
+        );
+        return {
+          direction,
+          participants: this.dedupeParticipants([...hodPeers, ...faculty]),
+        };
       }
       const deans = await this.dataSource.query<EligibleUser[]>(
         `SELECT DISTINCT u.user_id, u.name, u.official_email AS email, r.role_name, d.dept_name,
@@ -383,7 +429,9 @@ export class MeetingsService {
     const allowed = new Set(eligible.participants.map((p) => p.user_id));
     for (const id of inviteeIds) {
       if (!allowed.has(id)) {
-        throw new ForbiddenException('One or more invitees are outside your scheduling scope');
+        throw new ForbiddenException(
+          'One or more invitees are outside your scheduling scope',
+        );
       }
     }
   }
@@ -391,7 +439,9 @@ export class MeetingsService {
   private async assertCanRequest(actor: ActorContext, recipientId: string) {
     const eligible = await this.listEligibleParticipants(actor, 'request');
     if (!eligible.participants.some((p) => p.user_id === recipientId)) {
-      throw new ForbiddenException('You cannot request a meeting with this person');
+      throw new ForbiddenException(
+        'You cannot request a meeting with this person',
+      );
     }
   }
 
@@ -459,13 +509,16 @@ export class MeetingsService {
     if (!meeting || meeting.tenant_id !== actor.tenantId) {
       throw new NotFoundException('Meeting not found');
     }
-    const participantIds = (meeting.participants as Array<{ user_id: string }>).map((p) => p.user_id);
+    const participantIds = (
+      meeting.participants as Array<{ user_id: string }>
+    ).map((p) => p.user_id);
     const allowed =
       meeting.organizer_user_id === actor.userId ||
       meeting.requester_user_id === actor.userId ||
       participantIds.includes(actor.userId) ||
       this.isExecutive(actor.roles);
-    if (!allowed) throw new ForbiddenException('Not authorized to view this meeting');
+    if (!allowed)
+      throw new ForbiddenException('Not authorized to view this meeting');
     return meeting;
   }
 
@@ -519,7 +572,10 @@ export class MeetingsService {
         organizerName: actorUser.name,
         title: meeting.title,
         startsAt: starts.toISOString(),
-        actionLink: this.meetingActionLink(invitee?.role?.role_name, meeting.meeting_id),
+        actionLink: this.meetingActionLink(
+          invitee?.role?.role_name,
+          meeting.meeting_id,
+        ),
       });
     }
 
@@ -530,7 +586,10 @@ export class MeetingsService {
     const { starts, ends } = this.parseMeetingTime(dto.meeting_at);
     await this.assertCanRequest(actor, dto.recipient_user_id);
     const actorUser = await this.loadActor(actor.userId, actor.tenantId);
-    const recipient = await this.loadActor(dto.recipient_user_id, actor.tenantId);
+    const recipient = await this.loadActor(
+      dto.recipient_user_id,
+      actor.tenantId,
+    );
 
     const meeting = await this.meetings.save(
       this.meetings.create({
@@ -569,32 +628,45 @@ export class MeetingsService {
       requesterName: actorUser.name,
       title: meeting.title,
       startsAt: starts.toISOString(),
-      actionLink: this.meetingActionLink(recipient.role?.role_name, meeting.meeting_id),
+      actionLink: this.meetingActionLink(
+        recipient.role?.role_name,
+        meeting.meeting_id,
+      ),
     });
 
     return this.formatMeetingRow(meeting.meeting_id);
   }
 
-  async respondMeeting(actor: ActorContext, meetingId: string, dto: RespondMeetingDto) {
-    const meeting = await this.meetings.findOne({ where: { meeting_id: meetingId, tenant_id: actor.tenantId } });
+  async respondMeeting(
+    actor: ActorContext,
+    meetingId: string,
+    dto: RespondMeetingDto,
+  ) {
+    const meeting = await this.meetings.findOne({
+      where: { meeting_id: meetingId, tenant_id: actor.tenantId },
+    });
     if (!meeting) throw new NotFoundException('Meeting not found');
 
     const participant = await this.participants.findOne({
       where: { meeting_id: meetingId, user_id: actor.userId },
     });
-    if (!participant) throw new ForbiddenException('You are not a participant in this meeting');
+    if (!participant)
+      throw new ForbiddenException('You are not a participant in this meeting');
 
     participant.rsvp_status = dto.response;
     participant.response_note = dto.note?.trim() ?? null;
     await this.participants.save(participant);
     await this.syncMeetingStatus(meetingId);
 
-    const refreshed = await this.meetings.findOne({ where: { meeting_id: meetingId } });
+    const refreshed = await this.meetings.findOne({
+      where: { meeting_id: meetingId },
+    });
     if (!refreshed) throw new NotFoundException('Meeting not found');
 
     const actorUser = await this.loadActor(actor.userId, actor.tenantId);
     const notifyUserId =
-      refreshed.meeting_mode === 'REQUESTED' && refreshed.requester_user_id !== actor.userId
+      refreshed.meeting_mode === 'REQUESTED' &&
+      refreshed.requester_user_id !== actor.userId
         ? refreshed.requester_user_id
         : refreshed.organizer_user_id;
 
@@ -612,26 +684,43 @@ export class MeetingsService {
         status: dto.response === 'ACCEPTED' ? 'ACCEPTED' : 'DECLINED',
         startsAt: refreshed.starts_at.toISOString(),
         remarks: dto.note,
-        actionLink: this.meetingActionLink(recipient?.role?.role_name, refreshed.meeting_id),
+        actionLink: this.meetingActionLink(
+          recipient?.role?.role_name,
+          refreshed.meeting_id,
+        ),
       });
     }
 
     return this.formatMeetingRow(meetingId);
   }
 
-  async updateAgenda(actor: ActorContext, meetingId: string, dto: UpdateMeetingAgendaDto) {
-    const meeting = await this.meetings.findOne({ where: { meeting_id: meetingId, tenant_id: actor.tenantId } });
+  async updateAgenda(
+    actor: ActorContext,
+    meetingId: string,
+    dto: UpdateMeetingAgendaDto,
+  ) {
+    const meeting = await this.meetings.findOne({
+      where: { meeting_id: meetingId, tenant_id: actor.tenantId },
+    });
     if (!meeting) throw new NotFoundException('Meeting not found');
-    if (meeting.organizer_user_id !== actor.userId && !this.isExecutive(actor.roles)) {
+    if (
+      meeting.organizer_user_id !== actor.userId &&
+      !this.isExecutive(actor.roles)
+    ) {
       throw new ForbiddenException('Only the organizer can update the agenda');
     }
     meeting.agenda = dto.agenda.trim();
     await this.meetings.save(meeting);
 
-    const rows = await this.participants.find({ where: { meeting_id: meetingId } });
+    const rows = await this.participants.find({
+      where: { meeting_id: meetingId },
+    });
     for (const p of rows) {
       if (p.user_id === actor.userId) continue;
-      const user = await this.users.findOne({ where: { user_id: p.user_id }, relations: ['role'] });
+      const user = await this.users.findOne({
+        where: { user_id: p.user_id },
+        relations: ['role'],
+      });
       this.notify.meetingAgendaUpdated({
         tenantId: actor.tenantId,
         userId: p.user_id,
@@ -643,14 +732,25 @@ export class MeetingsService {
     return this.formatMeetingRow(meetingId);
   }
 
-  async publishMinutes(actor: ActorContext, meetingId: string, dto: PublishMeetingMinutesDto) {
-    const meeting = await this.meetings.findOne({ where: { meeting_id: meetingId, tenant_id: actor.tenantId } });
+  async publishMinutes(
+    actor: ActorContext,
+    meetingId: string,
+    dto: PublishMeetingMinutesDto,
+  ) {
+    const meeting = await this.meetings.findOne({
+      where: { meeting_id: meetingId, tenant_id: actor.tenantId },
+    });
     if (!meeting) throw new NotFoundException('Meeting not found');
-    if (meeting.organizer_user_id !== actor.userId && !this.isExecutive(actor.roles)) {
+    if (
+      meeting.organizer_user_id !== actor.userId &&
+      !this.isExecutive(actor.roles)
+    ) {
       throw new ForbiddenException('Only the organizer can publish minutes');
     }
 
-    let minutes = await this.minutesRepo.findOne({ where: { meeting_id: meetingId } });
+    let minutes = await this.minutesRepo.findOne({
+      where: { meeting_id: meetingId },
+    });
     if (!minutes) {
       minutes = this.minutesRepo.create({
         meeting_id: meetingId,
@@ -672,10 +772,15 @@ export class MeetingsService {
     meeting.status = 'COMPLETED';
     await this.meetings.save(meeting);
 
-    const rows = await this.participants.find({ where: { meeting_id: meetingId } });
+    const rows = await this.participants.find({
+      where: { meeting_id: meetingId },
+    });
     for (const p of rows) {
       if (p.user_id === actor.userId) continue;
-      const user = await this.users.findOne({ where: { user_id: p.user_id }, relations: ['role'] });
+      const user = await this.users.findOne({
+        where: { user_id: p.user_id },
+        relations: ['role'],
+      });
       this.notify.meetingMinutesPublished({
         tenantId: actor.tenantId,
         userId: p.user_id,

@@ -11,9 +11,19 @@ import { SemesterResultsService } from './semester-results.service';
 import { ExamCellFinanceListener } from './exam-cell-finance.listener';
 
 @Module({
-  imports: [FinanceModule, ExamsModule, NotificationsModule, AttendancePolicyModule],
+  imports: [
+    FinanceModule,
+    ExamsModule,
+    NotificationsModule,
+    AttendancePolicyModule,
+  ],
   controllers: [ExamCellController, FacultyReEvaluationsController],
-  providers: [ExamCellService, ResultControlService, SemesterResultsService, ExamCellFinanceListener],
+  providers: [
+    ExamCellService,
+    ResultControlService,
+    SemesterResultsService,
+    ExamCellFinanceListener,
+  ],
   exports: [ExamCellService, ResultControlService, SemesterResultsService],
 })
 export class ExamCellModule {}

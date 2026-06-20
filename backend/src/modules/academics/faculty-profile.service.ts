@@ -12,7 +12,10 @@ import { extname, join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { HrAdminService } from '../hr/hr-admin.service';
-import { openDocumentReadStream, resolveDocumentDiskPath } from '../hr/utils/document-file-path.util';
+import {
+  openDocumentReadStream,
+  resolveDocumentDiskPath,
+} from '../hr/utils/document-file-path.util';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 
 const DEGREE_LEVELS = ['UG', 'PG', 'PhD', 'Post-Doc'] as const;
@@ -44,10 +47,18 @@ export class FacultyProfileService {
     );
     if (!rows[0]) throw new NotFoundException('Faculty profile not found');
     const row = rows[0];
-    const onboarding = (row.onboarding_profile ?? {}) as Record<string, unknown>;
+    const onboarding = (row.onboarding_profile ?? {}) as Record<
+      string,
+      unknown
+    >;
 
     const qualifications = await this.listQualifications(tenantId, userId);
-    const responsibilities = await this.listResponsibilities(tenantId, userId, row.role, row.department);
+    const responsibilities = await this.listResponsibilities(
+      tenantId,
+      userId,
+      row.role,
+      row.department,
+    );
     const researchSummary = await this.getResearchSummary(tenantId, userId);
     const workload = await this.getWorkload(tenantId, userId);
     const menteeCount = await this.countActiveMentees(userId);
@@ -70,33 +81,47 @@ export class FacultyProfileService {
       display_name: displayTitle ? `${displayTitle} ${row.name}` : row.name,
       honorific: displayTitle,
       email: row.email,
-      phone: row.phone ?? (onboarding.staff_mobile as string | undefined) ?? null,
+      phone:
+        row.phone ?? (onboarding.staff_mobile as string | undefined) ?? null,
       role: row.role,
       department: row.department,
       employee_id: row.employee_id,
       designation: row.designation ?? row.role,
       joining_date: row.joining_date,
-      profile_photo_url: photoPath ? '/api/academics/faculty/profile/photo' : null,
+      profile_photo_url: photoPath
+        ? '/api/academics/faculty/profile/photo'
+        : null,
       total_teaching_experience_years: teachingExperience,
-      industry_experience_years: row.industry_experience_years != null
-        ? Number(row.industry_experience_years)
-        : Number(onboarding.industry_experience_years ?? 0),
+      industry_experience_years:
+        row.industry_experience_years != null
+          ? Number(row.industry_experience_years)
+          : Number(onboarding.industry_experience_years ?? 0),
       api_score: apiScore,
       active_mentees: menteeCount,
       responsibilities,
       personal: {
-        date_of_birth: onboarding.date_of_birth ? String(onboarding.date_of_birth).slice(0, 10) : null,
+        date_of_birth: onboarding.date_of_birth
+          ? String(onboarding.date_of_birth).slice(0, 10)
+          : null,
         blood_group: (onboarding.blood_group as string | undefined) ?? null,
         gender: (onboarding.gender as string | undefined) ?? null,
-        emergency_contact_name: (onboarding.emergency_contact_name as string | undefined) ?? null,
-        emergency_contact_phone: (onboarding.emergency_contact_phone as string | undefined) ?? null,
-        permanent_address: (onboarding.permanent_address as string | undefined) ?? null,
-        current_address: (onboarding.current_address as string | undefined) ?? null,
+        emergency_contact_name:
+          (onboarding.emergency_contact_name as string | undefined) ?? null,
+        emergency_contact_phone:
+          (onboarding.emergency_contact_phone as string | undefined) ?? null,
+        permanent_address:
+          (onboarding.permanent_address as string | undefined) ?? null,
+        current_address:
+          (onboarding.current_address as string | undefined) ?? null,
       },
       kyc: {
         pan_masked: this.crypto.maskPan(this.crypto.decrypt(row.pan_encrypted)),
-        aadhaar_masked: this.crypto.maskAadhaar(this.crypto.decrypt(row.aadhaar_encrypted)),
-        bank_masked: this.crypto.maskBank(this.crypto.decrypt(row.bank_account_encrypted)),
+        aadhaar_masked: this.crypto.maskAadhaar(
+          this.crypto.decrypt(row.aadhaar_encrypted),
+        ),
+        bank_masked: this.crypto.maskBank(
+          this.crypto.decrypt(row.bank_account_encrypted),
+        ),
         ifsc_code: row.ifsc_code,
         pf_uan: row.pf_uan,
       },
@@ -147,10 +172,14 @@ export class FacultyProfileService {
     },
   ) {
     const onboardingPatch: Record<string, unknown> = {};
-    if (dto.emergency_contact_name !== undefined) onboardingPatch.emergency_contact_name = dto.emergency_contact_name;
-    if (dto.emergency_contact_phone !== undefined) onboardingPatch.emergency_contact_phone = dto.emergency_contact_phone;
-    if (dto.permanent_address !== undefined) onboardingPatch.permanent_address = dto.permanent_address;
-    if (dto.current_address !== undefined) onboardingPatch.current_address = dto.current_address;
+    if (dto.emergency_contact_name !== undefined)
+      onboardingPatch.emergency_contact_name = dto.emergency_contact_name;
+    if (dto.emergency_contact_phone !== undefined)
+      onboardingPatch.emergency_contact_phone = dto.emergency_contact_phone;
+    if (dto.permanent_address !== undefined)
+      onboardingPatch.permanent_address = dto.permanent_address;
+    if (dto.current_address !== undefined)
+      onboardingPatch.current_address = dto.current_address;
     if (dto.industry_experience_years !== undefined) {
       onboardingPatch.industry_experience_years = dto.industry_experience_years;
     }
@@ -203,11 +232,14 @@ export class FacultyProfileService {
   }
 
   async revealKyc(tenantId: string, userId: string, password: string) {
-    const [row] = await this.dataSource.query<Array<{ password_hash: string | null }>>(
-      `SELECT password_hash FROM users WHERE user_id = $1 AND tenant_id = $2`,
-      [userId, tenantId],
-    );
-    if (!row?.password_hash) throw new UnauthorizedException('Password verification failed');
+    const [row] = await this.dataSource.query<
+      Array<{ password_hash: string | null }>
+    >(`SELECT password_hash FROM users WHERE user_id = $1 AND tenant_id = $2`, [
+      userId,
+      tenantId,
+    ]);
+    if (!row?.password_hash)
+      throw new UnauthorizedException('Password verification failed');
     const valid = await bcrypt.compare(password, row.password_hash);
     if (!valid) throw new UnauthorizedException('Invalid password');
 
@@ -242,7 +274,9 @@ export class FacultyProfileService {
     dto: { bank_account_no: string; ifsc_code: string; bank_name?: string },
   ) {
     if (!dto.bank_account_no?.trim() || !dto.ifsc_code?.trim()) {
-      throw new BadRequestException('Bank account number and IFSC are required');
+      throw new BadRequestException(
+        'Bank account number and IFSC are required',
+      );
     }
 
     const existing = await this.dataSource.query(
@@ -252,7 +286,9 @@ export class FacultyProfileService {
       [tenantId, userId],
     );
     if (existing.length) {
-      throw new BadRequestException('A bank details change request is already pending HR approval');
+      throw new BadRequestException(
+        'A bank details change request is already pending HR approval',
+      );
     }
 
     const rows = await this.dataSource.query(
@@ -295,13 +331,21 @@ export class FacultyProfileService {
       document_proof_url?: string;
     },
   ) {
-    if (!dto.university?.trim()) throw new BadRequestException('University is required');
+    if (!dto.university?.trim())
+      throw new BadRequestException('University is required');
     const year = Number(dto.passing_year);
     if (!year || year < 1950 || year > new Date().getFullYear() + 1) {
       throw new BadRequestException('Valid passing year is required');
     }
-    if (dto.degree_level && !DEGREE_LEVELS.includes(dto.degree_level as typeof DEGREE_LEVELS[number])) {
-      throw new BadRequestException(`degree_level must be one of: ${DEGREE_LEVELS.join(', ')}`);
+    if (
+      dto.degree_level &&
+      !DEGREE_LEVELS.includes(
+        dto.degree_level as (typeof DEGREE_LEVELS)[number],
+      )
+    ) {
+      throw new BadRequestException(
+        `degree_level must be one of: ${DEGREE_LEVELS.join(', ')}`,
+      );
     }
 
     const rows = await this.dataSource.query(
@@ -329,9 +373,19 @@ export class FacultyProfileService {
     userId: string,
     file: Express.Multer.File,
   ): Promise<string> {
-    const uploadDir = join(process.cwd(), 'uploads', 'faculty-qualifications', tenantId, userId);
+    const uploadDir = join(
+      process.cwd(),
+      'uploads',
+      'faculty-qualifications',
+      tenantId,
+      userId,
+    );
     mkdirSync(uploadDir, { recursive: true });
-    const safeName = `${Date.now()}${extname(file.originalname) || '.pdf'}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const safeName =
+      `${Date.now()}${extname(file.originalname) || '.pdf'}`.replace(
+        /[^a-zA-Z0-9._-]/g,
+        '_',
+      );
     const fullPath = join(uploadDir, safeName);
     await new Promise<void>((resolve, reject) => {
       const stream = createWriteStream(fullPath);
@@ -374,7 +428,11 @@ export class FacultyProfileService {
     }
 
     const titles = new Set<string>();
-    const merged: Array<{ title: string; description?: string | null; source?: string }> = [];
+    const merged: Array<{
+      title: string;
+      description?: string | null;
+      source?: string;
+    }> = [];
     for (const d of derived) {
       if (!titles.has(d.title)) {
         titles.add(d.title);
@@ -384,7 +442,11 @@ export class FacultyProfileService {
     for (const s of stored) {
       if (!titles.has(s.title)) {
         titles.add(s.title);
-        merged.push({ title: s.title, description: s.description, source: 'assigned' });
+        merged.push({
+          title: s.title,
+          description: s.description,
+          source: 'assigned',
+        });
       }
     }
     return merged;
@@ -404,9 +466,14 @@ export class FacultyProfileService {
     let books = 0;
     for (const log of logs) {
       if (log.publication_type === 'PATENT') patents += 1;
-      if (log.publication_type === 'JOURNAL' && log.indexing_type === 'SCOPUS') scopusPapers += 1;
+      if (log.publication_type === 'JOURNAL' && log.indexing_type === 'SCOPUS')
+        scopusPapers += 1;
       if (log.publication_type === 'CONFERENCE') conferencePapers += 1;
-      if (log.publication_type === 'BOOK' || log.publication_type === 'BOOK_CHAPTER') books += 1;
+      if (
+        log.publication_type === 'BOOK' ||
+        log.publication_type === 'BOOK_CHAPTER'
+      )
+        books += 1;
     }
 
     const projects = await this.dataSource.query(
@@ -501,12 +568,21 @@ export class FacultyProfileService {
       [tenantId, userId, year],
     );
     if (rows[0]?.auto_api_score != null) return Number(rows[0].auto_api_score);
-    const calculated = await this.hrAdmin.calculateApiScore(tenantId, userId, year);
+    const calculated = await this.hrAdmin.calculateApiScore(
+      tenantId,
+      userId,
+      year,
+    );
     return Number(calculated?.auto_api_score ?? 0);
   }
 
-  async uploadProfilePhoto(tenantId: string, userId: string, file: Express.Multer.File) {
-    if (!file?.buffer?.length) throw new BadRequestException('No photo uploaded');
+  async uploadProfilePhoto(
+    tenantId: string,
+    userId: string,
+    file: Express.Multer.File,
+  ) {
+    if (!file?.buffer?.length)
+      throw new BadRequestException('No photo uploaded');
     const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     if (!allowed.includes(file.mimetype)) {
       throw new BadRequestException('Profile photo must be JPG, PNG, or WEBP');
@@ -560,7 +636,12 @@ export class FacultyProfileService {
 
     if (this.objectStorage.isEnabled()) {
       const key = this.objectStorage.buildKey(tenantId, uniqueName);
-      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      const stored = await this.objectStorage.upload(
+        tenantId,
+        key,
+        file.buffer,
+        file.mimetype,
+      );
       return stored.url ?? stored.key;
     }
 
@@ -568,7 +649,13 @@ export class FacultyProfileService {
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const targetDir = join(process.cwd(), uploadPath, tenantId, String(year), month);
+    const targetDir = join(
+      process.cwd(),
+      uploadPath,
+      tenantId,
+      String(year),
+      month,
+    );
     mkdirSync(targetDir, { recursive: true });
     const fullPath = join(targetDir, uniqueName);
     await new Promise<void>((resolvePromise, reject) => {
@@ -589,12 +676,16 @@ export class FacultyProfileService {
     );
     if (doc?.file_path) return doc.file_path;
 
-    const [user] = await this.dataSource.query<Array<{ onboarding_profile: Record<string, unknown> | null }>>(
+    const [user] = await this.dataSource.query<
+      Array<{ onboarding_profile: Record<string, unknown> | null }>
+    >(
       `SELECT onboarding_profile FROM users WHERE tenant_id = $1 AND user_id = $2`,
       [tenantId, userId],
     );
     const fromProfile = user?.onboarding_profile?.profile_photo_url;
-    return typeof fromProfile === 'string' && fromProfile.trim() ? fromProfile : null;
+    return typeof fromProfile === 'string' && fromProfile.trim()
+      ? fromProfile
+      : null;
   }
 
   private async getProfilePhoto(tenantId: string, userId: string) {
@@ -605,7 +696,9 @@ export class FacultyProfileService {
     qualifications: Array<{ degree_level?: string | null }>,
     designation: string | null,
   ) {
-    const levels = qualifications.map((q) => (q.degree_level ?? '').toLowerCase());
+    const levels = qualifications.map((q) =>
+      (q.degree_level ?? '').toLowerCase(),
+    );
     if (levels.some((l) => l.includes('phd') || l === 'post-doc')) return 'Dr.';
     if (designation?.toLowerCase().includes('professor')) return 'Prof.';
     return null;
@@ -615,10 +708,12 @@ export class FacultyProfileService {
     total_experience_years?: string | number | null;
     joining_date?: string | null;
   }) {
-    if (row.total_experience_years != null) return Number(row.total_experience_years);
+    if (row.total_experience_years != null)
+      return Number(row.total_experience_years);
     if (!row.joining_date) return null;
     const joined = new Date(row.joining_date);
-    const years = (Date.now() - joined.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    const years =
+      (Date.now() - joined.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
     return Math.round(years * 10) / 10;
   }
 

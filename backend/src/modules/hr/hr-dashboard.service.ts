@@ -38,7 +38,14 @@ export class HrDashboardService {
     );
 
     const [attendanceRow] = await this.dataSource.query<
-      Array<{ present: string; absent: string; on_leave: string; late: string; unmarked: string; total_staff: string }>
+      Array<{
+        present: string;
+        absent: string;
+        on_leave: string;
+        late: string;
+        unmarked: string;
+        total_staff: string;
+      }>
     >(
       `WITH staff AS (
          SELECT u.user_id FROM users u
@@ -86,7 +93,9 @@ export class HrDashboardService {
     const late = Number(attendanceRow?.late ?? 0);
     const unmarked = Number(attendanceRow?.unmarked ?? 0);
 
-    const [pendingLeaves] = await this.dataSource.query<Array<{ count: string }>>(
+    const [pendingLeaves] = await this.dataSource.query<
+      Array<{ count: string }>
+    >(
       `SELECT COUNT(*)::text AS count FROM staff_leave_requests sl
        JOIN hr_employee_profiles p ON p.user_id = sl.staff_user_id AND p.tenant_id = sl.tenant_id
        WHERE sl.tenant_id = $1 AND sl.request_type = 'LEAVE'
@@ -94,7 +103,9 @@ export class HrDashboardService {
       [tenantId, entityId],
     );
 
-    const [pendingRegularizations] = await this.dataSource.query<Array<{ count: string }>>(
+    const [pendingRegularizations] = await this.dataSource.query<
+      Array<{ count: string }>
+    >(
       `SELECT COUNT(*)::text AS count FROM staff_leave_requests sl
        JOIN hr_employee_profiles p ON p.user_id = sl.staff_user_id AND p.tenant_id = sl.tenant_id
        WHERE sl.tenant_id = $1 AND sl.request_type = 'REGULARIZATION'
@@ -166,10 +177,30 @@ export class HrDashboardService {
         late_pct: Math.round((late / totalStaff) * 1000) / 10,
         unmarked_pct: Math.round((unmarked / totalStaff) * 1000) / 10,
         chart: [
-          { name: 'Present', value: present, pct: Math.round((present / totalStaff) * 1000) / 10, color: '#1e3a5f' },
-          { name: 'Absent', value: absent, pct: Math.round((absent / totalStaff) * 1000) / 10, color: '#c9a227' },
-          { name: 'On Leave', value: onLeave, pct: Math.round((onLeave / totalStaff) * 1000) / 10, color: '#dc2626' },
-          { name: 'Unmarked', value: unmarked, pct: Math.round((unmarked / totalStaff) * 1000) / 10, color: '#94a3b8' },
+          {
+            name: 'Present',
+            value: present,
+            pct: Math.round((present / totalStaff) * 1000) / 10,
+            color: '#1e3a5f',
+          },
+          {
+            name: 'Absent',
+            value: absent,
+            pct: Math.round((absent / totalStaff) * 1000) / 10,
+            color: '#c9a227',
+          },
+          {
+            name: 'On Leave',
+            value: onLeave,
+            pct: Math.round((onLeave / totalStaff) * 1000) / 10,
+            color: '#dc2626',
+          },
+          {
+            name: 'Unmarked',
+            value: unmarked,
+            pct: Math.round((unmarked / totalStaff) * 1000) / 10,
+            color: '#94a3b8',
+          },
         ].filter((row) => row.value > 0),
       },
       pending_actions: {

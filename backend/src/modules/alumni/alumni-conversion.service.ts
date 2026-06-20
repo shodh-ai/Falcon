@@ -31,7 +31,12 @@ export type AlumniConversionEligibility = {
   eligible: boolean;
   current_semester: number;
   max_semester: number;
-  no_dues: { finance: boolean; library: boolean; hostel: boolean; all_cleared: boolean };
+  no_dues: {
+    finance: boolean;
+    library: boolean;
+    hostel: boolean;
+    all_cleared: boolean;
+  };
   final_semester_results_published: boolean;
   active_backlogs: number;
   blockers: string[];
@@ -44,12 +49,16 @@ export class AlumniConversionService {
   private readonly logger = new Logger(AlumniConversionService.name);
 
   constructor(
-    @InjectQueue(ALUMNI_CONVERSION_QUEUE) private readonly queue: Queue<AlumniConversionJob>,
+    @InjectQueue(ALUMNI_CONVERSION_QUEUE)
+    private readonly queue: Queue<AlumniConversionJob>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  async getConversionEligibility(tenantId: string, studentUserId: string): Promise<AlumniConversionEligibility> {
+  async getConversionEligibility(
+    tenantId: string,
+    studentUserId: string,
+  ): Promise<AlumniConversionEligibility> {
     const blockers: string[] = [];
 
     const clearance = await this.getClearanceStatus(tenantId, studentUserId);
@@ -81,7 +90,9 @@ export class AlumniConversionService {
     const currentSemester = Number(semRows[0]?.current_semester ?? maxSemester);
 
     if (maxSemester < FINAL_SEMESTER) {
-      blockers.push(`Final semester (${FINAL_SEMESTER}) not reached — you are in semester ${Math.max(currentSemester, maxSemester)}`);
+      blockers.push(
+        `Final semester (${FINAL_SEMESTER}) not reached — you are in semester ${Math.max(currentSemester, maxSemester)}`,
+      );
     }
 
     const backlogRows = await this.dataSource.query<Array<{ count: string }>>(
@@ -91,10 +102,14 @@ export class AlumniConversionService {
     );
     const activeBacklogs = Number(backlogRows[0]?.count ?? 0);
     if (activeBacklogs > 0) {
-      blockers.push(`${activeBacklogs} active backlog(s) must be cleared first`);
+      blockers.push(
+        `${activeBacklogs} active backlog(s) must be cleared first`,
+      );
     }
 
-    const gradeRows = await this.dataSource.query<Array<{ published: boolean }>>(
+    const gradeRows = await this.dataSource.query<
+      Array<{ published: boolean }>
+    >(
       `SELECT EXISTS (
          SELECT 1 FROM grade_cards
          WHERE tenant_id = $1 AND student_user_id = $2
@@ -105,10 +120,11 @@ export class AlumniConversionService {
     let finalSemesterPublished = Boolean(gradeRows[0]?.published);
 
     if (!finalSemesterPublished) {
-      const profileRows = await this.dataSource.query<Array<{ final_result: string | null }>>(
-        `SELECT final_result FROM student_profiles WHERE user_id = $1`,
-        [studentUserId],
-      );
+      const profileRows = await this.dataSource.query<
+        Array<{ final_result: string | null }>
+      >(`SELECT final_result FROM student_profiles WHERE user_id = $1`, [
+        studentUserId,
+      ]);
       const finalResult = profileRows[0]?.final_result ?? '';
       if (maxSemester >= FINAL_SEMESTER && /pass/i.test(finalResult)) {
         finalSemesterPublished = true;
@@ -136,7 +152,8 @@ export class AlumniConversionService {
     const requestPending = Boolean(statusRows[0]?.request_pending);
 
     if (alumniConverted) blockers.push('Already converted to Alumni');
-    if (requestPending) blockers.push('Alumni conversion request already pending review');
+    if (requestPending)
+      blockers.push('Alumni conversion request already pending review');
 
     const eligible = blockers.length === 0;
 
@@ -170,10 +187,14 @@ export class AlumniConversionService {
       );
     }
 
-    const eligibility = await this.getConversionEligibility(tenantId, studentUserId);
+    const eligibility = await this.getConversionEligibility(
+      tenantId,
+      studentUserId,
+    );
     if (!eligibility.eligible) {
       throw new BadRequestException(
-        eligibility.blockers[0] ?? 'You are not eligible for alumni conversion yet.',
+        eligibility.blockers[0] ??
+          'You are not eligible for alumni conversion yet.',
       );
     }
 
@@ -269,7 +290,13 @@ export class AlumniConversionService {
          personal_email = COALESCE(EXCLUDED.personal_email, student_exit_clearances.personal_email),
          conversion_requested_at = NOW(),
          updated_at = NOW()`,
-      [tenantId, studentUserId, dto.linkedin_url, dto.organization ?? null, dto.personal_email ?? null],
+      [
+        tenantId,
+        studentUserId,
+        dto.linkedin_url,
+        dto.organization ?? null,
+        dto.personal_email ?? null,
+      ],
     );
 
     this.notify.alumniConversionRequested({
@@ -283,7 +310,10 @@ export class AlumniConversionService {
     return { submitted: true, verification_status: 'PENDING' };
   }
 
-  async getClearanceStatus(tenantId: string, studentUserId: string): Promise<ClearanceStatus> {
+  async getClearanceStatus(
+    tenantId: string,
+    studentUserId: string,
+  ): Promise<ClearanceStatus> {
     const rows = await this.dataSource.query<
       Array<{
         library_cleared: boolean;
@@ -312,7 +342,11 @@ export class AlumniConversionService {
   }
 
   /** Alumni Officer approves — runs guarded identity conversion transaction. */
-  async approveAndConvert(tenantId: string, alumniId: string, adminUserId: string) {
+  async approveAndConvert(
+    tenantId: string,
+    alumniId: string,
+    adminUserId: string,
+  ) {
     const rows = await this.dataSource.query<
       Array<{
         row_id: string;
@@ -327,25 +361,43 @@ export class AlumniConversionService {
       [tenantId, alumniId],
     );
     if (!rows[0]?.student_user_id) {
-      throw new NotFoundException('Pending alumni conversion request not found');
+      throw new NotFoundException(
+        'Pending alumni conversion request not found',
+      );
     }
 
     return this.convertToAlumni(tenantId, rows[0].student_user_id, adminUserId);
   }
 
   /** Strict DB transaction: Student → Alumni identity shift + privilege revocation. */
-  async convertToAlumni(tenantId: string, studentUserId: string, adminId: string) {
-    const eligibility = await this.getConversionEligibility(tenantId, studentUserId);
+  async convertToAlumni(
+    tenantId: string,
+    studentUserId: string,
+    adminId: string,
+  ) {
+    const eligibility = await this.getConversionEligibility(
+      tenantId,
+      studentUserId,
+    );
     if (!eligibility.no_dues.all_cleared) {
-      throw new BadRequestException('Cannot approve: Finance, Library, or Hostel no-dues are pending.');
+      throw new BadRequestException(
+        'Cannot approve: Finance, Library, or Hostel no-dues are pending.',
+      );
     }
-    if (!eligibility.final_semester_results_published || eligibility.active_backlogs > 0) {
-      throw new BadRequestException('Cannot approve: final-semester results or backlog requirements not met.');
+    if (
+      !eligibility.final_semester_results_published ||
+      eligibility.active_backlogs > 0
+    ) {
+      throw new BadRequestException(
+        'Cannot approve: final-semester results or backlog requirements not met.',
+      );
     }
 
     const clearance = await this.getClearanceStatus(tenantId, studentUserId);
     if (!clearance.all_cleared) {
-      throw new BadRequestException('Cannot approve: Department clearance is still pending.');
+      throw new BadRequestException(
+        'Cannot approve: Department clearance is still pending.',
+      );
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -383,7 +435,9 @@ export class AlumniConversionService {
         `SELECT role_id FROM roles WHERE role_name = 'Alumni' LIMIT 1`,
       );
       if (!alumniRole[0]?.role_id) {
-        throw new InternalServerErrorException('Alumni role is not configured in IAM.');
+        throw new InternalServerErrorException(
+          'Alumni role is not configured in IAM.',
+        );
       }
 
       await manager.query(`UPDATE users SET role_id = $1 WHERE user_id = $2`, [

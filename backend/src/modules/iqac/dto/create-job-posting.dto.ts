@@ -1,4 +1,13 @@
-import { IsBoolean, IsDateString, IsNumber, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateJobPostingDto {
   @IsString()

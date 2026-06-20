@@ -3,7 +3,11 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CacheService } from '../../core/redis/cache.service';
 import type { HrPowerAction } from '../../common/decorators/require-hr-power.decorator';
-import type { HrAccessLevel, HrCapabilities, HrModuleKey } from './hr-entity-context.service';
+import type {
+  HrAccessLevel,
+  HrCapabilities,
+  HrModuleKey,
+} from './hr-entity-context.service';
 
 const MASTER_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'HR', 'President']);
 
@@ -48,21 +52,22 @@ export type DelegationUserRow = {
 };
 
 /** Maps legacy lowercase module keys (JWT / HrPermissionGuard) to hr_access_controls names. */
-export const LEGACY_TO_CONTROL_MODULE: Record<HrModuleKey, HrDelegationModule> = {
-  onboarding: 'ONBOARDING',
-  offboarding: 'OFFBOARDING',
-  payroll: 'PAYROLL',
-  biometrics: 'BIOMETRICS',
-  leaves: 'LEAVES',
-  documents: 'DOCUMENTS',
-  policies: 'POLICIES',
-  rules: 'RULES',
-  directory: 'DIRECTORY',
-  attendance: 'ATTENDANCE',
-  recruitment: 'RECRUITMENT',
-  dashboard: 'DASHBOARD',
-  reports: 'REPORTS',
-};
+export const LEGACY_TO_CONTROL_MODULE: Record<HrModuleKey, HrDelegationModule> =
+  {
+    onboarding: 'ONBOARDING',
+    offboarding: 'OFFBOARDING',
+    payroll: 'PAYROLL',
+    biometrics: 'BIOMETRICS',
+    leaves: 'LEAVES',
+    documents: 'DOCUMENTS',
+    policies: 'POLICIES',
+    rules: 'RULES',
+    directory: 'DIRECTORY',
+    attendance: 'ATTENDANCE',
+    recruitment: 'RECRUITMENT',
+    dashboard: 'DASHBOARD',
+    reports: 'REPORTS',
+  };
 
 @Injectable()
 export class HrAccessControlService {
@@ -75,20 +80,39 @@ export class HrAccessControlService {
     return module.trim().toLowerCase() as HrModuleKey;
   }
 
-  levelToPowers(level: HrAccessLevel): Pick<
+  levelToPowers(
+    level: HrAccessLevel,
+  ): Pick<
     AccessControlRow,
     'can_view' | 'can_edit' | 'can_approve' | 'can_delete'
   > {
     if (level === 'write') {
-      return { can_view: true, can_edit: true, can_approve: false, can_delete: false };
+      return {
+        can_view: true,
+        can_edit: true,
+        can_approve: false,
+        can_delete: false,
+      };
     }
     if (level === 'read') {
-      return { can_view: true, can_edit: false, can_approve: false, can_delete: false };
+      return {
+        can_view: true,
+        can_edit: false,
+        can_approve: false,
+        can_delete: false,
+      };
     }
-    return { can_view: false, can_edit: false, can_approve: false, can_delete: false };
+    return {
+      can_view: false,
+      can_edit: false,
+      can_approve: false,
+      can_delete: false,
+    };
   }
 
-  powersToLevel(row: Pick<AccessControlRow, 'can_view' | 'can_edit'> | null): HrAccessLevel {
+  powersToLevel(
+    row: Pick<AccessControlRow, 'can_view' | 'can_edit'> | null,
+  ): HrAccessLevel {
     if (!row) return 'none';
     if (row.can_edit) return 'write';
     if (row.can_view) return 'read';
@@ -97,7 +121,9 @@ export class HrAccessControlService {
 
   buildCapabilitiesFromControls(rows: AccessControlRow[]): HrCapabilities {
     const caps: HrCapabilities = {};
-    for (const [legacy, controlName] of Object.entries(LEGACY_TO_CONTROL_MODULE)) {
+    for (const [legacy, controlName] of Object.entries(
+      LEGACY_TO_CONTROL_MODULE,
+    )) {
       const row = rows.find((r) => r.module_name === controlName);
       caps[legacy as HrModuleKey] = this.powersToLevel(row ?? null);
     }
@@ -105,7 +131,10 @@ export class HrAccessControlService {
   }
 
   /** Single source of truth: hr_access_controls, with legacy JSONB fallback. */
-  async getCapabilitiesForUser(tenantId: string, userId: string): Promise<HrCapabilities | null> {
+  async getCapabilitiesForUser(
+    tenantId: string,
+    userId: string,
+  ): Promise<HrCapabilities | null> {
     const cacheKey = `hr_caps:${tenantId}:${userId}`;
     return this.cache.getOrSet(cacheKey, async () => {
       const rows = await this.dataSource.query<AccessControlRow[]>(
@@ -151,7 +180,10 @@ export class HrAccessControlService {
   }
 
   /** Unified matrix: all staff + granular controls (replaces separate permissions/delegation lists). */
-  async listAccessMatrix(tenantId: string, options?: { q?: string; limit?: number; offset?: number }) {
+  async listAccessMatrix(
+    tenantId: string,
+    options?: { q?: string; limit?: number; offset?: number },
+  ) {
     const limit = Math.min(Math.max(options?.limit ?? 100, 1), 200);
     const offset = Math.max(options?.offset ?? 0, 0);
     const q = options?.q?.trim() || null;
@@ -200,7 +232,9 @@ export class HrAccessControlService {
     return users.map((u) => ({
       ...u,
       controls: byUser.get(u.user_id) ?? [],
-      capabilities: this.buildCapabilitiesFromControls(byUser.get(u.user_id) ?? []),
+      capabilities: this.buildCapabilitiesFromControls(
+        byUser.get(u.user_id) ?? [],
+      ),
     }));
   }
 
@@ -226,7 +260,11 @@ export class HrAccessControlService {
     let powers: Parameters<HrAccessControlService['upsertAccessControl']>[3];
     if (input.level != null) {
       const fromLevel = this.levelToPowers(input.level);
-      const existing = await this.getUserModuleAccess(tenantId, userId, controlModule);
+      const existing = await this.getUserModuleAccess(
+        tenantId,
+        userId,
+        controlModule,
+      );
       powers = {
         ...fromLevel,
         can_approve: existing?.can_approve ?? false,
@@ -235,7 +273,11 @@ export class HrAccessControlService {
         entity_scope: existing?.entity_scope ?? null,
       };
     } else {
-      const existing = await this.getUserModuleAccess(tenantId, userId, controlModule);
+      const existing = await this.getUserModuleAccess(
+        tenantId,
+        userId,
+        controlModule,
+      );
       powers = {
         can_view: input.can_view ?? existing?.can_view ?? false,
         can_edit: input.can_edit ?? existing?.can_edit ?? false,
@@ -246,20 +288,39 @@ export class HrAccessControlService {
             ? input.department_scope
             : (existing?.department_scope ?? null),
         entity_scope:
-          input.entity_scope !== undefined ? input.entity_scope : (existing?.entity_scope ?? null),
+          input.entity_scope !== undefined
+            ? input.entity_scope
+            : (existing?.entity_scope ?? null),
       };
       if (powers.can_edit || powers.can_approve || powers.can_delete) {
         powers.can_view = true;
       }
     }
 
-    const row = await this.upsertAccessControl(tenantId, userId, controlModule, powers);
-    const capabilities = await this.syncHrPermissionsJsonb(tenantId, userId, updatedByUserId);
-    return { user_id: userId, module: controlModule, control: row, capabilities };
+    const row = await this.upsertAccessControl(
+      tenantId,
+      userId,
+      controlModule,
+      powers,
+    );
+    const capabilities = await this.syncHrPermissionsJsonb(
+      tenantId,
+      userId,
+      updatedByUserId,
+    );
+    return {
+      user_id: userId,
+      module: controlModule,
+      control: row,
+      capabilities,
+    };
   }
 
   normalizeModule(module: string): HrDelegationModule {
-    const key = module.trim().toUpperCase().replace(/-/g, '_') as HrDelegationModule;
+    const key = module
+      .trim()
+      .toUpperCase()
+      .replace(/-/g, '_') as HrDelegationModule;
     if (!HR_DELEGATION_MODULES.includes(key)) {
       throw new ForbiddenException(`Unknown HR module: ${module}`);
     }
@@ -327,7 +388,11 @@ export class HrAccessControlService {
     }
   }
 
-  async getUserModuleAccess(tenantId: string, userId: string, module: HrDelegationModule) {
+  async getUserModuleAccess(
+    tenantId: string,
+    userId: string,
+    module: HrDelegationModule,
+  ) {
     const rows = await this.dataSource.query<AccessControlRow[]>(
       `SELECT access_id, user_id, module_name, can_view, can_edit, can_approve, can_delete,
               department_scope, entity_scope
@@ -383,7 +448,10 @@ export class HrAccessControlService {
   }
 
   /** @deprecated Use listAccessMatrix — kept for backward-compatible API alias. */
-  listDelegationMatrix(tenantId: string, options?: { q?: string; limit?: number }) {
+  listDelegationMatrix(
+    tenantId: string,
+    options?: { q?: string; limit?: number },
+  ) {
     return this.listAccessMatrix(tenantId, options);
   }
 
@@ -399,7 +467,9 @@ export class HrAccessControlService {
       return { clause: '', params: [] };
     }
 
-    const scoped = await this.dataSource.query<Array<{ department_scope: number[] | null }>>(
+    const scoped = await this.dataSource.query<
+      Array<{ department_scope: number[] | null }>
+    >(
       `SELECT department_scope FROM hr_access_controls
        WHERE tenant_id = $1 AND user_id = $2 AND department_scope IS NOT NULL
        LIMIT 1`,
@@ -424,15 +494,21 @@ export class HrAccessControlService {
     specificUserId?: string | null,
   ): Promise<string | null> {
     if (specificUserId) {
-      const row = await this.getUserModuleAccess(tenantId, specificUserId, module);
+      const row = await this.getUserModuleAccess(
+        tenantId,
+        specificUserId,
+        module,
+      );
       if (row?.can_approve) return specificUserId;
       return null;
     }
 
-    const requester = await this.dataSource.query<Array<{ dept_id: number | null }>>(
-      `SELECT dept_id FROM users WHERE user_id = $1 AND tenant_id = $2`,
-      [requesterUserId, tenantId],
-    );
+    const requester = await this.dataSource.query<
+      Array<{ dept_id: number | null }>
+    >(`SELECT dept_id FROM users WHERE user_id = $1 AND tenant_id = $2`, [
+      requesterUserId,
+      tenantId,
+    ]);
     const deptId = requester[0]?.dept_id;
 
     const rows = await this.dataSource.query<Array<{ user_id: string }>>(
@@ -475,7 +551,11 @@ export class HrAccessControlService {
     requestType: string,
   ): Promise<void> {
     if (this.isMasterRole(roles)) return;
-    if (!approverType || approverType === 'REPORTING_MANAGER' || approverType === 'DEPT_HEAD') {
+    if (
+      !approverType ||
+      approverType === 'REPORTING_MANAGER' ||
+      approverType === 'DEPT_HEAD'
+    ) {
       return;
     }
     if (approverType === 'HR_EXECUTIVE') {
@@ -490,7 +570,13 @@ export class HrAccessControlService {
     }
     if (approverType === 'HR_ADMIN') {
       if (roles.some((r) => r === 'HRAdmin' || r === 'SuperAdmin')) return;
-      await this.assertPower(tenantId, actorUserId, roles, 'OFFBOARDING', 'approve');
+      await this.assertPower(
+        tenantId,
+        actorUserId,
+        roles,
+        'OFFBOARDING',
+        'approve',
+      );
     }
   }
 }

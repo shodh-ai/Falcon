@@ -26,7 +26,14 @@ export class DepartmentScoreService {
            budget_adherence = EXCLUDED.budget_adherence,
            roi_score = EXCLUDED.roi_score,
            receivables_score = EXCLUDED.receivables_score`,
-        [tid, dept.dept_id, score.total, score.budgetAdherence, score.roi, score.receivables],
+        [
+          tid,
+          dept.dept_id,
+          score.total,
+          score.budgetAdherence,
+          score.roi,
+          score.receivables,
+        ],
       );
     }
     this.logger.log(`Computed dept scores for tenant ${tid}`);
@@ -41,8 +48,12 @@ export class DepartmentScoreService {
     );
     let budgetAdherence = 75;
     if (budgetRows[0]) {
-      const allocated = Number((budgetRows[0] as { allocated_amount: string }).allocated_amount);
-      const utilized = Number((budgetRows[0] as { utilized_amount: string }).utilized_amount);
+      const allocated = Number(
+        (budgetRows[0] as { allocated_amount: string }).allocated_amount,
+      );
+      const utilized = Number(
+        (budgetRows[0] as { utilized_amount: string }).utilized_amount,
+      );
       const utilPct = allocated > 0 ? (utilized / allocated) * 100 : 0;
       budgetAdherence = Math.max(0, 100 - Math.abs(utilPct - 85));
     }
@@ -76,7 +87,8 @@ export class DepartmentScoreService {
     );
     const overdue = Number(recvRows[0]?.overdue ?? 0);
     const totalDue = Number(recvRows[0]?.total_due ?? 0);
-    const receivables = totalDue > 0 ? Math.max(0, 100 - (overdue / totalDue) * 100) : 100;
+    const receivables =
+      totalDue > 0 ? Math.max(0, 100 - (overdue / totalDue) * 100) : 100;
 
     const total = budgetAdherence * 0.4 + roi * 0.4 + receivables * 0.2;
     return {

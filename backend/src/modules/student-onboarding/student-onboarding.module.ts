@@ -11,8 +11,16 @@ import { StudentOnboardingWelcomeEmailListener } from './student-onboarding-welc
 
 @Module({
   imports: [StorageModule],
-  controllers: [StudentOnboardingController, StaffOnboardingController, StudentVerificationAdminController],
-  providers: [StudentOnboardingService, StudentOnboardingWelcomeEmailListener, HrFieldEncryptionService],
+  controllers: [
+    StudentOnboardingController,
+    StaffOnboardingController,
+    StudentVerificationAdminController,
+  ],
+  providers: [
+    StudentOnboardingService,
+    StudentOnboardingWelcomeEmailListener,
+    HrFieldEncryptionService,
+  ],
   exports: [StudentOnboardingService],
 })
 export class StudentOnboardingModule {}

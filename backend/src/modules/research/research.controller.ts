@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -19,7 +27,11 @@ export class ResearchController {
 
   @Patch('scholars/:id/phase')
   @Roles('SuperAdmin', 'Faculty', 'HOD')
-  updatePhase(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() body: { phase: string }) {
+  updatePhase(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() body: { phase: string },
+  ) {
     return this.research.updatePhase(req.user.tenant_id ?? '', id, body.phase);
   }
 

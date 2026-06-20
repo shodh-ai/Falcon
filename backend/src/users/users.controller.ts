@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -49,7 +60,10 @@ export class UsersController {
 
   @Patch('me/device-token')
   updateMyDeviceToken(@Req() req: any, @Body() dto: UpdateDeviceTokenDto) {
-    return this.usersService.updateDeviceToken(req.user.user_id, dto.device_token);
+    return this.usersService.updateDeviceToken(
+      req.user.user_id,
+      dto.device_token,
+    );
   }
 
   @Get('stats')
@@ -90,7 +104,10 @@ export class UsersController {
 
   @Put(':id/department/:deptId')
   @Roles('IQAC', 'HR')
-  updateUserDepartment(@Param('id') id: string, @Param('deptId') deptId: string) {
+  updateUserDepartment(
+    @Param('id') id: string,
+    @Param('deptId') deptId: string,
+  ) {
     return this.usersService.updateUserDepartment(id, parseInt(deptId));
   }
 }

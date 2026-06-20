@@ -37,7 +37,10 @@ export class PlacementController {
 
   @Post('companies')
   @Roles('SuperAdmin', 'PlacementCell')
-  createCompany(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+  createCompany(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
     return this.placement.createCompany(this.tenant(req), dto);
   }
 
@@ -63,7 +66,10 @@ export class PlacementController {
 
   @Post('drives')
   @Roles('SuperAdmin', 'PlacementCell')
-  createDrive(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+  createDrive(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
     return this.placement.createDrive(this.tenant(req), dto);
   }
 
@@ -79,8 +85,15 @@ export class PlacementController {
 
   @Get('drives/:driveId/eligibility')
   @Roles('SuperAdmin', 'PlacementCell', 'Student')
-  eligibility(@Req() req: { user: AuthUser }, @Param('driveId') driveId: string) {
-    return this.placement.checkEligibility(req.user.user_id, driveId, this.tenant(req));
+  eligibility(
+    @Req() req: { user: AuthUser },
+    @Param('driveId') driveId: string,
+  ) {
+    return this.placement.checkEligibility(
+      req.user.user_id,
+      driveId,
+      this.tenant(req),
+    );
   }
 
   @Post('drives/:driveId/apply')
@@ -106,7 +119,10 @@ export class PlacementController {
 
   @Get('drives/:driveId/export')
   @Roles('SuperAdmin', 'PlacementCell')
-  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Header(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
   async exportApplicants(
     @Req() req: { user: AuthUser },
     @Param('driveId') driveId: string,
@@ -130,7 +146,11 @@ export class PlacementController {
   updateStage(
     @Req() req: { user: AuthUser },
     @Param('applicationId') applicationId: string,
-    @Body() body: { stage: PlacementPipelineStage; rejected_at_stage?: PlacementPipelineStage },
+    @Body()
+    body: {
+      stage: PlacementPipelineStage;
+      rejected_at_stage?: PlacementPipelineStage;
+    },
   ) {
     return this.placement.updateApplicationStage(
       this.tenant(req),
@@ -143,7 +163,10 @@ export class PlacementController {
   @Get('student/hub')
   @Roles('Student', 'SuperAdmin', 'PlacementCell')
   studentHub(@Req() req: { user: AuthUser }) {
-    return this.placement.getStudentPlacementsHub(this.tenant(req), req.user.user_id);
+    return this.placement.getStudentPlacementsHub(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Get('jobs')
@@ -159,7 +182,10 @@ export class PlacementController {
 
   @Post('resumes/:studentUserId/generate')
   @Roles('Student', 'SuperAdmin', 'PlacementCell')
-  generateResume(@Req() req: { user: AuthUser }, @Param('studentUserId') studentUserId: string) {
+  generateResume(
+    @Req() req: { user: AuthUser },
+    @Param('studentUserId') studentUserId: string,
+  ) {
     return this.placement.generateResumePdf(this.tenant(req), studentUserId);
   }
 

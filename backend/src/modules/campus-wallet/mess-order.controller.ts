@@ -16,16 +16,25 @@ export class MessOrderController {
   @Roles('Student')
   order(
     @Req() req: { user: AuthUser },
-    @Body() dto: { order_date: string; items: { item_id: string; meal_type: string; quantity?: number }[] },
+    @Body()
+    dto: {
+      order_date: string;
+      items: { item_id: string; meal_type: string; quantity?: number }[];
+    },
   ) {
-    const tenantId = req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId =
+      req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
     return this.wallet.placeOrder(tenantId, req.user.user_id, dto);
   }
 
   @Post('redeem-order')
   @Roles('Warden', 'SuperAdmin', 'Faculty')
-  redeemOrder(@Req() req: { user: AuthUser }, @Body() dto: { claim_pin_or_qr: string }) {
-    const tenantId = req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  redeemOrder(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { claim_pin_or_qr: string },
+  ) {
+    const tenantId =
+      req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
     return this.wallet.redeemOrder(tenantId, dto.claim_pin_or_qr);
   }
 }

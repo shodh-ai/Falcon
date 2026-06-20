@@ -15,7 +15,10 @@ function parseJsonResponse(text: string): Record<string, unknown> {
   try {
     return JSON.parse(text) as Record<string, unknown>;
   } catch {
-    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const cleaned = text
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
     return JSON.parse(cleaned) as Record<string, unknown>;
   }
 }
@@ -34,7 +37,9 @@ function normalizeModelName(modelName: string): string {
 function buildModelCandidates(configuredModel: string): string[] {
   const first = normalizeModelName(configuredModel || 'gemini-2.0-flash');
   const fallbacks = ['gemini-2.0-flash', 'gemini-flash-latest'];
-  return [first, ...fallbacks].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+  return [first, ...fallbacks].filter(
+    (m, idx, arr) => m && arr.indexOf(m) === idx,
+  );
 }
 
 /** Maps Gemini payload → DB (supports CSV schema + existing status/remarks). */
@@ -47,9 +52,14 @@ function toAuditResult(obj: Record<string, unknown>): AiAuditResult {
         : String(obj.rejection_reason);
     const extracted = normalizeExtracted(obj.extracted_data);
     return {
-      status: valid ? AiSubmissionStatus.VALIDATED : AiSubmissionStatus.REJECTED_MISMATCH,
+      status: valid
+        ? AiSubmissionStatus.VALIDATED
+        : AiSubmissionStatus.REJECTED_MISMATCH,
       extracted_data: valid ? extracted : {},
-      remarks: valid ? null : rejection || 'Document rejected as invalid or not matching this task.',
+      remarks: valid
+        ? null
+        : rejection ||
+          'Document rejected as invalid or not matching this task.',
     };
   }
 
@@ -63,7 +73,10 @@ function toAuditResult(obj: Record<string, unknown>): AiAuditResult {
   return {
     status,
     extracted_data: extracted,
-    remarks: status === AiSubmissionStatus.REJECTED_MISMATCH ? remarks || 'Rejected by model.' : remarks,
+    remarks:
+      status === AiSubmissionStatus.REJECTED_MISMATCH
+        ? remarks || 'Rejected by model.'
+        : remarks,
   };
 }
 
@@ -82,8 +95,11 @@ export class GeminiService {
       throw new Error('GEMINI_API_KEY is not configured');
     }
 
-    const configuredModel = this.config.get<string>('GEMINI_MODEL') || 'gemini-2.0-flash';
-    const { taskLabel, extractionFields, validationNotes } = pickExtractionRule(params.taskName);
+    const configuredModel =
+      this.config.get<string>('GEMINI_MODEL') || 'gemini-2.0-flash';
+    const { taskLabel, extractionFields, validationNotes } = pickExtractionRule(
+      params.taskName,
+    );
 
     const fieldLines = Object.entries(extractionFields)
       .map(([k, desc]) => `      "${k}": <value per description: ${desc}>`)
@@ -139,7 +155,11 @@ Rules:
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const candidates = buildModelCandidates(configuredModel);
-    let result: Awaited<ReturnType<ReturnType<GoogleGenerativeAI['getGenerativeModel']>['generateContent']>> | null = null;
+    let result: Awaited<
+      ReturnType<
+        ReturnType<GoogleGenerativeAI['getGenerativeModel']>['generateContent']
+      >
+    > | null = null;
     let lastErr: unknown = null;
 
     for (const modelName of candidates) {
@@ -163,9 +183,12 @@ Rules:
       } catch (err) {
         lastErr = err;
         const msg = err instanceof Error ? err.message : String(err);
-        const notFound = msg.includes('404') || msg.toLowerCase().includes('not found');
+        const notFound =
+          msg.includes('404') || msg.toLowerCase().includes('not found');
         if (notFound) {
-          this.logger.warn(`Gemini model unavailable: ${modelName}. Trying next fallback...`);
+          this.logger.warn(
+            `Gemini model unavailable: ${modelName}. Trying next fallback...`,
+          );
           continue;
         }
         throw err;
@@ -173,7 +196,9 @@ Rules:
     }
 
     if (!result) {
-      throw lastErr instanceof Error ? lastErr : new Error('No usable Gemini model found for generateContent.');
+      throw lastErr instanceof Error
+        ? lastErr
+        : new Error('No usable Gemini model found for generateContent.');
     }
 
     const text = result.response.text();

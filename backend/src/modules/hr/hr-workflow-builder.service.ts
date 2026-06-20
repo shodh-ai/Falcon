@@ -36,7 +36,11 @@ export class HrWorkflowBuilderService {
     dto: {
       action_type: string;
       workflow_name: string;
-      steps?: { step_order: number; approver_type: string; approver_ref?: string }[];
+      steps?: {
+        step_order: number;
+        approver_type: string;
+        approver_ref?: string;
+      }[];
     },
   ) {
     const rows = await this.dataSource.query(
@@ -49,7 +53,12 @@ export class HrWorkflowBuilderService {
       await this.dataSource.query(
         `INSERT INTO hr_approval_workflow_steps (workflow_id, step_order, approver_type, approver_ref)
          VALUES ($1,$2,$3,$4)`,
-        [workflowId, step.step_order, step.approver_type, step.approver_ref ?? null],
+        [
+          workflowId,
+          step.step_order,
+          step.approver_type,
+          step.approver_ref ?? null,
+        ],
       );
     }
     return this.getWorkflow(tenantId, entityId, workflowId);
@@ -83,7 +92,11 @@ export class HrWorkflowBuilderService {
     dto: {
       workflow_name?: string;
       is_active?: boolean;
-      steps?: { step_order: number; approver_type: string; approver_ref?: string }[];
+      steps?: {
+        step_order: number;
+        approver_type: string;
+        approver_ref?: string;
+      }[];
     },
   ) {
     await this.dataSource.query(
@@ -91,15 +104,29 @@ export class HrWorkflowBuilderService {
          workflow_name = COALESCE($4, workflow_name),
          is_active = COALESCE($5, is_active)
        WHERE tenant_id = $1 AND entity_id = $2 AND workflow_id = $3`,
-      [tenantId, entityId, workflowId, dto.workflow_name ?? null, dto.is_active ?? null],
+      [
+        tenantId,
+        entityId,
+        workflowId,
+        dto.workflow_name ?? null,
+        dto.is_active ?? null,
+      ],
     );
     if (dto.steps) {
-      await this.dataSource.query(`DELETE FROM hr_approval_workflow_steps WHERE workflow_id = $1`, [workflowId]);
+      await this.dataSource.query(
+        `DELETE FROM hr_approval_workflow_steps WHERE workflow_id = $1`,
+        [workflowId],
+      );
       for (const step of dto.steps) {
         await this.dataSource.query(
           `INSERT INTO hr_approval_workflow_steps (workflow_id, step_order, approver_type, approver_ref)
            VALUES ($1,$2,$3,$4)`,
-          [workflowId, step.step_order, step.approver_type, step.approver_ref ?? null],
+          [
+            workflowId,
+            step.step_order,
+            step.approver_type,
+            step.approver_ref ?? null,
+          ],
         );
       }
     }
@@ -107,10 +134,13 @@ export class HrWorkflowBuilderService {
   }
 
   async deleteWorkflow(tenantId: string, entityId: number, workflowId: string) {
-    await this.dataSource.query(`DELETE FROM hr_approval_workflow_steps WHERE workflow_id = $1`, [workflowId]);
+    await this.dataSource.query(
+      `DELETE FROM hr_approval_workflow_steps WHERE workflow_id = $1`,
+      [workflowId],
+    );
     await this.dataSource.query(
       `DELETE FROM hr_approval_workflows WHERE tenant_id = $1 AND entity_id = $2 AND workflow_id = $3`,
-      [tenantId, entityId, workflowId]
+      [tenantId, entityId, workflowId],
     );
     return { success: true };
   }
@@ -121,7 +151,11 @@ export class HrWorkflowBuilderService {
     actionType: string,
     requesterUserId: string,
     currentStepOrder: number,
-  ): Promise<{ step_order: number; approver_user_id: string | null; approver_type: string } | null> {
+  ): Promise<{
+    step_order: number;
+    approver_user_id: string | null;
+    approver_type: string;
+  } | null> {
     const workflows = await this.dataSource.query(
       `SELECT workflow_id FROM hr_approval_workflows
        WHERE tenant_id = $1 AND entity_id = $2 AND action_type = $3 AND is_active = true
@@ -169,7 +203,8 @@ export class HrWorkflowBuilderService {
         step.approver_ref,
       );
     } else if (step.approver_type === 'HR_ADMIN') {
-      approverUserId = await this.accessControl.resolveHrAdminApprover(tenantId);
+      approverUserId =
+        await this.accessControl.resolveHrAdminApprover(tenantId);
     }
 
     return {

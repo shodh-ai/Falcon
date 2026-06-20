@@ -1,10 +1,18 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { Repository, In } from 'typeorm';
 import { HR_PAYROLL_QUEUE } from '../../common/constants/hr-payroll-queue.constants';
-import { LeaveRequest, LeaveRequestStatus } from '../../entities/leave-request.entity';
+import {
+  LeaveRequest,
+  LeaveRequestStatus,
+} from '../../entities/leave-request.entity';
 import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
@@ -43,11 +51,13 @@ export class HrService {
   constructor(
     @InjectRepository(LeaveRequest) private leaves: Repository<LeaveRequest>,
     @InjectRepository(LeaveBalance) private balances: Repository<LeaveBalance>,
-    @InjectRepository(StaffAttendance) private staffAttendance: Repository<StaffAttendance>,
+    @InjectRepository(StaffAttendance)
+    private staffAttendance: Repository<StaffAttendance>,
     @InjectRepository(StaffLeaveRequest)
     private staffLeaveRequests: Repository<StaffLeaveRequest>,
     @InjectRepository(StaffPayslip) private payslips: Repository<StaffPayslip>,
-    @InjectRepository(StaffGatePass) private gatePasses: Repository<StaffGatePass>,
+    @InjectRepository(StaffGatePass)
+    private gatePasses: Repository<StaffGatePass>,
     @InjectRepository(User) private users: Repository<User>,
     private readonly notify: NotificationEmitterService,
     private readonly workflowRouting: WorkflowRoutingService,
@@ -74,7 +84,9 @@ export class HrService {
     });
     const saved = await this.leaves.save(entity);
 
-    const approver = await this.workflowRouting.getReportingOfficer(dto.requester_user_id);
+    const approver = await this.workflowRouting.getReportingOfficer(
+      dto.requester_user_id,
+    );
     this.workflowNotify.notifyApprover({
       tenantId: requester.tenant_id,
       approver,
@@ -99,15 +111,21 @@ export class HrService {
   }
 
   async actOnLeave(leaveId: string, dto: LeaveActionDto) {
-    const leave = await this.leaves.findOne({ where: { leave_request_id: leaveId } });
+    const leave = await this.leaves.findOne({
+      where: { leave_request_id: leaveId },
+    });
     if (!leave) throw new NotFoundException('Leave request not found');
 
     const next = APPROVAL_FLOW[leave.status];
     if (!next && leave.status !== 'REJECTED') {
-      throw new BadRequestException(`Cannot act on leave in status ${leave.status}`);
+      throw new BadRequestException(
+        `Cannot act on leave in status ${leave.status}`,
+      );
     }
 
-    const trail = (leave.approval_trail as { history?: unknown[] }) ?? { history: [] };
+    const trail = (leave.approval_trail as { history?: unknown[] }) ?? {
+      history: [],
+    };
     const history = Array.isArray(trail.history) ? trail.history : [];
     history.push({
       step: leave.status,
@@ -201,7 +219,9 @@ export class HrService {
     const hours = rows.reduce((sum, row) => {
       if (!row.check_in_at) return sum;
       const out = row.check_out_at ?? new Date();
-      return sum + Math.max(0, out.getTime() - row.check_in_at.getTime()) / 36e5;
+      return (
+        sum + Math.max(0, out.getTime() - row.check_in_at.getTime()) / 36e5
+      );
     }, 0);
 
     return Number(hours.toFixed(2));
@@ -228,13 +248,21 @@ export class HrService {
       this.staffAttendance
         .createQueryBuilder('attendance')
         .where('attendance.user_id = :userId', { userId })
-        .andWhere('attendance.work_date BETWEEN :start AND :end', { start, end })
+        .andWhere('attendance.work_date BETWEEN :start AND :end', {
+          start,
+          end,
+        })
         .getMany(),
       this.staffLeaveRequests
         .createQueryBuilder('leave')
         .where('leave.staff_user_id = :userId', { userId })
-        .andWhere('leave.status IN (:...statuses)', { statuses: ['PENDING', 'HOD_APPROVED', 'HR_APPROVED'] })
-        .andWhere('leave.start_date <= :end AND leave.end_date >= :start', { start, end })
+        .andWhere('leave.status IN (:...statuses)', {
+          statuses: ['PENDING', 'HOD_APPROVED', 'HR_APPROVED'],
+        })
+        .andWhere('leave.start_date <= :end AND leave.end_date >= :start', {
+          start,
+          end,
+        })
         .getMany(),
     ]);
 
@@ -272,9 +300,19 @@ export class HrService {
       [staffUserId, tenantId],
     );
     const entityId = Number(profile[0]?.entity_id ?? 1);
-    await this.leavePolicies.validateLeaveApplication(tenantId, entityId, staffUserId, dto);
+    await this.leavePolicies.validateLeaveApplication(
+      tenantId,
+      entityId,
+      staffUserId,
+      dto,
+    );
 
-    assertRetroactiveWorkforceLimit('LEAVE', dto.start_date, dto.end_date, actorRoles);
+    assertRetroactiveWorkforceLimit(
+      'LEAVE',
+      dto.start_date,
+      dto.end_date,
+      actorRoles,
+    );
     await assertNoOverlappingWorkforceDates(
       this.users.manager.connection,
       tenantId,
@@ -317,7 +355,11 @@ export class HrService {
 
   listMyPayslips(staffUserId: string, tenantId: string) {
     return this.payslips.find({
-      where: { staff_user_id: staffUserId, tenant_id: tenantId, is_published: true },
+      where: {
+        staff_user_id: staffUserId,
+        tenant_id: tenantId,
+        is_published: true,
+      },
       order: { year: 'DESC', generated_at: 'DESC' },
     });
   }
@@ -347,7 +389,8 @@ export class HrService {
     const saved = await this.gatePasses.save(row);
 
     if (reportingOfficerId) {
-      const approver = await this.workflowRouting.getReportingOfficer(staffUserId);
+      const approver =
+        await this.workflowRouting.getReportingOfficer(staffUserId);
       this.workflowNotify.notifyApprover({
         tenantId,
         approver,
@@ -387,7 +430,11 @@ export class HrService {
     tenantId: string,
     roles: string[] = [],
   ) {
-    const allowed = await this.canAccessTeamApprovals(reportingOfficerId, tenantId, roles);
+    const allowed = await this.canAccessTeamApprovals(
+      reportingOfficerId,
+      tenantId,
+      roles,
+    );
     if (!allowed) return [];
 
     return this.gatePasses.find({
@@ -422,15 +469,25 @@ export class HrService {
     });
     if (!pass) throw new NotFoundException('Gate pass not found');
 
-    const staff = await this.users.findOne({ where: { user_id: pass.staff_user_id } });
+    const staff = await this.users.findOne({
+      where: { user_id: pass.staff_user_id },
+    });
 
     if (pass.status === 'PENDING') {
-      const allowed = await this.canAccessTeamApprovals(actorUserId, tenantId, roles);
+      const allowed = await this.canAccessTeamApprovals(
+        actorUserId,
+        tenantId,
+        roles,
+      );
       if (!allowed) {
-        throw new ForbiddenException('Team approval features are not enabled for your account');
+        throw new ForbiddenException(
+          'Team approval features are not enabled for your account',
+        );
       }
       if (pass.reporting_officer_id !== actorUserId) {
-        throw new ForbiddenException('Only the assigned reporting officer can act on this pass');
+        throw new ForbiddenException(
+          'Only the assigned reporting officer can act on this pass',
+        );
       }
       if (status === 'REJECTED') {
         pass.status = 'REJECTED';
@@ -463,7 +520,9 @@ export class HrService {
     if (pass.status === 'PENDING_HR') {
       const hrAdmin = await this.workflowRouting.getHrAdmin(tenantId);
       if (hrAdmin.userId !== actorUserId) {
-        throw new ForbiddenException('Only HR admin can finalize this gate pass');
+        throw new ForbiddenException(
+          'Only HR admin can finalize this gate pass',
+        );
       }
       pass.status = status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
       const saved = await this.gatePasses.save(pass);
@@ -478,7 +537,9 @@ export class HrService {
       return saved;
     }
 
-    throw new BadRequestException(`Cannot act on gate pass in status ${pass.status}`);
+    throw new BadRequestException(
+      `Cannot act on gate pass in status ${pass.status}`,
+    );
   }
 
   private countWeekdaysInMonth(year: number, month: number): number {
@@ -516,7 +577,9 @@ export class HrService {
   }
 
   private monthLabel(year: number, month: number): string {
-    return new Date(year, month - 1, 1).toLocaleString('en-US', { month: 'long' });
+    return new Date(year, month - 1, 1).toLocaleString('en-US', {
+      month: 'long',
+    });
   }
 
   async getDashboardMetrics(tenantId: string, entityId: number) {
@@ -557,7 +620,10 @@ export class HrService {
             .andWhere('leave.status IN (:...statuses)', {
               statuses: ['PENDING', 'HOD_APPROVED', 'HR_APPROVED'],
             })
-            .andWhere('leave.start_date <= :today AND leave.end_date >= :today', { today })
+            .andWhere(
+              'leave.start_date <= :today AND leave.end_date >= :today',
+              { today },
+            )
             .getCount();
 
     const [pendingLeaves, pendingGatePasses] = await Promise.all([
@@ -567,7 +633,9 @@ export class HrService {
           { tenant_id: tenantId, status: 'HOD_APPROVED' as const },
         ],
       }),
-      this.gatePasses.count({ where: { tenant_id: tenantId, status: 'PENDING' } }),
+      this.gatePasses.count({
+        where: { tenant_id: tenantId, status: 'PENDING' },
+      }),
     ]);
 
     return {
@@ -610,7 +678,7 @@ export class HrService {
       salary_base: row.salary_base,
       reporting_officer_id: row.reporting_officer_id,
       reporting_officer_name: row.reporting_officer_id
-        ? officerMap.get(row.reporting_officer_id)?.name ?? null
+        ? (officerMap.get(row.reporting_officer_id)?.name ?? null)
         : null,
       is_active: row.is_active,
     }));
@@ -642,12 +710,28 @@ export class HrService {
         salary_base: employee.salary_base,
       },
       assets: [
-        { asset: 'Laptop', serial: `FAL-${employee.user_id.slice(0, 6).toUpperCase()}`, status: 'Assigned' },
-        { asset: 'ID Card', serial: `SGVU-${employee.user_id.slice(0, 4).toUpperCase()}`, status: 'Printed' },
+        {
+          asset: 'Laptop',
+          serial: `FAL-${employee.user_id.slice(0, 6).toUpperCase()}`,
+          status: 'Assigned',
+        },
+        {
+          asset: 'ID Card',
+          serial: `SGVU-${employee.user_id.slice(0, 4).toUpperCase()}`,
+          status: 'Printed',
+        },
       ],
       employment_history: [
-        { event: 'Joined SGVU', date: employee.created_at, status: 'Completed' },
-        { event: 'Current Role', date: employee.updated_at, status: employee.role?.role_name ?? 'Assigned' },
+        {
+          event: 'Joined SGVU',
+          date: employee.created_at,
+          status: 'Completed',
+        },
+        {
+          event: 'Current Role',
+          date: employee.updated_at,
+          status: employee.role?.role_name ?? 'Assigned',
+        },
       ],
       attendance,
       leaves,
@@ -684,10 +768,11 @@ export class HrService {
     } else if (deptChanged || roleChanged) {
       let roleName = user.role?.role_name;
       if (roleChanged && user.role_id) {
-        const roleRows = await this.users.manager.query<Array<{ role_name: string }>>(
-          `SELECT role_name FROM roles WHERE role_id = $1 LIMIT 1`,
-          [user.role_id],
-        );
+        const roleRows = await this.users.manager.query<
+          Array<{ role_name: string }>
+        >(`SELECT role_name FROM roles WHERE role_id = $1 LIMIT 1`, [
+          user.role_id,
+        ]);
         roleName = roleRows[0]?.role_name ?? roleName;
       }
 
@@ -731,7 +816,10 @@ export class HrService {
       this.staffAttendance
         .createQueryBuilder('attendance')
         .where('attendance.user_id IN (:...staffIds)', { staffIds })
-        .andWhere('attendance.work_date BETWEEN :start AND :end', { start, end })
+        .andWhere('attendance.work_date BETWEEN :start AND :end', {
+          start,
+          end,
+        })
         .getMany(),
       this.staffLeaveRequests
         .createQueryBuilder('leave')
@@ -740,7 +828,10 @@ export class HrService {
         .andWhere('leave.status IN (:...statuses)', {
           statuses: ['PENDING', 'HOD_APPROVED', 'HR_APPROVED'],
         })
-        .andWhere('leave.start_date <= :end AND leave.end_date >= :start', { start, end })
+        .andWhere('leave.start_date <= :end AND leave.end_date >= :start', {
+          start,
+          end,
+        })
         .getMany(),
     ]);
 
@@ -803,7 +894,11 @@ export class HrService {
     );
   }
 
-  listAllStaffLeaves(tenantId: string, entityId: number, status?: StaffLeaveRequest['status']) {
+  listAllStaffLeaves(
+    tenantId: string,
+    entityId: number,
+    status?: StaffLeaveRequest['status'],
+  ) {
     const qb = this.staffLeaveRequests
       .createQueryBuilder('leave')
       .leftJoinAndSelect('leave.staff', 'staff')
@@ -863,7 +958,9 @@ export class HrService {
       .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
       .getMany();
 
-    const eligibleStaff = staffUsers.filter((s) => Number(s.salary_base ?? 0) > 0);
+    const eligibleStaff = staffUsers.filter(
+      (s) => Number(s.salary_base ?? 0) > 0,
+    );
     const staffUserIds = eligibleStaff.map((s) => s.user_id);
 
     const presentCounts =
@@ -873,15 +970,20 @@ export class HrService {
             .select('attendance.user_id', 'user_id')
             .addSelect('COUNT(*)', 'count')
             .where('attendance.user_id IN (:...ids)', { ids: staffUserIds })
-            .andWhere('attendance.work_date BETWEEN :monthStart AND :monthEnd', {
-              monthStart,
-              monthEnd,
-            })
+            .andWhere(
+              'attendance.work_date BETWEEN :monthStart AND :monthEnd',
+              {
+                monthStart,
+                monthEnd,
+              },
+            )
             .andWhere('attendance.check_in_at IS NOT NULL')
             .groupBy('attendance.user_id')
             .getRawMany<{ user_id: string; count: string }>()
         : [];
-    const presentByUser = new Map(presentCounts.map((r) => [r.user_id, Number(r.count)]));
+    const presentByUser = new Map(
+      presentCounts.map((r) => [r.user_id, Number(r.count)]),
+    );
 
     const approvedLeaves =
       staffUserIds.length > 0
@@ -890,10 +992,13 @@ export class HrService {
             .where('leave.tenant_id = :tenantId', { tenantId })
             .andWhere('leave.staff_user_id IN (:...ids)', { ids: staffUserIds })
             .andWhere('leave.status = :status', { status: 'HR_APPROVED' })
-            .andWhere('leave.start_date <= :monthEnd AND leave.end_date >= :monthStart', {
-              monthStart,
-              monthEnd,
-            })
+            .andWhere(
+              'leave.start_date <= :monthEnd AND leave.end_date >= :monthStart',
+              {
+                monthStart,
+                monthEnd,
+              },
+            )
             .getMany()
         : [];
     const leavesByUser = new Map<string, typeof approvedLeaves>();
@@ -914,7 +1019,9 @@ export class HrService {
             },
           })
         : [];
-    const payslipByUser = new Map(existingPayslips.map((p) => [p.staff_user_id, p]));
+    const payslipByUser = new Map(
+      existingPayslips.map((p) => [p.staff_user_id, p]),
+    );
 
     const results: Array<{
       payslip_id: string;
@@ -937,7 +1044,10 @@ export class HrService {
 
       let paidLeaveDays = 0;
       for (const leave of staffLeaves) {
-        const dates = this.expandDateRange(leave.start_date, leave.end_date).filter((date) => {
+        const dates = this.expandDateRange(
+          leave.start_date,
+          leave.end_date,
+        ).filter((date) => {
           const d = new Date(date);
           return (
             d.getFullYear() === year &&
@@ -980,8 +1090,15 @@ export class HrService {
 
     const saved = toSave.length ? await this.payslips.save(toSave) : [];
 
-    const payrollTotal = saved.reduce((sum, slip) => sum + Number(slip.net_pay ?? 0), 0);
-    await this.financeLedger.postPayrollDisbursement(tenantId, monthKey, payrollTotal);
+    const payrollTotal = saved.reduce(
+      (sum, slip) => sum + Number(slip.net_pay ?? 0),
+      0,
+    );
+    await this.financeLedger.postPayrollDisbursement(
+      tenantId,
+      monthKey,
+      payrollTotal,
+    );
     for (const slip of saved) {
       const staff = eligibleStaff.find((s) => s.user_id === slip.staff_user_id);
       results.push({
@@ -1006,7 +1123,11 @@ export class HrService {
     };
   }
 
-  async queuePayrollRun(tenantId: string, monthKey: string, startedByUserId?: string) {
+  async queuePayrollRun(
+    tenantId: string,
+    monthKey: string,
+    startedByUserId?: string,
+  ) {
     const staffCount = await this.users
       .createQueryBuilder('user')
       .leftJoin('user.role', 'role')
@@ -1029,7 +1150,8 @@ export class HrService {
       processed_staff: 0,
       progress: 0,
       started_by_user_id: startedByUserId ?? null,
-      message: 'Payroll run queued. BullMQ worker will calculate LWP, PF, taxes, and payslip PDFs.',
+      message:
+        'Payroll run queued. BullMQ worker will calculate LWP, PF, taxes, and payslip PDFs.',
     };
   }
 
@@ -1050,9 +1172,12 @@ export class HrService {
 
     if (month) {
       const [year, monthValue] = month.split('-').map(Number);
-      qb.andWhere('payslip.year = :year', { year }).andWhere('payslip.month = :month', {
-        month: this.monthLabel(year, monthValue),
-      });
+      qb.andWhere('payslip.year = :year', { year }).andWhere(
+        'payslip.month = :month',
+        {
+          month: this.monthLabel(year, monthValue),
+        },
+      );
     }
 
     return qb.getMany();
@@ -1072,7 +1197,12 @@ export class HrService {
     leaveId: string,
     tenantId: string,
     status: 'HOD_APPROVED' | 'HR_APPROVED' | 'REJECTED',
-    actor?: { user_id: string; role?: string; roles?: string[]; dept_id?: number },
+    actor?: {
+      user_id: string;
+      role?: string;
+      roles?: string[];
+      dept_id?: number;
+    },
   ) {
     const leave = await this.staffLeaveRequests.findOne({
       where: { leave_id: leaveId, tenant_id: tenantId },
@@ -1080,17 +1210,25 @@ export class HrService {
     });
     if (!leave) throw new NotFoundException('Leave request not found');
     const actorRoles = actor?.roles ?? (actor?.role ? [actor.role] : []);
-    if (actorRoles.includes('HOD') && !actorRoles.includes('HR') && !actorRoles.includes('SuperAdmin')) {
+    if (
+      actorRoles.includes('HOD') &&
+      !actorRoles.includes('HR') &&
+      !actorRoles.includes('SuperAdmin')
+    ) {
       const hodDepartments = await this.users.manager.query(
         `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
         [actor?.user_id],
       );
       const allowedDeptIds = new Set<number>([
-        ...hodDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...hodDepartments.map((row: { dept_id: number }) =>
+          Number(row.dept_id),
+        ),
         ...(actor?.dept_id ? [actor.dept_id] : []),
       ]);
       if (!leave.staff?.dept_id || !allowedDeptIds.has(leave.staff.dept_id)) {
-        throw new ForbiddenException('HOD can act only on faculty from their department');
+        throw new ForbiddenException(
+          'HOD can act only on faculty from their department',
+        );
       }
     }
     const profile = await this.users.manager.query(
@@ -1106,7 +1244,10 @@ export class HrService {
     }
 
     if (leave.current_approver_user_id && actor?.user_id) {
-      this.hrWorkflow.assertActorIsCurrentApprover(actor.user_id, leave.current_approver_user_id);
+      this.hrWorkflow.assertActorIsCurrentApprover(
+        actor.user_id,
+        leave.current_approver_user_id,
+      );
     }
 
     const next = await this.hrWorkflow.advanceAfterApproval(
@@ -1132,7 +1273,12 @@ export class HrService {
   async hodApproveStaffLeave(
     leaveId: string,
     tenantId: string,
-    actor: { user_id: string; role?: string; roles?: string[]; dept_id?: number },
+    actor: {
+      user_id: string;
+      role?: string;
+      roles?: string[];
+      dept_id?: number;
+    },
   ) {
     const leave = await this.staffLeaveRequests.findOne({
       where: { leave_id: leaveId, tenant_id: tenantId },
@@ -1144,17 +1290,25 @@ export class HrService {
     }
 
     const actorRoles = actor.roles ?? (actor.role ? [actor.role] : []);
-    if (actorRoles.includes('HOD') && !actorRoles.includes('HR') && !actorRoles.includes('SuperAdmin')) {
+    if (
+      actorRoles.includes('HOD') &&
+      !actorRoles.includes('HR') &&
+      !actorRoles.includes('SuperAdmin')
+    ) {
       const hodDepartments = await this.users.manager.query(
         `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
         [actor.user_id],
       );
       const allowedDeptIds = new Set<number>([
-        ...hodDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...hodDepartments.map((row: { dept_id: number }) =>
+          Number(row.dept_id),
+        ),
         ...(actor.dept_id ? [actor.dept_id] : []),
       ]);
       if (!leave.staff?.dept_id || !allowedDeptIds.has(leave.staff.dept_id)) {
-        throw new ForbiddenException('HOD can act only on faculty from their department');
+        throw new ForbiddenException(
+          'HOD can act only on faculty from their department',
+        );
       }
     }
 
@@ -1165,7 +1319,10 @@ export class HrService {
     const entityId = Number(profile[0]?.entity_id ?? leave.entity_id ?? 1);
 
     if (leave.current_approver_user_id && actor.user_id) {
-      this.hrWorkflow.assertActorIsCurrentApprover(actor.user_id, leave.current_approver_user_id);
+      this.hrWorkflow.assertActorIsCurrentApprover(
+        actor.user_id,
+        leave.current_approver_user_id,
+      );
     }
 
     const next = await this.hrWorkflow.advanceAfterApproval(
@@ -1186,20 +1343,28 @@ export class HrService {
     }
 
     const saved = await this.staffLeaveRequests.save(leave);
-    const staff = leave.staff ?? (await this.users.findOne({ where: { user_id: leave.staff_user_id } }));
+    const staff =
+      leave.staff ??
+      (await this.users.findOne({ where: { user_id: leave.staff_user_id } }));
     if (staff?.tenant_id) {
       this.notify.leaveApproved({
         tenantId: staff.tenant_id,
         userId: leave.staff_user_id,
         title: 'Leave approved by HOD',
-        message: 'Your leave request was approved by your HOD and forwarded for final processing.',
+        message:
+          'Your leave request was approved by your HOD and forwarded for final processing.',
         actionLink: '/faculty/hr',
       });
     }
     if (next.approver_user_id && staff) {
       this.workflowNotify.notifyApprover({
         tenantId,
-        approver: { userId: next.approver_user_id, email: '', name: 'Approver', routeReason: 'HR_LEAVE' },
+        approver: {
+          userId: next.approver_user_id,
+          email: '',
+          name: 'Approver',
+          routeReason: 'HR_LEAVE',
+        },
         title: 'Leave awaiting HR approval',
         message: `${staff.name} leave was HOD-approved and needs HR sign-off.`,
         actionLink: '/hr/leaves',
@@ -1213,7 +1378,12 @@ export class HrService {
   async hodRejectStaffLeave(
     leaveId: string,
     tenantId: string,
-    actor: { user_id: string; role?: string; roles?: string[]; dept_id?: number },
+    actor: {
+      user_id: string;
+      role?: string;
+      roles?: string[];
+      dept_id?: number;
+    },
     remarks: string,
   ) {
     if (!remarks?.trim()) {
@@ -1229,17 +1399,25 @@ export class HrService {
     }
 
     const actorRoles = actor.roles ?? (actor.role ? [actor.role] : []);
-    if (actorRoles.includes('HOD') && !actorRoles.includes('HR') && !actorRoles.includes('SuperAdmin')) {
+    if (
+      actorRoles.includes('HOD') &&
+      !actorRoles.includes('HR') &&
+      !actorRoles.includes('SuperAdmin')
+    ) {
       const hodDepartments = await this.users.manager.query(
         `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
         [actor.user_id],
       );
       const allowedDeptIds = new Set<number>([
-        ...hodDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...hodDepartments.map((row: { dept_id: number }) =>
+          Number(row.dept_id),
+        ),
         ...(actor.dept_id ? [actor.dept_id] : []),
       ]);
       if (!leave.staff?.dept_id || !allowedDeptIds.has(leave.staff.dept_id)) {
-        throw new ForbiddenException('HOD can act only on faculty from their department');
+        throw new ForbiddenException(
+          'HOD can act only on faculty from their department',
+        );
       }
     }
 
@@ -1248,7 +1426,9 @@ export class HrService {
     leave.current_approver_user_id = null;
     const saved = await this.staffLeaveRequests.save(leave);
 
-    const staff = leave.staff ?? (await this.users.findOne({ where: { user_id: leave.staff_user_id } }));
+    const staff =
+      leave.staff ??
+      (await this.users.findOne({ where: { user_id: leave.staff_user_id } }));
     if (staff?.tenant_id) {
       this.notify.leaveApproved({
         tenantId: staff.tenant_id,
@@ -1286,7 +1466,13 @@ export class HrService {
   async createRecruitmentJob(
     tenantId: string,
     createdByUserId: string,
-    dto: { title?: string; department_id?: number; openings?: number; employment_type?: string; description?: string },
+    dto: {
+      title?: string;
+      department_id?: number;
+      openings?: number;
+      employment_type?: string;
+      description?: string;
+    },
   ) {
     const rows = await this.users.manager.query(
       `INSERT INTO hr_job_postings
@@ -1316,12 +1502,20 @@ export class HrService {
        ORDER BY a.created_at ASC`,
       [tenantId, entityId],
     );
-    const stages = ['APPLIED', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'HIRED'];
+    const stages = [
+      'APPLIED',
+      'SHORTLISTED',
+      'INTERVIEW_SCHEDULED',
+      'OFFERED',
+      'HIRED',
+    ];
     return {
       stages: stages.map((stage) => ({
         id: stage,
         title: stage.replaceAll('_', ' '),
-        cards: applicants.filter((row: { stage: string }) => row.stage === stage),
+        cards: applicants.filter(
+          (row: { stage: string }) => row.stage === stage,
+        ),
       })),
     };
   }
@@ -1338,7 +1532,10 @@ export class HrService {
     return rows[0];
   }
 
-  listClearanceTasks(tenantId: string, lifecycleType: 'ONBOARDING' | 'OFFBOARDING') {
+  listClearanceTasks(
+    tenantId: string,
+    lifecycleType: 'ONBOARDING' | 'OFFBOARDING',
+  ) {
     return this.users.manager.query(
       `SELECT t.*, u.name AS employee_name, a.name AS applicant_name, a.email AS applicant_email
        FROM hr_clearance_tasks t

@@ -28,7 +28,9 @@ function earliestDate(
   if (requestType === 'REGULARIZATION' && regularizationDate) {
     return regularizationDate.slice(0, 10);
   }
-  return startDate.slice(0, 10) <= endDate.slice(0, 10) ? startDate.slice(0, 10) : endDate.slice(0, 10);
+  return startDate.slice(0, 10) <= endDate.slice(0, 10)
+    ? startDate.slice(0, 10)
+    : endDate.slice(0, 10);
 }
 
 /** Blocks OD / leave / regularization dates more than 3 calendar days in the past (HR roles bypass). */
@@ -43,7 +45,12 @@ export function assertRetroactiveWorkforceLimit(
   if (actorRoles.some((r) => HR_BYPASS_ROLES.has(r))) return;
 
   const today = new Date();
-  const earliest = earliestDate(requestType, startDate, endDate, regularizationDate);
+  const earliest = earliestDate(
+    requestType,
+    startDate,
+    endDate,
+    regularizationDate,
+  );
   const daysSinceEarliest = calendarDaysDiff(today, parseDateOnly(earliest));
 
   if (daysSinceEarliest > WORKFORCE_RETROACTIVE_DAYS) {
@@ -71,12 +78,14 @@ export async function assertNoOverlappingWorkforceDates(
   requestType: StaffRequestType,
   regularizationDate?: string | null,
 ): Promise<void> {
-  const rangeStart = requestType === 'REGULARIZATION' && regularizationDate
-    ? regularizationDate.slice(0, 10)
-    : startDate.slice(0, 10);
-  const rangeEnd = requestType === 'REGULARIZATION' && regularizationDate
-    ? regularizationDate.slice(0, 10)
-    : endDate.slice(0, 10);
+  const rangeStart =
+    requestType === 'REGULARIZATION' && regularizationDate
+      ? regularizationDate.slice(0, 10)
+      : startDate.slice(0, 10);
+  const rangeEnd =
+    requestType === 'REGULARIZATION' && regularizationDate
+      ? regularizationDate.slice(0, 10)
+      : endDate.slice(0, 10);
 
   const rows = await dataSource.query<OverlapRow[]>(
     `SELECT leave_id, request_type, leave_type, start_date::text, end_date::text, regularization_date::text

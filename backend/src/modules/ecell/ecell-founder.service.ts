@@ -12,7 +12,11 @@ import { DataSource } from 'typeorm';
 import { RedisService } from '../../core/redis/redis.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { NotificationService } from '../integrations/notification.service';
-import { BookWorkspaceDto, MentorFeedbackDto, RequestMentorMeetingDto } from './dto/founder.dto';
+import {
+  BookWorkspaceDto,
+  MentorFeedbackDto,
+  RequestMentorMeetingDto,
+} from './dto/founder.dto';
 
 const FOUNDER_STATUSES = ['L2_APPROVED', 'FUNDED'];
 const MAX_WEEKLY_CONFERENCE_HOURS = 4;
@@ -26,7 +30,7 @@ export class EcellFounderService {
     private readonly redis: RedisService,
     private readonly notify: NotificationEmitterService,
     private readonly integrations: NotificationService,
-  ) {}
+  ) { }
 
   private tenant(tenantId?: string) {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
@@ -35,7 +39,8 @@ export class EcellFounderService {
   private mentorPortalLink(roleName: string) {
     const role = roleName.trim().toLowerCase();
     if (role === 'alumni') return '/alumni/mentorship';
-    if (role === 'president' || role === 'chairman') return '/president/meetings';
+    if (role === 'president' || role === 'chairman')
+      return '/president/meetings';
     if (role === 'dean') return '/dean/meetings';
     return '/faculty/mentorship';
   }
@@ -53,7 +58,9 @@ export class EcellFounderService {
       [tenantId, studentUserId, FOUNDER_STATUSES],
     );
     if (!rows[0]) {
-      throw new ForbiddenException('Founder Mode unlocks after Level 2 approval or funding');
+      throw new ForbiddenException(
+        'Founder Mode unlocks after Level 2 approval or funding',
+      );
     }
     return rows[0] as Record<string, unknown>;
   }
@@ -84,7 +91,11 @@ export class EcellFounderService {
     );
   }
 
-  async workspaceCalendar(tenantId: string | undefined, workspaceId: string, date: string) {
+  async workspaceCalendar(
+    tenantId: string | undefined,
+    workspaceId: string,
+    date: string,
+  ) {
     const day = date.slice(0, 10);
     const rows = await this.db.query(
       `SELECT b.booking_id, b.start_time, b.end_time, b.purpose, b.status,
@@ -104,7 +115,10 @@ export class EcellFounderService {
   }
 
   async listMyBookings(tenantId: string | undefined, studentUserId: string) {
-    const project = await this.getFounderProject(this.tenant(tenantId), studentUserId);
+    const project = await this.getFounderProject(
+      this.tenant(tenantId),
+      studentUserId,
+    );
     return this.db.query(
       `SELECT b.*, w.name AS workspace_name
        FROM ecell_workspace_bookings b
@@ -125,12 +139,18 @@ export class EcellFounderService {
     const project = await this.getFounderProject(tid, studentUserId);
     const start = new Date(dto.start_time);
     const end = new Date(dto.end_time);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      end <= start
+    ) {
       throw new BadRequestException('Invalid booking time range');
     }
     const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
     if (durationHours <= 0 || durationHours > 4) {
-      throw new BadRequestException('Each booking must be between 1 minute and 4 hours');
+      throw new BadRequestException(
+        'Each booking must be between 1 minute and 4 hours',
+      );
     }
 
     const workspaceRows = await this.db.query(
@@ -164,9 +184,15 @@ export class EcellFounderService {
 
     const slotKey = start.toISOString();
     const lockOwner = randomUUID();
-    const locked = await this.redis.acquireWorkspaceSlotLock(dto.workspace_id, slotKey, lockOwner);
+    const locked = await this.redis.acquireWorkspaceSlotLock(
+      dto.workspace_id,
+      slotKey,
+      lockOwner,
+    );
     if (!locked) {
-      throw new BadRequestException('This time slot is being booked by another startup — try again');
+      throw new BadRequestException(
+        'This time slot is being booked by another startup — try again',
+      );
     }
 
     try {
@@ -180,7 +206,9 @@ export class EcellFounderService {
         [dto.workspace_id, start.toISOString(), end.toISOString()],
       );
       if (overlap[0]) {
-        throw new BadRequestException('This room is already booked for the selected time');
+        throw new BadRequestException(
+          'This room is already booked for the selected time',
+        );
       }
 
       const rows = await this.db.query(
@@ -201,7 +229,11 @@ export class EcellFounderService {
       );
       return rows[0];
     } finally {
-      await this.redis.releaseWorkspaceSlotLock(dto.workspace_id, slotKey, lockOwner);
+      await this.redis.releaseWorkspaceSlotLock(
+        dto.workspace_id,
+        slotKey,
+        lockOwner,
+      );
     }
   }
 
@@ -271,7 +303,11 @@ export class EcellFounderService {
       ],
     );
     const meeting = rows[0];
-    const mentor = mentorRows[0] as { user_id: string; name: string; role_name: string };
+    const mentor = mentorRows[0] as {
+      user_id: string;
+      name: string;
+      role_name: string;
+    };
     const startupName = String(project.startup_name);
 
     this.notify.ecellMentorMeetingRequested({
@@ -286,7 +322,10 @@ export class EcellFounderService {
     return meeting;
   }
 
-  async listStudentMeetings(tenantId: string | undefined, studentUserId: string) {
+  async listStudentMeetings(
+    tenantId: string | undefined,
+    studentUserId: string,
+  ) {
     await this.getFounderProject(this.tenant(tenantId), studentUserId);
     return this.db.query(
       `SELECT m.*, u.name AS mentor_name, p.startup_name
@@ -357,7 +396,9 @@ export class EcellFounderService {
     if (accept) {
       const link = body.meeting_link?.trim();
       if (!link || link.length < 3) {
-        throw new BadRequestException('Please provide a Google Meet link or cabin number');
+        throw new BadRequestException(
+          'Please provide a Google Meet link or cabin number',
+        );
       }
       const updated = await this.db.query(
         `UPDATE ecell_mentor_meetings
@@ -420,7 +461,10 @@ export class EcellFounderService {
        RETURNING *`,
       [meetingId, tid, mentorUserId, dto.mentor_feedback.trim()],
     );
-    if (!rows[0]) throw new NotFoundException('Feedback session not found or already submitted');
+    if (!rows[0])
+      throw new NotFoundException(
+        'Feedback session not found or already submitted',
+      );
     return rows[0];
   }
 
@@ -489,7 +533,9 @@ export class EcellFounderService {
        WHERE u.user_id = $1`,
       [studentUserId],
     );
-    const phone = (rows[0]?.phone ?? rows[0]?.profile_phone) as string | undefined;
+    const phone = (rows[0]?.phone ?? rows[0]?.profile_phone) as
+      | string
+      | undefined;
     if (phone) await this.integrations.queueWhatsApp(phone, message);
   }
 }

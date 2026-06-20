@@ -1,15 +1,29 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { assertNoPendingSql } from '../../common/validators/pending-request.util';
 
-const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'END_TERM', 'INTERNAL', 'ASSIGNMENT'] as const;
+const EXAM_TYPES = [
+  'CAT1',
+  'CAT2',
+  'QUIZ',
+  'END_TERM',
+  'INTERNAL',
+  'ASSIGNMENT',
+] as const;
 type ExamType = (typeof EXAM_TYPES)[number];
 
-/** Canonical roll-number expression aligned with student profile schema. */
+/** Canonical roll-number expression — semester roll on enrollment, then permanent PRN. */
 const ROLL_NUMBER_SQL = `COALESCE(
+  NULLIF(BTRIM(e.roll_number), ''),
+  NULLIF(BTRIM(sp.prn_number), ''),
   NULLIF(BTRIM(sp.enrollment_no), ''),
   NULLIF(BTRIM(sp.enrollment_number), ''),
   NULLIF(BTRIM(sp.admission_number), ''),
@@ -207,7 +221,9 @@ export class FacultyWorkspacesService {
     const conductedClasses = Number(summary?.conducted_classes ?? 0);
     const remainingClasses = Math.max(expectedSoFar - conductedClasses, 0);
     const completionPercent =
-      expectedSoFar > 0 ? Math.round((conductedClasses / expectedSoFar) * 100) : 0;
+      expectedSoFar > 0
+        ? Math.round((conductedClasses / expectedSoFar) * 100)
+        : 0;
 
     return {
       term_start: summary?.term_start ?? null,
@@ -220,7 +236,8 @@ export class FacultyWorkspacesService {
       todays_classes: Number(summary?.todays_classes ?? 0),
       todays_conducted: Number(summary?.todays_conducted ?? 0),
       todays_remaining: Math.max(
-        Number(summary?.todays_classes ?? 0) - Number(summary?.todays_conducted ?? 0),
+        Number(summary?.todays_classes ?? 0) -
+        Number(summary?.todays_conducted ?? 0),
         0,
       ),
       missing_attendance_today: Number(summary?.missing_attendance_today ?? 0),
@@ -239,7 +256,8 @@ export class FacultyWorkspacesService {
           expected_so_far: expected,
           conducted_classes: conducted,
           remaining_classes: Math.max(expected - conducted, 0),
-          completion_percent: expected > 0 ? Math.round((conducted / expected) * 100) : 0,
+          completion_percent:
+            expected > 0 ? Math.round((conducted / expected) * 100) : 0,
         };
       }),
     };
@@ -279,9 +297,11 @@ export class FacultyWorkspacesService {
     );
 
     const maxMarksDefault =
-      rows.find((r: { max_marks: number | null }) => r.max_marks != null)?.max_marks ?? 50;
+      rows.find((r: { max_marks: number | null }) => r.max_marks != null)
+        ?.max_marks ?? 50;
     const draftCount = rows.filter(
-      (r: { mark_status: string | null }) => !r.mark_status || r.mark_status === 'DRAFT',
+      (r: { mark_status: string | null }) =>
+        !r.mark_status || r.mark_status === 'DRAFT',
     ).length;
     const pendingCount = rows.filter(
       (r: { mark_status: string | null }) => r.mark_status === 'PENDING_COE',
@@ -336,7 +356,8 @@ export class FacultyWorkspacesService {
           name: s.name,
           roll_number: s.roll_number,
           mark_id: s.mark_id ?? null,
-          marks_obtained: s.marks_obtained != null ? Number(s.marks_obtained) : null,
+          marks_obtained:
+            s.marks_obtained != null ? Number(s.marks_obtained) : null,
           max_marks: s.max_marks ?? maxMarksDefault,
           co_mapped: s.co_mapped ?? null,
           status: s.mark_status ?? 'DRAFT',
@@ -352,7 +373,11 @@ export class FacultyWorkspacesService {
       course_id: string;
       exam_type: string;
       max_marks: number;
-      entries: { student_user_id: string; marks_obtained: number; co_mapped?: string }[];
+      entries: {
+        student_user_id: string;
+        marks_obtained: number;
+        co_mapped?: string;
+      }[];
     },
   ) {
     if (!EXAM_TYPES.includes(dto.exam_type as ExamType)) {
@@ -387,13 +412,23 @@ export class FacultyWorkspacesService {
 
     if (dto.entries.length > 0) {
       const valuePlaceholders: string[] = [];
-      const params: unknown[] = [tenantId, dto.course_id, dto.exam_type, maxMarks, facultyUserId];
+      const params: unknown[] = [
+        tenantId,
+        dto.course_id,
+        dto.exam_type,
+        maxMarks,
+        facultyUserId,
+      ];
       let paramIdx = 6;
       for (const entry of dto.entries) {
         valuePlaceholders.push(
           `($1, $${paramIdx++}, $2, $3, $${paramIdx++}, $4, $${paramIdx++}, 'DRAFT', $5, NOW())`,
         );
-        params.push(entry.student_user_id, entry.marks_obtained, entry.co_mapped ?? null);
+        params.push(
+          entry.student_user_id,
+          entry.marks_obtained,
+          entry.co_mapped ?? null,
+        );
       }
       await this.dataSource.query(
         `INSERT INTO academic_marks (
@@ -444,7 +479,9 @@ export class FacultyWorkspacesService {
       [tenantId, courseId, examType, facultyUserId, targetStatus],
     );
 
-    const courseRows = await this.dataSource.query<Array<{ course_name: string }>>(
+    const courseRows = await this.dataSource.query<
+      Array<{ course_name: string }>
+    >(
       `SELECT course_name FROM academic_courses WHERE course_id = $1 AND tenant_id = $2 LIMIT 1`,
       [courseId, tenantId],
     );
@@ -458,7 +495,11 @@ export class FacultyWorkspacesService {
         'No draft marks found to submit. Save draft marks first for this course and exam type.',
       );
     }
-    return { published: publishedCount, status: 'PENDING_COE', course_name: courseName };
+    return {
+      published: publishedCount,
+      status: 'PENDING_COE',
+      course_name: courseName,
+    };
   }
 
   async listCoPoMappings(tenantId: string, courseId: string) {
@@ -524,6 +565,8 @@ export class FacultyWorkspacesService {
       original_date?: string;
       new_date?: string;
       reason?: string;
+      substitute_faculty_user_id?: string;
+      timetable_id?: string;
     },
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
@@ -539,8 +582,9 @@ export class FacultyWorkspacesService {
 
     const rows = await this.dataSource.query(
       `INSERT INTO class_adjustments (
-         tenant_id, course_id, faculty_user_id, adjustment_type, original_date, new_date, reason
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         tenant_id, course_id, faculty_user_id, adjustment_type, original_date, new_date,
+         reason, substitute_faculty_user_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING *`,
       [
         tenantId,
@@ -550,6 +594,7 @@ export class FacultyWorkspacesService {
         dto.original_date ?? null,
         dto.new_date ?? null,
         dto.reason ?? null,
+        dto.substitute_faculty_user_id ?? null,
       ],
     );
     return rows[0];
@@ -618,11 +663,14 @@ export class FacultyWorkspacesService {
       ...(hod[0]?.dept_id ? [hod[0].dept_id] : []),
     ]);
     if (!deptIds.has(Number(row.faculty_dept_id))) {
-      throw new ForbiddenException('HOD can act only on adjustments from their department');
+      throw new ForbiddenException(
+        'HOD can act only on adjustments from their department',
+      );
     }
 
     if (action === 'REJECT') {
-      if (!remarks?.trim()) throw new BadRequestException('Rejection remarks are required');
+      if (!remarks?.trim())
+        throw new BadRequestException('Rejection remarks are required');
       await this.dataSource.query(
         `UPDATE class_adjustments SET status = 'REJECTED', hod_remarks = $3 WHERE adjustment_id = $1 AND tenant_id = $2`,
         [adjustmentId, tenantId, remarks.trim()],
@@ -634,15 +682,19 @@ export class FacultyWorkspacesService {
       );
     }
 
-    const faculty = await this.dataSource.query<Array<{ user_id: string; tenant_id: string; name: string }>>(
-      `SELECT user_id, tenant_id, name FROM users WHERE user_id = $1`,
-      [row.faculty_user_id],
-    );
+    const faculty = await this.dataSource.query<
+      Array<{ user_id: string; tenant_id: string; name: string }>
+    >(`SELECT user_id, tenant_id, name FROM users WHERE user_id = $1`, [
+      row.faculty_user_id,
+    ]);
     if (faculty[0]) {
       this.notify.leaveApproved({
         tenantId: faculty[0].tenant_id,
         userId: faculty[0].user_id,
-        title: action === 'APPROVE' ? 'Extra class approved' : 'Extra class rejected',
+        title:
+          action === 'APPROVE'
+            ? 'Extra class approved'
+            : 'Extra class rejected',
         message:
           action === 'APPROVE'
             ? 'Your extra class request was approved by your HOD.'
@@ -651,9 +703,10 @@ export class FacultyWorkspacesService {
       });
     }
 
-    const updated = await this.dataSource.query(`SELECT * FROM class_adjustments WHERE adjustment_id = $1`, [
-      adjustmentId,
-    ]);
+    const updated = await this.dataSource.query(
+      `SELECT * FROM class_adjustments WHERE adjustment_id = $1`,
+      [adjustmentId],
+    );
     return updated[0];
   }
 
@@ -713,11 +766,11 @@ export class FacultyWorkspacesService {
     facultyUserId: string,
     tenantId: string,
     assignmentId: string,
-    reason: string
+    reason: string,
   ) {
     const assignment = await this.dataSource.query(
       `SELECT 1 FROM faculty_invigilation_assignments WHERE assignment_id = $1 AND faculty_user_id = $2 AND tenant_id = $3`,
-      [assignmentId, facultyUserId, tenantId]
+      [assignmentId, facultyUserId, tenantId],
     );
     if (!assignment[0]) throw new NotFoundException('Assignment not found');
 
@@ -725,7 +778,7 @@ export class FacultyWorkspacesService {
       `INSERT INTO invigilation_unavailability_requests (tenant_id, assignment_id, faculty_user_id, reason)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [tenantId, assignmentId, facultyUserId, reason]
+      [tenantId, assignmentId, facultyUserId, reason],
     );
     return rows[0];
   }
@@ -733,16 +786,25 @@ export class FacultyWorkspacesService {
   async assignProjectGuide(
     facultyUserId: string,
     tenantId: string,
-    data: { project_title: string; program?: string; start_date?: string; end_date?: string; funding_allocated?: number; student_ids: string[] },
+    data: {
+      project_title: string;
+      program?: string;
+      start_date?: string;
+      end_date?: string;
+      funding_allocated?: number;
+      student_ids: string[];
+    },
   ) {
     // Validate max 4 active projects
     const countRes = await this.dataSource.query(
       `SELECT COUNT(*) AS active_count FROM faculty_project_guides 
        WHERE tenant_id = $1 AND faculty_user_id = $2 AND status = 'ACTIVE'`,
-      [tenantId, facultyUserId]
+      [tenantId, facultyUserId],
     );
     if (parseInt(countRes[0].active_count) >= 4) {
-      throw new BadRequestException('Faculty member cannot have more than 4 active projects simultaneously.');
+      throw new BadRequestException(
+        'Faculty member cannot have more than 4 active projects simultaneously.',
+      );
     }
 
     const guideId = crypto.randomUUID();
@@ -757,13 +819,22 @@ export class FacultyWorkspacesService {
         `INSERT INTO faculty_project_guides 
           (guide_id, tenant_id, faculty_user_id, project_title, program, status, start_date, end_date, funding_allocated, funding_consumed, created_at)
          VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7, $8, 0, NOW())`,
-        [guideId, tenantId, facultyUserId, data.project_title, data.program, data.start_date, data.end_date, data.funding_allocated || 0]
+        [
+          guideId,
+          tenantId,
+          facultyUserId,
+          data.project_title,
+          data.program,
+          data.start_date,
+          data.end_date,
+          data.funding_allocated || 0,
+        ],
       );
 
       for (const studentId of data.student_ids) {
         await queryRunner.query(
           `INSERT INTO project_guide_students (guide_id, student_user_id, tenant_id) VALUES ($1, $2, $3)`,
-          [guideId, studentId, tenantId]
+          [guideId, studentId, tenantId],
         );
       }
 
@@ -813,7 +884,7 @@ export class FacultyWorkspacesService {
     guideId: string,
     facultyUserId: string,
     tenantId: string,
-    students: { student_user_id: string; grade?: string }[]
+    students: { student_user_id: string; grade?: string }[],
   ) {
     await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
 
@@ -824,12 +895,12 @@ export class FacultyWorkspacesService {
     try {
       await queryRunner.query(
         `DELETE FROM project_guide_students WHERE guide_id = $1 AND tenant_id = $2`,
-        [guideId, tenantId]
+        [guideId, tenantId],
       );
       for (const st of students) {
         await queryRunner.query(
           `INSERT INTO project_guide_students (guide_id, student_user_id, grade, tenant_id) VALUES ($1, $2, $3, $4)`,
-          [guideId, st.student_user_id, st.grade || null, tenantId]
+          [guideId, st.student_user_id, st.grade || null, tenantId],
         );
       }
       await queryRunner.commitTransaction();
@@ -842,11 +913,15 @@ export class FacultyWorkspacesService {
     }
   }
 
-  async completeProject(guideId: string, facultyUserId: string, tenantId: string) {
+  async completeProject(
+    guideId: string,
+    facultyUserId: string,
+    tenantId: string,
+  ) {
     await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
     await this.dataSource.query(
       `UPDATE faculty_project_guides SET status = 'COMPLETED', end_date = CURRENT_DATE WHERE guide_id = $1 AND tenant_id = $2`,
-      [guideId, tenantId]
+      [guideId, tenantId],
     );
     return { success: true };
   }
@@ -856,22 +931,24 @@ export class FacultyWorkspacesService {
     facultyUserId: string,
     tenantId: string,
     amount: number,
-    purpose: string
+    purpose: string,
   ) {
     await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
     // Check if there's already a pending request
     const existing = await this.dataSource.query(
       `SELECT 1 FROM project_funding_requests WHERE guide_id = $1 AND status IN ('PENDING_HOD', 'APPROVED_HOD')`,
-      [guideId]
+      [guideId],
     );
     if (existing.length > 0) {
-      throw new BadRequestException('A funding request is already pending or approved and awaiting transfer.');
+      throw new BadRequestException(
+        'A funding request is already pending or approved and awaiting transfer.',
+      );
     }
 
     const rows = await this.dataSource.query(
       `INSERT INTO project_funding_requests (tenant_id, guide_id, requested_by, amount, purpose)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [tenantId, guideId, facultyUserId, amount, purpose]
+      [tenantId, guideId, facultyUserId, amount, purpose],
     );
 
     const hodRows = await this.dataSource.query(
@@ -879,7 +956,7 @@ export class FacultyWorkspacesService {
        FROM users u 
        JOIN departments d ON u.dept_id = d.dept_id 
        WHERE u.user_id = $1 AND u.tenant_id = $2`,
-      [facultyUserId, tenantId]
+      [facultyUserId, tenantId],
     );
 
     if (hodRows.length > 0 && hodRows[0].hod_user_id) {
@@ -891,7 +968,7 @@ export class FacultyWorkspacesService {
         requesterName: hodRows[0].faculty_name || 'Faculty',
         title: 'New Project Funding Request',
         message: `A new funding request of ₹${amount} requires your approval.`,
-        actionLink: '/hod/inbox'
+        actionLink: '/hod/inbox',
       });
     }
 
@@ -908,7 +985,7 @@ export class FacultyWorkspacesService {
        INNER JOIN departments d ON d.dept_id = u.dept_id
        WHERE fr.tenant_id = $1 AND d.hod_user_id = $2
        ORDER BY fr.created_at DESC`,
-      [tenantId, hodUserId]
+      [tenantId, hodUserId],
     );
   }
 
@@ -921,7 +998,7 @@ export class FacultyWorkspacesService {
        INNER JOIN departments d ON d.dept_id = u.dept_id
        WHERE fr.tenant_id = $1 AND fr.status IN ('APPROVED_HOD', 'APPROVED_DEAN', 'REJECTED_DEAN')
        ORDER BY fr.created_at DESC`,
-      [tenantId]
+      [tenantId],
     );
   }
 
@@ -930,17 +1007,19 @@ export class FacultyWorkspacesService {
     status: 'APPROVED_HOD' | 'REJECTED_HOD',
     commitMessage: string,
     hodUserId: string,
-    tenantId: string
+    tenantId: string,
   ) {
     const rows = await this.dataSource.query(
       `UPDATE project_funding_requests
        SET status = $1, hod_commit_message = $2, hod_user_id = $3, updated_at = NOW()
        WHERE request_id = $4 AND tenant_id = $5 AND status = 'PENDING_HOD'
        RETURNING *`,
-      [status, commitMessage, hodUserId, requestId, tenantId]
+      [status, commitMessage, hodUserId, requestId, tenantId],
     );
     if (!rows.length) {
-      throw new NotFoundException('Pending funding request not found or unauthorized');
+      throw new NotFoundException(
+        'Pending funding request not found or unauthorized',
+      );
     }
 
     const updatedRequest = rows[0];
@@ -948,7 +1027,7 @@ export class FacultyWorkspacesService {
     if (status === 'APPROVED_HOD') {
       const deanUsers = await this.dataSource.query(
         `SELECT u.user_id FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.tenant_id = $1 AND r.role_name = 'Dean'`,
-        [tenantId]
+        [tenantId],
       );
 
       for (const d of deanUsers) {
@@ -960,7 +1039,7 @@ export class FacultyWorkspacesService {
           requesterName: 'HOD',
           title: 'Funding Request Pending Dean Approval',
           message: `A funding request of ₹${updatedRequest.amount} was approved by HOD and requires your final approval.`,
-          actionLink: '/dean/inbox'
+          actionLink: '/dean/inbox',
         });
       }
     }
@@ -973,17 +1052,19 @@ export class FacultyWorkspacesService {
     status: 'APPROVED_DEAN' | 'REJECTED_DEAN',
     commitMessage: string,
     deanUserId: string,
-    tenantId: string
+    tenantId: string,
   ) {
     const rows = await this.dataSource.query(
       `UPDATE project_funding_requests
        SET status = $1, dean_commit_message = $2, dean_user_id = $3, updated_at = NOW()
        WHERE request_id = $4 AND tenant_id = $5 AND status = 'APPROVED_HOD'
        RETURNING *`,
-      [status, commitMessage, deanUserId, requestId, tenantId]
+      [status, commitMessage, deanUserId, requestId, tenantId],
     );
     if (!rows.length) {
-      throw new NotFoundException('Pending funding request not found or unauthorized');
+      throw new NotFoundException(
+        'Pending funding request not found or unauthorized',
+      );
     }
 
     const updatedRequest = rows[0];
@@ -991,7 +1072,7 @@ export class FacultyWorkspacesService {
     if (status === 'APPROVED_DEAN') {
       const financeUsers = await this.dataSource.query(
         `SELECT u.user_id FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.tenant_id = $1 AND r.role_name IN ('FinanceAdmin', 'FinanceAccountant', 'Finance', 'Accountant')`,
-        [tenantId]
+        [tenantId],
       );
 
       for (const f of financeUsers) {
@@ -1003,7 +1084,7 @@ export class FacultyWorkspacesService {
           requesterName: 'Dean',
           title: 'Funding Request Dean Approved',
           message: `A funding request of ₹${updatedRequest.amount} was approved by the Dean and requires your transfer.`,
-          actionLink: '/finance/funding-requests'
+          actionLink: '/finance/funding-requests',
         });
       }
     }
@@ -1011,7 +1092,11 @@ export class FacultyWorkspacesService {
     return updatedRequest;
   }
 
-  async listProjectReports(guideId: string, facultyUserId: string, tenantId: string) {
+  async listProjectReports(
+    guideId: string,
+    facultyUserId: string,
+    tenantId: string,
+  ) {
     await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
     return this.dataSource.query(
       `SELECT * FROM project_weekly_reports WHERE guide_id = $1 ORDER BY week_no`,
@@ -1045,7 +1130,11 @@ export class FacultyWorkspacesService {
     return rows[0];
   }
 
-  async getStudentAnalytics(facultyUserId: string, tenantId: string, courseId?: string) {
+  async getStudentAnalytics(
+    facultyUserId: string,
+    tenantId: string,
+    courseId?: string,
+  ) {
     const params: unknown[] = [tenantId, facultyUserId];
     let courseFilter = '';
     if (courseId) {
@@ -1075,7 +1164,11 @@ export class FacultyWorkspacesService {
     );
   }
 
-  async listLogbook(facultyUserId: string, tenantId: string, courseId?: string) {
+  async listLogbook(
+    facultyUserId: string,
+    tenantId: string,
+    courseId?: string,
+  ) {
     const params: unknown[] = [tenantId, facultyUserId];
     let filter = '';
     if (courseId) {
@@ -1104,12 +1197,22 @@ export class FacultyWorkspacesService {
        ON CONFLICT (tenant_id, course_id, faculty_user_id, class_date) DO UPDATE SET
          topic_summary = EXCLUDED.topic_summary
        RETURNING *`,
-      [tenantId, dto.course_id, facultyUserId, dto.class_date, dto.topic_summary],
+      [
+        tenantId,
+        dto.course_id,
+        facultyUserId,
+        dto.class_date,
+        dto.topic_summary,
+      ],
     );
     return rows[0];
   }
 
-  async listRemedialActions(facultyUserId: string, tenantId: string, limit = 50) {
+  async listRemedialActions(
+    facultyUserId: string,
+    tenantId: string,
+    limit = 50,
+  ) {
     return this.dataSource.query(
       `SELECT r.remedial_id, r.student_user_id, r.course_id, r.reason, r.action_taken,
               r.scheduled_at, r.status, r.created_at,
@@ -1153,14 +1256,26 @@ export class FacultyWorkspacesService {
     return rows[0];
   }
 
-  async getLessonPlan(facultyUserId: string, tenantId: string, courseId: string) {
+  async getLessonPlan(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+  ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
     const rows = await this.dataSource.query(
       `SELECT * FROM course_lesson_plans
        WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3`,
       [tenantId, courseId, facultyUserId],
     );
-    return rows[0] ?? { course_id: courseId, handout_url: null, units: [], reference_links: [], status: 'DRAFT' };
+    return (
+      rows[0] ?? {
+        course_id: courseId,
+        handout_url: null,
+        units: [],
+        reference_links: [],
+        status: 'DRAFT',
+      }
+    );
   }
 
   async upsertLessonPlan(
@@ -1199,7 +1314,11 @@ export class FacultyWorkspacesService {
     return rows[0];
   }
 
-  private async assertFacultyOwnsCourse(facultyUserId: string, tenantId: string, courseId: string) {
+  private async assertFacultyOwnsCourse(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT 1 FROM academic_timetables
        WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3 LIMIT 1`,
@@ -1210,7 +1329,11 @@ export class FacultyWorkspacesService {
     }
   }
 
-  private async getResultSession(tenantId: string, courseId: string, examType: string) {
+  private async getResultSession(
+    tenantId: string,
+    courseId: string,
+    examType: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
@@ -1220,35 +1343,53 @@ export class FacultyWorkspacesService {
     return rows[0] ?? null;
   }
 
-  private assertFacultyEntryAllowed(session: {
-    entry_status: string;
-    marks_locked: boolean;
-    entry_open_at?: string | Date | null;
-    entry_close_at?: string | Date | null;
-    declared_at?: string | Date | null;
-  } | null) {
+  private assertFacultyEntryAllowed(
+    session: {
+      entry_status: string;
+      marks_locked: boolean;
+      entry_open_at?: string | Date | null;
+      entry_close_at?: string | Date | null;
+      declared_at?: string | Date | null;
+    } | null,
+  ) {
     if (!session) {
-      throw new BadRequestException('Marks entry has not been opened by Exam Cell for this exam.');
+      throw new BadRequestException(
+        'Marks entry has not been opened by Exam Cell for this exam.',
+      );
     }
     if (session.declared_at) {
-      throw new BadRequestException('Results already declared. Marks are locked.');
+      throw new BadRequestException(
+        'Results already declared. Marks are locked.',
+      );
     }
     if (session.entry_status !== 'OPEN') {
-      throw new BadRequestException('Marks entry is closed. Contact Exam Cell to reopen.');
+      throw new BadRequestException(
+        'Marks entry is closed. Contact Exam Cell to reopen.',
+      );
     }
     if (session.marks_locked) {
       throw new BadRequestException('Marks entry is locked by Exam Cell.');
     }
     const now = Date.now();
-    if (session.entry_open_at && new Date(session.entry_open_at).getTime() > now) {
+    if (
+      session.entry_open_at &&
+      new Date(session.entry_open_at).getTime() > now
+    ) {
       throw new BadRequestException('Marks entry window has not opened yet.');
     }
-    if (session.entry_close_at && new Date(session.entry_close_at).getTime() < now) {
+    if (
+      session.entry_close_at &&
+      new Date(session.entry_close_at).getTime() < now
+    ) {
       throw new BadRequestException('Marks entry window has closed.');
     }
   }
 
-  private async assertOwnsGuide(guideId: string, facultyUserId: string, tenantId: string) {
+  private async assertOwnsGuide(
+    guideId: string,
+    facultyUserId: string,
+    tenantId: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT 1 FROM faculty_project_guides
        WHERE guide_id = $1 AND faculty_user_id = $2 AND tenant_id = $3`,

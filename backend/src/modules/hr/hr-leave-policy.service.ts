@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -13,7 +17,11 @@ export class HrLeavePolicyService {
     );
   }
 
-  async createPolicy(tenantId: string, entityId: number, dto: Record<string, unknown>) {
+  async createPolicy(
+    tenantId: string,
+    entityId: number,
+    dto: Record<string, unknown>,
+  ) {
     const rows = await this.dataSource.query(
       `INSERT INTO hr_leave_policies (
          tenant_id, entity_id, leave_name, leave_code, leave_count, disbursement_cycle,
@@ -37,7 +45,12 @@ export class HrLeavePolicyService {
     return rows[0];
   }
 
-  async updatePolicy(tenantId: string, entityId: number, policyId: string, dto: Record<string, unknown>) {
+  async updatePolicy(
+    tenantId: string,
+    entityId: number,
+    policyId: string,
+    dto: Record<string, unknown>,
+  ) {
     const rows = await this.dataSource.query(
       `UPDATE hr_leave_policies SET
          leave_name = COALESCE($4, leave_name),
@@ -103,7 +116,9 @@ export class HrLeavePolicyService {
     const days = this.countDays(dto.start_date, dto.end_date, policy);
 
     if (days > entitled - used) {
-      throw new BadRequestException(`Insufficient ${dto.leave_type} balance (${entitled - used} remaining)`);
+      throw new BadRequestException(
+        `Insufficient ${dto.leave_type} balance (${entitled - used} remaining)`,
+      );
     }
 
     if (!policy.allow_clubbing) {
@@ -118,14 +133,23 @@ export class HrLeavePolicyService {
         [userId, tenantId, dto.start_date, dto.end_date],
       );
       if (adjacent[0]) {
-        throw new BadRequestException('Clubbing not allowed for this leave type');
+        throw new BadRequestException(
+          'Clubbing not allowed for this leave type',
+        );
       }
     }
 
     return { valid: true, days_requested: days };
   }
 
-  private countDays(start: string, end: string, policy: { sandwich_rule_enabled: boolean; sandwich_counts_weekends: boolean }) {
+  private countDays(
+    start: string,
+    end: string,
+    policy: {
+      sandwich_rule_enabled: boolean;
+      sandwich_counts_weekends: boolean;
+    },
+  ) {
     const s = new Date(start);
     const e = new Date(end);
     let days = 0;
@@ -147,7 +171,11 @@ export class HrLeavePolicyService {
       [tenantId, entityId],
     );
     for (const p of policies) {
-      if (p.disbursement_cycle !== 'YEARLY' && p.disbursement_cycle !== 'ON_JOIN') continue;
+      if (
+        p.disbursement_cycle !== 'YEARLY' &&
+        p.disbursement_cycle !== 'ON_JOIN'
+      )
+        continue;
       for (const s of staff) {
         await this.dataSource.query(
           `INSERT INTO hr_leave_policy_balances (user_id, policy_id, year, entitled, used)

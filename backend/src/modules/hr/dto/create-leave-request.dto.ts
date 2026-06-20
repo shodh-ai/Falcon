@@ -1,4 +1,12 @@
-import { IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 import type { LeaveType } from '../../../entities/leave-request.entity';
 
 export class CreateLeaveRequestDto {

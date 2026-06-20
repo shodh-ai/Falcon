@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HelpdeskTicket } from '../../../entities/helpdesk-ticket.entity';
@@ -10,7 +14,10 @@ import type { ITicketProvider } from './ticket-provider.interface';
 export class LocalTicketProvider implements ITicketProvider {
   readonly providerId = 'local-postgres';
 
-  constructor(@InjectRepository(HelpdeskTicket) private tickets: Repository<HelpdeskTicket>) {}
+  constructor(
+    @InjectRepository(HelpdeskTicket)
+    private tickets: Repository<HelpdeskTicket>,
+  ) {}
 
   createTicket(studentUserId: string, dto: CreateTicketDto) {
     return this.tickets.save(
@@ -37,7 +44,9 @@ export class LocalTicketProvider implements ITicketProvider {
   }
 
   async updateStatus(ticketId: string, dto: UpdateTicketStatusDto) {
-    const ticket = await this.tickets.findOne({ where: { ticket_id: ticketId } });
+    const ticket = await this.tickets.findOne({
+      where: { ticket_id: ticketId },
+    });
     if (!ticket) throw new NotFoundException('Ticket not found');
     ticket.status = dto.status;
     if (dto.assigned_to_user_id !== undefined) {
@@ -47,7 +56,9 @@ export class LocalTicketProvider implements ITicketProvider {
   }
 
   async getTicketForStudent(ticketId: string, studentUserId: string) {
-    const ticket = await this.tickets.findOne({ where: { ticket_id: ticketId } });
+    const ticket = await this.tickets.findOne({
+      where: { ticket_id: ticketId },
+    });
     if (!ticket) throw new NotFoundException('Ticket not found');
     if (ticket.student_user_id !== studentUserId) {
       throw new ForbiddenException('Not your ticket');

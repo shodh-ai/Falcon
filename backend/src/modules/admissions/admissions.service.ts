@@ -12,8 +12,10 @@ import { LeadScoringService } from './lead-scoring.service';
 export class AdmissionsService {
   constructor(
     @InjectRepository(Lead) private leads: Repository<Lead>,
-    @InjectRepository(Application) private applications: Repository<Application>,
-    @InjectRepository(DocumentVerification) private docs: Repository<DocumentVerification>,
+    @InjectRepository(Application)
+    private applications: Repository<Application>,
+    @InjectRepository(DocumentVerification)
+    private docs: Repository<DocumentVerification>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly scoring: LeadScoringService,
   ) {}
@@ -22,7 +24,10 @@ export class AdmissionsService {
     const where: Record<string, unknown> = {};
     if (stage) where.stage = stage;
     if (tenantId) where.tenant_id = tenantId;
-    return this.leads.find({ where, order: { lead_score: 'DESC', created_at: 'DESC' } });
+    return this.leads.find({
+      where,
+      order: { lead_score: 'DESC', created_at: 'DESC' },
+    });
   }
 
   createLead(dto: CreateLeadDto, tenantId?: string) {
@@ -54,7 +59,13 @@ export class AdmissionsService {
   async logLeadActivity(
     tenantId: string,
     leadId: string,
-    dto: { channel: string; direction?: string; subject?: string; body?: string; metadata?: Record<string, unknown> },
+    dto: {
+      channel: string;
+      direction?: string;
+      subject?: string;
+      body?: string;
+      metadata?: Record<string, unknown>;
+    },
   ) {
     const rows = await this.dataSource.query(
       `INSERT INTO admissions_lead_activities (tenant_id, lead_id, channel, direction, subject, body, metadata)
@@ -73,13 +84,26 @@ export class AdmissionsService {
     return rows[0];
   }
 
-  async uploadLeadDocument(tenantId: string, leadId: string, dto: { title: string; file_path: string }) {
+  async uploadLeadDocument(
+    tenantId: string,
+    leadId: string,
+    dto: { title: string; file_path: string },
+  ) {
     const lead = await this.leads.findOne({ where: { lead_id: leadId } });
     if (!lead) throw new NotFoundException('Lead not found');
-    if (!lead.email) throw new NotFoundException('Lead has no email to link to student account');
+    if (!lead.email)
+      throw new NotFoundException(
+        'Lead has no email to link to student account',
+      );
 
-    const users = await this.dataSource.query('SELECT user_id FROM users WHERE official_email = $1 OR personal_email = $1', [lead.email]);
-    if (users.length === 0) throw new NotFoundException('No enrolled student found for this lead email');
+    const users = await this.dataSource.query(
+      'SELECT user_id FROM users WHERE official_email = $1 OR personal_email = $1',
+      [lead.email],
+    );
+    if (users.length === 0)
+      throw new NotFoundException(
+        'No enrolled student found for this lead email',
+      );
 
     const userId = users[0].user_id;
 
@@ -98,7 +122,13 @@ export class AdmissionsService {
   }
 
   kanbanBoard(tenantId?: string) {
-    const stages = ['RAW_LEAD', 'CONTACTED', 'APPLICATION_STARTED', 'FEE_PAID', 'ENROLLED'];
+    const stages = [
+      'RAW_LEAD',
+      'CONTACTED',
+      'APPLICATION_STARTED',
+      'FEE_PAID',
+      'ENROLLED',
+    ];
     return Promise.all(
       stages.map(async (stage) => ({
         stage,
@@ -112,27 +142,35 @@ export class AdmissionsService {
   }
 
   listDocumentsForApplication(applicationId: string) {
-    return this.docs.find({ where: { application_id: applicationId }, order: { created_at: 'DESC' } });
+    return this.docs.find({
+      where: { application_id: applicationId },
+      order: { created_at: 'DESC' },
+    });
   }
 
-  async getEnrolledStudents(tenantId: string, q?: string, year?: string, branch?: string) {
+  async getEnrolledStudents(
+    tenantId: string,
+    q?: string,
+    year?: string,
+    branch?: string,
+  ) {
     const params: any[] = [tenantId];
     let queryIdx = 2;
-    
+
     let whereClause = `WHERE u.tenant_id = $1 AND r.role_name = 'Student'`;
-    
+
     if (q) {
       whereClause += ` AND (u.name ILIKE $${queryIdx} OR u.official_email ILIKE $${queryIdx} OR sp.enrollment_no ILIKE $${queryIdx})`;
       params.push(`%${q}%`);
       queryIdx++;
     }
-    
+
     if (year) {
       whereClause += ` AND sp.batch = $${queryIdx}`;
       params.push(year);
       queryIdx++;
     }
-    
+
     if (branch) {
       whereClause += ` AND d.dept_id = $${queryIdx}`;
       params.push(Number(branch));
@@ -177,21 +215,25 @@ export class AdmissionsService {
        ${whereClause}
        ORDER BY u.name ASC
        LIMIT 100`,
-      params
+      params,
     );
-    
+
     return students;
   }
 
   async uploadTransactionReceipt(transactionId: string, receiptUrl: string) {
     const result = await this.dataSource.query(
       `UPDATE finance_transactions SET receipt_url = $1 WHERE transaction_id = $2`,
-      [receiptUrl, transactionId]
+      [receiptUrl, transactionId],
     );
     return { success: true };
   }
 
-  async uploadEnrolledStudentDocument(tenantId: string, userId: string, dto: { title: string; file_path: string }) {
+  async uploadEnrolledStudentDocument(
+    tenantId: string,
+    userId: string,
+    dto: { title: string; file_path: string },
+  ) {
     await this.dataSource.query(
       `INSERT INTO student_certificates (certificate_id, tenant_id, student_user_id, title, issuer, file_path, verification_status)
        VALUES (gen_random_uuid(), $1, $2, $3, 'Admissions Office', $4, 'VERIFIED')`,

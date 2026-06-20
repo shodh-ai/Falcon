@@ -67,10 +67,13 @@ export class CertificatesService {
   ) {
     if (!file) throw new BadRequestException('Certificate file is required');
     if (!ALLOWED_CERTIFICATE_MIME_TYPES.includes(file.mimetype)) {
-      throw new BadRequestException('Only PDF, JPG, and PNG certificates are allowed');
+      throw new BadRequestException(
+        'Only PDF, JPG, and PNG certificates are allowed',
+      );
     }
     if (!dto.title?.trim()) throw new BadRequestException('Title is required');
-    if (!dto.issuer?.trim()) throw new BadRequestException('Issuer is required');
+    if (!dto.issuer?.trim())
+      throw new BadRequestException('Issuer is required');
 
     const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
     const stored = await this.persistFile(tenantId, uniqueName, file);
@@ -92,10 +95,13 @@ export class CertificatesService {
 
     const saved = await this.certificates.save(certificate);
 
-    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
 
     try {
-      const approver = await this.workflowRouting.getStudentProctor(studentUserId);
+      const approver =
+        await this.workflowRouting.getStudentProctor(studentUserId);
       this.workflowNotify.notifyApprover({
         tenantId,
         approver,
@@ -131,8 +137,12 @@ export class CertificatesService {
       .createQueryBuilder('certificate')
       .leftJoinAndSelect('certificate.student', 'student')
       .where('certificate.tenant_id = :tenantId', { tenantId })
-      .andWhere('certificate.verification_status = :status', { status: 'PENDING' })
-      .andWhere('certificate.student_user_id IN (:...studentIds)', { studentIds })
+      .andWhere('certificate.verification_status = :status', {
+        status: 'PENDING',
+      })
+      .andWhere('certificate.student_user_id IN (:...studentIds)', {
+        studentIds,
+      })
       .orderBy('certificate.uploaded_at', 'DESC')
       .getMany();
 
@@ -163,14 +173,16 @@ export class CertificatesService {
     });
     if (!certificate) throw new NotFoundException('Certificate not found');
 
-    await this.assertProctorCanAccess(certificate.student_user_id, proctorUserId);
+    await this.assertProctorCanAccess(
+      certificate.student_user_id,
+      proctorUserId,
+    );
 
     certificate.verification_status = dto.status;
     certificate.points_awarded =
       dto.status === 'VERIFIED' ? Math.max(0, dto.points_awarded ?? 0) : 0;
-    certificate.rejection_reason = dto.status === 'REJECTED'
-      ? dto.rejection_reason ?? null
-      : null;
+    certificate.rejection_reason =
+      dto.status === 'REJECTED' ? (dto.rejection_reason ?? null) : null;
     certificate.verified_by_user_id = proctorUserId;
     certificate.verified_at = new Date();
 
@@ -190,17 +202,23 @@ export class CertificatesService {
 
     const canRead =
       certificate.student_user_id === actorUserId ||
-      ['SuperAdmin', 'Registrar', 'HOD', 'Dean', 'IQAC'].includes(actorRole ?? '') ||
+      ['SuperAdmin', 'Registrar', 'HOD', 'Dean', 'IQAC'].includes(
+        actorRole ?? '',
+      ) ||
       (await this.isAssignedProctor(certificate.student_user_id, actorUserId));
 
-    if (!canRead) throw new ForbiddenException('You cannot view this certificate');
+    if (!canRead)
+      throw new ForbiddenException('You cannot view this certificate');
 
-    const filename = certificate.original_filename ?? basename(certificate.file_path);
+    const filename =
+      certificate.original_filename ?? basename(certificate.file_path);
     const mimeType = certificate.mime_type ?? 'application/octet-stream';
 
     if (certificate.file_key && this.objectStorage.isEnabled()) {
       return {
-        stream: await this.objectStorage.getDownloadStream(certificate.file_key),
+        stream: await this.objectStorage.getDownloadStream(
+          certificate.file_key,
+        ),
         filename,
         mimeType,
       };
@@ -246,14 +264,25 @@ export class CertificatesService {
     return { filePath: fullPath, fileKey: null };
   }
 
-  private async assertProctorCanAccess(studentUserId: string, proctorUserId: string) {
-    const canAccess = await this.isAssignedProctor(studentUserId, proctorUserId);
+  private async assertProctorCanAccess(
+    studentUserId: string,
+    proctorUserId: string,
+  ) {
+    const canAccess = await this.isAssignedProctor(
+      studentUserId,
+      proctorUserId,
+    );
     if (!canAccess) {
-      throw new ForbiddenException('Only the assigned mentor can verify this certificate');
+      throw new ForbiddenException(
+        'Only the assigned mentor can verify this certificate',
+      );
     }
   }
 
-  private async isAssignedProctor(studentUserId: string, proctorUserId: string) {
+  private async isAssignedProctor(
+    studentUserId: string,
+    proctorUserId: string,
+  ) {
     const mentorship = await this.mentorships.findOne({
       where: {
         student_user_id: studentUserId,

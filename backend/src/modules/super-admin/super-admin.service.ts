@@ -23,7 +23,9 @@ export class SuperAdminService {
   async getHierarchyTree(tenantId: string) {
     const campuses = await this.campuses.find({ order: { campus_id: 'ASC' } });
     const schools = await this.schools.find({ order: { school_id: 'ASC' } });
-    const departments = await this.departments.find({ order: { dept_id: 'ASC' } });
+    const departments = await this.departments.find({
+      order: { dept_id: 'ASC' },
+    });
     const programs = await this.programs.find({ order: { program_id: 'ASC' } });
     const sections = await this.dataSource.query(
       `SELECT section_id, section_name, batch_id, program_id, capacity FROM academic_sections WHERE tenant_id = $1 ORDER BY section_name`,
@@ -43,12 +45,23 @@ export class SuperAdminService {
 
   async createSection(
     tenantId: string,
-    dto: { section_name: string; batch_id?: string; program_id?: number; capacity?: number },
+    dto: {
+      section_name: string;
+      batch_id?: string;
+      program_id?: number;
+      capacity?: number;
+    },
   ) {
     const rows = await this.dataSource.query(
       `INSERT INTO academic_sections (tenant_id, batch_id, program_id, section_name, capacity)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [tenantId, dto.batch_id ?? null, dto.program_id ?? null, dto.section_name, dto.capacity ?? 60],
+      [
+        tenantId,
+        dto.batch_id ?? null,
+        dto.program_id ?? null,
+        dto.section_name,
+        dto.capacity ?? 60,
+      ],
     );
     return rows[0];
   }
@@ -56,7 +69,12 @@ export class SuperAdminService {
   async assignEntity(
     tenantId: string,
     actorUserId: string,
-    dto: { user_id: string; assignment_type: string; entity_type: string; entity_id: string },
+    dto: {
+      user_id: string;
+      assignment_type: string;
+      entity_type: string;
+      entity_id: string;
+    },
   ) {
     if (dto.assignment_type === 'DEAN' && dto.entity_type === 'SCHOOL') {
       await this.dataSource.query(
@@ -76,7 +94,13 @@ export class SuperAdminService {
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (tenant_id, user_id, assignment_type, entity_type, entity_id) DO NOTHING
        RETURNING *`,
-      [tenantId, dto.user_id, dto.assignment_type, dto.entity_type, dto.entity_id],
+      [
+        tenantId,
+        dto.user_id,
+        dto.assignment_type,
+        dto.entity_type,
+        dto.entity_id,
+      ],
     );
 
     await this.audit.log({
@@ -142,7 +166,7 @@ export class SuperAdminService {
        FROM hr_override_logs 
        WHERE tenant_id = $1 
        ORDER BY date_and_time DESC LIMIT 500`,
-      [tenantId]
+      [tenantId],
     );
   }
 }

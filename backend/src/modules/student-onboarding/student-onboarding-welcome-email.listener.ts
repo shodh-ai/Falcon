@@ -10,7 +10,9 @@ import { wrapFalconEmailHtml } from '../../common/email/falcon-email.template';
 
 @Injectable()
 export class StudentOnboardingWelcomeEmailListener {
-  private readonly logger = new Logger(StudentOnboardingWelcomeEmailListener.name);
+  private readonly logger = new Logger(
+    StudentOnboardingWelcomeEmailListener.name,
+  );
   private transporter: nodemailer.Transporter;
 
   constructor(private readonly config: ConfigService) {
@@ -47,14 +49,21 @@ export class StudentOnboardingWelcomeEmailListener {
 
     try {
       await this.transporter.sendMail({
-        from: this.config.get('EMAIL_FROM', 'Falcon Campus OS <noreply@falcon.local>'),
+        from: this.config.get(
+          'EMAIL_FROM',
+          'Falcon Campus OS <noreply@falcon.local>',
+        ),
         to: payload.officialEmail,
         subject: `Welcome to Falcon — Your portal is unlocked`,
         html,
       });
-      this.logger.log(`Student onboarding welcome email sent to ${payload.officialEmail}`);
+      this.logger.log(
+        `Student onboarding welcome email sent to ${payload.officialEmail}`,
+      );
     } catch (err) {
-      this.logger.warn(`Student onboarding welcome email failed for ${payload.officialEmail}: ${err}`);
+      this.logger.warn(
+        `Student onboarding welcome email failed for ${payload.officialEmail}: ${err}`,
+      );
     }
   }
 }

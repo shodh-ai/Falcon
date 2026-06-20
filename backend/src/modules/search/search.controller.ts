@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -61,7 +69,10 @@ export class SearchController {
       batch,
     });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="university-directory.csv"');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="university-directory.csv"',
+    );
     res.send(csv);
   }
 
@@ -91,6 +102,11 @@ export class SearchController {
   @Get('profile/:userId')
   profile(@Req() req: { user: AuthUser }, @Param('userId') userId: string) {
     const ctx = this.ctx(req);
-    return this.search.getProfile360(ctx.userId, ctx.tenantId, ctx.role, userId);
+    return this.search.getProfile360(
+      ctx.userId,
+      ctx.tenantId,
+      ctx.role,
+      userId,
+    );
   }
 }

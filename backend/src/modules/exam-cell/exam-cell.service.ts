@@ -31,22 +31,28 @@ export class ExamCellService {
     params: unknown[] = [],
   ): Promise<T[]> {
     try {
-      return (await this.db.query(sql, params)) as T[];
+      return await this.db.query(sql, params);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+      if (
+        /relation .* does not exist|column .* does not exist/i.test(message)
+      ) {
         return [];
       }
       throw err;
     }
   }
 
-  private normalizeSeatingAllocations(value: unknown): Array<Record<string, unknown>> {
+  private normalizeSeatingAllocations(
+    value: unknown,
+  ): Array<Record<string, unknown>> {
     if (Array.isArray(value)) return value as Array<Record<string, unknown>>;
     if (typeof value === 'string') {
       try {
         const parsed = JSON.parse(value) as unknown;
-        return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
+        return Array.isArray(parsed)
+          ? (parsed as Array<Record<string, unknown>>)
+          : [];
       } catch {
         return [];
       }
@@ -55,26 +61,30 @@ export class ExamCellService {
   }
 
   async dashboard(tenantId: string) {
-    const [[schedules], [pendingMarks], [reEvals], [ufmOpen], [duties]] = await Promise.all([
-      this.db.query(`SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`, [tenantId]),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM academic_marks WHERE tenant_id = $1 AND status = 'PENDING_COE'`,
-        [tenantId],
-      ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM exam_applications
+    const [[schedules], [pendingMarks], [reEvals], [ufmOpen], [duties]] =
+      await Promise.all([
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`,
+          [tenantId],
+        ),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM academic_marks WHERE tenant_id = $1 AND status = 'PENDING_COE'`,
+          [tenantId],
+        ),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM exam_applications
          WHERE application_type = 'RE_EVALUATION' AND fee_status = 'PAID'
            AND status IN ('PENDING', 'ASSIGNED', 'UNDER_REVIEW')`,
-      ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM ufm_cases WHERE tenant_id = $1 AND status != 'CLOSED'`,
-        [tenantId],
-      ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM exam_invigilation_duties WHERE tenant_id = $1 AND published = true`,
-        [tenantId],
-      ),
-    ]);
+        ),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM ufm_cases WHERE tenant_id = $1 AND status != 'CLOSED'`,
+          [tenantId],
+        ),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM exam_invigilation_duties WHERE tenant_id = $1 AND published = true`,
+          [tenantId],
+        ),
+      ]);
     return {
       persona: 'Falcon Exam OS',
       schedules: schedules?.c ?? 0,
@@ -97,7 +107,9 @@ export class ExamCellService {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (!/relation .* does not exist|column .* does not exist/i.test(message)) {
+      if (
+        !/relation .* does not exist|column .* does not exist/i.test(message)
+      ) {
         throw err;
       }
       return this.queryOrEmpty(
@@ -176,14 +188,21 @@ export class ExamCellService {
 
     let generated = 0;
     let blocked = 0;
-    const results: { student_user_id: string; name: string; eligible: boolean; reasons: string[] }[] =
-      [];
+    const results: {
+      student_user_id: string;
+      name: string;
+      eligible: boolean;
+      reasons: string[];
+    }[] = [];
 
     const uploadDir = path.join(process.cwd(), 'uploads', 'admit-cards', runId);
     fs.mkdirSync(uploadDir, { recursive: true });
 
     for (const student of students) {
-      const reasons = await this.getAdmitBlockReasons(student.user_id, tenantId);
+      const reasons = await this.getAdmitBlockReasons(
+        student.user_id,
+        tenantId,
+      );
       const eligible = reasons.length === 0;
 
       if (eligible) {
@@ -268,10 +287,14 @@ export class ExamCellService {
       reasons.push('Blocked: Pending fee dues');
     }
 
-    const attendance = await this.attendanceEligibility.evaluate(tenantId, studentUserId, {
-      context: 'ADMIT_CARD',
-      audit: true,
-    });
+    const attendance = await this.attendanceEligibility.evaluate(
+      tenantId,
+      studentUserId,
+      {
+        context: 'ADMIT_CARD',
+        audit: true,
+      },
+    );
     if (!attendance.eligible && attendance.reason) {
       reasons.push(attendance.reason);
     }
@@ -312,14 +335,28 @@ export class ExamCellService {
       [tenantId],
     );
 
-    const blocksMap = new Map<string, { block: string; halls: Array<{ name: string; capacity: number; rows: number; cols: number }> }>();
+    const blocksMap = new Map<
+      string,
+      {
+        block: string;
+        halls: Array<{
+          name: string;
+          capacity: number;
+          rows: number;
+          cols: number;
+        }>;
+      }
+    >();
     for (const s of spaces) {
       if (!s.block || !s.hall) continue;
-      if (!blocksMap.has(s.block)) blocksMap.set(s.block, { block: s.block, halls: [] });
+      if (!blocksMap.has(s.block))
+        blocksMap.set(s.block, { block: s.block, halls: [] });
       const cols = 5;
       const capacity = Number(s.capacity) > 0 ? Number(s.capacity) : 30;
       const rows = Math.max(1, Math.ceil(capacity / cols));
-      blocksMap.get(s.block)!.halls.push({ name: s.hall, capacity, rows, cols });
+      blocksMap
+        .get(s.block)!
+        .halls.push({ name: s.hall, capacity, rows, cols });
     }
     return Array.from(blocksMap.values());
   }
@@ -327,27 +364,45 @@ export class ExamCellService {
   /** Auto-allocate seats — no adjacent same-branch students */
   async autoAllocateSeating(
     tenantId: string,
-    dto: { allocation_strategy: string; exam_type?: string; exam_schedule_id?: string; semester: number; branch?: string; rooms: string[] },
+    dto: {
+      allocation_strategy: string;
+      exam_type?: string;
+      exam_schedule_id?: string;
+      semester: number;
+      branch?: string;
+      rooms: string[];
+    },
   ) {
-    if (!dto.rooms?.length) throw new BadRequestException('Select at least one room');
+    if (!dto.rooms?.length)
+      throw new BadRequestException('Select at least one room');
 
     let scheduleIds: string[] = [];
     if (dto.allocation_strategy === 'by_schedule') {
-      if (!dto.exam_schedule_id?.trim()) throw new BadRequestException('Select an exam schedule');
+      if (!dto.exam_schedule_id?.trim())
+        throw new BadRequestException('Select an exam schedule');
       const examRows = await this.db.query(
         `SELECT 1 FROM exam_schedules WHERE exam_schedule_id = $1`,
         [dto.exam_schedule_id],
       );
-      if (!examRows[0]) throw new BadRequestException('Exam schedule not found');
+      if (!examRows[0])
+        throw new BadRequestException('Exam schedule not found');
       scheduleIds.push(dto.exam_schedule_id);
     } else {
-      if (!dto.exam_type?.trim()) throw new BadRequestException('Select an exam type');
-      const exams = await this.db.query(`SELECT exam_schedule_id FROM exam_schedules WHERE tenant_id = $1 AND exam_type = $2`, [tenantId, dto.exam_type]);
+      if (!dto.exam_type?.trim())
+        throw new BadRequestException('Select an exam type');
+      const exams = await this.db.query(
+        `SELECT exam_schedule_id FROM exam_schedules WHERE tenant_id = $1 AND exam_type = $2`,
+        [tenantId, dto.exam_type],
+      );
       scheduleIds = exams.map((e: any) => e.exam_schedule_id);
-      if (scheduleIds.length === 0) throw new BadRequestException('No schedules found for this exam type');
+      if (scheduleIds.length === 0)
+        throw new BadRequestException('No schedules found for this exam type');
     }
 
-    const branchFilter = dto.branch && dto.branch !== 'All Branches' ? `AND COALESCE(d.dept_name, 'GEN') = $3` : '';
+    const branchFilter =
+      dto.branch && dto.branch !== 'All Branches'
+        ? `AND COALESCE(d.dept_name, 'GEN') = $3`
+        : '';
     const params: any[] = [tenantId, dto.semester];
     if (dto.branch && dto.branch !== 'All Branches') params.push(dto.branch);
 
@@ -362,35 +417,56 @@ export class ExamCellService {
       params,
     );
 
-    const spaces = await this.db.query(`SELECT room_number, capacity FROM campus_spaces WHERE tenant_id = $1`, [tenantId]);
-    const capMap = new Map<string, number>(spaces.map((s: any) => [s.room_number, Number(s.capacity)]));
+    const spaces = await this.db.query(
+      `SELECT room_number, capacity FROM campus_spaces WHERE tenant_id = $1`,
+      [tenantId],
+    );
+    const capMap = new Map<string, number>(
+      spaces.map((s: any) => [s.room_number, Number(s.capacity)]),
+    );
 
-    const schedulesInfo = await this.db.query(`
+    const schedulesInfo = await this.db.query(
+      `
       SELECT es.exam_schedule_id, es.exam_date, sub.subject_name
       FROM exam_schedules es
       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
       WHERE es.exam_schedule_id = ANY($1)
-    `, [scheduleIds]);
-    const schedMap = new Map<string, any>(schedulesInfo.map((s: any) => [s.exam_schedule_id, s]));
+    `,
+      [scheduleIds],
+    );
+    const schedMap = new Map<string, any>(
+      schedulesInfo.map((s: any) => [s.exam_schedule_id, s]),
+    );
 
     let totalAllocated = 0;
     const enrichedAllocations: any[] = [];
 
     for (const scheduleId of scheduleIds) {
       if (!dto.branch || dto.branch === 'All Branches') {
-         await this.db.query(`DELETE FROM exam_seating_allocations WHERE exam_schedule_id = $1`, [scheduleId]);
+        await this.db.query(
+          `DELETE FROM exam_seating_allocations WHERE exam_schedule_id = $1`,
+          [scheduleId],
+        );
       } else {
-         await this.db.query(`DELETE FROM exam_seating_allocations WHERE exam_schedule_id = $1 AND branch_code = $2`, [scheduleId, dto.branch]);
+        await this.db.query(
+          `DELETE FROM exam_seating_allocations WHERE exam_schedule_id = $1 AND branch_code = $2`,
+          [scheduleId, dto.branch],
+        );
       }
 
-      const occupiedRows = await this.db.query(`SELECT room, seat_number FROM exam_seating_allocations WHERE exam_schedule_id = $1`, [scheduleId]);
-      const occupied = new Set(occupiedRows.map((r: any) => `${r.room}-${Number(r.seat_number)}`));
+      const occupiedRows = await this.db.query(
+        `SELECT room, seat_number FROM exam_seating_allocations WHERE exam_schedule_id = $1`,
+        [scheduleId],
+      );
+      const occupied = new Set(
+        occupiedRows.map((r: any) => `${r.room}-${Number(r.seat_number)}`),
+      );
 
       let roomIdx = 0;
       let seatNum = 1;
       let prevBranch: string | null = null;
       const schedInfo = schedMap.get(scheduleId);
-      
+
       for (const s of students) {
         let room = dto.rooms[roomIdx];
         let capacity = capMap.get(room) || 30;
@@ -403,16 +479,16 @@ export class ExamCellService {
             seatNum = 1;
             prevBranch = null;
           }
-          
+
           if (s.branch_code === prevBranch) {
-             seatNum++;
-             prevBranch = null;
-             continue;
+            seatNum++;
+            prevBranch = null;
+            continue;
           }
 
           if (occupied.has(`${room}-${seatNum}`)) {
-             seatNum++;
-             continue;
+            seatNum++;
+            continue;
           }
 
           break;
@@ -425,15 +501,15 @@ export class ExamCellService {
            VALUES ($1,$2,$3,$4,$5,$6)`,
           [tenantId, scheduleId, room, s.user_id, seatString, s.branch_code],
         );
-        
+
         enrichedAllocations.push({
-           student_name: s.name,
-           student_user_id: s.user_id,
-           branch_code: s.branch_code,
-           subject_name: schedInfo?.subject_name,
-           exam_date: schedInfo?.exam_date,
-           room: room,
-           seat_number: seatString
+          student_name: s.name,
+          student_user_id: s.user_id,
+          branch_code: s.branch_code,
+          subject_name: schedInfo?.subject_name,
+          exam_date: schedInfo?.exam_date,
+          room: room,
+          seat_number: seatString,
         });
 
         occupied.add(`${room}-${seatNum}`);
@@ -446,7 +522,15 @@ export class ExamCellService {
     await this.db.query(
       `INSERT INTO exam_seating_runs (tenant_id, allocation_strategy, exam_type, exam_schedule_id, semester, branch, allocations)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [tenantId, dto.allocation_strategy, dto.exam_type || null, dto.exam_schedule_id || null, dto.semester, dto.branch || 'All Branches', JSON.stringify(enrichedAllocations)]
+      [
+        tenantId,
+        dto.allocation_strategy,
+        dto.exam_type || null,
+        dto.exam_schedule_id || null,
+        dto.semester,
+        dto.branch || 'All Branches',
+        JSON.stringify(enrichedAllocations),
+      ],
     );
 
     return { allocated: totalAllocated, rooms: dto.rooms };
@@ -482,10 +566,12 @@ export class ExamCellService {
     }> = [];
 
     try {
-      rows = (await this.db.query(baseSql(true), [tenantId])) as typeof rows;
+      rows = await this.db.query(baseSql(true), [tenantId]);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+      if (
+        /relation .* does not exist|column .* does not exist/i.test(message)
+      ) {
         rows = await this.queryOrEmpty(baseSql(false), [tenantId]);
       } else {
         throw err;
@@ -500,7 +586,10 @@ export class ExamCellService {
   }
 
   async deleteSeatingRun(tenantId: string, runId: string) {
-    await this.db.query(`DELETE FROM exam_seating_runs WHERE tenant_id = $1 AND run_id = $2`, [tenantId, runId]);
+    await this.db.query(
+      `DELETE FROM exam_seating_runs WHERE tenant_id = $1 AND run_id = $2`,
+      [tenantId, runId],
+    );
     return { success: true };
   }
 
@@ -530,7 +619,12 @@ export class ExamCellService {
 
   async assignInvigilation(
     tenantId: string,
-    dto: { exam_schedule_id: string; room: string; faculty_user_id: string },
+    dto: {
+      exam_schedule_id: string;
+      room: string;
+      faculty_user_id: string;
+      is_coordinator?: boolean;
+    },
   ) {
     if (!dto.exam_schedule_id?.trim() || !dto.faculty_user_id?.trim()) {
       throw new BadRequestException('Exam schedule and faculty are required');
@@ -541,14 +635,192 @@ export class ExamCellService {
     );
     if (!examRows[0]) throw new BadRequestException('Exam schedule not found');
 
+    if (dto.is_coordinator) {
+      await this.db.query(
+        `UPDATE exam_invigilation_duties SET is_coordinator = false
+         WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3`,
+        [tenantId, dto.exam_schedule_id, dto.room],
+      );
+    }
+
     const rows = await this.db.query(
-      `INSERT INTO exam_invigilation_duties (tenant_id, exam_schedule_id, room, faculty_user_id)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (exam_schedule_id, room, faculty_user_id) DO UPDATE SET status = 'ASSIGNED'
+      `INSERT INTO exam_invigilation_duties (tenant_id, exam_schedule_id, room, faculty_user_id, is_coordinator)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (exam_schedule_id, room, faculty_user_id) DO UPDATE SET
+         status = 'ASSIGNED',
+         is_coordinator = EXCLUDED.is_coordinator
        RETURNING *`,
-      [tenantId, dto.exam_schedule_id, dto.room, dto.faculty_user_id],
+      [
+        tenantId,
+        dto.exam_schedule_id,
+        dto.room,
+        dto.faculty_user_id,
+        dto.is_coordinator ?? false,
+      ],
     );
     return rows[0];
+  }
+
+  /**
+   * Assign students enrolled in the exam subject to a single room (seat 1..capacity).
+   * Optionally designate one faculty member as exam coordinator / invigilator for that room.
+   */
+  async assignSubjectToRoom(
+    tenantId: string,
+    dto: {
+      exam_schedule_id: string;
+      room: string;
+      semester: number;
+      coordinator_faculty_user_id?: string;
+      block?: string;
+    },
+  ) {
+    if (!dto.exam_schedule_id?.trim() || !dto.room?.trim()) {
+      throw new BadRequestException('Exam schedule and room are required');
+    }
+
+    const scheduleRows = await this.db.query(
+      `SELECT es.exam_schedule_id, es.subject_id, sub.subject_name, sub.subject_code
+       FROM exam_schedules es
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+       WHERE es.tenant_id = $1 AND es.exam_schedule_id = $2`,
+      [tenantId, dto.exam_schedule_id],
+    );
+    const schedule = scheduleRows[0];
+    if (!schedule) throw new BadRequestException('Exam schedule not found');
+
+    const spaceRows = await this.db.query(
+      `SELECT building_name, room_number, capacity FROM campus_spaces
+       WHERE tenant_id = $1 AND room_number = $2 LIMIT 1`,
+      [tenantId, dto.room],
+    );
+    const capacity =
+      Number(spaceRows[0]?.capacity) > 0 ? Number(spaceRows[0].capacity) : 60;
+    const block = dto.block ?? spaceRows[0]?.building_name ?? 'Main Block';
+
+    const students = await this.db.query(
+      `SELECT DISTINCT u.user_id, u.name,
+              COALESCE(
+                NULLIF(BTRIM(e.roll_number), ''),
+                NULLIF(BTRIM(sp.prn_number), ''),
+                NULLIF(BTRIM(sp.enrollment_no), ''),
+                u.user_id::text
+              ) AS sort_key
+       FROM exam_schedules es
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+       INNER JOIN academic_courses c ON c.tenant_id = es.tenant_id
+         AND (
+           c.course_code = sub.subject_code
+           OR c.course_name ILIKE sub.subject_name
+         )
+       INNER JOIN student_course_enrollments e
+         ON e.course_id = c.course_id AND e.tenant_id = c.tenant_id AND e.semester = $3 AND e.status = 'ENROLLED'
+       INNER JOIN users u ON u.user_id = e.student_user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       WHERE es.exam_schedule_id = $2 AND es.tenant_id = $1
+       ORDER BY sort_key`,
+      [tenantId, dto.exam_schedule_id, dto.semester],
+    );
+
+    await this.db.query(
+      `DELETE FROM exam_seating_allocations
+       WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3`,
+      [tenantId, dto.exam_schedule_id, dto.room],
+    );
+
+    let seatNum = 1;
+    const allocated: Array<{
+      student_user_id: string;
+      student_name: string;
+      seat_number: string;
+    }> = [];
+    for (const student of students) {
+      if (seatNum > capacity) break;
+      const seatString = String(seatNum).padStart(2, '0');
+      await this.db.query(
+        `INSERT INTO exam_seating_allocations (tenant_id, exam_schedule_id, room, student_user_id, seat_number, branch_code)
+         VALUES ($1,$2,$3,$4,$5,'GEN')`,
+        [tenantId, dto.exam_schedule_id, dto.room, student.user_id, seatString],
+      );
+      allocated.push({
+        student_user_id: student.user_id,
+        student_name: student.name,
+        seat_number: seatString,
+      });
+      seatNum++;
+    }
+
+    if (dto.coordinator_faculty_user_id?.trim()) {
+      await this.assignInvigilation(tenantId, {
+        exam_schedule_id: dto.exam_schedule_id,
+        room: dto.room,
+        faculty_user_id: dto.coordinator_faculty_user_id,
+        is_coordinator: true,
+      });
+    }
+
+    await this.publishSeatingPlans(tenantId, dto.exam_schedule_id, block);
+
+    return {
+      subject_name: schedule.subject_name,
+      room: dto.room,
+      capacity,
+      allocated: allocated.length,
+      students: allocated,
+      block,
+    };
+  }
+
+  /** Sync seating allocations into published exam_seating_plans for the student portal. */
+  async publishSeatingPlans(
+    tenantId: string,
+    examScheduleId?: string,
+    defaultBlock?: string,
+  ) {
+    const filter = examScheduleId ? 'AND a.exam_schedule_id = $2' : '';
+    const params = examScheduleId ? [tenantId, examScheduleId] : [tenantId];
+
+    const rows = await this.db.query(
+      `SELECT a.exam_schedule_id, a.room, a.student_user_id, a.seat_number,
+              cs.building_name
+       FROM exam_seating_allocations a
+       LEFT JOIN campus_spaces cs ON cs.tenant_id = a.tenant_id AND cs.room_number = a.room
+       WHERE a.tenant_id = $1 ${filter}
+       ORDER BY a.exam_schedule_id, a.room, a.seat_number`,
+      params,
+    );
+
+    const byRoom = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const key = `${row.exam_schedule_id}::${row.room}`;
+      if (!byRoom.has(key)) byRoom.set(key, []);
+      byRoom.get(key)!.push(row);
+    }
+
+    let published = 0;
+    for (const [key, roomRows] of byRoom) {
+      const [scheduleId, room] = key.split('::');
+      const block = roomRows[0]?.building_name ?? defaultBlock ?? 'Main Block';
+      const seatingMap = roomRows.map((r) => ({
+        student_user_id: r.student_user_id,
+        seat_no: r.seat_number,
+        block,
+      }));
+
+      await this.db.query(
+        `DELETE FROM exam_seating_plans
+         WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3`,
+        [tenantId, scheduleId, room],
+      );
+      await this.db.query(
+        `INSERT INTO exam_seating_plans (tenant_id, exam_schedule_id, room, seating_map, published)
+         VALUES ($1,$2,$3,$4,true)`,
+        [tenantId, scheduleId, room, JSON.stringify(seatingMap)],
+      );
+      published++;
+    }
+
+    return { published_rooms: published };
   }
 
   async publishInvigilationRoster(tenantId: string, examScheduleId: string) {
@@ -614,11 +886,11 @@ export class ExamCellService {
     tenantId: string,
     requestId: string,
     status: 'APPROVED' | 'REJECTED',
-    comment: string
+    comment: string,
   ) {
     const reqRow = await this.db.query(
       `SELECT * FROM invigilation_unavailability_requests WHERE request_id = $1 AND tenant_id = $2`,
-      [requestId, tenantId]
+      [requestId, tenantId],
     );
     const request = reqRow[0];
     if (!request) throw new NotFoundException('Request not found');
@@ -628,30 +900,35 @@ export class ExamCellService {
        SET status = $1, exam_cell_comment = $2, updated_at = NOW()
        WHERE request_id = $3
        RETURNING *`,
-      [status, comment, requestId]
+      [status, comment, requestId],
     );
 
     if (status === 'APPROVED') {
       const assignmentRow = await this.db.query(
         `SELECT * FROM faculty_invigilation_assignments WHERE assignment_id = $1`,
-        [request.assignment_id]
+        [request.assignment_id],
       );
       if (assignmentRow[0]) {
         const assignment = assignmentRow[0];
-        
+
         // Delete from faculty assignments
         await this.db.query(
           `DELETE FROM faculty_invigilation_assignments WHERE assignment_id = $1`,
-          [assignment.assignment_id]
+          [assignment.assignment_id],
         );
-        
+
         // Delete from exam_invigilation_duties
         // We know faculty_user_id, room, exam_schedule_id
         if (assignment.exam_schedule_id) {
           await this.db.query(
             `DELETE FROM exam_invigilation_duties 
              WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3 AND faculty_user_id = $4`,
-            [tenantId, assignment.exam_schedule_id, assignment.room, assignment.faculty_user_id]
+            [
+              tenantId,
+              assignment.exam_schedule_id,
+              assignment.room,
+              assignment.faculty_user_id,
+            ],
           );
         }
       }
@@ -701,21 +978,25 @@ export class ExamCellService {
     );
   }
 
-  async getGradesAggregateTable(tenantId: string, semester: number, courseId: string) {
+  async getGradesAggregateTable(
+    tenantId: string,
+    semester: number,
+    courseId: string,
+  ) {
     const students = await this.db.query(
       `SELECT e.student_user_id, u.name AS student_name
        FROM student_course_enrollments e
        JOIN users u ON u.user_id = e.student_user_id
        WHERE e.tenant_id = $1 AND e.semester = $2 AND e.course_id = $3
        ORDER BY u.name`,
-      [tenantId, semester, courseId]
+      [tenantId, semester, courseId],
     );
 
     const marks = await this.db.query(
       `SELECT student_user_id, exam_type, marks_obtained
        FROM academic_marks
        WHERE tenant_id = $1 AND course_id = $2`,
-      [tenantId, courseId]
+      [tenantId, courseId],
     );
 
     const marksMap = new Map<string, Record<string, number>>();
@@ -723,7 +1004,8 @@ export class ExamCellService {
       if (!marksMap.has(m.student_user_id)) {
         marksMap.set(m.student_user_id, {});
       }
-      marksMap.get(m.student_user_id)![m.exam_type] = Number(m.marks_obtained) || 0;
+      marksMap.get(m.student_user_id)![m.exam_type] =
+        Number(m.marks_obtained) || 0;
     }
 
     function calculateGrade(total: number) {
@@ -745,14 +1027,21 @@ export class ExamCellService {
       const cat2 = stuMarks['CAT2'];
       const endTerm = stuMarks['END_TERM'];
 
-      const isPending = quiz === undefined || internal === undefined || (cat1 === undefined && cat2 === undefined) || endTerm === undefined;
+      const isPending =
+        quiz === undefined ||
+        internal === undefined ||
+        (cat1 === undefined && cat2 === undefined) ||
+        endTerm === undefined;
       const midTerm = (cat1 || 0) + (cat2 || 0);
-      
+
       let aggregate: number | string = 'Pending';
       let grade = 'Pending';
 
       if (!isPending) {
-        aggregate = Math.min(100, Math.round((quiz || 0) + (internal || 0) + midTerm + (endTerm || 0)));
+        aggregate = Math.min(
+          100,
+          Math.round((quiz || 0) + (internal || 0) + midTerm + (endTerm || 0)),
+        );
         grade = calculateGrade(aggregate);
       }
 
@@ -761,10 +1050,11 @@ export class ExamCellService {
         student_name: s.student_name,
         quiz_marks: quiz ?? '—',
         internal_marks: internal ?? '—',
-        mid_term_marks: (cat1 !== undefined || cat2 !== undefined) ? midTerm : '—',
+        mid_term_marks:
+          cat1 !== undefined || cat2 !== undefined ? midTerm : '—',
         end_term_marks: endTerm ?? '—',
         aggregate,
-        grade
+        grade,
       };
     });
   }
@@ -797,9 +1087,8 @@ export class ExamCellService {
       [tenantId, dto.course_id, dto.exam_type],
     );
 
-    if (!updated.length) throw new BadRequestException('No PENDING_COE marks to publish');
-
-
+    if (!updated.length)
+      throw new BadRequestException('No PENDING_COE marks to publish');
 
     const courseRows = await this.db.query(
       `SELECT course_name FROM academic_courses WHERE course_id = $1`,
@@ -875,7 +1164,8 @@ export class ExamCellService {
          AND a.application_type = 'RE_EVALUATION'`,
       [applicationId],
     );
-    if (!rows[0]) throw new NotFoundException('Re-evaluation application not found');
+    if (!rows[0])
+      throw new NotFoundException('Re-evaluation application not found');
     return rows[0];
   }
 
@@ -889,7 +1179,9 @@ export class ExamCellService {
       [studentUserId, subjectId],
     );
     if (rows[0]?.marks_obtained != null) return Number(rows[0].marks_obtained);
-    const markRows = await this.db.query<Array<{ marks_obtained: string | null }>>(
+    const markRows = await this.db.query<
+      Array<{ marks_obtained: string | null }>
+    >(
       `SELECT m.marks_obtained
        FROM academic_marks m
        JOIN academic_courses c ON c.course_id = m.course_id
@@ -901,7 +1193,9 @@ export class ExamCellService {
        LIMIT 1`,
       [studentUserId, subjectId],
     );
-    return markRows[0]?.marks_obtained != null ? Number(markRows[0].marks_obtained) : null;
+    return markRows[0]?.marks_obtained != null
+      ? Number(markRows[0].marks_obtained)
+      : null;
   }
 
   private reEvalNotifyPayload(
@@ -938,7 +1232,9 @@ export class ExamCellService {
   ) {
     const application = await this.getReEvaluation(applicationId);
     if (application.status !== 'PENDING') {
-      throw new BadRequestException('Only pending applications can be assigned');
+      throw new BadRequestException(
+        'Only pending applications can be assigned',
+      );
     }
 
     const facultyRows = await this.db.query(
@@ -948,9 +1244,13 @@ export class ExamCellService {
        WHERE u.user_id = $1 AND u.tenant_id = $2 AND lower(r.role_name) = 'faculty'`,
       [facultyUserId, tenantId],
     );
-    if (!facultyRows[0]) throw new BadRequestException('Selected faculty is invalid');
+    if (!facultyRows[0])
+      throw new BadRequestException('Selected faculty is invalid');
 
-    const originalMarks = await this.loadOriginalMarks(application.student_user_id, application.subject_id);
+    const originalMarks = await this.loadOriginalMarks(
+      application.student_user_id,
+      application.subject_id,
+    );
 
     const rows = await this.db.query(
       `UPDATE exam_applications
@@ -963,7 +1263,11 @@ export class ExamCellService {
        RETURNING *`,
       [applicationId, facultyUserId, actorUserId, originalMarks],
     );
-    const updated = { ...application, ...rows[0], original_marks: originalMarks };
+    const updated = {
+      ...application,
+      ...rows[0],
+      original_marks: originalMarks,
+    };
 
     this.notify.examRevaluationAssigned({
       ...this.reEvalNotifyPayload(tenantId, updated),
@@ -980,10 +1284,14 @@ export class ExamCellService {
   ) {
     const application = await this.getReEvaluation(applicationId);
     if (application.assigned_faculty_user_id !== facultyUserId) {
-      throw new ForbiddenException('You are not assigned to this re-evaluation');
+      throw new ForbiddenException(
+        'You are not assigned to this re-evaluation',
+      );
     }
     if (application.status !== 'ASSIGNED') {
-      throw new BadRequestException('Report can only be submitted for assigned applications');
+      throw new BadRequestException(
+        'Report can only be submitted for assigned applications',
+      );
     }
 
     await this.db.query(
@@ -1001,7 +1309,8 @@ export class ExamCellService {
       `SELECT tenant_id FROM users WHERE user_id = $1`,
       [refreshed.student_user_id],
     );
-    const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId =
+      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
 
     this.notify.examRevaluationReportReady({
       ...this.reEvalNotifyPayload(tenantId, {
@@ -1015,10 +1324,16 @@ export class ExamCellService {
     return refreshed;
   }
 
-  async publishReEvaluation(tenantId: string, actorUserId: string, applicationId: string) {
+  async publishReEvaluation(
+    tenantId: string,
+    actorUserId: string,
+    applicationId: string,
+  ) {
     const application = await this.getReEvaluation(applicationId);
     if (application.status !== 'UNDER_REVIEW') {
-      throw new BadRequestException('Only applications with a submitted report can be published');
+      throw new BadRequestException(
+        'Only applications with a submitted report can be published',
+      );
     }
 
     await this.db.query(
@@ -1035,7 +1350,11 @@ export class ExamCellService {
         `UPDATE academic_exam_results
          SET marks_obtained = $3, updated_at = NOW()
          WHERE student_user_id = $1 AND subject_id = $2`,
-        [application.student_user_id, application.subject_id, application.revised_marks],
+        [
+          application.student_user_id,
+          application.subject_id,
+          application.revised_marks,
+        ],
       );
     }
 
@@ -1048,7 +1367,9 @@ export class ExamCellService {
       actionLink: '/student/exams?intent=revaluation',
     });
 
-    const parentRows = await this.db.query<Array<{ parent_mobile: string; parent_name: string }>>(
+    const parentRows = await this.db.query<
+      Array<{ parent_mobile: string; parent_name: string }>
+    >(
       `SELECT parent_mobile, parent_name
        FROM parent_student_links
        WHERE student_user_id = $1`,
@@ -1206,7 +1527,10 @@ export class ExamCellService {
       throw new BadRequestException('Incident description is required');
     }
 
-    const studentUserId = await this.resolveStudentUserId(tenantId, dto.student_user_id.trim());
+    const studentUserId = await this.resolveStudentUserId(
+      tenantId,
+      dto.student_user_id.trim(),
+    );
     const courseId = dto.course_id?.trim()
       ? await this.resolveCourseId(tenantId, dto.course_id.trim())
       : null;
@@ -1273,7 +1597,10 @@ export class ExamCellService {
   private static readonly UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-  private async resolveStudentUserId(tenantId: string, identifier: string): Promise<string> {
+  private async resolveStudentUserId(
+    tenantId: string,
+    identifier: string,
+  ): Promise<string> {
     const isUuid = ExamCellService.UUID_RE.test(identifier);
     const rows = await this.db.query<Array<{ user_id: string }>>(
       `SELECT u.user_id
@@ -1301,7 +1628,10 @@ export class ExamCellService {
     return rows[0].user_id;
   }
 
-  private async resolveCourseId(tenantId: string, identifier: string): Promise<string> {
+  private async resolveCourseId(
+    tenantId: string,
+    identifier: string,
+  ): Promise<string> {
     const isUuid = ExamCellService.UUID_RE.test(identifier);
     const rows = isUuid
       ? await this.db.query<Array<{ course_id: string }>>(
@@ -1317,7 +1647,9 @@ export class ExamCellService {
           [tenantId, identifier],
         );
     if (!rows[0]?.course_id) {
-      throw new BadRequestException('Course not found. Use course code (e.g. SMOKE101) or course UUID.');
+      throw new BadRequestException(
+        'Course not found. Use course code (e.g. SMOKE101) or course UUID.',
+      );
     }
     return rows[0].course_id;
   }
@@ -1336,18 +1668,27 @@ export class ExamCellService {
       `SELECT student_user_id FROM ufm_cases WHERE tenant_id = $1 AND status != 'CLOSED' AND marks_locked = true`,
       [tenantId],
     );
-    const blockedSet = new Set(blocked.map((b: { student_user_id: string }) => b.student_user_id));
+    const blockedSet = new Set(
+      blocked.map((b: { student_user_id: string }) => b.student_user_id),
+    );
 
     return grads
       .filter((g: { user_id: string }) => !blockedSet.has(g.user_id))
-      .map((g: { user_id: string; name: string; enrollment_number: string; abc_id: string }) => ({
-        student_user_id: g.user_id,
-        name: g.name,
-        enrollment_number: g.enrollment_number,
-        abc_id: g.abc_id,
-        digilocker_ready: Boolean(g.abc_id),
-        status: 'GENERATED',
-      }));
+      .map(
+        (g: {
+          user_id: string;
+          name: string;
+          enrollment_number: string;
+          abc_id: string;
+        }) => ({
+          student_user_id: g.user_id,
+          name: g.name,
+          enrollment_number: g.enrollment_number,
+          abc_id: g.abc_id,
+          digilocker_ready: Boolean(g.abc_id),
+          status: 'GENERATED',
+        }),
+      );
   }
 
   listFacultyForInvigilation(tenantId: string, examDate?: string) {
@@ -1375,4 +1716,3 @@ export class ExamCellService {
     );
   }
 }
-

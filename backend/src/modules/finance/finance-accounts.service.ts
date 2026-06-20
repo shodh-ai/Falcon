@@ -1,10 +1,17 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
-import { LEADERSHIP_ANOMALY_QUEUE, LeadershipAnomalyJob } from '../../common/constants/leadership-queue.constants';
+import {
+  LEADERSHIP_ANOMALY_QUEUE,
+  LeadershipAnomalyJob,
+} from '../../common/constants/leadership-queue.constants';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { BudgetFpaService } from '../leadership/budget-fpa.service';
@@ -19,7 +26,8 @@ export class FinanceAccountsService {
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
     private readonly budgetFpa: BudgetFpaService,
-    @InjectQueue(LEADERSHIP_ANOMALY_QUEUE) private readonly anomalyQueue: Queue<LeadershipAnomalyJob>,
+    @InjectQueue(LEADERSHIP_ANOMALY_QUEUE)
+    private readonly anomalyQueue: Queue<LeadershipAnomalyJob>,
   ) {}
 
   listTemplates(tenantId: string) {
@@ -70,7 +78,10 @@ export class FinanceAccountsService {
   }
 
   getBulkJob(jobId: string) {
-    return this.dataSource.query(`SELECT * FROM finance_bulk_jobs WHERE job_id = $1`, [jobId]);
+    return this.dataSource.query(
+      `SELECT * FROM finance_bulk_jobs WHERE job_id = $1`,
+      [jobId],
+    );
   }
 
   async runBulkDemandGeneration(
@@ -91,8 +102,11 @@ export class FinanceAccountsService {
     let developmentFee = Number(dto.development_fee ?? 15000);
     let academicYear = dto.academic_year ?? '2026-27';
     let semester = Number(dto.semester ?? 3);
-    let dueDate =
-      dto.due_date ?? new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10);
+    const dueDate =
+      dto.due_date ??
+      new Date(Date.now() + 1000 * 60 * 60 * 24 * 30)
+        .toISOString()
+        .slice(0, 10);
 
     if (dto.template_id) {
       const tpl = await this.dataSource.query(
@@ -266,10 +280,13 @@ export class FinanceAccountsService {
            ORDER BY created_at DESC LIMIT 1`,
           [tenantId, dto.department_id],
         );
-        deptBudgetId = (fyRows[0] as { budget_id: string } | undefined)?.budget_id;
+        deptBudgetId = (fyRows[0] as { budget_id: string } | undefined)
+          ?.budget_id;
       }
 
-      const tdsRate = Number((vendors[0] as { default_tds_rate: string }).default_tds_rate ?? 0);
+      const tdsRate = Number(
+        (vendors[0] as { default_tds_rate: string }).default_tds_rate ?? 0,
+      );
       const gstRate = Number(dto.gst_rate ?? 18);
       const taxable = Number(dto.taxable_amount);
       const gstAmount = Number(((taxable * gstRate) / 100).toFixed(2));
@@ -286,9 +303,16 @@ export class FinanceAccountsService {
         });
       }
 
-      const budget = await this.checkBudget(tenantId, dto.department_id, netPayable, deptBudgetId);
+      const budget = await this.checkBudget(
+        tenantId,
+        dto.department_id,
+        netPayable,
+        deptBudgetId,
+      );
       if (!budget.allowed) {
-        throw new BadRequestException(budget.message ?? 'Department budget exceeded');
+        throw new BadRequestException(
+          budget.message ?? 'Department budget exceeded',
+        );
       }
 
       const requiresBoard = netPayable >= 100000;
@@ -340,8 +364,12 @@ export class FinanceAccountsService {
       );
 
       // Record expense inline (inside tx) to avoid cross-connection FK issues
-      const expenseApprovedBy = !requiresBoard ? (dto.approved_by ?? null) : null;
-      const expenseApprovedAt = expenseApprovedBy ? new Date().toISOString() : null;
+      const expenseApprovedBy = !requiresBoard
+        ? (dto.approved_by ?? null)
+        : null;
+      const expenseApprovedAt = expenseApprovedBy
+        ? new Date().toISOString()
+        : null;
       if (deptBudgetId) {
         await tx.query(
           `UPDATE fin_dept_budgets SET utilized_amount = utilized_amount + $2 WHERE budget_id = $1`,
@@ -384,10 +412,18 @@ export class FinanceAccountsService {
       }
 
       if (!requiresBoard) {
-        await this.ledger.postExpense(tenantId, invoiceId, netPayable, gstAmount, tdsAmount, tx);
+        await this.ledger.postExpense(
+          tenantId,
+          invoiceId,
+          netPayable,
+          gstAmount,
+          tdsAmount,
+          tx,
+        );
       }
 
-      const vendorName = (vendors[0] as { business_name: string }).business_name ?? 'Vendor';
+      const vendorName =
+        (vendors[0] as { business_name: string }).business_name ?? 'Vendor';
       this.events.emit('leadership.expense_created', {
         tenantId,
         invoiceId,
@@ -396,8 +432,15 @@ export class FinanceAccountsService {
       });
 
       if (dto.department_id) {
-        const budgetAfter = await this.checkBudget(tenantId, dto.department_id, 0);
-        if (budgetAfter.utilization_percent && budgetAfter.utilization_percent >= 80) {
+        const budgetAfter = await this.checkBudget(
+          tenantId,
+          dto.department_id,
+          0,
+        );
+        if (
+          budgetAfter.utilization_percent &&
+          budgetAfter.utilization_percent >= 80
+        ) {
           void this.anomalyQueue.add('budget_check', {
             type: 'budget_check',
             tenantId,
@@ -438,19 +481,27 @@ export class FinanceAccountsService {
         [deptBudgetId, tenantId],
       );
       if (!rows[0]) return { allowed: true };
-      const r = rows[0] as { allocated_amount: string; utilized_amount: string; encumbered_amount: string };
+      const r = rows[0] as {
+        allocated_amount: string;
+        utilized_amount: string;
+        encumbered_amount: string;
+      };
       const allocated = Number(r.allocated_amount);
       const committed = Number(r.utilized_amount) + Number(r.encumbered_amount);
       if (committed + amount > allocated) {
         return {
           allowed: false,
           message: `Budget cap reached (committed ₹${committed + amount} > allocated ₹${allocated})`,
-          utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 100,
+          utilization_percent: allocated
+            ? Math.round(((committed + amount) / allocated) * 100)
+            : 100,
         };
       }
       return {
         allowed: true,
-        utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 0,
+        utilization_percent: allocated
+          ? Math.round(((committed + amount) / allocated) * 100)
+          : 0,
       };
     }
 
@@ -468,26 +519,47 @@ export class FinanceAccountsService {
         [tenantId, departmentId],
       );
       if (!legacy[0]) return { allowed: true };
-      const allocated = Number((legacy[0] as { allocated_amount: string }).allocated_amount);
-      const utilized = Number((legacy[0] as { utilized_amount: string }).utilized_amount);
+      const allocated = Number(
+        (legacy[0] as { allocated_amount: string }).allocated_amount,
+      );
+      const utilized = Number(
+        (legacy[0] as { utilized_amount: string }).utilized_amount,
+      );
       if (utilized + amount > allocated) {
-        return { allowed: false, message: `Budget cap reached`, utilization_percent: 100 };
+        return {
+          allowed: false,
+          message: `Budget cap reached`,
+          utilization_percent: 100,
+        };
       }
-      return { allowed: true, utilization_percent: allocated ? Math.round(((utilized + amount) / allocated) * 100) : 0 };
+      return {
+        allowed: true,
+        utilization_percent: allocated
+          ? Math.round(((utilized + amount) / allocated) * 100)
+          : 0,
+      };
     }
-    const r = rows[0] as { allocated_amount: string; utilized_amount: string; encumbered_amount: string };
+    const r = rows[0] as {
+      allocated_amount: string;
+      utilized_amount: string;
+      encumbered_amount: string;
+    };
     const allocated = Number(r.allocated_amount);
     const committed = Number(r.utilized_amount) + Number(r.encumbered_amount);
     if (committed + amount > allocated) {
       return {
         allowed: false,
         message: `Budget cap reached (${committed + amount} > ${allocated})`,
-        utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 100,
+        utilization_percent: allocated
+          ? Math.round(((committed + amount) / allocated) * 100)
+          : 100,
       };
     }
     return {
       allowed: true,
-      utilization_percent: allocated ? Math.round(((committed + amount) / allocated) * 100) : 0,
+      utilization_percent: allocated
+        ? Math.round(((committed + amount) / allocated) * 100)
+        : 0,
     };
   }
 
@@ -508,7 +580,11 @@ export class FinanceAccountsService {
 
   upsertBudget(
     tenantId: string,
-    dto: { department_id: number; financial_year: string; allocated_amount: number },
+    dto: {
+      department_id: number;
+      financial_year: string;
+      allocated_amount: number;
+    },
   ) {
     return this.dataSource.query(
       `INSERT INTO fin_budgets (tenant_id, department_id, financial_year, allocated_amount)
@@ -537,7 +613,11 @@ export class FinanceAccountsService {
       'November',
       'December',
     ];
-    return { year: Number(yearStr), monthLabel: monthNames[Number(monStr) - 1] ?? 'June', iso };
+    return {
+      year: Number(yearStr),
+      monthLabel: monthNames[Number(monStr) - 1] ?? 'June',
+      iso,
+    };
   }
 
   async salaryProcessingSummary(tenantId: string, month?: string) {
@@ -552,7 +632,9 @@ export class FinanceAccountsService {
     return {
       month: iso,
       staff_count: (rows[0] as { staff_count: number })?.staff_count ?? 0,
-      total_payout: Number((rows[0] as { total_payout: string })?.total_payout ?? 0),
+      total_payout: Number(
+        (rows[0] as { total_payout: string })?.total_payout ?? 0,
+      ),
     };
   }
 
@@ -568,12 +650,19 @@ export class FinanceAccountsService {
     );
     const lines = [
       'Beneficiary Name,Account Number,IFSC,Amount,Remarks',
-      ...(rows as Array<{ name: string; ifsc_code: string; net_pay: string }>).map(
+      ...(
+        rows as Array<{ name: string; ifsc_code: string; net_pay: string }>
+      ).map(
         (r) =>
           `"${r.name}","","${r.ifsc_code ?? ''}",${Number(r.net_pay).toFixed(2)},"Salary ${iso}"`,
       ),
     ];
-    return { format: 'NEFT_CSV', month: iso, csv: lines.join('\n'), row_count: rows.length };
+    return {
+      format: 'NEFT_CSV',
+      month: iso,
+      csv: lines.join('\n'),
+      row_count: rows.length,
+    };
   }
 
   exportCsv(rows: Record<string, unknown>[], filename: string) {

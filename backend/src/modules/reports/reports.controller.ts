@@ -11,14 +11,19 @@ export class ReportsController {
 
   @Get('documents')
   documents(@Req() req: { user: { tenant_id?: string } }) {
-    const tenantId = req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId =
+      req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
     return this.reports.listPolicyDocuments(tenantId);
   }
 
   @Get('warehouse/:dataset')
   @Roles('SuperAdmin', 'Registrar', 'President', 'Accountant')
-  warehouse(@Req() req: { user: { tenant_id?: string } }, @Param('dataset') dataset: string) {
-    const tenantId = req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  warehouse(
+    @Req() req: { user: { tenant_id?: string } },
+    @Param('dataset') dataset: string,
+  ) {
+    const tenantId =
+      req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
     return this.reports.warehouseExport(tenantId, dataset);
   }
 }

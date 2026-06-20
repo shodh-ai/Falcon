@@ -39,6 +39,7 @@ import { FacultyWorkspacesService } from './faculty-workspaces.service';
 import { FacultyProfileService } from './faculty-profile.service';
 import { FacultyProfileController } from './faculty-profile.controller';
 import { CourseLmsService } from './course-lms.service';
+import { AcademicProxyService } from './academic-proxy.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
@@ -95,6 +96,7 @@ import { InsightsController } from './insights.controller';
     FacultyWorkspacesService,
     FacultyProfileService,
     CourseLmsService,
+    AcademicProxyService,
     MarksheetPdfService,
     MarksHistoryService,
     EarlyWarningService,
@@ -109,9 +111,10 @@ import { InsightsController } from './insights.controller';
     FacultyWorkspacesService,
     FacultyProfileService,
     CourseLmsService,
+    AcademicProxyService,
     MarksheetPdfService,
     MarksHistoryService,
     InsightsService,
   ],
 })
-export class AcademicsModule {}
+export class AcademicsModule { }

@@ -1,7 +1,18 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
-export type HostelRequestType = 'GATE_PASS' | 'ROOM_CHANGE' | 'MESS_CHANGE' | 'MAINTENANCE';
+export type HostelRequestType =
+  | 'GATE_PASS'
+  | 'ROOM_CHANGE'
+  | 'MESS_CHANGE'
+  | 'MAINTENANCE';
 export type HostelRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 @Entity('hostel_requests')
