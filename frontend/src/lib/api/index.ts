@@ -10,6 +10,7 @@ export * from './api.iqac';
 export * from './api.operations';
 export * from './api.hostel-admin';
 export * from './api.campus-events';
+export * from './api.venue-booking';
 export * from './api.ecell';
 export * from './api.settings';
 export * from './use-hr-api';

@@ -27,6 +27,7 @@ import type {
   TimetableChangedPayload,
   TransportBusApproachingPayload,
   WorkflowApprovalRequiredPayload,
+  VenueBookingPayload,
 } from './notification.events';
 import {
   applyNotificationOverrides,
@@ -1024,6 +1025,69 @@ export function ecellMentorFeedbackRequestedMessage(
       actionLabel: 'Leave feedback',
       severity: 'info',
       intent: 'action_required',
+    },
+    overrides,
+  );
+}
+
+export function venueBookingPendingApprovalMessage(
+  payload: VenueBookingPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: 'Venue booking awaiting approval',
+      message:
+        payload.message ??
+        `${payload.studentName ?? 'A student'} requested ${payload.venueName} for "${payload.purpose ?? 'academic use'}". Review and approve or reject.`,
+      actionLink: payload.actionLink ?? '/library/venue-requests',
+      actionLabel: 'Review request',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: { bookingId: payload.bookingId, venueName: payload.venueName },
+    },
+    overrides,
+  );
+}
+
+export function venueBookingApprovedMessage(
+  payload: VenueBookingPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: 'Venue booking confirmed',
+      message:
+        payload.message ??
+        `Your booking for ${payload.venueName} is approved. Open your digital room pass before heading to the venue.`,
+      actionLink: payload.actionLink ?? '/student/venues',
+      actionLabel: 'View room pass',
+      severity: 'success',
+      intent: 'status_update',
+      metadata: { bookingId: payload.bookingId, venueName: payload.venueName },
+    },
+    overrides,
+  );
+}
+
+export function venueBookingRejectedMessage(
+  payload: VenueBookingPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: 'Venue booking not approved',
+      message:
+        payload.message ??
+        `Your request for ${payload.venueName} was not approved.${payload.remarks ? ` Reason: ${payload.remarks}` : ''}`,
+      actionLink: payload.actionLink ?? '/student/venues',
+      actionLabel: 'Book another slot',
+      severity: 'warning',
+      intent: 'status_update',
+      metadata: { bookingId: payload.bookingId, venueName: payload.venueName },
     },
     overrides,
   );

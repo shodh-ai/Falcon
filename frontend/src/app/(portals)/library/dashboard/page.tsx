@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { VenueRequestsWidget } from '@/components/venues/VenueRequestsWidget';
 
 type Metrics = {
   books_currently_issued: number;
@@ -56,6 +57,11 @@ export default function LibraryDashboardPage() {
             </Card>
           </Link>
         ))}
+        <VenueRequestsWidget
+          title="Venue booking requests"
+          href="/library/venue-requests"
+          loadPending={(v) => v.librarianPending()}
+        />
       </div>
 
       <div className="flex flex-wrap gap-2">

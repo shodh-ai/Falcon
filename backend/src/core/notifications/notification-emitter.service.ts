@@ -38,6 +38,7 @@ import {
   type EcellMentorMeetingRequestedPayload,
   type EcellMentorMeetingRespondedPayload,
   type EcellMentorFeedbackRequestedPayload,
+  type VenueBookingPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -231,5 +232,17 @@ export class NotificationEmitterService {
 
   ecellMentorFeedbackRequested(payload: EcellMentorFeedbackRequestedPayload) {
     this.events.emit(NotificationEvents.ECELL_MENTOR_FEEDBACK_REQUESTED, payload);
+  }
+
+  venueBookingPendingApproval(payload: VenueBookingPayload) {
+    this.events.emit(NotificationEvents.VENUE_BOOKING_PENDING_APPROVAL, payload);
+  }
+
+  venueBookingApproved(payload: VenueBookingPayload) {
+    this.events.emit(NotificationEvents.VENUE_BOOKING_APPROVED, payload);
+  }
+
+  venueBookingRejected(payload: VenueBookingPayload) {
+    this.events.emit(NotificationEvents.VENUE_BOOKING_REJECTED, payload);
   }
 }

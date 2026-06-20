@@ -46,6 +46,9 @@ export const NotificationEvents = {
   ECELL_MENTOR_MEETING_REQUESTED: 'ecell.mentor_meeting_requested',
   ECELL_MENTOR_MEETING_RESPONDED: 'ecell.mentor_meeting_responded',
   ECELL_MENTOR_FEEDBACK_REQUESTED: 'ecell.mentor_feedback_requested',
+  VENUE_BOOKING_PENDING_APPROVAL: 'venue.booking_pending_approval',
+  VENUE_BOOKING_APPROVED: 'venue.booking_approved',
+  VENUE_BOOKING_REJECTED: 'venue.booking_rejected',
 } as const;
 
 export type NotificationEventName =
@@ -271,4 +274,14 @@ export type EcellMentorMeetingRespondedPayload = BaseNotificationPayload & {
 export type EcellMentorFeedbackRequestedPayload = BaseNotificationPayload & {
   startupName: string;
   topic: string;
+};
+
+export type VenueBookingPayload = BaseNotificationPayload & {
+  bookingId: string;
+  venueName: string;
+  studentName?: string;
+  purpose?: string;
+  startTime?: string;
+  endTime?: string;
+  remarks?: string;
 };

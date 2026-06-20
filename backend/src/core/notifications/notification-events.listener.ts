@@ -48,6 +48,9 @@ import {
   ecellMentorMeetingRequestedMessage,
   ecellMentorMeetingRespondedMessage,
   ecellMentorFeedbackRequestedMessage,
+  venueBookingPendingApprovalMessage,
+  venueBookingApprovedMessage,
+  venueBookingRejectedMessage,
 } from './notification-message.catalog';
 import {
   NotificationEvents,
@@ -83,6 +86,7 @@ import {
   type EcellMentorMeetingRequestedPayload,
   type EcellMentorMeetingRespondedPayload,
   type EcellMentorFeedbackRequestedPayload,
+  type VenueBookingPayload,
 } from './notification.events';
 
 @Injectable()
@@ -541,6 +545,36 @@ export class NotificationEventsListener {
   @OnEvent(NotificationEvents.ECELL_MENTOR_FEEDBACK_REQUESTED)
   async onEcellMentorFeedbackRequested(payload: EcellMentorFeedbackRequestedPayload) {
     const msg = ecellMentorFeedbackRequestedMessage(payload, {
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.VENUE_BOOKING_PENDING_APPROVAL)
+  async onVenueBookingPending(payload: VenueBookingPayload) {
+    const msg = venueBookingPendingApprovalMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.VENUE_BOOKING_APPROVED)
+  async onVenueBookingApproved(payload: VenueBookingPayload) {
+    const msg = venueBookingApprovedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.VENUE_BOOKING_REJECTED)
+  async onVenueBookingRejected(payload: VenueBookingPayload) {
+    const msg = venueBookingRejectedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
       actionLink: payload.actionLink,
     });
     await this.emitFromPayload(payload.tenantId, payload.userId, msg);

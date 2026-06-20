@@ -54,6 +54,7 @@ import { EcellModule } from './modules/ecell/ecell.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
 import { DemeritsModule } from './modules/demerits/demerits.module';
 import { AttendancePolicyModule } from './modules/attendance-policy/attendance-policy.module';
+import { VenueBookingModule } from './modules/venue-booking/venue-booking.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -163,6 +164,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     MeetingsModule,
     DemeritsModule,
     AttendancePolicyModule,
+    VenueBookingModule,
   ],
   controllers: [AppController],
   providers: [
