@@ -51,11 +51,26 @@ export class AttendancePolicyService {
     if (!dto.description?.trim()) {
       throw new BadRequestException('A description of the reason is required.');
     }
+    if (!dto.supporting_doc_url?.trim()) {
+      throw new BadRequestException(
+        'Supporting proof is required (medical certificate, internship letter, accident report, etc.).',
+      );
+    }
+
+    const evaluation = await this.eligibility.evaluate(tenantId, studentUserId);
+    if (evaluation.attendance_percent >= evaluation.effective_threshold) {
+      throw new BadRequestException(
+        `Attendance exemption is only available when attendance is below ${evaluation.effective_threshold}%.`,
+      );
+    }
+    if (evaluation.threshold_source === 'EXEMPTION') {
+      throw new BadRequestException('You already have an approved attendance exemption.');
+    }
 
     const open = await this.db.query(
       `SELECT 1 FROM student_attendance_exemptions
        WHERE tenant_id = $1 AND student_user_id = $2
-         AND status IN ('PENDING_HOD', 'RECOMMENDED')
+         AND status = 'PENDING_HOD'
        LIMIT 1`,
       [tenantId, studentUserId],
     );
@@ -76,7 +91,7 @@ export class AttendancePolicyService {
         studentUserId,
         category,
         dto.description.trim(),
-        dto.supporting_doc_url ?? null,
+        dto.supporting_doc_url.trim(),
         attendance,
         dto.semester ?? null,
       ],
@@ -108,7 +123,7 @@ export class AttendancePolicyService {
   }
 
   // ----------------------------------------------------------------------------
-  // HOD: recommend / reject exemptions for own department
+  // HOD: approve / reject exemptions for own department
   // ----------------------------------------------------------------------------
 
   async listHodExemptions(tenantId: string, hodUserId: string) {
@@ -121,7 +136,7 @@ export class AttendancePolicyService {
        JOIN users u ON u.user_id = e.student_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1 AND u.dept_id = ANY($2::int[])
-       ORDER BY (e.status = 'PENDING_HOD') DESC, e.created_at DESC`,
+       ORDER BY (e.status IN ('PENDING_HOD', 'RECOMMENDED')) DESC, e.created_at DESC`,
       [tenantId, deptIds],
     );
   }
@@ -133,7 +148,7 @@ export class AttendancePolicyService {
     dto: DecisionDto,
   ) {
     const exemption = await this.loadExemptionInHodScope(tenantId, hodUserId, exemptionId);
-    if (exemption.status !== 'PENDING_HOD') {
+    if (!['PENDING_HOD', 'RECOMMENDED'].includes(exemption.status)) {
       throw new BadRequestException('This request is no longer pending your review.');
     }
 
@@ -158,7 +173,7 @@ export class AttendancePolicyService {
 
     await this.db.query(
       `UPDATE student_attendance_exemptions
-       SET status = 'RECOMMENDED', hod_user_id = $2, hod_remarks = $3,
+       SET status = 'APPROVED', hod_user_id = $2, hod_remarks = $3,
            hod_decided_at = NOW(), updated_at = NOW()
        WHERE exemption_id = $1`,
       [exemptionId, hodUserId, dto.remarks ?? null],
@@ -167,22 +182,30 @@ export class AttendancePolicyService {
     const [student] = await this.db.query(`SELECT name FROM users WHERE user_id = $1`, [
       exemption.student_user_id,
     ]);
+    this.notify.approvalRequired({
+      tenantId,
+      userId: exemption.student_user_id,
+      title: 'Attendance exemption approved',
+      message: `Your attendance exemption was approved by the HOD. You can now generate your admit card.${dto.remarks ? ` Remarks: ${dto.remarks}` : ''}`,
+      actionLink: '/student/exams',
+      requestType: 'ATTENDANCE_EXEMPTION',
+    });
     await this.notifyRoles(tenantId, ['ExamCell'], {
-      title: 'Attendance exemption for final approval',
-      message: `${student?.name ?? 'A student'} (attendance ${Number(exemption.attendance_percent_at_request)}%) was recommended for an attendance exemption by the HOD.`,
+      title: 'Attendance exemption approved',
+      message: `${student?.name ?? 'A student'} (attendance ${Number(exemption.attendance_percent_at_request)}%) was approved for an attendance exemption. Admit card generation is now allowed.`,
       actionLink: '/exam-cell/attendance-exemptions',
       requesterName: student?.name,
       requestType: 'ATTENDANCE_EXEMPTION',
     });
 
-    return { status: 'RECOMMENDED' };
+    return { status: 'APPROVED' };
   }
 
   // ----------------------------------------------------------------------------
-  // Dean / Exam Cell: final decision on exemptions
+  // Exam Cell: read-only view of HOD-approved exemptions
   // ----------------------------------------------------------------------------
 
-  listFinalExemptionQueue(tenantId: string) {
+  listApprovedExemptions(tenantId: string) {
     return this.db.query(
       `SELECT e.*, u.name AS student_name, u.official_email AS student_email,
               d.dept_name, hod.name AS hod_name
@@ -190,49 +213,10 @@ export class AttendancePolicyService {
        JOIN users u ON u.user_id = e.student_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        LEFT JOIN users hod ON hod.user_id = e.hod_user_id
-       WHERE e.tenant_id = $1 AND e.status IN ('RECOMMENDED', 'APPROVED', 'REJECTED')
-       ORDER BY (e.status = 'RECOMMENDED') DESC, e.created_at DESC`,
+       WHERE e.tenant_id = $1 AND e.status = 'APPROVED'
+       ORDER BY e.hod_decided_at DESC NULLS LAST, e.created_at DESC`,
       [tenantId],
     );
-  }
-
-  async finalDecideExemption(
-    tenantId: string,
-    approverUserId: string,
-    exemptionId: string,
-    dto: DecisionDto,
-  ) {
-    const [exemption] = await this.db.query(
-      `SELECT * FROM student_attendance_exemptions WHERE exemption_id = $1 AND tenant_id = $2`,
-      [exemptionId, tenantId],
-    );
-    if (!exemption) throw new NotFoundException('Exemption request not found');
-    if (exemption.status !== 'RECOMMENDED') {
-      throw new BadRequestException('This request is not awaiting final approval.');
-    }
-
-    const newStatus = dto.decision === 'REJECT' ? 'REJECTED' : 'APPROVED';
-    await this.db.query(
-      `UPDATE student_attendance_exemptions
-       SET status = $2, final_approver_id = $3, final_remarks = $4,
-           final_decided_at = NOW(), updated_at = NOW()
-       WHERE exemption_id = $1`,
-      [exemptionId, newStatus, approverUserId, dto.remarks ?? null],
-    );
-
-    this.notify.approvalRequired({
-      tenantId,
-      userId: exemption.student_user_id,
-      title: newStatus === 'APPROVED' ? 'Attendance exemption approved' : 'Attendance exemption rejected',
-      message:
-        newStatus === 'APPROVED'
-          ? `Your attendance exemption was approved. You can now generate your admit card.${dto.remarks ? ` Remarks: ${dto.remarks}` : ''}`
-          : `Your attendance exemption was rejected at final approval.${dto.remarks ? ` Remarks: ${dto.remarks}` : ''}`,
-      actionLink: '/student/exams',
-      requestType: 'ATTENDANCE_EXEMPTION',
-    });
-
-    return { status: newStatus };
   }
 
   // ----------------------------------------------------------------------------

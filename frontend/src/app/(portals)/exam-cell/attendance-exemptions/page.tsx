@@ -5,11 +5,11 @@ import { ExemptionReviewQueue } from '@/components/attendance/ExemptionReviewQue
 export default function ExamCellAttendanceExemptionsPage() {
   return (
     <ExemptionReviewQueue
-      title="Attendance Exemption — Final Approval"
-      description="HOD-recommended exemptions awaiting final sign-off. Approving unlocks the student's admit card despite low attendance."
-      listPath="/api/attendance-policy/final/exemptions"
-      decisionBasePath="/api/attendance-policy/final/exemptions"
-      mode="FINAL"
+      title="Attendance Exemptions — Approved"
+      description="Students the HOD has approved for attendance exemption. Admit card generation is allowed for these students despite low attendance."
+      listPath="/api/attendance-policy/approved/exemptions"
+      decisionBasePath=""
+      mode="VIEW"
     />
   );
 }

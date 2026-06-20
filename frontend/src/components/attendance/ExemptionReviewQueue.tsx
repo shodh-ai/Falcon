@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import {
   exemptionStatusLabel,
+  proofDocHref,
   reasonLabel,
   type AttendanceExemption,
 } from '@/lib/attendance-policy';
@@ -31,7 +32,7 @@ export function ExemptionReviewQueue({
   description: string;
   listPath: string;
   decisionBasePath: string;
-  mode: 'HOD' | 'FINAL';
+  mode: 'HOD' | 'VIEW';
 }) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<AttendanceExemption[]>([]);
@@ -39,8 +40,7 @@ export function ExemptionReviewQueue({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
 
-  const actionableStatus = mode === 'HOD' ? 'PENDING_HOD' : 'RECOMMENDED';
-  const approveLabel = mode === 'HOD' ? 'Recommend' : 'Approve';
+  const approveLabel = 'Approve';
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,7 +94,8 @@ export function ExemptionReviewQueue({
       ) : (
         rows.map((row) => {
           const pct = Math.round(Number(row.attendance_percent_at_request));
-          const actionable = row.status === actionableStatus;
+          const actionable =
+            mode === 'HOD' && (row.status === 'PENDING_HOD' || row.status === 'RECOMMENDED');
           return (
             <Card key={row.exemption_id}>
               <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -119,24 +120,21 @@ export function ExemptionReviewQueue({
                 <p className="whitespace-pre-wrap">{row.description}</p>
                 {row.supporting_doc_url ? (
                   <a
-                    href={row.supporting_doc_url}
+                    href={proofDocHref(row.supporting_doc_url)}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs font-medium text-primary underline"
                   >
-                    View supporting document
+                    View supporting proof
                   </a>
-                ) : null}
+                ) : (
+                  <p className="text-xs text-destructive">No proof attached</p>
+                )}
                 {row.hod_remarks ? (
                   <p className="text-xs text-muted-foreground">HOD note: {row.hod_remarks}</p>
                 ) : null}
-                {row.final_remarks ? (
-                  <p className="text-xs text-muted-foreground">
-                    Final note: {row.final_remarks}
-                  </p>
-                ) : null}
 
-                {actionable ? (
+                {mode === 'HOD' && actionable ? (
                   <div className="space-y-2 border-t pt-3">
                     <textarea
                       className="w-full rounded-lg border bg-background px-3 py-2 text-sm"

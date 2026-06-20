@@ -319,7 +319,16 @@ export default function StudentExamsPage() {
               </div>
             ) : null}
 
-            <StudentExemptionPanel />
+            {eligibility &&
+            (eligibility.exempted ||
+              eligibility.attendance_percent < (eligibility.min_required ?? 75)) ? (
+              <StudentExemptionPanel
+                canRequest={
+                  !eligibility.exempted &&
+                  eligibility.attendance_percent < (eligibility.min_required ?? 75)
+                }
+              />
+            ) : null}
 
             <Button
               className="w-full"
