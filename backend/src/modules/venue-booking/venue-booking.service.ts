@@ -405,29 +405,38 @@ export class VenueBookingService {
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async expireStalePendingBookings() {
-    const expired = await this.db.query(
-      `UPDATE venue_bookings
-       SET status = 'EXPIRED', updated_at = NOW()
-       WHERE status = 'PENDING_APPROVAL' AND start_time < NOW()
-       RETURNING booking_id, tenant_id, student_user_id, venue_id`,
-    );
-    if (!expired.length) return;
-
-    for (const row of expired) {
-      const meta = await this.db.query(
-        `SELECT v.name AS venue_name FROM campus_venues v WHERE v.venue_id = $1`,
-        [row.venue_id],
+    try {
+      const tableExists = await this.db.query(
+        `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'venue_bookings') AS exists`
       );
-      this.notify.venueBookingRejected({
-        tenantId: row.tenant_id,
-        userId: row.student_user_id,
-        bookingId: row.booking_id,
-        venueName: meta[0]?.venue_name ?? 'Venue',
-        remarks: 'Request expired — start time passed before approval',
-        title: 'Venue booking expired',
-        message: `Your booking request for ${meta[0]?.venue_name ?? 'a venue'} expired because it was not approved in time.`,
-        actionLink: '/student/venues',
-      });
+      if (!tableExists[0]?.exists) return;
+
+      const expired = await this.db.query(
+        `UPDATE venue_bookings
+         SET status = 'EXPIRED', updated_at = NOW()
+         WHERE status = 'PENDING_APPROVAL' AND start_time < NOW()
+         RETURNING booking_id, tenant_id, student_user_id, venue_id`,
+      );
+      if (!expired.length) return;
+
+      for (const row of expired) {
+        const meta = await this.db.query(
+          `SELECT v.name AS venue_name FROM campus_venues v WHERE v.venue_id = $1`,
+          [row.venue_id],
+        );
+        this.notify.venueBookingRejected({
+          tenantId: row.tenant_id,
+          userId: row.student_user_id,
+          bookingId: row.booking_id,
+          venueName: meta[0]?.venue_name ?? 'Venue',
+          remarks: 'Request expired — start time passed before approval',
+          title: 'Venue booking expired',
+          message: `Your booking request for ${meta[0]?.venue_name ?? 'a venue'} expired because it was not approved in time.`,
+          actionLink: '/student/venues',
+        });
+      }
+    } catch (error) {
+      // Ignore if table missing or other scheduled task error
     }
   }
 }

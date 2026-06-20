@@ -73,17 +73,17 @@ type PendingGroup = {
   rows: PendingMark[];
 };
 
-const EXAM_TYPES = ['INTERNAL', 'CAT1', 'CAT2', 'QUIZ', 'END_TERM', 'PRACTICAL'];
+const EXAM_TYPES = ['INTERNAL', 'CAT1', 'CAT2', 'END_TERM', 'PRACTICAL'];
 
-const WORKFLOW_STEPS = [
-  { key: 'review', label: 'Review', icon: Eye },
-  { key: 'lock', label: 'Lock', icon: Lock },
-  { key: 'preview', label: 'Preview grades', icon: Eye },
-  { key: 'declare', label: 'Declare', icon: Send },
-] as const;
+type WorkflowStep = 'review' | 'lock' | 'declare' | 'preview' | 'done';
 
-type WorkflowStep = (typeof WORKFLOW_STEPS)[number]['key'] | 'done';
-
+const WORKFLOW_STEPS: { key: WorkflowStep; label: string }[] = [
+  { key: 'review', label: 'Review Pending' },
+  { key: 'lock', label: 'Lock Submissions' },
+  { key: 'declare', label: 'Apply Rules' },
+  { key: 'preview', label: 'Preview & Publish' },
+  { key: 'done', label: 'Results Declared' }
+];
 function statusBadge(status: string) {
   if (status === 'OPEN') return 'default';
   if (status === 'LOCKED') return 'secondary';
@@ -637,13 +637,12 @@ function WorkflowStepper({ currentIdx }: { currentIdx: number }) {
         return (
           <div key={step.key} className="flex items-center gap-2">
             <div
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-                done
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${done
                   ? 'bg-emerald-100 text-emerald-800'
                   : active
                     ? 'bg-sgvu-gold/20 text-sgvu-navy ring-1 ring-sgvu-gold/50'
                     : 'bg-muted text-muted-foreground'
-              }`}
+                }`}
             >
               {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
               {step.label}

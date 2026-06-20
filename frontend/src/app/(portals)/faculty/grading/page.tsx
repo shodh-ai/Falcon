@@ -275,16 +275,10 @@ export default function FacultyGradingPage() {
           </label>
           <div className="flex items-end">
             <Badge
-              variant={
-                publishStatus === 'PUBLISHED'
-                  ? 'default'
-                  : publishStatus === 'PENDING_COE' || publishStatus === 'PARTIAL'
-                    ? 'outline'
-                    : 'secondary'
-              }
+              variant={publishStatus === 'PUBLISHED' || (examType === 'QUIZ' && publishStatus === 'PENDING_COE') ? 'default' : publishStatus === 'PENDING_COE' ? 'outline' : 'secondary'}
               className="text-xs font-semibold uppercase tracking-wide"
             >
-              {statusLabel(publishStatus)}
+              {examType === 'QUIZ' && publishStatus === 'PENDING_COE' ? 'PUBLISHED' : publishStatus === 'PENDING_COE' ? 'Submitted to Exam Cell' : publishStatus}
             </Badge>
           </div>
         </div>
@@ -295,53 +289,40 @@ export default function FacultyGradingPage() {
         count={rows.length}
         description="Enter marks per student — CO mapping optional"
       >
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          {allSubmitted ? (
-            <p className="text-xs text-muted-foreground">
-              All marks are submitted. Contact Exam Cell to reopen entry if you need changes.
-            </p>
-          ) : draftSubmitCount > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {draftSubmitCount} student{draftSubmitCount === 1 ? '' : 's'} ready to submit as draft marks.
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">Enter marks, save draft, then submit to Exam Cell.</p>
-          )}
-          <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" disabled={!canSaveDraft || saving} onClick={() => void saveDraft()}>
+        <div className="mb-4 flex flex-wrap justify-end gap-2">
+          <Button variant="outline" size="sm" disabled={!courseId || saving || !entryAllowed || (examType !== 'QUIZ' && (publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'))} onClick={() => void saveDraft()}>
             {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
             Save draft
           </Button>
-          <Button size="sm" disabled={!canSubmit || saving} onClick={() => void publish()}>
+          <Button size="sm" disabled={!courseId || saving || !entryAllowed || (examType !== 'QUIZ' && (publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'))} onClick={() => void publish()}>
             <Send className="mr-1 h-4 w-4" />
-            Submit to Exam Cell
+            {examType === 'QUIZ' ? 'Publish Quiz Scores' : 'Submit to Exam Cell'}
           </Button>
-          </div>
         </div>
 
-        {loading ? (
-          <FacultyInlineLoading label="Loading marks…" />
-        ) : !courseId ? (
-          <FacultyEmptyState description="Select a course to load the class roster." />
-        ) : rosterError ? (
-          <FacultyErrorBanner message={rosterError} />
-        ) : rows.length === 0 ? (
-          <FacultyEmptyState description="No enrolled students found for this course." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr className="border-b border-border/60 text-left text-xs font-medium text-muted-foreground">
-                  <th className="pb-2 pr-4">Roll</th>
-                  <th className="pb-2 pr-4">Student</th>
-                  <th className="pb-2 pr-4">CO</th>
-                  <th className="pb-2">Marks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const rowLocked = row.status === 'PENDING_COE' || row.status === 'PUBLISHED';
-                  return (
+      {loading ? (
+        <FacultyInlineLoading label="Loading marks…" />
+      ) : !courseId ? (
+        <FacultyEmptyState description="Select a course to load the class roster." />
+      ) : rosterError ? (
+        <FacultyErrorBanner message={rosterError} />
+      ) : rows.length === 0 ? (
+        <FacultyEmptyState description="No enrolled students found for this course." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-border/60 text-left text-xs font-medium text-muted-foreground">
+                <th className="pb-2 pr-4">Roll</th>
+                <th className="pb-2 pr-4">Student</th>
+                <th className="pb-2 pr-4">CO</th>
+                <th className="pb-2">Marks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const rowLocked = examType !== 'QUIZ' && (row.status === 'PENDING_COE' || row.status === 'PUBLISHED');
+                return (
                   <tr key={row.student_user_id} className="border-b border-border/40">
                     <td className="py-2.5 pr-4 text-xs font-medium text-muted-foreground">
                       {row.roll_number && row.roll_number.length <= 24 && !row.roll_number.includes('0000-4000')
@@ -388,13 +369,13 @@ export default function FacultyGradingPage() {
                       </div>
                     </td>
                   </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </FacultyPanel>
-    </FacultyPageShell>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </FacultyPanel>
+    </FacultyPageShell >
   );
 }

@@ -21,7 +21,7 @@ export class FacultyWorkspacesService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
-  ) {}
+  ) { }
 
   async listFacultyCourses(facultyUserId: string, tenantId: string) {
     const fromTimetable = await this.dataSource.query(
@@ -299,10 +299,11 @@ export class FacultyWorkspacesService {
             : 'DRAFT';
 
     const entryAllowed =
-      !!session &&
-      session.entry_status === 'OPEN' &&
-      !session.marks_locked &&
-      !session.declared_at;
+      examType === 'QUIZ' ||
+      (!!session &&
+        session.entry_status === 'OPEN' &&
+        !session.marks_locked &&
+        !session.declared_at);
 
     return {
       exam_type: examType,
@@ -312,13 +313,13 @@ export class FacultyWorkspacesService {
       entry_allowed: entryAllowed,
       result_session: session
         ? {
-            session_id: session.session_id,
-            entry_status: session.entry_status,
-            marks_locked: session.marks_locked,
-            entry_open_at: session.entry_open_at,
-            entry_close_at: session.entry_close_at,
-            declared_at: session.declared_at,
-          }
+          session_id: session.session_id,
+          entry_status: session.entry_status,
+          marks_locked: session.marks_locked,
+          entry_open_at: session.entry_open_at,
+          entry_close_at: session.entry_close_at,
+          declared_at: session.declared_at,
+        }
         : null,
       rows: rows.map(
         (s: {
@@ -358,9 +359,22 @@ export class FacultyWorkspacesService {
       throw new BadRequestException('Invalid exam_type');
     }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
-    const session = await this.getResultSession(tenantId, dto.course_id, dto.exam_type);
-    this.assertFacultyEntryAllowed(session);
+    if (dto.exam_type !== 'QUIZ') {
+      const session = await this.getResultSession(tenantId, dto.course_id, dto.exam_type);
+      this.assertFacultyEntryAllowed(session);
+    }
 
+    if (dto.exam_type !== 'QUIZ') {
+      const locked = await this.dataSource.query(
+        `SELECT 1 FROM academic_marks
+         WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+           AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1`,
+        [tenantId, dto.course_id, dto.exam_type],
+      );
+      if (locked[0]) {
+        throw new ForbiddenException('Submitted marks are locked. Contact Exam Cell to reopen entry.');
+      }
+    }
     const maxMarks = dto.max_marks;
     for (const entry of dto.entries) {
       if (entry.marks_obtained > maxMarks) {
@@ -397,6 +411,7 @@ export class FacultyWorkspacesService {
              ELSE EXCLUDED.co_mapped
            END,
            status = CASE
+             WHEN EXCLUDED.exam_type = 'QUIZ' THEN 'DRAFT'
              WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
              ELSE 'DRAFT'
            END,
@@ -415,14 +430,18 @@ export class FacultyWorkspacesService {
     examType: string,
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
-    const session = await this.getResultSession(tenantId, courseId, examType);
-    this.assertFacultyEntryAllowed(session);
+    if (examType !== 'QUIZ') {
+      const session = await this.getResultSession(tenantId, courseId, examType);
+      this.assertFacultyEntryAllowed(session);
+    }
+    const targetStatus = examType === 'QUIZ' ? 'PUBLISHED' : 'PENDING_COE';
+    const statusCondition = examType === 'QUIZ' ? `status IN ('DRAFT', 'PENDING_COE', 'PUBLISHED')` : `status = 'DRAFT'`;
     const result = await this.dataSource.query(
       `UPDATE academic_marks
-       SET status = 'PENDING_COE', updated_at = NOW()
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4 AND status = 'DRAFT'
+       SET status = $5, updated_at = NOW()
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND uploaded_by = $4 AND ${statusCondition}
        RETURNING mark_id`,
-      [tenantId, courseId, examType, facultyUserId],
+      [tenantId, courseId, examType, facultyUserId, targetStatus],
     );
 
     const courseRows = await this.dataSource.query<Array<{ course_name: string }>>(
@@ -431,8 +450,8 @@ export class FacultyWorkspacesService {
     );
     const courseName = courseRows[0]?.course_name ?? 'your course';
 
-    const publishedCount = Array.isArray(result) && result.length === 2 && typeof result[1] === 'number' 
-      ? result[1] 
+    const publishedCount = Array.isArray(result) && result.length === 2 && typeof result[1] === 'number'
+      ? result[1]
       : result.length;
     if (publishedCount === 0) {
       throw new BadRequestException(
@@ -797,7 +816,7 @@ export class FacultyWorkspacesService {
     students: { student_user_id: string; grade?: string }[]
   ) {
     await this.assertOwnsGuide(guideId, facultyUserId, tenantId);
-    
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -923,7 +942,7 @@ export class FacultyWorkspacesService {
     if (!rows.length) {
       throw new NotFoundException('Pending funding request not found or unauthorized');
     }
-    
+
     const updatedRequest = rows[0];
 
     if (status === 'APPROVED_HOD') {
@@ -931,7 +950,7 @@ export class FacultyWorkspacesService {
         `SELECT u.user_id FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.tenant_id = $1 AND r.role_name = 'Dean'`,
         [tenantId]
       );
-      
+
       for (const d of deanUsers) {
         this.notify.approvalRequired({
           tenantId,
@@ -966,7 +985,7 @@ export class FacultyWorkspacesService {
     if (!rows.length) {
       throw new NotFoundException('Pending funding request not found or unauthorized');
     }
-    
+
     const updatedRequest = rows[0];
 
     if (status === 'APPROVED_DEAN') {
@@ -974,7 +993,7 @@ export class FacultyWorkspacesService {
         `SELECT u.user_id FROM users u JOIN roles r ON u.role_id = r.role_id WHERE u.tenant_id = $1 AND r.role_name IN ('FinanceAdmin', 'FinanceAccountant', 'Finance', 'Accountant')`,
         [tenantId]
       );
-      
+
       for (const f of financeUsers) {
         this.notify.approvalRequired({
           tenantId,

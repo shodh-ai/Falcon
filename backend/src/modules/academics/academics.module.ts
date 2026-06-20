@@ -47,6 +47,8 @@ import { HrModule } from '../hr/hr.module';
 
 import { EarlyWarningService } from './early-warning.service';
 import { EarlyWarningController } from './early-warning.controller';
+import { InsightsService } from './insights.service';
+import { InsightsController } from './insights.controller';
 
 @Module({
   imports: [
@@ -81,7 +83,7 @@ import { EarlyWarningController } from './early-warning.controller';
       HelpdeskTicket,
     ]),
   ],
-  controllers: [AcademicsController, ProctorController, CertificatesController, EarlyWarningController, FacultyProfileController],
+  controllers: [AcademicsController, ProctorController, CertificatesController, EarlyWarningController, FacultyProfileController, InsightsController],
   providers: [
     AcademicsService,
     AcademicsFacultyService,
@@ -96,6 +98,7 @@ import { EarlyWarningController } from './early-warning.controller';
     MarksheetPdfService,
     MarksHistoryService,
     EarlyWarningService,
+    InsightsService,
   ],
   exports: [
     AcademicsService,
@@ -108,6 +111,7 @@ import { EarlyWarningController } from './early-warning.controller';
     CourseLmsService,
     MarksheetPdfService,
     MarksHistoryService,
+    InsightsService,
   ],
 })
 export class AcademicsModule {}
