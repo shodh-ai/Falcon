@@ -118,13 +118,27 @@ export class ExamCellController {
   }
 
   @Get('faculty-roster')
-  facultyRoster(@Req() req: { user: AuthUser }) {
-    return this.examCell.listFacultyForInvigilation(this.tenant(req));
+  getFacultyRoster(@Req() req: { user: AuthUser }, @Query('date') date?: string) {
+    return this.examCell.listFacultyForInvigilation(this.tenant(req), date);
   }
 
   @Get('results/pending')
   pendingResults(@Req() req: { user: AuthUser }) {
     return this.examCell.listPendingCoeMarks(this.tenant(req));
+  }
+
+  @Get('grades-aggregate/courses')
+  getGradesAggregateCourses(@Req() req: { user: AuthUser }, @Query('semester') semester: string) {
+    return this.examCell.getGradesAggregateCourses(this.tenant(req), Number(semester));
+  }
+
+  @Get('grades-aggregate/table')
+  getGradesAggregateTable(
+    @Req() req: { user: AuthUser },
+    @Query('semester') semester: string,
+    @Query('course_id') courseId: string,
+  ) {
+    return this.examCell.getGradesAggregateTable(this.tenant(req), Number(semester), courseId);
   }
 
   @Get('results/distribution')

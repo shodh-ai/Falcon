@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +19,8 @@ type PendingMark = {
   marks_obtained: string;
   max_marks: string;
   percent: string;
+  semester: number | null;
+  faculty_name: string | null;
 };
 
 type Distribution = {
@@ -50,7 +53,7 @@ type ResultSession = {
   reopen_reason?: string | null;
 };
 
-type CourseOption = { course_id: string; course_code: string; course_name: string };
+type CourseOption = { course_id: string; course_code: string; course_name: string; semester: number };
 type PolicyOption = { policy_id: number; policy_name: string };
 type PreviewRow = {
   student_name: string;
@@ -81,7 +84,7 @@ export default function ExamCellResultsPage() {
   const [createForm, setCreateForm] = useState({
     course_id: '',
     exam_type: 'INTERNAL',
-    semester: '4',
+    semester: '',
     max_marks: '50',
     pass_marks: '20',
     grading_policy_id: '',
@@ -89,6 +92,9 @@ export default function ExamCellResultsPage() {
   const [rulesForm, setRulesForm] = useState({ pass_marks: '', max_marks: '', grading_policy_id: '' });
   const [declareNote, setDeclareNote] = useState('');
   const [reopenReason, setReopenReason] = useState('');
+  const [pendingFilterSem, setPendingFilterSem] = useState<string>('');
+
+
 
   const selected = sessions.find((s) => s.session_id === selectedId) ?? null;
 
@@ -123,16 +129,23 @@ export default function ExamCellResultsPage() {
   }, [selected?.session_id]);
 
   const pendingGroups = useMemo(() => {
-    const map = new Map<string, { course_id: string; course_code: string; course_name: string; exam_type: string; rows: PendingMark[] }>();
+    const map = new Map<string, { course_id: string; course_code: string; course_name: string; exam_type: string; semester: number | null; faculty_name: string | null; rows: PendingMark[] }>();
     for (const row of pending) {
       const key = `${row.course_id}:${row.exam_type}`;
       if (!map.has(key)) {
-        map.set(key, { course_id: row.course_id, course_code: row.course_code, course_name: row.course_name, exam_type: row.exam_type, rows: [] });
+        map.set(key, { course_id: row.course_id, course_code: row.course_code, course_name: row.course_name, exam_type: row.exam_type, semester: row.semester, faculty_name: row.faculty_name, rows: [] });
       }
       map.get(key)!.rows.push(row);
     }
     return [...map.values()];
   }, [pending]);
+
+
+
+  const filteredPendingGroups = useMemo(() => {
+    if (!pendingFilterSem) return pendingGroups;
+    return pendingGroups.filter(g => g.semester === Number(pendingFilterSem));
+  }, [pendingGroups, pendingFilterSem]);
 
   async function createSession() {
     if (!createForm.course_id) {
@@ -261,16 +274,20 @@ export default function ExamCellResultsPage() {
       <Card>
         <CardHeader><CardTitle className="text-base">Create result session</CardTitle></CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
-          <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.course_id} onChange={(e) => setCreateForm({ ...createForm, course_id: e.target.value })}>
+          <select className="rounded-md border px-3 py-2 text-sm" value={createForm.semester} onChange={(e) => setCreateForm({ ...createForm, semester: e.target.value, course_id: '' })}>
+            <option value="">Select semester</option>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => <option key={s} value={s}>Semester {s}</option>)}
+            <option value="0">Unassigned</option>
+          </select>
+          <select className="rounded-md border px-3 py-2 text-sm" value={createForm.course_id} onChange={(e) => setCreateForm({ ...createForm, course_id: e.target.value })}>
             <option value="">Select course</option>
-            {courses.map((c) => (
-              <option key={c.course_id} value={c.course_id}>{c.course_code} — {c.course_name}</option>
+            {courses.filter(c => createForm.semester ? c.semester === Number(createForm.semester) : true).map((c) => (
+              <option key={`${c.course_id}-${c.semester}`} value={c.course_id}>{c.course_code} — {c.course_name}</option>
             ))}
           </select>
           <select className="rounded-md border px-3 py-2 text-sm" value={createForm.exam_type} onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}>
             {EXAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
-          <Input placeholder="Semester" value={createForm.semester} onChange={(e) => setCreateForm({ ...createForm, semester: e.target.value })} />
           <Input placeholder="Max marks" value={createForm.max_marks} onChange={(e) => setCreateForm({ ...createForm, max_marks: e.target.value })} />
           <Input placeholder="Pass marks" value={createForm.pass_marks} onChange={(e) => setCreateForm({ ...createForm, pass_marks: e.target.value })} />
           <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.grading_policy_id} onChange={(e) => setCreateForm({ ...createForm, grading_policy_id: e.target.value })}>
@@ -320,16 +337,21 @@ export default function ExamCellResultsPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" disabled={busy || !!selected.declared_at} onClick={() => void runAction('open-entry', 'Marks entry opened for faculty')}>Open entry</Button>
-                  <Button size="sm" variant="outline" disabled={busy || !!selected.declared_at} onClick={() => void runAction('close-entry', 'Marks entry closed')}>Close entry</Button>
-                  <Button size="sm" variant="outline" disabled={busy || !!selected.declared_at} onClick={() => void runAction('lock-marks', 'Marks locked')}>Lock marks</Button>
+                  {selected.entry_status !== 'OPEN' ? (
+                    <Button size="sm" disabled={busy || !!selected.declared_at} onClick={() => void runAction('open-entry', 'Marks entry opened for faculty')}>Open entry</Button>
+                  ) : (
+                    <Button size="sm" variant="outline" disabled={busy || !!selected.declared_at} onClick={() => void runAction('close-entry', 'Marks entry closed')}>Close entry</Button>
+                  )}
+                  {selected.entry_status !== 'LOCKED' ? (
+                    <Button size="sm" variant="outline" disabled={busy || !!selected.declared_at} onClick={() => void runAction('lock-marks', 'Marks locked')}>Lock marks</Button>
+                  ) : null}
                 </div>
 
-                {!selected.declared_at ? (
+                {!selected.declared_at && selected.entry_status !== 'OPEN' ? (
                   <div className="space-y-2 rounded-lg border p-3">
                     <p className="font-medium">Reopen for faculty corrections</p>
                     <Input placeholder="Reason for reopening" value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} />
-                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void reopenEntry()}>Reopen entry</Button>
+                    <Button size="sm" variant="outline" disabled={busy || !reopenReason.trim()} onClick={() => void reopenEntry()}>Reopen entry</Button>
                   </div>
                 ) : null}
 
@@ -370,8 +392,8 @@ export default function ExamCellResultsPage() {
                             <td className="px-3 py-1.5">{row.student_name}</td>
                             <td className="px-3 py-1.5 text-right">{row.marks_obtained}/{row.max_marks}</td>
                             <td className="px-3 py-1.5 text-right">{row.percent}%</td>
-                            <td className="px-3 py-1.5 text-right">{row.grade}</td>
-                            <td className="px-3 py-1.5 text-right">{row.result_status}</td>
+                            <td className={`px-3 py-1.5 text-right ${row.grade === 'F' ? 'font-bold text-red-600' : ''}`}>{row.grade}</td>
+                            <td className={`px-3 py-1.5 text-right ${row.result_status === 'FAIL' ? 'font-bold text-red-600' : ''}`}>{row.result_status}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -386,12 +408,24 @@ export default function ExamCellResultsPage() {
         )}
       </div>
 
+
+
       <div>
-        <h2 className="mb-3 text-lg font-bold text-sgvu-navy">Pending COE submissions</h2>
-        {pendingGroups.length === 0 ? (
-          <Card><CardContent className="py-8 text-center text-muted-foreground">No marks awaiting COE approval.</CardContent></Card>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-sgvu-navy">Faculty Marks Submissions</h2>
+          <select 
+            className="rounded-md border px-3 py-1.5 text-sm" 
+            value={pendingFilterSem} 
+            onChange={(e) => setPendingFilterSem(e.target.value)}
+          >
+            <option value="">All Semesters</option>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map(s => <option key={s} value={s}>Semester {s}</option>)}
+          </select>
+        </div>
+        {filteredPendingGroups.length === 0 ? (
+          <Card><CardContent className="py-8 text-center text-muted-foreground">No marks submissions found.</CardContent></Card>
         ) : (
-          pendingGroups.map((g) => (
+          filteredPendingGroups.map((g) => (
             <CourseResultBlock key={`${g.course_id}-${g.exam_type}`} group={g} api={api} />
           ))
         )}
@@ -404,10 +438,11 @@ function CourseResultBlock({
   group,
   api,
 }: {
-  group: { course_id: string; course_code: string; course_name: string; exam_type: string; rows: PendingMark[] };
+  group: { course_id: string; course_code: string; course_name: string; exam_type: string; semester: number | null; faculty_name: string | null; rows: PendingMark[] };
   api: ReturnType<typeof useAuthedApi>;
 }) {
   const [dist, setDist] = useState<Distribution | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     void api
@@ -415,42 +450,84 @@ function CourseResultBlock({
       .then((rows) => setDist(rows[0] ?? null));
   }, [api, group.course_id, group.exam_type]);
 
+  function downloadCSV(e: React.MouseEvent) {
+    e.stopPropagation();
+    const header = ['Student,Marks,Max Marks,Percent'];
+    const csv = group.rows.map(r => `"${r.student_name}",${r.marks_obtained},${r.max_marks},${r.percent}%`);
+    const blob = new Blob([header.concat(csv).join('\\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${group.course_code}_${group.exam_type}_marks.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <Card className="mb-4">
-      <CardHeader>
-        <CardTitle className="text-lg">{group.course_code} — {group.exam_type}</CardTitle>
-        <p className="text-sm text-muted-foreground">{group.course_name} · {group.rows.length} students submitted</p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {dist && (
-          <div className="flex flex-wrap gap-3 text-sm">
-            <Badge variant="outline">Avg: {dist.avg_marks}</Badge>
-            <Badge variant="outline">Min–Max: {dist.min_marks}–{dist.max_marks}</Badge>
-            <Badge variant="outline">≥90%: {dist.above_90pct}</Badge>
-            <Badge variant="outline">&lt;40%: {dist.below_40pct}</Badge>
+      <div 
+        className="flex cursor-pointer items-start justify-between p-6 hover:bg-slate-50" 
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <div>
+          <div className="flex items-center gap-3">
+            <CardTitle className="text-lg">{group.course_code} — {group.exam_type}</CardTitle>
+            {group.rows.some(r => r.status === 'PUBLISHED') ? (
+              <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Declared</span>
+            ) : (
+              <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">Pending</span>
+            )}
           </div>
-        )}
-        <div className="max-h-48 overflow-y-auto rounded-lg border">
-          <table className="min-w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left">Student</th>
-                <th className="px-3 py-2 text-right">Marks</th>
-                <th className="px-3 py-2 text-right">%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.rows.map((r) => (
-                <tr key={r.mark_id} className="border-t">
-                  <td className="px-3 py-1.5">{r.student_name}</td>
-                  <td className="px-3 py-1.5 text-right">{r.marks_obtained}/{r.max_marks}</td>
-                  <td className="px-3 py-1.5 text-right">{r.percent}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {group.course_name}
+            {group.semester ? ` · Sem ${group.semester}` : ''}
+            {group.faculty_name ? ` · ${group.faculty_name}` : ''}
+             · {group.rows.length} students submitted
+          </p>
         </div>
-      </CardContent>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={downloadCSV}>
+            <Download className="mr-1 h-4 w-4" />
+            Export
+          </Button>
+          <Button size="sm" variant="ghost" className="px-2">
+            {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
+      
+      {isOpen && (
+        <CardContent className="space-y-4 pt-0">
+          {dist && (
+            <div className="flex flex-wrap gap-3 text-sm">
+              <Badge variant="outline">Avg: {dist.avg_marks}</Badge>
+              <Badge variant="outline">Min–Max: {dist.min_marks}–{dist.max_marks}</Badge>
+              <Badge variant="outline">≥90%: {dist.above_90pct}</Badge>
+              <Badge variant="outline">&lt;40%: {dist.below_40pct}</Badge>
+            </div>
+          )}
+          <div className="max-h-48 overflow-y-auto rounded-lg border">
+            <table className="min-w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-3 py-2 text-left">Student</th>
+                  <th className="px-3 py-2 text-right">Marks</th>
+                  <th className="px-3 py-2 text-right">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.rows.map((r) => (
+                  <tr key={r.mark_id} className="border-t">
+                    <td className="px-3 py-1.5">{r.student_name}</td>
+                    <td className="px-3 py-1.5 text-right">{r.marks_obtained}/{r.max_marks}</td>
+                    <td className="px-3 py-1.5 text-right">{r.percent}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      )}
     </Card>
   );
 }
