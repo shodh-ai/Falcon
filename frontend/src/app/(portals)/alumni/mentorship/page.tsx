@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { AlumniPageHeader } from '@/components/alumni/AlumniPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
+import { EcellMentorInbox } from '@/components/ecell/EcellMentorInbox';
 
 type Profile = { opt_in_mentorship: boolean };
 
@@ -41,6 +42,7 @@ export default function AlumniMentorshipPage() {
           </p>
         </CardContent>
       </Card>
+      <EcellMentorInbox />
     </div>
   );
 }

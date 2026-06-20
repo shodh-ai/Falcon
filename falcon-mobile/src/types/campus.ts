@@ -36,6 +36,25 @@ export type CampusEvent = {
   status: string;
 };
 
+export type EcellProject = {
+  project_id: string;
+  startup_name: string;
+  innovation_description: string;
+  pitch_deck_url?: string | null;
+  requested_funding: string | number;
+  approved_funding_amount?: string | number | null;
+  current_status: string;
+  submitted_at: string;
+  cohort_name?: string | null;
+};
+
+export type EcellConfig = {
+  config_id: string;
+  cohort_name: string;
+  is_active: boolean;
+  max_funding_limit?: string | number | null;
+};
+
 export type PlacementHub = {
   open_drives: {
     drive_id: string;

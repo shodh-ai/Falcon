@@ -19,6 +19,7 @@ import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { MentorshipChatMessenger } from '@/components/mentorship/MentorshipChatMessenger';
+import { EcellMentorInbox } from '@/components/ecell/EcellMentorInbox';
 
 interface StudentInfo {
   mentorship_id: string;
@@ -141,6 +142,8 @@ export default function FacultyMentorshipPage() {
       {!loading && (
         <PendingMeetingRequests meetings={pendingMeetings} onUpdated={loadWorkspace} />
       )}
+
+      {!loading && <EcellMentorInbox />}
 
       {!loading && (
         <PendingLeaveRequests requests={pendingLeaveRequests} onUpdated={loadWorkspace} />
