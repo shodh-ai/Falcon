@@ -71,6 +71,18 @@ export function useRecentNotifications() {
   });
 }
 
+export function useNoticeBoard() {
+  return useQuery({
+    queryKey: ['announcements', 'feed'],
+    queryFn: async () => {
+      const { data } = await api.get<{ announcement_id: string; title: string; body_html: string }[]>(
+        '/api/admin-ops/announcements/feed',
+      );
+      return data;
+    },
+  });
+}
+
 export function useUnreadNotificationCount() {
   return useQuery({
     queryKey: ['notifications', 'unread-count'],

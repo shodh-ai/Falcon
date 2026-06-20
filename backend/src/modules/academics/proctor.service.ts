@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { AcademicMentorship } from '../../entities/academic-mentorship.entity';
@@ -19,10 +24,14 @@ import { MentorshipChatService } from './mentorship-chat.service';
 @Injectable()
 export class ProctorService {
   constructor(
-    @InjectRepository(AcademicMentorship) private mentorships: Repository<AcademicMentorship>,
-    @InjectRepository(StudentProfile) private profiles: Repository<StudentProfile>,
-    @InjectRepository(ProctorInteraction) private interactions: Repository<ProctorInteraction>,
-    @InjectRepository(MentorshipMeeting) private meetings: Repository<MentorshipMeeting>,
+    @InjectRepository(AcademicMentorship)
+    private mentorships: Repository<AcademicMentorship>,
+    @InjectRepository(StudentProfile)
+    private profiles: Repository<StudentProfile>,
+    @InjectRepository(ProctorInteraction)
+    private interactions: Repository<ProctorInteraction>,
+    @InjectRepository(MentorshipMeeting)
+    private meetings: Repository<MentorshipMeeting>,
     @InjectRepository(User) private users: Repository<User>,
     @InjectRepository(StudentCertificate)
     private certificates: Repository<StudentCertificate>,
@@ -71,19 +80,28 @@ export class ProctorService {
   async getStudentProfile(userId: string) {
     let profile = await this.profiles.findOne({ where: { user_id: userId } });
     if (!profile) {
-      profile = await this.profiles.save(this.profiles.create({ user_id: userId }));
+      profile = await this.profiles.save(
+        this.profiles.create({ user_id: userId }),
+      );
     }
     return profile;
   }
 
-  async updateStudentProfile(actorUserId: string, targetUserId: string, dto: UpdateStudentProfileDto) {
+  async updateStudentProfile(
+    actorUserId: string,
+    targetUserId: string,
+    dto: UpdateStudentProfileDto,
+  ) {
     if (actorUserId !== targetUserId) {
-      throw new ForbiddenException('Students can only update their own profile');
+      throw new ForbiddenException(
+        'Students can only update their own profile',
+      );
     }
 
     const profile = await this.getStudentProfile(targetUserId);
 
-    if (dto.enrollment_no !== undefined) profile.enrollment_no = dto.enrollment_no;
+    if (dto.enrollment_no !== undefined)
+      profile.enrollment_no = dto.enrollment_no;
     if (dto.batch !== undefined) profile.batch = dto.batch;
     if (dto.blood_group !== undefined) profile.blood_group = dto.blood_group;
     if (dto.parent_info !== undefined) profile.parent_info = dto.parent_info;
@@ -92,10 +110,14 @@ export class ProctorService {
   }
 
   async bookMeeting(studentUserId: string, meetingAt: string, note?: string) {
-    const mentorship = await this.mentorships.findOne({ where: { student_user_id: studentUserId, is_active: true } });
+    const mentorship = await this.mentorships.findOne({
+      where: { student_user_id: studentUserId, is_active: true },
+    });
     if (!mentorship) throw new NotFoundException('No active mentor assigned');
 
-    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
     const requestedTime = new Date(meetingAt);
     if (Number.isNaN(requestedTime.getTime())) {
       throw new BadRequestException('Invalid meeting date/time');
@@ -182,7 +204,9 @@ export class ProctorService {
       throw new ForbiddenException('This meeting is not assigned to you');
     }
     if (meeting.status !== 'PENDING') {
-      throw new BadRequestException('This meeting request has already been processed');
+      throw new BadRequestException(
+        'This meeting request has already been processed',
+      );
     }
 
     const trimmedRemarks = remarks?.trim() ?? '';
@@ -208,7 +232,11 @@ export class ProctorService {
       );
     }
 
-    const student = meeting.student ?? (await this.users.findOne({ where: { user_id: meeting.student_user_id } }));
+    const student =
+      meeting.student ??
+      (await this.users.findOne({
+        where: { user_id: meeting.student_user_id },
+      }));
     if (student?.tenant_id) {
       const when = new Date(meeting.requested_time).toLocaleString();
       const detail =
@@ -226,7 +254,10 @@ export class ProctorService {
         status,
         meetingAt: meeting.requested_time.toISOString(),
         remarks: trimmedRemarks,
-        title: status === 'APPROVED' ? 'Mentorship meeting approved' : 'Mentorship meeting declined',
+        title:
+          status === 'APPROVED'
+            ? 'Mentorship meeting approved'
+            : 'Mentorship meeting declined',
         message: `Your mentor meeting for ${when} was ${status === 'APPROVED' ? 'Approved' : 'Declined'}.${detail}`,
         actionLink: '/student/mentorship',
       });
@@ -255,7 +286,9 @@ export class ProctorService {
     startDate: string,
     endDate: string,
   ) {
-    const mentorship = await this.mentorships.findOne({ where: { student_user_id: studentUserId, is_active: true } });
+    const mentorship = await this.mentorships.findOne({
+      where: { student_user_id: studentUserId, is_active: true },
+    });
     if (!mentorship) throw new NotFoundException('No active mentor assigned');
 
     const start = new Date(`${startDate}T00:00:00`);
@@ -268,7 +301,9 @@ export class ProctorService {
     }
 
     const trimmedReason = reason.trim();
-    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
 
     await assertNoPendingRow(this.interactions, {
       student_user_id: studentUserId,
@@ -320,12 +355,17 @@ export class ProctorService {
       ? await this.users.find({ where: { user_id: In(studentIds) } })
       : [];
     const nameById = new Map(students.map((s) => [s.user_id, s.name]));
-    return rows.map((r) => this.mapLeaveRequest(r, nameById.get(r.student_user_id)));
+    return rows.map((r) =>
+      this.mapLeaveRequest(r, nameById.get(r.student_user_id)),
+    );
   }
 
   async listStudentLeaveRequests(studentUserId: string) {
     const rows = await this.interactions.find({
-      where: { student_user_id: studentUserId, interaction_type: 'LEAVE_REQUEST' },
+      where: {
+        student_user_id: studentUserId,
+        interaction_type: 'LEAVE_REQUEST',
+      },
       order: { created_at: 'DESC' },
       take: 10,
     });
@@ -338,7 +378,9 @@ export class ProctorService {
     status: 'APPROVED' | 'REJECTED',
     remarks?: string,
   ) {
-    const row = await this.interactions.findOne({ where: { interaction_id: interactionId } });
+    const row = await this.interactions.findOne({
+      where: { interaction_id: interactionId },
+    });
     if (!row || row.interaction_type !== 'LEAVE_REQUEST') {
       throw new NotFoundException('Leave request not found');
     }
@@ -346,12 +388,16 @@ export class ProctorService {
       throw new ForbiddenException('This request is not assigned to you');
     }
     if (row.status !== 'PENDING') {
-      throw new BadRequestException('This leave request has already been processed');
+      throw new BadRequestException(
+        'This leave request has already been processed',
+      );
     }
 
     const trimmedRemarks = remarks?.trim() ?? '';
     if (status === 'REJECTED' && trimmedRemarks.length < 3) {
-      throw new BadRequestException('Please provide a short reason for declining');
+      throw new BadRequestException(
+        'Please provide a short reason for declining',
+      );
     }
 
     row.status = status;
@@ -362,7 +408,9 @@ export class ProctorService {
     };
     const saved = await this.interactions.save(row);
 
-    const student = await this.users.findOne({ where: { user_id: row.student_user_id } });
+    const student = await this.users.findOne({
+      where: { user_id: row.student_user_id },
+    });
     const start = String(row.payload?.start_date ?? '');
     const end = String(row.payload?.end_date ?? '');
     const range = start && end ? `${start} – ${end}` : 'requested dates';
@@ -374,7 +422,10 @@ export class ProctorService {
         status,
         meetingAt: range,
         remarks: trimmedRemarks,
-        title: status === 'APPROVED' ? 'Leave request approved' : 'Leave request declined',
+        title:
+          status === 'APPROVED'
+            ? 'Leave request approved'
+            : 'Leave request declined',
         message: `Your mentor ${status === 'APPROVED' ? 'approved' : 'declined'} your leave/permission request for ${range}.${
           trimmedRemarks ? ` Note: ${trimmedRemarks}` : ''
         }`,
@@ -396,13 +447,17 @@ export class ProctorService {
       start_date: String(payload.start_date ?? ''),
       end_date: String(payload.end_date ?? ''),
       status: row.status,
-      mentor_remarks: payload.mentor_remarks ? String(payload.mentor_remarks) : null,
+      mentor_remarks: payload.mentor_remarks
+        ? String(payload.mentor_remarks)
+        : null,
       created_at: row.created_at,
     };
   }
 
   async sendMessage(studentUserId: string, message: string) {
-    const mentorship = await this.mentorships.findOne({ where: { student_user_id: studentUserId, is_active: true } });
+    const mentorship = await this.mentorships.findOne({
+      where: { student_user_id: studentUserId, is_active: true },
+    });
     if (!mentorship) throw new NotFoundException('No active mentor assigned');
 
     const trimmed = message.trim();
@@ -419,7 +474,11 @@ export class ProctorService {
         student_user_id: studentUserId,
         proctor_user_id: mentorship.proctor_user_id,
         interaction_type: 'MESSAGE',
-        payload: { message: trimmed, helpdesk_ticket_id: ticket.ticket_id, replies: [] },
+        payload: {
+          message: trimmed,
+          helpdesk_ticket_id: ticket.ticket_id,
+          replies: [],
+        },
         status: 'SENT',
       }),
     );
@@ -442,7 +501,9 @@ export class ProctorService {
     if (rows.length === 0) return [];
 
     const studentIds = [...new Set(rows.map((r) => r.student_user_id))];
-    const students = await this.users.find({ where: { user_id: In(studentIds) } });
+    const students = await this.users.find({
+      where: { user_id: In(studentIds) },
+    });
     const nameById = new Map(students.map((s) => [s.user_id, s.name]));
 
     return rows.map((row) => {
@@ -461,17 +522,27 @@ export class ProctorService {
       student_user_id: row.student_user_id,
       message: String(payload.message ?? ''),
       replies: Array.isArray(payload.replies) ? payload.replies : [],
-      helpdesk_ticket_id: payload.helpdesk_ticket_id ? String(payload.helpdesk_ticket_id) : null,
+      helpdesk_ticket_id: payload.helpdesk_ticket_id
+        ? String(payload.helpdesk_ticket_id)
+        : null,
       status: row.status,
       created_at: row.created_at,
     };
   }
 
-  async replyToMessage(proctorUserId: string, interactionId: string, reply: string) {
-    const row = await this.interactions.findOne({ where: { interaction_id: interactionId } });
+  async replyToMessage(
+    proctorUserId: string,
+    interactionId: string,
+    reply: string,
+  ) {
+    const row = await this.interactions.findOne({
+      where: { interaction_id: interactionId },
+    });
     if (!row) throw new NotFoundException('Message not found');
-    if (row.proctor_user_id !== proctorUserId) throw new ForbiddenException('Not your mentee message');
-    if (row.interaction_type !== 'MESSAGE') throw new BadRequestException('Not a message thread');
+    if (row.proctor_user_id !== proctorUserId)
+      throw new ForbiddenException('Not your mentee message');
+    if (row.interaction_type !== 'MESSAGE')
+      throw new BadRequestException('Not a message thread');
 
     const trimmed = reply.trim();
     if (!trimmed) throw new BadRequestException('Reply cannot be empty');
@@ -487,9 +558,16 @@ export class ProctorService {
     row.status = 'REPLIED';
     const saved = await this.interactions.save(row);
 
-    const ticketId = payload.helpdesk_ticket_id ? String(payload.helpdesk_ticket_id) : null;
+    const ticketId = payload.helpdesk_ticket_id
+      ? String(payload.helpdesk_ticket_id)
+      : null;
     if (ticketId) {
-      await this.ticketService.addMessage(ticketId, proctorUserId, 'Faculty', trimmed);
+      await this.ticketService.addMessage(
+        ticketId,
+        proctorUserId,
+        'Faculty',
+        trimmed,
+      );
     }
 
     return saved;
@@ -501,7 +579,7 @@ export class ProctorService {
       relations: ['student'],
       order: { created_at: 'DESC' },
     });
-    return mentorships.map(m => ({
+    return mentorships.map((m) => ({
       mentorship_id: m.mentorship_id,
       student: {
         user_id: m.student?.user_id,
@@ -520,15 +598,23 @@ export class ProctorService {
     const studentIds = mentorships.map((m) => m.student_user_id);
     if (studentIds.length === 0) {
       const leaveRequests = await this.listPendingLeaveRequests(proctorUserId);
-      return { certificates: [], meetings: pendingMeetings, leave_requests: leaveRequests };
+      return {
+        certificates: [],
+        meetings: pendingMeetings,
+        leave_requests: leaveRequests,
+      };
     }
 
     const certificates = await this.certificates
       .createQueryBuilder('certificate')
       .leftJoinAndSelect('certificate.student', 'student')
       .where('certificate.tenant_id = :tenantId', { tenantId })
-      .andWhere('certificate.verification_status = :status', { status: 'PENDING' })
-      .andWhere('certificate.student_user_id IN (:...studentIds)', { studentIds })
+      .andWhere('certificate.verification_status = :status', {
+        status: 'PENDING',
+      })
+      .andWhere('certificate.student_user_id IN (:...studentIds)', {
+        studentIds,
+      })
       .orderBy('certificate.uploaded_at', 'DESC')
       .getMany();
 
@@ -573,13 +659,16 @@ export class ProctorService {
         is_active: true,
       },
     });
-    if (!mentorship) throw new ForbiddenException('Certificate is not assigned to your mentee');
+    if (!mentorship)
+      throw new ForbiddenException(
+        'Certificate is not assigned to your mentee',
+      );
 
     certificate.verification_status = status;
     certificate.verified_by_user_id = proctorUserId;
     certificate.verified_at = new Date();
-    certificate.rejection_reason = status === 'REJECTED' ? rejectionReason ?? null : null;
+    certificate.rejection_reason =
+      status === 'REJECTED' ? (rejectionReason ?? null) : null;
     return this.certificates.save(certificate);
   }
-
 }

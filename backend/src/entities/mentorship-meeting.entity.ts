@@ -11,7 +11,11 @@ import {
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 import { User } from './user.entity';
 
-export type MentorshipMeetingStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
+export type MentorshipMeetingStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'COMPLETED';
 
 @Entity('mentorship_meetings')
 @Index(['proctor_user_id', 'status'])

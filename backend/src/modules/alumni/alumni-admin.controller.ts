@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -39,7 +48,11 @@ export class AlumniAdminController {
     @Req() req: { user: AuthUser },
     @Param('alumniId') alumniId: string,
   ) {
-    return this.admin.approveConversion(this.tenant(req), alumniId, req.user.user_id);
+    return this.admin.approveConversion(
+      this.tenant(req),
+      alumniId,
+      req.user.user_id,
+    );
   }
 
   @Post('verifications/:alumniId/approve')
@@ -48,7 +61,11 @@ export class AlumniAdminController {
     @Req() req: { user: AuthUser },
     @Param('alumniId') alumniId: string,
   ) {
-    return this.admin.approveConversion(this.tenant(req), alumniId, req.user.user_id);
+    return this.admin.approveConversion(
+      this.tenant(req),
+      alumniId,
+      req.user.user_id,
+    );
   }
 
   @Post('verifications/:alumniId/reject')
@@ -57,7 +74,12 @@ export class AlumniAdminController {
     @Req() req: { user: AuthUser },
     @Param('alumniId') alumniId: string,
   ) {
-    return this.admin.verifyProfile(this.tenant(req), alumniId, req.user.user_id, { action: 'reject' });
+    return this.admin.verifyProfile(
+      this.tenant(req),
+      alumniId,
+      req.user.user_id,
+      { action: 'reject' },
+    );
   }
 
   @Patch('profiles/:alumniId/verify')
@@ -67,7 +89,12 @@ export class AlumniAdminController {
     @Param('alumniId') alumniId: string,
     @Body() dto: { action: 'approve' | 'reject' },
   ) {
-    return this.admin.verifyProfile(this.tenant(req), alumniId, req.user.user_id, dto);
+    return this.admin.verifyProfile(
+      this.tenant(req),
+      alumniId,
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Get('donations')
@@ -98,7 +125,13 @@ export class AlumniAdminController {
   @Roles('IQAC', 'SuperAdmin', 'Registrar')
   createEvent(
     @Req() req: { user: AuthUser },
-    @Body() dto: { title: string; event_date: string; venue?: string; description?: string },
+    @Body()
+    dto: {
+      title: string;
+      event_date: string;
+      venue?: string;
+      description?: string;
+    },
   ) {
     return this.admin.createEvent(this.tenant(req), dto);
   }
@@ -108,7 +141,14 @@ export class AlumniAdminController {
   updateEvent(
     @Req() req: { user: AuthUser },
     @Param('eventId') eventId: string,
-    @Body() dto: Partial<{ title: string; event_date: string; venue: string; description: string; is_published: boolean }>,
+    @Body()
+    dto: Partial<{
+      title: string;
+      event_date: string;
+      venue: string;
+      description: string;
+      is_published: boolean;
+    }>,
   ) {
     return this.admin.updateEvent(this.tenant(req), eventId, dto);
   }

@@ -11,6 +11,7 @@ import { useAuthStore } from '@/lib/store';
 import {
   useDashboardMetrics,
   useRecentNotifications,
+  useNoticeBoard,
   useStudentProfile,
   useTodayTimetable,
   useUnreadNotificationCount,
@@ -66,6 +67,7 @@ export default function HomeScreen() {
   const timetable = useTodayTimetable();
   const profile = useStudentProfile();
   const notifications = useRecentNotifications();
+  const noticeBoard = useNoticeBoard();
   const unreadCount = useUnreadNotificationCount();
 
   const attendance = metrics.data?.attendance_percent ?? 0;
@@ -112,6 +114,22 @@ export default function HomeScreen() {
             </Text>
           ) : null}
         </Card>
+
+        {(noticeBoard.data ?? []).length > 0 ? (
+          <Card>
+            <Text className="text-lg font-bold text-sgvu-navy">Notice Board</Text>
+            <View className="mt-3 gap-3">
+              {(noticeBoard.data ?? []).slice(0, 3).map((item) => (
+                <View key={item.announcement_id}>
+                  <Text className="text-sm font-bold text-sgvu-navy">{item.title}</Text>
+                  <Text className="text-xs text-sgvu-navy/60 mt-1" numberOfLines={2}>
+                    {item.body_html.replace(/<[^>]+>/g, '')}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
 
         <Card>
           <Text className="text-lg font-bold text-sgvu-navy">Today&apos;s Timeline</Text>

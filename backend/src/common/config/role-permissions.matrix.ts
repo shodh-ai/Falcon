@@ -58,7 +58,9 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
 };
 
 export function roleCanEdit(role: string, resource: string): boolean {
-  const key = Object.keys(ROLE_PERMISSIONS).find((r) => r.toLowerCase() === role.toLowerCase());
+  const key = Object.keys(ROLE_PERMISSIONS).find(
+    (r) => r.toLowerCase() === role.toLowerCase(),
+  );
   if (!key) return false;
   const cap = ROLE_PERMISSIONS[key];
   if (cap.edit.includes('*')) return true;
@@ -66,6 +68,8 @@ export function roleCanEdit(role: string, resource: string): boolean {
 }
 
 export function isReadOnlyRole(role: string): boolean {
-  const key = Object.keys(ROLE_PERMISSIONS).find((r) => r.toLowerCase() === role.toLowerCase());
+  const key = Object.keys(ROLE_PERMISSIONS).find(
+    (r) => r.toLowerCase() === role.toLowerCase(),
+  );
   return Boolean(key && ROLE_PERMISSIONS[key].readOnlyPortal);
 }

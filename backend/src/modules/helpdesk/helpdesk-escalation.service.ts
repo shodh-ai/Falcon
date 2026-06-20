@@ -41,14 +41,20 @@ export class HelpdeskEscalationService {
     );
 
     for (const ticket of tickets) {
-      const hoursOpen = (Date.now() - new Date(ticket.created_at).getTime()) / (1000 * 60 * 60);
+      const hoursOpen =
+        (Date.now() - new Date(ticket.created_at).getTime()) / (1000 * 60 * 60);
       let targetLevel = 0;
-      if (hoursOpen >= 48) targetLevel = 4; // Leadership
+      if (hoursOpen >= 48)
+        targetLevel = 4; // Leadership
       else if (hoursOpen >= 24) targetLevel = 3; // Vice Chancellor
 
       if (targetLevel <= ticket.escalation_level) continue;
 
-      const assignee = await this.resolveEscalationAssignee(ticket.tenant_id, ticket.student_user_id, targetLevel);
+      const assignee = await this.resolveEscalationAssignee(
+        ticket.tenant_id,
+        ticket.student_user_id,
+        targetLevel,
+      );
       if (!assignee) continue;
 
       await this.dataSource.query(
@@ -58,7 +64,13 @@ export class HelpdeskEscalationService {
         [ticket.ticket_id, assignee.userId, targetLevel],
       );
 
-      const levelLabels = ['None', 'Faculty/Proctor', 'HOD', 'Vice Chancellor', 'Leadership/Chairman'];
+      const levelLabels = [
+        'None',
+        'Faculty/Proctor',
+        'HOD',
+        'Vice Chancellor',
+        'Leadership/Chairman',
+      ];
       this.notify.approvalRequired({
         tenantId: ticket.tenant_id,
         userId: assignee.userId,
@@ -75,7 +87,11 @@ export class HelpdeskEscalationService {
     }
   }
 
-  private async resolveEscalationAssignee(tenantId: string, studentUserId: string, level: number) {
+  private async resolveEscalationAssignee(
+    tenantId: string,
+    studentUserId: string,
+    level: number,
+  ) {
     try {
       if (level === 1) {
         return this.workflowRouting.getStudentProctor(studentUserId);

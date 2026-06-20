@@ -55,17 +55,34 @@ export class SearchService {
     }
 
     if (this.exactTicketPattern.test(q) && this.canSearchTickets(roleName)) {
-      const jump = await this.resolveTicketDirectJump(tenantId, q, searcherUserId, roleName);
+      const jump = await this.resolveTicketDirectJump(
+        tenantId,
+        q,
+        searcherUserId,
+        roleName,
+      );
       if (jump) return jump;
     }
 
     if (this.studentIdPattern.test(q)) {
-      const students = await this.searchStudents(searcherUserId, tenantId, roleName, q, true);
+      const students = await this.searchStudents(
+        searcherUserId,
+        tenantId,
+        roleName,
+        q,
+        true,
+      );
       return { students, staff: [], tickets: [] };
     }
 
     if (this.employeeIdPattern.test(q)) {
-      const staff = await this.searchStaff(searcherUserId, tenantId, roleName, q, true);
+      const staff = await this.searchStaff(
+        searcherUserId,
+        tenantId,
+        roleName,
+        q,
+        true,
+      );
       return { students: [], staff, tickets: [] };
     }
 
@@ -77,9 +94,13 @@ export class SearchService {
     }
 
     const [students, staff, tickets] = await Promise.all([
-      this.canSearchStudents(roleName) ? this.searchStudents(searcherUserId, tenantId, roleName, q, false) : [],
+      this.canSearchStudents(roleName)
+        ? this.searchStudents(searcherUserId, tenantId, roleName, q, false)
+        : [],
       this.searchStaff(searcherUserId, tenantId, roleName, q, false),
-      this.canSearchTickets(roleName) ? this.searchTickets(searcherUserId, tenantId, roleName, q, false) : [],
+      this.canSearchTickets(roleName)
+        ? this.searchTickets(searcherUserId, tenantId, roleName, q, false)
+        : [],
     ]);
 
     return { students, staff, tickets };
@@ -96,7 +117,17 @@ export class SearchService {
 
   private isExecutive(roleName: string) {
     const role = roleName.trim().toLowerCase();
-    return ['chairman', 'president', 'superadmin', 'registrar', 'hradmin', 'hr', 'hod', 'dean', 'warden'].includes(role);
+    return [
+      'chairman',
+      'president',
+      'superadmin',
+      'registrar',
+      'hradmin',
+      'hr',
+      'hod',
+      'dean',
+      'warden',
+    ].includes(role);
   }
 
   private avatarInitial(name: string) {
@@ -120,14 +151,20 @@ export class SearchService {
     if (!rows.length) return null;
     const t = rows[0] as { student_user_id: string; ticket_ref: string };
     const role = roleName.toLowerCase();
-    if (['student', 'applicant'].includes(role) && t.student_user_id !== searcherUserId) {
+    if (
+      ['student', 'applicant'].includes(role) &&
+      t.student_user_id !== searcherUserId
+    ) {
       return null;
     }
     return {
       students: [],
       staff: [],
       tickets: [],
-      direct_jump: { type: 'ticket', path: `/tickets/view/${ticketRef.toUpperCase()}` },
+      direct_jump: {
+        type: 'ticket',
+        path: `/tickets/view/${ticketRef.toUpperCase()}`,
+      },
     };
   }
 
@@ -140,7 +177,12 @@ export class SearchService {
   ): Promise<UnifiedSearchItem[]> {
     if (!this.canSearchStudents(roleName)) return [];
 
-    const scope = await this.buildScopeClause(searcherUserId, tenantId, roleName, 3);
+    const scope = await this.buildScopeClause(
+      searcherUserId,
+      tenantId,
+      roleName,
+      3,
+    );
     const like = idMode ? `${query}%` : `%${query}%`;
     const params: unknown[] = [tenantId, like, ...scope.params];
     const nameFilter = idMode
@@ -166,7 +208,9 @@ export class SearchService {
       id: String(r.user_id),
       name: String(r.name),
       avatar: this.avatarInitial(String(r.name)),
-      subtitle: [r.enrollment_no, r.dept_name].filter(Boolean).join(' - ') || String(r.batch ?? 'Student'),
+      subtitle:
+        [r.enrollment_no, r.dept_name].filter(Boolean).join(' - ') ||
+        String(r.batch ?? 'Student'),
     }));
   }
 
@@ -200,7 +244,12 @@ export class SearchService {
       return rows.map((r: Record<string, unknown>) => this.mapStaffRow(r));
     }
 
-    const scope = await this.buildScopeClause(searcherUserId, tenantId, roleName, 3);
+    const scope = await this.buildScopeClause(
+      searcherUserId,
+      tenantId,
+      roleName,
+      3,
+    );
     const filter = idMode
       ? 'ep.employee_id ILIKE $2'
       : '(u.name ILIKE $2 OR ep.employee_id ILIKE $2 OR u.name % $2)';
@@ -228,7 +277,9 @@ export class SearchService {
       id: String(r.user_id),
       name: String(r.name),
       avatar: this.avatarInitial(String(r.name)),
-      subtitle: [r.employee_id, r.designation ?? r.role_name, r.dept_name].filter(Boolean).join(' - '),
+      subtitle: [r.employee_id, r.designation ?? r.role_name, r.dept_name]
+        .filter(Boolean)
+        .join(' - '),
     };
   }
 
@@ -249,7 +300,9 @@ export class SearchService {
       conditions.push(`t.student_user_id = $${n++}`);
       params.push(searcherUserId);
     } else if (!this.isExecutive(role)) {
-      conditions.push(`(t.assigned_to_user_id = $${n} OR t.student_user_id = $${n})`);
+      conditions.push(
+        `(t.assigned_to_user_id = $${n} OR t.student_user_id = $${n})`,
+      );
       params.push(searcherUserId);
       n++;
     }
@@ -257,7 +310,9 @@ export class SearchService {
     if (idMode) {
       conditions.push(`UPPER(t.ticket_ref) ILIKE UPPER($${n++})`);
     } else {
-      conditions.push(`(t.subject ILIKE $${n} OR t.ticket_ref ILIKE $${n} OR t.description ILIKE $${n})`);
+      conditions.push(
+        `(t.subject ILIKE $${n} OR t.ticket_ref ILIKE $${n} OR t.description ILIKE $${n})`,
+      );
     }
     params.push(like);
 
@@ -281,15 +336,32 @@ export class SearchService {
     }));
   }
 
-  private async buildScopeClause(searcherUserId: string, tenantId: string, roleName: string, startAt: number) {
+  private async buildScopeClause(
+    searcherUserId: string,
+    tenantId: string,
+    roleName: string,
+    startAt: number,
+  ) {
     const role = roleName.trim().toLowerCase();
 
-    if (['chairman', 'president', 'superadmin', 'registrar', 'hradmin', 'hr'].includes(role)) {
+    if (
+      [
+        'chairman',
+        'president',
+        'superadmin',
+        'registrar',
+        'hradmin',
+        'hr',
+      ].includes(role)
+    ) {
       return { clause: 'TRUE', params: [] as unknown[] };
     }
 
     if (role === 'hod' || role === 'dean') {
-      const rows = await this.db.query(`SELECT dept_id FROM users WHERE user_id = $1`, [searcherUserId]);
+      const rows = await this.db.query(
+        `SELECT dept_id FROM users WHERE user_id = $1`,
+        [searcherUserId],
+      );
       const deptId = rows[0]?.dept_id;
       if (!deptId) return { clause: 'FALSE', params: [] };
       return { clause: `u.dept_id = $${startAt}`, params: [deptId] };
@@ -396,7 +468,13 @@ export class SearchService {
   }
 
   private applyDirectoryFilters(
-    filters: { q?: string; role?: string; department?: string; status?: string; batch?: string },
+    filters: {
+      q?: string;
+      role?: string;
+      department?: string;
+      status?: string;
+      batch?: string;
+    },
     conditions: string[],
     params: unknown[],
   ) {
@@ -422,7 +500,9 @@ export class SearchService {
     }
 
     if (filters.department?.trim()) {
-      conditions.push(`COALESCE(d.dept_name, 'University-wide') ILIKE $${idx++}`);
+      conditions.push(
+        `COALESCE(d.dept_name, 'University-wide') ILIKE $${idx++}`,
+      );
       params.push(`%${filters.department.trim()}%`);
     }
 
@@ -455,12 +535,26 @@ export class SearchService {
       LEFT JOIN departments d ON d.dept_id = u.dept_id`;
   }
 
-  async getDirectoryFilterOptions(searcherUserId: string, tenantId: string, roleName: string) {
+  async getDirectoryFilterOptions(
+    searcherUserId: string,
+    tenantId: string,
+    roleName: string,
+  ) {
     if (!this.canBrowseDirectory(roleName)) {
-      return { roles: [], departments: [], batches: [], statuses: ['Active', 'Alumni', 'On Leave', 'Suspended'] };
+      return {
+        roles: [],
+        departments: [],
+        batches: [],
+        statuses: ['Active', 'Alumni', 'On Leave', 'Suspended'],
+      };
     }
 
-    const scope = await this.buildScopeClause(searcherUserId, tenantId, roleName, 2);
+    const scope = await this.buildScopeClause(
+      searcherUserId,
+      tenantId,
+      roleName,
+      2,
+    );
     const baseParams: unknown[] = [tenantId, ...scope.params];
 
     const [roles, departments, batches] = await Promise.all([
@@ -501,13 +595,26 @@ export class SearchService {
     searcherUserId: string,
     tenantId: string,
     roleName: string,
-    filters: { q?: string; role?: string; department?: string; status?: string; batch?: string; page?: number; limit?: number },
+    filters: {
+      q?: string;
+      role?: string;
+      department?: string;
+      status?: string;
+      batch?: string;
+      page?: number;
+      limit?: number;
+    },
   ) {
     if (!this.canBrowseDirectory(roleName)) {
       return { items: [], total: 0, page: 1, limit: 25, total_pages: 0 };
     }
 
-    const scope = await this.buildScopeClause(searcherUserId, tenantId, roleName, 2);
+    const scope = await this.buildScopeClause(
+      searcherUserId,
+      tenantId,
+      roleName,
+      2,
+    );
     const conditions = ['u.tenant_id = $1', `(${scope.clause})`];
     const params: unknown[] = [tenantId, ...scope.params];
     this.applyDirectoryFilters(filters, conditions, params);
@@ -564,15 +671,34 @@ export class SearchService {
     searcherUserId: string,
     tenantId: string,
     roleName: string,
-    filters: { q?: string; role?: string; department?: string; status?: string; batch?: string },
+    filters: {
+      q?: string;
+      role?: string;
+      department?: string;
+      status?: string;
+      batch?: string;
+    },
   ) {
-    const result = await this.browseDirectory(searcherUserId, tenantId, roleName, {
-      ...filters,
-      page: 1,
-      limit: 10000,
-    });
+    const result = await this.browseDirectory(
+      searcherUserId,
+      tenantId,
+      roleName,
+      {
+        ...filters,
+        page: 1,
+        limit: 10000,
+      },
+    );
 
-    const header = ['Name', 'Email', 'Role', 'University ID', 'Department', 'Batch', 'Status'];
+    const header = [
+      'Name',
+      'Email',
+      'Role',
+      'University ID',
+      'Department',
+      'Batch',
+      'Status',
+    ];
     const lines = [header.join(',')];
     for (const row of result.items) {
       lines.push(
@@ -592,7 +718,11 @@ export class SearchService {
     return lines.join('\n');
   }
 
-  private async buildScopeSql(searcherUserId: string, tenantId: string, roleName: string) {
+  private async buildScopeSql(
+    searcherUserId: string,
+    tenantId: string,
+    roleName: string,
+  ) {
     const role = roleName.trim().toLowerCase();
 
     if (['chairman', 'president', 'superadmin', 'registrar'].includes(role)) {
@@ -600,7 +730,10 @@ export class SearchService {
     }
 
     if (role === 'hod' || role === 'dean') {
-      const rows = await this.db.query(`SELECT dept_id FROM users WHERE user_id = $1`, [searcherUserId]);
+      const rows = await this.db.query(
+        `SELECT dept_id FROM users WHERE user_id = $1`,
+        [searcherUserId],
+      );
       const deptId = rows[0]?.dept_id;
       if (!deptId) return { sql: 'FALSE', params: [] };
       return { sql: 'u.dept_id = $4', params: [deptId] };
@@ -641,8 +774,18 @@ export class SearchService {
     return { sql: 'u.user_id = $4', params: [searcherUserId] };
   }
 
-  async getProfile360(viewerUserId: string, tenantId: string, roleName: string, targetUserId: string) {
-    await this.assertProfileAccess(viewerUserId, tenantId, roleName, targetUserId);
+  async getProfile360(
+    viewerUserId: string,
+    tenantId: string,
+    roleName: string,
+    targetUserId: string,
+  ) {
+    await this.assertProfileAccess(
+      viewerUserId,
+      tenantId,
+      roleName,
+      targetUserId,
+    );
 
     const userRows = await this.db.query(
       `SELECT u.user_id, u.name, u.official_email, u.phone, r.role_name, d.dept_name,
@@ -661,56 +804,65 @@ export class SearchService {
     const user = userRows[0];
     if (!user) throw new NotFoundException('Profile not found');
 
-    const isStudent = ['student', 'applicant'].includes(String(user.role_name).toLowerCase());
+    const isStudent = ['student', 'applicant'].includes(
+      String(user.role_name).toLowerCase(),
+    );
 
     if (isStudent) {
-      const [academics, finance, hostel, discipline, ufm, tickets, proctor] = await Promise.all([
-        this.db.query(
-          `SELECT c.course_code, c.course_name, e.semester, e.attendance_percent, e.grade_points, e.status
+      const [academics, finance, hostel, discipline, ufm, tickets, proctor] =
+        await Promise.all([
+          this.db.query(
+            `SELECT c.course_code, c.course_name, e.semester, e.attendance_percent, e.grade_points, e.status
            FROM student_course_enrollments e
            JOIN academic_courses c ON c.course_id = e.course_id
            WHERE e.student_user_id = $1 ORDER BY e.semester DESC LIMIT 20`,
-          [targetUserId],
-        ),
-        this.db.query(
-          `SELECT fee_head, total_amount, paid_amount, status, due_date
+            [targetUserId],
+          ),
+          this.db.query(
+            `SELECT fee_head, total_amount, paid_amount, status, due_date
            FROM finance_fee_demands WHERE student_user_id = $1 ORDER BY due_date`,
-          [targetUserId],
-        ),
-        this.db.query(
-          `SELECT h.hostel_name, r.room_number, ha.status
+            [targetUserId],
+          ),
+          this.db.query(
+            `SELECT h.hostel_name, r.room_number, ha.status
            FROM hostel_allocations ha
            JOIN operations_hostel_rooms r ON r.room_id = ha.room_id
            JOIN operations_hostels h ON h.hostel_id = r.hostel_id
            WHERE ha.student_user_id = $1 AND ha.status = 'ACTIVE' LIMIT 1`,
-          [targetUserId],
-        ),
-        this.db.query(
-          `SELECT incident_date, category, description, action_taken
+            [targetUserId],
+          ),
+          this.db.query(
+            `SELECT incident_date, category, description, action_taken
            FROM student_disciplinary_records WHERE student_user_id = $1 ORDER BY incident_date DESC LIMIT 10`,
-          [targetUserId],
-        ),
-        this.db.query(
-          `SELECT description, penalty_applied, status, logged_at
+            [targetUserId],
+          ),
+          this.db.query(
+            `SELECT description, penalty_applied, status, logged_at
            FROM ufm_cases WHERE student_user_id = $1 ORDER BY logged_at DESC LIMIT 10`,
-          [targetUserId],
-        ),
-        this.db.query(
-          `SELECT ticket_id, category, subject, status, created_at, sla_deadline
+            [targetUserId],
+          ),
+          this.db.query(
+            `SELECT ticket_id, category, subject, status, created_at, sla_deadline
            FROM helpdesk_tickets WHERE student_user_id = $1 ORDER BY created_at DESC LIMIT 10`,
-          [targetUserId],
-        ),
-        this.db.query(
-          `SELECT p.name AS proctor_name FROM academic_mentorships m
+            [targetUserId],
+          ),
+          this.db.query(
+            `SELECT p.name AS proctor_name FROM academic_mentorships m
            JOIN users p ON p.user_id = m.proctor_user_id
            WHERE m.student_user_id = $1 AND m.is_active = true LIMIT 1`,
-          [targetUserId],
-        ),
-      ]);
+            [targetUserId],
+          ),
+        ]);
 
       const avgCgpa = academics.length
-        ? academics.reduce((s: number, r: { grade_points: string | null }) => s + Number(r.grade_points ?? 0), 0) /
-          academics.filter((r: { grade_points: string | null }) => r.grade_points).length
+        ? academics.reduce(
+            (s: number, r: { grade_points: string | null }) =>
+              s + Number(r.grade_points ?? 0),
+            0,
+          ) /
+          academics.filter(
+            (r: { grade_points: string | null }) => r.grade_points,
+          ).length
         : null;
 
       return {
@@ -723,14 +875,23 @@ export class SearchService {
           avg_attendance: academics.length
             ? Number(
                 (
-                  academics.reduce((s: number, r: { attendance_percent: string }) => s + Number(r.attendance_percent ?? 0), 0) /
-                  academics.length
+                  academics.reduce(
+                    (s: number, r: { attendance_percent: string }) =>
+                      s + Number(r.attendance_percent ?? 0),
+                    0,
+                  ) / academics.length
                 ).toFixed(2),
               )
             : null,
           pending_dues: finance
-            .filter((f: { status: string }) => !['PAID', 'WAIVED'].includes(f.status))
-            .reduce((s: number, f: { total_amount: string; paid_amount: string }) => s + (Number(f.total_amount) - Number(f.paid_amount)), 0),
+            .filter(
+              (f: { status: string }) => !['PAID', 'WAIVED'].includes(f.status),
+            )
+            .reduce(
+              (s: number, f: { total_amount: string; paid_amount: string }) =>
+                s + (Number(f.total_amount) - Number(f.paid_amount)),
+              0,
+            ),
         },
         tabs: { academics, finance, hostel, discipline, ufm, tickets },
       };
@@ -742,21 +903,27 @@ export class SearchService {
          FROM admin_timetable_slots WHERE faculty_user_id = $1 ORDER BY day_of_week, start_time LIMIT 20`,
         [targetUserId],
       ),
-      this.db.query(
-        `SELECT leave_type, days_requested, status, start_date, end_date
+      this.db
+        .query(
+          `SELECT leave_type, days_requested, status, start_date, end_date
          FROM hr_leave_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`,
-        [targetUserId],
-      ).catch(() => []),
-      this.db.query(
-        `SELECT appraisal_year, auto_api_score, hod_rating, hr_final_status
+          [targetUserId],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT appraisal_year, auto_api_score, hod_rating, hr_final_status
          FROM hr_employee_appraisals WHERE user_id = $1 ORDER BY appraisal_year DESC LIMIT 3`,
-        [targetUserId],
-      ).catch(() => []),
-      this.db.query(
-        `SELECT AVG(score)::numeric(4,2) AS avg_rating, COUNT(*)::int AS sessions
+          [targetUserId],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT AVG(score)::numeric(4,2) AS avg_rating, COUNT(*)::int AS sessions
          FROM placement_mock_interviews WHERE interviewer_user_id = $1 AND score IS NOT NULL`,
-        [targetUserId],
-      ).catch(() => [{ avg_rating: null, sessions: 0 }]),
+          [targetUserId],
+        )
+        .catch(() => [{ avg_rating: null, sessions: 0 }]),
     ]);
 
     return {
@@ -786,7 +953,8 @@ export class SearchService {
     if (viewerUserId === targetUserId) return;
 
     const role = roleName.trim().toLowerCase();
-    if (['chairman', 'president', 'superadmin', 'registrar'].includes(role)) return;
+    if (['chairman', 'president', 'superadmin', 'registrar'].includes(role))
+      return;
 
     const scope = await this.buildScopeSql(viewerUserId, tenantId, roleName);
     const params = [targetUserId, tenantId, ...scope.params];
@@ -795,6 +963,7 @@ export class SearchService {
       `SELECT 1 FROM users u WHERE u.user_id = $1 AND u.tenant_id = $2 AND (${scopeSql})`,
       params,
     );
-    if (!rows.length) throw new NotFoundException('Profile not in your search scope');
+    if (!rows.length)
+      throw new NotFoundException('Profile not in your search scope');
   }
 }

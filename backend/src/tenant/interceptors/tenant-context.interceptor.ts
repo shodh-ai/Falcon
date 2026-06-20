@@ -20,7 +20,9 @@ export class TenantContextInterceptor implements NestInterceptor {
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const req = context.switchToHttp().getRequest<{ user?: { tenant_id?: string } }>();
+    const req = context
+      .switchToHttp()
+      .getRequest<{ user?: { tenant_id?: string } }>();
     const tenantId = req.user?.tenant_id;
 
     if (!tenantId) {

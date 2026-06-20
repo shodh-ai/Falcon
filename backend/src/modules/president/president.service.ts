@@ -14,7 +14,8 @@ export class PresidentService {
     @InjectRepository(FeeDemand) private demands: Repository<FeeDemand>,
     @InjectRepository(StudentCourseEnrollment)
     private enrollments: Repository<StudentCourseEnrollment>,
-    @InjectRepository(TaskAssignment) private taskAssignments: Repository<TaskAssignment>,
+    @InjectRepository(TaskAssignment)
+    private taskAssignments: Repository<TaskAssignment>,
     @InjectRepository(StaffPayslip) private payslips: Repository<StaffPayslip>,
   ) {}
 
@@ -32,7 +33,10 @@ export class PresidentService {
 
     return {
       total_university_revenue: this.sumDemandTotal(demands),
-      total_collected: demands.reduce((sum, row) => sum + Number(row.paid_amount ?? 0), 0),
+      total_collected: demands.reduce(
+        (sum, row) => sum + Number(row.paid_amount ?? 0),
+        0,
+      ),
       headcount: {
         students,
         staff,
@@ -42,11 +46,21 @@ export class PresidentService {
   }
 
   async getAcademics() {
-    const rows = await this.enrollments.find({ relations: ['student', 'student.department'] });
-    const byDepartment = new Map<string, { total: number; passed: number; failed: number; attendance: number }>();
+    const rows = await this.enrollments.find({
+      relations: ['student', 'student.department'],
+    });
+    const byDepartment = new Map<
+      string,
+      { total: number; passed: number; failed: number; attendance: number }
+    >();
     for (const row of rows) {
       const key = row.student?.department?.dept_name ?? 'Unassigned';
-      const bucket = byDepartment.get(key) ?? { total: 0, passed: 0, failed: 0, attendance: 0 };
+      const bucket = byDepartment.get(key) ?? {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        attendance: 0,
+      };
       bucket.total += 1;
       bucket.attendance += Number(row.attendance_percent ?? 0);
       if (row.status === 'FAILED') bucket.failed += 1;
@@ -54,23 +68,36 @@ export class PresidentService {
       byDepartment.set(key, bucket);
     }
     return {
-      schools: Array.from(byDepartment.entries()).map(([department, stats]) => ({
-        department,
-        pass_count: stats.passed,
-        fail_count: stats.failed,
-        average_attendance: stats.total ? Number((stats.attendance / stats.total).toFixed(2)) : 0,
-      })),
+      schools: Array.from(byDepartment.entries()).map(
+        ([department, stats]) => ({
+          department,
+          pass_count: stats.passed,
+          fail_count: stats.failed,
+          average_attendance: stats.total
+            ? Number((stats.attendance / stats.total).toFixed(2))
+            : 0,
+        }),
+      ),
     };
   }
 
   async getFinance() {
     const demands = await this.demands.find();
-    const collected = demands.reduce((sum, row) => sum + Number(row.paid_amount ?? 0), 0);
+    const collected = demands.reduce(
+      (sum, row) => sum + Number(row.paid_amount ?? 0),
+      0,
+    );
     const total = this.sumDemandTotal(demands);
     return {
       collected,
       pending: Math.max(0, total - collected),
-      status_breakdown: ['PENDING', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'WAIVED'].map((status) => ({
+      status_breakdown: [
+        'PENDING',
+        'PARTIALLY_PAID',
+        'PAID',
+        'OVERDUE',
+        'WAIVED',
+      ].map((status) => ({
         status,
         count: demands.filter((row) => row.status === status).length,
       })),
@@ -107,10 +134,14 @@ export class PresidentService {
         .getCount(),
       this.payslips.find({ order: { generated_at: 'DESC' }, take: 100 }),
     ]);
-    const payrollExpense = currentPayslips.reduce((sum, row) => sum + Number(row.net_pay ?? 0), 0);
+    const payrollExpense = currentPayslips.reduce(
+      (sum, row) => sum + Number(row.net_pay ?? 0),
+      0,
+    );
     return {
       faculty_retention_rate: 94,
-      faculty_to_student_ratio: faculty > 0 ? Number((students / faculty).toFixed(2)) : 0,
+      faculty_to_student_ratio:
+        faculty > 0 ? Number((students / faculty).toFixed(2)) : 0,
       total_payroll_expense: payrollExpense,
       headcount: { faculty, staff, students },
     };

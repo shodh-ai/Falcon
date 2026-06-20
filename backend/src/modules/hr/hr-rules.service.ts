@@ -28,7 +28,10 @@ export class HrRulesService {
           `SELECT * FROM hr_attendance_rules WHERE tenant_id = $1 AND entity_id = $2`,
           [tenantId, entityId],
         );
-        if (!rows[0]) throw new NotFoundException('Attendance rules not configured for entity');
+        if (!rows[0])
+          throw new NotFoundException(
+            'Attendance rules not configured for entity',
+          );
         return rows[0];
       },
       43_200,
@@ -127,7 +130,11 @@ export class HrRulesService {
   }
 
   /** Batch-resolve shift context for many users in one round-trip (avoids N+1 in matrix views). */
-  async getShiftsForUsers(tenantId: string, entityId: number, userIds: string[]) {
+  async getShiftsForUsers(
+    tenantId: string,
+    entityId: number,
+    userIds: string[],
+  ) {
     if (!userIds.length) return new Map<string, Record<string, unknown>>();
 
     const rows = await this.dataSource.query<
@@ -175,7 +182,8 @@ export class HrRulesService {
         [entityId],
       );
       if (fallback[0]) {
-        for (const userId of missing) map.set(userId, { ...fallback[0], user_id: userId });
+        for (const userId of missing)
+          map.set(userId, { ...fallback[0], user_id: userId });
       }
     }
 
@@ -230,7 +238,13 @@ export class HrRulesService {
          penalty_dates = hr_penalty_trackers.penalty_dates || $5::jsonb,
          updated_at = NOW()
        RETURNING *`,
-      [tenantId, entityId, userId, monthYear, JSON.stringify([{ type: 'EARLY_GOING', date }])],
+      [
+        tenantId,
+        entityId,
+        userId,
+        monthYear,
+        JSON.stringify([{ type: 'EARLY_GOING', date }]),
+      ],
     );
     return rows[0];
   }
@@ -250,7 +264,16 @@ export class HrRulesService {
          tenant_id, entity_id, user_id, month_year, deduction_type,
          amount, days_deducted, reason
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [tenantId, entityId, userId, monthYear, deductionType, amount, daysDeducted, reason],
+      [
+        tenantId,
+        entityId,
+        userId,
+        monthYear,
+        deductionType,
+        amount,
+        daysDeducted,
+        reason,
+      ],
     );
   }
 }

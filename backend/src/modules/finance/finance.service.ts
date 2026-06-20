@@ -14,14 +14,19 @@ export class FinanceService {
 
   constructor(
     @InjectRepository(FeeDemand) private demands: Repository<FeeDemand>,
-    @InjectRepository(Transaction) private transactions: Repository<Transaction>,
-    @InjectRepository(LateFinePolicy) private finePolicies: Repository<LateFinePolicy>,
+    @InjectRepository(Transaction)
+    private transactions: Repository<Transaction>,
+    @InjectRepository(LateFinePolicy)
+    private finePolicies: Repository<LateFinePolicy>,
     private readonly notify: NotificationEmitterService,
   ) {}
 
   listDemands(studentUserId?: string) {
     if (studentUserId) {
-      return this.demands.find({ where: { student_user_id: studentUserId }, order: { due_date: 'ASC' } });
+      return this.demands.find({
+        where: { student_user_id: studentUserId },
+        order: { due_date: 'ASC' },
+      });
     }
     return this.demands.find({ order: { due_date: 'ASC' } });
   }
@@ -70,9 +75,14 @@ export class FinanceService {
     );
 
     return {
-      todays_collection: successfulToday.reduce((sum, row) => sum + Number(row.amount), 0),
+      todays_collection: successfulToday.reduce(
+        (sum, row) => sum + Number(row.amount),
+        0,
+      ),
       total_outstanding: openDemands.reduce(
-        (sum, row) => sum + Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
+        (sum, row) =>
+          sum +
+          Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
         0,
       ),
       recent_transactions: recentTransactions,
@@ -93,7 +103,11 @@ export class FinanceService {
     const tuitionFee = Number(dto.tuition_fee ?? 85000);
     const developmentFee = Number(dto.development_fee ?? 15000);
     const academicYear = dto.academic_year ?? '2026-27';
-    const dueDate = dto.due_date ?? new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10);
+    const dueDate =
+      dto.due_date ??
+      new Date(Date.now() + 1000 * 60 * 60 * 24 * 30)
+        .toISOString()
+        .slice(0, 10);
     const students = await this.demands.manager.query(
       `SELECT u.user_id
        FROM users u
@@ -136,7 +150,8 @@ export class FinanceService {
       queued: true,
       job: 'finance.bulk-demand-generation',
       generated: saved.length,
-      message: 'Smoke implementation completed synchronously; production path can enqueue this via BullMQ.',
+      message:
+        'Smoke implementation completed synchronously; production path can enqueue this via BullMQ.',
     };
   }
 
@@ -159,19 +174,28 @@ export class FinanceService {
       .where({ due_date: LessThan(today), status: Not('PAID') })
       .andWhere('status NOT IN (:...skip)', { skip: ['OVERDUE', 'WAIVED'] })
       .execute();
-    this.logger.log(`Late-fee sweep: marked ${result.affected ?? 0} demands as OVERDUE`);
+    this.logger.log(
+      `Late-fee sweep: marked ${result.affected ?? 0} demands as OVERDUE`,
+    );
   }
 
   listTransactions(studentUserId?: string) {
     if (studentUserId) {
-      return this.transactions.find({ where: { student_user_id: studentUserId }, order: { created_at: 'DESC' } });
+      return this.transactions.find({
+        where: { student_user_id: studentUserId },
+        order: { created_at: 'DESC' },
+      });
     }
     return this.transactions.find({ order: { created_at: 'DESC' } });
   }
 
   async uploadReceipt(transactionId: string, receiptUrl: string) {
-    const result = await this.transactions.update({ transaction_id: transactionId }, { receipt_url: receiptUrl });
-    if (result.affected === 0) throw new BadRequestException('Transaction not found');
+    const result = await this.transactions.update(
+      { transaction_id: transactionId },
+      { receipt_url: receiptUrl },
+    );
+    if (result.affected === 0)
+      throw new BadRequestException('Transaction not found');
     return { success: true };
   }
 
@@ -193,12 +217,21 @@ export class FinanceService {
           )
         : [];
     const studentMap = new Map(
-      (students as Array<{ user_id: string; name: string; official_email: string }>).map((row) => [row.user_id, row]),
+      (
+        students as Array<{
+          user_id: string;
+          name: string;
+          official_email: string;
+        }>
+      ).map((row) => [row.user_id, row]),
     );
 
     return rows.map((row) => ({
       ...row,
-      outstanding_amount: Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
+      outstanding_amount: Math.max(
+        0,
+        Number(row.total_amount) - Number(row.paid_amount ?? 0),
+      ),
       admit_card_locked: row.status !== 'PAID' && row.status !== 'WAIVED',
       student: studentMap.get(row.student_user_id) ?? null,
     }));
@@ -206,7 +239,9 @@ export class FinanceService {
 
   async lockAdmitCards(tenantId: string) {
     const defaulters = await this.listDefaulters();
-    const studentIds = [...new Set(defaulters.map((row) => row.student_user_id))];
+    const studentIds = [
+      ...new Set(defaulters.map((row) => row.student_user_id)),
+    ];
     for (const userId of studentIds) {
       this.notify.admitCardLocked({
         tenantId,
@@ -221,8 +256,12 @@ export class FinanceService {
     };
   }
 
-  async applyScholarship(dto: { student_user_id?: string; discount_percent?: number }) {
-    if (!dto.student_user_id) throw new BadRequestException('student_user_id is required');
+  async applyScholarship(dto: {
+    student_user_id?: string;
+    discount_percent?: number;
+  }) {
+    if (!dto.student_user_id)
+      throw new BadRequestException('student_user_id is required');
     const discountPercent = Number(dto.discount_percent ?? 50);
     const activeDemand = await this.demands.findOne({
       where: [
@@ -232,9 +271,14 @@ export class FinanceService {
       ],
       order: { due_date: 'ASC' },
     });
-    if (!activeDemand) throw new BadRequestException('No active fee demand found for this student');
+    if (!activeDemand)
+      throw new BadRequestException(
+        'No active fee demand found for this student',
+      );
     const original = Number(activeDemand.total_amount);
-    activeDemand.total_amount = Number((original * (1 - discountPercent / 100)).toFixed(2));
+    activeDemand.total_amount = Number(
+      (original * (1 - discountPercent / 100)).toFixed(2),
+    );
     activeDemand.fee_breakup = {
       ...(activeDemand.fee_breakup ?? {}),
       scholarship_discount_percent: discountPercent,
@@ -266,11 +310,15 @@ export class FinanceService {
        INNER JOIN departments d ON d.dept_id = u.dept_id
        WHERE fr.tenant_id = $1 AND fr.status IN ('APPROVED_DEAN', 'TRANSFERRED')
        ORDER BY CASE fr.status WHEN 'TRANSFERRED' THEN 1 ELSE 0 END, fr.created_at DESC`,
-      [tenantId]
+      [tenantId],
     );
   }
 
-  async transferFunding(requestId: string, accountantUserId: string, tenantId: string) {
+  async transferFunding(
+    requestId: string,
+    accountantUserId: string,
+    tenantId: string,
+  ) {
     const queryRunner = this.demands.manager.connection.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -281,11 +329,13 @@ export class FinanceService {
          SET status = 'TRANSFERRED', accountant_user_id = $1, updated_at = NOW()
          WHERE request_id = $2 AND tenant_id = $3 AND status = 'APPROVED_DEAN'
          RETURNING *`,
-        [accountantUserId, requestId, tenantId]
+        [accountantUserId, requestId, tenantId],
       );
 
       if (!requestRows.length) {
-        throw new BadRequestException('Funding request not found or not approved by Dean');
+        throw new BadRequestException(
+          'Funding request not found or not approved by Dean',
+        );
       }
 
       const request = requestRows[0];
@@ -294,7 +344,7 @@ export class FinanceService {
         `UPDATE faculty_project_guides
          SET funding_allocated = COALESCE(funding_allocated, 0) + $1
          WHERE guide_id = $2 AND tenant_id = $3`,
-        [request.amount, request.guide_id, tenantId]
+        [request.amount, request.guide_id, tenantId],
       );
 
       await queryRunner.commitTransaction();

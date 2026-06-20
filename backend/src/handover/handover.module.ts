@@ -7,9 +7,7 @@ import { TaskAssignment } from '../entities/task-assignment.entity';
 import { User } from '../entities/user.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([HandoverLog, TaskAssignment, User]),
-  ],
+  imports: [TypeOrmModule.forFeature([HandoverLog, TaskAssignment, User])],
   controllers: [HandoverController],
   providers: [HandoverService],
 })

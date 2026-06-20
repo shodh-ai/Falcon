@@ -22,7 +22,10 @@ export class AnomalyDetectionProcessor extends WorkerHost {
     if (data.type === 'invoice_created') {
       await this.anomaly.processInvoice(data.tenantId, data.invoiceId);
     } else if (data.type === 'budget_check') {
-      await this.anomaly.checkBudgetThresholds(data.tenantId, data.departmentId);
+      await this.anomaly.checkBudgetThresholds(
+        data.tenantId,
+        data.departmentId,
+      );
     }
     return { ok: true };
   }

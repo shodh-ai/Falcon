@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
@@ -51,11 +55,17 @@ export class ImpersonationService {
     const tokenUser = refreshed ?? target;
     const roleClaims = this.authService.getRoleClaims(tokenUser);
     if (!roleClaims.primaryRole) {
-      throw new ForbiddenException('Target user has no assignable role for impersonation');
+      throw new ForbiddenException(
+        'Target user has no assignable role for impersonation',
+      );
     }
 
-    const baseToken = this.authService.signToken(tokenUser, tenantId, tenantSchema);
-    const decoded = this.jwt.decode(baseToken) as Record<string, unknown>;
+    const baseToken = this.authService.signToken(
+      tokenUser,
+      tenantId,
+      tenantSchema,
+    );
+    const decoded = this.jwt.decode(baseToken);
     const token = this.jwt.sign(
       {
         ...decoded,

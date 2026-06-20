@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In, IsNull } from 'typeorm';
-import { HrDailyAttendance, CalculatedAttendanceStatus } from '../../entities/hr-daily-attendance.entity';
+import {
+  HrDailyAttendance,
+  CalculatedAttendanceStatus,
+} from '../../entities/hr-daily-attendance.entity';
 import { HrHoliday } from '../../entities/hr-holiday.entity';
 import { HrShift } from '../../entities/hr-shift.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
@@ -37,10 +40,13 @@ export class AttendanceCalculationService {
   private readonly logger = new Logger(AttendanceCalculationService.name);
 
   constructor(
-    @InjectRepository(HrDailyAttendance) private readonly daily: Repository<HrDailyAttendance>,
-    @InjectRepository(HrHoliday) private readonly holidays: Repository<HrHoliday>,
+    @InjectRepository(HrDailyAttendance)
+    private readonly daily: Repository<HrDailyAttendance>,
+    @InjectRepository(HrHoliday)
+    private readonly holidays: Repository<HrHoliday>,
     @InjectRepository(HrShift) private readonly shifts: Repository<HrShift>,
-    @InjectRepository(StaffLeaveRequest) private readonly requests: Repository<StaffLeaveRequest>,
+    @InjectRepository(StaffLeaveRequest)
+    private readonly requests: Repository<StaffLeaveRequest>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly rules: HrRulesService,
     private readonly dynamicRules: HrDynamicRulesService,
@@ -67,7 +73,11 @@ export class AttendanceCalculationService {
 
     const tenantId = profile[0].tenant_id;
     const entityId = Number(profile[0].entity_id);
-    const shiftRow = await this.rules.getShiftForUser(tenantId, entityId, userId);
+    const shiftRow = await this.rules.getShiftForUser(
+      tenantId,
+      entityId,
+      userId,
+    );
     let entityRules: Record<string, unknown> | null = null;
     try {
       entityRules = await this.rules.getRules(tenantId, entityId);
@@ -90,7 +100,8 @@ export class AttendanceCalculationService {
          FROM hr_shifts WHERE entity_id = $1 ORDER BY shift_name LIMIT 1`,
         [ctx.entityId],
       );
-      if (entityShift[0]) return this.shiftFromRow(entityShift[0], ctx.entityRules);
+      if (entityShift[0])
+        return this.shiftFromRow(entityShift[0], ctx.entityRules);
     }
 
     return this.shiftFromRow(
@@ -126,14 +137,19 @@ export class AttendanceCalculationService {
       shift_name: row.shift_name,
       start_time: this.normalizeTime(row.start_time),
       end_time: this.normalizeTime(row.end_time),
-      grace_period_mins: Number(entityRules?.late_coming_max_mins ?? row.grace_period_mins ?? 15),
+      grace_period_mins: Number(
+        entityRules?.late_coming_max_mins ?? row.grace_period_mins ?? 15,
+      ),
       half_day_min_hours: Number(row.half_day_min_hours ?? 4),
       full_day_min_hours: Number(row.full_day_min_hours ?? 8),
       week_off_day: Number(row.week_off_day ?? 0),
     };
   }
 
-  async calculateAndPersist(userId: string, date: string): Promise<DayCalculationResult> {
+  async calculateAndPersist(
+    userId: string,
+    date: string,
+  ): Promise<DayCalculationResult> {
     const shift = await this.getEmployeeShift(userId);
     let row = await this.daily.findOne({ where: { user_id: userId, date } });
 
@@ -152,7 +168,10 @@ export class AttendanceCalculationService {
     if (result.first_in_time) row.first_in_time = result.first_in_time;
     if (result.last_out_time) row.last_out_time = result.last_out_time;
     if (result.first_in_time) {
-      const liveHours = this.hoursBetween(result.first_in_time, result.last_out_time);
+      const liveHours = this.hoursBetween(
+        result.first_in_time,
+        result.last_out_time,
+      );
       row.total_hours = liveHours.toFixed(2);
       result.total_hours = liveHours;
     } else if (result.total_hours != null) {
@@ -176,7 +195,8 @@ export class AttendanceCalculationService {
     const shiftCtx = shift ?? (await this.getEmployeeShift(userId));
     const ctx = await this.loadAttendanceContext(userId);
     const earlyMaxMins = Number(ctx?.entityRules?.early_going_max_mins ?? 0);
-    const attendance = row ?? (await this.daily.findOne({ where: { user_id: userId, date } }));
+    const attendance =
+      row ?? (await this.daily.findOne({ where: { user_id: userId, date } }));
 
     const dow = new Date(`${date}T12:00:00`).getDay();
     if (dow === shiftCtx.week_off_day) {
@@ -185,7 +205,11 @@ export class AttendanceCalculationService {
 
     const holiday = await this.holidays.findOne({
       where: [
-        { date, entity_id: ctx?.entityId ? ctx.entityId : IsNull(), applicable_to: In(['ALL', 'STAFF']) },
+        {
+          date,
+          entity_id: ctx?.entityId ? ctx.entityId : IsNull(),
+          applicable_to: In(['ALL', 'STAFF']),
+        },
         { date, entity_id: IsNull(), applicable_to: In(['ALL', 'STAFF']) },
       ],
     });
@@ -208,7 +232,10 @@ export class AttendanceCalculationService {
       return this.buildResult(date, 'ABSENT', attendance, shiftCtx);
     }
 
-    const hours = this.hoursBetween(attendance.first_in_time, attendance.last_out_time);
+    const hours = this.hoursBetween(
+      attendance.first_in_time,
+      attendance.last_out_time,
+    );
     const late = this.isLate(attendance.first_in_time, date, shiftCtx);
     const early = attendance.last_out_time
       ? this.isEarly(attendance.last_out_time, date, shiftCtx, earlyMaxMins)
@@ -242,7 +269,13 @@ export class AttendanceCalculationService {
       ctx.tenantId,
       ctx.entityId,
     );
-    return batch.get(userId) ?? { month, shift: await this.getEmployeeShift(userId), days: [] };
+    return (
+      batch.get(userId) ?? {
+        month,
+        shift: await this.getEmployeeShift(userId),
+        days: [],
+      }
+    );
   }
 
   /** Fetch month calendars for many users with batched SQL (fixes N+1 in matrix endpoints). */
@@ -251,8 +284,16 @@ export class AttendanceCalculationService {
     month: string,
     tenantId: string,
     entityId: number,
-  ): Promise<Map<string, { month: string; shift: ShiftContext; days: DayCalculationResult[] }>> {
-    const result = new Map<string, { month: string; shift: ShiftContext; days: DayCalculationResult[] }>();
+  ): Promise<
+    Map<
+      string,
+      { month: string; shift: ShiftContext; days: DayCalculationResult[] }
+    >
+  > {
+    const result = new Map<
+      string,
+      { month: string; shift: ShiftContext; days: DayCalculationResult[] }
+    >();
     if (!userIds.length) return result;
 
     const { year, monthNum, daysInMonth, start, end } = this.parseMonth(month);
@@ -264,7 +305,11 @@ export class AttendanceCalculationService {
       entityRules = null;
     }
 
-    const shiftRows = await this.rules.getShiftsForUsers(tenantId, entityId, userIds);
+    const shiftRows = await this.rules.getShiftsForUsers(
+      tenantId,
+      entityId,
+      userIds,
+    );
     const defaultShift = this.shiftFromRow(
       {
         shift_id: '',
@@ -288,8 +333,12 @@ export class AttendanceCalculationService {
       this.holidays
         .createQueryBuilder('h')
         .where('h.date BETWEEN :start AND :end', { start, end })
-        .andWhere('h.applicable_to IN (:...applicableTo)', { applicableTo: ['ALL', 'STAFF'] })
-        .andWhere('(h.entity_id = :entityId OR h.entity_id IS NULL)', { entityId })
+        .andWhere('h.applicable_to IN (:...applicableTo)', {
+          applicableTo: ['ALL', 'STAFF'],
+        })
+        .andWhere('(h.entity_id = :entityId OR h.entity_id IS NULL)', {
+          entityId,
+        })
         .getMany(),
       this.requests
         .createQueryBuilder('r')
@@ -302,7 +351,10 @@ export class AttendanceCalculationService {
         .getMany(),
     ]);
 
-    const attendanceByUserDate = new Map<string, Map<string, HrDailyAttendance>>();
+    const attendanceByUserDate = new Map<
+      string,
+      Map<string, HrDailyAttendance>
+    >();
     for (const row of attendanceRows) {
       if (!attendanceByUserDate.has(row.user_id)) {
         attendanceByUserDate.set(row.user_id, new Map());
@@ -310,12 +362,15 @@ export class AttendanceCalculationService {
       attendanceByUserDate.get(row.user_id)!.set(row.date, row);
     }
 
-    const holidayByDate = new Map(holidayRows.map((holiday) => [holiday.date, holiday]));
+    const holidayByDate = new Map(
+      holidayRows.map((holiday) => [holiday.date, holiday]),
+    );
     const pendingByUser = new Map<string, Set<string>>();
     for (const userId of userIds) pendingByUser.set(userId, new Set());
     for (const req of pendingRequests) {
       const dates = this.buildPendingDatesSet([req], start, end);
-      const existing = pendingByUser.get(req.staff_user_id) ?? new Set<string>();
+      const existing =
+        pendingByUser.get(req.staff_user_id) ?? new Set<string>();
       dates.forEach((d) => existing.add(d));
       pendingByUser.set(req.staff_user_id, existing);
     }
@@ -339,7 +394,9 @@ export class AttendanceCalculationService {
             entityRules,
           )
         : defaultShift;
-      const attendanceByDate = attendanceByUserDate.get(userId) ?? new Map<string, HrDailyAttendance>();
+      const attendanceByDate =
+        attendanceByUserDate.get(userId) ??
+        new Map<string, HrDailyAttendance>();
       const pendingDates = pendingByUser.get(userId) ?? new Set<string>();
       const days: DayCalculationResult[] = [];
 
@@ -370,7 +427,9 @@ export class AttendanceCalculationService {
       async () => {
         const params: unknown[] = [tenantId, entityId];
         const entityFilter = ` AND p.entity_id = $2`;
-        const staff = await this.dataSource.query<Array<{ user_id: string; name: string }>>(
+        const staff = await this.dataSource.query<
+          Array<{ user_id: string; name: string }>
+        >(
           `SELECT u.user_id, u.name FROM users u
            JOIN roles r ON r.role_id = u.role_id
            LEFT JOIN hr_employee_profiles p ON p.user_id = u.user_id AND p.tenant_id = u.tenant_id
@@ -381,7 +440,12 @@ export class AttendanceCalculationService {
         );
 
         const userIds = staff.map((s) => s.user_id);
-        const calendars = await this.buildMonthCalendarsBatch(userIds, month, tenantId, entityId);
+        const calendars = await this.buildMonthCalendarsBatch(
+          userIds,
+          month,
+          tenantId,
+          entityId,
+        );
 
         const employees = staff.map((s) => {
           const cal = calendars.get(s.user_id);
@@ -416,10 +480,16 @@ export class AttendanceCalculationService {
         this.logger.warn(`Recalc failed ${row.user_id} ${date}: ${e}`);
       }
     }
-    this.logger.log(`Nightly attendance recalc for ${rows.length} records on ${date}`);
+    this.logger.log(
+      `Nightly attendance recalc for ${rows.length} records on ${date}`,
+    );
   }
 
-  private async evaluateDynamicRules(userId: string, date: string, result: DayCalculationResult) {
+  private async evaluateDynamicRules(
+    userId: string,
+    date: string,
+    result: DayCalculationResult,
+  ) {
     const profile = await this.dataSource.query(
       `SELECT tenant_id, entity_id FROM hr_employee_profiles WHERE user_id = $1 LIMIT 1`,
       [userId],
@@ -443,12 +513,16 @@ export class AttendanceCalculationService {
     const pending = new Set<string>();
     for (const req of requests) {
       if (req.regularization_date) {
-        if (req.regularization_date >= monthStart && req.regularization_date <= monthEnd) {
+        if (
+          req.regularization_date >= monthStart &&
+          req.regularization_date <= monthEnd
+        ) {
           pending.add(req.regularization_date);
         }
         continue;
       }
-      const rangeStart = req.start_date < monthStart ? monthStart : req.start_date;
+      const rangeStart =
+        req.start_date < monthStart ? monthStart : req.start_date;
       const rangeEnd = req.end_date > monthEnd ? monthEnd : req.end_date;
       const cursor = new Date(`${rangeStart}T12:00:00`);
       const end = new Date(`${rangeEnd}T12:00:00`);
@@ -492,7 +566,10 @@ export class AttendanceCalculationService {
       return this.buildResult(date, 'ABSENT', attendance, shiftCtx);
     }
 
-    const hours = this.hoursBetween(attendance.first_in_time, attendance.last_out_time);
+    const hours = this.hoursBetween(
+      attendance.first_in_time,
+      attendance.last_out_time,
+    );
     const late = this.isLate(attendance.first_in_time, date, shiftCtx);
     const early = attendance.last_out_time
       ? this.isEarly(attendance.last_out_time, date, shiftCtx, earlyMaxMins)
@@ -535,10 +612,16 @@ export class AttendanceCalculationService {
     hours?: number,
   ): DayCalculationResult {
     const inT = row?.first_in_time
-      ? row.first_in_time.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+      ? row.first_in_time.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
       : '--';
     const outT = row?.last_out_time
-      ? row.last_out_time.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+      ? row.last_out_time.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
       : '--';
     const label = status.replace(/_/g, ' ');
     const tooltip = `${this.formatDisplayDate(date)} | In: ${inT} | Out: ${outT} | Status: ${label}`;
@@ -548,7 +631,9 @@ export class AttendanceCalculationService {
       calculated_status: status,
       first_in_time: row?.first_in_time ?? null,
       last_out_time: row?.last_out_time ?? null,
-      total_hours: hours ?? (row ? this.hoursBetween(row.first_in_time, row.last_out_time) : null),
+      total_hours:
+        hours ??
+        (row ? this.hoursBetween(row.first_in_time, row.last_out_time) : null),
       shift,
       tooltip,
     };
@@ -556,17 +641,32 @@ export class AttendanceCalculationService {
 
   private formatDisplayDate(date: string) {
     const d = new Date(`${date}T12:00:00`);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    return d.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
   }
 
   private isLate(firstIn: Date, date: string, shift: ShiftContext): boolean {
-    const graceEnd = this.shiftDateTime(date, shift.start_time, shift.grace_period_mins);
+    const graceEnd = this.shiftDateTime(
+      date,
+      shift.start_time,
+      shift.grace_period_mins,
+    );
     return firstIn.getTime() > graceEnd.getTime();
   }
 
-  private isEarly(lastOut: Date, date: string, shift: ShiftContext, earlyMaxMins = 0): boolean {
+  private isEarly(
+    lastOut: Date,
+    date: string,
+    shift: ShiftContext,
+    earlyMaxMins = 0,
+  ): boolean {
     const shiftEnd = this.shiftDateTime(date, shift.end_time, 0);
-    const earliestAllowed = new Date(shiftEnd.getTime() - earlyMaxMins * 60 * 1000);
+    const earliestAllowed = new Date(
+      shiftEnd.getTime() - earlyMaxMins * 60 * 1000,
+    );
     return lastOut.getTime() < earliestAllowed.getTime();
   }
 

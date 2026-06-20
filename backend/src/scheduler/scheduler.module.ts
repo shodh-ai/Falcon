@@ -12,7 +12,12 @@ import { LeadershipAiModule } from '../modules/leadership-ai/leadership-ai.modul
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([TaskAssignment, TaskMaster, User, OwnerDailyBrief]),
+    TypeOrmModule.forFeature([
+      TaskAssignment,
+      TaskMaster,
+      User,
+      OwnerDailyBrief,
+    ]),
     TasksModule,
     forwardRef(() => LeadershipModule),
     LeadershipAiModule,

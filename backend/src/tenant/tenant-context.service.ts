@@ -35,6 +35,6 @@ export class TenantContextService {
   }
 
   getSettings(): Record<string, unknown> {
-    return (this.storage.getStore()?.tenant.settings ?? {}) as Record<string, unknown>;
+    return this.storage.getStore()?.tenant.settings ?? {};
   }
 }

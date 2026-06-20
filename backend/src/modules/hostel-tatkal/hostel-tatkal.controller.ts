@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -50,13 +58,25 @@ export class HostelTatkalController {
   @Post('holds/:holdId/pay/order')
   @Roles('Student')
   payOrder(@Req() req: { user: AuthUser }, @Param('holdId') holdId: string) {
-    return this.tatkal.createPaymentOrder(this.tenant(req), req.user.user_id, holdId);
+    return this.tatkal.createPaymentOrder(
+      this.tenant(req),
+      req.user.user_id,
+      holdId,
+    );
   }
 
   @Post('confirm-payment')
   @Roles('Student')
-  confirm(@Req() req: { user: AuthUser }, @Body() dto: { hold_id: string; payment_ref: string }) {
-    return this.tatkal.confirmPayment(this.tenant(req), req.user.user_id, dto.hold_id, dto.payment_ref);
+  confirm(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { hold_id: string; payment_ref: string },
+  ) {
+    return this.tatkal.confirmPayment(
+      this.tenant(req),
+      req.user.user_id,
+      dto.hold_id,
+      dto.payment_ref,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

@@ -20,7 +20,10 @@ export class HostelTatkalGateway {
   }
 
   @SubscribeMessage('joinSale')
-  handleJoin(@MessageBody() data: { tenant_id: string }, @ConnectedSocket() client: Socket) {
+  handleJoin(
+    @MessageBody() data: { tenant_id: string },
+    @ConnectedSocket() client: Socket,
+  ) {
     if (data?.tenant_id) {
       client.join(`tenant:${data.tenant_id}`);
       this.logger.debug(`Client joined tenant sale room ${data.tenant_id}`);

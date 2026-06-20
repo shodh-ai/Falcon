@@ -54,7 +54,12 @@ describe('MeetingsService', () => {
   it('rejects schedule when no invitees selected at controller validation layer', async () => {
     await expect(
       service.scheduleMeeting(
-        { userId: 'u1', tenantId: 't1', roles: ['Faculty'], primaryRole: 'Faculty' },
+        {
+          userId: 'u1',
+          tenantId: 't1',
+          roles: ['Faculty'],
+          primaryRole: 'Faculty',
+        },
         {
           title: 'Review',
           venue: 'Room 101',
@@ -68,7 +73,15 @@ describe('MeetingsService', () => {
   it('blocks invitees outside scheduling scope', async () => {
     jest.spyOn(service, 'listEligibleParticipants').mockResolvedValue({
       direction: 'schedule',
-      participants: [{ user_id: 'allowed', name: 'Allowed', email: 'a@x.com', role_name: 'Faculty', relation: 'department_peer' }],
+      participants: [
+        {
+          user_id: 'allowed',
+          name: 'Allowed',
+          email: 'a@x.com',
+          role_name: 'Faculty',
+          relation: 'department_peer',
+        },
+      ],
     });
 
     await expect(
@@ -87,7 +100,12 @@ describe('MeetingsService', () => {
   it('rejects meetings scheduled in the past', async () => {
     await expect(
       service.scheduleMeeting(
-        { userId: 'u1', tenantId: 't1', roles: ['Faculty'], primaryRole: 'Faculty' },
+        {
+          userId: 'u1',
+          tenantId: 't1',
+          roles: ['Faculty'],
+          primaryRole: 'Faculty',
+        },
         {
           title: 'Review',
           venue: 'Room 101',

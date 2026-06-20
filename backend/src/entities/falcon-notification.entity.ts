@@ -20,7 +20,11 @@ export type FalconNotificationCategory =
   | 'PLACEMENT'
   | 'HELPDESK';
 
-export type FalconNotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
+export type FalconNotificationSeverity =
+  | 'info'
+  | 'success'
+  | 'warning'
+  | 'critical';
 
 export type FalconNotificationIntent =
   | 'info'

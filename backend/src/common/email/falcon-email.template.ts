@@ -1,4 +1,7 @@
-export function wrapFalconEmailHtml(bodyHtml: string, frontendUrl?: string): string {
+export function wrapFalconEmailHtml(
+  bodyHtml: string,
+  frontendUrl?: string,
+): string {
   const dashboardUrl = frontendUrl ?? 'http://localhost:3000';
   return `
 <!DOCTYPE html>

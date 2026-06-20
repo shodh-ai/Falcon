@@ -8,7 +8,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { Response } from 'express';
 import { ObjectStorageService } from '../../storage/object-storage.service';
-import { HR_DOCUMENT_CATEGORIES, HR_DOCUMENT_GROUP_MAP } from './hr-document.constants';
+import {
+  HR_DOCUMENT_CATEGORIES,
+  HR_DOCUMENT_GROUP_MAP,
+} from './hr-document.constants';
 import { parseStorageKey } from './utils/s3-key.util';
 import {
   openDocumentReadStream,
@@ -74,7 +77,8 @@ export class HrDocumentVaultService {
   ) {
     const docType = dto.document_type?.trim().toUpperCase();
     if (!docType) throw new BadRequestException('document_type is required');
-    if (!dto.file_url?.trim()) throw new BadRequestException('file_url is required');
+    if (!dto.file_url?.trim())
+      throw new BadRequestException('file_url is required');
 
     const status = options?.autoVerify ? 'VERIFIED' : 'PENDING';
     const fileName =
@@ -87,7 +91,16 @@ export class HrDocumentVaultService {
          (tenant_id, entity_id, user_id, document_type, file_url, file_name, uploaded_by, verification_status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING document_id, document_type, file_name, verification_status, uploaded_at`,
-      [tenantId, entityId, userId, docType, dto.file_url, fileName, uploadedBy, status],
+      [
+        tenantId,
+        entityId,
+        userId,
+        docType,
+        dto.file_url,
+        fileName,
+        uploadedBy,
+        status,
+      ],
     );
     return rows[0];
   }
@@ -132,45 +145,67 @@ export class HrDocumentVaultService {
 
     const key = parseStorageKey(doc.file_url);
     if (key && this.storage.isEnabled()) {
-      const url = await this.storage.getPresignedDownloadUrl(key, PRESIGNED_TTL_SECONDS);
+      const url = await this.storage.getPresignedDownloadUrl(
+        key,
+        PRESIGNED_TTL_SECONDS,
+      );
       return {
         url,
         delivery: 'presigned' as const,
-        expires_at: new Date(Date.now() + PRESIGNED_TTL_SECONDS * 1000).toISOString(),
+        expires_at: new Date(
+          Date.now() + PRESIGNED_TTL_SECONDS * 1000,
+        ).toISOString(),
         file_name: doc.file_name,
       };
     }
 
-    if (doc.file_url.startsWith('http://') || doc.file_url.startsWith('https://')) {
+    if (
+      doc.file_url.startsWith('http://') ||
+      doc.file_url.startsWith('https://')
+    ) {
       return {
         url: doc.file_url,
         delivery: 'presigned' as const,
-        expires_at: new Date(Date.now() + PRESIGNED_TTL_SECONDS * 1000).toISOString(),
+        expires_at: new Date(
+          Date.now() + PRESIGNED_TTL_SECONDS * 1000,
+        ).toISOString(),
         file_name: doc.file_name,
       };
     }
 
-    if (resolveDocumentDiskPath(doc.file_url) || (key && !this.storage.isEnabled())) {
+    if (
+      resolveDocumentDiskPath(doc.file_url) ||
+      (key && !this.storage.isEnabled())
+    ) {
       return {
         url: `/api/hr/documents/${docId}/file`,
         delivery: 'authenticated' as const,
-        expires_at: new Date(Date.now() + PRESIGNED_TTL_SECONDS * 1000).toISOString(),
+        expires_at: new Date(
+          Date.now() + PRESIGNED_TTL_SECONDS * 1000,
+        ).toISOString(),
         file_name: doc.file_name,
       };
     }
 
-    if (doc.file_url.startsWith('/') || doc.file_url.includes('uploads/download')) {
+    if (
+      doc.file_url.startsWith('/') ||
+      doc.file_url.includes('uploads/download')
+    ) {
       return {
         url: doc.file_url.startsWith('http')
           ? doc.file_url
           : `/api/uploads/download?key=${encodeURIComponent(key ?? '')}`,
         delivery: 'presigned' as const,
-        expires_at: new Date(Date.now() + PRESIGNED_TTL_SECONDS * 1000).toISOString(),
+        expires_at: new Date(
+          Date.now() + PRESIGNED_TTL_SECONDS * 1000,
+        ).toISOString(),
         file_name: doc.file_name,
       };
     }
 
-    throw new NotFoundException('Document file not available in secure storage');
+    throw new NotFoundException(
+      'Document file not available in secure storage',
+    );
   }
 
   async pipeDocumentFile(
@@ -195,7 +230,9 @@ export class HrDocumentVaultService {
 
     const stream = await openDocumentReadStream(doc.file_url, this.storage);
     if (!stream) {
-      throw new NotFoundException('Document file not available in secure storage');
+      throw new NotFoundException(
+        'Document file not available in secure storage',
+      );
     }
 
     const fileName = doc.file_name ?? 'document';

@@ -30,7 +30,9 @@ export class HostelTatkalPaymentListener {
         payload.paymentId ?? `webhook_${Date.now()}`,
       );
     } catch (e) {
-      this.logger.warn(`Hostel booking finalize skipped: ${e instanceof Error ? e.message : e}`);
+      this.logger.warn(
+        `Hostel booking finalize skipped: ${e instanceof Error ? e.message : e}`,
+      );
     }
   }
 }

@@ -1,4 +1,12 @@
-import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BaseTenantEntity } from './base-tenant.entity';
 import { AcademicCourse } from './academic-course.entity';
 import { User } from './user.entity';

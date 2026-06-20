@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -32,8 +40,14 @@ export class LeadershipAiController {
   }
 
   @Post('scenario')
-  scenario(@Req() req: { user: AuthUser }, @Body() body: { admissions_drop_pct?: number }) {
-    return this.gemini.scenarioPlanning(this.tenant(req), body.admissions_drop_pct ?? 15);
+  scenario(
+    @Req() req: { user: AuthUser },
+    @Body() body: { admissions_drop_pct?: number },
+  ) {
+    return this.gemini.scenarioPlanning(
+      this.tenant(req),
+      body.admissions_drop_pct ?? 15,
+    );
   }
 
   @Get('forecast')
@@ -46,11 +60,18 @@ export class LeadershipAiController {
        ORDER BY horizon_days`,
       [tid, tid],
     );
-    return rows.map((r: { horizon_days: number; projected_balance: string; assumptions: unknown; forecast_date: string }) => ({
-      horizon_days: r.horizon_days,
-      projected_balance: Number(r.projected_balance),
-      assumptions: r.assumptions,
-      forecast_date: r.forecast_date,
-    }));
+    return rows.map(
+      (r: {
+        horizon_days: number;
+        projected_balance: string;
+        assumptions: unknown;
+        forecast_date: string;
+      }) => ({
+        horizon_days: r.horizon_days,
+        projected_balance: Number(r.projected_balance),
+        assumptions: r.assumptions,
+        forecast_date: r.forecast_date,
+      }),
+    );
   }
 }

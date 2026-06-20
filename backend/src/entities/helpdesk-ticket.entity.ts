@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type HelpdeskTicketCategory =
@@ -10,7 +17,11 @@ export type HelpdeskTicketCategory =
   | 'FACILITIES'
   | 'MENTORSHIP'
   | 'STUDENT_PROFILE';
-export type HelpdeskTicketStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'REJECTED';
+export type HelpdeskTicketStatus =
+  | 'PENDING'
+  | 'IN_PROGRESS'
+  | 'RESOLVED'
+  | 'REJECTED';
 
 @Entity('helpdesk_tickets')
 @Index(['student_user_id'])

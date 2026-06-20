@@ -15,7 +15,11 @@ export class ExamCellFinanceListener {
 
   /** Loop 2: Re-evaluation fee paid → surface in COE queue */
   @OnEvent('finance.demand_paid')
-  async onDemandPaid(payload: { demandId: string; feeHead?: string; studentUserId?: string }) {
+  async onDemandPaid(payload: {
+    demandId: string;
+    feeHead?: string;
+    studentUserId?: string;
+  }) {
     if (payload.feeHead !== 'RE_EVALUATION') return;
 
     const rows = await this.db.query(
@@ -31,16 +35,20 @@ export class ExamCellFinanceListener {
       [payload.demandId],
     );
 
-    this.logger.log(`Re-evaluation application unlocked for demand ${payload.demandId}`);
+    this.logger.log(
+      `Re-evaluation application unlocked for demand ${payload.demandId}`,
+    );
 
-    const row = rows[0] as {
-      exam_application_id: string;
-      student_user_id: string;
-      student_name: string;
-      tenant_id: string;
-      subject_name: string;
-      subject_code: string;
-    } | undefined;
+    const row = rows[0] as
+      | {
+          exam_application_id: string;
+          student_user_id: string;
+          student_name: string;
+          tenant_id: string;
+          subject_name: string;
+          subject_code: string;
+        }
+      | undefined;
 
     if (row) {
       this.notify.examRevaluationFeePaid({

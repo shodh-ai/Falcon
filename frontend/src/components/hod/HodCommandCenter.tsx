@@ -27,6 +27,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { TodayBirthdaysWidget } from '@/components/dashboard/TodayBirthdaysWidget';
 
 type HealthMetrics = {
   total_faculty: number;
@@ -51,6 +52,7 @@ type SyllabusRow = {
   faculty_name: string;
   coverage_percent: number;
   behind_schedule: boolean;
+  days_behind?: number;
 };
 
 type InboxRow = {
@@ -267,6 +269,8 @@ export function HodCommandCenter() {
         }
       />
 
+      <TodayBirthdaysWidget />
+
       {facultyPulse ? (
         <div className="rounded-xl border border-gray-100 bg-white px-5 py-4 shadow-sm">
           <p className="mb-3 text-sm font-semibold text-sgvu-navy">Faculty pulse today</p>
@@ -390,7 +394,8 @@ export function HodCommandCenter() {
                   </div>
                   {row.behind_schedule ? (
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Behind schedule — {row.coverage_percent}% complete before exams
+                      Behind schedule — {row.coverage_percent}% complete
+                      {row.days_behind ? ` · ${row.days_behind} days behind planned syllabus` : ''}
                     </p>
                   ) : null}
                 </li>

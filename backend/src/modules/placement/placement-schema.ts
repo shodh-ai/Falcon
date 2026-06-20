@@ -11,10 +11,14 @@ export type PlacementSchema = {
 let cached: PlacementSchema | null = null;
 
 /** Resolve which placement table family exists in this database. */
-export async function resolvePlacementSchema(db: DataSource): Promise<PlacementSchema> {
+export async function resolvePlacementSchema(
+  db: DataSource,
+): Promise<PlacementSchema> {
   if (cached) return cached;
 
-  const rows = await db.query<Array<{ table_name: string; column_name: string }>>(
+  const rows = await db.query<
+    Array<{ table_name: string; column_name: string }>
+  >(
     `SELECT table_name, column_name
      FROM information_schema.columns
      WHERE table_schema = 'public'
@@ -31,7 +35,8 @@ export async function resolvePlacementSchema(db: DataSource): Promise<PlacementS
 
   const legacyDrives = has('placement_drives', 'placement_drive_id');
   const atsDrives = has('placement_ats_drives', 'drive_id');
-  const modernDrives = has('placement_drives', 'drive_id') && has('placement_drives', 'tenant_id');
+  const modernDrives =
+    has('placement_drives', 'drive_id') && has('placement_drives', 'tenant_id');
 
   if (legacyDrives && atsDrives) {
     cached = {
@@ -80,14 +85,20 @@ export function resetPlacementSchemaCache() {
 const d = 'd';
 
 export function driveRoleExpr(s: PlacementSchema) {
-  if (s.drivesTable === 'placement_ats_drives' || (s.drivesTable === 'placement_drives' && s.companyJoin)) {
+  if (
+    s.drivesTable === 'placement_ats_drives' ||
+    (s.drivesTable === 'placement_drives' && s.companyJoin)
+  ) {
     return `COALESCE(${d}.job_role, ${d}.job_profile)`;
   }
   return `COALESCE(${d}.job_role, ${d}.role_title)`;
 }
 
 export function drivePackageExpr(s: PlacementSchema) {
-  if (s.drivesTable === 'placement_ats_drives' || (s.drivesTable === 'placement_drives' && s.companyJoin)) {
+  if (
+    s.drivesTable === 'placement_ats_drives' ||
+    (s.drivesTable === 'placement_drives' && s.companyJoin)
+  ) {
     return `COALESCE(${d}.package_lpa, ${d}.package_details_lpa, 0)`;
   }
   return `COALESCE(${d}.package_lpa, 0)`;
@@ -98,7 +109,10 @@ export function driveBacklogExpr(s: PlacementSchema) {
 }
 
 export function driveDeadlineExpr(s: PlacementSchema) {
-  if (s.drivesTable === 'placement_ats_drives' || (s.drivesTable === 'placement_drives' && s.tenantScoped)) {
+  if (
+    s.drivesTable === 'placement_ats_drives' ||
+    (s.drivesTable === 'placement_drives' && s.tenantScoped)
+  ) {
     return `COALESCE(${d}.deadline, ${d}.drive_date::timestamptz)`;
   }
   return `${d}.deadline`;

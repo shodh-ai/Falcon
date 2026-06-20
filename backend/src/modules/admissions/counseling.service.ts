@@ -20,7 +20,11 @@ export class CounselingService {
     );
   }
 
-  async allotSeat(tenantId: string, programCode: string, academicYear = '2026-27') {
+  async allotSeat(
+    tenantId: string,
+    programCode: string,
+    academicYear = '2026-27',
+  ) {
     const rows = await this.db.query(
       `UPDATE admission_seat_matrix
        SET filled_seats = filled_seats + 1, updated_at = NOW()
@@ -51,8 +55,18 @@ export class CounselingService {
       `INSERT INTO admission_counseling_rules (tenant_id, academic_year, quota_sc_pct, quota_st_pct, quota_general_pct)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT DO NOTHING`,
-      [tid, academicYear, rules.sc_pct ?? 15, rules.st_pct ?? 15, rules.general_pct ?? 70],
+      [
+        tid,
+        academicYear,
+        rules.sc_pct ?? 15,
+        rules.st_pct ?? 15,
+        rules.general_pct ?? 70,
+      ],
     );
-    return { message: 'Merit list generation queued', academic_year: academicYear, rules };
+    return {
+      message: 'Merit list generation queued',
+      academic_year: academicYear,
+      rules,
+    };
   }
 }

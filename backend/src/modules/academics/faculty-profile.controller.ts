@@ -38,7 +38,10 @@ export class FacultyProfileController {
 
   @Get('compliance')
   compliance(@Req() req: { user: AuthUser }) {
-    return this.profile.getComplianceStatus(this.tenant(req.user), req.user.user_id);
+    return this.profile.getComplianceStatus(
+      this.tenant(req.user),
+      req.user.user_id,
+    );
   }
 
   @Get('photo')
@@ -49,7 +52,11 @@ export class FacultyProfileController {
     );
     const ext = filePath.split('.').pop()?.toLowerCase();
     const contentType =
-      ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      ext === 'png'
+        ? 'image/png'
+        : ext === 'webp'
+          ? 'image/webp'
+          : 'image/jpeg';
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'private, max-age=300');
     stream.pipe(res);
@@ -57,13 +64,23 @@ export class FacultyProfileController {
 
   @Post('photo')
   @UseInterceptors(
-    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }),
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
   )
-  uploadPhoto(@Req() req: { user: AuthUser }, @UploadedFile() file?: Express.Multer.File) {
+  uploadPhoto(
+    @Req() req: { user: AuthUser },
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
     if (!file) {
       throw new BadRequestException('No photo uploaded');
     }
-    return this.profile.uploadProfilePhoto(this.tenant(req.user), req.user.user_id, file);
+    return this.profile.uploadProfilePhoto(
+      this.tenant(req.user),
+      req.user.user_id,
+      file,
+    );
   }
 
   @Patch()
@@ -73,14 +90,18 @@ export class FacultyProfileController {
   ) {
     return this.profile.updateProfile(this.tenant(req.user), req.user.user_id, {
       emergency_contact_name: body.emergency_contact_name as string | undefined,
-      emergency_contact_phone: body.emergency_contact_phone as string | undefined,
+      emergency_contact_phone: body.emergency_contact_phone as
+        | string
+        | undefined,
       permanent_address: body.permanent_address as string | undefined,
       current_address: body.current_address as string | undefined,
       orcid_id: body.orcid_id as string | undefined,
       scopus_id: body.scopus_id as string | undefined,
       google_scholar_url: body.google_scholar_url as string | undefined,
       total_experience_years: body.total_experience_years as number | undefined,
-      industry_experience_years: body.industry_experience_years as number | undefined,
+      industry_experience_years: body.industry_experience_years as
+        | number
+        | undefined,
     });
   }
 
@@ -89,25 +110,40 @@ export class FacultyProfileController {
     @Req() req: { user: AuthUser },
     @Body('password') password: string,
   ) {
-    return this.profile.revealKyc(this.tenant(req.user), req.user.user_id, password);
+    return this.profile.revealKyc(
+      this.tenant(req.user),
+      req.user.user_id,
+      password,
+    );
   }
 
   @Post('bank-change-request')
   bankChangeRequest(
     @Req() req: { user: AuthUser },
-    @Body() body: { bank_account_no: string; ifsc_code: string; bank_name?: string },
+    @Body()
+    body: { bank_account_no: string; ifsc_code: string; bank_name?: string },
   ) {
-    return this.profile.submitBankChangeRequest(this.tenant(req.user), req.user.user_id, body);
+    return this.profile.submitBankChangeRequest(
+      this.tenant(req.user),
+      req.user.user_id,
+      body,
+    );
   }
 
   @Get('qualifications')
   listQualifications(@Req() req: { user: AuthUser }) {
-    return this.profile.listQualifications(this.tenant(req.user), req.user.user_id);
+    return this.profile.listQualifications(
+      this.tenant(req.user),
+      req.user.user_id,
+    );
   }
 
   @Post('qualifications')
   @UseInterceptors(
-    FileInterceptor('document', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }),
+    FileInterceptor('document', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
   )
   async addQualification(
     @Req() req: { user: AuthUser },
@@ -118,7 +154,11 @@ export class FacultyProfileController {
     const userId = req.user.user_id;
     let documentProofUrl = body.document_proof_url;
     if (file) {
-      documentProofUrl = await this.profile.saveQualificationDocument(tenantId, userId, file);
+      documentProofUrl = await this.profile.saveQualificationDocument(
+        tenantId,
+        userId,
+        file,
+      );
     }
     return this.profile.addQualification(tenantId, userId, {
       degree_level: body.degree_level,

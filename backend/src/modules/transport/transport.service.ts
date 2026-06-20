@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
@@ -67,7 +72,12 @@ export class TransportService {
     return { routes, stops };
   }
 
-  async findNearestStops(tenantId: string, lat: number, lng: number, limit = 8) {
+  async findNearestStops(
+    tenantId: string,
+    lat: number,
+    lng: number,
+    limit = 8,
+  ) {
     const stops = await this.dataSource.query<StopRow[]>(
       `SELECT s.stop_id, s.route_id, r.route_name, s.stop_name,
               s.latitude, s.longitude, s.pickup_time, s.fee_amount, s.stop_order,
@@ -83,7 +93,12 @@ export class TransportService {
     return stops
       .map((s) => ({
         ...s,
-        distance_km: this.haversineKm(lat, lng, Number(s.latitude), Number(s.longitude)),
+        distance_km: this.haversineKm(
+          lat,
+          lng,
+          Number(s.latitude),
+          Number(s.longitude),
+        ),
         fee_amount: Number(s.fee_amount),
         seats_available: Math.max(0, s.total_seats - Number(s.allocated_count)),
       }))
@@ -108,10 +123,14 @@ export class TransportService {
   async optIn(tenantId: string, studentUserId: string, stopId: string) {
     const existing = await this.getMyAllocation(tenantId, studentUserId);
     if (existing?.payment_status === 'PAID') {
-      throw new BadRequestException('You already have an active transport allocation.');
+      throw new BadRequestException(
+        'You already have an active transport allocation.',
+      );
     }
     if (existing?.payment_status === 'PENDING') {
-      throw new BadRequestException('Complete payment for your pending transport opt-in first.');
+      throw new BadRequestException(
+        'Complete payment for your pending transport opt-in first.',
+      );
     }
 
     const stopRows = await this.dataSource.query(
@@ -130,11 +149,15 @@ export class TransportService {
       [stop.route_id],
     );
     if (Number(countRows[0]?.c ?? 0) >= Number(stop.total_seats)) {
-      throw new BadRequestException('This route is fully booked. Contact transport office.');
+      throw new BadRequestException(
+        'This route is fully booked. Contact transport office.',
+      );
     }
 
     const academicYear = '2026-27';
-    const dueDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14).toISOString().slice(0, 10);
+    const dueDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14)
+      .toISOString()
+      .slice(0, 10);
     const feeAmount = Number(stop.fee_amount);
 
     const demand = await this.finance.createDemand(
@@ -189,14 +212,27 @@ export class TransportService {
         amount: feeAmount,
         currency: 'INR',
         demand_id: demand.demand_id,
-        notes: { student_user_id: studentUserId, demand_id: demand.demand_id, fee_head: 'TRANSPORT_FEE' },
+        notes: {
+          student_user_id: studentUserId,
+          demand_id: demand.demand_id,
+          fee_head: 'TRANSPORT_FEE',
+        },
         mock_checkout_url: `/student/transport?pay=${demand.demand_id}`,
       },
-      route: { route_name: stop.route_name, stop_name: stop.stop_name, fee_amount: feeAmount },
+      route: {
+        route_name: stop.route_name,
+        stop_name: stop.stop_name,
+        fee_amount: feeAmount,
+      },
     };
   }
 
-  async confirmPayment(tenantId: string, studentUserId: string, allocationId: string, paymentRef: string) {
+  async confirmPayment(
+    tenantId: string,
+    studentUserId: string,
+    allocationId: string,
+    paymentRef: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT * FROM transport_allocations
        WHERE allocation_id = $1 AND tenant_id = $2 AND student_user_id = $3`,
@@ -204,7 +240,8 @@ export class TransportService {
     );
     const alloc = rows[0];
     if (!alloc) throw new NotFoundException('Allocation not found');
-    if (alloc.payment_status === 'PAID') return { allocation: alloc, already_paid: true };
+    if (alloc.payment_status === 'PAID')
+      return { allocation: alloc, already_paid: true };
 
     if (alloc.fee_demand_id) {
       await this.dataSource.query(
@@ -215,7 +252,10 @@ export class TransportService {
       );
     }
 
-    const updated = await this.activateAllocation(alloc.allocation_id, paymentRef);
+    const updated = await this.activateAllocation(
+      alloc.allocation_id,
+      paymentRef,
+    );
     return { allocation: updated, payment_ref: paymentRef };
   }
 
@@ -236,7 +276,9 @@ export class TransportService {
        RETURNING *`,
       [allocationId],
     );
-    this.logger.log(`Transport pass activated ${allocationId}${paymentRef ? ` ref=${paymentRef}` : ''}`);
+    this.logger.log(
+      `Transport pass activated ${allocationId}${paymentRef ? ` ref=${paymentRef}` : ''}`,
+    );
     return updated[0];
   }
 
@@ -261,7 +303,13 @@ export class TransportService {
     await this.dataSource.query(
       `INSERT INTO transport_pass_tokens (tenant_id, student_user_id, allocation_id, token_hash, expires_at)
        VALUES ($1, $2, $3, $4, $5)`,
-      [tenantId, studentUserId, alloc.allocation_id, tokenHash, expiresAt.toISOString()],
+      [
+        tenantId,
+        studentUserId,
+        alloc.allocation_id,
+        tokenHash,
+        expiresAt.toISOString(),
+      ],
     );
 
     return {
@@ -273,10 +321,15 @@ export class TransportService {
     };
   }
 
-  async scanBusPass(tenantId: string, qrPayload: string, expectedRouteId?: string) {
+  async scanBusPass(
+    tenantId: string,
+    qrPayload: string,
+    expectedRouteId?: string,
+  ) {
     const parts = qrPayload.replace(/^transport:/, '').split(':');
     const [studentUserId, tokenHash, routeId] = parts;
-    if (!studentUserId || !tokenHash) throw new BadRequestException('Invalid QR');
+    if (!studentUserId || !tokenHash)
+      throw new BadRequestException('Invalid QR');
 
     const tokenRows = await this.dataSource.query(
       `SELECT * FROM transport_pass_tokens
@@ -291,8 +344,14 @@ export class TransportService {
       throw new BadRequestException('Transport pass inactive');
     }
 
-    const routeMatch = !expectedRouteId || expectedRouteId === routeId || expectedRouteId === alloc.route_id;
-    const studentRows = await this.dataSource.query(`SELECT name FROM users WHERE user_id = $1`, [studentUserId]);
+    const routeMatch =
+      !expectedRouteId ||
+      expectedRouteId === routeId ||
+      expectedRouteId === alloc.route_id;
+    const studentRows = await this.dataSource.query(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [studentUserId],
+    );
 
     return {
       valid: routeMatch,
@@ -300,7 +359,9 @@ export class TransportService {
       student_name: studentRows[0]?.name ?? 'Student',
       route_name: alloc.route_name,
       stop_name: alloc.stop_name,
-      message: routeMatch ? 'Valid pass — board approved' : 'Wrong bus — route mismatch',
+      message: routeMatch
+        ? 'Valid pass — board approved'
+        : 'Wrong bus — route mismatch',
     };
   }
 
@@ -317,7 +378,8 @@ export class TransportService {
         Number(alloc.latitude),
         Number(alloc.longitude),
       );
-      const speedKmh = location.speed && location.speed > 5 ? location.speed : 25;
+      const speedKmh =
+        location.speed && location.speed > 5 ? location.speed : 25;
       eta_minutes = Math.max(1, Math.round((distKm / speedKmh) * 60));
     }
 
@@ -355,9 +417,20 @@ export class TransportService {
     return payload;
   }
 
-  private async checkGeofenceAlerts(tenantId: string, routeId: string, lat: number, lng: number) {
+  private async checkGeofenceAlerts(
+    tenantId: string,
+    routeId: string,
+    lat: number,
+    lng: number,
+  ) {
     const students = await this.dataSource.query<
-      Array<{ allocation_id: string; student_user_id: string; stop_name: string; latitude: string; longitude: string }>
+      Array<{
+        allocation_id: string;
+        student_user_id: string;
+        stop_name: string;
+        latitude: string;
+        longitude: string;
+      }>
     >(
       `SELECT a.allocation_id, a.student_user_id, s.stop_name, s.latitude, s.longitude
        FROM transport_allocations a
@@ -367,7 +440,12 @@ export class TransportService {
     );
 
     for (const row of students) {
-      const dist = this.haversineKm(lat, lng, Number(row.latitude), Number(row.longitude));
+      const dist = this.haversineKm(
+        lat,
+        lng,
+        Number(row.latitude),
+        Number(row.longitude),
+      );
       if (dist > 2) continue;
 
       const shouldAlert = await this.redis.markGeofenceAlert(row.allocation_id);
@@ -435,7 +513,12 @@ export class TransportService {
 
   async createRoute(
     tenantId: string,
-    dto: { route_name: string; vehicle_id?: string; driver_user_id?: string; total_seats?: number },
+    dto: {
+      route_name: string;
+      vehicle_id?: string;
+      driver_user_id?: string;
+      total_seats?: number;
+    },
   ) {
     const rows = await this.dataSource.query(
       `INSERT INTO transport_routes (tenant_id, route_name, vehicle_id, driver_user_id, total_seats)
@@ -489,20 +572,35 @@ export class TransportService {
        ORDER BY stop_order`,
       [routeId, tenantId],
     );
-    if (!stops.length) throw new BadRequestException('No stops with coordinates');
+    if (!stops.length)
+      throw new BadRequestException('No stops with coordinates');
 
     const idx = Math.floor(Date.now() / 5000) % stops.length;
     const stop = stops[idx];
-    return this.ingestGpsPing(tenantId, routeId, Number(stop.latitude), Number(stop.longitude), 28);
+    return this.ingestGpsPing(
+      tenantId,
+      routeId,
+      Number(stop.latitude),
+      Number(stop.longitude),
+      28,
+    );
   }
 
-  async requestRouteChange(tenantId: string, studentUserId: string, reason: string) {
+  async requestRouteChange(
+    tenantId: string,
+    studentUserId: string,
+    reason: string,
+  ) {
     if (!reason?.trim() || reason.trim().length < 10) {
-      throw new BadRequestException('Please provide a reason (10+ characters) for the route change');
+      throw new BadRequestException(
+        'Please provide a reason (10+ characters) for the route change',
+      );
     }
     const allocation = await this.getMyAllocation(tenantId, studentUserId);
     if (!allocation || allocation.payment_status !== 'PAID') {
-      throw new BadRequestException('You must have an active paid transport allocation to request a route change');
+      throw new BadRequestException(
+        'You must have an active paid transport allocation to request a route change',
+      );
     }
     const pending = await this.dataSource.query<Array<{ request_id: string }>>(
       `SELECT request_id FROM transport_route_change_requests
@@ -510,13 +608,21 @@ export class TransportService {
       [studentUserId],
     );
     if (pending[0]) {
-      throw new BadRequestException('You already have a pending route change request');
+      throw new BadRequestException(
+        'You already have a pending route change request',
+      );
     }
     const rows = await this.dataSource.query(
       `INSERT INTO transport_route_change_requests (
          tenant_id, student_user_id, current_route_id, current_stop_id, reason, status
        ) VALUES ($1, $2, $3, $4, $5, 'PENDING') RETURNING *`,
-      [tenantId, studentUserId, allocation.route_id, allocation.stop_id, reason.trim()],
+      [
+        tenantId,
+        studentUserId,
+        allocation.route_id,
+        allocation.stop_id,
+        reason.trim(),
+      ],
     );
     return rows[0];
   }

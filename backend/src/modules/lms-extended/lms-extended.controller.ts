@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -16,8 +25,15 @@ export class LmsExtendedController {
 
   @Post('quizzes')
   @Roles('Faculty', 'SuperAdmin')
-  createQuiz(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.lms.createQuiz(this.tenant(req), req.user.user_id, dto as never);
+  createQuiz(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.lms.createQuiz(
+      this.tenant(req),
+      req.user.user_id,
+      dto as never,
+    );
   }
 
   @Get('courses/:courseId/quizzes')
@@ -28,7 +44,10 @@ export class LmsExtendedController {
 
   @Post('quizzes/:quizId/attempts')
   @Roles('Student')
-  startAttempt(@Req() req: { user: AuthUser }, @Param('quizId') quizId: string) {
+  startAttempt(
+    @Req() req: { user: AuthUser },
+    @Param('quizId') quizId: string,
+  ) {
     return this.lms.startAttempt(quizId, req.user.user_id);
   }
 
@@ -37,9 +56,22 @@ export class LmsExtendedController {
   submitAttempt(
     @Req() req: { user: AuthUser },
     @Param('attemptId') attemptId: string,
-    @Body() dto: { answers: Array<{ question_id: string; selected_option_id?: string; descriptive_answer?: string }>; anti_cheat_events?: unknown[] },
+    @Body()
+    dto: {
+      answers: Array<{
+        question_id: string;
+        selected_option_id?: string;
+        descriptive_answer?: string;
+      }>;
+      anti_cheat_events?: unknown[];
+    },
   ) {
-    return this.lms.submitAttempt(attemptId, req.user.user_id, dto.answers, dto.anti_cheat_events);
+    return this.lms.submitAttempt(
+      attemptId,
+      req.user.user_id,
+      dto.answers,
+      dto.anti_cheat_events,
+    );
   }
 
   @Post('live-classes')
@@ -62,7 +94,10 @@ export class LmsExtendedController {
 
   @Post('forums/threads')
   @Roles('Faculty', 'Student', 'SuperAdmin')
-  createThread(@Req() req: { user: AuthUser }, @Body() dto: CreateForumThreadDto) {
+  createThread(
+    @Req() req: { user: AuthUser },
+    @Body() dto: CreateForumThreadDto,
+  ) {
     return this.lms.createThread(this.tenant(req), req.user.user_id, dto);
   }
 
@@ -84,7 +119,10 @@ export class LmsExtendedController {
 
   @Post('forums/upvote')
   @Roles('Faculty', 'Student', 'SuperAdmin')
-  upvote(@Req() req: { user: AuthUser }, @Body() dto: { target_type: 'THREAD' | 'POST'; target_id: string }) {
+  upvote(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { target_type: 'THREAD' | 'POST'; target_id: string },
+  ) {
     return this.lms.upvote(req.user.user_id, dto.target_type, dto.target_id);
   }
 

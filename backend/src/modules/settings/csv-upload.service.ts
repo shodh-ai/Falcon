@@ -7,7 +7,10 @@ export interface CsvImportResult {
   errors: { row: number; reason: string }[];
 }
 
-export type CsvRowHandler = (row: Record<string, string>, rowIndex: number) => Promise<void> | void;
+export type CsvRowHandler = (
+  row: Record<string, string>,
+  rowIndex: number,
+) => Promise<void> | void;
 
 /**
  * Lightweight RFC-4180 CSV parser + row dispatcher. We avoid pulling in
@@ -61,21 +64,32 @@ export class CsvUploadService {
 
     if (rows.length === 0) return [];
     const header = rows[0].map((h) => h.trim());
-    return rows.slice(1).filter((r) => r.some((c) => c.length > 0)).map((r) => {
-      const obj: Record<string, string> = {};
-      header.forEach((key, idx) => {
-        obj[key] = (r[idx] ?? '').trim();
+    return rows
+      .slice(1)
+      .filter((r) => r.some((c) => c.length > 0))
+      .map((r) => {
+        const obj: Record<string, string> = {};
+        header.forEach((key, idx) => {
+          obj[key] = (r[idx] ?? '').trim();
+        });
+        return obj;
       });
-      return obj;
-    });
   }
 
-  async processCsv(buffer: Buffer, handler: CsvRowHandler): Promise<CsvImportResult> {
+  async processCsv(
+    buffer: Buffer,
+    handler: CsvRowHandler,
+  ): Promise<CsvImportResult> {
     if (!buffer || buffer.length === 0) {
       throw new BadRequestException('Empty CSV upload');
     }
     const rows = this.parse(buffer);
-    const result: CsvImportResult = { total_rows: rows.length, imported: 0, skipped: 0, errors: [] };
+    const result: CsvImportResult = {
+      total_rows: rows.length,
+      imported: 0,
+      skipped: 0,
+      errors: [],
+    };
     for (let i = 0; i < rows.length; i++) {
       try {
         await handler(rows[i], i + 2);

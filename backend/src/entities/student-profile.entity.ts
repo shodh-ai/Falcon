@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 @Entity('student_profiles')
@@ -12,6 +19,10 @@ export class StudentProfile extends BaseSoftDeleteEntity {
 
   @Column({ length: 50, nullable: true })
   enrollment_no: string;
+
+  /** Permanent registration number — assigned once at admission. */
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  prn_number: string | null;
 
   @Column({ length: 50, nullable: true })
   batch: string;

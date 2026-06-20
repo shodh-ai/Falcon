@@ -1,4 +1,10 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BaseTenantEntity } from './base-tenant.entity';
 
 @Entity('owner_daily_briefs')

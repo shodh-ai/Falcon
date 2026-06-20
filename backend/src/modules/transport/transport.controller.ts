@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -46,7 +55,11 @@ export class TransportController {
   @Post('opt-in')
   @Roles('Student', 'SuperAdmin')
   optIn(@Req() req: { user: AuthUser }, @Body() dto: { stop_id: string }) {
-    return this.transport.optIn(this.tenant(req), req.user.user_id, dto.stop_id);
+    return this.transport.optIn(
+      this.tenant(req),
+      req.user.user_id,
+      dto.stop_id,
+    );
   }
 
   @Post('confirm-payment')
@@ -66,13 +79,19 @@ export class TransportController {
   @Get('bus-pass/qr')
   @Roles('Student', 'SuperAdmin')
   busPassQr(@Req() req: { user: AuthUser }) {
-    return this.transport.generateBusPassToken(this.tenant(req), req.user.user_id);
+    return this.transport.generateBusPassToken(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Get('live')
   @Roles('Student', 'SuperAdmin')
   liveTracking(@Req() req: { user: AuthUser }) {
-    return this.transport.getLiveLocationForStudent(this.tenant(req), req.user.user_id);
+    return this.transport.getLiveLocationForStudent(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Post('gps/ping')
@@ -81,12 +100,21 @@ export class TransportController {
     @Req() req: { user: AuthUser },
     @Body() dto: { route_id: string; lat: number; lng: number; speed?: number },
   ) {
-    return this.transport.ingestGpsPing(this.tenant(req), dto.route_id, dto.lat, dto.lng, dto.speed);
+    return this.transport.ingestGpsPing(
+      this.tenant(req),
+      dto.route_id,
+      dto.lat,
+      dto.lng,
+      dto.speed,
+    );
   }
 
   @Post('gps/simulate/:routeId')
   @Roles('TransportOfficer', 'SuperAdmin')
-  simulateGps(@Req() req: { user: AuthUser }, @Param('routeId') routeId: string) {
+  simulateGps(
+    @Req() req: { user: AuthUser },
+    @Param('routeId') routeId: string,
+  ) {
     return this.transport.simulateGpsAlongRoute(this.tenant(req), routeId);
   }
 
@@ -96,7 +124,11 @@ export class TransportController {
     @Req() req: { user: AuthUser },
     @Body() dto: { qr_payload: string; route_id?: string },
   ) {
-    return this.transport.scanBusPass(this.tenant(req), dto.qr_payload, dto.route_id);
+    return this.transport.scanBusPass(
+      this.tenant(req),
+      dto.qr_payload,
+      dto.route_id,
+    );
   }
 
   @Get('admin/fleet-map')
@@ -113,13 +145,23 @@ export class TransportController {
 
   @Post('request-route-change')
   @Roles('Student', 'SuperAdmin')
-  requestRouteChange(@Req() req: { user: AuthUser }, @Body() dto: { reason: string }) {
-    return this.transport.requestRouteChange(this.tenant(req), req.user.user_id, dto.reason);
+  requestRouteChange(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { reason: string },
+  ) {
+    return this.transport.requestRouteChange(
+      this.tenant(req),
+      req.user.user_id,
+      dto.reason,
+    );
   }
 
   @Post('admin/routes')
   @Roles('TransportOfficer', 'SuperAdmin')
-  createRoute(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+  createRoute(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
     return this.transport.createRoute(this.tenant(req), dto as never);
   }
 

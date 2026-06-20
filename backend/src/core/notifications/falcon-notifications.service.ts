@@ -30,7 +30,9 @@ export class FalconNotificationsService {
     private readonly notifications: Repository<FalconNotification>,
   ) {}
 
-  async create(input: CreateFalconNotificationInput): Promise<FalconNotification> {
+  async create(
+    input: CreateFalconNotificationInput,
+  ): Promise<FalconNotification> {
     const row = this.notifications.create({
       tenant_id: input.tenantId,
       user_id: input.userId,
@@ -95,7 +97,12 @@ export class FalconNotificationsService {
 
   async markAllRead(tenantId: string, userId: string) {
     await this.notifications.update(
-      { tenant_id: tenantId, user_id: userId, is_read: false, deleted_at: IsNull() },
+      {
+        tenant_id: tenantId,
+        user_id: userId,
+        is_read: false,
+        deleted_at: IsNull(),
+      },
       { is_read: true },
     );
     return { updated: true };

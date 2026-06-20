@@ -40,7 +40,11 @@ export class HrDocumentExportService {
     requestedBy: string,
     filters: HrDocumentExportJob['filters'],
   ) {
-    const documentCount = await this.countMatchingDocuments(tenantId, entityId, filters);
+    const documentCount = await this.countMatchingDocuments(
+      tenantId,
+      entityId,
+      filters,
+    );
     if (documentCount === 0) {
       throw new BadRequestException(
         'No documents matched the selected filters. Upload documents to the employee vault first.',
@@ -64,7 +68,8 @@ export class HrDocumentExportService {
     return {
       job_id: jobId,
       document_count: documentCount,
-      message: 'Export queued. You will receive a notification when the archive is ready.',
+      message:
+        'Export queued. You will receive a notification when the archive is ready.',
     };
   }
 
@@ -73,8 +78,16 @@ export class HrDocumentExportService {
     entityId: number,
     filters: HrDocumentExportJob['filters'],
   ): Promise<number> {
-    const { sql, params } = this.buildDocumentFilterQuery(tenantId, entityId, filters, 'COUNT(*)::int AS cnt');
-    const rows = await this.dataSource.query<Array<{ cnt: number }>>(sql, params);
+    const { sql, params } = this.buildDocumentFilterQuery(
+      tenantId,
+      entityId,
+      filters,
+      'COUNT(*)::int AS cnt',
+    );
+    const rows = await this.dataSource.query<Array<{ cnt: number }>>(
+      sql,
+      params,
+    );
     return rows[0]?.cnt ?? 0;
   }
 
@@ -85,7 +98,9 @@ export class HrDocumentExportService {
     select: string,
   ) {
     const isAll = filters.document_type === 'ALL';
-    const params: unknown[] = isAll ? [tenantId] : [tenantId, filters.document_type];
+    const params: unknown[] = isAll
+      ? [tenantId]
+      : [tenantId, filters.document_type];
     let idx = isAll ? 2 : 3;
     let deptClause = '';
     let roleClause = '';
@@ -121,7 +136,10 @@ export class HrDocumentExportService {
     let download_url: string | null = null;
     if (job.status === 'COMPLETED' && job.file_key) {
       if (this.storage.isEnabled()) {
-        download_url = await this.storage.getPresignedDownloadUrl(job.file_key, 900);
+        download_url = await this.storage.getPresignedDownloadUrl(
+          job.file_key,
+          900,
+        );
       } else {
         download_url = `/api/hr/documents/export-jobs/${jobId}/download`;
       }
@@ -148,7 +166,7 @@ export class HrDocumentExportService {
     if (job.status !== 'COMPLETED' || !job.file_key) {
       throw new NotFoundException(
         job.status === 'FAILED'
-          ? job.error_message ?? 'Export failed'
+          ? (job.error_message ?? 'Export failed')
           : 'Export is still processing',
       );
     }
@@ -170,7 +188,11 @@ export class HrDocumentExportService {
     createReadStream(fullPath).pipe(res);
   }
 
-  private async loadExportJobRow(tenantId: string, jobId: string, requesterId: string) {
+  private async loadExportJobRow(
+    tenantId: string,
+    jobId: string,
+    requesterId: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT * FROM hr_document_export_jobs
        WHERE job_id = $1 AND tenant_id = $2 AND requested_by = $3`,
@@ -232,13 +254,23 @@ export class HrDocumentExportService {
         );
       }
 
-      const deptLabel = job.filters.dept_id ? `Dept${job.filters.dept_id}` : 'All';
+      const deptLabel = job.filters.dept_id
+        ? `Dept${job.filters.dept_id}`
+        : 'All';
       const zipName = `${deptLabel}_${job.filters.document_type}_Export.zip`;
       const fileKey = `${job.tenantId}/exports/${job.jobId}/${zipName}`;
 
       if (this.storage.isEnabled()) {
-        const s3Key = this.storage.buildKey(job.tenantId, `exports/${job.jobId}/${zipName}`);
-        await this.storage.upload(job.tenantId, s3Key, zipBuffer, 'application/zip');
+        const s3Key = this.storage.buildKey(
+          job.tenantId,
+          `exports/${job.jobId}/${zipName}`,
+        );
+        await this.storage.upload(
+          job.tenantId,
+          s3Key,
+          zipBuffer,
+          'application/zip',
+        );
         await this.dataSource.query(
           `UPDATE hr_document_export_jobs
            SET status = 'COMPLETED', file_key = $2, file_name = $3, completed_at = NOW()
@@ -269,7 +301,11 @@ export class HrDocumentExportService {
         actionLink: downloadPath,
       });
 
-      return { file_key: fileKey, file_name: zipName, document_count: packedCount };
+      return {
+        file_key: fileKey,
+        file_name: zipName,
+        document_count: packedCount,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.dataSource.query(
@@ -313,7 +349,10 @@ export class HrDocumentExportService {
 
       void (async () => {
         for (const doc of docs) {
-          const stream = await openDocumentReadStream(doc.file_url, this.storage);
+          const stream = await openDocumentReadStream(
+            doc.file_url,
+            this.storage,
+          );
           if (!stream) continue;
           packedCount += 1;
           const safeName = doc.employee_name.replace(/[^a-zA-Z0-9]/g, '');
@@ -322,7 +361,7 @@ export class HrDocumentExportService {
             ? doc.file_name!.slice(doc.file_name!.lastIndexOf('.'))
             : '.pdf';
           const entryName = `${doc.document_type}_${safeName}_${empId}${ext}`;
-          archive.append(stream as Readable, { name: entryName });
+          archive.append(stream, { name: entryName });
         }
         await archive.finalize();
       })().catch(reject);

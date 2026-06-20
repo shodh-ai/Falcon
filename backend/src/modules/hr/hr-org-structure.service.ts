@@ -17,10 +17,22 @@ export class HrOrgStructureService {
     return this.buildTree(rows);
   }
 
-  private buildTree(rows: Array<{ unit_id: string; parent_id: string | null; unit_type: string; unit_name: string; sort_order: number; is_active: boolean }>) {
+  private buildTree(
+    rows: Array<{
+      unit_id: string;
+      parent_id: string | null;
+      unit_type: string;
+      unit_name: string;
+      sort_order: number;
+      is_active: boolean;
+    }>,
+  ) {
     const map = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
-      map.set(row.unit_id, { ...row, children: [] as Record<string, unknown>[] });
+      map.set(row.unit_id, {
+        ...row,
+        children: [] as Record<string, unknown>[],
+      });
     }
     const roots: Record<string, unknown>[] = [];
     for (const node of map.values()) {
@@ -37,12 +49,24 @@ export class HrOrgStructureService {
   async createUnit(
     tenantId: string,
     entityId: number,
-    dto: { parent_id?: string; unit_type: string; unit_name: string; sort_order?: number },
+    dto: {
+      parent_id?: string;
+      unit_type: string;
+      unit_name: string;
+      sort_order?: number;
+    },
   ) {
     const rows = await this.dataSource.query(
       `INSERT INTO hr_org_units (tenant_id, entity_id, parent_id, unit_type, unit_name, sort_order)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [tenantId, entityId, dto.parent_id ?? null, dto.unit_type, dto.unit_name, dto.sort_order ?? 0],
+      [
+        tenantId,
+        entityId,
+        dto.parent_id ?? null,
+        dto.unit_type,
+        dto.unit_name,
+        dto.sort_order ?? 0,
+      ],
     );
     return rows[0];
   }
@@ -51,7 +75,13 @@ export class HrOrgStructureService {
     tenantId: string,
     entityId: number,
     unitId: string,
-    dto: { parent_id?: string | null; unit_type?: string; unit_name?: string; sort_order?: number; is_active?: boolean },
+    dto: {
+      parent_id?: string | null;
+      unit_type?: string;
+      unit_name?: string;
+      sort_order?: number;
+      is_active?: boolean;
+    },
   ) {
     const updates: string[] = [];
     const params: any[] = [tenantId, entityId, unitId];

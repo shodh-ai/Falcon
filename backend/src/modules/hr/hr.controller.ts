@@ -25,7 +25,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { HrPermissionGuard } from '../../common/guards/hr-permission.guard';
 import { HrPowerGuard } from '../../common/guards/hr-power.guard';
-import { HrAccessControlService, HR_DELEGATION_MODULES } from './hr-access-control.service';
+import {
+  HrAccessControlService,
+  HR_DELEGATION_MODULES,
+} from './hr-access-control.service';
 import { EntityScopeGuard } from '../../common/guards/entity-scope.guard';
 import { SkipEntityScope } from '../../common/decorators/skip-entity-scope.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -62,10 +65,22 @@ import { RunPayrollDto, UpdateEmployeeDto } from './dto/hr-operations.dto';
 import type { LeaveRequestStatus } from '../../entities/leave-request.entity';
 import type { StaffLeaveStatus } from '../../entities/staff-leave-request.entity';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[]; dept_id?: number };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+  dept_id?: number;
+};
 
 @Controller(['hr', 'api/hr'])
-@UseGuards(JwtAuthGuard, RolesGuard, HrPermissionGuard, HrPowerGuard, EntityScopeGuard)
+@UseGuards(
+  JwtAuthGuard,
+  RolesGuard,
+  HrPermissionGuard,
+  HrPowerGuard,
+  EntityScopeGuard,
+)
 export class HrController {
   constructor(
     private readonly hr: HrService,
@@ -95,7 +110,11 @@ export class HrController {
   }
 
   private isHrRole(user: AuthUser): boolean {
-    const roles = user.roles?.length ? user.roles : user.role ? [user.role] : [];
+    const roles = user.roles?.length
+      ? user.roles
+      : user.role
+        ? [user.role]
+        : [];
     return roles.some((r) => ['HR', 'HRAdmin', 'SuperAdmin'].includes(r));
   }
 
@@ -125,14 +144,20 @@ export class HrController {
 
   @Post('staff-attendance/:userId/check-in')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD')
-  checkIn(@Param('userId') userId: string, @Body('work_date') workDate: string) {
+  checkIn(
+    @Param('userId') userId: string,
+    @Body('work_date') workDate: string,
+  ) {
     return this.hr.recordStaffAttendance(userId, workDate);
   }
 
   @Post('attendance/web-punch')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  webPunch(@Req() req: { user: AuthUser }, @Body('action') action?: 'IN' | 'OUT') {
+  webPunch(
+    @Req() req: { user: AuthUser },
+    @Body('action') action?: 'IN' | 'OUT',
+  ) {
     return this.hr.webPunch(req.user.user_id, action);
   }
 
@@ -146,7 +171,10 @@ export class HrController {
   @Get('attendance/my-calendar')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  myAttendanceCalendar(@Req() req: { user: AuthUser }, @Query('month') month: string) {
+  myAttendanceCalendar(
+    @Req() req: { user: AuthUser },
+    @Query('month') month: string,
+  ) {
     return this.hr.listAttendanceCalendar(
       req.user.user_id,
       month ?? new Date().toISOString().slice(0, 7),
@@ -158,7 +186,13 @@ export class HrController {
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   applyLeave(
     @Req() req: { user: AuthUser },
-    @Body() dto: { leave_type: string; start_date: string; end_date: string; reason?: string },
+    @Body()
+    dto: {
+      leave_type: string;
+      start_date: string;
+      end_date: string;
+      reason?: string;
+    },
   ) {
     return this.hr.applyStaffLeave(
       req.user.user_id,
@@ -171,7 +205,10 @@ export class HrController {
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myStaffLeaves(@Req() req: { user: AuthUser }) {
-    return this.hr.listMyStaffLeaves(req.user.user_id, this.resolveTenantId(req.user));
+    return this.hr.listMyStaffLeaves(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('leaves/my-balances')
@@ -185,7 +222,10 @@ export class HrController {
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myPayslips(@Req() req: { user: AuthUser }) {
-    return this.hr.listMyPayslips(req.user.user_id, this.resolveTenantId(req.user));
+    return this.hr.listMyPayslips(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Post('gate-passes')
@@ -195,14 +235,21 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body() dto: { out_time: string; expected_in_time: string; reason: string },
   ) {
-    return this.hr.createGatePass(req.user.user_id, this.resolveTenantId(req.user), dto);
+    return this.hr.createGatePass(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      dto,
+    );
   }
 
   @Get('gate-passes/my')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   myGatePasses(@Req() req: { user: AuthUser }) {
-    return this.hr.listMyGatePasses(req.user.user_id, this.resolveTenantId(req.user));
+    return this.hr.listMyGatePasses(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('gate-passes/pending-approvals')
@@ -240,7 +287,10 @@ export class HrController {
   @Get('dashboard/metrics')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President')
   @HrPermission('dashboard', 'read')
-  async dashboardMetrics(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async dashboardMetrics(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hr.getDashboardMetrics(tenantId, entity);
@@ -249,7 +299,10 @@ export class HrController {
   @Get('dashboard/master')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President')
   @HrPermission('dashboard', 'read')
-  async masterDashboard(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async masterDashboard(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.dashboard.getMasterDashboard(tenantId, entity);
@@ -267,9 +320,14 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     const monthKey = month ?? new Date().toISOString().slice(0, 7);
-    const buffer = await this.reports.buildMusterRoll(tenantId, entity, monthKey);
+    const buffer = await this.reports.buildMusterRoll(
+      tenantId,
+      entity,
+      monthKey,
+    );
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="muster-roll-${monthKey}.xlsx"`,
     });
     return new StreamableFile(buffer);
@@ -288,9 +346,15 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     const monthKey = month ?? new Date().toISOString().slice(0, 7);
-    const buffer = await this.reports.buildEmployeeAttendance(tenantId, entity, monthKey, userId);
+    const buffer = await this.reports.buildEmployeeAttendance(
+      tenantId,
+      entity,
+      monthKey,
+      userId,
+    );
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="attendance-${userId}-${monthKey}.xlsx"`,
     });
     return new StreamableFile(buffer);
@@ -308,9 +372,14 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     const y = year ? Number(year) : new Date().getFullYear();
-    const buffer = await this.reports.buildLeaveBalanceRegister(tenantId, entity, y);
+    const buffer = await this.reports.buildLeaveBalanceRegister(
+      tenantId,
+      entity,
+      y,
+    );
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="leave-balances-${y}.xlsx"`,
     });
     return new StreamableFile(buffer);
@@ -328,9 +397,14 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     const monthKey = month ?? new Date().toISOString().slice(0, 7);
-    const buffer = await this.reports.buildPayrollRegister(tenantId, entity, monthKey);
+    const buffer = await this.reports.buildPayrollRegister(
+      tenantId,
+      entity,
+      monthKey,
+    );
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="payroll-register-${monthKey}.xlsx"`,
     });
     return new StreamableFile(buffer);
@@ -346,9 +420,13 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    const buffer = await this.reports.buildMissingPunchesReport(tenantId, entity);
+    const buffer = await this.reports.buildMissingPunchesReport(
+      tenantId,
+      entity,
+    );
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': 'attachment; filename="missing-punches.xlsx"',
     });
     return new StreamableFile(buffer);
@@ -366,7 +444,8 @@ export class HrController {
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     const buffer = await this.reports.buildEmployeeMasterDump(tenantId, entity);
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': 'attachment; filename="employee-master.xlsx"',
     });
     return new StreamableFile(buffer);
@@ -376,7 +455,11 @@ export class HrController {
   @SkipEntityScope()
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'Faculty', 'HOD', 'Dean')
   listEntities(@Req() req: { user: AuthUser }) {
-    const roles = req.user.roles?.length ? req.user.roles : req.user.role ? [req.user.role] : [];
+    const roles = req.user.roles?.length
+      ? req.user.roles
+      : req.user.role
+        ? [req.user.role]
+        : [];
     return this.entityCtx.listAllowedEntities(
       this.resolveTenantId(req.user),
       req.user.user_id,
@@ -405,7 +488,8 @@ export class HrController {
   @Roles('HRAdmin', 'SuperAdmin')
   updatePermissionMatrix(
     @Req() req: { user: AuthUser },
-    @Body() body: { rows: { user_id: string; capabilities: Record<string, string> }[] },
+    @Body()
+    body: { rows: { user_id: string; capabilities: Record<string, string> }[] },
   ) {
     return this.entityCtx.upsertPermissionMatrix(
       this.resolveTenantId(req.user),
@@ -546,12 +630,7 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.dynamicRules.updateRule(
-      tenantId,
-      entity,
-      ruleId,
-      body as Parameters<HrDynamicRulesService['updateRule']>[3],
-    );
+    return this.dynamicRules.updateRule(tenantId, entity, ruleId, body);
   }
 
   @Patch('admin/rules/:ruleId')
@@ -564,7 +643,9 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.dynamicRules.updateRule(tenantId, entity, ruleId, { is_active: body.is_active });
+    return this.dynamicRules.updateRule(tenantId, entity, ruleId, {
+      is_active: body.is_active,
+    });
   }
 
   @Post('admin/rules/:ruleId/delete')
@@ -581,7 +662,10 @@ export class HrController {
 
   @Get('admin/shifts')
   @Roles('HRAdmin', 'SuperAdmin')
-  async listShifts(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listShifts(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.rules.listShifts(tenantId, entity);
@@ -590,7 +674,10 @@ export class HrController {
   @Get('employees')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('directory', 'read')
-  async listEmployees(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listEmployees(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hrAdmin.listDirectory(
@@ -630,7 +717,11 @@ export class HrController {
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('directory', 'read')
   employee360(@Param('userId') userId: string, @Req() req: { user: AuthUser }) {
-    return this.hrAdmin.getEmployee360(this.resolveTenantId(req.user), userId, false);
+    return this.hrAdmin.getEmployee360(
+      this.resolveTenantId(req.user),
+      userId,
+      false,
+    );
   }
 
   @Post('employees/:userId/kyc/reveal')
@@ -660,7 +751,7 @@ export class HrController {
     return this.hrAdmin.upsertEmployeeProfile(
       this.resolveTenantId(req.user),
       userId,
-      body as Parameters<HrAdminService['upsertEmployeeProfile']>[2],
+      body,
     );
   }
 
@@ -684,7 +775,10 @@ export class HrController {
   @Post('leaves/balance-adjust')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('leaves', 'write')
-  adjustLeaveBalance(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  adjustLeaveBalance(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.hrAdmin.adjustLeaveBalance(
       this.resolveTenantId(req.user),
       body.user_id as string,
@@ -698,18 +792,31 @@ export class HrController {
   async biometricSync(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
-    @Body() body: {
+    @Body()
+    body: {
       secret?: string;
-      punches?: { employee_id: string; punch_time: string; device_id?: string; punch_type: 'IN' | 'OUT'; entity_id?: number }[];
+      punches?: {
+        employee_id: string;
+        punch_time: string;
+        device_id?: string;
+        punch_type: 'IN' | 'OUT';
+        entity_id?: number;
+      }[];
     },
   ) {
     if (body.punches?.length) {
       this.hrAdmin.validateBiometricWebhook(body.secret);
     }
     const tenantId = this.resolveTenantId(req.user);
-    const entity = entityId ? await this.entityCtx.resolveEntityId(tenantId, entityId) : undefined;
+    const entity = entityId
+      ? await this.entityCtx.resolveEntityId(tenantId, entityId)
+      : undefined;
     if (body.punches?.length) {
-      return this.hrAdmin.ingestBiometricPunches(tenantId, body.punches, entity);
+      return this.hrAdmin.ingestBiometricPunches(
+        tenantId,
+        body.punches,
+        entity,
+      );
     }
     return this.hrAdmin.processBiometricLogs(tenantId);
   }
@@ -719,24 +826,45 @@ export class HrController {
   async biometricsSyncAlias(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
-    @Body() body: {
+    @Body()
+    body: {
       secret?: string;
       emp_id?: string;
       timestamp?: string;
       device_id?: string;
-      punches?: { employee_id: string; punch_time: string; device_id?: string; punch_type: 'IN' | 'OUT' }[];
+      punches?: {
+        employee_id: string;
+        punch_time: string;
+        device_id?: string;
+        punch_type: 'IN' | 'OUT';
+      }[];
     },
   ) {
-    const normalized = body.punches ?? (body.emp_id && body.timestamp
-      ? [{ employee_id: body.emp_id, punch_time: body.timestamp, device_id: body.device_id, punch_type: 'IN' as const }]
-      : []);
-    return this.biometricSync(req, entityId, { secret: body.secret, punches: normalized });
+    const normalized =
+      body.punches ??
+      (body.emp_id && body.timestamp
+        ? [
+            {
+              employee_id: body.emp_id,
+              punch_time: body.timestamp,
+              device_id: body.device_id,
+              punch_type: 'IN' as const,
+            },
+          ]
+        : []);
+    return this.biometricSync(req, entityId, {
+      secret: body.secret,
+      punches: normalized,
+    });
   }
 
   @Get('payroll/packages')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('payroll', 'read')
-  async payPackages(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async payPackages(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hrAdmin.listPayPackages(tenantId, entity);
@@ -745,7 +873,10 @@ export class HrController {
   @Post('payroll/packages')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('payroll', 'write')
-  upsertPayPackage(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  upsertPayPackage(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.hrAdmin.upsertPayPackage(
       this.resolveTenantId(req.user),
       body as Parameters<HrAdminService['upsertPayPackage']>[1],
@@ -770,7 +901,10 @@ export class HrController {
 
   @Get('promotions/candidates')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  async promotionCandidates(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async promotionCandidates(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hrAdmin.listPromotionCandidates(tenantId, entity);
@@ -791,7 +925,10 @@ export class HrController {
 
   @Get('employees/:userId/profile')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  employeeProfile(@Param('userId') userId: string, @Req() req: { user: AuthUser }) {
+  employeeProfile(
+    @Param('userId') userId: string,
+    @Req() req: { user: AuthUser },
+  ) {
     return this.hr.getEmployeeProfile(this.resolveTenantId(req.user), userId);
   }
 
@@ -825,7 +962,10 @@ export class HrController {
   @Get('attendance/calendar')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  attendanceCalendar(@Req() req: { user: AuthUser }, @Query('month') month?: string) {
+  attendanceCalendar(
+    @Req() req: { user: AuthUser },
+    @Query('month') month?: string,
+  ) {
     return this.attendanceCalc.getMonthCalendar(
       req.user.user_id,
       month ?? new Date().toISOString().slice(0, 7),
@@ -867,14 +1007,26 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('status') status: 'HOD_APPROVED' | 'HR_APPROVED' | 'REJECTED',
   ) {
-    return this.hr.actOnStaffLeave(leaveId, this.resolveTenantId(req.user), status, req.user);
+    return this.hr.actOnStaffLeave(
+      leaveId,
+      this.resolveTenantId(req.user),
+      status,
+      req.user,
+    );
   }
 
   @Patch('leaves/:leaveId/approve')
   @Roles('HOD', 'Dean', 'SuperAdmin')
   @HrPermission('leaves', 'write')
-  hodApproveLeave(@Param('leaveId') leaveId: string, @Req() req: { user: AuthUser }) {
-    return this.hr.hodApproveStaffLeave(leaveId, this.resolveTenantId(req.user), req.user);
+  hodApproveLeave(
+    @Param('leaveId') leaveId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.hr.hodApproveStaffLeave(
+      leaveId,
+      this.resolveTenantId(req.user),
+      req.user,
+    );
   }
 
   @Patch('leaves/:leaveId/reject')
@@ -885,7 +1037,12 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('remarks') remarks: string,
   ) {
-    return this.hr.hodRejectStaffLeave(leaveId, this.resolveTenantId(req.user), req.user, remarks);
+    return this.hr.hodRejectStaffLeave(
+      leaveId,
+      this.resolveTenantId(req.user),
+      req.user,
+      remarks,
+    );
   }
 
   @Post('payroll/run')
@@ -893,13 +1050,20 @@ export class HrController {
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @RequirePermission('payroll', 'write')
   async runPayroll(@Req() req: { user: AuthUser }, @Body() dto: RunPayrollDto) {
-    return this.hr.queuePayrollRun(this.resolveTenantId(req.user), dto.month, req.user.user_id);
+    return this.hr.queuePayrollRun(
+      this.resolveTenantId(req.user),
+      dto.month,
+      req.user.user_id,
+    );
   }
 
   @Get('payroll/structures')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('payroll', 'read')
-  async salaryStructures(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async salaryStructures(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hr.listSalaryStructures(tenantId, entity);
@@ -928,7 +1092,10 @@ export class HrController {
   @Get('recruitment/jobs')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('recruitment', 'read')
-  async recruitmentJobs(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async recruitmentJobs(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hr.listRecruitmentJobs(tenantId, entity);
@@ -939,15 +1106,29 @@ export class HrController {
   @HrPermission('recruitment', 'write')
   createRecruitmentJob(
     @Req() req: { user: AuthUser },
-    @Body() dto: { title?: string; department_id?: number; openings?: number; employment_type?: string; description?: string },
+    @Body()
+    dto: {
+      title?: string;
+      department_id?: number;
+      openings?: number;
+      employment_type?: string;
+      description?: string;
+    },
   ) {
-    return this.hr.createRecruitmentJob(this.resolveTenantId(req.user), req.user.user_id, dto);
+    return this.hr.createRecruitmentJob(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Get('recruitment/pipeline')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD', 'Dean')
   @HrPermission('recruitment', 'read')
-  async recruitmentPipeline(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async recruitmentPipeline(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.hr.listRecruitmentPipeline(tenantId, entity);
@@ -964,7 +1145,10 @@ export class HrController {
     const tenantId = this.resolveTenantId(req.user);
     const result = await this.hr.moveApplicant(tenantId, applicantId, stage);
     if (stage === 'HIRED') {
-      const spawn = await this.onboardingWorkflow.triggerOnHired(tenantId, applicantId);
+      const spawn = await this.onboardingWorkflow.triggerOnHired(
+        tenantId,
+        applicantId,
+      );
       return { ...result, onboarding_spawn: spawn };
     }
     return result;
@@ -973,7 +1157,10 @@ export class HrController {
   @Get('onboarding')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('onboarding', 'read')
-  async listOnboardingNewHires(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listOnboardingNewHires(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.onboardingWorkflow.listNewHires(tenantId, entity);
@@ -989,7 +1176,11 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.onboardingWorkflow.getEmployeeWorkflow(tenantId, entity, userId);
+    return this.onboardingWorkflow.getEmployeeWorkflow(
+      tenantId,
+      entity,
+      userId,
+    );
   }
 
   @Patch('onboarding/tasks/:taskId')
@@ -1000,7 +1191,11 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('completed') completed: boolean,
   ) {
-    return this.onboardingWorkflow.setTaskStatus(taskId, req.user.user_id, completed !== false);
+    return this.onboardingWorkflow.setTaskStatus(
+      taskId,
+      req.user.user_id,
+      completed !== false,
+    );
   }
 
   @Get('admin/workflow-templates')
@@ -1012,7 +1207,11 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.onboardingWorkflow.listTemplates(tenantId, entity, workflowType ?? 'ONBOARDING');
+    return this.onboardingWorkflow.listTemplates(
+      tenantId,
+      entity,
+      workflowType ?? 'ONBOARDING',
+    );
   }
 
   @Post('admin/workflow-templates')
@@ -1024,7 +1223,11 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.onboardingWorkflow.createTemplate(tenantId, entity, body as Parameters<HrOnboardingWorkflowService['createTemplate']>[2]);
+    return this.onboardingWorkflow.createTemplate(
+      tenantId,
+      entity,
+      body as Parameters<HrOnboardingWorkflowService['createTemplate']>[2],
+    );
   }
 
   @Patch('admin/workflow-templates/reorder')
@@ -1054,7 +1257,12 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.onboardingWorkflow.updateTemplate(tenantId, entity, templateId, body as Parameters<HrOnboardingWorkflowService['updateTemplate']>[3]);
+    return this.onboardingWorkflow.updateTemplate(
+      tenantId,
+      entity,
+      templateId,
+      body,
+    );
   }
 
   @Post('admin/workflow-templates/:templateId/delete')
@@ -1072,7 +1280,10 @@ export class HrController {
   @Get('offboarding')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('offboarding', 'read')
-  async offboarding(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async offboarding(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.ess.listResignations(tenantId, entity);
@@ -1084,14 +1295,22 @@ export class HrController {
   hrProcessOffboarding(
     @Param('resignationId') resignationId: string,
     @Req() req: { user: AuthUser },
-    @Body('separation_mode') separationMode: 'SERVE_NOTICE' | 'BUYOUT_NOTICE' | 'IMMEDIATE_SEPARATION',
+    @Body('separation_mode')
+    separationMode: 'SERVE_NOTICE' | 'BUYOUT_NOTICE' | 'IMMEDIATE_SEPARATION',
   ) {
-    return this.ess.hrProcessResignation(resignationId, req.user.user_id, separationMode);
+    return this.ess.hrProcessResignation(
+      resignationId,
+      req.user.user_id,
+      separationMode,
+    );
   }
 
   @Get('ess/onboarding/progress')
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  async essOnboardingProgress(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async essOnboardingProgress(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.ess.getOnboardingProgress(tenantId, entity, req.user.user_id);
@@ -1125,7 +1344,11 @@ export class HrController {
     @Req() req: { user: AuthUser },
     @Body('approved') approved: boolean,
   ) {
-    return this.ess.hodClearResignation(resignationId, req.user.user_id, approved);
+    return this.ess.hodClearResignation(
+      resignationId,
+      req.user.user_id,
+      approved,
+    );
   }
 
   @Get('ess/calendar')
@@ -1194,7 +1417,8 @@ export class HrController {
       monthKey,
     );
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="team-attendance-${monthKey}.xlsx"`,
     });
     return new StreamableFile(buf);
@@ -1293,7 +1517,13 @@ export class HrController {
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
   teamBulkRequests(
     @Req() req: { user: AuthUser },
-    @Body() body: { ids: string[]; action: 'APPROVE' | 'REJECT'; comment?: string; tab?: string },
+    @Body()
+    body: {
+      ids: string[];
+      action: 'APPROVE' | 'REJECT';
+      comment?: string;
+      tab?: string;
+    },
   ) {
     return this.team.bulkActOnRequests(
       req.user.user_id,
@@ -1336,9 +1566,9 @@ export class HrController {
     @Query('entity_id') entityId?: string,
   ) {
     const tenantId = this.resolveTenantId(req.user);
-    return this.entityCtx.resolveEntityId(tenantId, entityId).then((entity) =>
-      this.team.listAllPendingForAdmin(tenantId, entity),
-    );
+    return this.entityCtx
+      .resolveEntityId(tenantId, entityId)
+      .then((entity) => this.team.listAllPendingForAdmin(tenantId, entity));
   }
 
   @Patch('admin/requests/:leaveId/override')
@@ -1379,7 +1609,8 @@ export class HrController {
     @Param('userId') userId: string,
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
-    @Body() body: { document_type: string; file_url: string; file_name?: string },
+    @Body()
+    body: { document_type: string; file_url: string; file_name?: string },
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
@@ -1459,7 +1690,12 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.employeeBulk.createManualEmployee(tenantId, entity, req.user.user_id, body);
+    return this.employeeBulk.createManualEmployee(
+      tenantId,
+      entity,
+      req.user.user_id,
+      body,
+    );
   }
 
   @Post('employees/bulk-upload')
@@ -1494,8 +1730,10 @@ export class HrController {
   async bulkUploadTemplate(@Res({ passthrough: true }) res: Response) {
     const buffer = await this.employeeBulk.buildTemplateBuffer();
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': 'attachment; filename="employee-bulk-upload-template.xlsx"',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition':
+        'attachment; filename="employee-bulk-upload-template.xlsx"',
     });
     return new StreamableFile(buffer);
   }
@@ -1512,11 +1750,16 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.documentExport.createExportJob(tenantId, entity, req.user.user_id, {
-      document_type: body.document_type,
-      dept_id: body.dept_id,
-      role_id: body.role_id,
-    });
+    return this.documentExport.createExportJob(
+      tenantId,
+      entity,
+      req.user.user_id,
+      {
+        document_type: body.document_type,
+        dept_id: body.dept_id,
+        role_id: body.role_id,
+      },
+    );
   }
 
   @Get('documents/export-jobs/:jobId')
@@ -1568,7 +1811,10 @@ export class HrController {
 
   @Get('ess/documents')
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  async essDocuments(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async essDocuments(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.documentVault.listDocuments(tenantId, req.user.user_id, entity);
@@ -1579,7 +1825,8 @@ export class HrController {
   async uploadEssDocument(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
-    @Body() body: { document_type: string; file_url: string; file_name?: string },
+    @Body()
+    body: { document_type: string; file_url: string; file_name?: string },
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
@@ -1595,7 +1842,10 @@ export class HrController {
 
   @Get('ess/policies')
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
-  async essPolicies(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async essPolicies(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.ess.listPoliciesForUser(tenantId, entity, req.user.user_id);
@@ -1607,7 +1857,11 @@ export class HrController {
     @Param('policyId') policyId: string,
     @Req() req: { user: AuthUser },
   ) {
-    return this.ess.acknowledgePolicy(this.resolveTenantId(req.user), policyId, req.user.user_id);
+    return this.ess.acknowledgePolicy(
+      this.resolveTenantId(req.user),
+      policyId,
+      req.user.user_id,
+    );
   }
 
   @Post('ess/policies/:policyId/vote')
@@ -1617,13 +1871,21 @@ export class HrController {
     @Body('vote') vote: 'YES' | 'NO',
     @Req() req: { user: AuthUser },
   ) {
-    return this.ess.submitPolicyVote(this.resolveTenantId(req.user), policyId, req.user.user_id, vote);
+    return this.ess.submitPolicyVote(
+      this.resolveTenantId(req.user),
+      policyId,
+      req.user.user_id,
+      vote,
+    );
   }
 
   @Get('policies')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('policies', 'read')
-  async listPolicies(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listPolicies(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.ess.listPolicies(tenantId, entity);
@@ -1635,7 +1897,13 @@ export class HrController {
   async createPolicy(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId: string | undefined,
-    @Body() body: { title: string; category?: string; file_url?: string; is_mandatory?: boolean },
+    @Body()
+    body: {
+      title: string;
+      category?: string;
+      file_url?: string;
+      is_mandatory?: boolean;
+    },
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
@@ -1645,7 +1913,10 @@ export class HrController {
   @Get('policies/archived')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   @HrPermission('policies', 'read')
-  async listArchivedPolicies(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listArchivedPolicies(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.ess.listArchivedPolicies(tenantId, entity);
@@ -1700,7 +1971,8 @@ export class HrController {
   @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceApply(
     @Req() req: { user: AuthUser },
-    @Body() dto: {
+    @Body()
+    dto: {
       request_type: StaffRequestType;
       staff_user_id?: string;
       leave_type?: string;
@@ -1712,9 +1984,13 @@ export class HrController {
     },
   ) {
     const roles = this.resolveRoles(req.user);
-    const canApplyForOthers = roles.some((r) => ['HRAdmin', 'SuperAdmin', 'HR'].includes(r));
+    const canApplyForOthers = roles.some((r) =>
+      ['HRAdmin', 'SuperAdmin', 'HR'].includes(r),
+    );
     const targetUserId =
-      dto.staff_user_id && canApplyForOthers ? dto.staff_user_id : req.user.user_id;
+      dto.staff_user_id && canApplyForOthers
+        ? dto.staff_user_id
+        : req.user.user_id;
     return this.workforce.applyRequest(
       targetUserId,
       this.resolveTenantId(req.user),
@@ -1727,7 +2003,10 @@ export class HrController {
   @SkipEntityScope()
   @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceMyRequests(@Req() req: { user: AuthUser }) {
-    return this.workforce.listMyRequests(req.user.user_id, this.resolveTenantId(req.user));
+    return this.workforce.listMyRequests(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('workforce/team/pending')
@@ -1771,14 +2050,21 @@ export class HrController {
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'Faculty', 'HOD')
   simulateBiometric(
     @Req() req: { user: AuthUser },
-    @Body() dto: { user_id?: string; date?: string; action: 'IN' | 'OUT'; at?: string },
+    @Body()
+    dto: { user_id?: string; date?: string; action: 'IN' | 'OUT'; at?: string },
   ) {
-    return this.workforce.simulateBiometricPunch(dto.user_id ?? req.user.user_id, dto);
+    return this.workforce.simulateBiometricPunch(
+      dto.user_id ?? req.user.user_id,
+      dto,
+    );
   }
 
   @Get('admin/org-structure')
   @Roles('HRAdmin', 'SuperAdmin')
-  async orgStructureTree(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async orgStructureTree(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.orgStructure.listTree(tenantId, entity);
@@ -1793,7 +2079,11 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.orgStructure.createUnit(tenantId, entity, body as Parameters<HrOrgStructureService['createUnit']>[2]);
+    return this.orgStructure.createUnit(
+      tenantId,
+      entity,
+      body as Parameters<HrOrgStructureService['createUnit']>[2],
+    );
   }
 
   @Put('admin/org-structure/:unitId')
@@ -1806,7 +2096,7 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.orgStructure.updateUnit(tenantId, entity, unitId, body as Parameters<HrOrgStructureService['updateUnit']>[3]);
+    return this.orgStructure.updateUnit(tenantId, entity, unitId, body);
   }
 
   @Delete('admin/org-structure/:unitId')
@@ -1823,7 +2113,10 @@ export class HrController {
 
   @Get('admin/leave-policies')
   @Roles('HRAdmin', 'SuperAdmin')
-  async listLeavePolicies(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listLeavePolicies(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.leavePolicies.listPolicies(tenantId, entity);
@@ -1868,7 +2161,10 @@ export class HrController {
 
   @Get('admin/workflows')
   @Roles('HRAdmin', 'SuperAdmin')
-  async listWorkflows(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listWorkflows(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.workflowBuilder.listWorkflows(tenantId, entity);
@@ -1883,7 +2179,11 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.workflowBuilder.createWorkflow(tenantId, entity, body as Parameters<HrWorkflowBuilderService['createWorkflow']>[2]);
+    return this.workflowBuilder.createWorkflow(
+      tenantId,
+      entity,
+      body as Parameters<HrWorkflowBuilderService['createWorkflow']>[2],
+    );
   }
 
   @Put('admin/workflows/:workflowId')
@@ -1896,7 +2196,12 @@ export class HrController {
   ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
-    return this.workflowBuilder.updateWorkflow(tenantId, entity, workflowId, body as Parameters<HrWorkflowBuilderService['updateWorkflow']>[3]);
+    return this.workflowBuilder.updateWorkflow(
+      tenantId,
+      entity,
+      workflowId,
+      body,
+    );
   }
 
   @Delete('admin/workflows/:workflowId')
@@ -1939,7 +2244,8 @@ export class HrController {
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
   async updateExitStatus(
     @Param('resignationId') resignationId: string,
-    @Body() body: { exit_status: string; fnf_deduct_checklist_penalty?: boolean },
+    @Body()
+    body: { exit_status: string; fnf_deduct_checklist_penalty?: boolean },
   ) {
     return this.checklists.updateExitStatus(
       resignationId,
@@ -1950,7 +2256,10 @@ export class HrController {
 
   @Get('org-units')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  async listOrgUnitsFlat(@Req() req: { user: AuthUser }, @Query('entity_id') entityId?: string) {
+  async listOrgUnitsFlat(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
     const tenantId = this.resolveTenantId(req.user);
     const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
     return this.orgStructure.listFlat(tenantId, entity);
@@ -1959,5 +2268,4 @@ export class HrController {
   private resolveTenantId(user: AuthUser) {
     return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
-
 }

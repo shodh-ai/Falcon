@@ -49,6 +49,11 @@ export class ReportsService {
     const sql = queries[dataset];
     if (!sql) return { dataset, rows: [], note: 'Unknown dataset key' };
     const rows = await this.db.query(sql, [tenantId]);
-    return { dataset, exported_at: new Date().toISOString(), row_count: rows.length, rows };
+    return {
+      dataset,
+      exported_at: new Date().toISOString(),
+      row_count: rows.length,
+      rows,
+    };
   }
 }

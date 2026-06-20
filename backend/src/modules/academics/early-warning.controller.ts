@@ -23,6 +23,9 @@ export class EarlyWarningController {
   @Post(':studentId/intervention')
   @Roles('Faculty', 'SuperAdmin')
   scheduleIntervention(@Req() req: any, @Param('studentId') studentId: string) {
-    return this.warningService.scheduleIntervention(req.user.user_id, studentId);
+    return this.warningService.scheduleIntervention(
+      req.user.user_id,
+      studentId,
+    );
   }
 }

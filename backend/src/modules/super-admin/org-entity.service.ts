@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CreateOrgEntityDto } from './dto/create-org-entity.dto';
@@ -22,13 +26,18 @@ export class OrgEntityService {
     );
   }
 
-  async createEntity(tenantId: string, creatorUserId: string, dto: CreateOrgEntityDto) {
+  async createEntity(
+    tenantId: string,
+    creatorUserId: string,
+    dto: CreateOrgEntityDto,
+  ) {
     const code = dto.entity_code.trim().toUpperCase();
     const existing = await this.dataSource.query(
       `SELECT entity_id FROM org_entities WHERE tenant_id = $1 AND entity_code = $2`,
       [tenantId, code],
     );
-    if (existing[0]) throw new ConflictException(`Entity code ${code} already exists`);
+    if (existing[0])
+      throw new ConflictException(`Entity code ${code} already exists`);
 
     const rows = await this.dataSource.query(
       `INSERT INTO org_entities (
@@ -79,7 +88,12 @@ export class OrgEntityService {
     );
   }
 
-  async grantAccess(tenantId: string, entityId: number, userId: string, grantedByUserId: string) {
+  async grantAccess(
+    tenantId: string,
+    entityId: number,
+    userId: string,
+    grantedByUserId: string,
+  ) {
     await this.assertEntityInTenant(tenantId, entityId);
     const userRows = await this.dataSource.query(
       `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND is_active = true`,

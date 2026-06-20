@@ -8,9 +8,15 @@ import { GeminiService } from './gemini.service';
 import { SUBMISSION_AI_QUEUE } from '../common/constants/ai-queue.constants';
 import { AiSubmissionStatus } from '../common/enums/ai-submission-status.enum';
 
-function firstPdfAbsolutePath(filePath: string | undefined, fileType: string | undefined): string | null {
+function firstPdfAbsolutePath(
+  filePath: string | undefined,
+  fileType: string | undefined,
+): string | null {
   if (!filePath) return null;
-  const paths = filePath.split(',').map((s) => s.trim()).filter(Boolean);
+  const paths = filePath
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   const types = (fileType || '').split(',').map((s) => s.trim());
   for (let i = 0; i < paths.length; i++) {
     const p = paths[i];
@@ -46,7 +52,10 @@ export class AiSubmissionProcessor extends WorkerHost {
       return;
     }
 
-    const pdfPath = firstPdfAbsolutePath(submission.file_path, submission.file_type);
+    const pdfPath = firstPdfAbsolutePath(
+      submission.file_path,
+      submission.file_type,
+    );
     if (!pdfPath) {
       submission.ai_status = AiSubmissionStatus.REJECTED_MISMATCH;
       submission.ai_extracted_data = {};

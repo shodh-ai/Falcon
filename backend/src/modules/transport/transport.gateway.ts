@@ -29,7 +29,10 @@ export class TransportGateway {
   }
 
   @SubscribeMessage('joinRoute')
-  handleJoinRoute(@MessageBody() data: { route_id: string }, @ConnectedSocket() client: Socket) {
+  handleJoinRoute(
+    @MessageBody() data: { route_id: string },
+    @ConnectedSocket() client: Socket,
+  ) {
     if (data?.route_id) {
       client.join(`route_${data.route_id}`);
       this.logger.debug(`Client joined route room ${data.route_id}`);

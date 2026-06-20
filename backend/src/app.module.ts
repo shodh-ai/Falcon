@@ -55,6 +55,9 @@ import { MeetingsModule } from './modules/meetings/meetings.module';
 import { DemeritsModule } from './modules/demerits/demerits.module';
 import { AttendancePolicyModule } from './modules/attendance-policy/attendance-policy.module';
 import { VenueBookingModule } from './modules/venue-booking/venue-booking.module';
+import { MasterDataModule } from './modules/master-data/master-data.module';
+import { AcademicRndModule } from './modules/academic-rnd/academic-rnd.module';
+import { CertificateAutomationModule } from './modules/certificate-automation/certificate-automation.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -95,19 +98,28 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
         username: configService.get('DB_USERNAME', 'postgres'),
         password: configService.get('DB_PASSWORD', 'postgres'),
         database: configService.get('DB_DATABASE', 'university_governance'),
-        entities: Object.values(entities).filter((e) => typeof e === 'function'),
+        entities: Object.values(entities).filter(
+          (e) => typeof e === 'function',
+        ),
         subscribers: [EntityScopeSubscriber, SystemAuditSubscriber],
-        synchronize: configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
+        synchronize:
+          configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
         logging:
           configService.get('TYPEORM_LOGGING', 'false') === 'true'
             ? ['query', 'error', 'warn']
             : configService.get('NODE_ENV') === 'development',
-        maxQueryExecutionTime: Number(configService.get('TYPEORM_SLOW_MS', '200')),
+        maxQueryExecutionTime: Number(
+          configService.get('TYPEORM_SLOW_MS', '200'),
+        ),
         extra: {
           max: Number(configService.get('DB_POOL_MAX', '20')),
           min: Number(configService.get('DB_POOL_MIN', '2')),
-          idleTimeoutMillis: Number(configService.get('DB_POOL_IDLE_MS', '30000')),
-          connectionTimeoutMillis: Number(configService.get('DB_POOL_CONNECT_MS', '5000')),
+          idleTimeoutMillis: Number(
+            configService.get('DB_POOL_IDLE_MS', '30000'),
+          ),
+          connectionTimeoutMillis: Number(
+            configService.get('DB_POOL_CONNECT_MS', '5000'),
+          ),
         },
       }),
       inject: [ConfigService],
@@ -165,6 +177,9 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     DemeritsModule,
     AttendancePolicyModule,
     VenueBookingModule,
+    MasterDataModule,
+    AcademicRndModule,
+    CertificateAutomationModule,
   ],
   controllers: [AppController],
   providers: [

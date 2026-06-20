@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Header, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -18,13 +29,19 @@ export class CampusEventsController {
 
   @Get('master-calendar')
   @Roles('Registrar', 'Dean', 'SuperAdmin', 'Student', 'Faculty')
-  masterCalendar(@Req() req: { user: AuthUser }, @Query('academic_year') academicYear?: string) {
+  masterCalendar(
+    @Req() req: { user: AuthUser },
+    @Query('academic_year') academicYear?: string,
+  ) {
     return this.events.listMasterCalendar(this.tenant(req), academicYear);
   }
 
   @Post('master-calendar')
   @Roles('Registrar', 'Dean', 'SuperAdmin')
-  upsertCalendar(@Req() req: { user: AuthUser }, @Body() dto: UpsertMasterCalendarDto) {
+  upsertCalendar(
+    @Req() req: { user: AuthUser },
+    @Body() dto: UpsertMasterCalendarDto,
+  ) {
     return this.events.upsertMasterCalendarEntry(this.tenant(req), dto);
   }
 
@@ -72,7 +89,12 @@ export class CampusEventsController {
     @Query('venue_id') venueId: string,
     @Query('event_date') eventDate: string,
   ) {
-    return this.events.checkVenueClash(this.tenant(req), venueId, eventDate, id);
+    return this.events.checkVenueClash(
+      this.tenant(req),
+      venueId,
+      eventDate,
+      id,
+    );
   }
 
   @Post('events/:id/register')
@@ -83,8 +105,15 @@ export class CampusEventsController {
 
   @Get('registrations/:registrationId')
   @Roles('Student')
-  registrationHold(@Req() req: { user: AuthUser }, @Param('registrationId') registrationId: string) {
-    return this.events.getPendingRegistration(this.tenant(req), req.user.user_id, registrationId);
+  registrationHold(
+    @Req() req: { user: AuthUser },
+    @Param('registrationId') registrationId: string,
+  ) {
+    return this.events.getPendingRegistration(
+      this.tenant(req),
+      req.user.user_id,
+      registrationId,
+    );
   }
 
   @Post('events/:id/register/confirm')
@@ -138,7 +167,12 @@ export class CampusEventsController {
     @Param('id') id: string,
     @Body() dto: { qr_code: string },
   ) {
-    return this.events.scanAttendance(this.tenant(req), req.user.user_id, id, dto.qr_code);
+    return this.events.scanAttendance(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto.qr_code,
+    );
   }
 
   @Get('coordinator/events/:id/scan-stats')
@@ -152,7 +186,11 @@ export class CampusEventsController {
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="attendees.csv"')
   attendeesCsv(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.events.exportAttendeesCsv(this.tenant(req), req.user.user_id, id);
+    return this.events.exportAttendeesCsv(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+    );
   }
 
   @Get('approvals/pending')
@@ -188,7 +226,11 @@ export class CampusEventsController {
 
   @Post('approvals/:id/reject')
   @Roles('Faculty', 'SuperAdmin')
-  reject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
+  reject(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: RejectEventDto,
+  ) {
     return this.events.rejectEvent(
       this.tenant(req),
       req.user.user_id,
@@ -221,7 +263,11 @@ export class CampusEventsController {
 
   @Post('approvals/hod/:id/reject')
   @Roles('HOD', 'SuperAdmin')
-  hodReject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
+  hodReject(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: RejectEventDto,
+  ) {
     return this.events.rejectHodEvent(
       this.tenant(req),
       req.user.user_id,
@@ -254,7 +300,11 @@ export class CampusEventsController {
 
   @Post('approvals/dean/:id/reject')
   @Roles('Dean', 'SuperAdmin')
-  deanReject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
+  deanReject(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: RejectEventDto,
+  ) {
     return this.events.rejectDeanEvent(
       this.tenant(req),
       req.user.user_id,
@@ -272,14 +322,32 @@ export class CampusEventsController {
 
   @Post('estate/:id/approve')
   @Roles('Registrar', 'Dean', 'SuperAdmin')
-  estateApprove(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: EstateApproveDto) {
-    return this.events.approveEstate(this.tenant(req), req.user.user_id, id, dto);
+  estateApprove(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: EstateApproveDto,
+  ) {
+    return this.events.approveEstate(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto,
+    );
   }
 
   @Post('estate/:id/reject')
   @Roles('Registrar', 'Dean', 'SuperAdmin')
-  estateReject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
-    return this.events.rejectEstate(this.tenant(req), req.user.user_id, id, dto.comment);
+  estateReject(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.events.rejectEstate(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto.comment,
+    );
   }
 
   @Get('finance-approvals/pending')
@@ -296,20 +364,47 @@ export class CampusEventsController {
 
   @Post('finance-approvals/:id/approve')
   @Roles('Accountant', 'SuperAdmin')
-  financeApprove(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: FundTransferDto) {
-    return this.events.approveFinance(this.tenant(req), req.user.user_id, id, dto);
+  financeApprove(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: FundTransferDto,
+  ) {
+    return this.events.approveFinance(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto,
+    );
   }
 
   @Post('funding/:id/transfer')
   @Roles('Accountant', 'SuperAdmin')
-  fundingTransfer(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: FundTransferDto) {
-    return this.events.approveFinance(this.tenant(req), req.user.user_id, id, dto);
+  fundingTransfer(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: FundTransferDto,
+  ) {
+    return this.events.approveFinance(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto,
+    );
   }
 
   @Post('finance-approvals/:id/reject')
   @Roles('Accountant', 'SuperAdmin')
-  financeReject(@Req() req: { user: AuthUser }, @Param('id') id: string, @Body() dto: RejectEventDto) {
-    return this.events.rejectFinance(this.tenant(req), req.user.user_id, id, dto.comment);
+  financeReject(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: RejectEventDto,
+  ) {
+    return this.events.rejectFinance(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto.comment,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

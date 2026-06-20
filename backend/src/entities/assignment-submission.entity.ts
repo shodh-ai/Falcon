@@ -1,4 +1,12 @@
-import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BaseTenantEntity } from './base-tenant.entity';
 import { AcademicAssignment } from './academic-assignment.entity';
 import { User } from './user.entity';
@@ -37,4 +45,10 @@ export class AssignmentSubmission extends BaseTenantEntity {
 
   @Column({ type: 'text', nullable: true })
   faculty_remarks: string | null;
+
+  @Column({ type: 'varchar', length: 30, default: 'SUBMITTED' })
+  status: string;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  revision_due_at: Date | null;
 }

@@ -34,7 +34,10 @@ export class FinancialGeminiService {
     });
   }
 
-  async chat(tenantId: string, question: string): Promise<{ answer: string; sql?: string; rows?: unknown[] }> {
+  async chat(
+    tenantId: string,
+    question: string,
+  ): Promise<{ answer: string; sql?: string; rows?: unknown[] }> {
     const model = this.getModel();
     const prompt = `You are Falcon AI, a financial assistant for a university Chairman.
 ${FINANCE_SCHEMA}
@@ -48,13 +51,18 @@ Rules: SELECT only. No INSERT/UPDATE/DELETE. Always scope to tenant.`;
     const text = result.response.text();
     let parsed: { sql?: string; explanation?: string };
     try {
-      parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''));
+      parsed = JSON.parse(
+        text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''),
+      );
     } catch {
       return { answer: text };
     }
 
     if (!parsed.sql || !/^select/i.test(parsed.sql.trim())) {
-      return { answer: parsed.explanation ?? 'I can only run read-only financial queries.' };
+      return {
+        answer:
+          parsed.explanation ?? 'I can only run read-only financial queries.',
+      };
     }
 
     try {
@@ -68,11 +76,16 @@ Rules: SELECT only. No INSERT/UPDATE/DELETE. Always scope to tenant.`;
         rows: rows.slice(0, 50),
       };
     } catch (err) {
-      return { answer: `Query failed: ${(err as Error).message}`, sql: parsed.sql };
+      return {
+        answer: `Query failed: ${(err as Error).message}`,
+        sql: parsed.sql,
+      };
     }
   }
 
-  async deltaAnalysis(tenantId: string): Promise<{ narrative: string; deltas: unknown[] }> {
+  async deltaAnalysis(
+    tenantId: string,
+  ): Promise<{ narrative: string; deltas: unknown[] }> {
     const deltas = await this.db.query(
       `SELECT h.head_name,
               COALESCE(SUM(CASE WHEN i.invoice_date >= date_trunc('month', CURRENT_DATE) THEN i.net_payable ELSE 0 END), 0)::numeric AS this_month,
@@ -113,11 +126,13 @@ Respond in plain text with "Main Reasons:" followed by bullet points with amount
     );
 
     const factor = 1 - admissionsDropPct / 100;
-    const projections = (history as { month: Date; revenue: string }[]).map((h, idx) => ({
-      month: h.month,
-      baseline: Number(h.revenue),
-      adjusted: Math.round(Number(h.revenue) * factor * (1 + idx * 0.01)),
-    }));
+    const projections = (history as { month: Date; revenue: string }[]).map(
+      (h, idx) => ({
+        month: h.month,
+        baseline: Number(h.revenue),
+        adjusted: Math.round(Number(h.revenue) * factor * (1 + idx * 0.01)),
+      }),
+    );
 
     const model = this.getModel();
     const result = await model.generateContent(
@@ -163,7 +178,10 @@ Summarize the 12-month cash flow trajectory for the Chairman in 3-4 sentences.`,
           tenantId,
           horizon,
           projected,
-          JSON.stringify({ monthly_net: monthlyNet, current_cash: currentCash }),
+          JSON.stringify({
+            monthly_net: monthlyNet,
+            current_cash: currentCash,
+          }),
         ],
       );
     }

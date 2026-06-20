@@ -51,6 +51,8 @@ import {
   venueBookingPendingApprovalMessage,
   venueBookingApprovedMessage,
   venueBookingRejectedMessage,
+  academicRndStatusUpdatedMessage,
+  certificateStatusUpdatedMessage,
 } from './notification-message.catalog';
 import {
   NotificationEvents,
@@ -87,6 +89,8 @@ import {
   type EcellMentorMeetingRespondedPayload,
   type EcellMentorFeedbackRequestedPayload,
   type VenueBookingPayload,
+  type AcademicRndStatusUpdatedPayload,
+  type CertificateStatusUpdatedPayload,
 } from './notification.events';
 
 @Injectable()
@@ -527,7 +531,9 @@ export class NotificationEventsListener {
   }
 
   @OnEvent(NotificationEvents.ECELL_MENTOR_MEETING_REQUESTED)
-  async onEcellMentorMeetingRequested(payload: EcellMentorMeetingRequestedPayload) {
+  async onEcellMentorMeetingRequested(
+    payload: EcellMentorMeetingRequestedPayload,
+  ) {
     const msg = ecellMentorMeetingRequestedMessage(payload, {
       actionLink: payload.actionLink,
     });
@@ -535,7 +541,9 @@ export class NotificationEventsListener {
   }
 
   @OnEvent(NotificationEvents.ECELL_MENTOR_MEETING_RESPONDED)
-  async onEcellMentorMeetingResponded(payload: EcellMentorMeetingRespondedPayload) {
+  async onEcellMentorMeetingResponded(
+    payload: EcellMentorMeetingRespondedPayload,
+  ) {
     const msg = ecellMentorMeetingRespondedMessage(payload, {
       actionLink: payload.actionLink,
     });
@@ -543,7 +551,9 @@ export class NotificationEventsListener {
   }
 
   @OnEvent(NotificationEvents.ECELL_MENTOR_FEEDBACK_REQUESTED)
-  async onEcellMentorFeedbackRequested(payload: EcellMentorFeedbackRequestedPayload) {
+  async onEcellMentorFeedbackRequested(
+    payload: EcellMentorFeedbackRequestedPayload,
+  ) {
     const msg = ecellMentorFeedbackRequestedMessage(payload, {
       actionLink: payload.actionLink,
     });
@@ -573,6 +583,26 @@ export class NotificationEventsListener {
   @OnEvent(NotificationEvents.VENUE_BOOKING_REJECTED)
   async onVenueBookingRejected(payload: VenueBookingPayload) {
     const msg = venueBookingRejectedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ACADEMIC_RND_STATUS_UPDATED)
+  async onAcademicRndStatusUpdated(payload: AcademicRndStatusUpdatedPayload) {
+    const msg = academicRndStatusUpdatedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.CERTIFICATE_STATUS_UPDATED)
+  async onCertificateStatusUpdated(payload: CertificateStatusUpdatedPayload) {
+    const msg = certificateStatusUpdatedMessage(payload, {
       title: payload.title,
       message: payload.message,
       actionLink: payload.actionLink,

@@ -44,11 +44,13 @@ export class FinancialFeedListener {
         if (!row) return;
         tenantId = row.tenant_id;
         amount = Number(row.paid_amount);
-        programLabel = row.program ? `${row.fee_head} (${row.program})` : row.fee_head;
+        programLabel = row.program
+          ? `${row.fee_head} (${row.program})`
+          : row.fee_head;
       }
 
       await this.feed.emit({
-        tenantId: tenantId!,
+        tenantId: tenantId,
         eventType: 'INCOME',
         label: `Student Fee Received - ${programLabel}`,
         amount: amount ?? 0,

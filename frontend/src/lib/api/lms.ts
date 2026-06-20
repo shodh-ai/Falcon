@@ -33,8 +33,11 @@ export type StudentAssignmentRow = {
     submitted_at: string;
     marks_awarded: string | null;
     faculty_remarks: string | null;
+    revision_due_at?: string | null;
+    status?: string;
   } | null;
-  status: 'PENDING' | 'SUBMITTED' | 'GRADED' | 'OVERDUE';
+  status: 'PENDING' | 'SUBMITTED' | 'GRADED' | 'OVERDUE' | 'RETURNED_FOR_REVISION';
+  can_resubmit?: boolean;
 };
 
 export type StudentWorkspace = {
@@ -62,7 +65,9 @@ export type AssignmentRosterRow = {
   submitted: boolean;
   submission_id: string | null;
   marks_awarded: string | null;
-  status: 'GRADED' | 'SUBMITTED' | 'NOT_SUBMITTED';
+  status: 'GRADED' | 'SUBMITTED' | 'NOT_SUBMITTED' | 'RETURNED_FOR_REVISION';
+  faculty_remarks?: string | null;
+  revision_due_at?: string | null;
 };
 
 export function formatDeadlineCountdown(dueDate: string): string {

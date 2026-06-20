@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
@@ -18,7 +22,12 @@ import { ObjectStorageService } from '../../storage/object-storage.service';
 import { resolvePlacementSchema } from '../placement/placement-schema';
 import { FinanceReceiptService } from '../finance/finance-receipt.service';
 
-const EXTRA_CERT_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+const EXTRA_CERT_MIME = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/jpg',
+];
 
 @Injectable()
 export class StudentPortalService {
@@ -90,8 +99,13 @@ export class StudentPortalService {
     const parentInfo = row.parent_info ?? {};
     const unlocked = this.isProfileUnlocked(row.profile_unlocked_until);
     return {
-      student_id: row.enrollment_number ?? row.admission_number ?? row.enrollment_no ?? row.user_id,
-      enrollment_no: row.enrollment_number ?? row.admission_number ?? row.enrollment_no,
+      student_id:
+        row.enrollment_number ??
+        row.admission_number ??
+        row.enrollment_no ??
+        row.user_id,
+      enrollment_no:
+        row.enrollment_number ?? row.admission_number ?? row.enrollment_no,
       name: row.name,
       email: row.email,
       mobile: parentInfo?.student_mobile ?? parentInfo?.mobile ?? null,
@@ -109,18 +123,36 @@ export class StudentPortalService {
       parent_details: {
         father_name: parentInfo?.father_name ?? parentInfo?.father ?? null,
         mother_name: parentInfo?.mother_name ?? parentInfo?.mother ?? null,
-        parent_occupation: parentInfo?.parent_occupation ?? parentInfo?.occupation ?? null,
+        parent_occupation:
+          parentInfo?.parent_occupation ?? parentInfo?.occupation ?? null,
         annual_income: parentInfo?.annual_income ?? null,
-        emergency_contact_name: parentInfo?.emergency_contact_name ?? parentInfo?.emergency_contact ?? null,
-        emergency_contact_phone: parentInfo?.emergency_contact_phone ?? parentInfo?.emergency_phone ?? null,
-        emergency_contact_priority: parentInfo?.emergency_contact_priority ?? 'Primary',
+        emergency_contact_name:
+          parentInfo?.emergency_contact_name ??
+          parentInfo?.emergency_contact ??
+          null,
+        emergency_contact_phone:
+          parentInfo?.emergency_contact_phone ??
+          parentInfo?.emergency_phone ??
+          null,
+        emergency_contact_priority:
+          parentInfo?.emergency_contact_priority ?? 'Primary',
       },
       address: {
-        permanent: parentInfo?.permanent_address ?? parentInfo?.address?.permanent ?? parentInfo?.address ?? null,
-        current: parentInfo?.current_address ?? parentInfo?.address?.current ?? null,
+        permanent:
+          parentInfo?.permanent_address ??
+          parentInfo?.address?.permanent ??
+          parentInfo?.address ??
+          null,
+        current:
+          parentInfo?.current_address ?? parentInfo?.address?.current ?? null,
       },
-      aadhaar_masked: this.maskEncrypted(row.aadhaar_encrypted, (v) => this.crypto.maskAadhaar(v)),
-      passport_masked: this.maskEncrypted(row.passport_encrypted, (v) => `••••${v.slice(-4)}`),
+      aadhaar_masked: this.maskEncrypted(row.aadhaar_encrypted, (v) =>
+        this.crypto.maskAadhaar(v),
+      ),
+      passport_masked: this.maskEncrypted(
+        row.passport_encrypted,
+        (v) => `••••${v.slice(-4)}`,
+      ),
       admission_type: row.admission_type,
       admission_status: row.admission_status,
       profile_photo_url: this.displayProfilePhotoUrl(row.profile_photo_url),
@@ -142,7 +174,12 @@ export class StudentPortalService {
       address?: { permanent?: string; current?: string };
     },
   ) {
-    const profileRows = await this.dataSource.query<Array<{ profile_unlocked_until: Date | null; parent_info: Record<string, any> | null }>>(
+    const profileRows = await this.dataSource.query<
+      Array<{
+        profile_unlocked_until: Date | null;
+        parent_info: Record<string, any> | null;
+      }>
+    >(
       `SELECT profile_unlocked_until, parent_info FROM student_profiles WHERE user_id = $1`,
       [userId],
     );
@@ -154,7 +191,10 @@ export class StudentPortalService {
     let queryIdx = 1;
 
     if (dto.profile_photo_url !== undefined) {
-      if (typeof dto.profile_photo_url === 'string' && dto.profile_photo_url.startsWith('data:')) {
+      if (
+        typeof dto.profile_photo_url === 'string' &&
+        dto.profile_photo_url.startsWith('data:')
+      ) {
         throw new BadRequestException(
           'Profile photo is too large to save this way. Use the photo upload button with a JPG, PNG, or WEBP file under 5 MB.',
         );
@@ -167,15 +207,23 @@ export class StudentPortalService {
       values.push(dto.bank_details);
     }
 
-    const wantsLockedFields = dto.parent_details !== undefined || dto.address !== undefined;
+    const wantsLockedFields =
+      dto.parent_details !== undefined || dto.address !== undefined;
     if (wantsLockedFields) {
       if (!this.isProfileUnlocked(profileRow.profile_unlocked_until)) {
-        throw new BadRequestException('Profile fields are locked. Request a correction from Admin.');
+        throw new BadRequestException(
+          'Profile fields are locked. Request a correction from Admin.',
+        );
       }
-      const mergedParent = { ...(profileRow.parent_info ?? {}), ...(dto.parent_details ?? {}) };
+      const mergedParent = {
+        ...(profileRow.parent_info ?? {}),
+        ...(dto.parent_details ?? {}),
+      };
       if (dto.address) {
-        mergedParent.permanent_address = dto.address.permanent ?? mergedParent.permanent_address;
-        mergedParent.current_address = dto.address.current ?? mergedParent.current_address;
+        mergedParent.permanent_address =
+          dto.address.permanent ?? mergedParent.permanent_address;
+        mergedParent.current_address =
+          dto.address.current ?? mergedParent.current_address;
       }
       setChunks.push(`parent_info = $${queryIdx++}`);
       values.push(mergedParent);
@@ -192,8 +240,13 @@ export class StudentPortalService {
     return { success: true, locked: wantsLockedFields };
   }
 
-  async uploadProfilePhoto(tenantId: string, userId: string, file: Express.Multer.File) {
-    if (!file?.buffer?.length) throw new BadRequestException('No photo uploaded');
+  async uploadProfilePhoto(
+    tenantId: string,
+    userId: string,
+    file: Express.Multer.File,
+  ) {
+    if (!file?.buffer?.length)
+      throw new BadRequestException('No photo uploaded');
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
     if (!allowed.includes(file.mimetype)) {
       throw new BadRequestException('Profile photo must be JPG, PNG, or WEBP');
@@ -242,7 +295,10 @@ export class StudentPortalService {
     return '/api/student/profile/photo';
   }
 
-  private async getProfilePhotoPath(tenantId: string, userId: string): Promise<string | null> {
+  private async getProfilePhotoPath(
+    tenantId: string,
+    userId: string,
+  ): Promise<string | null> {
     const [doc] = await this.dataSource.query<Array<{ file_path: string }>>(
       `SELECT file_path FROM student_onboarding_docs
        WHERE tenant_id = $1 AND student_user_id = $2 AND doc_type = 'PHOTO' AND file_path IS NOT NULL
@@ -251,27 +307,44 @@ export class StudentPortalService {
     );
     if (doc?.file_path) return doc.file_path;
 
-    const [profile] = await this.dataSource.query<Array<{ profile_photo_url: string | null }>>(
+    const [profile] = await this.dataSource.query<
+      Array<{ profile_photo_url: string | null }>
+    >(
       `SELECT profile_photo_url FROM student_profiles WHERE tenant_id = $1 AND user_id = $2`,
       [tenantId, userId],
     );
     const url = profile?.profile_photo_url;
-    if (typeof url === 'string' && url.trim() && !url.startsWith('data:')) return url;
+    if (typeof url === 'string' && url.trim() && !url.startsWith('data:'))
+      return url;
     return null;
   }
 
-  private async persistProfilePhotoFile(tenantId: string, file: Express.Multer.File): Promise<string> {
+  private async persistProfilePhotoFile(
+    tenantId: string,
+    file: Express.Multer.File,
+  ): Promise<string> {
     const uniqueName = `${uuidv4()}${extname(file.originalname) || '.jpg'}`;
     if (this.objectStorage.isEnabled()) {
       const key = this.objectStorage.buildKey(tenantId, uniqueName);
-      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      const stored = await this.objectStorage.upload(
+        tenantId,
+        key,
+        file.buffer,
+        file.mimetype,
+      );
       return stored.url ?? stored.key;
     }
     const uploadPath = process.env.UPLOAD_PATH || './uploads';
     const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const targetDir = join(process.cwd(), uploadPath, tenantId, String(year), month);
+    const targetDir = join(
+      process.cwd(),
+      uploadPath,
+      tenantId,
+      String(year),
+      month,
+    );
     mkdirSync(targetDir, { recursive: true });
     const fullPath = join(targetDir, uniqueName);
     writeFileSync(fullPath, file.buffer);
@@ -279,10 +352,9 @@ export class StudentPortalService {
   }
 
   async getCampusSettings(tenantId: string) {
-    const rows = await this.dataSource.query<Array<{ settings: Record<string, unknown> | null }>>(
-      `SELECT settings FROM tenants WHERE tenant_id = $1`,
-      [tenantId],
-    );
+    const rows = await this.dataSource.query<
+      Array<{ settings: Record<string, unknown> | null }>
+    >(`SELECT settings FROM tenants WHERE tenant_id = $1`, [tenantId]);
     const settings = rows[0]?.settings ?? {};
     return {
       is_hostel_sale_active: settings.is_hostel_sale_active === true,
@@ -324,23 +396,27 @@ export class StudentPortalService {
         )
       : [];
 
-    const documents = await this.dataSource.query(
-      `SELECT certificate_id, title, issuer, verification_status, file_path, uploaded_at
+    const documents = await this.dataSource
+      .query(
+        `SELECT certificate_id, title, issuer, verification_status, file_path, uploaded_at
        FROM student_certificates
        WHERE student_user_id = $1
        ORDER BY uploaded_at DESC`,
-      [userId],
-    ).catch(() => []);
+        [userId],
+      )
+      .catch(() => []);
 
-    const feeReceipts = await this.dataSource.query(
-      `SELECT f.demand_id, f.fee_head, f.total_amount, f.paid_amount, f.status, f.due_date,
+    const feeReceipts = await this.dataSource
+      .query(
+        `SELECT f.demand_id, f.fee_head, f.total_amount, f.paid_amount, f.status, f.due_date,
               t.receipt_url
        FROM finance_fee_demands f
        LEFT JOIN finance_transactions t ON t.demand_id = f.demand_id AND t.status = 'SUCCESS'
        WHERE f.student_user_id = $1 AND f.fee_head ILIKE '%admission%'
        ORDER BY f.created_at DESC LIMIT 5`,
-      [userId],
-    ).catch(() => []);
+        [userId],
+      )
+      .catch(() => []);
 
     return {
       profile: profile[0] ?? null,
@@ -351,7 +427,10 @@ export class StudentPortalService {
       admission_fee_receipts: feeReceipts,
       timeline: [
         application[0]?.submitted_at
-          ? { label: 'Application submitted', date: application[0].submitted_at }
+          ? {
+              label: 'Application submitted',
+              date: application[0].submitted_at,
+            }
           : null,
         counseling[0]?.counseling_date
           ? { label: 'Counseling', date: counseling[0].counseling_date }
@@ -383,7 +462,10 @@ export class StudentPortalService {
 
     const creditsEarned = enrollments
       .filter((r: { status: string }) => r.status === 'COMPLETED')
-      .reduce((sum: number, r: { credits: number }) => sum + Number(r.credits), 0);
+      .reduce(
+        (sum: number, r: { credits: number }) => sum + Number(r.credits),
+        0,
+      );
 
     const currentSemEnrollments = enrollments.filter(
       (r: { semester: number }) => Number(r.semester) === currentSemester,
@@ -411,16 +493,26 @@ export class StudentPortalService {
       credits_earned: creditsEarned,
       credits_required: 160,
       enrollments,
-      core_enrollments: enrollments.filter((r: { course_type: string }) => r.course_type === 'CORE'),
-      elective_enrollments: enrollments.filter((r: { course_type: string }) => r.course_type === 'ELECTIVE'),
+      core_enrollments: enrollments.filter(
+        (r: { course_type: string }) => r.course_type === 'CORE',
+      ),
+      elective_enrollments: enrollments.filter(
+        (r: { course_type: string }) => r.course_type === 'ELECTIVE',
+      ),
       available_electives: electives,
       electives_needed: electivesNeeded,
       electives_max: 2,
     };
   }
 
-  private async ensureCoreEnrollments(tenantId: string, userId: string, semester: number) {
-    const coreCourses = await this.dataSource.query<Array<{ course_id: string }>>(
+  private async ensureCoreEnrollments(
+    tenantId: string,
+    userId: string,
+    semester: number,
+  ) {
+    const coreCourses = await this.dataSource.query<
+      Array<{ course_id: string }>
+    >(
       `SELECT course_id FROM academic_courses
        WHERE tenant_id = $1
          AND COALESCE(course_type, CASE WHEN is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'CORE'`,
@@ -438,7 +530,6 @@ export class StudentPortalService {
     }
   }
 
-
   async getAttendance(tenantId: string, userId: string) {
     const subjectWise = await this.dataSource.query(
       `SELECT c.course_code, c.course_name, e.semester, e.attendance_percent, e.status
@@ -454,7 +545,8 @@ export class StudentPortalService {
         ? Number(
             (
               subjectWise.reduce(
-                (s: number, r: { attendance_percent: string }) => s + Number(r.attendance_percent),
+                (s: number, r: { attendance_percent: string }) =>
+                  s + Number(r.attendance_percent),
                 0,
               ) / subjectWise.length
             ).toFixed(2),
@@ -463,22 +555,39 @@ export class StudentPortalService {
 
     const semesters = Array.from({ length: 8 }, (_, i) => {
       const sem = i + 1;
-      const rows = subjectWise.filter((r: { semester: number }) => Number(r.semester) === sem);
-      const completed = rows.length > 0 && rows.every((r: { status: string }) => r.status === 'COMPLETED');
-      const inProgress = rows.some((r: { status: string }) => r.status === 'ENROLLED');
+      const rows = subjectWise.filter(
+        (r: { semester: number }) => Number(r.semester) === sem,
+      );
+      const completed =
+        rows.length > 0 &&
+        rows.every((r: { status: string }) => r.status === 'COMPLETED');
+      const inProgress = rows.some(
+        (r: { status: string }) => r.status === 'ENROLLED',
+      );
       return {
         semester: sem,
-        status: completed ? 'COMPLETED' : inProgress ? 'IN_PROGRESS' : rows.length ? 'PARTIAL' : 'UPCOMING',
+        status: completed
+          ? 'COMPLETED'
+          : inProgress
+            ? 'IN_PROGRESS'
+            : rows.length
+              ? 'PARTIAL'
+              : 'UPCOMING',
         courses_count: rows.length,
       };
     });
 
-    return { overall_percent: avg, subject_wise: subjectWise, progression: semesters };
+    return {
+      overall_percent: avg,
+      subject_wise: subjectWise,
+      progression: semesters,
+    };
   }
 
   async getMarks(tenantId: string, userId: string) {
-    const marks = await this.dataSource.query(
-      `SELECT m.exam_type, m.marks_obtained, m.max_marks, m.status,
+    const marks = await this.dataSource
+      .query(
+        `SELECT m.exam_type, m.marks_obtained, m.max_marks, m.status,
               c.course_code, c.course_name, e.semester
        FROM academic_marks m
        JOIN academic_courses c ON c.course_id = m.course_id
@@ -486,16 +595,19 @@ export class StudentPortalService {
          ON e.course_id = m.course_id AND e.student_user_id = m.student_user_id
        WHERE m.student_user_id = $1 AND m.tenant_id = $2 AND m.status = 'PUBLISHED'
        ORDER BY e.semester NULLS LAST, c.course_code, m.exam_type`,
-      [userId, tenantId],
-    ).catch(() => []);
+        [userId, tenantId],
+      )
+      .catch(() => []);
 
-    const gradeCards = await this.dataSource.query(
-      `SELECT semester, cgpa, status, published_at
+    const gradeCards = await this.dataSource
+      .query(
+        `SELECT semester, cgpa, status, published_at
        FROM grade_cards
        WHERE student_user_id = $1 AND tenant_id = $2
        ORDER BY semester`,
-      [userId, tenantId],
-    ).catch(() => []);
+        [userId, tenantId],
+      )
+      .catch(() => []);
 
     const enrollments = await this.dataSource.query(
       `SELECT e.semester, e.grade, e.grade_points, e.status,
@@ -506,17 +618,23 @@ export class StudentPortalService {
       [userId],
     );
 
-    const backlogs = enrollments.filter((r: { status: string }) => r.status === 'FAILED');
-    const failedCodes = new Set(backlogs.map((b: { course_code: string }) => b.course_code));
+    const backlogs = enrollments.filter(
+      (r: { status: string }) => r.status === 'FAILED',
+    );
+    const failedCodes = new Set(
+      backlogs.map((b: { course_code: string }) => b.course_code),
+    );
     const cleared = enrollments.filter(
       (r: { status: string; course_code: string }) =>
         r.status === 'COMPLETED' && failedCodes.has(r.course_code),
     );
 
-    const sgpaFromCards = gradeCards.map((g: { semester: number; cgpa: string | null }) => ({
-      semester: Number(g.semester),
-      sgpa: g.cgpa != null ? Number(g.cgpa) : 0,
-    }));
+    const sgpaFromCards = gradeCards.map(
+      (g: { semester: number; cgpa: string | null }) => ({
+        semester: Number(g.semester),
+        sgpa: g.cgpa != null ? Number(g.cgpa) : 0,
+      }),
+    );
 
     const semesterMap = new Map<number, { points: number; credits: number }>();
     for (const row of enrollments) {
@@ -534,10 +652,21 @@ export class StudentPortalService {
         sgpa: credits > 0 ? Number((points / credits).toFixed(2)) : 0,
       }));
 
-    const sgpaHistory = sgpaFromCards.length ? sgpaFromCards : sgpaFromEnrollments;
-    const overallCredits = [...semesterMap.values()].reduce((s, b) => s + b.credits, 0);
-    const overallPoints = [...semesterMap.values()].reduce((s, b) => s + b.points, 0);
-    const cgpa = overallCredits > 0 ? Number((overallPoints / overallCredits).toFixed(2)) : 0;
+    const sgpaHistory = sgpaFromCards.length
+      ? sgpaFromCards
+      : sgpaFromEnrollments;
+    const overallCredits = [...semesterMap.values()].reduce(
+      (s, b) => s + b.credits,
+      0,
+    );
+    const overallPoints = [...semesterMap.values()].reduce(
+      (s, b) => s + b.points,
+      0,
+    );
+    const cgpa =
+      overallCredits > 0
+        ? Number((overallPoints / overallCredits).toFixed(2))
+        : 0;
 
     return {
       component_marks: marks,
@@ -551,27 +680,32 @@ export class StudentPortalService {
   async getExamDesk(tenantId: string, userId: string) {
     const examLabel = `COALESCE(sub.subject_name, sub.subject_code, es.exam_type::text, 'Exam')`;
 
-    const ufm = await this.dataSource.query(
-      `SELECT c.case_id, c.description, c.penalty_applied, c.status, c.logged_at,
+    const ufm = await this.dataSource
+      .query(
+        `SELECT c.case_id, c.description, c.penalty_applied, c.status, c.logged_at,
               ${examLabel} AS exam_name, es.exam_date
        FROM ufm_cases c
        LEFT JOIN exam_schedules es ON es.exam_schedule_id = c.exam_id
        LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
        WHERE c.student_user_id = $1 AND c.tenant_id = $2
        ORDER BY c.logged_at DESC`,
-      [userId, tenantId],
-    ).catch(() => []);
+        [userId, tenantId],
+      )
+      .catch(() => []);
 
-    const disciplineUfm = await this.dataSource.query(
-      `SELECT record_id, incident_type, description, action_taken, date_logged
+    const disciplineUfm = await this.dataSource
+      .query(
+        `SELECT record_id, incident_type, description, action_taken, date_logged
        FROM student_discipline_records
        WHERE student_user_id = $1 AND tenant_id = $2 AND incident_type = 'UFM'
        ORDER BY date_logged DESC`,
-      [userId, tenantId],
-    ).catch(() => []);
+        [userId, tenantId],
+      )
+      .catch(() => []);
 
-    const seating = await this.dataSource.query(
-      `SELECT sp.seating_plan_id, sp.room,
+    const seating = await this.dataSource
+      .query(
+        `SELECT sp.seating_plan_id, sp.room,
               seat.elem->>'block' AS block,
               seat.elem->>'seat_no' AS seat_no,
               ${examLabel} AS exam_name, es.exam_date, es.start_time
@@ -581,8 +715,9 @@ export class StudentPortalService {
        JOIN LATERAL jsonb_array_elements(sp.seating_map) AS seat(elem) ON true
        WHERE sp.tenant_id = $1 AND sp.published = true
          AND seat.elem->>'student_user_id' = $2`,
-      [tenantId, userId],
-    ).catch(() => []);
+        [tenantId, userId],
+      )
+      .catch(() => []);
 
     const mySeats = seating.map(
       (plan: {
@@ -593,7 +728,8 @@ export class StudentPortalService {
         seat_no?: string;
       }) => {
         const examDate = new Date(plan.exam_date);
-        const hoursUntilExam = (examDate.getTime() - Date.now()) / (1000 * 60 * 60);
+        const hoursUntilExam =
+          (examDate.getTime() - Date.now()) / (1000 * 60 * 60);
         const seatRevealed = hoursUntilExam <= 24;
         return {
           exam_name: plan.exam_name,
@@ -622,18 +758,24 @@ export class StudentPortalService {
       [tenantId, userId],
     );
 
-    const legacy = await this.dataSource.query(
-      `SELECT program_type AS activity_type, activity_name AS details, credits_awarded, start_date AS event_date
+    const legacy = await this.dataSource
+      .query(
+        `SELECT program_type AS activity_type, activity_name AS details, credits_awarded, start_date AS event_date
        FROM ncc_nss_sodeca_records
        WHERE tenant_id = $1 AND student_user_id = $2`,
-      [tenantId, userId],
-    ).catch(() => []);
+        [tenantId, userId],
+      )
+      .catch(() => []);
 
     const totals = ['NCC', 'NSS', 'SODECA'].map((type) => ({
       activity_type: type,
       credits: [...records, ...legacy]
         .filter((r: { activity_type: string }) => r.activity_type === type)
-        .reduce((s: number, r: { credits_awarded: number }) => s + Number(r.credits_awarded ?? 0), 0),
+        .reduce(
+          (s: number, r: { credits_awarded: number }) =>
+            s + Number(r.credits_awarded ?? 0),
+          0,
+        ),
     }));
 
     return { records: [...records, ...legacy], totals };
@@ -673,7 +815,10 @@ export class StudentPortalService {
 
     return {
       records: [...demerits, ...legacy],
-      demerit_summary: summary[0] ?? { cumulative_demerit_points: 0, is_subject_back_triggered: false },
+      demerit_summary: summary[0] ?? {
+        cumulative_demerit_points: 0,
+        is_subject_back_triggered: false,
+      },
     };
   }
 
@@ -701,13 +846,15 @@ export class StudentPortalService {
       [userId],
     );
 
-    const tasks = await this.dataSource.query(
-      `SELECT task_name, owner_department, status, created_at
+    const tasks = await this.dataSource
+      .query(
+        `SELECT task_name, owner_department, status, created_at
        FROM student_exit_clearance_tasks
        WHERE tenant_id = $1 AND student_user_id = $2
        ORDER BY created_at`,
-      [tenantId, userId],
-    ).catch(() => []);
+        [tenantId, userId],
+      )
+      .catch(() => []);
 
     const c = clearance[0] ?? {};
     const steps = [
@@ -724,11 +871,15 @@ export class StudentPortalService {
       degree_issued_date: c.degree_issued_date ?? profile[0]?.degree_issued_at,
       degree_award_status: profile[0]?.degree_award_status,
       final_result: profile[0]?.final_result,
-      alumni_converted: c.alumni_converted ?? profile[0]?.alumni_conversion_flag,
+      alumni_converted:
+        c.alumni_converted ?? profile[0]?.alumni_conversion_flag,
       linkedin_url: c.linkedin_url,
       placement_organization: c.placement_organization,
       clearance_tasks: tasks,
-      alumni_eligibility: await this.alumniConversion.getConversionEligibility(tenantId, userId),
+      alumni_eligibility: await this.alumniConversion.getConversionEligibility(
+        tenantId,
+        userId,
+      ),
     };
   }
 
@@ -741,7 +892,12 @@ export class StudentPortalService {
       `UPDATE student_exit_clearances
        SET linkedin_url = $3, placement_organization = $4, updated_at = NOW()
        WHERE tenant_id = $1 AND student_user_id = $2`,
-      [tenantId, userId, dto.linkedin_url ?? null, dto.placement_organization ?? null],
+      [
+        tenantId,
+        userId,
+        dto.linkedin_url ?? null,
+        dto.placement_organization ?? null,
+      ],
     );
     return this.alumniConversion.enqueueConversion({
       tenantId,
@@ -777,7 +933,10 @@ export class StudentPortalService {
       subject: dto.subject.trim(),
       description,
     });
-    return { ticket_id: ticket.ticket_id, message: 'Profile correction submitted to Academic Admin.' };
+    return {
+      ticket_id: ticket.ticket_id,
+      message: 'Profile correction submitted to Academic Admin.',
+    };
   }
 
   async logExtracurricular(
@@ -805,7 +964,14 @@ export class StudentPortalService {
          event_date, verification_status, certificate_file_path
        ) VALUES ($1, $2, $3, $4, 0, $5::date, 'PENDING_VERIFICATION', $6)
        RETURNING record_id`,
-      [tenantId, userId, activityType, dto.description.trim(), dto.event_date, filePath],
+      [
+        tenantId,
+        userId,
+        activityType,
+        dto.description.trim(),
+        dto.event_date,
+        filePath,
+      ],
     );
 
     const student = await this.dataSource.query<Array<{ name: string }>>(
@@ -830,16 +996,29 @@ export class StudentPortalService {
     return { record_id: rows[0].record_id, status: 'PENDING_VERIFICATION' };
   }
 
-  private async persistExtracurricularFile(tenantId: string, file: Express.Multer.File): Promise<string> {
+  private async persistExtracurricularFile(
+    tenantId: string,
+    file: Express.Multer.File,
+  ): Promise<string> {
     const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
     if (this.objectStorage.isEnabled()) {
       const key = this.objectStorage.buildKey(tenantId, uniqueName);
-      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      const stored = await this.objectStorage.upload(
+        tenantId,
+        key,
+        file.buffer,
+        file.mimetype,
+      );
       return stored.url;
     }
     const uploadPath = process.env.UPLOAD_PATH || './uploads';
     const date = new Date();
-    const dir = resolve(uploadPath, tenantId, `${date.getFullYear()}`, `${date.getMonth() + 1}`);
+    const dir = resolve(
+      uploadPath,
+      tenantId,
+      `${date.getFullYear()}`,
+      `${date.getMonth() + 1}`,
+    );
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const fullPath = resolve(dir, uniqueName);
     writeFileSync(fullPath, file.buffer);
@@ -847,19 +1026,23 @@ export class StudentPortalService {
   }
 
   async getLibrary(tenantId: string, userId: string) {
-    const books = await this.dataSource.query(
-      `SELECT title, author, available_copies, shelf_location
+    const books = await this.dataSource
+      .query(
+        `SELECT title, author, available_copies, shelf_location
        FROM operations_library_books
        ORDER BY title LIMIT 20`,
-    ).catch(() => []);
+      )
+      .catch(() => []);
 
-    const dues = await this.dataSource.query(
-      `SELECT fee_head, total_amount - paid_amount AS outstanding, status
+    const dues = await this.dataSource
+      .query(
+        `SELECT fee_head, total_amount - paid_amount AS outstanding, status
        FROM finance_fee_demands
        WHERE student_user_id = $1 AND fee_head ILIKE '%library%'
        ORDER BY due_date DESC`,
-      [userId],
-    ).catch(() => []);
+        [userId],
+      )
+      .catch(() => []);
 
     const exit = await this.dataSource.query(
       `SELECT library_cleared FROM student_exit_clearances
@@ -876,17 +1059,21 @@ export class StudentPortalService {
   }
 
   async getTransport(tenantId: string, userId: string) {
-    const routes = await this.dataSource.query(
-      `SELECT route_code, route_name, bus_number, capacity, annual_fee, stops
+    const routes = await this.dataSource
+      .query(
+        `SELECT route_code, route_name, bus_number, capacity, annual_fee, stops
        FROM operations_transport_routes
        WHERE is_active = true
        ORDER BY route_name`,
-    ).catch(() => []);
+      )
+      .catch(() => []);
 
     return {
       assigned_route: routes[0] ?? null,
       all_routes: routes,
-      note: routes.length ? null : 'Transport allocation will appear once assigned by Admin.',
+      note: routes.length
+        ? null
+        : 'Transport allocation will appear once assigned by Admin.',
     };
   }
 
@@ -894,8 +1081,9 @@ export class StudentPortalService {
     const s = await resolvePlacementSchema(this.dataSource).catch(() => null);
 
     if (s?.drivesTable === 'placement_ats_drives') {
-      const drives = await this.dataSource.query(
-        `SELECT d.drive_id, COALESCE(d.job_role, d.job_profile) AS job_title, d.min_cgpa,
+      const drives = await this.dataSource
+        .query(
+          `SELECT d.drive_id, COALESCE(d.job_role, d.job_profile) AS job_title, d.min_cgpa,
                 COALESCE(d.deadline, d.drive_date::timestamptz) AS application_deadline,
                 COALESCE(d.package_lpa, d.package_details_lpa) AS package_lpa,
                 c.company_name, d.description
@@ -903,11 +1091,13 @@ export class StudentPortalService {
          JOIN placement_companies c ON c.company_id = d.company_id
          WHERE d.tenant_id = $1 AND d.status IN ('ACTIVE', 'OPEN')
          ORDER BY d.created_at DESC`,
-        [tenantId],
-      ).catch(() => []);
+          [tenantId],
+        )
+        .catch(() => []);
 
-      const applications = await this.dataSource.query(
-        `SELECT a.application_id, a.pipeline_stage AS status, a.rejected_at_stage,
+      const applications = await this.dataSource
+        .query(
+          `SELECT a.application_id, a.pipeline_stage AS status, a.rejected_at_stage,
                 a.applied_at, COALESCE(d.job_role, d.job_profile) AS job_title,
                 c.company_name, d.drive_id
          FROM placement_ats_drive_applications a
@@ -915,31 +1105,36 @@ export class StudentPortalService {
          JOIN placement_companies c ON c.company_id = d.company_id
          WHERE a.student_user_id = $1
          ORDER BY a.applied_at DESC`,
-        [userId],
-      ).catch(() => []);
+          [userId],
+        )
+        .catch(() => []);
 
       return { open_jobs: drives, my_applications: applications };
     }
 
-    const drives = await this.dataSource.query(
-      `SELECT d.placement_drive_id AS drive_id,
+    const drives = await this.dataSource
+      .query(
+        `SELECT d.placement_drive_id AS drive_id,
               COALESCE(d.job_role, d.role_title) AS job_title, d.min_cgpa,
               d.deadline AS application_deadline, d.package_lpa, d.company_name, d.description
        FROM placement_drives d
        WHERE d.status IN ('ACTIVE', 'OPEN')
        ORDER BY d.created_at DESC`,
-    ).catch(() => []);
+      )
+      .catch(() => []);
 
-    const applications = await this.dataSource.query(
-      `SELECT a.application_id, COALESCE(a.status, 'APPLIED') AS status,
+    const applications = await this.dataSource
+      .query(
+        `SELECT a.application_id, COALESCE(a.status, 'APPLIED') AS status,
               a.applied_at, COALESCE(d.job_role, d.role_title) AS job_title,
               d.company_name, d.placement_drive_id AS drive_id
        FROM placement_applications a
        JOIN placement_drives d ON d.placement_drive_id = a.placement_drive_id
        WHERE a.student_user_id = $1
        ORDER BY a.applied_at DESC NULLS LAST`,
-      [userId],
-    ).catch(() => []);
+        [userId],
+      )
+      .catch(() => []);
 
     return { open_jobs: drives, my_applications: applications };
   }
@@ -963,16 +1158,22 @@ export class StudentPortalService {
       [userId],
     );
 
-    const total_outstanding = (pending_demands as Array<{ total_amount: string; paid_amount: string }>).reduce(
-      (sum, row) => sum + Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
+    const total_outstanding = (
+      pending_demands as Array<{ total_amount: string; paid_amount: string }>
+    ).reduce(
+      (sum, row) =>
+        sum +
+        Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
       0,
     );
 
-    const hostelFinesPending = await this.dataSource.query<Array<{ count: string }>>(
-      `SELECT COUNT(*)::text AS count FROM operations_hostel_fines
+    const hostelFinesPending = await this.dataSource
+      .query<Array<{ count: string }>>(
+        `SELECT COUNT(*)::text AS count FROM operations_hostel_fines
        WHERE student_user_id = $1 AND status = 'PENDING'`,
-      [userId],
-    ).catch(() => [{ count: '0' }]);
+        [userId],
+      )
+      .catch(() => [{ count: '0' }]);
 
     const hasOpenDemands = total_outstanding > 0;
     const hostelFineCount = Number(hostelFinesPending[0]?.count ?? 0);
@@ -998,18 +1199,25 @@ export class StudentPortalService {
        FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
       [demandId, userId],
     );
-    const demand = rows[0] as {
-      demand_id: string;
-      fee_head: string;
-      total_amount: string;
-      paid_amount: string;
-      status: string;
-    } | undefined;
+    const demand = rows[0] as
+      | {
+          demand_id: string;
+          fee_head: string;
+          total_amount: string;
+          paid_amount: string;
+          status: string;
+        }
+      | undefined;
     if (!demand) throw new NotFoundException('Fee demand not found');
-    if (demand.status === 'PAID') throw new BadRequestException('This demand is already paid');
+    if (demand.status === 'PAID')
+      throw new BadRequestException('This demand is already paid');
 
-    const outstanding = Math.max(0, Number(demand.total_amount) - Number(demand.paid_amount ?? 0));
-    if (outstanding <= 0) throw new BadRequestException('Nothing due on this demand');
+    const outstanding = Math.max(
+      0,
+      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
+    );
+    if (outstanding <= 0)
+      throw new BadRequestException('Nothing due on this demand');
 
     const orderId = `order_${demandId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
     return {
@@ -1024,17 +1232,23 @@ export class StudentPortalService {
     };
   }
 
-  async payDemandMock(userId: string, demandId: string, gatewayPaymentId?: string) {
+  async payDemandMock(
+    userId: string,
+    demandId: string,
+    gatewayPaymentId?: string,
+  ) {
     const rows = await this.dataSource.query(
       `SELECT * FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
       [demandId, userId],
     );
-    const demand = rows[0] as {
-      demand_id: string;
-      total_amount: string;
-      paid_amount: string;
-      status: string;
-    } | undefined;
+    const demand = rows[0] as
+      | {
+          demand_id: string;
+          total_amount: string;
+          paid_amount: string;
+          status: string;
+        }
+      | undefined;
     if (!demand) {
       throw new BadRequestException('Fee demand not found');
     }
@@ -1042,20 +1256,26 @@ export class StudentPortalService {
       return { already_paid: true, demand_id: demandId };
     }
 
-    const outstanding = Math.max(0, Number(demand.total_amount) - Number(demand.paid_amount ?? 0));
+    const outstanding = Math.max(
+      0,
+      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
+    );
     if (outstanding <= 0) {
       throw new BadRequestException('Nothing due on this demand');
     }
 
     const paymentId = gatewayPaymentId ?? `pay_${Date.now()}`;
-    const demandMeta = await this.dataSource.query<Array<{ fee_head: string; tenant_id: string }>>(
+    const demandMeta = await this.dataSource.query<
+      Array<{ fee_head: string; tenant_id: string }>
+    >(
       `SELECT d.fee_head, u.tenant_id FROM finance_fee_demands d
        JOIN users u ON u.user_id = d.student_user_id
        WHERE d.demand_id = $1`,
       [demandId],
     );
     const feeHead = demandMeta[0]?.fee_head ?? 'FEE';
-    const tenantId = demandMeta[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId =
+      demandMeta[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
     const receiptNumber = `RCP-${paymentId.replace(/\W/g, '').slice(-12).toUpperCase()}`;
 
     const txnRows = await this.dataSource.query(
@@ -1086,7 +1306,13 @@ export class StudentPortalService {
       await this.dataSource.query(
         `INSERT INTO student_documents (tenant_id, student_user_id, category, title, file_url, source_transaction_id)
          VALUES ($1, $2, 'FEE_RECEIPTS', $3, $4, $5)`,
-        [tenantId, userId, `${feeHead} Receipt — ${receiptNumber}`, receiptUrl, transactionId],
+        [
+          tenantId,
+          userId,
+          `${feeHead} Receipt — ${receiptNumber}`,
+          receiptUrl,
+          transactionId,
+        ],
       );
     } catch (err) {
       // Receipt generation is best-effort; payment still recorded
@@ -1099,21 +1325,25 @@ export class StudentPortalService {
       [demandId],
     );
 
-    await this.dataSource.query(
-      `UPDATE operations_hostel_fines SET status = 'PAID'
+    await this.dataSource
+      .query(
+        `UPDATE operations_hostel_fines SET status = 'PAID'
        WHERE finance_demand_id = $1 AND student_user_id = $2`,
-      [demandId, userId],
-    ).catch(() => undefined);
+        [demandId, userId],
+      )
+      .catch(() => undefined);
 
-    await this.dataSource.query(
-      `UPDATE student_profiles SET no_dues_status = 'CLEARED'
+    await this.dataSource
+      .query(
+        `UPDATE student_profiles SET no_dues_status = 'CLEARED'
        WHERE user_id = $1
          AND NOT EXISTS (
            SELECT 1 FROM finance_fee_demands fd
            WHERE fd.student_user_id = $1 AND fd.status NOT IN ('PAID', 'WAIVED')
          )`,
-      [userId],
-    ).catch(() => undefined);
+        [userId],
+      )
+      .catch(() => undefined);
 
     this.events.emit('finance.demand_paid', {
       tenantId,
@@ -1136,13 +1366,15 @@ export class StudentPortalService {
   }
 
   async getDocumentVault(tenantId: string, userId: string) {
-    const docs = await this.dataSource.query(
-      `SELECT document_id, category, title, file_url, source_transaction_id, created_at
+    const docs = await this.dataSource
+      .query(
+        `SELECT document_id, category, title, file_url, source_transaction_id, created_at
        FROM student_documents
        WHERE tenant_id = $1 AND student_user_id = $2
        ORDER BY created_at DESC`,
-      [tenantId, userId],
-    ).catch(() => []);
+        [tenantId, userId],
+      )
+      .catch(() => []);
     return { documents: docs };
   }
 }

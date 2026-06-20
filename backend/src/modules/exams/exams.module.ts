@@ -12,7 +12,12 @@ import { AttendancePolicyModule } from '../attendance-policy/attendance-policy.m
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ExamSchedule, ExamApplication, AttendanceRecord, User]),
+    TypeOrmModule.forFeature([
+      ExamSchedule,
+      ExamApplication,
+      AttendanceRecord,
+      User,
+    ]),
     FinanceModule,
     AttendancePolicyModule,
   ],

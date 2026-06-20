@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -12,7 +16,11 @@ export const ONBOARDING_STAGES = [
 export class HrOnboardingWorkflowService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  listTemplates(tenantId: string, entityId: number, workflowType = 'ONBOARDING') {
+  listTemplates(
+    tenantId: string,
+    entityId: number,
+    workflowType = 'ONBOARDING',
+  ) {
     return this.dataSource.query(
       `SELECT template_id, workflow_type, stage_name, task_name, is_mandatory, step_order
        FROM hr_workflow_templates
@@ -35,7 +43,8 @@ export class HrOnboardingWorkflowService {
   ) {
     const stage = dto.stage_name?.trim();
     const task = dto.task_name?.trim();
-    if (!stage || !task) throw new BadRequestException('stage_name and task_name are required');
+    if (!stage || !task)
+      throw new BadRequestException('stage_name and task_name are required');
 
     let order = dto.step_order;
     if (order == null) {
@@ -79,7 +88,14 @@ export class HrOnboardingWorkflowService {
          stage_name = COALESCE($6, stage_name)
        WHERE tenant_id = $1 AND entity_id = $2 AND template_id = $3
        RETURNING *`,
-      [tenantId, entityId, templateId, dto.task_name ?? null, dto.is_mandatory ?? null, dto.stage_name ?? null],
+      [
+        tenantId,
+        entityId,
+        templateId,
+        dto.task_name ?? null,
+        dto.is_mandatory ?? null,
+        dto.stage_name ?? null,
+      ],
     );
     if (!rows[0]) throw new NotFoundException('Workflow template not found');
     return rows[0];
@@ -143,7 +159,11 @@ export class HrOnboardingWorkflowService {
     );
   }
 
-  async getEmployeeWorkflow(tenantId: string, entityId: number, userId: string) {
+  async getEmployeeWorkflow(
+    tenantId: string,
+    entityId: number,
+    userId: string,
+  ) {
     const [employee] = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email,
               p.designation, p.joining_date, p.employee_id,
@@ -178,11 +198,15 @@ export class HrOnboardingWorkflowService {
     );
 
     const total = tasks.length;
-    const completed = tasks.filter((t: { status: string }) => t.status === 'COMPLETED').length;
+    const completed = tasks.filter(
+      (t: { status: string }) => t.status === 'COMPLETED',
+    ).length;
 
     const stages = ONBOARDING_STAGES.map((stageName) => ({
       stage_name: stageName,
-      tasks: tasks.filter((t: { stage_name: string }) => t.stage_name === stageName),
+      tasks: tasks.filter(
+        (t: { stage_name: string }) => t.stage_name === stageName,
+      ),
     }));
 
     return {
@@ -194,8 +218,16 @@ export class HrOnboardingWorkflowService {
     };
   }
 
-  async spawnTasksForEmployee(tenantId: string, entityId: number, userId: string) {
-    const templates = await this.listTemplates(tenantId, entityId, 'ONBOARDING');
+  async spawnTasksForEmployee(
+    tenantId: string,
+    entityId: number,
+    userId: string,
+  ) {
+    const templates = await this.listTemplates(
+      tenantId,
+      entityId,
+      'ONBOARDING',
+    );
     if (!templates.length) return { spawned: 0 };
 
     let spawned = 0;
@@ -212,7 +244,11 @@ export class HrOnboardingWorkflowService {
     return { spawned, total_templates: templates.length };
   }
 
-  async setTaskStatus(taskId: string, completedByUserId: string, completed: boolean) {
+  async setTaskStatus(
+    taskId: string,
+    completedByUserId: string,
+    completed: boolean,
+  ) {
     const rows = await this.dataSource.query(
       `UPDATE hr_employee_onboarding_tasks SET
          status = $2,
@@ -220,7 +256,12 @@ export class HrOnboardingWorkflowService {
          completed_by = CASE WHEN $3 THEN $4::uuid ELSE NULL END
        WHERE task_id = $1
        RETURNING *`,
-      [taskId, completed ? 'COMPLETED' : 'PENDING', completed, completedByUserId],
+      [
+        taskId,
+        completed ? 'COMPLETED' : 'PENDING',
+        completed,
+        completedByUserId,
+      ],
     );
     if (!rows[0]) throw new NotFoundException('Onboarding task not found');
     return rows[0];
@@ -233,7 +274,8 @@ export class HrOnboardingWorkflowService {
       `SELECT hired_user_id, entity_id FROM hr_applicants WHERE applicant_id = $1 AND tenant_id = $2`,
       [applicantId, tenantId],
     );
-    if (!applicant?.hired_user_id) return { spawned: 0, reason: 'no_hired_user' };
+    if (!applicant?.hired_user_id)
+      return { spawned: 0, reason: 'no_hired_user' };
 
     let entityId = applicant.entity_id;
     if (!entityId) {
@@ -245,6 +287,10 @@ export class HrOnboardingWorkflowService {
     }
     if (!entityId) return { spawned: 0, reason: 'no_entity' };
 
-    return this.spawnTasksForEmployee(tenantId, entityId, applicant.hired_user_id);
+    return this.spawnTasksForEmployee(
+      tenantId,
+      entityId,
+      applicant.hired_user_id,
+    );
   }
 }

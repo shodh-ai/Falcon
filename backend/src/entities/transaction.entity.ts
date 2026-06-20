@@ -1,10 +1,25 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  Index,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { FeeDemand } from './fee-demand.entity';
 import { BaseSoftDeleteEntity } from './base-soft-delete.entity';
 
 export type TransactionStatus = 'INITIATED' | 'SUCCESS' | 'FAILED' | 'REFUNDED';
-export type PaymentGateway = 'RAZORPAY' | 'PAYU' | 'CASH' | 'CHEQUE' | 'NEFT' | 'OTHER';
+export type PaymentGateway =
+  | 'RAZORPAY'
+  | 'PAYU'
+  | 'CASH'
+  | 'CHEQUE'
+  | 'NEFT'
+  | 'OTHER';
 export type TransactionDirection = 'IN' | 'OUT';
+export type ChequeStatus = 'PENDING_CLEARANCE' | 'CLEARED' | 'BOUNCED';
 
 @Entity('finance_transactions')
 @Index(['gateway_reference'])
@@ -59,6 +74,21 @@ export class Transaction extends BaseSoftDeleteEntity {
 
   @Column({ type: 'jsonb', nullable: true })
   gateway_payload: Record<string, unknown> | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  cheque_number: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  bank_name: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  clearance_date: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  bounce_reason: string | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  cheque_status: ChequeStatus | null;
 
   @CreateDateColumn()
   created_at: Date;

@@ -83,7 +83,9 @@ export class NotificationCronService {
     }
 
     if (rows.length) {
-      this.logger.log(`Emitted ${rows.length} attendance warning notifications`);
+      this.logger.log(
+        `Emitted ${rows.length} attendance warning notifications`,
+      );
     }
   }
 }

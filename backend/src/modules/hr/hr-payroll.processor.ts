@@ -16,11 +16,15 @@ export class HrPayrollProcessor extends WorkerHost {
   }
 
   async process(job: Job<HrPayrollJob>) {
-    this.logger.log(`Payroll job ${job.data.jobId} started for ${job.data.monthKey}`);
+    this.logger.log(
+      `Payroll job ${job.data.jobId} started for ${job.data.monthKey}`,
+    );
     try {
       return await this.hr.runPayroll(job.data.tenantId, job.data.monthKey);
     } catch (err) {
-      this.logger.error(`Payroll job failed: ${err instanceof Error ? err.message : err}`);
+      this.logger.error(
+        `Payroll job failed: ${err instanceof Error ? err.message : err}`,
+      );
       throw err;
     }
   }

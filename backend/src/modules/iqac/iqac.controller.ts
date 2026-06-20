@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Header, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -52,8 +64,11 @@ export class IqacController {
     @Res() res: Response,
   ) {
     const data = await this.analytics.getFacultyData(this.tenant(req), tab);
-    const csv = this.analytics.exportFacultyCsv(data.rows as Record<string, unknown>[]);
-    res.setHeader('Content-Disposition', `attachment; filename="iqac-faculty-${tab}.csv"`);
+    const csv = this.analytics.exportFacultyCsv(data.rows);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="iqac-faculty-${tab}.csv"`,
+    );
     res.send(csv);
   }
 
@@ -79,7 +94,10 @@ export class IqacController {
 
   @Get('audits')
   @Roles('SuperAdmin', 'IQAC', 'President')
-  audits(@Req() req: { user: AuthUser }, @Query('academic_year') academicYear?: string) {
+  audits(
+    @Req() req: { user: AuthUser },
+    @Query('academic_year') academicYear?: string,
+  ) {
     return this.analytics.getAudits(this.tenant(req), academicYear);
   }
 
@@ -95,7 +113,11 @@ export class IqacController {
     @Req() req: { user: AuthUser },
     @Body() dto: { report_type: 'AQAR' | 'SSR'; academic_year: string },
   ) {
-    return this.analytics.generateReport(this.tenant(req), req.user.user_id, dto);
+    return this.analytics.generateReport(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Post('analytics/refresh')
@@ -151,7 +173,10 @@ export class IqacController {
   @Post('placements/jobs')
   @Roles('SuperAdmin', 'PlacementCell')
   createJob(@Req() req: { user: AuthUser }, @Body() dto: CreateJobPostingDto) {
-    return this.iqac.createJob(dto, req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001');
+    return this.iqac.createJob(
+      dto,
+      req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
+    );
   }
 
   @Post('placements/jobs/:id/apply')
@@ -182,7 +207,12 @@ export class IqacController {
     @Param('alumniId') alumniId: string,
     @Body() dto: { action: 'approve' | 'reject' },
   ) {
-    return this.alumniAdmin.verifyProfile(this.tenant(req), alumniId, req.user.user_id, dto);
+    return this.alumniAdmin.verifyProfile(
+      this.tenant(req),
+      alumniId,
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Get('alumni/donations')
@@ -213,7 +243,13 @@ export class IqacController {
   @Roles('SuperAdmin', 'IQAC', 'Registrar')
   alumniCreateEvent(
     @Req() req: { user: AuthUser },
-    @Body() dto: { title: string; event_date: string; venue?: string; description?: string },
+    @Body()
+    dto: {
+      title: string;
+      event_date: string;
+      venue?: string;
+      description?: string;
+    },
   ) {
     return this.alumniAdmin.createEvent(this.tenant(req), dto);
   }
