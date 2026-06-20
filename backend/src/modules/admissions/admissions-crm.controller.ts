@@ -6,8 +6,10 @@ import { AdmissionsService } from './admissions.service';
 import { CounselingService } from './counseling.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadStageDto } from './dto/update-lead-stage.dto';
+import { HrWorkforceService } from '../hr/hr-workforce.service';
+import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
 
 @Controller('api/admissions-crm')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -16,6 +18,7 @@ export class AdmissionsCrmController {
   constructor(
     private readonly admissions: AdmissionsService,
     private readonly counseling: CounselingService,
+    private readonly workforce: HrWorkforceService,
   ) {}
 
   @Get('kanban')
@@ -97,6 +100,31 @@ export class AdmissionsCrmController {
     return this.counseling.listMeritRanks(this.tenant(req));
   }
 
+  /** Admissions/registrar self-service leave — avoids HR portal role gates on legacy deploys. */
+  @Post('self-service/workforce/requests')
+  submitWorkforceRequest(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      request_type: StaffRequestType;
+      leave_type?: string;
+      start_date?: string;
+      end_date?: string;
+      regularization_date?: string;
+      missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
+      reason?: string;
+    },
+  ) {
+    return this.workforce.applyRequest(req.user.user_id, this.tenant(req), dto, {
+      actorRoles: this.resolveRoles(req.user),
+    });
+  }
+
+  @Get('self-service/workforce/my-requests')
+  myWorkforceRequests(@Req() req: { user: AuthUser }) {
+    return this.workforce.listMyRequests(req.user.user_id, this.tenant(req));
+  }
+
   @Post('counseling/generate-merit')
   generateMerit(
     @Req() req: { user: AuthUser },
@@ -107,5 +135,9 @@ export class AdmissionsCrmController {
 
   private tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private resolveRoles(user: AuthUser): string[] {
+    return user.roles?.length ? user.roles : user.role ? [user.role] : [];
   }
 }

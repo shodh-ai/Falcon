@@ -19,6 +19,11 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
     edit: ['marks', 'seating', 'admit_cards'],
     approve: ['ufm_cases', 'revaluation'],
   },
+  DC_MEMBER: {
+    view: ['discipline', 'students'],
+    edit: ['demerit_incidents'],
+    approve: ['demerit_incidents'],
+  },
   PlacementCell: {
     view: ['student_resumes', 'marks', 'placements'],
     edit: ['drives', 'companies', 'offers'],

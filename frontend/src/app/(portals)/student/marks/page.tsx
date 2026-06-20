@@ -9,6 +9,7 @@ import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { API_URL } from '@/lib/api/client';
 import { useAuth } from '@/context/AuthContext';
@@ -61,6 +62,21 @@ type MarksHistory = {
     declaration_note?: string | null;
     declared_at: string;
   }>;
+  grade_cards?: Array<{
+    grade_card_id: string;
+    semester: number;
+    status: 'DRAFT' | 'PUBLISHED' | 'WITHHELD';
+    published_at: string | null;
+    payload: {
+      result_stage?: 'DRAFT' | 'PROVISIONAL' | 'FINAL';
+      sgpa?: number;
+      cgpa?: number;
+      rank?: number | null;
+      credits_attempted?: number;
+      credits_earned?: number;
+      withheld_reason?: string;
+    } | null;
+  }>;
   backlogs: {
     uncleared: { course_id: string; course_code: string; course_name: string; semester: number }[];
     cleared: { course_code: string; course_name: string; semester: number }[];
@@ -109,10 +125,18 @@ export default function StudentMarksPage() {
     return [...new Set([...fromGrades, ...fromComponents])].sort((a, b) => a - b);
   }, [data]);
 
-  async function downloadMarksheet(semester: number) {
+  const gradeCardsBySemester = useMemo(() => {
+    const map = new Map<number, NonNullable<MarksHistory['grade_cards']>[number]>();
+    for (const card of data?.grade_cards ?? []) {
+      if (!map.has(Number(card.semester))) map.set(Number(card.semester), card);
+    }
+    return map;
+  }, [data?.grade_cards]);
+
+  async function downloadMarksheet(semester: number, type: 'provisional' | 'final') {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/academics/marksheet/download/${semester}`, {
+      const res = await fetch(`${API_URL}/api/academics/marksheet/download/${semester}?type=${type}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -129,7 +153,7 @@ export default function StudentMarksPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `marksheet-semester-${semester}.pdf`;
+      a.download = `${type}-marksheet-semester-${semester}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -171,6 +195,60 @@ export default function StudentMarksPage() {
         <StudentStatCard label="Credits earned" value={data?.total_credits_earned ?? '—'} helper="Total credits completed" />
       </div>
 
+      {(data?.grade_cards?.length ?? 0) > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Published marksheets</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Provisional and final semester grade cards published by the Controller of Examinations.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            {data!.grade_cards!.map((card) => {
+              const stage = card.payload?.result_stage ?? 'DRAFT';
+              const isFinal = stage === 'FINAL';
+              const isPublished = stage === 'PROVISIONAL' || isFinal;
+              return (
+                <div key={card.grade_card_id} className="rounded-xl border p-4 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-sgvu-navy">Semester {card.semester}</p>
+                      <p className="text-muted-foreground">
+                        SGPA {Number(card.payload?.sgpa ?? 0).toFixed(2)} · CGPA {Number(card.payload?.cgpa ?? data?.cgpa ?? 0).toFixed(2)}
+                      </p>
+                      {card.payload?.rank ? <p className="text-xs text-muted-foreground">Semester rank #{card.payload.rank}</p> : null}
+                      {card.payload?.withheld_reason ? (
+                        <p className="text-xs text-destructive">{card.payload.withheld_reason}</p>
+                      ) : null}
+                    </div>
+                    <Badge variant={card.status === 'WITHHELD' ? 'destructive' : isFinal ? 'success' : 'warning'}>
+                      {card.status === 'WITHHELD' ? 'Withheld' : isFinal ? 'Final' : stage === 'PROVISIONAL' ? 'Provisional' : 'Draft'}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!isPublished || card.status === 'WITHHELD'}
+                      onClick={() => void downloadMarksheet(Number(card.semester), 'provisional')}
+                    >
+                      <Download className="h-4 w-4" /> Provisional PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={!isFinal || card.status === 'WITHHELD'}
+                      onClick={() => void downloadMarksheet(Number(card.semester), 'final')}
+                    >
+                      <Download className="h-4 w-4" /> Final PDF
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {(data?.exam_reports?.length ?? 0) > 0 ? (
         <Card>
           <CardHeader>
@@ -202,7 +280,7 @@ export default function StudentMarksPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Grade history</CardTitle>
-          <p className="text-sm text-muted-foreground">Expand a semester to view subject-wise grades and download the provisional marksheet.</p>
+          <p className="text-sm text-muted-foreground">Expand a semester to view subject-wise grades and download available marksheets.</p>
         </CardHeader>
         <CardContent className="space-y-2">
           {loading && <p className="text-sm text-muted-foreground">Loading grade history…</p>}
@@ -211,6 +289,10 @@ export default function StudentMarksPage() {
           )}
           {(data?.semesters ?? []).map((sem) => {
             const open = expandedSemesters.has(sem.semester_number);
+            const card = gradeCardsBySemester.get(sem.semester_number);
+            const stage = card?.payload?.result_stage ?? 'DRAFT';
+            const canDownloadProvisional = card && card.status !== 'WITHHELD' && (stage === 'PROVISIONAL' || stage === 'FINAL');
+            const canDownloadFinal = card && card.status !== 'WITHHELD' && stage === 'FINAL';
             return (
               <div key={sem.semester_number} className="overflow-hidden rounded-lg border border-border">
                 <button
@@ -224,6 +306,14 @@ export default function StudentMarksPage() {
                     <span className="text-muted-foreground">Total Credits: {sem.credits}</span>
                     <span className="text-muted-foreground">|</span>
                     <span>SGPA: {sem.sgpa.toFixed(2)}</span>
+                    {card ? (
+                      <>
+                        <span className="text-muted-foreground">|</span>
+                        <Badge variant={card.status === 'WITHHELD' ? 'destructive' : stage === 'FINAL' ? 'success' : 'warning'}>
+                          {card.status === 'WITHHELD' ? 'Withheld' : stage}
+                        </Badge>
+                      </>
+                    ) : null}
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                     {open ? 'Collapse' : 'Expand'}
@@ -260,15 +350,27 @@ export default function StudentMarksPage() {
                         </tbody>
                       </table>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-2"
-                      onClick={() => void downloadMarksheet(sem.semester_number)}
-                    >
-                      <Download className="h-4 w-4" />
-                      Download Provisional Marksheet (PDF)
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-2"
+                        disabled={!canDownloadProvisional}
+                        onClick={() => void downloadMarksheet(sem.semester_number, 'provisional')}
+                      >
+                        <Download className="h-4 w-4" />
+                        Download Provisional PDF
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="gap-2"
+                        disabled={!canDownloadFinal}
+                        onClick={() => void downloadMarksheet(sem.semester_number, 'final')}
+                      >
+                        <Download className="h-4 w-4" />
+                        Download Final PDF
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

@@ -82,7 +82,7 @@ export class MarksHistoryService {
       const grade = row.grade ?? '—';
       const status = row.status === 'FAILED' ? 'FAIL' : row.status === 'COMPLETED' ? 'PASS' : 'IN_PROGRESS';
 
-      if (row.status === 'COMPLETED' && row.grade_points != null) {
+      if ((row.status === 'COMPLETED' || row.status === 'FAILED') && row.grade_points != null) {
         bucket.points += Number(row.grade_points) * credits;
         bucket.completedCredits += credits;
       }
@@ -122,7 +122,7 @@ export class MarksHistoryService {
     let cgpaPoints = 0;
     let cgpaCredits = 0;
     for (const row of enrollments) {
-      if (row.status === 'COMPLETED' && row.grade_points != null) {
+      if ((row.status === 'COMPLETED' || row.status === 'FAILED') && row.grade_points != null) {
         cgpaPoints += Number(row.grade_points) * Number(row.credits);
         cgpaCredits += Number(row.credits);
       }
@@ -170,12 +170,23 @@ export class MarksHistoryService {
       )
       .catch(() => []);
 
+    const gradeCards = await this.dataSource
+      .query(
+        `SELECT grade_card_id, semester, cgpa, status, published_at, payload
+         FROM grade_cards
+         WHERE tenant_id = $1 AND student_user_id = $2
+         ORDER BY semester DESC, created_at DESC`,
+        [tenantId, studentUserId],
+      )
+      .catch(() => []);
+
     return {
       cgpa,
       total_credits_earned: totalCreditsEarned,
       semesters,
       component_marks_by_semester: componentBySemester,
       exam_reports: examReports,
+      grade_cards: gradeCards,
       backlogs: {
         uncleared,
         cleared,

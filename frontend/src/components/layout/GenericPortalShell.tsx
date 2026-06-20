@@ -11,6 +11,7 @@ import {
   iqacPortal,
   libraryPortal,
   parentPortal,
+  disciplinaryCommitteePortal,
   examCellPortal,
   presidentPortal,
   alumniPortal,
@@ -29,6 +30,7 @@ type PortalKey =
   | 'library'
   | 'president'
   | 'parent'
+  | 'disciplinary-committee'
   | 'exam-cell'
   | 'alumni'
   | 'alumni-admin'
@@ -44,6 +46,7 @@ const configs = {
   iqac: iqacPortal,
   library: libraryPortal,
   parent: parentPortal,
+  'disciplinary-committee': disciplinaryCommitteePortal,
   'exam-cell': examCellPortal,
   president: presidentPortal,
   alumni: alumniPortal,

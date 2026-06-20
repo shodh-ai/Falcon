@@ -41,6 +41,7 @@ import {
   Library,
   BusFront,
   TrendingUp,
+  Scale,
   Heart,
   Calendar,
   CheckCircle,
@@ -342,6 +343,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
         { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
+        { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
       ],
     },
     {
@@ -386,6 +388,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
         { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
+        { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
       ],
     },
     {
@@ -530,6 +533,8 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
+        { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
+        { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
       ],
     },
@@ -565,6 +570,8 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students'] },
+        { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical'] },
+        { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
       ],
     },
@@ -612,6 +619,7 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
+        { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'faculty', 'minutes'] },
       ],
@@ -654,6 +662,7 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['inbox'] },
+        { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes'] },
       ],
@@ -956,6 +965,25 @@ export const parentPortal: PortalConfig = {
   ],
 };
 
+export const disciplinaryCommitteePortal: PortalConfig = {
+  personaLabel: 'Disciplinary Committee',
+  personaTitle: 'Student Conduct & Demerits',
+  homeHref: '/disciplinary-committee/dashboard',
+  navGroups: [
+    {
+      title: 'Review',
+      items: [
+        { label: 'Command Centre', href: '/disciplinary-committee/dashboard', icon: LayoutDashboard, keywords: ['dc', 'dashboard'] },
+        { label: 'Disciplinary Queue', href: '/disciplinary-committee/queue', icon: Scale, keywords: ['pending', 'review', 'approve', 'demerit'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'DC Dashboard', href: '/disciplinary-committee/dashboard', icon: LayoutDashboard },
+    { label: 'Disciplinary Queue', href: '/disciplinary-committee/queue', icon: Scale },
+  ],
+};
+
 export const examCellPortal: PortalConfig = {
   personaLabel: 'Falcon Exam OS',
   personaTitle: 'Controller of Examinations',
@@ -967,6 +995,7 @@ export const examCellPortal: PortalConfig = {
         { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'exam cell'] },
         { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term'] },
         { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
+        { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'low attendance', 'admit card', 'approve'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms'] },
         { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty'] },
       ],
@@ -975,6 +1004,7 @@ export const examCellPortal: PortalConfig = {
       title: 'Post-Exam Operations',
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
+        { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
         { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
@@ -986,7 +1016,9 @@ export const examCellPortal: PortalConfig = {
     { label: 'Exam OS Dashboard', href: '/exam-cell/dashboard', icon: LayoutDashboard },
     { label: 'Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays },
     { label: 'Admit Cards', href: '/exam-cell/admit-cards', icon: Ticket },
+    { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck },
     { label: 'Publish Results', href: '/exam-cell/results', icon: TrendingUp },
+    { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal },
     { label: 'UFM Desk', href: '/exam-cell/ufm-cases', icon: Shield },
   ],
 };

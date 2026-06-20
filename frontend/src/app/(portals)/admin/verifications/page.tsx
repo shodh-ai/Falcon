@@ -59,6 +59,7 @@ type VerificationDetail = {
     university?: string | null;
     passing_year?: string | null;
     specialization?: string | null;
+    onboarding_status?: string;
     employee_id?: string | null;
     designation?: string | null;
     enrollment_no?: string | null;
@@ -170,11 +171,20 @@ export default function AdminStudentVerificationsPage() {
       const data = await api.get<VerificationDetail>(`/api/admin/student-verifications/${userId}`);
       setDetail(data);
       if (data.documents[0]) setPreviewDoc(data.documents[0].file_path);
+      if (data.person.onboarding_status !== 'PENDING_ADMIN_APPROVAL') {
+        toast.error(
+          data.person.onboarding_status === 'COMPLETED'
+            ? 'This user has already been approved. Refresh the queue.'
+            : `This user is no longer awaiting review (${data.person.onboarding_status}).`,
+        );
+      }
     } catch (err) {
       toast.error(parseApiError(err));
       setSelectedId(null);
     }
   };
+
+  const canReview = detail?.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
 
   const approve = async () => {
     if (!selectedId) return;
@@ -280,8 +290,17 @@ export default function AdminStudentVerificationsPage() {
             <DialogTitle>{detail?.person.name}</DialogTitle>
             <DialogDescription>
               {detail?.person.email} · {detail?.person.role_name}
+              {detail?.person.onboarding_status ? ` · ${detail.person.onboarding_status}` : null}
             </DialogDescription>
           </DialogHeader>
+
+          {detail && !canReview ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              {detail.person.onboarding_status === 'COMPLETED'
+                ? 'This submission has already been approved. Close the dialog and refresh the queue.'
+                : 'This user is not awaiting admin approval anymore. Refresh the queue before taking action.'}
+            </div>
+          ) : null}
 
           {detail && (
             <div className="grid gap-4 lg:grid-cols-2">
@@ -399,11 +418,15 @@ export default function AdminStudentVerificationsPage() {
               Close
             </Button>
             <div className="flex gap-2">
-              <Button variant="destructive" onClick={() => void reject()} disabled={acting}>
+              <Button variant="destructive" onClick={() => void reject()} disabled={acting || !canReview}>
                 <XCircle className="mr-1 h-4 w-4" />
                 Reject
               </Button>
-              <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => void approve()} disabled={acting}>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={() => void approve()}
+                disabled={acting || !canReview}
+              >
                 <CheckCircle2 className="mr-1 h-4 w-4" />
                 Approve
               </Button>

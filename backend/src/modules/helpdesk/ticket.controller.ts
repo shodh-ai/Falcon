@@ -18,9 +18,16 @@ const HELPDESK_REQUESTER_ROLES = [
   'HR',
   'HRAdmin',
   'SuperAdmin',
+  'AdmissionsOfficer',
   'Registrar',
   'Accountant',
   'Warden',
+  'ExamCell',
+  'IQAC',
+  'Librarian',
+  'PlacementCell',
+  'TransportOfficer',
+  'DC_MEMBER',
 ] as const;
 
 @Controller('api/helpdesk/tickets')

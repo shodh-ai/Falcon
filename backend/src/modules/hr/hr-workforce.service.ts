@@ -19,6 +19,7 @@ import {
   assertRetroactiveWorkforceLimit,
 } from '../../common/validators/workforce-request.validator';
 import { canAccessTeamApprovals } from './utils/reporting-officer.util';
+import { workforceStatusPathForRoles } from './utils/workforce-portal-links.util';
 
 export type ApplyWorkforceRequestDto = {
   request_type: StaffRequestType;
@@ -457,7 +458,7 @@ export class HrWorkforceService {
       row.status = 'REJECTED';
       row.current_approver_user_id = null;
       const saved = await this.requests.save(row);
-      this.notifyEmployeeDecision(staff!, row, false, comment);
+      void this.notifyEmployeeDecision(staff!, row, false, comment);
       return saved;
     }
 
@@ -475,7 +476,7 @@ export class HrWorkforceService {
       row.current_approver_user_id = null;
       const saved = await this.requests.save(row);
       await this.applyApprovalSideEffects(saved);
-      this.notifyEmployeeDecision(staff!, saved, true, comment);
+      void this.notifyEmployeeDecision(staff!, saved, true, comment);
       return saved;
     }
 
@@ -726,7 +727,7 @@ export class HrWorkforceService {
     );
   }
 
-  private notifyEmployeeDecision(
+  private async notifyEmployeeDecision(
     staff: User | null | undefined,
     row: StaffLeaveRequest,
     approved: boolean,
@@ -734,6 +735,12 @@ export class HrWorkforceService {
   ) {
     if (!staff?.tenant_id) return;
     const label = this.requestTypeLabel(row.request_type);
+    const roleRows = (await this.users.manager.query(
+      `SELECT r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1
+       UNION SELECT r.role_name FROM user_roles ur JOIN roles r ON r.role_id = ur.role_id WHERE ur.user_id = $1`,
+      [row.staff_user_id],
+    )) as Array<{ role_name: string }>;
+    const actionLink = workforceStatusPathForRoles(roleRows.map((row) => row.role_name));
     this.notify.leaveApproved({
       tenantId: staff.tenant_id,
       userId: row.staff_user_id,
@@ -741,7 +748,7 @@ export class HrWorkforceService {
       message: approved
         ? `Your ${label} request was approved.${comment ? ` Note: ${comment}` : ''}`
         : `Your ${label} request was rejected.${comment ? ` Reason: ${comment}` : ''}`,
-      actionLink: '/faculty/hr',
+      actionLink,
       leaveType: row.leave_type,
       startDate: row.start_date,
       endDate: row.end_date,

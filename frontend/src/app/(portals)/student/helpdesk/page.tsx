@@ -41,6 +41,14 @@ type DisciplineRecord = {
   date_logged: string;
 };
 
+type DisciplineResponse = {
+  records: DisciplineRecord[];
+  demerit_summary?: {
+    cumulative_demerit_points: number;
+    is_subject_back_triggered: boolean;
+  };
+};
+
 export default function StudentHelpdeskPage() {
   const api = useAuthedApi();
   const router = useRouter();
@@ -50,6 +58,7 @@ export default function StudentHelpdeskPage() {
   const [form, setForm] = useState({ category: 'IT', subject: '', description: '' });
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [discipline, setDiscipline] = useState<DisciplineRecord[]>([]);
+  const [demeritSummary, setDemeritSummary] = useState<{ cumulative_demerit_points: number; is_subject_back_triggered: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -72,7 +81,21 @@ export default function StudentHelpdeskPage() {
 
   useEffect(() => {
     void loadTickets();
-    void api.get<DisciplineRecord[]>('/api/student/discipline').then(setDiscipline).catch(() => setDiscipline([]));
+    void api
+      .get<DisciplineResponse | DisciplineRecord[]>('/api/student/discipline')
+      .then((res) => {
+        if (Array.isArray(res)) {
+          setDiscipline(res);
+          setDemeritSummary(null);
+        } else {
+          setDiscipline(res.records ?? []);
+          setDemeritSummary(res.demerit_summary ?? null);
+        }
+      })
+      .catch(() => {
+        setDiscipline([]);
+        setDemeritSummary(null);
+      });
   }, [api]);
 
   async function handleCreateTicket() {
@@ -104,6 +127,13 @@ export default function StudentHelpdeskPage() {
         title="Grievances & Helpdesk"
         description="Raise IT or maintenance grievances. Discipline records are read-only official notices from Mentor/Warden."
       />
+
+      {demeritSummary && demeritSummary.cumulative_demerit_points > 0 ? (
+        <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          Demerit points on record: <strong>{demeritSummary.cumulative_demerit_points}</strong>
+          {demeritSummary.is_subject_back_triggered ? ' · Subject Back applied' : null}
+        </div>
+      ) : null}
 
       {discipline.length > 0 && (
         <StudentSectionCard title="Discipline records" description="Official notices — read only" icon={AlertTriangle} tone="danger">

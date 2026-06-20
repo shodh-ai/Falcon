@@ -130,6 +130,25 @@ export class ResultControlService {
     return this.getSession(tenantId, sessionId);
   }
 
+  /** Close faculty entry and lock submitted marks before grade preview / declaration. */
+  async prepareForDeclaration(tenantId: string, sessionId: string, actorUserId: string) {
+    const session = await this.getSession(tenantId, sessionId);
+    if (session.declared_at) {
+      throw new BadRequestException('Results already declared');
+    }
+    const pending = await this.db.query<Array<{ c: number }>>(
+      `SELECT COUNT(*)::int AS c FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
+      [tenantId, session.course_id, session.exam_type],
+    );
+    if (!pending[0]?.c) {
+      throw new BadRequestException('No faculty submissions awaiting declaration');
+    }
+    await this.closeEntry(tenantId, sessionId);
+    await this.lockMarks(tenantId, sessionId, actorUserId);
+    return this.getSession(tenantId, sessionId);
+  }
+
   async reopenEntry(tenantId: string, sessionId: string, dto: ReopenResultEntryDto) {
     const session = await this.getSession(tenantId, sessionId);
     if (session.declared_at) {
@@ -277,6 +296,16 @@ export class ResultControlService {
         [row.mark_id],
       );
 
+      await this.upsertExamResult(
+        tenantId,
+        row.student_user_id,
+        session.course_id,
+        session.exam_type,
+        obtained,
+        max,
+        grade,
+      );
+
       await this.db.query(
         `INSERT INTO student_exam_reports (
            tenant_id, session_id, student_user_id, course_id, exam_type,
@@ -327,6 +356,33 @@ export class ResultControlService {
     );
 
     return { declared, course_name: courseName, exam_type: session.exam_type, session_id: sessionId };
+  }
+
+  /** Best-effort mirror into legacy results table; RCC uses student_exam_reports. */
+  private async upsertExamResult(
+    tenantId: string,
+    studentUserId: string,
+    courseId: string,
+    examType: string,
+    marksObtained: number,
+    maxMarks: number,
+    grade: string,
+  ) {
+    try {
+      await this.db.query(
+        `DELETE FROM academic_exam_results
+         WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND exam_type = $4`,
+        [tenantId, studentUserId, courseId, examType],
+      );
+      await this.db.query(
+        `INSERT INTO academic_exam_results (
+           tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, grade, status
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
+        [tenantId, studentUserId, courseId, examType, marksObtained, maxMarks, grade],
+      );
+    } catch {
+      // Ignore schema drift on legacy table; declaration still succeeds via student_exam_reports.
+    }
   }
 
   async getSessionForCourse(tenantId: string, courseId: string, examType: string) {

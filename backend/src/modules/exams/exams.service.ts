@@ -3,15 +3,17 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ExamSchedule } from '../../entities/exam-schedule.entity';
 import { ExamApplication } from '../../entities/exam-application.entity';
-import { AttendanceRecord } from '../../entities/attendance-record.entity';
 import { User } from '../../entities/user.entity';
 import { FinanceService } from '../finance/finance.service';
 import { CreateExamApplicationDto } from './dto/create-exam-application.dto';
 import { AdmitCardPdfService } from './pdf/admit-card-pdf.service';
+import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 
 export interface ExamEligibilityResult {
   eligible: boolean;
   attendance_percent: number;
+  min_required: number;
+  exempted: boolean;
   reasons: Array<{ code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES'; message: string; details?: unknown }>;
 }
 
@@ -20,11 +22,11 @@ export class ExamsService {
   constructor(
     @InjectRepository(ExamSchedule) private schedules: Repository<ExamSchedule>,
     @InjectRepository(ExamApplication) private applications: Repository<ExamApplication>,
-    @InjectRepository(AttendanceRecord) private attendanceRepo: Repository<AttendanceRecord>,
     @InjectRepository(User) private users: Repository<User>,
     @InjectDataSource() private readonly db: DataSource,
     private readonly finance: FinanceService,
     private readonly pdf: AdmitCardPdfService,
+    private readonly attendanceEligibility: AttendanceEligibilityService,
   ) {}
 
   async listUpcomingSchedulesForStudent(studentUserId: string): Promise<ExamSchedule[]> {
@@ -83,18 +85,24 @@ export class ExamsService {
   }
 
   async checkEligibility(studentUserId: string): Promise<ExamEligibilityResult> {
-    const [attendancePercent, pendingDues] = await Promise.all([
-      this.getOverallAttendancePercent(studentUserId),
+    const student = await this.users.findOne({ where: { user_id: studentUserId } });
+    const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+
+    const [attendance, pendingDues] = await Promise.all([
+      this.attendanceEligibility.evaluate(tenantId, studentUserId, { context: 'EXAM_DESK' }),
       this.finance.getPendingDues(studentUserId),
     ]);
 
     const reasons: ExamEligibilityResult['reasons'] = [];
 
-    if (attendancePercent < 75) {
+    if (!attendance.eligible && attendance.reason) {
       reasons.push({
         code: 'ATTENDANCE_SHORTFALL',
         message: 'Blocked: Attendance Shortfall',
-        details: { attendance_percent: attendancePercent, min_required: 75 },
+        details: {
+          attendance_percent: attendance.attendance_percent,
+          min_required: attendance.effective_threshold,
+        },
       });
     }
 
@@ -114,7 +122,9 @@ export class ExamsService {
 
     return {
       eligible: reasons.length === 0,
-      attendance_percent: attendancePercent,
+      attendance_percent: attendance.attendance_percent,
+      min_required: attendance.effective_threshold,
+      exempted: attendance.threshold_source === 'EXEMPTION',
       reasons,
     };
   }
@@ -137,13 +147,6 @@ export class ExamsService {
       },
       schedules,
     });
-  }
-
-  private async getOverallAttendancePercent(studentUserId: string): Promise<number> {
-    const rows = await this.attendanceRepo.find({ where: { student_user_id: studentUserId } });
-    if (rows.length === 0) return 0;
-    const attended = rows.filter((a) => a.status === 'PRESENT' || a.status === 'LATE').length;
-    return Math.round((attended / rows.length) * 100);
   }
 
   private getAcademicYear(now = new Date()): string {

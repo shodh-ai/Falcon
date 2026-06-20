@@ -48,6 +48,7 @@ import { HrWorkflowBuilderService } from './hr-workflow-builder.service';
 import { HrChecklistService } from './hr-checklist.service';
 import { HrOnboardingWorkflowService } from './hr-onboarding-workflow.service';
 import { HrDashboardService } from './hr-dashboard.service';
+import { WORKFORCE_SELF_SERVICE_ROLES } from './hr-workforce.constants';
 import { HrReportsService } from './hr-reports.service';
 import { HrDocumentVaultService } from './hr-document-vault.service';
 import { HrEmployeeBulkService } from './hr-employee-bulk.service';
@@ -1689,14 +1690,14 @@ export class HrController {
   }
 
   @Get('workforce/today')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceToday(@Req() req: { user: AuthUser }) {
     return this.workforce.getTodayWidget(req.user.user_id);
   }
 
   @Post('workforce/requests')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceApply(
     @Req() req: { user: AuthUser },
     @Body() dto: {
@@ -1724,13 +1725,13 @@ export class HrController {
 
   @Get('workforce/my-requests')
   @SkipEntityScope()
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceMyRequests(@Req() req: { user: AuthUser }) {
     return this.workforce.listMyRequests(req.user.user_id, this.resolveTenantId(req.user));
   }
 
   @Get('workforce/team/pending')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceTeamPending(
     @Req() req: { user: AuthUser },
     @Query('type') type?: StaffRequestType,
@@ -1744,7 +1745,7 @@ export class HrController {
   }
 
   @Patch('workforce/team/:leaveId/action')
-  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  @Roles(...WORKFORCE_SELF_SERVICE_ROLES)
   workforceTeamAction(
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },

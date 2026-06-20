@@ -258,22 +258,26 @@ export class StudentVerificationAdminController {
     private readonly objectStorage: ObjectStorageService,
   ) {}
 
+  private tenant(req: { user: AuthUser }) {
+    return this.onboarding.resolveTenantId(req.user.tenant_id);
+  }
+
   @Get('queue')
   queue(
     @Req() req: { user: AuthUser },
     @Query('portal_kind') portalKind?: 'student' | 'staff' | 'all',
   ) {
-    return this.onboarding.getVerificationQueue(req.user.tenant_id ?? '', portalKind ?? 'all');
+    return this.onboarding.getVerificationQueue(this.tenant(req), portalKind ?? 'all');
   }
 
   @Get(':targetUserId')
   detail(@Req() req: { user: AuthUser }, @Param('targetUserId') targetUserId: string) {
-    return this.onboarding.getVerificationDetail(req.user.tenant_id ?? '', targetUserId);
+    return this.onboarding.getVerificationDetail(this.tenant(req), targetUserId);
   }
 
   @Post(':targetUserId/approve')
   approve(@Req() req: { user: AuthUser }, @Param('targetUserId') targetUserId: string) {
-    return this.onboarding.approve(req.user.tenant_id ?? '', targetUserId);
+    return this.onboarding.approve(this.tenant(req), targetUserId);
   }
 
   @Post(':targetUserId/reject')
@@ -282,7 +286,7 @@ export class StudentVerificationAdminController {
     @Param('targetUserId') targetUserId: string,
     @Body() body: { remarks: string },
   ) {
-    return this.onboarding.reject(req.user.tenant_id ?? '', targetUserId, body.remarks);
+    return this.onboarding.reject(this.tenant(req), targetUserId, body.remarks);
   }
 
   @Get(':targetUserId/documents/:docType/preview')
@@ -293,7 +297,7 @@ export class StudentVerificationAdminController {
     @Res() res: Response,
   ) {
     const filePath = await this.onboarding.getDocumentPath(
-      req.user.tenant_id ?? '',
+      this.tenant(req),
       targetUserId,
       docType.toUpperCase().replace(/-/g, '_'),
     );

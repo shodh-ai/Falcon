@@ -2,8 +2,10 @@
 
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
+import { StaffLeaveStatusBanner } from '@/components/self-service/StaffLeaveStatusBanner';
+import { AdmissionsLeaveNotificationListener } from '@/components/self-service/AdmissionsLeaveNotificationListener';
 import type { PortalConfig } from '@/lib/navigation';
-import { FileCheck2, Kanban, Users } from 'lucide-react';
+import { CalendarDays, FileCheck2, Kanban, Users } from 'lucide-react';
 
 const admissionsCrmPortal: PortalConfig = {
   personaLabel: 'Admissions CRM',
@@ -16,6 +18,7 @@ const admissionsCrmPortal: PortalConfig = {
         { label: 'Kanban board', href: '/admissions-crm/pipeline', icon: Kanban },
         { label: 'Verifications', href: '/admissions-crm/verifications', icon: FileCheck2 },
         { label: 'Enrolled Students', href: '/admissions-crm/enrolled-students', icon: Users },
+        { label: 'My leave', href: '/admissions-crm/leaves', icon: CalendarDays },
       ],
     },
   ],
@@ -23,5 +26,11 @@ const admissionsCrmPortal: PortalConfig = {
 };
 
 export function AdmissionsCrmShell({ children }: { children: ReactNode }) {
-  return <AppShell config={admissionsCrmPortal}>{children}</AppShell>;
+  return (
+    <AppShell config={admissionsCrmPortal}>
+      <AdmissionsLeaveNotificationListener />
+      <StaffLeaveStatusBanner statusPath="/admissions-crm/leaves" />
+      {children}
+    </AppShell>
+  );
 }

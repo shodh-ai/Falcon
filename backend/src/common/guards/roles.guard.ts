@@ -17,12 +17,21 @@ export class RolesGuard implements CanActivate {
     }
 
     const { user } = context.switchToHttp().getRequest();
-    
+
     if (!user || (!user.role && !Array.isArray(user.roles))) {
       return false;
     }
 
-    const userRoles = Array.isArray(user.roles) ? user.roles : [user.role];
-    return requiredRoles.some((role) => userRoles.includes(role));
+    const userRoles = Array.from(
+      new Set([
+        ...(Array.isArray(user.roles) ? user.roles : []),
+        ...(user.role ? [user.role] : []),
+      ]),
+    ).filter(Boolean);
+    const normalizedUserRoles = userRoles.map((role) => String(role).trim().toLowerCase());
+
+    return requiredRoles.some((role) =>
+      normalizedUserRoles.includes(String(role).trim().toLowerCase()),
+    );
   }
 }

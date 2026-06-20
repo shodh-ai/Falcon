@@ -640,13 +640,41 @@ export class StudentPortalService {
   }
 
   async getDiscipline(tenantId: string, userId: string) {
-    return this.dataSource.query(
+    const legacy = await this.dataSource.query(
       `SELECT record_id, incident_type, description, action_taken, date_logged
        FROM student_discipline_records
        WHERE tenant_id = $1 AND student_user_id = $2
        ORDER BY date_logged DESC`,
       [tenantId, userId],
     );
+
+    const demerits = await this.dataSource
+      .query(
+        `SELECT di.incident_id AS record_id, di.category AS incident_type, di.description,
+                COALESCE(di.dc_committee_remarks, 'Demerit points approved by Disciplinary Committee') AS action_taken,
+                di.updated_at::date AS date_logged, di.points, di.status,
+                c.course_code, c.course_name
+         FROM demerit_incidents di
+         JOIN academic_courses c ON c.course_id = di.course_id
+         WHERE di.tenant_id = $1 AND di.student_user_id = $2 AND di.status = 'APPROVED_BY_DC'
+         ORDER BY di.updated_at DESC`,
+        [tenantId, userId],
+      )
+      .catch(() => []);
+
+    const summary = await this.dataSource
+      .query(
+        `SELECT cumulative_demerit_points, is_subject_back_triggered, subject_back_triggered_at
+         FROM student_academic_summaries
+         WHERE tenant_id = $1 AND student_user_id = $2`,
+        [tenantId, userId],
+      )
+      .catch(() => []);
+
+    return {
+      records: [...demerits, ...legacy],
+      demerit_summary: summary[0] ?? { cumulative_demerit_points: 0, is_subject_back_triggered: false },
+    };
   }
 
   async getExit(tenantId: string, userId: string) {

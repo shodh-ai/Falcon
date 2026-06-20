@@ -10,11 +10,13 @@ import { AdmissionsService } from './admissions.service';
 import { CounselingService } from './counseling.service';
 import { LeadScoringService, LEAD_SCORING_QUEUE } from './lead-scoring.service';
 import { LeadScoringProcessor } from './lead-scoring.processor';
+import { HrModule } from '../hr/hr.module';
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: LEAD_SCORING_QUEUE }),
     TypeOrmModule.forFeature([Lead, Application, DocumentVerification]),
+    HrModule,
   ],
   controllers: [AdmissionsController, AdmissionsCrmController],
   providers: [AdmissionsService, LeadScoringService, LeadScoringProcessor, CounselingService],

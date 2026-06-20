@@ -280,11 +280,23 @@ export class FacultyWorkspacesService {
 
     const maxMarksDefault =
       rows.find((r: { max_marks: number | null }) => r.max_marks != null)?.max_marks ?? 50;
-    const publishStatus = rows.some((r: { mark_status: string | null }) => r.mark_status === 'PUBLISHED')
-      ? 'PUBLISHED'
-      : rows.some((r: { mark_status: string | null }) => r.mark_status === 'PENDING_COE')
-        ? 'PENDING_COE'
-        : 'DRAFT';
+    const draftCount = rows.filter(
+      (r: { mark_status: string | null }) => !r.mark_status || r.mark_status === 'DRAFT',
+    ).length;
+    const pendingCount = rows.filter(
+      (r: { mark_status: string | null }) => r.mark_status === 'PENDING_COE',
+    ).length;
+    const publishedCount = rows.filter(
+      (r: { mark_status: string | null }) => r.mark_status === 'PUBLISHED',
+    ).length;
+    const publishStatus =
+      publishedCount > 0 && publishedCount === rows.length
+        ? 'PUBLISHED'
+        : pendingCount > 0 && draftCount > 0
+          ? 'PARTIAL'
+          : pendingCount > 0
+            ? 'PENDING_COE'
+            : 'DRAFT';
 
     const entryAllowed =
       !!session &&
@@ -349,15 +361,6 @@ export class FacultyWorkspacesService {
     const session = await this.getResultSession(tenantId, dto.course_id, dto.exam_type);
     this.assertFacultyEntryAllowed(session);
 
-    const locked = await this.dataSource.query(
-      `SELECT 1 FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
-         AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1`,
-      [tenantId, dto.course_id, dto.exam_type],
-    );
-    if (locked[0]) {
-      throw new ForbiddenException('Submitted marks are locked. Contact Exam Cell to reopen entry.');
-    }
     const maxMarks = dto.max_marks;
     for (const entry of dto.entries) {
       if (entry.marks_obtained > maxMarks) {
@@ -384,9 +387,15 @@ export class FacultyWorkspacesService {
            co_mapped, status, uploaded_by, updated_at
          ) VALUES ${valuePlaceholders.join(', ')}
          ON CONFLICT (tenant_id, student_user_id, course_id, exam_type) DO UPDATE SET
-           marks_obtained = EXCLUDED.marks_obtained,
+           marks_obtained = CASE
+             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.marks_obtained
+             ELSE EXCLUDED.marks_obtained
+           END,
            max_marks = EXCLUDED.max_marks,
-           co_mapped = EXCLUDED.co_mapped,
+           co_mapped = CASE
+             WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.co_mapped
+             ELSE EXCLUDED.co_mapped
+           END,
            status = CASE
              WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
              ELSE 'DRAFT'

@@ -10,6 +10,7 @@ import { FinanceService } from '../finance/finance.service';
 import { AdmitCardPdfService } from '../exams/pdf/admit-card-pdf.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { NotificationEvents } from '../../core/notifications/notification.events';
+import { AttendanceEligibilityService } from '../attendance-policy/attendance-eligibility.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -21,7 +22,36 @@ export class ExamCellService {
     private readonly admitPdf: AdmitCardPdfService,
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
+    private readonly attendanceEligibility: AttendanceEligibilityService,
   ) {}
+
+  private async queryOrEmpty<T extends Record<string, unknown>>(
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<T[]> {
+    try {
+      return (await this.db.query(sql, params)) as T[];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  private normalizeSeatingAllocations(value: unknown): Array<Record<string, unknown>> {
+    if (Array.isArray(value)) return value as Array<Record<string, unknown>>;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
 
   async dashboard(tenantId: string) {
     const [[schedules], [pendingMarks], [reEvals], [ufmOpen], [duties]] = await Promise.all([
@@ -54,15 +84,29 @@ export class ExamCellService {
     };
   }
 
-  listSchedules(tenantId: string) {
-    return this.db.query(
-      `SELECT es.*, sub.subject_name, sub.subject_code
-       FROM exam_schedules es
-       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-       WHERE es.tenant_id = $1 OR es.tenant_id IS NULL
-       ORDER BY es.exam_date ASC, es.start_time ASC`,
-      [tenantId],
-    );
+  async listSchedules(tenantId: string) {
+    try {
+      return await this.db.query(
+        `SELECT es.*, sub.subject_name, sub.subject_code
+         FROM exam_schedules es
+         LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+         WHERE es.tenant_id = $1 OR es.tenant_id IS NULL
+         ORDER BY es.exam_date ASC, es.start_time ASC`,
+        [tenantId],
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/relation .* does not exist|column .* does not exist/i.test(message)) {
+        throw err;
+      }
+      return this.queryOrEmpty(
+        `SELECT es.*, NULL::text AS subject_name, NULL::text AS subject_code
+         FROM exam_schedules es
+         WHERE es.tenant_id = $1 OR es.tenant_id IS NULL
+         ORDER BY es.exam_date ASC, es.start_time ASC`,
+        [tenantId],
+      );
+    }
   }
 
   createSchedule(
@@ -138,7 +182,7 @@ export class ExamCellService {
     fs.mkdirSync(uploadDir, { recursive: true });
 
     for (const student of students) {
-      const reasons = await this.getAdmitBlockReasons(student.user_id);
+      const reasons = await this.getAdmitBlockReasons(student.user_id, tenantId);
       const eligible = reasons.length === 0;
 
       if (eligible) {
@@ -213,22 +257,23 @@ export class ExamCellService {
     return { run_id: runId, generated, blocked, students: results };
   }
 
-  async getAdmitBlockReasons(studentUserId: string): Promise<string[]> {
+  async getAdmitBlockReasons(
+    studentUserId: string,
+    tenantId = 'a0000000-0000-4000-8000-000000000001',
+  ): Promise<string[]> {
     const reasons: string[] = [];
     const pendingDues = await this.finance.getPendingDues(studentUserId);
     if (pendingDues.length > 0) {
       reasons.push('Blocked: Pending fee dues');
     }
 
-    const att = await this.db.query(
-      `SELECT COUNT(*) FILTER (WHERE status IN ('PRESENT','LATE'))::float AS attended,
-              COUNT(*)::float AS total
-       FROM academic_attendance_records WHERE student_user_id = $1`,
-      [studentUserId],
-    );
-    const total = Number(att[0]?.total ?? 0);
-    const pct = total > 0 ? Math.round((Number(att[0]?.attended ?? 0) / total) * 100) : 0;
-    if (pct < 75) reasons.push(`Blocked: Attendance ${pct}% (min 75%)`);
+    const attendance = await this.attendanceEligibility.evaluate(tenantId, studentUserId, {
+      context: 'ADMIT_CARD',
+      audit: true,
+    });
+    if (!attendance.eligible && attendance.reason) {
+      reasons.push(attendance.reason);
+    }
 
     const fines = await this.db.query(
       `SELECT COUNT(*)::int AS c FROM operations_hostel_fines
@@ -241,33 +286,39 @@ export class ExamCellService {
   }
 
   async getBranchesBySemester(tenantId: string, semester: number) {
-    const rows = await this.db.query(
+    const rows = await this.queryOrEmpty<{ branch_code: string }>(
       `SELECT DISTINCT COALESCE(d.dept_name, 'GEN') AS branch_code
        FROM users u
        INNER JOIN student_course_enrollments e ON e.student_user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1 AND e.semester = $2
        ORDER BY branch_code`,
-      [tenantId, semester]
+      [tenantId, semester],
     );
-    return rows.map((r: any) => r.branch_code);
+    return rows.map((r) => r.branch_code);
   }
 
   async getBlocksAndHalls(tenantId: string) {
-    const spaces = await this.db.query(
+    const spaces = await this.queryOrEmpty<{
+      block: string;
+      hall: string;
+      capacity: number | null;
+    }>(
       `SELECT building_name AS block, room_number AS hall, capacity
        FROM campus_spaces
        WHERE tenant_id = $1 AND space_type = 'CLASSROOM'
        ORDER BY building_name, room_number`,
-      [tenantId]
+      [tenantId],
     );
-    
-    const blocksMap = new Map();
+
+    const blocksMap = new Map<string, { block: string; halls: Array<{ name: string; capacity: number; rows: number; cols: number }> }>();
     for (const s of spaces) {
+      if (!s.block || !s.hall) continue;
       if (!blocksMap.has(s.block)) blocksMap.set(s.block, { block: s.block, halls: [] });
       const cols = 5;
-      const rows = Math.ceil(s.capacity / cols);
-      blocksMap.get(s.block).halls.push({ name: s.hall, capacity: s.capacity, rows, cols });
+      const capacity = Number(s.capacity) > 0 ? Number(s.capacity) : 30;
+      const rows = Math.max(1, Math.ceil(capacity / cols));
+      blocksMap.get(s.block)!.halls.push({ name: s.hall, capacity, rows, cols });
     }
     return Array.from(blocksMap.values());
   }
@@ -401,17 +452,50 @@ export class ExamCellService {
   }
 
   async listSeatingRuns(tenantId: string) {
-    return this.db.query(
-      `SELECT r.run_id, r.allocation_strategy, r.exam_type, r.exam_schedule_id, r.semester, r.branch, r.created_at,
-              jsonb_array_length(r.allocations) as total_allocated, r.allocations,
-              sub.subject_name, es.exam_date
-       FROM exam_seating_runs r
-       LEFT JOIN exam_schedules es ON es.exam_schedule_id = r.exam_schedule_id
-       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-       WHERE r.tenant_id = $1
-       ORDER BY r.created_at DESC`,
-       [tenantId]
-    );
+    const baseSql = (withSubjectJoin: boolean) => `
+      SELECT r.run_id, r.allocation_strategy, r.exam_type, r.exam_schedule_id, r.semester, r.branch, r.created_at,
+             CASE
+               WHEN jsonb_typeof(r.allocations) = 'array' THEN jsonb_array_length(r.allocations)
+               ELSE 0
+             END AS total_allocated,
+             r.allocations,
+             ${withSubjectJoin ? 'sub.subject_name, es.exam_date' : 'NULL::text AS subject_name, es.exam_date'}
+      FROM exam_seating_runs r
+      LEFT JOIN exam_schedules es ON es.exam_schedule_id = r.exam_schedule_id
+      ${withSubjectJoin ? 'LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id' : ''}
+      WHERE r.tenant_id = $1
+      ORDER BY r.created_at DESC`;
+
+    let rows: Array<{
+      run_id: string;
+      allocation_strategy: string;
+      exam_type: string | null;
+      exam_schedule_id: string | null;
+      semester: number;
+      branch: string;
+      created_at: string;
+      total_allocated: number | null;
+      allocations: unknown;
+      subject_name: string | null;
+      exam_date: string | null;
+    }> = [];
+
+    try {
+      rows = (await this.db.query(baseSql(true), [tenantId])) as typeof rows;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+        rows = await this.queryOrEmpty(baseSql(false), [tenantId]);
+      } else {
+        throw err;
+      }
+    }
+
+    return rows.map((row) => ({
+      ...row,
+      total_allocated: Number(row.total_allocated ?? 0),
+      allocations: this.normalizeSeatingAllocations(row.allocations),
+    }));
   }
 
   async deleteSeatingRun(tenantId: string, runId: string) {
@@ -580,6 +664,9 @@ export class ExamCellService {
       `SELECT m.*, u.name AS student_name, c.course_code, c.course_name,
               m.marks_obtained, m.max_marks,
               ROUND(100.0 * m.marks_obtained / NULLIF(m.max_marks, 0), 1) AS percent,
+              sess.session_id,
+              sess.entry_status AS session_entry_status,
+              sess.declared_at AS session_declared_at,
               f.name AS faculty_name,
               e.semester
        FROM academic_marks m
@@ -587,7 +674,16 @@ export class ExamCellService {
        JOIN academic_courses c ON c.course_id = m.course_id
        LEFT JOIN users f ON f.user_id = m.uploaded_by
        LEFT JOIN student_course_enrollments e ON e.student_user_id = m.student_user_id AND e.course_id = m.course_id
-       WHERE m.tenant_id = $1 AND m.status IN ('PENDING_COE', 'PUBLISHED')
+       LEFT JOIN LATERAL (
+         SELECT s.session_id, s.entry_status, s.declared_at
+         FROM exam_result_sessions s
+         WHERE s.tenant_id = m.tenant_id
+           AND s.course_id = m.course_id
+           AND s.exam_type = m.exam_type
+         ORDER BY s.semester DESC
+         LIMIT 1
+       ) sess ON TRUE
+       WHERE m.tenant_id = $1 AND m.status = 'PENDING_COE'
        ORDER BY c.course_code, m.exam_type, u.name`,
       [tenantId],
     );
@@ -1108,39 +1204,121 @@ export class ExamCellService {
     if (!dto.description?.trim()) {
       throw new BadRequestException('Incident description is required');
     }
+
+    const studentUserId = await this.resolveStudentUserId(tenantId, dto.student_user_id.trim());
+    const courseId = dto.course_id?.trim()
+      ? await this.resolveCourseId(tenantId, dto.course_id.trim())
+      : null;
+
     const rows = await this.db.query(
       `INSERT INTO ufm_cases (tenant_id, student_user_id, exam_id, description, penalty_applied, reported_by, marks_locked, status)
        VALUES ($1,$2,$3,$4,$5,$6,true,'OPEN') RETURNING *`,
       [
         tenantId,
-        dto.student_user_id,
+        studentUserId,
         dto.exam_id ?? null,
-        dto.description,
-        dto.penalty_applied ?? 'Exam cancelled — UFM',
+        dto.description.trim(),
+        dto.penalty_applied?.trim() || 'Exam cancelled — UFM',
         dto.reported_by ?? null,
       ],
     );
 
-    if (dto.course_id) {
+    if (courseId) {
       await this.db.query(
         `UPDATE academic_marks SET marks_obtained = 0, status = 'PUBLISHED', updated_at = NOW()
          WHERE student_user_id = $1 AND course_id = $2 AND tenant_id = $3`,
-        [dto.student_user_id, dto.course_id, tenantId],
+        [studentUserId, courseId, tenantId],
       );
     } else {
       await this.db.query(
         `UPDATE academic_marks SET marks_obtained = 0, status = 'PUBLISHED', updated_at = NOW()
          WHERE student_user_id = $1 AND tenant_id = $2`,
-        [dto.student_user_id, tenantId],
+        [studentUserId, tenantId],
       );
     }
 
     await this.db.query(
       `UPDATE grade_cards SET status = 'WITHHELD' WHERE student_user_id = $1 AND tenant_id = $2`,
-      [dto.student_user_id, tenantId],
+      [studentUserId, tenantId],
     );
 
     return rows[0];
+  }
+
+  listUfmFormOptions(tenantId: string) {
+    return Promise.all([
+      this.db.query(
+        `SELECT u.user_id, u.name, u.official_email,
+                COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+         FROM users u
+         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
+         ORDER BY u.name
+         LIMIT 500`,
+        [tenantId],
+      ),
+      this.db.query(
+        `SELECT course_id, course_code, course_name
+         FROM academic_courses
+         WHERE tenant_id = $1
+         ORDER BY course_code
+         LIMIT 300`,
+        [tenantId],
+      ),
+    ]).then(([students, courses]) => ({ students, courses }));
+  }
+
+  private static readonly UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  private async resolveStudentUserId(tenantId: string, identifier: string): Promise<string> {
+    const isUuid = ExamCellService.UUID_RE.test(identifier);
+    const rows = await this.db.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id
+       FROM users u
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND r.role_name = 'Student'
+         AND (
+           ($2 = true AND u.user_id = $3::uuid)
+           OR lower(u.official_email) = lower($4)
+           OR lower(COALESCE(sp.enrollment_no, '')) = lower($4)
+           OR lower(COALESCE(sp.enrollment_number, '')) = lower($4)
+           OR lower(COALESCE(sp.admission_number, '')) = lower($4)
+         )
+       LIMIT 1`,
+      [tenantId, isUuid, identifier, identifier],
+    );
+    if (!rows[0]?.user_id) {
+      throw new BadRequestException(
+        'Student not found. Use enrollment number (e.g. SGVU-2026-1004), email, or user UUID.',
+      );
+    }
+    return rows[0].user_id;
+  }
+
+  private async resolveCourseId(tenantId: string, identifier: string): Promise<string> {
+    const isUuid = ExamCellService.UUID_RE.test(identifier);
+    const rows = isUuid
+      ? await this.db.query<Array<{ course_id: string }>>(
+          `SELECT course_id FROM academic_courses
+           WHERE tenant_id = $1 AND course_id = $2::uuid
+           LIMIT 1`,
+          [tenantId, identifier],
+        )
+      : await this.db.query<Array<{ course_id: string }>>(
+          `SELECT course_id FROM academic_courses
+           WHERE tenant_id = $1 AND upper(course_code) = upper($2)
+           LIMIT 1`,
+          [tenantId, identifier],
+        );
+    if (!rows[0]?.course_id) {
+      throw new BadRequestException('Course not found. Use course code (e.g. SMOKE101) or course UUID.');
+    }
+    return rows[0].course_id;
   }
 
   async generateTranscripts(tenantId: string, semester: number) {
@@ -1196,3 +1374,4 @@ export class ExamCellService {
     );
   }
 }
+

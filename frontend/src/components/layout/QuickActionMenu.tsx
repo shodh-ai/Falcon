@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { CalendarDays, Headphones, Loader2, Plus, Presentation } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -24,11 +25,21 @@ import { cn } from '@/lib/utils';
 import { useAuthedApi } from '@/lib/api';
 import { workforceMinDate } from '@/lib/workforce-dates';
 import { HEADER_CONTROL_CLASS } from '@/components/layout/header-styles';
+import { useAuth } from '@/context/AuthContext';
+import {
+  canRaiseHelpdeskTicket,
+  canUseWorkforceQuickActions,
+} from '@/lib/quick-action-access';
+import { workforceRequestsApi } from '@/lib/workforce-api';
 
 type ModalKind = 'leave' | 'od' | 'ticket' | 'room' | null;
 
 export function QuickActionMenu() {
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const { user } = useAuth();
+  const canLeave = canUseWorkforceQuickActions(user);
+  const canTicket = canRaiseHelpdeskTicket(user);
   const [open, setOpen] = useState<ModalKind>(null);
   const [submitting, setSubmitting] = useState(false);
   const [leaveForm, setLeaveForm] = useState({
@@ -45,7 +56,7 @@ export function QuickActionMenu() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.post('/api/hr/workforce/requests', { request_type: 'LEAVE', ...leaveForm });
+      await api.post(workforceRequestsApi(user, pathname), { request_type: 'LEAVE', ...leaveForm });
       toast.success('Leave request submitted');
       setOpen(null);
       setLeaveForm({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
@@ -60,7 +71,7 @@ export function QuickActionMenu() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.post('/api/hr/workforce/requests', {
+      await api.post(workforceRequestsApi(user, pathname), {
         request_type: 'ON_DUTY',
         leave_type: 'OD',
         start_date: odForm.start_date,
@@ -107,6 +118,19 @@ export function QuickActionMenu() {
     setRoomForm({ date: '', slot: '10:00', room: '', purpose: '' });
   }
 
+  const menuItems = useMemo(() => {
+    const items: Array<{ key: ModalKind; label: string; icon: typeof CalendarDays; show: boolean }> = [
+      { key: 'leave', label: 'Apply for Leave / OD', icon: CalendarDays, show: canLeave },
+      { key: 'ticket', label: 'Raise IT Ticket', icon: Headphones, show: canTicket },
+      { key: 'room', label: 'Book Meeting Room', icon: Presentation, show: true },
+    ];
+    return items.filter((item) => item.show);
+  }, [canLeave, canTicket]);
+
+  if (menuItems.length === 0) {
+    return null;
+  }
+
   return (
     <>
       <DropdownMenu>
@@ -119,18 +143,16 @@ export function QuickActionMenu() {
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel>Self-service</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setOpen('leave')}>
-            <CalendarDays className="h-4 w-4" />
-            Apply for Leave / OD
-          </DropdownMenuItem>
-          <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setOpen('ticket')}>
-            <Headphones className="h-4 w-4" />
-            Raise IT Ticket
-          </DropdownMenuItem>
-          <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setOpen('room')}>
-            <Presentation className="h-4 w-4" />
-            Book Meeting Room
-          </DropdownMenuItem>
+          {menuItems.map((item) => (
+            <DropdownMenuItem
+              key={item.key}
+              className="cursor-pointer gap-2"
+              onClick={() => setOpen(item.key)}
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </DropdownMenuItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
 

@@ -15,6 +15,7 @@ import {
   ReopenResultEntryDto,
 } from './dto/result-control.dto';
 import { ResultControlService } from './result-control.service';
+import { SemesterResultsService } from './semester-results.service';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
@@ -25,6 +26,7 @@ export class ExamCellController {
   constructor(
     private readonly examCell: ExamCellService,
     private readonly resultControl: ResultControlService,
+    private readonly semesterResults: SemesterResultsService,
   ) {}
 
   @Get('dashboard')
@@ -202,8 +204,32 @@ export class ExamCellController {
   }
 
   @Get('grade-cards')
-  gradeCards() {
-    return this.examCell.listGradeCards();
+  gradeCards(@Req() req: { user: AuthUser }, @Query('semester') semester?: string) {
+    return this.semesterResults.listGradeCards(this.tenant(req), semester ? Number(semester) : undefined);
+  }
+
+  @Post('grade-cards/generate')
+  generateGradeCards(@Req() req: { user: AuthUser }, @Body() dto: { semester: number }) {
+    return this.semesterResults.generateGradeCards(this.tenant(req), Number(dto.semester));
+  }
+
+  @Post('grade-cards/publish-provisional')
+  publishProvisionalGradeCards(@Req() req: { user: AuthUser }, @Body() dto: { semester: number }) {
+    return this.semesterResults.publishProvisional(this.tenant(req), Number(dto.semester));
+  }
+
+  @Post('grade-cards/finalize')
+  finalizeGradeCards(@Req() req: { user: AuthUser }, @Body() dto: { semester: number }) {
+    return this.semesterResults.finalize(this.tenant(req), Number(dto.semester));
+  }
+
+  @Get('grade-cards/top-students')
+  topStudents(
+    @Req() req: { user: AuthUser },
+    @Query('semester') semester: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.semesterResults.topStudents(this.tenant(req), Number(semester), limit ? Number(limit) : 10);
   }
 
   @Get('ufm-cases')
@@ -211,9 +237,17 @@ export class ExamCellController {
     return this.examCell.listUfmCases();
   }
 
+  @Get('ufm-cases/form-options')
+  ufmFormOptions(@Req() req: { user: AuthUser }) {
+    return this.examCell.listUfmFormOptions(this.tenant(req));
+  }
+
   @Post('ufm-cases')
   createUfmCase(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.examCell.createUfmCase(this.tenant(req), dto as Parameters<ExamCellService['createUfmCase']>[1]);
+    return this.examCell.createUfmCase(this.tenant(req), {
+      ...(dto as Parameters<ExamCellService['createUfmCase']>[1]),
+      reported_by: req.user.user_id,
+    });
   }
 
   @Post('transcripts/generate')
@@ -253,6 +287,11 @@ export class ExamCellController {
   @Post('result-control/sessions/:sessionId/lock-marks')
   lockResultMarks(@Req() req: { user: AuthUser }, @Param('sessionId') sessionId: string) {
     return this.resultControl.lockMarks(this.tenant(req), sessionId, req.user.user_id);
+  }
+
+  @Post('result-control/sessions/:sessionId/prepare-declaration')
+  prepareResultDeclaration(@Req() req: { user: AuthUser }, @Param('sessionId') sessionId: string) {
+    return this.resultControl.prepareForDeclaration(this.tenant(req), sessionId, req.user.user_id);
   }
 
   @Post('result-control/sessions/:sessionId/reopen-entry')
