@@ -44,6 +44,10 @@ import {
   timetableChangedMessage,
   transportBusApproachingMessage,
   workflowApprovalRequiredMessage,
+  ecellStatusUpdatedMessage,
+  ecellMentorMeetingRequestedMessage,
+  ecellMentorMeetingRespondedMessage,
+  ecellMentorFeedbackRequestedMessage,
 } from './notification-message.catalog';
 import {
   NotificationEvents,
@@ -75,6 +79,10 @@ import {
   type HrExportReadyPayload,
   type HrExportFailedPayload,
   type AlumniConversionRequestedPayload,
+  type EcellStatusUpdatedPayload,
+  type EcellMentorMeetingRequestedPayload,
+  type EcellMentorMeetingRespondedPayload,
+  type EcellMentorFeedbackRequestedPayload,
 } from './notification.events';
 
 @Injectable()
@@ -499,6 +507,40 @@ export class NotificationEventsListener {
     const msg = exportFailedMessage(payload, {
       title: payload.title,
       message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ECELL_STATUS_UPDATED)
+  async onEcellStatusUpdated(payload: EcellStatusUpdatedPayload) {
+    const msg = ecellStatusUpdatedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ECELL_MENTOR_MEETING_REQUESTED)
+  async onEcellMentorMeetingRequested(payload: EcellMentorMeetingRequestedPayload) {
+    const msg = ecellMentorMeetingRequestedMessage(payload, {
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ECELL_MENTOR_MEETING_RESPONDED)
+  async onEcellMentorMeetingResponded(payload: EcellMentorMeetingRespondedPayload) {
+    const msg = ecellMentorMeetingRespondedMessage(payload, {
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ECELL_MENTOR_FEEDBACK_REQUESTED)
+  async onEcellMentorFeedbackRequested(payload: EcellMentorFeedbackRequestedPayload) {
+    const msg = ecellMentorFeedbackRequestedMessage(payload, {
       actionLink: payload.actionLink,
     });
     await this.emitFromPayload(payload.tenantId, payload.userId, msg);

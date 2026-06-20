@@ -944,3 +944,87 @@ export function leadershipHelpdeskEscalationMessage(input: {
     intent: 'action_required',
   };
 }
+
+export function ecellStatusUpdatedMessage(
+  payload: { title?: string; message?: string; actionLink?: string },
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: payload.title ?? 'E-Cell Incubation Update',
+      message: payload.message ?? 'Your incubation pitch status has been updated.',
+      actionLink: payload.actionLink ?? '/student/e-cell',
+      actionLabel: 'View tracker',
+      severity: 'info',
+      intent: 'status_update',
+    },
+    overrides,
+  );
+}
+
+export function ecellMentorMeetingRequestedMessage(
+  payload: { startupName: string; topic: string; requestedTime: string; actionLink?: string },
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const when = new Date(payload.requestedTime).toLocaleString();
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: `Mentoring request — ${payload.startupName}`,
+      message: `Startup ${payload.startupName} requested a mentoring session on ${when}. Topic: ${payload.topic}`,
+      actionLink: payload.actionLink ?? '/faculty/mentorship',
+      actionLabel: 'Open inbox',
+      severity: 'warning',
+      intent: 'action_required',
+    },
+    overrides,
+  );
+}
+
+export function ecellMentorMeetingRespondedMessage(
+  payload: {
+    mentorName: string;
+    accepted: boolean;
+    requestedTime: string;
+    meetingLink?: string;
+    declineReason?: string;
+    actionLink?: string;
+  },
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const when = new Date(payload.requestedTime).toLocaleString();
+  const message = payload.accepted
+    ? `Your meeting with ${payload.mentorName} is confirmed for ${when}!${payload.meetingLink ? ` Link/Room: ${payload.meetingLink}` : ''}`
+    : `${payload.mentorName} declined your session (${when}). ${payload.declineReason ?? ''}`.trim();
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: payload.accepted ? 'Mentor meeting confirmed' : 'Mentor meeting declined',
+      message,
+      actionLink: payload.actionLink ?? '/student/e-cell',
+      actionLabel: 'View Founder Hub',
+      severity: payload.accepted ? 'success' : 'warning',
+      intent: 'status_update',
+    },
+    overrides,
+  );
+}
+
+export function ecellMentorFeedbackRequestedMessage(
+  payload: { startupName: string; topic: string; actionLink?: string },
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: 'Share mentoring feedback',
+      message: `How was your session with startup ${payload.startupName}? Topic: ${payload.topic}. Please leave brief feedback for the Incubation Cell.`,
+      actionLink: payload.actionLink ?? '/faculty/mentorship',
+      actionLabel: 'Leave feedback',
+      severity: 'info',
+      intent: 'action_required',
+    },
+    overrides,
+  );
+}

@@ -50,6 +50,7 @@ import { TransportModule } from './modules/transport/transport.module';
 import { LibraryModule } from './modules/library/library.module';
 import { HostelAdminModule } from './modules/hostel-admin/hostel-admin.module';
 import { CampusEventsModule } from './modules/campus-events/campus-events.module';
+import { EcellModule } from './modules/ecell/ecell.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
@@ -156,6 +157,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     LibraryModule,
     HostelAdminModule,
     CampusEventsModule,
+    EcellModule,
     MeetingsModule,
   ],
   controllers: [AppController],

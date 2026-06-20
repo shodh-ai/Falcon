@@ -78,6 +78,34 @@ export class RedisService implements OnModuleDestroy {
     return result === 'OK';
   }
 
+  ecellWorkspaceSlotKey(workspaceId: string, startTimeIso: string) {
+    return `ecell_workspace_slot:${workspaceId}:${startTimeIso}`;
+  }
+
+  /** SET NX EX — prevents two startups booking the same room slot concurrently. */
+  async acquireWorkspaceSlotLock(workspaceId: string, startTimeIso: string, ownerId: string, ttlSec = 30) {
+    const result = await this.client.set(
+      this.ecellWorkspaceSlotKey(workspaceId, startTimeIso),
+      ownerId,
+      'EX',
+      ttlSec,
+      'NX',
+    );
+    return result === 'OK';
+  }
+
+  async releaseWorkspaceSlotLock(workspaceId: string, startTimeIso: string, ownerId: string) {
+    const key = this.ecellWorkspaceSlotKey(workspaceId, startTimeIso);
+    const script = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    return this.client.eval(script, 1, key, ownerId);
+  }
+
   eventPayLockKey(eventId: string, studentUserId: string) {
     return `event_pay_lock:${eventId}:${studentUserId}`;
   }

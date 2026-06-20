@@ -42,6 +42,10 @@ export const NotificationEvents = {
   ALUMNI_CONVERSION_APPROVED: 'alumni.conversion_approved',
   ALUMNI_WELCOME_EMAIL: 'alumni.welcome_email',
   STUDENT_ONBOARDING_APPROVED: 'student.onboarding_approved',
+  ECELL_STATUS_UPDATED: 'ecell.status_updated',
+  ECELL_MENTOR_MEETING_REQUESTED: 'ecell.mentor_meeting_requested',
+  ECELL_MENTOR_MEETING_RESPONDED: 'ecell.mentor_meeting_responded',
+  ECELL_MENTOR_FEEDBACK_REQUESTED: 'ecell.mentor_feedback_requested',
 } as const;
 
 export type NotificationEventName =
@@ -246,4 +250,25 @@ export type StudentOnboardingApprovedPayload = {
   studentName: string;
   officialEmail: string;
   dashboardPath?: string;
+};
+
+export type EcellStatusUpdatedPayload = BaseNotificationPayload;
+
+export type EcellMentorMeetingRequestedPayload = BaseNotificationPayload & {
+  startupName: string;
+  topic: string;
+  requestedTime: string;
+};
+
+export type EcellMentorMeetingRespondedPayload = BaseNotificationPayload & {
+  mentorName: string;
+  accepted: boolean;
+  requestedTime: string;
+  meetingLink?: string;
+  declineReason?: string;
+};
+
+export type EcellMentorFeedbackRequestedPayload = BaseNotificationPayload & {
+  startupName: string;
+  topic: string;
 };

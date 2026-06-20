@@ -24,6 +24,16 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
     edit: ['drives', 'companies', 'offers'],
     approve: ['placement_eligibility'],
   },
+  Incubation_Admin: {
+    view: ['incubation', 'startup_portfolio', 'grant_ledger'],
+    edit: ['incubation', 'cohorts', 'mentor_network'],
+    approve: ['incubation_grants', 'startup_pipeline'],
+  },
+  ECellAdmin: {
+    view: ['incubation', 'startup_portfolio', 'grant_ledger'],
+    edit: ['incubation', 'cohorts', 'mentor_network'],
+    approve: ['incubation_grants', 'startup_pipeline'],
+  },
   Parent: {
     view: ['own_child'],
     edit: [],
