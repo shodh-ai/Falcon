@@ -36,13 +36,18 @@ export class EcellService {
 
   private hasRole(roles: string[] | undefined, roleName: string) {
     const normalized = (roles ?? []).map((r) => r.trim().toLowerCase());
-    return normalized.includes(roleName.trim().toLowerCase()) || normalized.includes('superadmin');
+    return (
+      normalized.includes(roleName.trim().toLowerCase()) ||
+      normalized.includes('superadmin')
+    );
   }
 
   private assertTransition(from: string, to: string) {
     const allowed = VALID_TRANSITIONS[from] ?? [];
     if (!allowed.includes(to)) {
-      throw new BadRequestException(`Invalid status transition from ${from} to ${to}`);
+      throw new BadRequestException(
+        `Invalid status transition from ${from} to ${to}`,
+      );
     }
   }
 
@@ -82,13 +87,20 @@ export class EcellService {
     level: 1 | 2,
   ) {
     const config = await this.getActiveConfig(tenantId);
-    if (!config) throw new BadRequestException('No active E-Cell configuration found');
+    if (!config)
+      throw new BadRequestException('No active E-Cell configuration found');
     const required =
       level === 1
         ? String(config.level_1_approver_role)
         : String(config.level_2_approver_role);
-    if (!this.hasRole(roles, required) && !this.hasRole(roles, 'ECellAdmin') && !this.hasRole(roles, 'Incubation_Admin')) {
-      throw new ForbiddenException(`Requires ${required} role for Level ${level} approval`);
+    if (
+      !this.hasRole(roles, required) &&
+      !this.hasRole(roles, 'ECellAdmin') &&
+      !this.hasRole(roles, 'Incubation_Admin')
+    ) {
+      throw new ForbiddenException(
+        `Requires ${required} role for Level ${level} approval`,
+      );
     }
     return config;
   }
@@ -115,7 +127,9 @@ export class EcellService {
        WHERE u.user_id = $1`,
       [studentUserId],
     );
-    const phone = (rows[0]?.phone ?? rows[0]?.profile_phone) as string | undefined;
+    const phone = (rows[0]?.phone ?? rows[0]?.profile_phone) as
+      | string
+      | undefined;
     if (phone) {
       await this.integrations.queueWhatsApp(phone, `${title}: ${message}`);
     }
@@ -125,7 +139,10 @@ export class EcellService {
     return this.getActiveConfig(this.tenant(tenantId));
   }
 
-  async upsertConfiguration(tenantId: string | undefined, dto: UpsertEcellConfigDto) {
+  async upsertConfiguration(
+    tenantId: string | undefined,
+    dto: UpsertEcellConfigDto,
+  ) {
     const tid = this.tenant(tenantId);
     if (dto.is_active !== false) {
       await this.db.query(
@@ -160,15 +177,26 @@ export class EcellService {
     );
   }
 
-  async submitProject(tenantId: string | undefined, studentUserId: string, dto: SubmitEcellProjectDto) {
+  async submitProject(
+    tenantId: string | undefined,
+    studentUserId: string,
+    dto: SubmitEcellProjectDto,
+  ) {
     const tid = this.tenant(tenantId);
     const config = await this.getActiveConfig(tid);
     if (!config) {
-      throw new BadRequestException('E-Cell incubation is not open for submissions');
+      throw new BadRequestException(
+        'E-Cell incubation is not open for submissions',
+      );
     }
-    const maxLimit = config.max_funding_limit != null ? Number(config.max_funding_limit) : null;
+    const maxLimit =
+      config.max_funding_limit != null
+        ? Number(config.max_funding_limit)
+        : null;
     if (maxLimit != null && dto.requested_funding > maxLimit) {
-      throw new BadRequestException(`Requested funding cannot exceed cohort limit of ₹${maxLimit}`);
+      throw new BadRequestException(
+        `Requested funding cannot exceed cohort limit of ₹${maxLimit}`,
+      );
     }
 
     const existing = await this.db.query(
@@ -179,7 +207,9 @@ export class EcellService {
       [tid, studentUserId],
     );
     if (existing[0]) {
-      throw new BadRequestException('You already have an active incubation pitch in progress');
+      throw new BadRequestException(
+        'You already have an active incubation pitch in progress',
+      );
     }
 
     const rows = await this.db.query(
@@ -262,7 +292,8 @@ export class EcellService {
        RETURNING *`,
       [projectId, tid, from],
     );
-    if (!rows[0]) throw new BadRequestException('Project not found or already processed');
+    if (!rows[0])
+      throw new BadRequestException('Project not found or already processed');
 
     if (level && level > 0) {
       await this.db.query(
@@ -274,7 +305,11 @@ export class EcellService {
     }
 
     const label =
-      level === 1 ? 'Level 1 Review' : level === 2 ? 'Level 2 Review' : 'Initial Triage';
+      level === 1
+        ? 'Level 1 Review'
+        : level === 2
+          ? 'Level 2 Review'
+          : 'Initial Triage';
     await this.notifyStudent(
       tid,
       String(project.student_user_id),
@@ -311,15 +346,25 @@ export class EcellService {
 
     const requested = Number(project.requested_funding);
     const approved = dto.approved_funding_amount ?? requested;
-    if (approved <= 0) throw new BadRequestException('Approved funding must be greater than zero');
+    if (approved <= 0)
+      throw new BadRequestException(
+        'Approved funding must be greater than zero',
+      );
     if (approved > requested) {
-      throw new BadRequestException(`Approved amount cannot exceed requested ₹${requested}`);
+      throw new BadRequestException(
+        `Approved amount cannot exceed requested ₹${requested}`,
+      );
     }
 
     const config = await this.getActiveConfig(tid);
-    const maxLimit = config?.max_funding_limit != null ? Number(config.max_funding_limit) : null;
+    const maxLimit =
+      config?.max_funding_limit != null
+        ? Number(config.max_funding_limit)
+        : null;
     if (maxLimit != null && approved > maxLimit) {
-      throw new BadRequestException(`Approved funding cannot exceed cohort limit of ₹${maxLimit}`);
+      throw new BadRequestException(
+        `Approved funding cannot exceed cohort limit of ₹${maxLimit}`,
+      );
     }
 
     const rows = await this.db.query(
@@ -331,7 +376,10 @@ export class EcellService {
        RETURNING *`,
       [projectId, tid, approved],
     );
-    if (!rows[0]) throw new BadRequestException('Project not found or not awaiting L1 review');
+    if (!rows[0])
+      throw new BadRequestException(
+        'Project not found or not awaiting L1 review',
+      );
 
     await this.db.query(
       `INSERT INTO ecell_approvals (
@@ -390,14 +438,21 @@ export class EcellService {
       [projectId, tid],
     );
     if (!l1Rows[0]) {
-      throw new BadRequestException('Level 2 approval requires an existing Level 1 approval record');
+      throw new BadRequestException(
+        'Level 2 approval requires an existing Level 1 approval record',
+      );
     }
 
-    const l1Amount = Number(l1Rows[0].approved_funding_amount ?? project.approved_funding_amount);
+    const l1Amount = Number(
+      l1Rows[0].approved_funding_amount ?? project.approved_funding_amount,
+    );
     const finalAmount = dto.approved_funding_amount ?? l1Amount;
-    if (finalAmount <= 0) throw new BadRequestException('Final funding must be greater than zero');
+    if (finalAmount <= 0)
+      throw new BadRequestException('Final funding must be greater than zero');
     if (finalAmount > l1Amount) {
-      throw new BadRequestException(`Final amount cannot exceed L1 approved ₹${l1Amount}`);
+      throw new BadRequestException(
+        `Final amount cannot exceed L1 approved ₹${l1Amount}`,
+      );
     }
 
     const queryRunner = this.db.createQueryRunner();
@@ -413,7 +468,10 @@ export class EcellService {
          RETURNING *`,
         [projectId, tid, finalAmount],
       );
-      if (!updated[0]) throw new BadRequestException('Project not found or not awaiting L2 review');
+      if (!updated[0])
+        throw new BadRequestException(
+          'Project not found or not awaiting L2 review',
+        );
 
       await queryRunner.query(
         `INSERT INTO ecell_approvals (
@@ -436,7 +494,14 @@ export class EcellService {
       );
 
       const disbursementId = disbursement[0].disbursement_id as string;
-      await this.ledger.postExpense(tid, disbursementId, finalAmount, 0, 0, queryRunner);
+      await this.ledger.postExpense(
+        tid,
+        disbursementId,
+        finalAmount,
+        0,
+        0,
+        queryRunner,
+      );
 
       await queryRunner.query(
         `UPDATE ecell_disbursement_requests

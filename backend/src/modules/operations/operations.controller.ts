@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -24,13 +34,19 @@ export class OperationsController {
 
   @Patch('gate-passes/:id/approve')
   @Roles('Warden', 'SuperAdmin', 'HOD')
-  approvePass(@Param('id') id: string, @Req() req: { user: { user_id: string } }) {
+  approvePass(
+    @Param('id') id: string,
+    @Req() req: { user: { user_id: string } },
+  ) {
     return this.ops.approveGatePass(id, req.user.user_id);
   }
 
   @Patch('gate-passes/:id/reject')
   @Roles('Warden', 'SuperAdmin', 'HOD')
-  rejectPass(@Param('id') id: string, @Req() req: { user: { user_id: string } }) {
+  rejectPass(
+    @Param('id') id: string,
+    @Req() req: { user: { user_id: string } },
+  ) {
     return this.ops.rejectGatePass(id, req.user.user_id);
   }
 

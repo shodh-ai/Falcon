@@ -1,4 +1,10 @@
-import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket } from '@nestjs/websockets';
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
+} from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 
@@ -9,11 +15,19 @@ export class HostelAdminGateway {
 
   private readonly logger = new Logger(HostelAdminGateway.name);
 
-  emitToHostel(hostelId: string, event: string, payload: Record<string, unknown>) {
+  emitToHostel(
+    hostelId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ) {
     this.server.to(`hostel:${hostelId}`).emit(event, payload);
   }
 
-  emitToTenant(tenantId: string, event: string, payload: Record<string, unknown>) {
+  emitToTenant(
+    tenantId: string,
+    event: string,
+    payload: Record<string, unknown>,
+  ) {
     this.server.to(`tenant:${tenantId}`).emit(event, payload);
   }
 

@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
@@ -36,8 +42,11 @@ export class TicketService {
   ) {}
 
   async createTicket(studentUserId: string, dto: CreateTicketDto) {
-    const student = await this.users.findOne({ where: { user_id: studentUserId } });
-    const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
+    const tenantId =
+      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
 
     if (dto.category !== 'MENTORSHIP') {
       await assertNoPendingRow(this.tickets, {
@@ -54,7 +63,11 @@ export class TicketService {
           email: '',
           routeReason: 'MENTORSHIP_DIRECT',
         }
-      : await this.workflowRouting.getHelpdeskAssignee(studentUserId, tenantId, dto.category);
+      : await this.workflowRouting.getHelpdeskAssignee(
+          studentUserId,
+          tenantId,
+          dto.category,
+        );
 
     const { assigned_to_user_id: _omit, ...ticketFields } = dto;
 
@@ -72,11 +85,12 @@ export class TicketService {
       } as Partial<HelpdeskTicket>),
     );
 
-    const actionLink = dto.category === 'HR'
-      ? `/hr/grievances/${ticket.ticket_id}`
-      : dto.category === 'FACILITIES'
+    const actionLink =
+      dto.category === 'HR'
         ? `/hr/grievances/${ticket.ticket_id}`
-        : `/helpdesk/tickets/${ticket.ticket_id}`;
+        : dto.category === 'FACILITIES'
+          ? `/hr/grievances/${ticket.ticket_id}`
+          : `/helpdesk/tickets/${ticket.ticket_id}`;
 
     this.workflowNotify.notifyApprover({
       tenantId,
@@ -107,7 +121,9 @@ export class TicketService {
     actorRole: string,
     tenantId: string,
   ) {
-    const rows = await this.tickets.manager.query<Array<Record<string, unknown>>>(
+    const rows = await this.tickets.manager.query<
+      Array<Record<string, unknown>>
+    >(
       `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
               t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
               su.name AS student_name, au.name AS assigned_to_name
@@ -167,7 +183,9 @@ export class TicketService {
       throw new NotFoundException('Ticket not found');
     }
 
-    const rows = await this.tickets.manager.query<Array<Record<string, unknown>>>(
+    const rows = await this.tickets.manager.query<
+      Array<Record<string, unknown>>
+    >(
       `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
               t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
               t.sla_deadline, t.resolved_at, t.rejection_reason,
@@ -285,10 +303,14 @@ export class TicketService {
 
   async updateStatus(ticketId: string, dto: UpdateTicketStatusDto) {
     if (dto.status === 'REJECTED' && !dto.rejection_reason?.trim()) {
-      throw new BadRequestException('rejection_reason is required when rejecting a ticket');
+      throw new BadRequestException(
+        'rejection_reason is required when rejecting a ticket',
+      );
     }
 
-    const ticket = await this.tickets.findOne({ where: { ticket_id: ticketId } });
+    const ticket = await this.tickets.findOne({
+      where: { ticket_id: ticketId },
+    });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
     ticket.status = dto.status;
@@ -316,8 +338,13 @@ export class TicketService {
     }
 
     if (dto.status === 'REJECTED') {
-      const student = await this.users.findOne({ where: { user_id: ticket.student_user_id } });
-      const tenantId = student?.tenant_id ?? ticket.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+      const student = await this.users.findOne({
+        where: { user_id: ticket.student_user_id },
+      });
+      const tenantId =
+        student?.tenant_id ??
+        ticket.tenant_id ??
+        'a0000000-0000-4000-8000-000000000001';
       this.notify.ticketReply({
         tenantId,
         userId: ticket.student_user_id,
@@ -332,8 +359,15 @@ export class TicketService {
     return saved;
   }
 
-  async addMessage(ticketId: string, actorUserId: string, actorRole: string, message: string) {
-    const ticket = await this.tickets.findOne({ where: { ticket_id: ticketId } });
+  async addMessage(
+    ticketId: string,
+    actorUserId: string,
+    actorRole: string,
+    message: string,
+  ) {
+    const ticket = await this.tickets.findOne({
+      where: { ticket_id: ticketId },
+    });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
     const isStudentOwner = ticket.student_user_id === actorUserId;
@@ -349,7 +383,9 @@ export class TicketService {
       'HRAdmin',
     ].includes(actorRole);
     if (!isStudentOwner && !isAdminActor) {
-      throw new ForbiddenException('You are not allowed to post messages in this ticket');
+      throw new ForbiddenException(
+        'You are not allowed to post messages in this ticket',
+      );
     }
 
     const conversation = ticket.conversation ?? [];
@@ -363,11 +399,13 @@ export class TicketService {
     const saved = await this.tickets.save(ticket);
 
     if (isAdminActor && !isStudentOwner && ticket.category !== 'MENTORSHIP') {
-      const student = await this.tickets.manager.query<Array<{ tenant_id: string }>>(
-        `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
-        [ticket.student_user_id],
-      );
-      const tenantId = student[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+      const student = await this.tickets.manager.query<
+        Array<{ tenant_id: string }>
+      >(`SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`, [
+        ticket.student_user_id,
+      ]);
+      const tenantId =
+        student[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
       this.notify.ticketReply({
         tenantId,
         userId: ticket.student_user_id,

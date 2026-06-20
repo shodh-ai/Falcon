@@ -7,14 +7,19 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AcademicMentorship } from '../../entities/academic-mentorship.entity';
-import { MentorshipChat, MentorshipChatSender } from '../../entities/mentorship-chat.entity';
+import {
+  MentorshipChat,
+  MentorshipChatSender,
+} from '../../entities/mentorship-chat.entity';
 import { User } from '../../entities/user.entity';
 
 @Injectable()
 export class MentorshipChatService {
   constructor(
-    @InjectRepository(MentorshipChat) private readonly chats: Repository<MentorshipChat>,
-    @InjectRepository(AcademicMentorship) private readonly mentorships: Repository<AcademicMentorship>,
+    @InjectRepository(MentorshipChat)
+    private readonly chats: Repository<MentorshipChat>,
+    @InjectRepository(AcademicMentorship)
+    private readonly mentorships: Repository<AcademicMentorship>,
     @InjectRepository(User) private readonly users: Repository<User>,
   ) {}
 
@@ -28,7 +33,11 @@ export class MentorshipChatService {
     );
   }
 
-  async sendFacultyMessage(proctorUserId: string, studentUserId: string, message: string) {
+  async sendFacultyMessage(
+    proctorUserId: string,
+    studentUserId: string,
+    message: string,
+  ) {
     const mentorship = await this.mentorships.findOne({
       where: {
         student_user_id: studentUserId,
@@ -36,7 +45,8 @@ export class MentorshipChatService {
         is_active: true,
       },
     });
-    if (!mentorship) throw new ForbiddenException('This student is not your mentee');
+    if (!mentorship)
+      throw new ForbiddenException('This student is not your mentee');
 
     return this.insertMessage(studentUserId, proctorUserId, 'FACULTY', message);
   }
@@ -77,13 +87,21 @@ export class MentorshipChatService {
     );
 
     return summaries.sort((a, b) => {
-      const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-      const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      const aTime = a.last_message_at
+        ? new Date(a.last_message_at).getTime()
+        : 0;
+      const bTime = b.last_message_at
+        ? new Date(b.last_message_at).getTime()
+        : 0;
       return bTime - aTime;
     });
   }
 
-  async getThread(proctorUserId: string, studentUserId: string, markRead: boolean) {
+  async getThread(
+    proctorUserId: string,
+    studentUserId: string,
+    markRead: boolean,
+  ) {
     await this.assertMentorshipPair(studentUserId, proctorUserId);
 
     const rows = await this.chats.find({
@@ -148,7 +166,10 @@ export class MentorshipChatService {
     return mentorship;
   }
 
-  private async assertMentorshipPair(studentUserId: string, proctorUserId: string) {
+  private async assertMentorshipPair(
+    studentUserId: string,
+    proctorUserId: string,
+  ) {
     const mentorship = await this.mentorships.findOne({
       where: {
         student_user_id: studentUserId,
@@ -156,7 +177,8 @@ export class MentorshipChatService {
         is_active: true,
       },
     });
-    if (!mentorship) throw new ForbiddenException('Not an active mentorship pair');
+    if (!mentorship)
+      throw new ForbiddenException('Not an active mentorship pair');
   }
 
   private mapMessage(row: MentorshipChat) {

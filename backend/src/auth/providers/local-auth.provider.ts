@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { User } from '../../entities/user.entity';
-import type { AuthTokenPayload, IAuthProvider } from '../interfaces/auth-provider.interface';
+import type {
+  AuthTokenPayload,
+  IAuthProvider,
+} from '../interfaces/auth-provider.interface';
 
 @Injectable()
 export class LocalAuthProvider implements IAuthProvider {
@@ -35,7 +38,8 @@ export class LocalAuthProvider implements IAuthProvider {
       .filter((row) => row.role?.role_name)
       .sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
       .map((row) => row.role.role_name);
-    const roles = mappedRoles.length > 0 ? Array.from(new Set(mappedRoles)) : [];
+    const roles =
+      mappedRoles.length > 0 ? Array.from(new Set(mappedRoles)) : [];
     if (user.role?.role_name && !roles.includes(user.role.role_name)) {
       roles.unshift(user.role.role_name);
     }

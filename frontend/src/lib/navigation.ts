@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
+  LayoutGrid,
   Wallet,
   GraduationCap,
   ClipboardCheck,
@@ -41,6 +42,7 @@ import {
   Library,
   BusFront,
   TrendingUp,
+  Upload,
   Scale,
   Heart,
   Calendar,
@@ -63,6 +65,7 @@ import {
   MapPin,
   AlertTriangle,
   Contact,
+  Megaphone,
 } from 'lucide-react';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
@@ -270,6 +273,7 @@ export const studentPortal: PortalConfig = {
         { label: 'My Profile & Master Data', href: '/student/profile', icon: UserRoundCog, keywords: ['profile', 'aadhaar', 'scholarship', 'enrollment'] },
         { label: 'Admission & Document Vault', href: '/student/admission-vault', icon: Archive, keywords: ['admission', 'counseling', 'entrance', 'migration'] },
         { label: 'Exit & Alumni Transition', href: '/student/exit', icon: DoorOpen, keywords: ['no dues', 'degree', 'alumni', 'graduation'] },
+        { label: 'Degree & Convocation', href: '/student/certificates', icon: GraduationCap, keywords: ['degree', 'convocation', 'transcript', 'certificate'] },
       ],
     },
     {
@@ -291,6 +295,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['clubs', 'tickets', 'ncc', 'nss', 'fest'] },
         { label: 'Venue Booking', href: '/student/venues', icon: Building2, keywords: ['room', 'gd', 'seminar', 'hall', 'classroom', 'booking'] },
         { label: 'E-Cell & Incubation', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
+        { label: 'Research Grants', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
       ],
     },
     {
@@ -316,6 +321,8 @@ export const studentPortal: PortalConfig = {
     { label: 'Falcon Events', href: '/student/falcon-events', icon: PartyPopper },
     { label: 'Venue Booking', href: '/student/venues', icon: Building2 },
     { label: 'E-Cell Hub', href: '/student/e-cell', icon: Rocket },
+    { label: 'Research Grants', href: '/student/research', icon: FlaskConical },
+    { label: 'Degree & Convocation', href: '/student/certificates', icon: GraduationCap },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
     { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield },
   ],
@@ -358,6 +365,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
         { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
+        { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
       ],
     },
     {
@@ -404,6 +412,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
         { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
+        { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
       ],
     },
     {
@@ -531,6 +540,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
         { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation'] },
+        { label: 'Proxy Teaching Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events', 'coordinator'] },
         { label: 'Venue Requests', href: '/hod/venue-requests', icon: Building2, keywords: ['room', 'seminar', 'classroom', 'booking'] },
         { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty', 'dean', 'minutes'] },
@@ -841,8 +851,10 @@ export const financePortal: PortalConfig = {
         { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
         { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
         { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
+        { label: 'Cheque Clearing', href: '/finance/cheque-clearing', icon: Banknote, keywords: ['cheque', 'bounce', 'deposit'] },
         { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'] },
         { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'] },
+        { label: 'R&D Grant Budget Review', href: '/finance/rnd-budget', icon: FlaskConical, keywords: ['research', 'grant', 'budget'] },
         { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
       ],
     },
@@ -898,6 +910,7 @@ export const iqacPortal: PortalConfig = {
       items: [
         { label: 'Progression & Placements', href: '/iqac/student-outcomes', icon: GraduationCap, keywords: ['lpa', 'alumni', 'placed'] },
         { label: 'Student Achievements', href: '/iqac/student-achievements', icon: Award, keywords: ['certificates', 'naac'] },
+        { label: 'Student R&D Grants', href: '/iqac/rnd', icon: FlaskConical, keywords: ['research grant', 'ranking', 'naac'] },
       ],
     },
     {
@@ -925,6 +938,7 @@ export const iqacPortal: PortalConfig = {
     { label: 'AQAR / SSR Reports', href: '/iqac/reports', icon: FileText },
     { label: 'Alumni Verification', href: '/iqac/alumni/verification', icon: CheckCircle },
     { label: 'Falcon Core Tasks', href: '/iqac/tasks', icon: ListChecks },
+    { label: 'Student R&D Grants', href: '/iqac/rnd', icon: FlaskConical },
   ],
 };
 
@@ -1012,6 +1026,7 @@ export const examCellPortal: PortalConfig = {
         { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
         { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'low attendance', 'admit card', 'approved'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms'] },
+        { label: 'Resource Allocation', href: '/exam-cell/resource-allocation', icon: LayoutGrid, keywords: ['coordinator', 'invigilator', 'room', 'subject'] },
         { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty'] },
       ],
     },
@@ -1149,6 +1164,8 @@ export const adminOpsPortal: PortalConfig = {
         { label: 'Fleet & Transport', href: '/admin-ops/fleet', icon: Bus },
         { label: 'Transport Hub', href: '/admin-ops/transport', icon: BusFront },
         { label: 'Master Academic Calendar', href: '/admin-ops/calendar', icon: Calendar },
+        { label: 'Campus Announcements', href: '/admin-ops/announcements', icon: Megaphone, keywords: ['news', 'notice', 'board'] },
+        { label: 'Convocation & Certificates', href: '/admin-ops/convocation', icon: GraduationCap, keywords: ['degree', 'convocation', 'pdf', 'digilocker'] },
         { label: 'Event Venue Approvals', href: '/admin-ops/events', icon: Ticket },
         { label: 'Student Venue Requests', href: '/admin-ops/venue-requests', icon: Building2, keywords: ['seminar', 'estate', 'booking'] },
         { label: 'Master Timetable', href: '/admin-ops/timetable', icon: CalendarClock },
@@ -1241,6 +1258,7 @@ export const adminPortal: PortalConfig = {
         { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
         { label: 'Student Verifications', href: '/admin/verifications', icon: FileCheck2, roles: ['SuperAdmin', 'AdmissionsOfficer', 'Registrar'] },
         { label: 'Academics', href: '/admin/academics', icon: GraduationCap, roles: ['SuperAdmin', 'Registrar'] },
+        { label: 'Student Excel Upload', href: '/admin/students/bulk-upload', icon: Upload, roles: ['SuperAdmin', 'Registrar', 'AdmissionsOfficer'] },
         { label: 'Finance', href: '/admin/finance', icon: Wallet, roles: ['SuperAdmin', 'Accountant', 'President'] },
         { label: 'HR & Payroll', href: '/admin/hr', icon: Users, roles: ['SuperAdmin', 'HR', 'President'] },
         { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },

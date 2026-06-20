@@ -1,8 +1,19 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BaseTenantEntity } from './base-tenant.entity';
 import { User } from './user.entity';
 
-export type StaffGatePassStatus = 'PENDING' | 'PENDING_HR' | 'APPROVED' | 'REJECTED';
+export type StaffGatePassStatus =
+  | 'PENDING'
+  | 'PENDING_HR'
+  | 'APPROVED'
+  | 'REJECTED';
 
 @Entity('staff_gate_passes')
 @Index(['tenant_id', 'staff_user_id', 'status'])

@@ -43,14 +43,18 @@ export class ObjectStorageService implements OnModuleInit {
 
   async onModuleInit() {
     if (!this.enabled) {
-      this.logger.warn('S3/MinIO not configured — uploads will use disk fallback');
+      this.logger.warn(
+        'S3/MinIO not configured — uploads will use disk fallback',
+      );
       return;
     }
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
     } catch {
       try {
-        await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+        await this.client.send(
+          new CreateBucketCommand({ Bucket: this.bucket }),
+        );
         this.logger.log(`Created bucket: ${this.bucket}`);
       } catch (err) {
         this.logger.warn(`Could not ensure bucket ${this.bucket}: ${err}`);
@@ -99,7 +103,10 @@ export class ObjectStorageService implements OnModuleInit {
     return response.Body as Readable;
   }
 
-  async getPresignedDownloadUrl(key: string, expiresInSeconds = 3600): Promise<string> {
+  async getPresignedDownloadUrl(
+    key: string,
+    expiresInSeconds = 3600,
+  ): Promise<string> {
     const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
     return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
   }

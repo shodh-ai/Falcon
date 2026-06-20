@@ -9,7 +9,13 @@ import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { AttendanceEligibilityService } from './attendance-eligibility.service';
 
-const EXEMPTION_REASONS = ['MEDICAL', 'ACCIDENT', 'INTERNSHIP', 'BEREAVEMENT', 'OTHER'];
+const EXEMPTION_REASONS = [
+  'MEDICAL',
+  'ACCIDENT',
+  'INTERNSHIP',
+  'BEREAVEMENT',
+  'OTHER',
+];
 
 interface CreateExemptionDto {
   reason_category?: string;
@@ -41,7 +47,11 @@ export class AttendancePolicyService {
   // Student: individual exemption requests
   // ----------------------------------------------------------------------------
 
-  async createExemption(tenantId: string, studentUserId: string, dto: CreateExemptionDto) {
+  async createExemption(
+    tenantId: string,
+    studentUserId: string,
+    dto: CreateExemptionDto,
+  ) {
     const category = (dto.reason_category ?? '').toUpperCase();
     if (!EXEMPTION_REASONS.includes(category)) {
       throw new BadRequestException(
@@ -75,10 +85,13 @@ export class AttendancePolicyService {
       [tenantId, studentUserId],
     );
     if (open.length > 0) {
-      throw new BadRequestException('You already have an exemption request under review.');
+      throw new BadRequestException(
+        'You already have an exemption request under review.',
+      );
     }
 
-    const attendance = await this.eligibility.computeAttendancePercent(studentUserId);
+    const attendance =
+      await this.eligibility.computeAttendancePercent(studentUserId);
 
     const rows = await this.db.query(
       `INSERT INTO student_attendance_exemptions
@@ -223,19 +236,31 @@ export class AttendancePolicyService {
   // HOD: department threshold relaxation (75 -> 70 / 65), Dean approves
   // ----------------------------------------------------------------------------
 
-  async createThresholdRequest(tenantId: string, hodUserId: string, dto: CreateThresholdDto) {
+  async createThresholdRequest(
+    tenantId: string,
+    hodUserId: string,
+    dto: CreateThresholdDto,
+  ) {
     const pct = Number(dto.requested_min_percent);
     if (!Number.isFinite(pct) || pct < 1 || pct > 100) {
-      throw new BadRequestException('requested_min_percent must be between 1 and 100.');
+      throw new BadRequestException(
+        'requested_min_percent must be between 1 and 100.',
+      );
     }
     if (!dto.reason?.trim()) {
       throw new BadRequestException('A justification is required.');
     }
 
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    let deptId = dto.dept_id ?? deptIds[0] ?? null;
-    if (deptId != null && deptIds.length > 0 && !deptIds.includes(Number(deptId))) {
-      throw new ForbiddenException('You can only request changes for your own department.');
+    const deptId = dto.dept_id ?? deptIds[0] ?? null;
+    if (
+      deptId != null &&
+      deptIds.length > 0 &&
+      !deptIds.includes(Number(deptId))
+    ) {
+      throw new ForbiddenException(
+        'You can only request changes for your own department.',
+      );
     }
 
     const rows = await this.db.query(
@@ -246,7 +271,10 @@ export class AttendancePolicyService {
       [tenantId, deptId, pct, dto.reason.trim(), hodUserId],
     );
 
-    const [hod] = await this.db.query(`SELECT name FROM users WHERE user_id = $1`, [hodUserId]);
+    const [hod] = await this.db.query(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [hodUserId],
+    );
     await this.notifyRoles(tenantId, ['Dean'], {
       title: 'Attendance policy change request',
       message: `${hod?.name ?? 'An HOD'} requested lowering the minimum attendance to ${pct}%.`,
@@ -307,7 +335,10 @@ export class AttendancePolicyService {
     this.notify.approvalRequired({
       tenantId,
       userId: request.requested_by,
-      title: newStatus === 'APPROVED' ? 'Attendance policy approved' : 'Attendance policy rejected',
+      title:
+        newStatus === 'APPROVED'
+          ? 'Attendance policy approved'
+          : 'Attendance policy rejected',
       message:
         newStatus === 'APPROVED'
           ? `Your request to set minimum attendance to ${request.requested_min_percent}% was approved.`
@@ -338,7 +369,9 @@ export class AttendancePolicyService {
     );
     if (!exemption) throw new NotFoundException('Exemption request not found');
     if (deptIds.length && !deptIds.includes(Number(exemption.dept_id))) {
-      throw new ForbiddenException('This student is not in your department scope.');
+      throw new ForbiddenException(
+        'This student is not in your department scope.',
+      );
     }
     return exemption;
   }
@@ -348,7 +381,10 @@ export class AttendancePolicyService {
       `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
       [hodUserId],
     );
-    const [hod] = await this.db.query(`SELECT dept_id FROM users WHERE user_id = $1`, [hodUserId]);
+    const [hod] = await this.db.query(
+      `SELECT dept_id FROM users WHERE user_id = $1`,
+      [hodUserId],
+    );
     return Array.from(
       new Set<number>([
         ...direct.map((row: { dept_id: number }) => Number(row.dept_id)),
@@ -400,7 +436,11 @@ export class AttendancePolicyService {
       [tenantId, roleNames],
     );
     for (const row of recipients as Array<{ user_id: string }>) {
-      this.notify.approvalRequired({ tenantId, userId: row.user_id, ...payload });
+      this.notify.approvalRequired({
+        tenantId,
+        userId: row.user_id,
+        ...payload,
+      });
     }
   }
 }

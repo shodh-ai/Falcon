@@ -21,8 +21,19 @@ export class IntegrationsController {
   @Post('government/push')
   @UseGuards(JwtAuthGuard)
   @Roles('SuperAdmin', 'Registrar')
-  governmentPush(@Body() dto: { type: 'DIGILOCKER' | 'NAD' | 'ABC'; entity_type: string; entity_id?: string }) {
-    return this.integrations.queueGovernmentPush(dto.type, dto.entity_type, dto.entity_id);
+  governmentPush(
+    @Body()
+    dto: {
+      type: 'DIGILOCKER' | 'NAD' | 'ABC';
+      entity_type: string;
+      entity_id?: string;
+    },
+  ) {
+    return this.integrations.queueGovernmentPush(
+      dto.type,
+      dto.entity_type,
+      dto.entity_id,
+    );
   }
 
   @Post('whatsapp/send')

@@ -14,7 +14,10 @@ export function parsePageParams(
   defaultLimit = DEFAULT_PAGE_LIMIT,
   maxLimit = MAX_PAGE_LIMIT,
 ) {
-  const limit = Math.min(Math.max(Number(limitRaw) || defaultLimit, 1), maxLimit);
+  const limit = Math.min(
+    Math.max(Number(limitRaw) || defaultLimit, 1),
+    maxLimit,
+  );
   const offset = Math.max(Number(offsetRaw) || 0, 0);
   return { limit, offset };
 }

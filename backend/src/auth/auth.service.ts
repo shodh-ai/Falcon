@@ -68,7 +68,8 @@ export class AuthService {
     password: string,
     tenantSubdomain?: string,
   ): Promise<{ token: string; user: Record<string, unknown> }> {
-    const subdomain = tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+    const subdomain =
+      tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
     const tenant = await this.tenantService.findBySubdomain(subdomain);
 
     const [credential] = await this.dataSource.query<LoginCredentialRow[]>(
@@ -103,7 +104,10 @@ export class AuthService {
     const tokenUser = freshUser ?? user;
     const roleClaims = this.getRoleClaims(tokenUser);
     const token = this.signToken(tokenUser, tenant.tenant_id, tenant.pg_schema);
-    const caps = await this.hrEntityCtx.getPermissions(tenant.tenant_id, tokenUser.user_id);
+    const caps = await this.hrEntityCtx.getPermissions(
+      tenant.tenant_id,
+      tokenUser.user_id,
+    );
     const permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
     const allowedRows = await this.hrEntityCtx.listAllowedEntities(
       tenant.tenant_id,
@@ -166,7 +170,10 @@ export class AuthService {
   }
 
   /** Resolve guardian mobile for Parent-role users (password login → parent portal APIs). */
-  async resolveParentMobile(tenantId: string, email: string): Promise<string | null> {
+  async resolveParentMobile(
+    tenantId: string,
+    email: string,
+  ): Promise<string | null> {
     const rows = await this.dataSource.query<Array<{ parent_mobile: string }>>(
       `SELECT parent_mobile FROM parent_student_links
        WHERE tenant_id = $1 AND LOWER(COALESCE(parent_email, '')) = LOWER($2)

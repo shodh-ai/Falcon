@@ -1,4 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  Index,
+} from 'typeorm';
 import { BaseTenantEntity } from './base-tenant.entity';
 
 export type FeedEventType = 'INCOME' | 'EXPENSE' | 'ALERT';

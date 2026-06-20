@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Public } from '../../common/decorators/roles.decorator';
 import { ReadOnlyPortal } from '../../common/decorators/read-only-portal.decorator';
@@ -29,7 +38,9 @@ export class ParentController {
   @Get('overview')
   @UseGuards(JwtAuthGuard)
   overview(@Req() req: { user: ParentUser }, @Query('mobile') mobile?: string) {
-    return this.parent.getChildOverview(this.parent.resolveMobile(req.user, mobile));
+    return this.parent.getChildOverview(
+      this.parent.resolveMobile(req.user, mobile),
+    );
   }
 
   @Get('feed')
@@ -50,7 +61,10 @@ export class ParentController {
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
   ) {
-    return this.parent.getLiveFeed(this.parent.resolveMobile(req.user), studentUserId);
+    return this.parent.getLiveFeed(
+      this.parent.resolveMobile(req.user),
+      studentUserId,
+    );
   }
 
   @Get('students/:studentUserId/academics')
@@ -59,7 +73,10 @@ export class ParentController {
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
   ) {
-    return this.parent.getAcademicsSummary(this.parent.resolveMobile(req.user), studentUserId);
+    return this.parent.getAcademicsSummary(
+      this.parent.resolveMobile(req.user),
+      studentUserId,
+    );
   }
 
   @Get('students/:studentUserId/proctor')
@@ -68,7 +85,10 @@ export class ParentController {
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
   ) {
-    return this.parent.getProctorInfo(this.parent.resolveMobile(req.user), studentUserId);
+    return this.parent.getProctorInfo(
+      this.parent.resolveMobile(req.user),
+      studentUserId,
+    );
   }
 
   @Post('students/:studentUserId/proctor/meeting-request')
@@ -93,7 +113,10 @@ export class ParentController {
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
   ) {
-    return this.parent.getTracking(this.parent.resolveMobile(req.user), studentUserId);
+    return this.parent.getTracking(
+      this.parent.resolveMobile(req.user),
+      studentUserId,
+    );
   }
 
   @Get('students/:studentUserId/fee-certificate')
@@ -199,7 +222,10 @@ export class ParentController {
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
   ) {
-    return this.parent.getAttendanceForParent(this.parent.resolveMobile(req.user), studentUserId);
+    return this.parent.getAttendanceForParent(
+      this.parent.resolveMobile(req.user),
+      studentUserId,
+    );
   }
 
   @Get('students/:studentUserId/marks')
@@ -208,7 +234,10 @@ export class ParentController {
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
   ) {
-    return this.parent.getMarksForParent(this.parent.resolveMobile(req.user), studentUserId);
+    return this.parent.getMarksForParent(
+      this.parent.resolveMobile(req.user),
+      studentUserId,
+    );
   }
 
   @Get('students/:studentUserId/fees')
@@ -217,6 +246,9 @@ export class ParentController {
     @Req() req: { user: ParentUser },
     @Param('studentUserId') studentUserId: string,
   ) {
-    return this.parent.getFeeDuesForParent(this.parent.resolveMobile(req.user), studentUserId);
+    return this.parent.getFeeDuesForParent(
+      this.parent.resolveMobile(req.user),
+      studentUserId,
+    );
   }
 }

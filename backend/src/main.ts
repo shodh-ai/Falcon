@@ -24,7 +24,8 @@ async function bootstrap() {
         origin === frontendUrl ||
         origin.endsWith(`.${saasBase}`) ||
         isDevPrivateNetworkOrigin ||
-        (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost'));
+        (process.env.NODE_ENV !== 'production' &&
+          origin.startsWith('http://localhost'));
       callback(allowed ? null : new Error('Not allowed by CORS'), allowed);
     },
     credentials: true,

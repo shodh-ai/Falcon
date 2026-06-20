@@ -84,6 +84,7 @@ function MarkAttendanceContent() {
   const [classes, setClasses] = useState<FacultyClass[]>([]);
   const [missingAlerts, setMissingAlerts] = useState<MissingAttendanceAlert[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(initialCourseId);
+  const [selectedTimetableId, setSelectedTimetableId] = useState<string | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [analytics, setAnalytics] = useState<AttendanceAnalytics | null>(null);
   const [attendance, setAttendance] = useState<Record<string, UiStatus>>({});
@@ -95,8 +96,8 @@ function MarkAttendanceContent() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const selectedClass = useMemo(
-    () => classes.find((c) => c.course_id === selectedCourseId) ?? null,
-    [classes, selectedCourseId],
+    () => classes.find((c) => c.timetable_id === selectedTimetableId) ?? classes.find((c) => c.course_id === selectedCourseId) ?? null,
+    [classes, selectedCourseId, selectedTimetableId],
   );
 
   const filteredStudents = useMemo(
@@ -130,8 +131,12 @@ function MarkAttendanceContent() {
           setSelectedCourseId(null);
           return;
         }
-        const fromUrl = initialCourseId && data.find((c) => c.course_id === initialCourseId);
-        setSelectedCourseId(fromUrl ? fromUrl.course_id : data[0].course_id);
+        const fromUrl = initialCourseId
+          ? data.find((c) => c.course_id === initialCourseId)
+          : undefined;
+        const pick = fromUrl ?? data[0];
+        setSelectedCourseId(pick.course_id);
+        setSelectedTimetableId(pick.timetable_id);
       })
       .finally(() => setLoading(false));
   }, [api, initialCourseId]);
@@ -140,12 +145,14 @@ function MarkAttendanceContent() {
     if (!selectedCourseId) return;
     let cancelled = false;
     setRosterLoading(true);
+    const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
     (async () => {
       try {
+        const timetableQuery = timetableId ? `&timetableId=${timetableId}` : '';
         const [roster, state] = await Promise.all([
           api.get<Student[]>(`/api/academics/faculty/course/${selectedCourseId}/students`),
           api.get<{ locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null }>(
-            `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
+            `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableQuery}`,
           ),
         ]);
         const courseAnalytics = await api
@@ -172,7 +179,28 @@ function MarkAttendanceContent() {
     return () => {
       cancelled = true;
     };
-  }, [api, selectedCourseId, selectedDate]);
+  }, [api, selectedCourseId, selectedDate, selectedTimetableId, selectedClass?.timetable_id]);
+
+  async function copyPreviousAttendance() {
+    if (!selectedCourseId || !selectedTimetableId || locked) return;
+    try {
+      const prev = await api.get<{ attendance_data: { student_id: string; status: UiStatus }[] | null }>(
+        `/api/academics/faculty/course/${selectedCourseId}/attendance/previous-session?date=${selectedDate}&timetableId=${selectedTimetableId}`,
+      );
+      if (!prev.attendance_data?.length) {
+        toast.error('No previous session attendance found for this batch today.');
+        return;
+      }
+      const map: Record<string, UiStatus> = {};
+      for (const row of prev.attendance_data) {
+        if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
+      }
+      setAttendance(map);
+      toast.success('Copied attendance from previous hour');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not copy previous attendance');
+    }
+  }
 
   function markAll(status: UiStatus) {
     if (locked) return;
@@ -199,6 +227,7 @@ function MarkAttendanceContent() {
         {
           course_id: selectedCourseId,
           date: selectedDate,
+          timetable_id: selectedTimetableId ?? selectedClass?.timetable_id,
           attendance_data: payload,
         },
       );
@@ -273,6 +302,7 @@ function MarkAttendanceContent() {
               variant="destructive"
               onClick={() => {
                 setSelectedCourseId(missingAlerts[0].course_id);
+                setSelectedTimetableId(missingAlerts[0].timetable_id);
                 setSelectedDate(todayIso());
               }}
             >
@@ -292,12 +322,15 @@ function MarkAttendanceContent() {
           <FacultyPanel title="Today's classes" count={classes.length}>
             <ul className="space-y-1.5">
               {classes.map((c) => {
-                const active = selectedCourseId === c.course_id;
+                const active = selectedTimetableId === c.timetable_id;
                 return (
                   <li key={c.timetable_id}>
                     <button
                       type="button"
-                      onClick={() => setSelectedCourseId(c.course_id)}
+                      onClick={() => {
+                        setSelectedCourseId(c.course_id);
+                        setSelectedTimetableId(c.timetable_id);
+                      }}
                       className={cn(
                         'w-full rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
                         active
@@ -435,6 +468,9 @@ function MarkAttendanceContent() {
                     <Button type="button" size="sm" variant="outline" onClick={() => markAll('ABSENT')}>
                       <X className="mr-1 h-3.5 w-3.5" />
                       All absent
+                    </Button>
+                    <Button type="button" size="sm" variant="secondary" onClick={() => void copyPreviousAttendance()}>
+                      Take Same Attendance as Previous
                     </Button>
                   </div>
                 )}

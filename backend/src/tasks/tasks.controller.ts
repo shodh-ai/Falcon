@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -49,7 +60,11 @@ export class TasksController {
     @Body('dueDate') dueDate?: string,
   ) {
     const dueDateObj = dueDate ? new Date(dueDate) : undefined;
-    return this.tasksService.assignTaskToUser(parseInt(taskId), userId, dueDateObj);
+    return this.tasksService.assignTaskToUser(
+      parseInt(taskId),
+      userId,
+      dueDateObj,
+    );
   }
 
   @Get('assignments/my')
@@ -59,7 +74,10 @@ export class TasksController {
 
   @Get('assignments/user/:userId')
   @Roles('IQAC', 'HR', 'Dean')
-  getUserAssignments(@Param('userId') userId: string, @Query('status') status?: string) {
+  getUserAssignments(
+    @Param('userId') userId: string,
+    @Query('status') status?: string,
+  ) {
     return this.tasksService.findUserAssignments(userId, status);
   }
 
@@ -84,7 +102,11 @@ export class TasksController {
     @Body() createSubmissionDto: CreateSubmissionDto,
     @Req() req: any,
   ) {
-    return this.tasksService.createSubmission(assignmentId, createSubmissionDto, req.user.user_id);
+    return this.tasksService.createSubmission(
+      assignmentId,
+      createSubmissionDto,
+      req.user.user_id,
+    );
   }
 
   @Get('submissions/assignment/:assignmentId')

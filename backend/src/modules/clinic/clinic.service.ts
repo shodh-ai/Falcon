@@ -49,7 +49,12 @@ export class ClinicService {
     const visit = rows[0];
 
     if (restDays > 0) {
-      await this.triggerMedicalLeaveLoop(tid, dto.patient_user_id, restDays, dto.diagnosis);
+      await this.triggerMedicalLeaveLoop(
+        tid,
+        dto.patient_user_id,
+        restDays,
+        dto.diagnosis,
+      );
     }
 
     return visit;
@@ -61,7 +66,9 @@ export class ClinicService {
     restDays: number,
     diagnosis: string,
   ) {
-    const patient = await this.users.findOne({ where: { user_id: patientUserId } });
+    const patient = await this.users.findOne({
+      where: { user_id: patientUserId },
+    });
     if (!patient) return;
 
     const wardenRows = await this.db.query(
@@ -82,8 +89,9 @@ export class ClinicService {
     });
 
     for (const target of [wardenRows[0], proctorRows[0]].filter(Boolean)) {
-      const userId = (target as { user_id?: string; proctor_user_id?: string }).user_id
-        ?? (target as { proctor_user_id?: string }).proctor_user_id;
+      const userId =
+        (target as { user_id?: string; proctor_user_id?: string }).user_id ??
+        (target as { proctor_user_id?: string }).proctor_user_id;
       if (!userId) continue;
       await this.notifyDispatch.dispatch({
         tenantId,

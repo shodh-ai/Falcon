@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -9,7 +19,12 @@ import { UpdateLeadStageDto } from './dto/update-lead-stage.dto';
 import { HrWorkforceService } from '../hr/hr-workforce.service';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller('api/admissions-crm')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -27,18 +42,35 @@ export class AdmissionsCrmController {
   }
 
   @Get('enrolled-students')
-  @Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'Accountant', 'FinanceManager')
+  @Roles(
+    'SuperAdmin',
+    'AdmissionsOfficer',
+    'Registrar',
+    'Accountant',
+    'FinanceManager',
+  )
   getEnrolledStudents(
     @Req() req: { user: AuthUser },
     @Query('q') q?: string,
     @Query('year') year?: string,
     @Query('branch') branch?: string,
   ) {
-    return this.admissions.getEnrolledStudents(this.tenant(req), q, year, branch);
+    return this.admissions.getEnrolledStudents(
+      this.tenant(req),
+      q,
+      year,
+      branch,
+    );
   }
 
   @Patch('transactions/:id/receipt')
-  @Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'Accountant', 'FinanceManager')
+  @Roles(
+    'SuperAdmin',
+    'AdmissionsOfficer',
+    'Registrar',
+    'Accountant',
+    'FinanceManager',
+  )
   uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
     return this.admissions.uploadTransactionReceipt(id, dto.receipt_url);
   }
@@ -49,7 +81,11 @@ export class AdmissionsCrmController {
     @Param('id') id: string,
     @Body() dto: { title: string; file_path: string },
   ) {
-    return this.admissions.uploadEnrolledStudentDocument(this.tenant(req), id, dto);
+    return this.admissions.uploadEnrolledStudentDocument(
+      this.tenant(req),
+      id,
+      dto,
+    );
   }
 
   @Get('leads/:id/timeline')
@@ -71,7 +107,14 @@ export class AdmissionsCrmController {
   logActivity(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
-    @Body() dto: { channel: string; direction?: string; subject?: string; body?: string; metadata?: Record<string, unknown> },
+    @Body()
+    dto: {
+      channel: string;
+      direction?: string;
+      subject?: string;
+      body?: string;
+      metadata?: Record<string, unknown>;
+    },
   ) {
     return this.admissions.logLeadActivity(this.tenant(req), id, dto);
   }
@@ -91,7 +134,10 @@ export class AdmissionsCrmController {
   }
 
   @Post('counseling/seats/:programCode/allot')
-  allotSeat(@Req() req: { user: AuthUser }, @Param('programCode') programCode: string) {
+  allotSeat(
+    @Req() req: { user: AuthUser },
+    @Param('programCode') programCode: string,
+  ) {
     return this.counseling.allotSeat(this.tenant(req), programCode);
   }
 
@@ -115,9 +161,14 @@ export class AdmissionsCrmController {
       reason?: string;
     },
   ) {
-    return this.workforce.applyRequest(req.user.user_id, this.tenant(req), dto, {
-      actorRoles: this.resolveRoles(req.user),
-    });
+    return this.workforce.applyRequest(
+      req.user.user_id,
+      this.tenant(req),
+      dto,
+      {
+        actorRoles: this.resolveRoles(req.user),
+      },
+    );
   }
 
   @Get('self-service/workforce/my-requests')
@@ -128,9 +179,19 @@ export class AdmissionsCrmController {
   @Post('counseling/generate-merit')
   generateMerit(
     @Req() req: { user: AuthUser },
-    @Body() body: { academic_year: string; sc_pct?: number; st_pct?: number; general_pct?: number },
+    @Body()
+    body: {
+      academic_year: string;
+      sc_pct?: number;
+      st_pct?: number;
+      general_pct?: number;
+    },
   ) {
-    return this.counseling.generateMeritList(this.tenant(req), body.academic_year, body);
+    return this.counseling.generateMeritList(
+      this.tenant(req),
+      body.academic_year,
+      body,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

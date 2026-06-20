@@ -5,7 +5,11 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, QueryRunner } from 'typeorm';
-import type { DemeritCategory, ReviewDemeritIncidentDto, SubmitDemeritIncidentDto } from './dto/demerits.dto';
+import type {
+  DemeritCategory,
+  ReviewDemeritIncidentDto,
+  SubmitDemeritIncidentDto,
+} from './dto/demerits.dto';
 
 const SUBJECT_BACK_THRESHOLD = 6;
 
@@ -48,33 +52,54 @@ export class DemeritsService {
         [tenantId],
       ),
       facultyUserId
-        ? this.db.query(
-            `SELECT DISTINCT c.course_id, c.course_code, c.course_name
+        ? this.db
+            .query(
+              `SELECT DISTINCT c.course_id, c.course_code, c.course_name
              FROM academic_courses c
              JOIN faculty_course_assignments fca ON fca.course_id = c.course_id
              WHERE c.tenant_id = $1 AND fca.faculty_user_id = $2
              ORDER BY c.course_code
              LIMIT 200`,
-            [tenantId, facultyUserId],
-          ).catch(() =>
-            this.db.query(
-              `SELECT course_id, course_code, course_name FROM academic_courses
+              [tenantId, facultyUserId],
+            )
+            .catch(() =>
+              this.db.query(
+                `SELECT course_id, course_code, course_name FROM academic_courses
                WHERE tenant_id = $1 ORDER BY course_code LIMIT 200`,
-              [tenantId],
-            ),
-          )
+                [tenantId],
+              ),
+            )
         : this.db.query(
             `SELECT course_id, course_code, course_name FROM academic_courses
              WHERE tenant_id = $1 ORDER BY course_code LIMIT 200`,
             [tenantId],
           ),
     ]);
-    return { students, courses, categories: ['PLAGIARISM', 'BEHAVIORAL', 'ATTENDANCE', 'EXAM_MALPRACTICE'] };
+    return {
+      students,
+      courses,
+      categories: [
+        'PLAGIARISM',
+        'BEHAVIORAL',
+        'ATTENDANCE',
+        'EXAM_MALPRACTICE',
+      ],
+    };
   }
 
-  async submitIncident(tenantId: string, facultyUserId: string, dto: SubmitDemeritIncidentDto) {
-    const studentUserId = await this.resolveStudentUserId(tenantId, dto.student_id.trim());
-    const courseId = await this.resolveCourseId(tenantId, dto.subject_id.trim());
+  async submitIncident(
+    tenantId: string,
+    facultyUserId: string,
+    dto: SubmitDemeritIncidentDto,
+  ) {
+    const studentUserId = await this.resolveStudentUserId(
+      tenantId,
+      dto.student_id.trim(),
+    );
+    const courseId = await this.resolveCourseId(
+      tenantId,
+      dto.subject_id.trim(),
+    );
 
     const rows = await this.db.query<IncidentRow[]>(
       `INSERT INTO demerit_incidents (
@@ -111,29 +136,30 @@ export class DemeritsService {
   }
 
   async getDashboard(tenantId: string) {
-    const [[pending], [approvedMonth], [rejectedMonth], [subjectBack]] = await Promise.all([
-      this.db.query<Array<{ c: number }>>(
-        `SELECT COUNT(*)::int AS c FROM demerit_incidents WHERE tenant_id = $1 AND status = 'PENDING_DC_REVIEW'`,
-        [tenantId],
-      ),
-      this.db.query<Array<{ c: number }>>(
-        `SELECT COUNT(*)::int AS c FROM demerit_incidents
+    const [[pending], [approvedMonth], [rejectedMonth], [subjectBack]] =
+      await Promise.all([
+        this.db.query<Array<{ c: number }>>(
+          `SELECT COUNT(*)::int AS c FROM demerit_incidents WHERE tenant_id = $1 AND status = 'PENDING_DC_REVIEW'`,
+          [tenantId],
+        ),
+        this.db.query<Array<{ c: number }>>(
+          `SELECT COUNT(*)::int AS c FROM demerit_incidents
          WHERE tenant_id = $1 AND status = 'APPROVED_BY_DC'
            AND updated_at >= date_trunc('month', NOW())`,
-        [tenantId],
-      ),
-      this.db.query<Array<{ c: number }>>(
-        `SELECT COUNT(*)::int AS c FROM demerit_incidents
+          [tenantId],
+        ),
+        this.db.query<Array<{ c: number }>>(
+          `SELECT COUNT(*)::int AS c FROM demerit_incidents
          WHERE tenant_id = $1 AND status = 'REJECTED_BY_DC'
            AND updated_at >= date_trunc('month', NOW())`,
-        [tenantId],
-      ),
-      this.db.query<Array<{ c: number }>>(
-        `SELECT COUNT(*)::int AS c FROM student_academic_summaries
+          [tenantId],
+        ),
+        this.db.query<Array<{ c: number }>>(
+          `SELECT COUNT(*)::int AS c FROM student_academic_summaries
          WHERE tenant_id = $1 AND is_subject_back_triggered = true`,
-        [tenantId],
-      ),
-    ]);
+          [tenantId],
+        ),
+      ]);
     return {
       pending_review: pending?.c ?? 0,
       approved_this_month: approvedMonth?.c ?? 0,
@@ -172,7 +198,12 @@ export class DemeritsService {
                dc_committee_remarks = $4,
                updated_at = NOW()
            WHERE incident_id = $1 AND tenant_id = $2`,
-          [incidentId, tenantId, reviewerUserId, dto.dc_committee_remarks.trim()],
+          [
+            incidentId,
+            tenantId,
+            reviewerUserId,
+            dto.dc_committee_remarks.trim(),
+          ],
         );
         await qr.commitTransaction();
         return this.enrichIncident(
@@ -195,8 +226,13 @@ export class DemeritsService {
         [incidentId, tenantId, reviewerUserId, dto.dc_committee_remarks.trim()],
       );
 
-      const summary = await this.ensureSummaryLocked(qr, tenantId, incident.student_user_id);
-      const newTotal = Number(summary.cumulative_demerit_points) + Number(incident.points);
+      const summary = await this.ensureSummaryLocked(
+        qr,
+        tenantId,
+        incident.student_user_id,
+      );
+      const newTotal =
+        Number(summary.cumulative_demerit_points) + Number(incident.points);
       const subjectBack = newTotal >= SUBJECT_BACK_THRESHOLD;
 
       await qr.query(
@@ -207,18 +243,30 @@ export class DemeritsService {
              subject_back_triggered_at = CASE WHEN $4 AND subject_back_triggered_at IS NULL THEN NOW() ELSE subject_back_triggered_at END,
              updated_at = NOW()
          WHERE tenant_id = $1 AND student_user_id = $2`,
-        [tenantId, incident.student_user_id, newTotal, subjectBack, incident.course_id],
+        [
+          tenantId,
+          incident.student_user_id,
+          newTotal,
+          subjectBack,
+          incident.course_id,
+        ],
       );
 
       if (subjectBack) {
-        await this.applySubjectBack(qr, tenantId, incident, dto.dc_committee_remarks.trim());
+        await this.applySubjectBack(
+          qr,
+          tenantId,
+          incident,
+          dto.dc_committee_remarks.trim(),
+        );
       }
 
       await qr.commitTransaction();
       const updated = (
-        await this.db.query<IncidentRow[]>(`SELECT * FROM demerit_incidents WHERE incident_id = $1`, [
-          incidentId,
-        ])
+        await this.db.query<IncidentRow[]>(
+          `SELECT * FROM demerit_incidents WHERE incident_id = $1`,
+          [incidentId],
+        )
       )[0];
       return this.enrichIncident(updated);
     } catch (e) {
@@ -243,12 +291,20 @@ export class DemeritsService {
   }
 
   getStudentSummary(tenantId: string, studentUserId: string) {
-    return this.db.query(
-      `SELECT cumulative_demerit_points, is_subject_back_triggered, subject_back_triggered_at
+    return this.db
+      .query(
+        `SELECT cumulative_demerit_points, is_subject_back_triggered, subject_back_triggered_at
        FROM student_academic_summaries
        WHERE tenant_id = $1 AND student_user_id = $2`,
-      [tenantId, studentUserId],
-    ).then((rows) => rows[0] ?? { cumulative_demerit_points: 0, is_subject_back_triggered: false });
+        [tenantId, studentUserId],
+      )
+      .then(
+        (rows) =>
+          rows[0] ?? {
+            cumulative_demerit_points: 0,
+            is_subject_back_triggered: false,
+          },
+      );
   }
 
   private async applySubjectBack(
@@ -264,30 +320,38 @@ export class DemeritsService {
     );
 
     if (await this.tableExists(qr, 'student_course_enrollments')) {
-      await qr.query(
-        `UPDATE student_course_enrollments
+      await qr
+        .query(
+          `UPDATE student_course_enrollments
          SET status = 'FAILED', grade = 'F', grade_points = 0, updated_at = NOW()
          WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3`,
-        [tenantId, incident.student_user_id, incident.course_id],
-      ).catch(() => undefined);
+          [tenantId, incident.student_user_id, incident.course_id],
+        )
+        .catch(() => undefined);
     }
 
     if (await this.tableExists(qr, 'student_discipline_records')) {
-      await qr.query(
-        `INSERT INTO student_discipline_records (
+      await qr
+        .query(
+          `INSERT INTO student_discipline_records (
            tenant_id, student_user_id, incident_type, description, action_taken, date_logged
          ) VALUES ($1,$2,'SUBJECT_BACK',$3,$4,CURRENT_DATE)`,
-        [
-          tenantId,
-          incident.student_user_id,
-          `Automatic Subject Back — cumulative demerit points reached ${SUBJECT_BACK_THRESHOLD}.`,
-          `Subject Back applied for approved demerit incident. DC remarks: ${remarks}`,
-        ],
-      ).catch(() => undefined);
+          [
+            tenantId,
+            incident.student_user_id,
+            `Automatic Subject Back — cumulative demerit points reached ${SUBJECT_BACK_THRESHOLD}.`,
+            `Subject Back applied for approved demerit incident. DC remarks: ${remarks}`,
+          ],
+        )
+        .catch(() => undefined);
     }
   }
 
-  private async ensureSummaryLocked(qr: QueryRunner, tenantId: string, studentUserId: string) {
+  private async ensureSummaryLocked(
+    qr: QueryRunner,
+    tenantId: string,
+    studentUserId: string,
+  ) {
     await qr.query(
       `INSERT INTO student_academic_summaries (tenant_id, student_user_id)
        VALUES ($1, $2)
@@ -300,7 +364,10 @@ export class DemeritsService {
        WHERE tenant_id = $1 AND student_user_id = $2
        FOR UPDATE`,
       [tenantId, studentUserId],
-    )) as Array<{ cumulative_demerit_points: number; is_subject_back_triggered: boolean }>;
+    )) as Array<{
+      cumulative_demerit_points: number;
+      is_subject_back_triggered: boolean;
+    }>;
     return rows[0];
   }
 
@@ -357,13 +424,19 @@ export class DemeritsService {
       evidence_urls: urls,
       current_demerit_points: currentPoints,
       projected_demerit_points:
-        row.status === 'PENDING_DC_REVIEW' ? currentPoints + points : currentPoints,
+        row.status === 'PENDING_DC_REVIEW'
+          ? currentPoints + points
+          : currentPoints,
       threshold_warning:
-        row.status === 'PENDING_DC_REVIEW' && currentPoints + points >= SUBJECT_BACK_THRESHOLD,
+        row.status === 'PENDING_DC_REVIEW' &&
+        currentPoints + points >= SUBJECT_BACK_THRESHOLD,
     };
   }
 
-  private async resolveStudentUserId(tenantId: string, identifier: string): Promise<string> {
+  private async resolveStudentUserId(
+    tenantId: string,
+    identifier: string,
+  ): Promise<string> {
     const isUuid = DemeritsService.UUID_RE.test(identifier);
     const rows = await this.db.query<Array<{ user_id: string }>>(
       `SELECT u.user_id
@@ -386,7 +459,10 @@ export class DemeritsService {
     return rows[0].user_id;
   }
 
-  private async resolveCourseId(tenantId: string, identifier: string): Promise<string> {
+  private async resolveCourseId(
+    tenantId: string,
+    identifier: string,
+  ): Promise<string> {
     const isUuid = DemeritsService.UUID_RE.test(identifier);
     const rows = isUuid
       ? await this.db.query<Array<{ course_id: string }>>(

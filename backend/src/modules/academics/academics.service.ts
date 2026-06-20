@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
@@ -30,20 +34,28 @@ export class AcademicsService {
   constructor(
     @InjectRepository(Subject) private subjects: Repository<Subject>,
     @InjectRepository(Batch) private batches: Repository<Batch>,
-    @InjectRepository(AttendanceRecord) private attendance: Repository<AttendanceRecord>,
+    @InjectRepository(AttendanceRecord)
+    private attendance: Repository<AttendanceRecord>,
     @InjectRepository(ExamResult) private results: Repository<ExamResult>,
-    @InjectRepository(GradingPolicy) private gradingPolicies: Repository<GradingPolicy>,
-    @InjectRepository(AcademicCourse) private courses: Repository<AcademicCourse>,
+    @InjectRepository(GradingPolicy)
+    private gradingPolicies: Repository<GradingPolicy>,
+    @InjectRepository(AcademicCourse)
+    private courses: Repository<AcademicCourse>,
     @InjectRepository(StudentCourseEnrollment)
     private courseEnrollments: Repository<StudentCourseEnrollment>,
-    @InjectRepository(AcademicTimetable) private timetables: Repository<AcademicTimetable>,
+    @InjectRepository(AcademicTimetable)
+    private timetables: Repository<AcademicTimetable>,
     @InjectRepository(User) private users: Repository<User>,
-    @InjectRepository(StaffAttendance) private staffAttendance: Repository<StaffAttendance>,
+    @InjectRepository(StaffAttendance)
+    private staffAttendance: Repository<StaffAttendance>,
     @InjectRepository(StaffLeaveRequest)
     private staffLeaveRequests: Repository<StaffLeaveRequest>,
-    @InjectRepository(StaffGatePass) private staffGatePasses: Repository<StaffGatePass>,
-    @InjectRepository(HelpdeskTicket) private helpdeskTickets: Repository<HelpdeskTicket>,
-    @InjectRepository(StudentProfile) private studentProfiles: Repository<StudentProfile>,
+    @InjectRepository(StaffGatePass)
+    private staffGatePasses: Repository<StaffGatePass>,
+    @InjectRepository(HelpdeskTicket)
+    private helpdeskTickets: Repository<HelpdeskTicket>,
+    @InjectRepository(StudentProfile)
+    private studentProfiles: Repository<StudentProfile>,
     private readonly notify: NotificationEmitterService,
   ) {}
 
@@ -123,13 +135,18 @@ export class AcademicsService {
       (sum, row) => sum + Number(row.grade_points) * row.course.credits,
       0,
     );
-    const creditsCompleted = completed.reduce((sum, row) => sum + row.course.credits, 0);
+    const creditsCompleted = completed.reduce(
+      (sum, row) => sum + row.course.credits,
+      0,
+    );
     const cgpa =
       creditsCompleted > 0
         ? Number((weightedGradePoints / creditsCompleted).toFixed(2))
         : 0;
 
-    const attendanceRows = enrollments.filter((row) => row.attendance_percent !== null);
+    const attendanceRows = enrollments.filter(
+      (row) => row.attendance_percent !== null,
+    );
     const attendancePercent =
       attendanceRows.length > 0
         ? Number(
@@ -214,17 +231,27 @@ export class AcademicsService {
       where: { tenant_id: tenantId, is_elective: true },
       order: { course_code: 'ASC' },
     });
-    return electives.filter((course) => !existingCourseIds.has(course.course_id));
+    return electives.filter(
+      (course) => !existingCourseIds.has(course.course_id),
+    );
   }
 
-  async registerCourses(studentUserId: string, tenantId: string, courseIds: string[]) {
+  async registerCourses(
+    studentUserId: string,
+    tenantId: string,
+    courseIds: string[],
+  ) {
     const uniqueCourseIds = [...new Set(courseIds)].filter(Boolean);
     if (uniqueCourseIds.length === 0) return [];
     if (uniqueCourseIds.length > 2) {
-      throw new BadRequestException('You may register at most 2 electives per semester');
+      throw new BadRequestException(
+        'You may register at most 2 electives per semester',
+      );
     }
 
-    const semesterRows = await this.courseEnrollments.manager.query<Array<{ semester: number }>>(
+    const semesterRows = await this.courseEnrollments.manager.query<
+      Array<{ semester: number }>
+    >(
       `SELECT COALESCE(MAX(semester), 1) AS semester FROM student_course_enrollments WHERE student_user_id = $1`,
       [studentUserId],
     );
@@ -236,7 +263,9 @@ export class AcademicsService {
       .where('e.student_user_id = :studentUserId', { studentUserId })
       .andWhere('e.tenant_id = :tenantId', { tenantId })
       .andWhere('e.semester = :semester', { semester })
-      .andWhere(`COALESCE(c.course_type, CASE WHEN c.is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'ELECTIVE'`)
+      .andWhere(
+        `COALESCE(c.course_type, CASE WHEN c.is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'ELECTIVE'`,
+      )
       .getCount();
     if (electiveRows + uniqueCourseIds.length > 2) {
       throw new BadRequestException('Maximum 2 electives allowed per semester');
@@ -250,10 +279,14 @@ export class AcademicsService {
     });
 
     const invalid = courses.filter(
-      (c) => (c as { course_type?: string }).course_type !== 'ELECTIVE' && c.is_elective !== true,
+      (c) =>
+        (c as { course_type?: string }).course_type !== 'ELECTIVE' &&
+        c.is_elective !== true,
     );
     if (invalid.length > 0) {
-      throw new BadRequestException('Only ELECTIVE courses can be self-registered');
+      throw new BadRequestException(
+        'Only ELECTIVE courses can be self-registered',
+      );
     }
 
     const existing = await this.courseEnrollments.find({
@@ -295,8 +328,10 @@ export class AcademicsService {
       total_students: center.health_metrics.total_students,
       average_department_attendance: center.health_metrics.average_attendance,
       pending_leave_approvals: center.health_metrics.pending_leave_count,
-      pending_gate_pass_approvals: center.health_metrics.pending_gate_pass_count,
-      pending_profile_corrections: center.health_metrics.pending_profile_corrections,
+      pending_gate_pass_approvals:
+        center.health_metrics.pending_gate_pass_count,
+      pending_profile_corrections:
+        center.health_metrics.pending_profile_corrections,
     };
   }
 
@@ -307,7 +342,11 @@ export class AcademicsService {
 
   async getDeanCommandCenter(tenantId: string, deanUserId: string) {
     const scope = await this.resolveDeanScope(deanUserId);
-    const center = await this.buildCommandCenterForDepartments(tenantId, deanUserId, scope.departmentIds);
+    const center = await this.buildCommandCenterForDepartments(
+      tenantId,
+      deanUserId,
+      scope.departmentIds,
+    );
     const [pendingEvents, hodCount] = await Promise.all([
       this.countPendingAdvisorEvents(tenantId),
       scope.departmentIds.length
@@ -385,22 +424,46 @@ export class AcademicsService {
       [tenantId, departmentIds],
     );
     const syllabusByDept = new Map<number, { avg: number; behind: number }>(
-      syllabusRows.map((row: { dept_id: number; avg_coverage: number; behind_count: number }) => [
-        Number(row.dept_id),
-        { avg: Number(row.avg_coverage ?? 0), behind: Number(row.behind_count ?? 0) },
-      ]),
+      syllabusRows.map(
+        (row: {
+          dept_id: number;
+          avg_coverage: number;
+          behind_count: number;
+        }) => [
+          Number(row.dept_id),
+          {
+            avg: Number(row.avg_coverage ?? 0),
+            behind: Number(row.behind_count ?? 0),
+          },
+        ],
+      ),
     );
-    const riskByDept = new Map<number, { attendance_risk: number; result_risk: number }>(
-      riskRows.map((row: { dept_id: number; attendance_risk: number; result_risk: number }) => [
-        Number(row.dept_id),
-        { attendance_risk: Number(row.attendance_risk ?? 0), result_risk: Number(row.result_risk ?? 0) },
-      ]),
+    const riskByDept = new Map<
+      number,
+      { attendance_risk: number; result_risk: number }
+    >(
+      riskRows.map(
+        (row: {
+          dept_id: number;
+          attendance_risk: number;
+          result_risk: number;
+        }) => [
+          Number(row.dept_id),
+          {
+            attendance_risk: Number(row.attendance_risk ?? 0),
+            result_risk: Number(row.result_risk ?? 0),
+          },
+        ],
+      ),
     );
 
     return rows.map((row: Record<string, unknown>) => {
       const deptId = Number(row.dept_id);
       const cov = syllabusByDept.get(deptId) ?? { avg: 0, behind: 0 };
-      const risk = riskByDept.get(deptId) ?? { attendance_risk: 0, result_risk: 0 };
+      const risk = riskByDept.get(deptId) ?? {
+        attendance_risk: 0,
+        result_risk: 0,
+      };
       return {
         dept_id: deptId,
         dept_name: row.dept_name,
@@ -469,9 +532,17 @@ export class AcademicsService {
     return this.listAppraisalsForDepartments(tenantId, departmentIds);
   }
 
-  async listDeanStudents(tenantId: string, deanUserId: string, lowAttendance = false) {
+  async listDeanStudents(
+    tenantId: string,
+    deanUserId: string,
+    lowAttendance = false,
+  ) {
     const { departmentIds } = await this.resolveDeanScope(deanUserId);
-    return this.listStudentsForDepartments(tenantId, departmentIds, lowAttendance);
+    return this.listStudentsForDepartments(
+      tenantId,
+      departmentIds,
+      lowAttendance,
+    );
   }
 
   async listDeanInbox(tenantId: string, deanUserId: string) {
@@ -526,7 +597,9 @@ export class AcademicsService {
       this.computeDepartmentAttendanceTrend(tenantId, deptIds),
       this.fetchSyllabusCoverage(tenantId, deptIds),
       this.buildHodPendingInbox(tenantId, actorUserId, deptIds),
-      this.listStudentsForDepartments(tenantId, deptIds, true).then((rows) => rows.slice(0, 5)),
+      this.listStudentsForDepartments(tenantId, deptIds, true).then((rows) =>
+        rows.slice(0, 5),
+      ),
       deptIds.length
         ? this.users.manager.query(
             `SELECT COUNT(*)::int AS count
@@ -541,8 +614,12 @@ export class AcademicsService {
         : Promise.resolve([{ count: 0 }]),
     ]);
 
-    const pendingLeaveCount = pendingInbox.filter((row) => row.type === 'LEAVE').length;
-    const pendingGatePassCount = pendingInbox.filter((row) => row.type === 'GATE_PASS').length;
+    const pendingLeaveCount = pendingInbox.filter(
+      (row) => row.type === 'LEAVE',
+    ).length;
+    const pendingGatePassCount = pendingInbox.filter(
+      (row) => row.type === 'GATE_PASS',
+    ).length;
 
     return {
       health_metrics: {
@@ -572,7 +649,10 @@ export class AcademicsService {
     return this.listFacultyWorkloadForDepartments(tenantId, deptIds);
   }
 
-  private async listFacultyWorkloadForDepartments(tenantId: string, deptIds: number[]) {
+  private async listFacultyWorkloadForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
@@ -618,7 +698,10 @@ export class AcademicsService {
     return this.listDepartmentTimetableForDepartments(tenantId, deptIds);
   }
 
-  private async listDepartmentTimetableForDepartments(tenantId: string, deptIds: number[]) {
+  private async listDepartmentTimetableForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
@@ -654,7 +737,10 @@ export class AcademicsService {
     return this.listResultAnalyticsForDepartments(tenantId, deptIds);
   }
 
-  private async listResultAnalyticsForDepartments(tenantId: string, deptIds: number[]) {
+  private async listResultAnalyticsForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
@@ -686,7 +772,8 @@ export class AcademicsService {
         enrolled,
         passed,
         failed,
-        pass_percent: graded > 0 ? Number(((passed / graded) * 100).toFixed(1)) : 0,
+        pass_percent:
+          graded > 0 ? Number(((passed / graded) * 100).toFixed(1)) : 0,
       };
     });
   }
@@ -696,7 +783,10 @@ export class AcademicsService {
     return this.listGrievancesForDepartments(tenantId, deptIds);
   }
 
-  private async listGrievancesForDepartments(tenantId: string, deptIds: number[]) {
+  private async listGrievancesForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
@@ -718,7 +808,10 @@ export class AcademicsService {
     return this.listSlowLearnersForDepartments(tenantId, deptIds);
   }
 
-  private async listSlowLearnersForDepartments(tenantId: string, deptIds: number[]) {
+  private async listSlowLearnersForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
@@ -743,7 +836,10 @@ export class AcademicsService {
       name: row.name,
       email: row.email,
       average_attendance: Number(row.average_attendance ?? 0),
-      average_grade_points: row.average_grade_points === null ? null : Number(row.average_grade_points),
+      average_grade_points:
+        row.average_grade_points === null
+          ? null
+          : Number(row.average_grade_points),
       course_count: Number(row.course_count ?? 0),
       low_attendance_courses: Number(row.low_attendance_courses ?? 0),
       failing_courses: Number(row.failing_courses ?? 0),
@@ -755,7 +851,10 @@ export class AcademicsService {
     return this.listAppraisalsForDepartments(tenantId, deptIds);
   }
 
-  private async listAppraisalsForDepartments(tenantId: string, deptIds: number[]) {
+  private async listAppraisalsForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
@@ -786,7 +885,9 @@ export class AcademicsService {
       [appraisalId, tenantId],
     );
     if (!row || !deptIds.includes(Number(row.dept_id))) {
-      throw new NotFoundException('Appraisal not found in your department scope');
+      throw new NotFoundException(
+        'Appraisal not found in your department scope',
+      );
     }
     if (hodRating < 0 || hodRating > 5) {
       throw new Error('HOD rating must be between 0 and 5');
@@ -798,10 +899,18 @@ export class AcademicsService {
        WHERE appraisal_record_id = $2 AND tenant_id = $3`,
       [hodRating, appraisalId, tenantId],
     );
-    return { appraisal_record_id: appraisalId, hod_rating: hodRating, hr_final_status: 'HR_APPROVED' };
+    return {
+      appraisal_record_id: appraisalId,
+      hod_rating: hodRating,
+      hr_final_status: 'HR_APPROVED',
+    };
   }
 
-  private async countFacultyOnLeaveToday(tenantId: string, facultyIds: string[], today: string) {
+  private async countFacultyOnLeaveToday(
+    tenantId: string,
+    facultyIds: string[],
+    today: string,
+  ) {
     if (!facultyIds.length) return 0;
     const [row] = await this.users.manager.query(
       `SELECT COUNT(DISTINCT staff_user_id)::int AS count
@@ -816,7 +925,11 @@ export class AcademicsService {
     return Number(row?.count ?? 0);
   }
 
-  private async countClassesScheduledToday(tenantId: string, facultyIds: string[], dayOfWeek: number) {
+  private async countClassesScheduledToday(
+    tenantId: string,
+    facultyIds: string[],
+    dayOfWeek: number,
+  ) {
     if (!facultyIds.length) return 0;
     const [row] = await this.users.manager.query(
       `SELECT COUNT(*)::int AS count
@@ -857,7 +970,10 @@ export class AcademicsService {
     return Number(row?.count ?? 0);
   }
 
-  private async computeDepartmentAttendanceTrend(tenantId: string, deptIds: number[]) {
+  private async computeDepartmentAttendanceTrend(
+    tenantId: string,
+    deptIds: number[],
+  ) {
     if (!deptIds.length) {
       return { current: 0, delta: 0, label: 'No department data' };
     }
@@ -873,8 +989,10 @@ export class AcademicsService {
       enrollments.length > 0
         ? Number(
             (
-              enrollments.reduce((sum, row) => sum + Number(row.attendance_percent ?? 0), 0) /
-              enrollments.length
+              enrollments.reduce(
+                (sum, row) => sum + Number(row.attendance_percent ?? 0),
+                0,
+              ) / enrollments.length
             ).toFixed(1),
           )
         : 0;
@@ -908,15 +1026,22 @@ export class AcademicsService {
     const rows = await this.users.manager.query(
       `SELECT c.course_code, c.course_name, u.name AS faculty_name,
               COUNT(*)::int AS total_modules,
-              COUNT(*) FILTER (WHERE m.status = 'COMPLETED')::int AS completed_modules
+              COUNT(*) FILTER (WHERE m.status = 'COMPLETED')::int AS completed_modules,
+              MAX(
+                CASE
+                  WHEN m.planned_completion_date IS NOT NULL
+                    AND m.status != 'COMPLETED'
+                    AND m.planned_completion_date < CURRENT_DATE
+                  THEN (CURRENT_DATE - m.planned_completion_date)
+                  ELSE 0
+                END
+              )::int AS days_behind
        FROM course_modules m
        INNER JOIN academic_courses c ON c.course_id = m.course_id
        INNER JOIN users u ON u.user_id = m.faculty_user_id
        WHERE m.tenant_id = $1 AND u.dept_id = ANY($2::int[])
        GROUP BY c.course_id, c.course_code, c.course_name, u.user_id, u.name
-       ORDER BY
-         (COUNT(*) FILTER (WHERE m.status = 'COMPLETED')::float / NULLIF(COUNT(*), 0)) ASC NULLS FIRST,
-         c.course_code ASC
+       ORDER BY days_behind DESC NULLS LAST, c.course_code ASC
        LIMIT 12`,
       [tenantId, deptIds],
     );
@@ -924,7 +1049,9 @@ export class AcademicsService {
     return rows.map((row: Record<string, unknown>) => {
       const total = Number(row.total_modules ?? 0);
       const completed = Number(row.completed_modules ?? 0);
-      const percent = total > 0 ? Number(((completed / total) * 100).toFixed(0)) : 0;
+      const percent =
+        total > 0 ? Number(((completed / total) * 100).toFixed(0)) : 0;
+      const daysBehind = Number(row.days_behind ?? 0);
       return {
         course_code: row.course_code,
         course_name: row.course_name,
@@ -932,12 +1059,17 @@ export class AcademicsService {
         completed_modules: completed,
         total_modules: total,
         coverage_percent: percent,
-        behind_schedule: percent < 60,
+        behind_schedule: percent < 60 || daysBehind > 0,
+        days_behind: daysBehind,
       };
     });
   }
 
-  private async buildHodPendingInbox(tenantId: string, hodUserId: string, deptIds: number[]) {
+  private async buildHodPendingInbox(
+    tenantId: string,
+    hodUserId: string,
+    deptIds: number[],
+  ) {
     const [leaves, gatePasses, adjustments] = await Promise.all([
       this.listHodLeaveApprovals(tenantId, hodUserId),
       this.listHodGatePassApprovals(tenantId, hodUserId),
@@ -974,7 +1106,8 @@ export class AcademicsService {
         employee_name: leave.staff?.name ?? 'Faculty',
         date_label: `${leave.start_date} → ${leave.end_date}`,
         detail: leave.reason ?? '—',
-        created_at: leave.applied_at?.toISOString?.() ?? new Date().toISOString(),
+        created_at:
+          leave.applied_at?.toISOString?.() ?? new Date().toISOString(),
       });
     }
 
@@ -984,7 +1117,9 @@ export class AcademicsService {
         type: 'GATE_PASS',
         title: 'Gate Pass',
         employee_name: pass.staff?.name ?? 'Faculty',
-        date_label: pass.out_time ? new Date(pass.out_time).toLocaleString('en-IN') : '—',
+        date_label: pass.out_time
+          ? new Date(pass.out_time).toLocaleString('en-IN')
+          : '—',
         detail: pass.reason ?? '—',
         created_at: pass.out_time?.toISOString?.() ?? new Date().toISOString(),
       });
@@ -995,7 +1130,10 @@ export class AcademicsService {
       inbox.push({
         id: String(adj.adjustment_id),
         type: adjType === 'CANCEL' ? 'CANCEL' : 'EXTRA_CLASS',
-        title: adjType === 'CANCEL' ? 'Class Cancellation' : 'Extra / Substitute Class',
+        title:
+          adjType === 'CANCEL'
+            ? 'Class Cancellation'
+            : 'Extra / Substitute Class',
         employee_name: String(adj.faculty_name ?? 'Faculty'),
         date_label: adj.new_date
           ? new Date(String(adj.new_date)).toLocaleDateString('en-IN')
@@ -1008,7 +1146,8 @@ export class AcademicsService {
     }
 
     return inbox.sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
   }
 
@@ -1115,7 +1254,11 @@ export class AcademicsService {
     return saved;
   }
 
-  async listHodStudents(tenantId: string, hodUserId: string, lowAttendance = false) {
+  async listHodStudents(
+    tenantId: string,
+    hodUserId: string,
+    lowAttendance = false,
+  ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     return this.listStudentsForDepartments(tenantId, deptIds, lowAttendance);
   }
@@ -1131,7 +1274,9 @@ export class AcademicsService {
       .leftJoinAndSelect('user.role', 'role')
       .where('user.tenant_id = :tenantId', { tenantId })
       .andWhere("role.role_name = 'Student'")
-      .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+      .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', {
+        deptIds,
+      })
       .orderBy('user.name', 'ASC')
       .getMany();
 
@@ -1147,15 +1292,35 @@ export class AcademicsService {
 
     return students
       .map((student) => {
-        const rows = enrollments.filter((row) => row.student_user_id === student.user_id);
+        const rows = enrollments.filter(
+          (row) => row.student_user_id === student.user_id,
+        );
         const attendance =
           rows.length > 0
-            ? Number((rows.reduce((sum, row) => sum + Number(row.attendance_percent), 0) / rows.length).toFixed(2))
+            ? Number(
+                (
+                  rows.reduce(
+                    (sum, row) => sum + Number(row.attendance_percent),
+                    0,
+                  ) / rows.length
+                ).toFixed(2),
+              )
             : 0;
-        const completed = rows.filter((row) => row.status === 'COMPLETED' && row.grade_points !== null);
-        const weightedGradePoints = completed.reduce((sum, row) => sum + Number(row.grade_points) * row.course.credits, 0);
-        const creditsCompleted = completed.reduce((sum, row) => sum + row.course.credits, 0);
-        const cgpa = creditsCompleted > 0 ? Number((weightedGradePoints / creditsCompleted).toFixed(2)) : 0;
+        const completed = rows.filter(
+          (row) => row.status === 'COMPLETED' && row.grade_points !== null,
+        );
+        const weightedGradePoints = completed.reduce(
+          (sum, row) => sum + Number(row.grade_points) * row.course.credits,
+          0,
+        );
+        const creditsCompleted = completed.reduce(
+          (sum, row) => sum + row.course.credits,
+          0,
+        );
+        const cgpa =
+          creditsCompleted > 0
+            ? Number((weightedGradePoints / creditsCompleted).toFixed(2))
+            : 0;
 
         return {
           user_id: student.user_id,
@@ -1166,13 +1331,19 @@ export class AcademicsService {
           course_count: rows.length,
           low_attendance: attendance < 75,
           cgpa,
-          enrollment_year: student.created_at ? new Date(student.created_at).getFullYear() : new Date().getFullYear(),
+          enrollment_year: student.created_at
+            ? new Date(student.created_at).getFullYear()
+            : new Date().getFullYear(),
         };
       })
       .filter((student) => !lowAttendance || student.low_attendance);
   }
 
-  async getHodStudentDetail(tenantId: string, hodUserId: string, studentUserId: string) {
+  async getHodStudentDetail(
+    tenantId: string,
+    hodUserId: string,
+    studentUserId: string,
+  ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const student = await this.users.findOne({
       where: { user_id: studentUserId, tenant_id: tenantId },
@@ -1227,7 +1398,12 @@ export class AcademicsService {
         attendance: r.attendance ? Number(Number(r.attendance).toFixed(2)) : 0,
       })),
       active_backlogs: Number(backlogsRes[0]?.count ?? 0),
-      placement: placementRes[0] ? { status: placementRes[0].status, company_name: placementRes[0].company_name } : null,
+      placement: placementRes[0]
+        ? {
+            status: placementRes[0].status,
+            company_name: placementRes[0].company_name,
+          }
+        : null,
     };
   }
 
@@ -1239,7 +1415,9 @@ export class AcademicsService {
       .leftJoinAndSelect('staff.department', 'department')
       .where('leave.tenant_id = :tenantId', { tenantId })
       .andWhere('leave.status = :status', { status: 'PENDING' })
-      .andWhere(deptIds.length ? 'staff.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+      .andWhere(deptIds.length ? 'staff.dept_id IN (:...deptIds)' : '1=1', {
+        deptIds,
+      })
       .orderBy('leave.applied_at', 'ASC')
       .getMany();
   }
@@ -1261,8 +1439,18 @@ export class AcademicsService {
       return {
         ...pass,
         date: outDate.toISOString().slice(0, 10),
-        out_time_display: outDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
-        expected_in_display: inDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
+        out_time_display: outDate.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'Asia/Kolkata',
+        }),
+        expected_in_display: inDate.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'Asia/Kolkata',
+        }),
       };
     });
   }
@@ -1289,7 +1477,8 @@ export class AcademicsService {
     const now = this.getIstMinutesNow();
     const startMinutes = this.toMinutes(startTime);
     const endMinutes = this.toMinutes(endTime);
-    if (Number.isNaN(startMinutes) || Number.isNaN(endMinutes)) return 'upcoming';
+    if (Number.isNaN(startMinutes) || Number.isNaN(endMinutes))
+      return 'upcoming';
     if (now < startMinutes) return 'upcoming';
     if (now > endMinutes) return 'done';
     if (now >= startMinutes && now <= endMinutes) return 'ongoing';
@@ -1343,12 +1532,16 @@ export class AcademicsService {
 
   private isVirtualRoom(room: string | null) {
     if (!room) return false;
-    return /zoom|meet|online|virtual|teams|webex|google|hangout|vtop-virtual/i.test(room);
+    return /zoom|meet|online|virtual|teams|webex|google|hangout|vtop-virtual/i.test(
+      room,
+    );
   }
 
   private async fetchActiveLiveClasses(courseIds: string[]) {
     if (courseIds.length === 0) return new Map<string, string>();
-    const rows = await this.timetables.manager.query<Array<{ course_id: string; meeting_url: string }>>(
+    const rows = await this.timetables.manager.query<
+      Array<{ course_id: string; meeting_url: string }>
+    >(
       `SELECT DISTINCT ON (course_id) course_id, meeting_url
        FROM lms_live_classes
        WHERE course_id = ANY($1::uuid[])
@@ -1391,7 +1584,9 @@ export class AcademicsService {
        WHERE dean_user_id = $1 AND deleted_at IS NULL`,
       [deanUserId],
     );
-    const schoolIds = schoolRows.map((row: { school_id: number }) => Number(row.school_id));
+    const schoolIds = schoolRows.map((row: { school_id: number }) =>
+      Number(row.school_id),
+    );
     let departmentIds: number[] = [];
     if (schoolIds.length) {
       const deptRows = await this.users.manager.query(
@@ -1400,7 +1595,9 @@ export class AcademicsService {
          WHERE school_id = ANY($1::int[]) AND dept_id IS NOT NULL AND deleted_at IS NULL`,
         [schoolIds],
       );
-      departmentIds = deptRows.map((row: { dept_id: number }) => Number(row.dept_id));
+      departmentIds = deptRows.map((row: { dept_id: number }) =>
+        Number(row.dept_id),
+      );
     }
     const dean = await this.users.findOne({ where: { user_id: deanUserId } });
     if (dean?.dept_id) {
@@ -1425,7 +1622,9 @@ export class AcademicsService {
     const hod = await this.users.findOne({ where: { user_id: hodUserId } });
     return Array.from(
       new Set<number>([
-        ...directDepartments.map((row: { dept_id: number }) => Number(row.dept_id)),
+        ...directDepartments.map((row: { dept_id: number }) =>
+          Number(row.dept_id),
+        ),
         ...(hod?.dept_id ? [hod.dept_id] : []),
       ]),
     );
@@ -1438,7 +1637,9 @@ export class AcademicsService {
       .leftJoinAndSelect('user.department', 'department')
       .where('user.tenant_id = :tenantId', { tenantId })
       .andWhere("role.role_name IN ('Faculty', 'HOD', 'Dean')")
-      .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', { deptIds })
+      .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', {
+        deptIds,
+      })
       .orderBy('user.name', 'ASC')
       .getMany();
   }
@@ -1482,9 +1683,13 @@ export class AcademicsService {
           email: student?.email ?? '',
           department: student?.department?.dept_name ?? null,
           enrollment_no: profile?.enrollment_no ?? null,
-          mobile: (profile?.parent_info as Record<string, unknown>)?.mobile ?? null,
-          address: (profile?.parent_info as Record<string, unknown>)?.address ?? null,
-          parent_details: (profile?.parent_info as Record<string, unknown>)?.parent_details ?? null,
+          mobile:
+            (profile?.parent_info as Record<string, unknown>)?.mobile ?? null,
+          address:
+            (profile?.parent_info as Record<string, unknown>)?.address ?? null,
+          parent_details:
+            (profile?.parent_info as Record<string, unknown>)?.parent_details ??
+            null,
         },
       };
     });
@@ -1509,7 +1714,8 @@ export class AcademicsService {
     const ticket = await this.helpdeskTickets.findOne({
       where: { ticket_id: ticketId, category: 'ACADEMICS', status: 'PENDING' },
     });
-    if (!ticket) throw new NotFoundException('Ticket not found or already resolved');
+    if (!ticket)
+      throw new NotFoundException('Ticket not found or already resolved');
 
     const auditEntry = {
       sender_user_id: adminUserId,
@@ -1538,15 +1744,68 @@ export class AcademicsService {
         where: { user_id: ticket.student_user_id },
       });
       if (profile) {
-        const info = (profile.parent_info ?? {}) as Record<string, unknown>;
+        const info = profile.parent_info ?? {};
         if (dto.updated_mobile !== undefined) info.mobile = dto.updated_mobile;
-        if (dto.updated_address !== undefined) info.address = dto.updated_address;
-        if (dto.updated_parent_details !== undefined) info.parent_details = dto.updated_parent_details;
+        if (dto.updated_address !== undefined)
+          info.address = dto.updated_address;
+        if (dto.updated_parent_details !== undefined)
+          info.parent_details = dto.updated_parent_details;
         profile.parent_info = info;
         await this.studentProfiles.save(profile);
       }
     }
 
     return { success: true, action: dto.action, ticket_id: ticketId };
+  }
+
+  async assignSemesterRollNumbers(
+    tenantId: string,
+    dto: { semester: number; course_id?: string; sort_by?: 'name' | 'merit' },
+  ) {
+    const semester = Number(dto.semester);
+    if (!Number.isFinite(semester) || semester <= 0) {
+      throw new BadRequestException('Valid semester is required');
+    }
+
+    const sortBy = dto.sort_by ?? 'name';
+    const where: Record<string, unknown> = {
+      tenant_id: tenantId,
+      semester,
+      status: 'ENROLLED',
+    };
+    if (dto.course_id) where.course_id = dto.course_id;
+
+    const enrollments = await this.courseEnrollments.find({
+      where,
+      relations: ['student'],
+    });
+    if (!enrollments.length) {
+      throw new NotFoundException(
+        'No enrollments found for the given semester',
+      );
+    }
+
+    enrollments.sort((a, b) => {
+      if (sortBy === 'merit') {
+        const meritA = Number(a.attendance_percent ?? 0);
+        const meritB = Number(b.attendance_percent ?? 0);
+        if (meritB !== meritA) return meritB - meritA;
+      }
+      const nameA = a.student?.name ?? '';
+      const nameB = b.student?.name ?? '';
+      return nameA.localeCompare(nameB);
+    });
+
+    for (let i = 0; i < enrollments.length; i++) {
+      enrollments[i].roll_number = String(i + 1);
+    }
+    await this.courseEnrollments.save(enrollments);
+
+    return {
+      semester,
+      course_id: dto.course_id ?? null,
+      assigned: enrollments.length,
+      sort_by: sortBy,
+    };
   }
 }

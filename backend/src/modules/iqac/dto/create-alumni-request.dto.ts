@@ -5,7 +5,13 @@ export class CreateAlumniRequestDto {
   @IsUUID()
   alumni_user_id: string;
 
-  @IsIn(['TRANSCRIPT', 'DEGREE_DISPATCH', 'MIGRATION_CERTIFICATE', 'BONAFIDE', 'OTHER'])
+  @IsIn([
+    'TRANSCRIPT',
+    'DEGREE_DISPATCH',
+    'MIGRATION_CERTIFICATE',
+    'BONAFIDE',
+    'OTHER',
+  ])
   service_type: AlumniServiceType;
 
   @IsOptional()

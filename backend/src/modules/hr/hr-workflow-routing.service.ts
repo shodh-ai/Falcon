@@ -115,9 +115,14 @@ export class HrWorkflowRoutingService {
     };
   }
 
-  assertActorIsCurrentApprover(actorUserId: string, currentApproverUserId: string | null | undefined) {
+  assertActorIsCurrentApprover(
+    actorUserId: string,
+    currentApproverUserId: string | null | undefined,
+  ) {
     if (!currentApproverUserId || currentApproverUserId !== actorUserId) {
-      throw new ForbiddenException('You are not the assigned approver for this step');
+      throw new ForbiddenException(
+        'You are not the assigned approver for this step',
+      );
     }
   }
 }

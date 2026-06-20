@@ -18,7 +18,9 @@ export class TenantResolutionMiddleware implements NestMiddleware {
 
     try {
       const tenant = await this.tenantService.findBySubdomain(subdomain);
-      const features = await this.tenantService.getEnabledFeatures(tenant.tenant_id);
+      const features = await this.tenantService.getEnabledFeatures(
+        tenant.tenant_id,
+      );
       req.headers['x-tenant-id'] = tenant.tenant_id;
       req.headers['x-tenant-subdomain'] = tenant.subdomain;
 

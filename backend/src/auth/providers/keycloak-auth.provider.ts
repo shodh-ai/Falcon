@@ -18,7 +18,9 @@ export class KeycloakAuthProvider implements IAuthProvider {
     if (!process.env.KEYCLOAK_REALM) {
       return this.localFallback.signToken(user, tenantId, tenantSchema);
     }
-    this.logger.warn('Keycloak is configured but not yet wired — using local JWT');
+    this.logger.warn(
+      'Keycloak is configured but not yet wired — using local JWT',
+    );
     return this.localFallback.signToken(user, tenantId, tenantSchema);
   }
 

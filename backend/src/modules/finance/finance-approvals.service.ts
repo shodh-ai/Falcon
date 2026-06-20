@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomInt } from 'crypto';
 import { DataSource } from 'typeorm';
@@ -57,12 +63,17 @@ export class FinanceApprovalsService {
        WHERE tenant_id = $1 AND approval_id = $2`,
       [tenantId, approvalId],
     );
-    const approval = approvals[0] as { approval_id: string; status: string; amount: string } | undefined;
+    const approval = approvals[0] as
+      | { approval_id: string; status: string; amount: string }
+      | undefined;
     if (!approval) throw new NotFoundException('Approval request not found');
-    if (approval.status !== 'PENDING') throw new BadRequestException('Approval is not pending');
+    if (approval.status !== 'PENDING')
+      throw new BadRequestException('Approval is not pending');
 
     const otp = String(randomInt(0, 1000000)).padStart(6, '0');
-    const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString();
+    const expiresAt = new Date(
+      Date.now() + OTP_TTL_MINUTES * 60 * 1000,
+    ).toISOString();
 
     await this.db.query(
       `INSERT INTO fin_approval_otps (tenant_id, approval_id, otp_hash, expires_at)
@@ -80,7 +91,8 @@ export class FinanceApprovalsService {
     const tenantId = this.tenantId(user.tenant_id);
 
     const role = String(user.role_name ?? '');
-    const allowed = role === 'Chairman' || role === 'President' || role === 'SuperAdmin';
+    const allowed =
+      role === 'Chairman' || role === 'President' || role === 'SuperAdmin';
     if (!allowed) throw new ForbiddenException('Only CFO/Chairman can approve');
 
     return this.db.transaction(async (tx) => {
@@ -91,9 +103,16 @@ export class FinanceApprovalsService {
          FOR UPDATE`,
         [tenantId, approvalId],
       );
-      const approval = approvals[0] as { entity_type: 'PO' | 'VENDOR_INVOICE'; entity_id: string; status: string } | undefined;
+      const approval = approvals[0] as
+        | {
+            entity_type: 'PO' | 'VENDOR_INVOICE';
+            entity_id: string;
+            status: string;
+          }
+        | undefined;
       if (!approval) throw new NotFoundException('Approval request not found');
-      if (approval.status !== 'PENDING') throw new BadRequestException('Approval is not pending');
+      if (approval.status !== 'PENDING')
+        throw new BadRequestException('Approval is not pending');
 
       const otpRows = await tx.query(
         `SELECT otp_id, otp_hash, expires_at, used_at
@@ -104,13 +123,25 @@ export class FinanceApprovalsService {
          FOR UPDATE`,
         [tenantId, approvalId],
       );
-      const otpRow = otpRows[0] as { otp_id: string; otp_hash: string; expires_at: string; used_at: string | null } | undefined;
+      const otpRow = otpRows[0] as
+        | {
+            otp_id: string;
+            otp_hash: string;
+            expires_at: string;
+            used_at: string | null;
+          }
+        | undefined;
       if (!otpRow) throw new BadRequestException('OTP not requested');
       if (otpRow.used_at) throw new BadRequestException('OTP already used');
-      if (new Date(otpRow.expires_at).getTime() < Date.now()) throw new BadRequestException('OTP expired');
-      if (otpRow.otp_hash !== this.otpHash(otp)) throw new BadRequestException('Invalid OTP');
+      if (new Date(otpRow.expires_at).getTime() < Date.now())
+        throw new BadRequestException('OTP expired');
+      if (otpRow.otp_hash !== this.otpHash(otp))
+        throw new BadRequestException('Invalid OTP');
 
-      await tx.query(`UPDATE fin_approval_otps SET used_at = NOW() WHERE otp_id = $1`, [otpRow.otp_id]);
+      await tx.query(
+        `UPDATE fin_approval_otps SET used_at = NOW() WHERE otp_id = $1`,
+        [otpRow.otp_id],
+      );
       await tx.query(
         `UPDATE fin_approval_requests
          SET status = 'APPROVED', approved_by = $3, approved_at = NOW()
@@ -135,7 +166,14 @@ export class FinanceApprovalsService {
            FOR UPDATE`,
           [tenantId, approval.entity_id],
         );
-        const inv = invRows[0] as { invoice_id: string; net_payable: string; gst_amount: string; tds_amount: string } | undefined;
+        const inv = invRows[0] as
+          | {
+              invoice_id: string;
+              net_payable: string;
+              gst_amount: string;
+              tds_amount: string;
+            }
+          | undefined;
         if (!inv) throw new NotFoundException('Vendor invoice not found');
 
         await tx.query(

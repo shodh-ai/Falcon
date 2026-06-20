@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HandoverLog } from '../entities/handover-log.entity';
@@ -17,11 +21,20 @@ export class HandoverService {
     private userRepository: Repository<User>,
   ) {}
 
-  async performHandover(createHandoverDto: CreateHandoverDto, performedBy: string): Promise<HandoverLog> {
-    const { from_user: fromUserId, to_user: toUserId, notes } = createHandoverDto;
+  async performHandover(
+    createHandoverDto: CreateHandoverDto,
+    performedBy: string,
+  ): Promise<HandoverLog> {
+    const {
+      from_user: fromUserId,
+      to_user: toUserId,
+      notes,
+    } = createHandoverDto;
 
     if (fromUserId === toUserId) {
-      throw new BadRequestException('Outgoing and replacement users must be different');
+      throw new BadRequestException(
+        'Outgoing and replacement users must be different',
+      );
     }
 
     // Validate users
@@ -49,7 +62,9 @@ export class HandoverService {
 
     // Check if roles match
     if (fromUser.role_id !== toUser.role_id) {
-      throw new BadRequestException('Users must have the same role for handover');
+      throw new BadRequestException(
+        'Users must have the same role for handover',
+      );
     }
 
     // Deactivate from_user
@@ -88,7 +103,7 @@ export class HandoverService {
     if (userId) {
       queryBuilder.andWhere(
         '(log.from_user = :userId OR log.to_user = :userId OR log.performed_by = :userId)',
-        { userId }
+        { userId },
       );
     }
 
@@ -102,7 +117,9 @@ export class HandoverService {
     });
 
     if (!handoverLog) {
-      throw new NotFoundException(`Handover log with ID ${handoverId} not found`);
+      throw new NotFoundException(
+        `Handover log with ID ${handoverId} not found`,
+      );
     }
 
     return handoverLog;

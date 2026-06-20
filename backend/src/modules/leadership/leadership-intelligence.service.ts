@@ -32,7 +32,8 @@ export class LeadershipIntelligenceService {
     const templateId = (dto?.template_id as string | undefined) ?? null;
     const ledgerCategory = String(dto?.ledger_category ?? 'TUITION_GENERAL');
     const weight = Number(dto?.weight ?? 1);
-    const isActive = dto?.is_active === undefined ? true : Boolean(dto.is_active);
+    const isActive =
+      dto?.is_active === undefined ? true : Boolean(dto.is_active);
 
     if (!ruleId) {
       const rows = await this.db.query(
@@ -40,9 +41,20 @@ export class LeadershipIntelligenceService {
            (tenant_id, fee_head, program_code, template_id, ledger_category, weight, is_active)
          VALUES ($1, $2, $3, $4::uuid, $5, $6, $7)
          RETURNING rule_id`,
-        [tid, feeHead, programCode, templateId, ledgerCategory, weight, isActive],
+        [
+          tid,
+          feeHead,
+          programCode,
+          templateId,
+          ledgerCategory,
+          weight,
+          isActive,
+        ],
       );
-      return { created: true, rule_id: (rows[0] as { rule_id: string }).rule_id };
+      return {
+        created: true,
+        rule_id: (rows[0] as { rule_id: string }).rule_id,
+      };
     }
 
     await this.db.query(
@@ -55,7 +67,16 @@ export class LeadershipIntelligenceService {
            is_active = $7,
            updated_at = NOW()
        WHERE tenant_id = $1 AND rule_id = $8::uuid`,
-      [tid, feeHead, programCode, templateId, ledgerCategory, weight, isActive, ruleId],
+      [
+        tid,
+        feeHead,
+        programCode,
+        templateId,
+        ledgerCategory,
+        weight,
+        isActive,
+        ruleId,
+      ],
     );
     return { updated: true, rule_id: ruleId };
   }
@@ -74,14 +95,24 @@ export class LeadershipIntelligenceService {
          AND ($4::date IS NULL OR balance_date <= $4::date)
        ORDER BY balance_date DESC
        LIMIT 400`,
-      [tid, params?.bankAccountKey ?? null, params?.from ?? null, params?.to ?? null],
+      [
+        tid,
+        params?.bankAccountKey ?? null,
+        params?.from ?? null,
+        params?.to ?? null,
+      ],
     );
   }
 
-  async upsertBankBalanceSnapshot(tenantId?: string, dto?: Record<string, unknown>) {
+  async upsertBankBalanceSnapshot(
+    tenantId?: string,
+    dto?: Record<string, unknown>,
+  ) {
     const tid = this.tenantId(tenantId);
     const bankAccountKey = String(dto?.bank_account_key ?? 'primary');
-    const balanceDate = String(dto?.balance_date ?? new Date().toISOString().slice(0, 10));
+    const balanceDate = String(
+      dto?.balance_date ?? new Date().toISOString().slice(0, 10),
+    );
     const closingBalance = Number(dto?.closing_balance ?? 0);
     const source = String(dto?.source ?? 'MANUAL');
     const payload = (dto?.payload as Record<string, unknown> | undefined) ?? {};
@@ -95,10 +126,21 @@ export class LeadershipIntelligenceService {
          closing_balance = EXCLUDED.closing_balance,
          source = EXCLUDED.source,
          payload = EXCLUDED.payload`,
-      [tid, bankAccountKey, balanceDate, closingBalance, source, JSON.stringify(payload)],
+      [
+        tid,
+        bankAccountKey,
+        balanceDate,
+        closingBalance,
+        source,
+        JSON.stringify(payload),
+      ],
     );
 
-    return { upserted: true, bank_account_key: bankAccountKey, balance_date: balanceDate };
+    return {
+      upserted: true,
+      bank_account_key: bankAccountKey,
+      balance_date: balanceDate,
+    };
   }
 
   async getVariance(
@@ -131,11 +173,27 @@ export class LeadershipIntelligenceService {
          LIMIT 1`,
         [tid],
       );
-      const r = rows[0] as { month: string; revenue: string; prev_m: string | null; prev_y: string | null } | undefined;
+      const r = rows[0] as
+        | {
+            month: string;
+            revenue: string;
+            prev_m: string | null;
+            prev_y: string | null;
+          }
+        | undefined;
       const current = Number(r?.revenue ?? 0);
-      const prev = compare === 'YoY' ? Number(r?.prev_y ?? 0) : Number(r?.prev_m ?? 0);
+      const prev =
+        compare === 'YoY' ? Number(r?.prev_y ?? 0) : Number(r?.prev_m ?? 0);
       const pct = prev > 0 ? ((current - prev) / prev) * 100 : null;
-      return { metric, compare, period: r?.month ?? null, current, previous: prev, delta: current - prev, delta_pct: pct };
+      return {
+        metric,
+        compare,
+        period: r?.month ?? null,
+        current,
+        previous: prev,
+        delta: current - prev,
+        delta_pct: pct,
+      };
     }
 
     if (metric === 'VENDOR_SPEND') {
@@ -158,11 +216,27 @@ export class LeadershipIntelligenceService {
          LIMIT 1`,
         [tid],
       );
-      const r = rows[0] as { month: string; spend: string; prev_m: string | null; prev_y: string | null } | undefined;
+      const r = rows[0] as
+        | {
+            month: string;
+            spend: string;
+            prev_m: string | null;
+            prev_y: string | null;
+          }
+        | undefined;
       const current = Number(r?.spend ?? 0);
-      const prev = compare === 'YoY' ? Number(r?.prev_y ?? 0) : Number(r?.prev_m ?? 0);
+      const prev =
+        compare === 'YoY' ? Number(r?.prev_y ?? 0) : Number(r?.prev_m ?? 0);
       const pct = prev > 0 ? ((current - prev) / prev) * 100 : null;
-      return { metric, compare, period: r?.month ?? null, current, previous: prev, delta: current - prev, delta_pct: pct };
+      return {
+        metric,
+        compare,
+        period: r?.month ?? null,
+        current,
+        previous: prev,
+        delta: current - prev,
+        delta_pct: pct,
+      };
     }
 
     if (metric === 'BUDGET_UTILIZATION') {
@@ -186,7 +260,14 @@ export class LeadershipIntelligenceService {
       };
     }
 
-    return { metric, compare, current: 0, previous: 0, delta: 0, delta_pct: null };
+    return {
+      metric,
+      compare,
+      current: 0,
+      previous: 0,
+      delta: 0,
+      delta_pct: null,
+    };
   }
 
   async getDeptScatter(tenantId?: string, params?: { month?: string }) {
@@ -214,13 +295,20 @@ export class LeadershipIntelligenceService {
       [tid, monthStart],
     );
 
-    const costMap = new Map(costRows.map((r: { department: string; cost: string }) => [r.department, Number(r.cost)]));
+    const costMap = new Map(
+      costRows.map((r: { department: string; cost: string }) => [
+        r.department,
+        Number(r.cost),
+      ]),
+    );
 
-    const points = revenueRows.map((r: { department: string; revenue: string }) => ({
-      department: r.department,
-      revenue: Number(r.revenue),
-      cost: costMap.get(r.department) ?? 0,
-    }));
+    const points = revenueRows.map(
+      (r: { department: string; revenue: string }) => ({
+        department: r.department,
+        revenue: Number(r.revenue),
+        cost: costMap.get(r.department) ?? 0,
+      }),
+    );
 
     return { month, points };
   }
@@ -253,7 +341,9 @@ export class LeadershipIntelligenceService {
       faculty_roi: row?.faculty_roi != null ? Number(row.faculty_roi) : null,
       opex_ratio: row?.opex_ratio != null ? Number(row.opex_ratio) : null,
       fee_collection_efficiency:
-        row?.fee_collection_efficiency != null ? Number(row.fee_collection_efficiency) : null,
+        row?.fee_collection_efficiency != null
+          ? Number(row.fee_collection_efficiency)
+          : null,
       sources: row?.sources ?? {},
       generated_at: row?.generated_at ?? null,
     };
@@ -269,7 +359,9 @@ export class LeadershipIntelligenceService {
        LIMIT 1`,
       [tid, today],
     );
-    const row = rows[0] as { brief_date: string; bullets: string[]; generated_at: Date } | undefined;
+    const row = rows[0] as
+      | { brief_date: string; bullets: string[]; generated_at: Date }
+      | undefined;
     return {
       brief_date: row?.brief_date ?? today,
       bullets: Array.isArray(row?.bullets) ? row?.bullets : [],
@@ -277,9 +369,16 @@ export class LeadershipIntelligenceService {
     };
   }
 
-  async getCashFlowSankey(tenantId?: string, params?: { from?: string; to?: string }) {
+  async getCashFlowSankey(
+    tenantId?: string,
+    params?: { from?: string; to?: string },
+  ) {
     const tid = this.tenantId(tenantId);
-    const from = params?.from ?? new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString().slice(0, 10);
+    const from =
+      params?.from ??
+      new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
+        .toISOString()
+        .slice(0, 10);
     const to = params?.to ?? new Date().toISOString().slice(0, 10);
 
     const rows = await this.db.query(
@@ -311,7 +410,9 @@ export class LeadershipIntelligenceService {
     );
 
     const inflows = rows
-      .filter((r: { bucket: string; net_credit: string }) => Number(r.net_credit) > 0)
+      .filter(
+        (r: { bucket: string; net_credit: string }) => Number(r.net_credit) > 0,
+      )
       .map((r: { bucket: string; net_credit: string }) => ({
         label: r.bucket,
         amount: Number(r.net_credit),
@@ -319,7 +420,9 @@ export class LeadershipIntelligenceService {
       .filter((r) => r.label !== 'BANK');
 
     const outflows = rows
-      .filter((r: { bucket: string; net_credit: string }) => Number(r.net_credit) < 0)
+      .filter(
+        (r: { bucket: string; net_credit: string }) => Number(r.net_credit) < 0,
+      )
       .map((r: { bucket: string; net_credit: string }) => ({
         label: r.bucket,
         amount: Math.abs(Number(r.net_credit)),
@@ -333,8 +436,16 @@ export class LeadershipIntelligenceService {
     ];
 
     const links = [
-      ...inflows.map((i) => ({ source: i.label, target: 'Total Revenue', value: i.amount })),
-      ...outflows.map((o) => ({ source: 'Total Revenue', target: o.label, value: o.amount })),
+      ...inflows.map((i) => ({
+        source: i.label,
+        target: 'Total Revenue',
+        value: i.amount,
+      })),
+      ...outflows.map((o) => ({
+        source: 'Total Revenue',
+        target: o.label,
+        value: o.amount,
+      })),
     ];
 
     return { from, to, nodes, links };
@@ -355,7 +466,10 @@ export class LeadershipIntelligenceService {
        LIMIT 1`,
       [tid, bankAccountKey, date],
     );
-    const startingBalance = Number((snapRows[0] as { closing_balance: string } | undefined)?.closing_balance ?? 0);
+    const startingBalance = Number(
+      (snapRows[0] as { closing_balance: string } | undefined)
+        ?.closing_balance ?? 0,
+    );
 
     const moves = await this.db.query(
       `SELECT
@@ -376,7 +490,9 @@ export class LeadershipIntelligenceService {
       [tid, date],
     );
 
-    const deltas = (moves as Array<{ ledger_category: string; delta: string }>).map((m) => ({
+    const deltas = (
+      moves as Array<{ ledger_category: string; delta: string }>
+    ).map((m) => ({
       label: m.ledger_category,
       value: Number(m.delta),
     }));
@@ -445,7 +561,12 @@ export class LeadershipIntelligenceService {
       this.getDefaulterSummary(tid),
       this.getDepartmentScores(tid),
     ]);
-    return { q1_ledger: ledger, q2_revenue: revenueMix, q3_defaulters: defaulters, q4_dept_scores: deptScores };
+    return {
+      q1_ledger: ledger,
+      q2_revenue: revenueMix,
+      q3_defaulters: defaulters,
+      q4_dept_scores: deptScores,
+    };
   }
 
   private async getLedgerBreakdown(tenantId: string, period: Period) {
@@ -544,7 +665,9 @@ export class LeadershipIntelligenceService {
       collection_rate:
         Number(row.total_collected) + Number(row.total_due) > 0
           ? Math.round(
-              (Number(row.total_collected) / (Number(row.total_collected) + Number(row.total_due))) * 100,
+              (Number(row.total_collected) /
+                (Number(row.total_collected) + Number(row.total_due))) *
+                100,
             )
           : 0,
     };
@@ -639,7 +762,12 @@ export class LeadershipIntelligenceService {
     );
   }
 
-  async getAuditLog(tenantId?: string, tableName?: string, recordId?: string, limit = 100) {
+  async getAuditLog(
+    tenantId?: string,
+    tableName?: string,
+    recordId?: string,
+    limit = 100,
+  ) {
     const tid = this.tenantId(tenantId);
     const params: unknown[] = [limit];
     let where = '1=1';
@@ -703,10 +831,12 @@ export class LeadershipIntelligenceService {
         revenue: m.revenue,
         expenses: m.expenses,
       })),
-      defaulters_by_department: defaulters.map((r: { department: string; outstanding: string }) => ({
-        department: r.department,
-        outstanding: Number(r.outstanding),
-      })),
+      defaulters_by_department: defaulters.map(
+        (r: { department: string; outstanding: string }) => ({
+          department: r.department,
+          outstanding: Number(r.outstanding),
+        }),
+      ),
       hostel_mess_revenue: hostel,
       hostel_ops_cost: hostel * 0.62,
       revenue_by_source: revenueMix,

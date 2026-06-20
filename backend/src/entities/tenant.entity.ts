@@ -29,7 +29,12 @@ export class Tenant {
   @Column({ length: 63, unique: true })
   subdomain: string;
 
-  @Column({ type: 'varchar', length: 255, nullable: true, name: 'custom_domain' })
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+    name: 'custom_domain',
+  })
   custom_domain: string | null;
 
   @Column({ length: 63, name: 'pg_schema' })

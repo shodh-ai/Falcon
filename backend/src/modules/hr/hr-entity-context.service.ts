@@ -7,7 +7,10 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EntityScopeContext } from '../../common/entity-scope/entity-scope.context';
-import { HrAccessControlService, LEGACY_TO_CONTROL_MODULE } from './hr-access-control.service';
+import {
+  HrAccessControlService,
+  LEGACY_TO_CONTROL_MODULE,
+} from './hr-access-control.service';
 
 export type HrModuleKey =
   | 'onboarding'
@@ -30,7 +33,12 @@ export type HrCapabilities = Partial<Record<HrModuleKey, HrAccessLevel>>;
 
 const MASTER_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'HR', 'President']);
 /** Roles that may list and scope all tenant entities without per-user access rows. */
-const UNIVERSAL_ENTITY_ROLES = new Set(['SuperAdmin', 'HRAdmin', 'HR', 'President']);
+const UNIVERSAL_ENTITY_ROLES = new Set([
+  'SuperAdmin',
+  'HRAdmin',
+  'HR',
+  'President',
+]);
 
 export type AllowedEntity = { id: number; name: string; code: string };
 
@@ -42,7 +50,11 @@ export class HrEntityContextService {
   ) {}
 
   /** Strict entity filter — uses request scope when entityId omitted. */
-  entityFilterSql(alias: string, paramIndex: number, entityId?: number): string {
+  entityFilterSql(
+    alias: string,
+    paramIndex: number,
+    entityId?: number,
+  ): string {
     const scoped = entityId ?? EntityScopeContext.getEntityId();
     if (!scoped) {
       throw new ForbiddenException('Entity scope is required for this query');
@@ -69,7 +81,11 @@ export class HrEntityContextService {
     );
   }
 
-  async listAllowedEntities(tenantId: string, userId: string, roles: string[] = []) {
+  async listAllowedEntities(
+    tenantId: string,
+    userId: string,
+    roles: string[] = [],
+  ) {
     if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
       return this.listEntities(tenantId);
     }
@@ -94,7 +110,11 @@ export class HrEntityContextService {
   }
 
   formatAllowedEntities(
-    rows: Array<{ entity_id: number; entity_name: string; entity_code: string }>,
+    rows: Array<{
+      entity_id: number;
+      entity_name: string;
+      entity_code: string;
+    }>,
   ): AllowedEntity[] {
     return rows.map((row) => ({
       id: row.entity_id,
@@ -123,7 +143,9 @@ export class HrEntityContextService {
       [userId, entityId, tenantId],
     );
     if (!rows[0]) {
-      throw new ForbiddenException('You do not have access to this Organization Entity.');
+      throw new ForbiddenException(
+        'You do not have access to this Organization Entity.',
+      );
     }
   }
 
@@ -145,7 +167,9 @@ export class HrEntityContextService {
 
     const allowed = await this.listAllowedEntities(tenantId, userId, roles);
     if (!allowed.length) {
-      throw new ForbiddenException('No organization entity assigned to your account.');
+      throw new ForbiddenException(
+        'No organization entity assigned to your account.',
+      );
     }
     if (allowed.length === 1) {
       return Number(allowed[0].entity_id);
@@ -159,7 +183,10 @@ export class HrEntityContextService {
     );
   }
 
-  async resolveEntityId(tenantId: string, entityIdRaw?: string | number): Promise<number> {
+  async resolveEntityId(
+    tenantId: string,
+    entityIdRaw?: string | number,
+  ): Promise<number> {
     const fromContext = EntityScopeContext.getEntityId();
     if (fromContext && (entityIdRaw == null || entityIdRaw === '')) {
       return fromContext;
@@ -185,7 +212,10 @@ export class HrEntityContextService {
     );
   }
 
-  async getPermissions(tenantId: string, userId: string): Promise<HrCapabilities | null> {
+  async getPermissions(
+    tenantId: string,
+    userId: string,
+  ): Promise<HrCapabilities | null> {
     return this.accessControl.getCapabilitiesForUser(tenantId, userId);
   }
 
@@ -204,7 +234,8 @@ export class HrEntityContextService {
     }
 
     const access = caps[module] ?? 'none';
-    if (access === 'none') throw new ForbiddenException(`Access denied for ${module}`);
+    if (access === 'none')
+      throw new ForbiddenException(`Access denied for ${module}`);
     if (level === 'write' && access !== 'write') {
       throw new ForbiddenException(`Write access denied for ${module}`);
     }
@@ -255,7 +286,7 @@ export class HrEntityContextService {
           tenantId,
           row.user_id,
           controlModule,
-          { level: level as HrAccessLevel },
+          { level: level },
           updatedByUserId,
         );
       }
@@ -280,20 +311,29 @@ export class HrEntityContextService {
     return { user_id: targetUserId, capabilities: result.capabilities };
   }
 
-  canAccessModule(caps: HrCapabilities | null | undefined, module: HrModuleKey): boolean {
+  canAccessModule(
+    caps: HrCapabilities | null | undefined,
+    module: HrModuleKey,
+  ): boolean {
     if (!caps) return false;
     const access = caps[module] ?? 'none';
     return access !== 'none';
   }
 
-  capabilitiesToPermissionList(caps: HrCapabilities | null | undefined): string[] {
+  capabilitiesToPermissionList(
+    caps: HrCapabilities | null | undefined,
+  ): string[] {
     if (!caps) return [];
     return Object.entries(caps)
       .filter(([, level]) => level && level !== 'none')
       .map(([module, level]) => `${module}:${level}`);
   }
 
-  hasPermission(permissions: string[], module: HrModuleKey, minLevel: 'read' | 'write' = 'read'): boolean {
+  hasPermission(
+    permissions: string[],
+    module: HrModuleKey,
+    minLevel: 'read' | 'write' = 'read',
+  ): boolean {
     const required = minLevel === 'write' ? ['write'] : ['read', 'write'];
     return permissions.some((p) => {
       const [mod, level] = p.split(':');

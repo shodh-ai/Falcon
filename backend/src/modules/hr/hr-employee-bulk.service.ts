@@ -1,15 +1,10 @@
-import {
-  BadRequestException,
-  Injectable,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, QueryRunner } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as ExcelJS from 'exceljs';
 import { randomBytes } from 'crypto';
-import {
-  getInitialOnboardingStatusForRole,
-} from '../student-onboarding/onboarding-portal.util';
+import { getInitialOnboardingStatusForRole } from '../student-onboarding/onboarding-portal.util';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import {
   fetchDepartmentHodUserId,
@@ -69,7 +64,10 @@ export class HrEmployeeBulkService {
     return Buffer.from(buf);
   }
 
-  async parseUploadFile(buffer: Buffer, filename: string): Promise<EmployeeRowInput[]> {
+  async parseUploadFile(
+    buffer: Buffer,
+    filename: string,
+  ): Promise<EmployeeRowInput[]> {
     const lower = filename.toLowerCase();
     if (lower.endsWith('.csv')) {
       return this.parseCsv(buffer);
@@ -77,14 +75,21 @@ export class HrEmployeeBulkService {
     if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
       return this.parseExcel(buffer);
     }
-    throw new BadRequestException('Only .xlsx, .xls, or .csv files are supported');
+    throw new BadRequestException(
+      'Only .xlsx, .xls, or .csv files are supported',
+    );
   }
 
   private parseCsv(buffer: Buffer): EmployeeRowInput[] {
     const text = buffer.toString('utf8').trim();
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
-    if (lines.length < 2) throw new BadRequestException('CSV must include a header row and at least one data row');
-    const headers = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+    if (lines.length < 2)
+      throw new BadRequestException(
+        'CSV must include a header row and at least one data row',
+      );
+    const headers = lines[0]
+      .split(',')
+      .map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
     return lines.slice(1).map((line, idx) => {
       const values = line.split(',').map((v) => v.trim());
       const row: Record<string, string> = {};
@@ -122,16 +127,22 @@ export class HrEmployeeBulkService {
       rows.push(this.normalizeRow(record, rowNumber));
     });
 
-    if (!rows.length) throw new BadRequestException('Excel file contains no data rows');
+    if (!rows.length)
+      throw new BadRequestException('Excel file contains no data rows');
     return rows;
   }
 
-  private normalizeRow(raw: Record<string, string>, line: number): EmployeeRowInput {
+  private normalizeRow(
+    raw: Record<string, string>,
+    line: number,
+  ): EmployeeRowInput {
     const name = raw.name?.trim();
     const email = (raw.official_email ?? raw.email ?? '').trim().toLowerCase();
     if (!name) throw new BadRequestException(`Row ${line}: name is required`);
     if (!email || !EMAIL_RE.test(email)) {
-      throw new BadRequestException(`Row ${line}: invalid email "${email || '(empty)'}"`);
+      throw new BadRequestException(
+        `Row ${line}: invalid email "${email || '(empty)'}"`,
+      );
     }
     return {
       name,
@@ -141,7 +152,8 @@ export class HrEmployeeBulkService {
       department: raw.department?.trim() || undefined,
       employee_id: raw.employee_id?.trim() || undefined,
       designation: raw.designation?.trim() || undefined,
-      joining_date: raw.joining_date?.trim() || new Date().toISOString().slice(0, 10),
+      joining_date:
+        raw.joining_date?.trim() || new Date().toISOString().slice(0, 10),
     };
   }
 
@@ -168,7 +180,13 @@ export class HrEmployeeBulkService {
     await qr.connect();
     await qr.startTransaction();
     try {
-      const result = await this.createEmployeeInPipeline(qr, tenantId, entityId, row, actorUserId);
+      const result = await this.createEmployeeInPipeline(
+        qr,
+        tenantId,
+        entityId,
+        row,
+        actorUserId,
+      );
       await qr.commitTransaction();
       this.emitCredentials(tenantId, result);
       return result;
@@ -191,7 +209,11 @@ export class HrEmployeeBulkService {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
-    const created: Array<{ user_id: string; email: string; temp_password: string }> = [];
+    const created: Array<{
+      user_id: string;
+      email: string;
+      temp_password: string;
+    }> = [];
     try {
       for (let i = 0; i < rows.length; i++) {
         const line = i + 2;
@@ -220,7 +242,10 @@ export class HrEmployeeBulkService {
     for (const emp of created) {
       this.emitCredentials(tenantId, emp);
     }
-    return { created: created.length, employees: created.map((e) => ({ user_id: e.user_id, email: e.email })) };
+    return {
+      created: created.length,
+      employees: created.map((e) => ({ user_id: e.user_id, email: e.email })),
+    };
   }
 
   private emitCredentials(
@@ -280,8 +305,7 @@ export class HrEmployeeBulkService {
     const tempPassword = this.generateTempPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
     const employeeId =
-      row.employee_id ||
-      `SGVU-${randomBytes(4).toString('hex').toUpperCase()}`;
+      row.employee_id || `SGVU-${randomBytes(4).toString('hex').toUpperCase()}`;
 
     const onboardingStatus = getInitialOnboardingStatusForRole(roleName);
 
@@ -289,7 +313,17 @@ export class HrEmployeeBulkService {
       `INSERT INTO users (tenant_id, name, official_email, role_id, dept_id, password_hash, is_active, entity_id, phone, onboarding_status, onboarding_profile)
        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9, '{}'::jsonb)
        RETURNING user_id`,
-      [tenantId, row.name, email, roleId, deptId, passwordHash, entityId, row.phone ?? null, onboardingStatus],
+      [
+        tenantId,
+        row.name,
+        email,
+        roleId,
+        deptId,
+        passwordHash,
+        entityId,
+        row.phone ?? null,
+        onboardingStatus,
+      ],
     );
     const userId = userRows[0].user_id as string;
 
@@ -299,10 +333,10 @@ export class HrEmployeeBulkService {
       employeeUserId: userId,
     });
     if (reportingOfficerId) {
-      await qr.query(`UPDATE users SET reporting_officer_id = $1 WHERE user_id = $2`, [
-        reportingOfficerId,
-        userId,
-      ]);
+      await qr.query(
+        `UPDATE users SET reporting_officer_id = $1 WHERE user_id = $2`,
+        [reportingOfficerId, userId],
+      );
     }
 
     await qr.query(

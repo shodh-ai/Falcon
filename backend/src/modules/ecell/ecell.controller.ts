@@ -18,7 +18,10 @@ import { EcellService } from './ecell.service';
 import { EcellFounderService } from './ecell-founder.service';
 import { SubmitEcellProjectDto } from './dto/submit-project.dto';
 import { UpsertEcellConfigDto } from './dto/upsert-config.dto';
-import { EcellApprovalActionDto, EcellRejectDto } from './dto/approval-action.dto';
+import {
+  EcellApprovalActionDto,
+  EcellRejectDto,
+} from './dto/approval-action.dto';
 import {
   BookWorkspaceDto,
   MentorFeedbackDto,
@@ -48,7 +51,14 @@ export class EcellController {
   }
 
   @Get('config/active')
-  @Roles('Student', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin', 'HOD', 'Dean')
+  @Roles(
+    'Student',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+    'HOD',
+    'Dean',
+  )
   activeConfig(@Req() req: { user: AuthUser }) {
     return this.ecell.getActiveConfiguration(this.tenant(req));
   }
@@ -61,13 +71,19 @@ export class EcellController {
 
   @Post('config')
   @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
-  upsertConfig(@Req() req: { user: AuthUser }, @Body() dto: UpsertEcellConfigDto) {
+  upsertConfig(
+    @Req() req: { user: AuthUser },
+    @Body() dto: UpsertEcellConfigDto,
+  ) {
     return this.ecell.upsertConfiguration(this.tenant(req), dto);
   }
 
   @Post('projects')
   @Roles('Student')
-  submitProject(@Req() req: { user: AuthUser }, @Body() dto: SubmitEcellProjectDto) {
+  submitProject(
+    @Req() req: { user: AuthUser },
+    @Body() dto: SubmitEcellProjectDto,
+  ) {
     return this.ecell.submitProject(this.tenant(req), req.user.user_id, dto);
   }
 
@@ -96,7 +112,13 @@ export class EcellController {
     @Param('id') id: string,
     @Body() dto: EcellRejectDto,
   ) {
-    return this.ecell.rejectProject(this.tenant(req), req.user.user_id, id, dto.remarks, 0);
+    return this.ecell.rejectProject(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto.remarks,
+      0,
+    );
   }
 
   @Get('admin/portfolio')
@@ -106,7 +128,14 @@ export class EcellController {
   }
 
   @Get('admin/pipeline/board')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin', 'HOD', 'Dean', 'President')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+    'HOD',
+    'Dean',
+    'President',
+  )
   pipelineBoard(@Req() req: { user: AuthUser }) {
     return this.ecell.listPipelineBoard(this.tenant(req));
   }
@@ -124,7 +153,13 @@ export class EcellController {
     @Param('id') id: string,
     @Body() dto: EcellApprovalActionDto,
   ) {
-    return this.ecell.approveL1(this.tenant(req), req.user.user_id, req.user.roles, id, dto);
+    return this.ecell.approveL1(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles,
+      id,
+      dto,
+    );
   }
 
   @Post('approvals/l1/:id/reject')
@@ -134,33 +169,69 @@ export class EcellController {
     @Param('id') id: string,
     @Body() dto: EcellRejectDto,
   ) {
-    return this.ecell.rejectProject(this.tenant(req), req.user.user_id, id, dto.remarks, 1);
+    return this.ecell.rejectProject(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto.remarks,
+      1,
+    );
   }
 
   @Get('approvals/l2/pending')
-  @Roles('Dean', 'President', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Dean',
+    'President',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   l2Queue(@Req() req: { user: AuthUser }) {
     return this.ecell.listL2Queue(this.tenant(req), req.user.roles);
   }
 
   @Post('approvals/l2/:id/approve')
-  @Roles('Dean', 'President', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Dean',
+    'President',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   approveL2(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
     @Body() dto: EcellApprovalActionDto,
   ) {
-    return this.ecell.approveL2(this.tenant(req), req.user.user_id, req.user.roles, id, dto);
+    return this.ecell.approveL2(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.roles,
+      id,
+      dto,
+    );
   }
 
   @Post('approvals/l2/:id/reject')
-  @Roles('Dean', 'President', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Dean',
+    'President',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   rejectL2(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
     @Body() dto: EcellRejectDto,
   ) {
-    return this.ecell.rejectProject(this.tenant(req), req.user.user_id, id, dto.remarks, 2);
+    return this.ecell.rejectProject(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto.remarks,
+      2,
+    );
   }
 
   @Get('admin/dashboard')
@@ -215,7 +286,11 @@ export class EcellController {
     @Param('id') id: string,
     @Query('date') date: string,
   ) {
-    return this.founder.workspaceCalendar(this.tenant(req), id, date ?? new Date().toISOString());
+    return this.founder.workspaceCalendar(
+      this.tenant(req),
+      id,
+      date ?? new Date().toISOString(),
+    );
   }
 
   @Get('founder/bookings')
@@ -244,50 +319,122 @@ export class EcellController {
 
   @Post('founder/mentor-meetings')
   @Roles('Student')
-  requestMeeting(@Req() req: { user: AuthUser }, @Body() dto: RequestMentorMeetingDto) {
-    return this.founder.requestMentorMeeting(this.tenant(req), req.user.user_id, dto);
+  requestMeeting(
+    @Req() req: { user: AuthUser },
+    @Body() dto: RequestMentorMeetingDto,
+  ) {
+    return this.founder.requestMentorMeeting(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Get('mentor/inbox')
-  @Roles('Faculty', 'HOD', 'Dean', 'President', 'Alumni', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'President',
+    'Alumni',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   mentorInbox(@Req() req: { user: AuthUser }) {
     return this.founder.listMentorInbox(req.user.user_id, this.tenant(req));
   }
 
   @Get('mentor/feedback-pending')
-  @Roles('Faculty', 'HOD', 'Dean', 'President', 'Alumni', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'President',
+    'Alumni',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   mentorFeedbackPending(@Req() req: { user: AuthUser }) {
-    return this.founder.listMentorFeedbackPending(req.user.user_id, this.tenant(req));
+    return this.founder.listMentorFeedbackPending(
+      req.user.user_id,
+      this.tenant(req),
+    );
   }
 
   @Post('mentor/meetings/:id/accept')
-  @Roles('Faculty', 'HOD', 'Dean', 'President', 'Alumni', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'President',
+    'Alumni',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   acceptMeeting(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
     @Body() dto: RespondMentorMeetingDto,
   ) {
-    return this.founder.respondMentorMeeting(this.tenant(req), req.user.user_id, id, true, dto);
+    return this.founder.respondMentorMeeting(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      true,
+      dto,
+    );
   }
 
   @Post('mentor/meetings/:id/decline')
-  @Roles('Faculty', 'HOD', 'Dean', 'President', 'Alumni', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'President',
+    'Alumni',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   declineMeeting(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
     @Body() dto: RespondMentorMeetingDto,
   ) {
-    return this.founder.respondMentorMeeting(this.tenant(req), req.user.user_id, id, false, dto);
+    return this.founder.respondMentorMeeting(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      false,
+      dto,
+    );
   }
 
   @Post('mentor/meetings/:id/feedback')
-  @Roles('Faculty', 'HOD', 'Dean', 'President', 'Alumni', INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'President',
+    'Alumni',
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'SuperAdmin',
+  )
   mentorFeedback(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
     @Body() dto: MentorFeedbackDto,
   ) {
-    return this.founder.submitMentorFeedback(this.tenant(req), req.user.user_id, id, dto);
+    return this.founder.submitMentorFeedback(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto,
+    );
   }
 
   @Get('admin/mentor-progress')

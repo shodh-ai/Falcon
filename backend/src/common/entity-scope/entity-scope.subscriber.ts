@@ -46,7 +46,9 @@ export class EntityScopeSubscriber implements EntitySubscriberInterface {
     if (entity.entity_id == null || entity.entity_id === '') {
       entity.entity_id = scopeId;
     } else if (Number(entity.entity_id) !== scopeId) {
-      throw new ForbiddenException('Cannot insert data for an entity outside your current scope.');
+      throw new ForbiddenException(
+        'Cannot insert data for an entity outside your current scope.',
+      );
     }
   }
 
@@ -57,9 +59,12 @@ export class EntityScopeSubscriber implements EntitySubscriberInterface {
     const scopeId = EntityScopeContext.getEntityId();
     if (!scopeId) return;
 
-    const rowEntityId = event.entity?.entity_id ?? event.databaseEntity?.entity_id;
+    const rowEntityId =
+      event.entity?.entity_id ?? event.databaseEntity?.entity_id;
     if (rowEntityId != null && Number(rowEntityId) !== scopeId) {
-      throw new ForbiddenException('Cannot update data belonging to another organization entity.');
+      throw new ForbiddenException(
+        'Cannot update data belonging to another organization entity.',
+      );
     }
 
     if (event.entity && event.entity.entity_id == null) {

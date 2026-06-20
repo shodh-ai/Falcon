@@ -77,7 +77,12 @@ abstract class BaseOnboardingController {
 
   resetPassword(
     @Req() req: { user: AuthUser },
-    @Body() body: { current_password: string; new_password: string; confirm_password?: string },
+    @Body()
+    body: {
+      current_password: string;
+      new_password: string;
+      confirm_password?: string;
+    },
   ) {
     if (body.new_password !== body.confirm_password) {
       throw new BadRequestException('Passwords do not match');
@@ -95,7 +100,11 @@ abstract class BaseOnboardingController {
   }
 
   saveProfile(@Req() req: { user: AuthUser }, @Body() body: ProfileBody) {
-    return this.onboarding.saveStep2Profile(this.tenant(req), req.user.user_id, body);
+    return this.onboarding.saveStep2Profile(
+      this.tenant(req),
+      req.user.user_id,
+      body,
+    );
   }
 
   async uploadDocument(
@@ -117,20 +126,31 @@ abstract class BaseOnboardingController {
   }
 
   submit(@Req() req: { user: AuthUser }) {
-    return this.onboarding.submitForVerification(this.tenant(req), req.user.user_id);
+    return this.onboarding.submitForVerification(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   protected tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? '';
   }
 
-  protected async persistFile(file: Express.Multer.File, tenantId: string): Promise<string> {
+  protected async persistFile(
+    file: Express.Multer.File,
+    tenantId: string,
+  ): Promise<string> {
     if (!file) throw new BadRequestException('No file uploaded');
     const uniqueName = `${uuidv4()}${extname(file.originalname)}`;
 
     if (this.objectStorage.isEnabled()) {
       const key = this.objectStorage.buildKey(tenantId, uniqueName);
-      const stored = await this.objectStorage.upload(tenantId, key, file.buffer, file.mimetype);
+      const stored = await this.objectStorage.upload(
+        tenantId,
+        key,
+        file.buffer,
+        file.mimetype,
+      );
       return stored.url ?? stored.key;
     }
 
@@ -155,7 +175,10 @@ abstract class BaseOnboardingController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Student', 'Applicant')
 export class StudentOnboardingController extends BaseOnboardingController {
-  constructor(onboarding: StudentOnboardingService, objectStorage: ObjectStorageService) {
+  constructor(
+    onboarding: StudentOnboardingService,
+    objectStorage: ObjectStorageService,
+  ) {
     super(onboarding, objectStorage, STUDENT_ONBOARDING_DOC_TYPES);
   }
 
@@ -167,7 +190,12 @@ export class StudentOnboardingController extends BaseOnboardingController {
   @Post('reset-password')
   resetPassword(
     @Req() req: { user: AuthUser },
-    @Body() body: { current_password: string; new_password: string; confirm_password?: string },
+    @Body()
+    body: {
+      current_password: string;
+      new_password: string;
+      confirm_password?: string;
+    },
   ) {
     return super.resetPassword(req, body);
   }
@@ -184,7 +212,10 @@ export class StudentOnboardingController extends BaseOnboardingController {
 
   @Post('documents/:docType')
   @UseInterceptors(
-    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }),
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
   )
   uploadDocument(
     @Req() req: { user: AuthUser },
@@ -204,7 +235,10 @@ export class StudentOnboardingController extends BaseOnboardingController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Faculty', 'HOD', 'Dean')
 export class StaffOnboardingController extends BaseOnboardingController {
-  constructor(onboarding: StudentOnboardingService, objectStorage: ObjectStorageService) {
+  constructor(
+    onboarding: StudentOnboardingService,
+    objectStorage: ObjectStorageService,
+  ) {
     super(onboarding, objectStorage, STAFF_ONBOARDING_DOC_TYPES);
   }
 
@@ -216,7 +250,12 @@ export class StaffOnboardingController extends BaseOnboardingController {
   @Post('reset-password')
   resetPassword(
     @Req() req: { user: AuthUser },
-    @Body() body: { current_password: string; new_password: string; confirm_password?: string },
+    @Body()
+    body: {
+      current_password: string;
+      new_password: string;
+      confirm_password?: string;
+    },
   ) {
     return super.resetPassword(req, body);
   }
@@ -233,7 +272,10 @@ export class StaffOnboardingController extends BaseOnboardingController {
 
   @Post('documents/:docType')
   @UseInterceptors(
-    FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }),
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
   )
   uploadDocument(
     @Req() req: { user: AuthUser },
@@ -267,16 +309,28 @@ export class StudentVerificationAdminController {
     @Req() req: { user: AuthUser },
     @Query('portal_kind') portalKind?: 'student' | 'staff' | 'all',
   ) {
-    return this.onboarding.getVerificationQueue(this.tenant(req), portalKind ?? 'all');
+    return this.onboarding.getVerificationQueue(
+      this.tenant(req),
+      portalKind ?? 'all',
+    );
   }
 
   @Get(':targetUserId')
-  detail(@Req() req: { user: AuthUser }, @Param('targetUserId') targetUserId: string) {
-    return this.onboarding.getVerificationDetail(this.tenant(req), targetUserId);
+  detail(
+    @Req() req: { user: AuthUser },
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.onboarding.getVerificationDetail(
+      this.tenant(req),
+      targetUserId,
+    );
   }
 
   @Post(':targetUserId/approve')
-  approve(@Req() req: { user: AuthUser }, @Param('targetUserId') targetUserId: string) {
+  approve(
+    @Req() req: { user: AuthUser },
+    @Param('targetUserId') targetUserId: string,
+  ) {
     return this.onboarding.approve(this.tenant(req), targetUserId);
   }
 
@@ -308,7 +362,10 @@ export class StudentVerificationAdminController {
 
     if (this.objectStorage.isEnabled() && !filePath.startsWith('/')) {
       const stream = await this.objectStorage.getDownloadStream(filePath);
-      res.setHeader('Content-Disposition', `inline; filename="${basename(filePath)}"`);
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${basename(filePath)}"`,
+      );
       return stream.pipe(res);
     }
 
@@ -317,7 +374,10 @@ export class StudentVerificationAdminController {
     if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
       throw new BadRequestException('File not found');
     }
-    res.setHeader('Content-Disposition', `inline; filename="${basename(resolvedPath)}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${basename(resolvedPath)}"`,
+    );
     return createReadStream(resolvedPath).pipe(res);
   }
 }

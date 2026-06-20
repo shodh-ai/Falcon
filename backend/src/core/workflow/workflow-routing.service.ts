@@ -38,7 +38,8 @@ export class WorkflowRoutingService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(HostelAllocation)
     private readonly hostelAllocations: Repository<HostelAllocation>,
-    @InjectRepository(HostelRoom) private readonly hostelRooms: Repository<HostelRoom>,
+    @InjectRepository(HostelRoom)
+    private readonly hostelRooms: Repository<HostelRoom>,
     @InjectRepository(Role) private readonly roles: Repository<Role>,
   ) {}
 
@@ -53,7 +54,9 @@ export class WorkflowRoutingService {
     }
     const proctor =
       mapping.proctor ??
-      (await this.users.findOne({ where: { user_id: mapping.proctor_user_id } }));
+      (await this.users.findOne({
+        where: { user_id: mapping.proctor_user_id },
+      }));
     if (!proctor) {
       throw new NotFoundException('Assigned proctor user record not found.');
     }
@@ -69,7 +72,9 @@ export class WorkflowRoutingService {
   async getReportingOfficer(staffUserId: string): Promise<RoutedApprover> {
     const staff = await this.users.findOne({ where: { user_id: staffUserId } });
     if (!staff?.reporting_officer_id) {
-      throw new NotFoundException('No reporting officer assigned for this user.');
+      throw new NotFoundException(
+        'No reporting officer assigned for this user.',
+      );
     }
     const officer = await this.users.findOne({
       where: { user_id: staff.reporting_officer_id },
@@ -90,16 +95,26 @@ export class WorkflowRoutingService {
   }
 
   async getFinanceAdmin(tenantId: string): Promise<RoutedApprover> {
-    return this.resolveUserByEmail(this.financeAdminEmail, tenantId, 'FINANCE_ADMIN');
+    return this.resolveUserByEmail(
+      this.financeAdminEmail,
+      tenantId,
+      'FINANCE_ADMIN',
+    );
   }
 
   async getItAdmin(tenantId: string): Promise<RoutedApprover> {
     try {
-      return await this.resolveUserByEmail(this.itAdminEmail, tenantId, 'IT_ADMIN');
+      return await this.resolveUserByEmail(
+        this.itAdminEmail,
+        tenantId,
+        'IT_ADMIN',
+      );
     } catch {
       const byRole = await this.resolveUserByRole('SuperAdmin', tenantId);
       if (byRole) return { ...byRole, routeReason: 'IT_ADMIN_ROLE_FALLBACK' };
-      throw new NotFoundException('No IT admin user configured for helpdesk routing.');
+      throw new NotFoundException(
+        'No IT admin user configured for helpdesk routing.',
+      );
     }
   }
 
@@ -129,7 +144,9 @@ export class WorkflowRoutingService {
       );
     }
 
-    const warden = await this.users.findOne({ where: { user_id: wardenUserId } });
+    const warden = await this.users.findOne({
+      where: { user_id: wardenUserId },
+    });
     if (!warden) {
       throw new NotFoundException('Warden user record not found.');
     }
@@ -150,26 +167,36 @@ export class WorkflowRoutingService {
   ): Promise<RoutedApprover> {
     switch (category) {
       case 'FINANCE': {
-        const admin = await this.resolveUserByRole('Accountant', tenantId) || await this.resolveUserByRole('FinanceManager', tenantId);
+        const admin =
+          (await this.resolveUserByRole('Accountant', tenantId)) ||
+          (await this.resolveUserByRole('FinanceManager', tenantId));
         if (admin) return admin;
         return this.getFinanceAdmin(tenantId);
       }
       case 'IT': {
-        const admin = await this.resolveUserByRole('Admin', tenantId) || await this.resolveUserByRole('SuperAdmin', tenantId);
+        const admin =
+          (await this.resolveUserByRole('Admin', tenantId)) ||
+          (await this.resolveUserByRole('SuperAdmin', tenantId));
         if (admin) return admin;
         return this.getItAdmin(tenantId);
       }
       case 'HR': {
-        const hrAdmin = await this.resolveUserByRole('HRAdmin', tenantId) || await this.resolveUserByRole('HR', tenantId);
+        const hrAdmin =
+          (await this.resolveUserByRole('HRAdmin', tenantId)) ||
+          (await this.resolveUserByRole('HR', tenantId));
         if (hrAdmin) return hrAdmin;
         return this.getHrAdmin(tenantId);
       }
       case 'FACILITIES': {
-        const facAdmin = await this.resolveUserByRole('Warden', tenantId) || await this.resolveUserByRole('SuperAdmin', tenantId);
+        const facAdmin =
+          (await this.resolveUserByRole('Warden', tenantId)) ||
+          (await this.resolveUserByRole('SuperAdmin', tenantId));
         if (facAdmin) return facAdmin;
         const superAdmin = await this.resolveUserByRole('SuperAdmin', tenantId);
         if (superAdmin) return superAdmin;
-        throw new NotFoundException('No facilities admin found for helpdesk routing');
+        throw new NotFoundException(
+          'No facilities admin found for helpdesk routing',
+        );
       }
       case 'HOSTEL': {
         try {
@@ -183,7 +210,9 @@ export class WorkflowRoutingService {
       case 'MENTORSHIP':
         return this.getStudentProctor(studentUserId);
       case 'ACADEMICS': {
-        const hod = await this.resolveUserByRole('HOD', tenantId) || await this.resolveUserByRole('Dean', tenantId);
+        const hod =
+          (await this.resolveUserByRole('HOD', tenantId)) ||
+          (await this.resolveUserByRole('Dean', tenantId));
         if (hod) return hod;
         return this.resolveUserByEmail(
           this.fallbackHodEmail,
@@ -210,7 +239,9 @@ export class WorkflowRoutingService {
           );
         }
       default:
-        throw new BadRequestException(`Unsupported helpdesk category: ${category}`);
+        throw new BadRequestException(
+          `Unsupported helpdesk category: ${category}`,
+        );
     }
   }
 

@@ -17,11 +17,19 @@ export class CacheService {
     }
   }
 
-  async set(key: string, value: unknown, ttlSec = DEFAULT_TTL_SEC): Promise<void> {
+  async set(
+    key: string,
+    value: unknown,
+    ttlSec = DEFAULT_TTL_SEC,
+  ): Promise<void> {
     await this.redis.client.set(key, JSON.stringify(value), 'EX', ttlSec);
   }
 
-  async getOrSet<T>(key: string, factory: () => Promise<T>, ttlSec = DEFAULT_TTL_SEC): Promise<T> {
+  async getOrSet<T>(
+    key: string,
+    factory: () => Promise<T>,
+    ttlSec = DEFAULT_TTL_SEC,
+  ): Promise<T> {
     const cached = await this.get<T>(key);
     if (cached !== null) return cached;
     const data = await factory();
@@ -34,7 +42,10 @@ export class CacheService {
   }
 
   async delByPrefix(prefix: string): Promise<void> {
-    const stream = this.redis.client.scanStream({ match: `${prefix}*`, count: 100 });
+    const stream = this.redis.client.scanStream({
+      match: `${prefix}*`,
+      count: 100,
+    });
     const keys: string[] = [];
     for await (const batch of stream) {
       keys.push(...(batch as string[]));

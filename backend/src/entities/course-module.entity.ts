@@ -49,6 +49,15 @@ export class CourseModule extends BaseTenantEntity {
   @Column({ type: 'timestamptz', nullable: true })
   completed_at: Date | null;
 
+  @Column({ type: 'date', nullable: true })
+  planned_completion_date: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  actual_completion_date: string | null;
+
+  @Column({ type: 'varchar', length: 50, default: 'PENDING' })
+  hod_approval_status: string;
+
   @CreateDateColumn()
   created_at: Date;
 

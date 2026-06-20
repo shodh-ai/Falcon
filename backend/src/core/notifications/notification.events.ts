@@ -49,6 +49,8 @@ export const NotificationEvents = {
   VENUE_BOOKING_PENDING_APPROVAL: 'venue.booking_pending_approval',
   VENUE_BOOKING_APPROVED: 'venue.booking_approved',
   VENUE_BOOKING_REJECTED: 'venue.booking_rejected',
+  ACADEMIC_RND_STATUS_UPDATED: 'academic_rnd.status_updated',
+  CERTIFICATE_STATUS_UPDATED: 'certificate.status_updated',
 } as const;
 
 export type NotificationEventName =
@@ -285,3 +287,7 @@ export type VenueBookingPayload = BaseNotificationPayload & {
   endTime?: string;
   remarks?: string;
 };
+
+export type AcademicRndStatusUpdatedPayload = BaseNotificationPayload;
+
+export type CertificateStatusUpdatedPayload = BaseNotificationPayload;

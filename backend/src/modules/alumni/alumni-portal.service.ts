@@ -22,18 +22,23 @@ const DONATION_FUNDS = [
 export class AlumniPortalService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    @InjectRepository(AlumniProfile) private readonly profiles: Repository<AlumniProfile>,
-    @InjectRepository(AlumniDonation) private readonly donations: Repository<AlumniDonation>,
-    @InjectRepository(AlumniEvent) private readonly events: Repository<AlumniEvent>,
-    @InjectRepository(AlumniServiceRequest) private readonly serviceRequests: Repository<AlumniServiceRequest>,
+    @InjectRepository(AlumniProfile)
+    private readonly profiles: Repository<AlumniProfile>,
+    @InjectRepository(AlumniDonation)
+    private readonly donations: Repository<AlumniDonation>,
+    @InjectRepository(AlumniEvent)
+    private readonly events: Repository<AlumniEvent>,
+    @InjectRepository(AlumniServiceRequest)
+    private readonly serviceRequests: Repository<AlumniServiceRequest>,
   ) {}
 
   async getMyProfile(tenantId: string, userId: string) {
     const profile = await this.ensureProfile(tenantId, userId);
-    const dueAt = profile.career_update_due_at ?? this.nextCareerDueDate(profile.profile_updated_at);
+    const dueAt =
+      profile.career_update_due_at ??
+      this.nextCareerDueDate(profile.profile_updated_at);
     const needsUpdate =
-      !profile.profile_updated_at ||
-      new Date(dueAt).getTime() <= Date.now();
+      !profile.profile_updated_at || new Date(dueAt).getTime() <= Date.now();
 
     return {
       ...this.serializeProfile(profile),
@@ -66,7 +71,9 @@ export class AlumniPortalService {
       profile.opt_in_mentorship = dto.opt_in_mentorship;
     }
     profile.profile_updated_at = new Date();
-    profile.career_update_due_at = new Date(this.nextCareerDueDate(profile.profile_updated_at));
+    profile.career_update_due_at = new Date(
+      this.nextCareerDueDate(profile.profile_updated_at),
+    );
     await this.profiles.save(profile);
     return this.getMyProfile(tenantId, userId);
   }
@@ -109,7 +116,8 @@ export class AlumniPortalService {
   ) {
     const profile = await this.ensureProfile(tenantId, userId);
     const amount = Number(dto.amount);
-    if (!amount || amount < 1) throw new BadRequestException('Invalid donation amount');
+    if (!amount || amount < 1)
+      throw new BadRequestException('Invalid donation amount');
 
     const transactionId = `ALM-${randomUUID().slice(0, 12).toUpperCase()}`;
     const donation = this.donations.create({
@@ -118,7 +126,10 @@ export class AlumniPortalService {
       alumni_id: profile.alumni_id,
       alumni_user_id: userId,
       amount,
-      purpose: dto.purpose || DONATION_FUNDS.find((f) => f.code === dto.fund_code)?.label || 'Endowment',
+      purpose:
+        dto.purpose ||
+        DONATION_FUNDS.find((f) => f.code === dto.fund_code)?.label ||
+        'Endowment',
       transaction_id: transactionId,
       payment_status: 'PENDING',
       gateway: 'RAZORPAY',
@@ -141,9 +152,17 @@ export class AlumniPortalService {
     };
   }
 
-  async confirmDonationMock(tenantId: string, userId: string, donationId: string) {
+  async confirmDonationMock(
+    tenantId: string,
+    userId: string,
+    donationId: string,
+  ) {
     const donation = await this.donations.findOne({
-      where: { donation_id: donationId, tenant_id: tenantId, alumni_user_id: userId },
+      where: {
+        donation_id: donationId,
+        tenant_id: tenantId,
+        alumni_user_id: userId,
+      },
     });
     if (!donation) throw new NotFoundException('Donation not found');
     donation.payment_status = 'SUCCESS';
@@ -152,12 +171,22 @@ export class AlumniPortalService {
     return donation;
   }
 
-  async getDonationReceipt(tenantId: string, userId: string, donationId: string) {
+  async getDonationReceipt(
+    tenantId: string,
+    userId: string,
+    donationId: string,
+  ) {
     const donation = await this.donations.findOne({
-      where: { donation_id: donationId, tenant_id: tenantId, alumni_user_id: userId },
+      where: {
+        donation_id: donationId,
+        tenant_id: tenantId,
+        alumni_user_id: userId,
+      },
     });
     if (!donation || donation.payment_status !== 'SUCCESS') {
-      throw new NotFoundException('Receipt available only for successful donations');
+      throw new NotFoundException(
+        'Receipt available only for successful donations',
+      );
     }
     const profile = await this.ensureProfile(tenantId, userId);
     return {
@@ -167,7 +196,8 @@ export class AlumniPortalService {
       purpose: donation.purpose,
       donated_at: donation.donated_at,
       ledger_account: donation.ledger_account,
-      exemption_note: 'Eligible for tax deduction under Section 80G (demo receipt).',
+      exemption_note:
+        'Eligible for tax deduction under Section 80G (demo receipt).',
     };
   }
 
@@ -189,7 +219,12 @@ export class AlumniPortalService {
        WHERE tenant_id = $1 AND alumni_id = $2`,
       [tenantId, profile.alumni_id],
     );
-    const regMap = new Map(registrations.map((r: { event_id: string; status: string }) => [r.event_id, r.status]));
+    const regMap = new Map(
+      registrations.map((r: { event_id: string; status: string }) => [
+        r.event_id,
+        r.status,
+      ]),
+    );
     return events.map((e) => ({
       ...e,
       rsvp_status: regMap.get(e.event_id) ?? null,
@@ -216,7 +251,11 @@ export class AlumniPortalService {
 
   createServiceRequest(
     userId: string,
-    dto: { service_type: string; remarks?: string; dispatch_details?: Record<string, unknown> },
+    dto: {
+      service_type: string;
+      remarks?: string;
+      dispatch_details?: Record<string, unknown>;
+    },
   ) {
     return this.serviceRequests.save(
       this.serviceRequests.create({
@@ -250,7 +289,9 @@ export class AlumniPortalService {
       });
     }
     if (!profile) {
-      throw new NotFoundException('Alumni profile not found. Complete graduation clearance first.');
+      throw new NotFoundException(
+        'Alumni profile not found. Complete graduation clearance first.',
+      );
     }
     return profile;
   }

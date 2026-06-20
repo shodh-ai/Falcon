@@ -1,10 +1,26 @@
-import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BaseTenantEntity } from './base-tenant.entity';
 import { User } from './user.entity';
 
-export type StaffLeaveStatus = 'PENDING' | 'HOD_APPROVED' | 'HR_APPROVED' | 'REJECTED';
+export type StaffLeaveStatus =
+  | 'PENDING'
+  | 'HOD_APPROVED'
+  | 'HR_APPROVED'
+  | 'REJECTED';
 
-export type StaffRequestType = 'LEAVE' | 'ON_DUTY' | 'COMP_OFF_CREDIT' | 'REGULARIZATION';
+export type StaffRequestType =
+  | 'LEAVE'
+  | 'ON_DUTY'
+  | 'COMP_OFF_CREDIT'
+  | 'REGULARIZATION';
 
 @Entity('staff_leave_requests')
 @Index(['tenant_id', 'staff_user_id', 'status'])

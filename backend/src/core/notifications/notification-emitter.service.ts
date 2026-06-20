@@ -39,6 +39,8 @@ import {
   type EcellMentorMeetingRespondedPayload,
   type EcellMentorFeedbackRequestedPayload,
   type VenueBookingPayload,
+  type AcademicRndStatusUpdatedPayload,
+  type CertificateStatusUpdatedPayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -87,7 +89,10 @@ export class NotificationEmitterService {
   }
 
   courseMaterialAdded(payload: CourseMaterialAddedPayload) {
-    this.events.emit(NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED, payload);
+    this.events.emit(
+      NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED,
+      payload,
+    );
   }
 
   gatePassUpdated(payload: GatePassUpdatedPayload) {
@@ -127,11 +132,17 @@ export class NotificationEmitterService {
   }
 
   reservationReady(payload: LibraryReservationReadyPayload) {
-    this.events.emit(NotificationEvents.OPERATIONS_LIBRARY_RESERVATION_READY, payload);
+    this.events.emit(
+      NotificationEvents.OPERATIONS_LIBRARY_RESERVATION_READY,
+      payload,
+    );
   }
 
   busApproaching(payload: TransportBusApproachingPayload) {
-    this.events.emit(NotificationEvents.OPERATIONS_TRANSPORT_BUS_APPROACHING, payload);
+    this.events.emit(
+      NotificationEvents.OPERATIONS_TRANSPORT_BUS_APPROACHING,
+      payload,
+    );
   }
 
   approvalRequired(payload: WorkflowApprovalRequiredPayload) {
@@ -223,19 +234,31 @@ export class NotificationEmitterService {
   }
 
   ecellMentorMeetingRequested(payload: EcellMentorMeetingRequestedPayload) {
-    this.events.emit(NotificationEvents.ECELL_MENTOR_MEETING_REQUESTED, payload);
+    this.events.emit(
+      NotificationEvents.ECELL_MENTOR_MEETING_REQUESTED,
+      payload,
+    );
   }
 
   ecellMentorMeetingResponded(payload: EcellMentorMeetingRespondedPayload) {
-    this.events.emit(NotificationEvents.ECELL_MENTOR_MEETING_RESPONDED, payload);
+    this.events.emit(
+      NotificationEvents.ECELL_MENTOR_MEETING_RESPONDED,
+      payload,
+    );
   }
 
   ecellMentorFeedbackRequested(payload: EcellMentorFeedbackRequestedPayload) {
-    this.events.emit(NotificationEvents.ECELL_MENTOR_FEEDBACK_REQUESTED, payload);
+    this.events.emit(
+      NotificationEvents.ECELL_MENTOR_FEEDBACK_REQUESTED,
+      payload,
+    );
   }
 
   venueBookingPendingApproval(payload: VenueBookingPayload) {
-    this.events.emit(NotificationEvents.VENUE_BOOKING_PENDING_APPROVAL, payload);
+    this.events.emit(
+      NotificationEvents.VENUE_BOOKING_PENDING_APPROVAL,
+      payload,
+    );
   }
 
   venueBookingApproved(payload: VenueBookingPayload) {
@@ -244,5 +267,13 @@ export class NotificationEmitterService {
 
   venueBookingRejected(payload: VenueBookingPayload) {
     this.events.emit(NotificationEvents.VENUE_BOOKING_REJECTED, payload);
+  }
+
+  academicRndStatusUpdated(payload: AcademicRndStatusUpdatedPayload) {
+    this.events.emit(NotificationEvents.ACADEMIC_RND_STATUS_UPDATED, payload);
+  }
+
+  certificateStatusUpdated(payload: CertificateStatusUpdatedPayload) {
+    this.events.emit(NotificationEvents.CERTIFICATE_STATUS_UPDATED, payload);
   }
 }

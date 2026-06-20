@@ -15,7 +15,15 @@ import { HostelAdminModule } from '../hostel-admin/hostel-admin.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([HostelRoom, GatePass, LibraryBook, TransportRoute, HostelAllocation, HostelRequest, User]),
+    TypeOrmModule.forFeature([
+      HostelRoom,
+      GatePass,
+      LibraryBook,
+      TransportRoute,
+      HostelAllocation,
+      HostelRequest,
+      User,
+    ]),
     HostelAdminModule,
   ],
   controllers: [OperationsController, HostelController],

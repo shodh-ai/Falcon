@@ -34,8 +34,10 @@ export const EXTRACTION_RULES: ExtractionRule[] = [
     extractionFields: {
       meeting_date: '(String) The date the DAPC meeting was held.',
       total_attendees: '(Number) How many members were present.',
-      key_decisions: '(Array of Strings) Top 3 decisions made or points discussed.',
-      next_meeting_date: '(String) When the next meeting is scheduled (if mentioned).',
+      key_decisions:
+        '(Array of Strings) Top 3 decisions made or points discussed.',
+      next_meeting_date:
+        '(String) When the next meeting is scheduled (if mentioned).',
     },
   },
   {
@@ -54,7 +56,8 @@ export const EXTRACTION_RULES: ExtractionRule[] = [
     taskLabel: 'Submission of Student Reports (Lab/Internship/Field)',
     extractionFields: {
       student_batch: '(String) The semester/batch of the students.',
-      project_type: '(String) Is this an Internship, Field Visit, or Lab Project?',
+      project_type:
+        '(String) Is this an Internship, Field Visit, or Lab Project?',
       industry_partner:
         '(String) Name of the company visited or partnered with (if applicable).',
     },
@@ -74,7 +77,8 @@ export const EXTRACTION_RULES: ExtractionRule[] = [
 const DEFAULT_FIELDS: Record<string, string> = {
   document_title: '(String) Main title or heading of the document.',
   document_summary: '(String) One sentence describing what the document is.',
-  primary_date: '(String) The most relevant date visible on the document, if any.',
+  primary_date:
+    '(String) The most relevant date visible on the document, if any.',
 };
 
 export function pickExtractionRule(taskName: string): {

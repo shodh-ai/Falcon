@@ -72,7 +72,10 @@ export class TenantService {
     return (value !== undefined && value !== null ? value : fallback) as T;
   }
 
-  private toBrandingDto(tenant: Tenant, features: Set<string>): TenantBrandingDto {
+  private toBrandingDto(
+    tenant: Tenant,
+    features: Set<string>,
+  ): TenantBrandingDto {
     return {
       tenantId: tenant.tenant_id,
       name: tenant.name,

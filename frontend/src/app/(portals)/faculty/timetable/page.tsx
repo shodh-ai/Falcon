@@ -363,6 +363,8 @@ export default function FacultyTimetablePage() {
             >
               <option value="EXTRA_CLASS">Extra class</option>
               <option value="CANCEL">Cancel class</option>
+              <option value="SUSPENSION">Lecture suspension (day)</option>
+              <option value="SUBSTITUTE">Substitute faculty</option>
               <option value="SUBSTITUTE">Substitute</option>
             </select>
             <Input

@@ -26,12 +26,16 @@ import { NotificationEmitterService } from '../../core/notifications/notificatio
 export class IqacService {
   constructor(
     @InjectRepository(JobPosting) private jobs: Repository<JobPosting>,
-    @InjectRepository(JobApplication) private jobApplications: Repository<JobApplication>,
-    @InjectRepository(AlumniServiceRequest) private alumniRequests: Repository<AlumniServiceRequest>,
+    @InjectRepository(JobApplication)
+    private jobApplications: Repository<JobApplication>,
+    @InjectRepository(AlumniServiceRequest)
+    private alumniRequests: Repository<AlumniServiceRequest>,
     @InjectRepository(Department) private departments: Repository<Department>,
-    @InjectRepository(StudentCertificate) private certificates: Repository<StudentCertificate>,
+    @InjectRepository(StudentCertificate)
+    private certificates: Repository<StudentCertificate>,
     @InjectRepository(Submission) private submissions: Repository<Submission>,
-    @InjectRepository(TaskAssignment) private taskAssignments: Repository<TaskAssignment>,
+    @InjectRepository(TaskAssignment)
+    private taskAssignments: Repository<TaskAssignment>,
     @InjectRepository(TaskMaster) private taskMaster: Repository<TaskMaster>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
@@ -86,7 +90,10 @@ export class IqacService {
 
   listAlumniRequests(alumniUserId?: string) {
     if (alumniUserId) {
-      return this.alumniRequests.find({ where: { alumni_user_id: alumniUserId }, order: { created_at: 'DESC' } });
+      return this.alumniRequests.find({
+        where: { alumni_user_id: alumniUserId },
+        order: { created_at: 'DESC' },
+      });
     }
     return this.alumniRequests.find({ order: { created_at: 'DESC' } });
   }
@@ -96,7 +103,9 @@ export class IqacService {
   }
 
   async getDashboard() {
-    const departments = await this.departments.find({ order: { dept_name: 'ASC' } });
+    const departments = await this.departments.find({
+      order: { dept_name: 'ASC' },
+    });
     const pendingAssignments = await this.taskAssignments.find({
       where: { status: 'Pending' },
       relations: ['assigned_user', 'task'],
@@ -105,7 +114,8 @@ export class IqacService {
     return {
       heatmap: departments.map((department, index) => {
         const pending = pendingAssignments.filter(
-          (assignment) => assignment.assigned_user?.dept_id === department.dept_id,
+          (assignment) =>
+            assignment.assigned_user?.dept_id === department.dept_id,
         ).length;
         return {
           dept_id: department.dept_id,
@@ -118,15 +128,25 @@ export class IqacService {
   }
 
   listTaskMaster() {
-    return this.taskMaster.find({ relations: ['role'], order: { month: 'ASC', task_id: 'ASC' } });
+    return this.taskMaster.find({
+      relations: ['role'],
+      order: { month: 'ASC', task_id: 'ASC' },
+    });
   }
 
-  createTaskMaster(dto: { task_name?: string; task_description?: string; role_id?: number; month?: string; is_recurring?: boolean }) {
+  createTaskMaster(dto: {
+    task_name?: string;
+    task_description?: string;
+    role_id?: number;
+    month?: string;
+    is_recurring?: boolean;
+  }) {
     const task = new TaskMaster();
     task.task_name = dto.task_name ?? 'Monthly Compliance Report';
     task.task_description = dto.task_description ?? null;
     task.role_id = dto.role_id ?? null;
-    task.month = dto.month ?? new Date().toLocaleString('en-US', { month: 'long' });
+    task.month =
+      dto.month ?? new Date().toLocaleString('en-US', { month: 'long' });
     task.is_recurring = dto.is_recurring ?? true;
     return this.taskMaster.save(task);
   }
@@ -150,9 +170,24 @@ export class IqacService {
   getExportCenter() {
     return {
       exports: [
-        { key: 'naac-student-achievements', label: 'NAAC Student Achievements', format: 'xlsx', status: 'READY' },
-        { key: 'nirf-faculty-strength', label: 'NIRF Faculty Strength', format: 'xlsx', status: 'READY' },
-        { key: 'monthly-compliance', label: 'Monthly Compliance Tracker', format: 'xlsx', status: 'READY' },
+        {
+          key: 'naac-student-achievements',
+          label: 'NAAC Student Achievements',
+          format: 'xlsx',
+          status: 'READY',
+        },
+        {
+          key: 'nirf-faculty-strength',
+          label: 'NIRF Faculty Strength',
+          format: 'xlsx',
+          status: 'READY',
+        },
+        {
+          key: 'monthly-compliance',
+          label: 'Monthly Compliance Tracker',
+          format: 'xlsx',
+          status: 'READY',
+        },
       ],
     };
   }

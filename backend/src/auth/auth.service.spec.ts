@@ -79,6 +79,13 @@ describe('AuthService.localLogin', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
 
+    mockDataSource.query.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('COUNT(*)')) {
+        return [{ count: '0' }];
+      }
+      return [];
+    });
+
     mockTenantService.findBySubdomain.mockResolvedValue(TENANT);
     mockHrEntityCtx.getPermissions.mockResolvedValue({});
     mockHrEntityCtx.capabilitiesToPermissionList.mockReturnValue([]);
@@ -93,7 +100,10 @@ describe('AuthService.localLogin', () => {
         AuthService,
         { provide: DataSource, useValue: mockDataSource },
         { provide: getRepositoryToken(User), useValue: mockUserRepository },
-        { provide: getRepositoryToken(UserRole), useValue: mockUserRolesRepository },
+        {
+          provide: getRepositoryToken(UserRole),
+          useValue: mockUserRolesRepository,
+        },
         { provide: TenantService, useValue: mockTenantService },
         { provide: HrEntityContextService, useValue: mockHrEntityCtx },
         { provide: AUTH_PROVIDER, useValue: mockAuthProvider },

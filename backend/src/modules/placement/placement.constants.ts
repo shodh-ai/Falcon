@@ -40,4 +40,8 @@ export const PLACEMENT_TRACKER_STEPS: PlacementPipelineStage[] = [
 /** University policy: offers above this LPA lock lower-tier drives. */
 export const PLACEMENT_TIER1_LPA_THRESHOLD = 5;
 
-export const PLACEMENT_DRIVE_STATUSES = ['ACTIVE', 'CLOSED', 'COMPLETED'] as const;
+export const PLACEMENT_DRIVE_STATUSES = [
+  'ACTIVE',
+  'CLOSED',
+  'COMPLETED',
+] as const;

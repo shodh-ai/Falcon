@@ -17,7 +17,11 @@ export class HrChecklistService {
     return this.dataSource.query(sql, params);
   }
 
-  async createTemplate(tenantId: string, entityId: number, dto: Record<string, unknown>) {
+  async createTemplate(
+    tenantId: string,
+    entityId: number,
+    dto: Record<string, unknown>,
+  ) {
     const rows = await this.dataSource.query(
       `INSERT INTO hr_workflow_checklists (
          tenant_id, entity_id, workflow_type, task_name, is_mandatory, assigned_to_role, sort_order
@@ -49,7 +53,11 @@ export class HrChecklistService {
     userId: string,
     pipelineId: string,
   ) {
-    const templates = await this.listTemplates(tenantId, entityId, 'ONBOARDING');
+    const templates = await this.listTemplates(
+      tenantId,
+      entityId,
+      'ONBOARDING',
+    );
     for (const t of templates) {
       await this.dataSource.query(
         `INSERT INTO hr_checklist_instances (template_id, pipeline_id, user_id, status)
@@ -66,7 +74,11 @@ export class HrChecklistService {
     userId: string,
     resignationId: string,
   ) {
-    const templates = await this.listTemplates(tenantId, entityId, 'OFFBOARDING');
+    const templates = await this.listTemplates(
+      tenantId,
+      entityId,
+      'OFFBOARDING',
+    );
     for (const t of templates) {
       await this.dataSource.query(
         `INSERT INTO hr_checklist_instances (template_id, resignation_id, user_id, status)
@@ -87,8 +99,15 @@ export class HrChecklistService {
       [pipelineId],
     );
     const total = rows.length;
-    const done = rows.filter((r: { status: string }) => r.status === 'COMPLETED').length;
-    return { tasks: rows, total, completed: done, progress_percent: total ? Math.round((done / total) * 100) : 0 };
+    const done = rows.filter(
+      (r: { status: string }) => r.status === 'COMPLETED',
+    ).length;
+    return {
+      tasks: rows,
+      total,
+      completed: done,
+      progress_percent: total ? Math.round((done / total) * 100) : 0,
+    };
   }
 
   async updateExitStatus(

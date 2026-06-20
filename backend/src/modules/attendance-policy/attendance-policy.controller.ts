@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -54,22 +62,39 @@ export class AttendancePolicyController {
     @Param('id') id: string,
     @Body() dto: DecisionBody,
   ) {
-    return this.policy.hodDecideExemption(this.tenant(req), req.user.user_id, id, dto);
+    return this.policy.hodDecideExemption(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto,
+    );
   }
 
   @Get('hod/threshold-requests')
   @Roles('HOD', 'SuperAdmin')
   myThresholdRequests(@Req() req: { user: AuthUser }) {
-    return this.policy.listMyThresholdRequests(this.tenant(req), req.user.user_id);
+    return this.policy.listMyThresholdRequests(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Post('hod/threshold-requests')
   @Roles('HOD', 'SuperAdmin')
   createThresholdRequest(
     @Req() req: { user: AuthUser },
-    @Body() dto: { dept_id?: number | null; requested_min_percent?: number; reason?: string },
+    @Body()
+    dto: {
+      dept_id?: number | null;
+      requested_min_percent?: number;
+      reason?: string;
+    },
   ) {
-    return this.policy.createThresholdRequest(this.tenant(req), req.user.user_id, dto);
+    return this.policy.createThresholdRequest(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   // --- Dean: decide threshold changes ---
@@ -87,7 +112,12 @@ export class AttendancePolicyController {
     @Param('id') id: string,
     @Body() dto: DecisionBody,
   ) {
-    return this.policy.decideThresholdRequest(this.tenant(req), req.user.user_id, id, dto);
+    return this.policy.decideThresholdRequest(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      dto,
+    );
   }
 
   // --- Exam Cell: HOD-approved exemptions (admit card may now be generated) ---

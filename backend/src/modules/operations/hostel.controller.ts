@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -23,7 +31,10 @@ export class HostelController {
 
   @Post('requests')
   @Roles('Student')
-  createRequest(@Req() req: { user: AuthUser }, @Body() dto: CreateHostelRequestDto) {
+  createRequest(
+    @Req() req: { user: AuthUser },
+    @Body() dto: CreateHostelRequestDto,
+  ) {
     return this.hostel.createRequest(req.user.user_id, dto);
   }
 
@@ -35,7 +46,10 @@ export class HostelController {
 
   @Post('leaves')
   @Roles('Student')
-  createLeave(@Req() req: { user: AuthUser }, @Body() dto: CreateHostelLeaveDto) {
+  createLeave(
+    @Req() req: { user: AuthUser },
+    @Body() dto: CreateHostelLeaveDto,
+  ) {
     return this.hostel.createLeave(req.user.user_id, dto);
   }
 

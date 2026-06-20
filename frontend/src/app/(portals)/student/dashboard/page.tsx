@@ -16,6 +16,7 @@ import { Bell, Briefcase, CalendarClock, ChevronRight, CreditCard, GraduationCap
 import type { TimetableSlot } from '@/lib/mock/student-dashboard';
 import { useAuthedApi } from '@/lib/api';
 import { AuthenticatedProfilePhoto } from '@/components/profile/AuthenticatedProfilePhoto';
+import { NoticeBoardWidget } from '@/components/dashboard/NoticeBoardWidget';
 import { useRecentNotifications, toAppNotification } from '@/hooks/useNotifications';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
@@ -152,6 +153,8 @@ export default function StudentDashboardPage() {
           </div>
         </div>
       </section>
+
+      <NoticeBoardWidget />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StudentStatCard

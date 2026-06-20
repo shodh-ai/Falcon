@@ -14,12 +14,17 @@ export class LeadScoringService {
   private readonly logger = new Logger(LeadScoringService.name);
 
   constructor(
-    @InjectQueue(LEAD_SCORING_QUEUE) private readonly queue: Queue<LeadScoreJob>,
+    @InjectQueue(LEAD_SCORING_QUEUE)
+    private readonly queue: Queue<LeadScoreJob>,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async enqueue(tenantId: string, leadId?: string) {
-    await this.queue.add('score', { tenantId, leadId }, { removeOnComplete: true });
+    await this.queue.add(
+      'score',
+      { tenantId, leadId },
+      { removeOnComplete: true },
+    );
   }
 
   async scoreLead(leadId: string) {
@@ -75,7 +80,9 @@ export class LeadScoringService {
 
   @Cron(CronExpression.EVERY_DAY_AT_6AM)
   async nightlyRescore() {
-    const tenants = await this.dataSource.query(`SELECT tenant_id FROM tenants`);
+    const tenants = await this.dataSource.query(
+      `SELECT tenant_id FROM tenants`,
+    );
     for (const t of tenants) {
       await this.enqueue(t.tenant_id);
     }

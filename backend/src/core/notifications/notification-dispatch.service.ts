@@ -21,7 +21,8 @@ export type DispatchNotificationInput = NotificationMessage & {
 export class NotificationDispatchService {
   constructor(
     private readonly falconNotifications: FalconNotificationsService,
-    @InjectQueue(NOTIFICATION_DELIVERY_QUEUE) private readonly deliveryQueue: Queue,
+    @InjectQueue(NOTIFICATION_DELIVERY_QUEUE)
+    private readonly deliveryQueue: Queue,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -41,10 +42,11 @@ export class NotificationDispatchService {
 
     if (input.queueDelivery === false) return row;
 
-    const contact = await this.dataSource.query<Array<{ official_email: string | null }>>(
-      `SELECT official_email FROM users WHERE user_id = $1 LIMIT 1`,
-      [input.userId],
-    );
+    const contact = await this.dataSource.query<
+      Array<{ official_email: string | null }>
+    >(`SELECT official_email FROM users WHERE user_id = $1 LIMIT 1`, [
+      input.userId,
+    ]);
 
     const job: NotificationDeliveryJob = {
       tenantId: input.tenantId,

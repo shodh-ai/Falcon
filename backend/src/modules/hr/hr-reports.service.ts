@@ -15,30 +15,65 @@ export class HrReportsService {
 
   private statusCode(calculated: string | null | undefined): string {
     if (!calculated) return 'A';
-    if (calculated === 'FULL_DAY' || calculated === 'LATE_COMING' || calculated === 'EARLY_GOING') return 'P';
-    if (calculated === 'HALF_DAY' || calculated === 'LESS_THAN_HALF_DAY') return 'HD';
-    if (calculated === 'HOLIDAY' || calculated === 'WEEK_OFF' || calculated === 'RESTRICTED_HOLIDAY') return 'H';
+    if (
+      calculated === 'FULL_DAY' ||
+      calculated === 'LATE_COMING' ||
+      calculated === 'EARLY_GOING'
+    )
+      return 'P';
+    if (calculated === 'HALF_DAY' || calculated === 'LESS_THAN_HALF_DAY')
+      return 'HD';
+    if (
+      calculated === 'HOLIDAY' ||
+      calculated === 'WEEK_OFF' ||
+      calculated === 'RESTRICTED_HOLIDAY'
+    )
+      return 'H';
     if (calculated === 'PENDING_REQUEST') return 'L';
     return 'A';
   }
 
-  async buildMusterRoll(tenantId: string, entityId: number, month: string): Promise<Buffer> {
-    const matrix = await this.attendanceCalc.getMatrixMonth(tenantId, month, entityId);
+  async buildMusterRoll(
+    tenantId: string,
+    entityId: number,
+    month: string,
+  ): Promise<Buffer> {
+    const matrix = await this.attendanceCalc.getMatrixMonth(
+      tenantId,
+      month,
+      entityId,
+    );
     const [, monthNum] = month.split('-').map(Number);
-    const daysInMonth = new Date(month.split('-').map(Number)[0], monthNum, 0).getDate();
+    const daysInMonth = new Date(
+      month.split('-').map(Number)[0],
+      monthNum,
+      0,
+    ).getDate();
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Muster Roll');
-    const headers = ['Employee ID', 'Name', ...Array.from({ length: daysInMonth }, (_, i) => String(i + 1))];
+    const headers = [
+      'Employee ID',
+      'Name',
+      ...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)),
+    ];
     sheet.addRow(headers);
     sheet.getRow(1).font = { bold: true };
 
     for (const emp of matrix.employees) {
-      const dayMap = new Map(emp.days.map((d) => [d.date.slice(8, 10), this.statusCode(d.calculated_status)]));
+      const dayMap = new Map(
+        emp.days.map((d) => [
+          d.date.slice(8, 10),
+          this.statusCode(d.calculated_status),
+        ]),
+      );
       const row = [
         emp.user_id.slice(0, 8),
         emp.name,
-        ...Array.from({ length: daysInMonth }, (_, i) => dayMap.get(String(i + 1).padStart(2, '0')) ?? 'A'),
+        ...Array.from(
+          { length: daysInMonth },
+          (_, i) => dayMap.get(String(i + 1).padStart(2, '0')) ?? 'A',
+        ),
       ];
       sheet.addRow(row);
     }
@@ -52,39 +87,56 @@ export class HrReportsService {
     return Buffer.from(buf);
   }
 
-  async buildEmployeeAttendance(tenantId: string, entityId: number, month: string, userId: string): Promise<Buffer> {
-    const matrix = await this.attendanceCalc.getMatrixMonth(tenantId, month, entityId);
-    const emp = matrix.employees.find(e => e.user_id === userId);
-    
+  async buildEmployeeAttendance(
+    tenantId: string,
+    entityId: number,
+    month: string,
+    userId: string,
+  ): Promise<Buffer> {
+    const matrix = await this.attendanceCalc.getMatrixMonth(
+      tenantId,
+      month,
+      entityId,
+    );
+    const emp = matrix.employees.find((e) => e.user_id === userId);
+
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Attendance');
     if (!emp) {
-        sheet.addRow(['No data found for employee']);
-        const buf = await wb.xlsx.writeBuffer();
-        return Buffer.from(buf);
+      sheet.addRow(['No data found for employee']);
+      const buf = await wb.xlsx.writeBuffer();
+      return Buffer.from(buf);
     }
-    
+
     sheet.addRow(['Employee ID', emp.user_id]);
     sheet.addRow(['Name', emp.name]);
     sheet.addRow(['Month', month]);
     sheet.addRow([]);
-    
+
     sheet.addRow(['Date', 'Status', 'Details']);
     sheet.getRow(5).font = { bold: true };
-    
+
     for (const day of emp.days) {
-      sheet.addRow([day.date, this.statusCode(day.calculated_status), day.tooltip || '']);
+      sheet.addRow([
+        day.date,
+        this.statusCode(day.calculated_status),
+        day.tooltip || '',
+      ]);
     }
-    
+
     sheet.getColumn(1).width = 15;
     sheet.getColumn(2).width = 10;
     sheet.getColumn(3).width = 40;
-    
+
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }
 
-  async buildLeaveBalanceRegister(tenantId: string, entityId: number, year: number): Promise<Buffer> {
+  async buildLeaveBalanceRegister(
+    tenantId: string,
+    entityId: number,
+    year: number,
+  ): Promise<Buffer> {
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     const rows = await this.dataSource.query(
       `SELECT u.name, p.employee_id,
@@ -103,16 +155,32 @@ export class HrReportsService {
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Leave Balances');
-    sheet.addRow(['Employee ID', 'Name', 'CL Balance', 'SL Balance', 'EL Balance']);
+    sheet.addRow([
+      'Employee ID',
+      'Name',
+      'CL Balance',
+      'SL Balance',
+      'EL Balance',
+    ]);
     sheet.getRow(1).font = { bold: true };
     for (const r of rows) {
-      sheet.addRow([r.employee_id, r.name, r.cl_balance, r.sl_balance, r.el_balance]);
+      sheet.addRow([
+        r.employee_id,
+        r.name,
+        r.cl_balance,
+        r.sl_balance,
+        r.el_balance,
+      ]);
     }
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }
 
-  async buildPayrollRegister(tenantId: string, entityId: number, month: string): Promise<Buffer> {
+  async buildPayrollRegister(
+    tenantId: string,
+    entityId: number,
+    month: string,
+  ): Promise<Buffer> {
     const [year, monthNum] = month.split('-').map(Number);
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     const rows = await this.dataSource.query(
@@ -127,18 +195,37 @@ export class HrReportsService {
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Salary Register');
-    sheet.addRow(['Employee ID', 'Name', 'Base/Gross Pay', 'Deductions (est.)', 'Net Pay', 'LWP Days', 'Working Days']);
+    sheet.addRow([
+      'Employee ID',
+      'Name',
+      'Base/Gross Pay',
+      'Deductions (est.)',
+      'Net Pay',
+      'LWP Days',
+      'Working Days',
+    ]);
     sheet.getRow(1).font = { bold: true };
     for (const r of rows) {
       const gross = Number(r.gross_pay ?? 0);
       const net = Number(r.net_pay ?? 0);
-      sheet.addRow([r.employee_id, r.name, gross, gross - net, net, r.lwp_days, r.working_days]);
+      sheet.addRow([
+        r.employee_id,
+        r.name,
+        gross,
+        gross - net,
+        net,
+        r.lwp_days,
+        r.working_days,
+      ]);
     }
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf);
   }
 
-  async buildMissingPunchesReport(tenantId: string, entityId: number): Promise<Buffer> {
+  async buildMissingPunchesReport(
+    tenantId: string,
+    entityId: number,
+  ): Promise<Buffer> {
     const today = new Date().toISOString().slice(0, 10);
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -162,14 +249,24 @@ export class HrReportsService {
 
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Missing Punches');
-    sheet.addRow(['Employee ID', 'Name', 'Yesterday IN', 'Yesterday OUT', 'Today IN']);
+    sheet.addRow([
+      'Employee ID',
+      'Name',
+      'Yesterday IN',
+      'Yesterday OUT',
+      'Today IN',
+    ]);
     sheet.getRow(1).font = { bold: true };
     for (const r of rows) {
       sheet.addRow([
         r.employee_id,
         r.name,
-        r.first_in_time ? new Date(r.first_in_time).toLocaleString('en-IN') : '',
-        r.last_out_time ? new Date(r.last_out_time).toLocaleString('en-IN') : 'MISSING',
+        r.first_in_time
+          ? new Date(r.first_in_time).toLocaleString('en-IN')
+          : '',
+        r.last_out_time
+          ? new Date(r.last_out_time).toLocaleString('en-IN')
+          : 'MISSING',
         r.today_in ? new Date(r.today_in).toLocaleString('en-IN') : '',
       ]);
     }
@@ -177,7 +274,10 @@ export class HrReportsService {
     return Buffer.from(buf);
   }
 
-  async buildEmployeeMasterDump(tenantId: string, entityId: number): Promise<Buffer> {
+  async buildEmployeeMasterDump(
+    tenantId: string,
+    entityId: number,
+  ): Promise<Buffer> {
     const entityFilter = this.entityCtx.entityFilterSql('p', 2);
     const rows = await this.dataSource.query(
       `SELECT u.name, u.official_email AS email, r.role_name AS role, d.dept_name AS department,
@@ -197,12 +297,28 @@ export class HrReportsService {
     const wb = new ExcelJS.Workbook();
     const sheet = wb.addWorksheet('Employee Master');
     sheet.addRow([
-      'Employee ID', 'Name', 'Email', 'Role', 'Department', 'Designation', 'Joining Date', 'PAN Status', 'Aadhaar Status',
+      'Employee ID',
+      'Name',
+      'Email',
+      'Role',
+      'Department',
+      'Designation',
+      'Joining Date',
+      'PAN Status',
+      'Aadhaar Status',
     ]);
     sheet.getRow(1).font = { bold: true };
     for (const r of rows) {
       sheet.addRow([
-        r.employee_id, r.name, r.email, r.role, r.department, r.designation, r.joining_date, r.pan_status, r.aadhaar_status,
+        r.employee_id,
+        r.name,
+        r.email,
+        r.role,
+        r.department,
+        r.designation,
+        r.joining_date,
+        r.pan_status,
+        r.aadhaar_status,
       ]);
     }
     const buf = await wb.xlsx.writeBuffer();
@@ -210,6 +326,8 @@ export class HrReportsService {
   }
 
   private monthLabel(month: number): string {
-    return new Date(2000, month - 1, 1).toLocaleString('en-US', { month: 'long' });
+    return new Date(2000, month - 1, 1).toLocaleString('en-US', {
+      month: 'long',
+    });
   }
 }

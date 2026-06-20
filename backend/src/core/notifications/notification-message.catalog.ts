@@ -51,7 +51,11 @@ export function feeGeneratedMessage(
       actionLabel: 'Pay dues',
       severity: 'warning',
       intent: 'action_required',
-      metadata: { amount: payload.amount, dueDate: payload.dueDate, feeHead: payload.feeHead },
+      metadata: {
+        amount: payload.amount,
+        dueDate: payload.dueDate,
+        feeHead: payload.feeHead,
+      },
     },
     overrides,
   );
@@ -128,7 +132,10 @@ export function courseMaterialAddedMessage(
       actionLabel: 'View material',
       severity: 'info',
       intent: 'info',
-      metadata: { courseId: payload.courseId, materialTitle: payload.materialTitle },
+      metadata: {
+        courseId: payload.courseId,
+        materialTitle: payload.materialTitle,
+      },
     },
     overrides,
   );
@@ -185,7 +192,10 @@ export function examRevaluationAssignedMessage(
       actionLabel: 'Open reassessment',
       severity: 'info',
       intent: 'action_required',
-      metadata: { applicationId: payload.applicationId, subjectName: payload.subjectName },
+      metadata: {
+        applicationId: payload.applicationId,
+        subjectName: payload.subjectName,
+      },
     },
     overrides,
   );
@@ -297,7 +307,11 @@ export function leaveApprovedMessage(
       actionLabel: 'View leave record',
       severity: 'success',
       intent: 'status_update',
-      metadata: { leaveType: payload.leaveType, startDate: payload.startDate, endDate: payload.endDate },
+      metadata: {
+        leaveType: payload.leaveType,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+      },
     },
     overrides,
   );
@@ -335,7 +349,10 @@ export function meetingRequestedMessage(
       actionLabel: 'Review request',
       severity: 'info',
       intent: 'action_required',
-      metadata: { studentName: payload.studentName, meetingAt: payload.meetingAt },
+      metadata: {
+        studentName: payload.studentName,
+        meetingAt: payload.meetingAt,
+      },
     },
     overrides,
   );
@@ -355,7 +372,9 @@ export function meetingRespondedMessage(
   return applyNotificationOverrides(
     {
       category: 'ACADEMICS',
-      title: approved ? 'Mentorship meeting approved' : 'Mentorship meeting declined',
+      title: approved
+        ? 'Mentorship meeting approved'
+        : 'Mentorship meeting declined',
       message: approved
         ? `Your mentor approved the meeting scheduled for ${when}.${remarkSuffix}`
         : `Your mentor declined the meeting scheduled for ${when}.${remarkSuffix}`,
@@ -382,7 +401,10 @@ export function jobPostedMessage(
       actionLabel: 'View drive',
       severity: 'info',
       intent: 'action_required',
-      metadata: { companyName: payload.companyName, roleTitle: payload.roleTitle },
+      metadata: {
+        companyName: payload.companyName,
+        roleTitle: payload.roleTitle,
+      },
     },
     overrides,
   );
@@ -431,7 +453,9 @@ export function workflowApprovalRequiredMessage(
   payload: WorkflowApprovalRequiredPayload,
   overrides?: NotificationMessageOverrides,
 ): NotificationMessage {
-  const requestLabel = humanizeRequestType(payload.requestType ?? payload.title);
+  const requestLabel = humanizeRequestType(
+    payload.requestType ?? payload.title,
+  );
   const requester = payload.requesterName ?? 'Someone';
   const routeHint = payload.routeReason ? ` (${payload.routeReason})` : '';
   return applyNotificationOverrides(
@@ -624,7 +648,10 @@ export function eventRejectedMessage(
       actionLabel: 'View club events',
       severity: 'critical',
       intent: 'status_update',
-      metadata: { eventId: payload.eventId, rejectedByTier: payload.rejectedByTier },
+      metadata: {
+        eventId: payload.eventId,
+        rejectedByTier: payload.rejectedByTier,
+      },
     },
     overrides,
   );
@@ -672,7 +699,9 @@ export function meetingInvitedMessage(
   payload: MeetingPortalPayload,
   overrides?: NotificationMessageOverrides,
 ): NotificationMessage {
-  const when = payload.startsAt ? new Date(payload.startsAt).toLocaleString() : 'the scheduled time';
+  const when = payload.startsAt
+    ? new Date(payload.startsAt).toLocaleString()
+    : 'the scheduled time';
   return applyNotificationOverrides(
     {
       category: 'HR',
@@ -692,7 +721,9 @@ export function meetingRequestedUpwardMessage(
   payload: MeetingPortalPayload,
   overrides?: NotificationMessageOverrides,
 ): NotificationMessage {
-  const when = payload.startsAt ? new Date(payload.startsAt).toLocaleString() : 'the requested time';
+  const when = payload.startsAt
+    ? new Date(payload.startsAt).toLocaleString()
+    : 'the requested time';
   return applyNotificationOverrides(
     {
       category: 'HR',
@@ -713,7 +744,9 @@ export function meetingPortalRespondedMessage(
   overrides?: NotificationMessageOverrides,
 ): NotificationMessage {
   const accepted = payload.status === 'ACCEPTED';
-  const when = payload.startsAt ? new Date(payload.startsAt).toLocaleString() : 'the scheduled time';
+  const when = payload.startsAt
+    ? new Date(payload.startsAt).toLocaleString()
+    : 'the scheduled time';
   return applyNotificationOverrides(
     {
       category: 'HR',
@@ -820,7 +853,11 @@ export function exportFailedMessage(
       actionLabel: 'Retry export',
       severity: 'critical',
       intent: 'action_required',
-      metadata: { jobId: payload.jobId, label: payload.label, errorMessage: payload.errorMessage },
+      metadata: {
+        jobId: payload.jobId,
+        label: payload.label,
+        errorMessage: payload.errorMessage,
+      },
     },
     overrides,
   );
@@ -830,7 +867,9 @@ export function alumniConversionRequestedMessage(
   payload: AlumniConversionRequestedPayload,
 ): NotificationMessage {
   const programSuffix = payload.programName ? ` (${payload.programName})` : '';
-  const enrollmentSuffix = payload.enrollmentNo ? ` · ${payload.enrollmentNo}` : '';
+  const enrollmentSuffix = payload.enrollmentNo
+    ? ` · ${payload.enrollmentNo}`
+    : '';
   return {
     category: 'OPERATIONS',
     title: `Alumni conversion — ${payload.studentName}`,
@@ -905,7 +944,9 @@ export function financialAnomalyMessage(input: {
   const critical = input.severity === 'RED';
   return {
     category: 'FINANCE',
-    title: critical ? 'Critical financial alert' : 'Financial attention required',
+    title: critical
+      ? 'Critical financial alert'
+      : 'Financial attention required',
     message: input.message,
     actionLink: '/leadership/intelligence',
     actionLabel: 'Open intelligence',
@@ -954,7 +995,8 @@ export function ecellStatusUpdatedMessage(
     {
       category: 'OPERATIONS',
       title: payload.title ?? 'E-Cell Incubation Update',
-      message: payload.message ?? 'Your incubation pitch status has been updated.',
+      message:
+        payload.message ?? 'Your incubation pitch status has been updated.',
       actionLink: payload.actionLink ?? '/student/e-cell',
       actionLabel: 'View tracker',
       severity: 'info',
@@ -965,7 +1007,12 @@ export function ecellStatusUpdatedMessage(
 }
 
 export function ecellMentorMeetingRequestedMessage(
-  payload: { startupName: string; topic: string; requestedTime: string; actionLink?: string },
+  payload: {
+    startupName: string;
+    topic: string;
+    requestedTime: string;
+    actionLink?: string;
+  },
   overrides?: NotificationMessageOverrides,
 ): NotificationMessage {
   const when = new Date(payload.requestedTime).toLocaleString();
@@ -1001,7 +1048,9 @@ export function ecellMentorMeetingRespondedMessage(
   return applyNotificationOverrides(
     {
       category: 'ACADEMICS',
-      title: payload.accepted ? 'Mentor meeting confirmed' : 'Mentor meeting declined',
+      title: payload.accepted
+        ? 'Mentor meeting confirmed'
+        : 'Mentor meeting declined',
       message,
       actionLink: payload.actionLink ?? '/student/e-cell',
       actionLabel: 'View Founder Hub',
@@ -1088,6 +1137,46 @@ export function venueBookingRejectedMessage(
       severity: 'warning',
       intent: 'status_update',
       metadata: { bookingId: payload.bookingId, venueName: payload.venueName },
+    },
+    overrides,
+  );
+}
+
+export function academicRndStatusUpdatedMessage(
+  payload: { title?: string; message?: string; actionLink?: string },
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: payload.title ?? 'Research Grant Update',
+      message:
+        payload.message ??
+        'Your R&D grant application status has been updated.',
+      actionLink: payload.actionLink ?? '/student/research',
+      actionLabel: 'View application',
+      severity: 'info',
+      intent: 'status_update',
+    },
+    overrides,
+  );
+}
+
+export function certificateStatusUpdatedMessage(
+  payload: { title?: string; message?: string; actionLink?: string },
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: payload.title ?? 'Certificate Update',
+      message:
+        payload.message ??
+        'Your degree / certificate application status has been updated.',
+      actionLink: payload.actionLink ?? '/student/certificates',
+      actionLabel: 'View certificates',
+      severity: 'info',
+      intent: 'status_update',
     },
     overrides,
   );

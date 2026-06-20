@@ -14,8 +14,10 @@ export class FinanceWebhookService {
   private readonly logger = new Logger(FinanceWebhookService.name);
 
   constructor(
-    @InjectRepository(Transaction) private readonly transactions: Repository<Transaction>,
-    @InjectRepository(FeeDemand) private readonly demands: Repository<FeeDemand>,
+    @InjectRepository(Transaction)
+    private readonly transactions: Repository<Transaction>,
+    @InjectRepository(FeeDemand)
+    private readonly demands: Repository<FeeDemand>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly receipts: FinanceReceiptService,
     private readonly ledger: FinanceLedgerService,
@@ -26,26 +28,36 @@ export class FinanceWebhookService {
   /**
    * Idempotent payment webhook — duplicate SUCCESS events are ignored.
    */
-  async handleGatewayWebhook(provider: 'razorpay' | 'payu', dto: GatewayWebhookDto) {
+  async handleGatewayWebhook(
+    provider: 'razorpay' | 'payu',
+    dto: GatewayWebhookDto,
+  ) {
     this.logger.log(`Webhook ${provider} event=${dto.event}`);
 
     if (dto.event !== 'payment.captured' && dto.event !== 'payment.success') {
       return { received: true, processed: false, reason: 'ignored_event' };
     }
 
-    const paymentEntity = (dto.payload?.payment as { entity?: Record<string, unknown> })?.entity
-      ?? (dto.payload as Record<string, unknown>);
-    const paymentId = String(paymentEntity?.id ?? paymentEntity?.payment_id ?? '');
+    const paymentEntity =
+      (dto.payload?.payment as { entity?: Record<string, unknown> })?.entity ??
+      dto.payload;
+    const paymentId = String(
+      paymentEntity?.id ?? paymentEntity?.payment_id ?? '',
+    );
     const orderId = String(paymentEntity?.order_id ?? '');
     const amountPaise = Number(paymentEntity?.amount ?? 0);
     const amount = amountPaise > 1000 ? amountPaise / 100 : amountPaise;
     const notes = (paymentEntity?.notes as Record<string, unknown>) ?? {};
-    const studentUserId = String(notes.student_user_id ?? notes.studentUserId ?? '');
+    const studentUserId = String(
+      notes.student_user_id ?? notes.studentUserId ?? '',
+    );
     const demandId = String(notes.demand_id ?? notes.demandId ?? '');
     const feeHead = String(notes.fee_head ?? notes.feeHead ?? '');
     const holdId = String(notes.hold_id ?? notes.holdId ?? '');
     const eventId = String(notes.event_id ?? notes.eventId ?? '');
-    const registrationId = String(notes.registration_id ?? notes.registrationId ?? '');
+    const registrationId = String(
+      notes.registration_id ?? notes.registrationId ?? '',
+    );
     const tenantIdFromNotes = String(notes.tenant_id ?? notes.tenantId ?? '');
 
     if (!paymentId) {
@@ -106,9 +118,10 @@ export class FinanceWebhookService {
     await this.transactions.save(txn);
 
     if (feeHead === 'EVENTS_CLUB' && registrationId && studentUserId) {
-      const tenantRows = await this.dataSource.query(`SELECT tenant_id FROM users WHERE user_id = $1`, [
-        studentUserId,
-      ]);
+      const tenantRows = await this.dataSource.query(
+        `SELECT tenant_id FROM users WHERE user_id = $1`,
+        [studentUserId],
+      );
       const tenantId =
         tenantIdFromNotes ||
         (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
@@ -130,9 +143,10 @@ export class FinanceWebhookService {
     }
 
     if (feeHead === 'HOSTEL_BOOKING' && holdId && studentUserId) {
-      const tenantRows = await this.dataSource.query(`SELECT tenant_id FROM users WHERE user_id = $1`, [
-        studentUserId,
-      ]);
+      const tenantRows = await this.dataSource.query(
+        `SELECT tenant_id FROM users WHERE user_id = $1`,
+        [studentUserId],
+      );
       const tenantId =
         tenantIdFromNotes ||
         (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
@@ -153,9 +167,10 @@ export class FinanceWebhookService {
     }
 
     if (feeHead === 'WALLET_TOPUP' && studentUserId) {
-      const tenantRows = await this.dataSource.query(`SELECT tenant_id FROM users WHERE user_id = $1`, [
-        studentUserId,
-      ]);
+      const tenantRows = await this.dataSource.query(
+        `SELECT tenant_id FROM users WHERE user_id = $1`,
+        [studentUserId],
+      );
       const tenantId =
         tenantIdFromNotes ||
         (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ||
@@ -170,12 +185,18 @@ export class FinanceWebhookService {
     }
 
     if (demandId) {
-      const demand = await this.demands.findOne({ where: { demand_id: demandId } });
+      const demand = await this.demands.findOne({
+        where: { demand_id: demandId },
+      });
       if (demand) {
         const paid = Number(demand.paid_amount ?? 0) + amount;
         demand.paid_amount = paid;
         demand.status =
-          paid >= Number(demand.total_amount) ? 'PAID' : paid > 0 ? 'PARTIALLY_PAID' : demand.status;
+          paid >= Number(demand.total_amount)
+            ? 'PAID'
+            : paid > 0
+              ? 'PARTIALLY_PAID'
+              : demand.status;
         await this.demands.save(demand);
 
         if (demand.status === 'PAID') {
@@ -198,7 +219,10 @@ export class FinanceWebhookService {
     }
 
     const tenantRows = studentUserId
-      ? await this.dataSource.query(`SELECT tenant_id FROM users WHERE user_id = $1`, [studentUserId])
+      ? await this.dataSource.query(
+          `SELECT tenant_id FROM users WHERE user_id = $1`,
+          [studentUserId],
+        )
       : [];
     const tenantId =
       (tenantRows[0] as { tenant_id: string } | undefined)?.tenant_id ??
@@ -215,15 +239,25 @@ export class FinanceWebhookService {
         studentUserId: receiptStudentId,
         amount,
         paymentMode: txn.payment_mode ?? undefined,
-        feeHead: demandId ? (await this.demands.findOne({ where: { demand_id: demandId } }))?.fee_head : undefined,
+        feeHead: demandId
+          ? (await this.demands.findOne({ where: { demand_id: demandId } }))
+              ?.fee_head
+          : undefined,
       });
       txn.receipt_url = receiptUrl;
       await this.transactions.save(txn);
       await this.receipts.emailReceipt(receiptStudentId, receiptUrl, amount);
     }
 
-    await this.ledger.postFeePayment(tenantId, txn.transaction_id, amount, { feeHead: feeHead || undefined });
+    await this.ledger.postFeePayment(tenantId, txn.transaction_id, amount, {
+      feeHead: feeHead || undefined,
+    });
 
-    return { received: true, processed: true, transaction_id: txn.transaction_id, receipt_url: receiptUrl };
+    return {
+      received: true,
+      processed: true,
+      transaction_id: txn.transaction_id,
+      receipt_url: receiptUrl,
+    };
   }
 }

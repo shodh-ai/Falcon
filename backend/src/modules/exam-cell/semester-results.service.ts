@@ -59,7 +59,10 @@ export class SemesterResultsService {
     }
 
     const rows = await this.loadEnrollmentRows(tenantId, semester);
-    if (!rows.length) throw new BadRequestException(`No enrollments found for semester ${semester}`);
+    if (!rows.length)
+      throw new BadRequestException(
+        `No enrollments found for semester ${semester}`,
+      );
 
     const cgpaByStudent = await this.loadCgpaMap(tenantId);
     const openUfm = await this.loadOpenUfmSet(tenantId);
@@ -69,14 +72,23 @@ export class SemesterResultsService {
     const cards = [...grouped.entries()].map(([studentId, studentRows]) => {
       const first = studentRows[0];
       const semesterCalc = this.calculateSemester(studentRows);
-      const cgpaCalc = cgpaByStudent.get(studentId) ?? { points: 0, credits: 0 };
-      const cgpa = cgpaCalc.credits > 0 ? this.round2(cgpaCalc.points / cgpaCalc.credits) : 0;
-      const withheldReason = openUfm.has(studentId) ? 'Open UFM case' : undefined;
+      const cgpaCalc = cgpaByStudent.get(studentId) ?? {
+        points: 0,
+        credits: 0,
+      };
+      const cgpa =
+        cgpaCalc.credits > 0
+          ? this.round2(cgpaCalc.points / cgpaCalc.credits)
+          : 0;
+      const withheldReason = openUfm.has(studentId)
+        ? 'Open UFM case'
+        : undefined;
       const payload: GradeCardPayload = {
         result_stage: 'DRAFT',
         semester,
         generated_at: generatedAt,
-        formula: 'SGPA/CGPA = sum(credits * grade points) / sum(attempted credits)',
+        formula:
+          'SGPA/CGPA = sum(credits * grade points) / sum(attempted credits)',
         sgpa: semesterCalc.sgpa,
         cgpa,
         rank: null,
@@ -90,7 +102,8 @@ export class SemesterResultsService {
           course_name: row.course_name,
           credits: Number(row.credits),
           grade: row.grade,
-          grade_points: row.grade_points == null ? null : Number(row.grade_points),
+          grade_points:
+            row.grade_points == null ? null : Number(row.grade_points),
           status: row.status,
         })),
       };
@@ -106,7 +119,13 @@ export class SemesterResultsService {
 
     const ranked = this.assignRanks(cards);
     for (const card of ranked) {
-      await this.upsertGradeCard(tenantId, semester, card.student_user_id, card.status, card.payload);
+      await this.upsertGradeCard(
+        tenantId,
+        semester,
+        card.student_user_id,
+        card.status,
+        card.payload,
+      );
     }
 
     return {
@@ -166,10 +185,16 @@ export class SemesterResultsService {
     );
   }
 
-  private async transitionStage(tenantId: string, semester: number, stage: Exclude<GradeCardStage, 'DRAFT'>) {
+  private async transitionStage(
+    tenantId: string,
+    semester: number,
+    stage: Exclude<GradeCardStage, 'DRAFT'>,
+  ) {
     const rows = await this.listGradeCards(tenantId, semester);
-    if (!rows.length) throw new BadRequestException('Generate grade cards before publishing');
-    const timestampKey = stage === 'FINAL' ? 'final_published_at' : 'provisional_published_at';
+    if (!rows.length)
+      throw new BadRequestException('Generate grade cards before publishing');
+    const timestampKey =
+      stage === 'FINAL' ? 'final_published_at' : 'provisional_published_at';
     const now = new Date().toISOString();
 
     for (const row of rows) {
@@ -245,7 +270,10 @@ export class SemesterResultsService {
   private groupByStudent(rows: EnrollmentRow[]) {
     const grouped = new Map<string, EnrollmentRow[]>();
     for (const row of rows) {
-      grouped.set(row.student_user_id, [...(grouped.get(row.student_user_id) ?? []), row]);
+      grouped.set(row.student_user_id, [
+        ...(grouped.get(row.student_user_id) ?? []),
+        row,
+      ]);
     }
     return grouped;
   }
@@ -255,9 +283,13 @@ export class SemesterResultsService {
     let creditsAttempted = 0;
     let creditsEarned = 0;
     for (const row of rows) {
-      const gradePoints = row.grade_points == null ? null : Number(row.grade_points);
+      const gradePoints =
+        row.grade_points == null ? null : Number(row.grade_points);
       const credits = Number(row.credits);
-      if ((row.status === 'COMPLETED' || row.status === 'FAILED') && gradePoints != null) {
+      if (
+        (row.status === 'COMPLETED' || row.status === 'FAILED') &&
+        gradePoints != null
+      ) {
         points += gradePoints * credits;
         creditsAttempted += credits;
       }
@@ -270,14 +302,24 @@ export class SemesterResultsService {
     };
   }
 
-  private assignRanks<T extends { status: string; payload: GradeCardPayload }>(cards: T[]) {
+  private assignRanks<T extends { status: string; payload: GradeCardPayload }>(
+    cards: T[],
+  ) {
     const rankable = cards
-      .filter((card) => card.status !== 'WITHHELD' && card.payload.credits_attempted > 0)
-      .sort((a, b) => b.payload.sgpa - a.payload.sgpa || b.payload.cgpa - a.payload.cgpa);
+      .filter(
+        (card) =>
+          card.status !== 'WITHHELD' && card.payload.credits_attempted > 0,
+      )
+      .sort(
+        (a, b) =>
+          b.payload.sgpa - a.payload.sgpa || b.payload.cgpa - a.payload.cgpa,
+      );
     rankable.forEach((card, idx) => {
       card.payload.rank = idx + 1;
     });
-    return cards.sort((a, b) => (a.payload.rank ?? 999999) - (b.payload.rank ?? 999999));
+    return cards.sort(
+      (a, b) => (a.payload.rank ?? 999999) - (b.payload.rank ?? 999999),
+    );
   }
 
   private async upsertGradeCard(
@@ -298,14 +340,28 @@ export class SemesterResultsService {
         `UPDATE grade_cards
          SET cgpa = $4, status = $5, payload = $6::jsonb
          WHERE grade_card_id = $1 AND tenant_id = $2 AND semester = $3`,
-        [existing[0].grade_card_id, tenantId, semester, payload.cgpa, status, JSON.stringify(payload)],
+        [
+          existing[0].grade_card_id,
+          tenantId,
+          semester,
+          payload.cgpa,
+          status,
+          JSON.stringify(payload),
+        ],
       );
       return;
     }
     await this.db.query(
       `INSERT INTO grade_cards (tenant_id, student_user_id, semester, cgpa, status, payload)
        VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-      [tenantId, studentUserId, semester, payload.cgpa, status, JSON.stringify(payload)],
+      [
+        tenantId,
+        studentUserId,
+        semester,
+        payload.cgpa,
+        status,
+        JSON.stringify(payload),
+      ],
     );
   }
 

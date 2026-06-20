@@ -1,10 +1,25 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { HostelAdminService } from './hostel-admin.service';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller('api/hostel-admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -31,12 +46,18 @@ export class HostelAdminController {
   }
 
   @Get('dashboard')
-  dashboard(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId?: string) {
+  dashboard(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId?: string,
+  ) {
     return this.hostelAdmin.getDashboard(this.ctx(req), hostelId);
   }
 
   @Get('hostels/:hostelId')
-  hostelDetail(@Req() req: { user: AuthUser }, @Param('hostelId') hostelId: string) {
+  hostelDetail(
+    @Req() req: { user: AuthUser },
+    @Param('hostelId') hostelId: string,
+  ) {
     return this.hostelAdmin.getHostelDetail(this.ctx(req), hostelId);
   }
 
@@ -57,18 +78,33 @@ export class HostelAdminController {
   }
 
   @Post('students/transfer')
-  transfer(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.transferStudent(this.ctx(req), dto as Parameters<HostelAdminService['transferStudent']>[1]);
+  transfer(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.transferStudent(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['transferStudent']>[1],
+    );
   }
 
   @Post('students/:studentUserId/evict')
-  evict(@Req() req: { user: AuthUser }, @Param('studentUserId') studentUserId: string) {
+  evict(
+    @Req() req: { user: AuthUser },
+    @Param('studentUserId') studentUserId: string,
+  ) {
     return this.hostelAdmin.evictStudent(this.ctx(req), studentUserId);
   }
 
   @Post('roll-call')
-  markRollCall(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.markRollCall(this.ctx(req), dto as Parameters<HostelAdminService['markRollCall']>[1]);
+  markRollCall(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.markRollCall(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['markRollCall']>[1],
+    );
   }
 
   @Get('roll-call/monthly')
@@ -86,11 +122,18 @@ export class HostelAdminController {
     @Query('hostelId') hostelId: string,
     @Query('date') date: string,
   ) {
-    return this.hostelAdmin.listRollCall(this.ctx(req), hostelId, date ?? new Date().toISOString().slice(0, 10));
+    return this.hostelAdmin.listRollCall(
+      this.ctx(req),
+      hostelId,
+      date ?? new Date().toISOString().slice(0, 10),
+    );
   }
 
   @Get('leaves/stats')
-  leaveStats(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId?: string) {
+  leaveStats(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId?: string,
+  ) {
     return this.hostelAdmin.leaveStats(this.ctx(req), hostelId);
   }
 
@@ -109,21 +152,37 @@ export class HostelAdminController {
     @Param('leaveId') leaveId: string,
     @Body() dto: { status: 'APPROVED' | 'REJECTED' },
   ) {
-    return this.hostelAdmin.updateLeaveStatus(this.ctx(req), leaveId, dto.status);
+    return this.hostelAdmin.updateLeaveStatus(
+      this.ctx(req),
+      leaveId,
+      dto.status,
+    );
   }
 
   @Post('leaves')
-  createLeave(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.createLeave(this.ctx(req), dto as Parameters<HostelAdminService['createLeave']>[1]);
+  createLeave(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.createLeave(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['createLeave']>[1],
+    );
   }
 
   @Get('gate-passes')
-  gatePasses(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId?: string) {
+  gatePasses(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId?: string,
+  ) {
     return this.hostelAdmin.listGatePasses(this.ctx(req), hostelId);
   }
 
   @Patch('requests/:requestId/approve')
-  approveRequest(@Req() req: { user: AuthUser }, @Param('requestId') requestId: string) {
+  approveRequest(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+  ) {
     return this.hostelAdmin.approveHostelRequest(this.ctx(req), requestId);
   }
 
@@ -142,12 +201,18 @@ export class HostelAdminController {
   // }
 
   @Get('visitors')
-  visitors(@Req() req: { user: AuthUser }, @Query('hostelId') hostelId: string) {
+  visitors(
+    @Req() req: { user: AuthUser },
+    @Query('hostelId') hostelId: string,
+  ) {
     return this.hostelAdmin.listVisitorsInside(this.ctx(req), hostelId);
   }
 
   @Post('visitors/scan')
-  visitorScan(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+  visitorScan(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
     return this.hostelAdmin.processVisitorScan(
       this.ctx(req),
       dto as Parameters<HostelAdminService['processVisitorScan']>[1],
@@ -169,8 +234,14 @@ export class HostelAdminController {
   }
 
   @Post('fines')
-  createFine(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.createFine(this.ctx(req), dto as Parameters<HostelAdminService['createFine']>[1]);
+  createFine(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.createFine(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['createFine']>[1],
+    );
   }
 
   @Get('mess/menu')
@@ -179,23 +250,44 @@ export class HostelAdminController {
   }
 
   @Post('mess/menu')
-  saveMessMenu(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.saveMessMenu(this.ctx(req), dto as Parameters<HostelAdminService['saveMessMenu']>[1]);
+  saveMessMenu(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.saveMessMenu(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['saveMessMenu']>[1],
+    );
   }
 
   @Post('broadcasts')
-  broadcast(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.sendBroadcast(this.ctx(req), dto as Parameters<HostelAdminService['sendBroadcast']>[1]);
+  broadcast(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.sendBroadcast(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['sendBroadcast']>[1],
+    );
   }
 
   @Get('master-data')
-  masterData(@Req() req: { user: AuthUser }, @Query('category') category?: string) {
+  masterData(
+    @Req() req: { user: AuthUser },
+    @Query('category') category?: string,
+  ) {
     return this.hostelAdmin.listMasterData(this.ctx(req), category);
   }
 
   @Post('master-data')
-  upsertMaster(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.upsertMasterData(this.ctx(req), dto as Parameters<HostelAdminService['upsertMasterData']>[1]);
+  upsertMaster(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.upsertMasterData(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['upsertMasterData']>[1],
+    );
   }
 
   @Get('permissions')
@@ -204,8 +296,14 @@ export class HostelAdminController {
   }
 
   @Post('permissions')
-  setPermission(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.hostelAdmin.setRolePermission(this.ctx(req), dto as Parameters<HostelAdminService['setRolePermission']>[1]);
+  setPermission(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hostelAdmin.setRolePermission(
+      this.ctx(req),
+      dto as Parameters<HostelAdminService['setRolePermission']>[1],
+    );
   }
 
   @Get('campus-settings')
@@ -214,7 +312,10 @@ export class HostelAdminController {
   }
 
   @Patch('campus-settings')
-  updateCampusSettings(@Req() req: { user: AuthUser }, @Body() dto: { is_hostel_sale_active?: boolean }) {
+  updateCampusSettings(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { is_hostel_sale_active?: boolean },
+  ) {
     return this.hostelAdmin.setCampusSettings(this.ctx(req), dto);
   }
 }

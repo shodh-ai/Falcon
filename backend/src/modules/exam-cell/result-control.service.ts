@@ -88,10 +88,16 @@ export class ResultControlService {
     return this.getSession(tenantId, rows[0].session_id);
   }
 
-  async openEntry(tenantId: string, sessionId: string, dto: OpenResultEntryDto) {
+  async openEntry(
+    tenantId: string,
+    sessionId: string,
+    dto: OpenResultEntryDto,
+  ) {
     const session = await this.getSession(tenantId, sessionId);
     if (session.declared_at) {
-      throw new BadRequestException('Cannot open entry after results are declared');
+      throw new BadRequestException(
+        'Cannot open entry after results are declared',
+      );
     }
     await this.db.query(
       `UPDATE exam_result_sessions
@@ -131,7 +137,11 @@ export class ResultControlService {
   }
 
   /** Close faculty entry and lock submitted marks before grade preview / declaration. */
-  async prepareForDeclaration(tenantId: string, sessionId: string, actorUserId: string) {
+  async prepareForDeclaration(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+  ) {
     const session = await this.getSession(tenantId, sessionId);
     if (session.declared_at) {
       throw new BadRequestException('Results already declared');
@@ -142,14 +152,20 @@ export class ResultControlService {
       [tenantId, session.course_id, session.exam_type],
     );
     if (!pending[0]?.c) {
-      throw new BadRequestException('No faculty submissions awaiting declaration');
+      throw new BadRequestException(
+        'No faculty submissions awaiting declaration',
+      );
     }
     await this.closeEntry(tenantId, sessionId);
     await this.lockMarks(tenantId, sessionId, actorUserId);
     return this.getSession(tenantId, sessionId);
   }
 
-  async reopenEntry(tenantId: string, sessionId: string, dto: ReopenResultEntryDto) {
+  async reopenEntry(
+    tenantId: string,
+    sessionId: string,
+    dto: ReopenResultEntryDto,
+  ) {
     const session = await this.getSession(tenantId, sessionId);
     if (session.declared_at) {
       throw new BadRequestException('Cannot reopen after declaration');
@@ -169,7 +185,11 @@ export class ResultControlService {
     return this.getSession(tenantId, sessionId);
   }
 
-  async configureRules(tenantId: string, sessionId: string, dto: ConfigureSessionRulesDto) {
+  async configureRules(
+    tenantId: string,
+    sessionId: string,
+    dto: ConfigureSessionRulesDto,
+  ) {
     await this.getSession(tenantId, sessionId);
     await this.db.query(
       `UPDATE exam_result_sessions
@@ -178,7 +198,12 @@ export class ResultControlService {
            max_marks = COALESCE($4, max_marks),
            updated_at = NOW()
        WHERE session_id = $1`,
-      [sessionId, dto.pass_marks ?? null, dto.grading_policy_id ?? null, dto.max_marks ?? null],
+      [
+        sessionId,
+        dto.pass_marks ?? null,
+        dto.grading_policy_id ?? null,
+        dto.max_marks ?? null,
+      ],
     );
     return this.getSession(tenantId, sessionId);
   }
@@ -210,13 +235,23 @@ export class ResultControlService {
     return parseGradeBands(rows[0]?.rules);
   }
 
-  async processSession(tenantId: string, sessionId: string, actorUserId: string) {
+  async processSession(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+  ) {
     const session = await this.getSession(tenantId, sessionId);
     const bands = await this.loadGradeBands(session);
-    const passMarks = session.pass_marks != null ? Number(session.pass_marks) : null;
+    const passMarks =
+      session.pass_marks != null ? Number(session.pass_marks) : null;
 
     const marks = await this.db.query<
-      Array<{ student_user_id: string; student_name: string; marks_obtained: string; max_marks: string }>
+      Array<{
+        student_user_id: string;
+        student_name: string;
+        marks_obtained: string;
+        max_marks: string;
+      }>
     >(
       `SELECT m.student_user_id, u.name AS student_name, m.marks_obtained, m.max_marks
        FROM academic_marks m JOIN users u ON u.user_id = m.student_user_id
@@ -224,7 +259,8 @@ export class ResultControlService {
          AND m.status IN ('PENDING_COE', 'PUBLISHED')`,
       [tenantId, session.course_id, session.exam_type],
     );
-    if (!marks.length) throw new BadRequestException('No submitted marks to process');
+    if (!marks.length)
+      throw new BadRequestException('No submitted marks to process');
 
     const preview = marks.map((row) => {
       const obtained = Number(row.marks_obtained);
@@ -266,19 +302,27 @@ export class ResultControlService {
     dto: DeclareResultSessionDto,
   ) {
     const session = await this.getSession(tenantId, sessionId);
-    if (session.declared_at) throw new BadRequestException('Results already declared');
+    if (session.declared_at)
+      throw new BadRequestException('Results already declared');
 
     const bands = await this.loadGradeBands(session);
-    const passMarks = session.pass_marks != null ? Number(session.pass_marks) : null;
+    const passMarks =
+      session.pass_marks != null ? Number(session.pass_marks) : null;
 
     const marks = await this.db.query<
-      Array<{ mark_id: string; student_user_id: string; marks_obtained: string; max_marks: string }>
+      Array<{
+        mark_id: string;
+        student_user_id: string;
+        marks_obtained: string;
+        max_marks: string;
+      }>
     >(
       `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
       [tenantId, session.course_id, session.exam_type],
     );
-    if (!marks.length) throw new BadRequestException('No PENDING_COE marks to declare');
+    if (!marks.length)
+      throw new BadRequestException('No PENDING_COE marks to declare');
 
     const courseName = session.course_name ?? 'Course';
     let declared = 0;
@@ -316,18 +360,39 @@ export class ResultControlService {
            percent = EXCLUDED.percent, grade = EXCLUDED.grade, grade_points = EXCLUDED.grade_points,
            result_status = EXCLUDED.result_status, report_summary = EXCLUDED.report_summary, declared_at = NOW()`,
         [
-          tenantId, sessionId, row.student_user_id, session.course_id, session.exam_type,
-          obtained, max, percent, grade, gradePoints, resultStatus, summary,
+          tenantId,
+          sessionId,
+          row.student_user_id,
+          session.course_id,
+          session.exam_type,
+          obtained,
+          max,
+          percent,
+          grade,
+          gradePoints,
+          resultStatus,
+          summary,
         ],
       );
 
-      if (session.exam_type === 'END_TERM' || session.exam_type === 'INTERNAL') {
+      if (
+        session.exam_type === 'END_TERM' ||
+        session.exam_type === 'INTERNAL'
+      ) {
         await this.db.query(
           `UPDATE student_course_enrollments
            SET grade = $4, grade_points = $5,
                status = CASE WHEN $6 = 'PASS' THEN 'COMPLETED' ELSE 'FAILED' END
            WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3 AND semester = $7`,
-          [tenantId, row.student_user_id, session.course_id, grade, gradePoints, resultStatus, session.semester],
+          [
+            tenantId,
+            row.student_user_id,
+            session.course_id,
+            grade,
+            gradePoints,
+            resultStatus,
+            session.semester,
+          ],
         );
       }
 
@@ -355,7 +420,12 @@ export class ResultControlService {
       [sessionId, actorUserId, dto.declaration_note?.trim() ?? null],
     );
 
-    return { declared, course_name: courseName, exam_type: session.exam_type, session_id: sessionId };
+    return {
+      declared,
+      course_name: courseName,
+      exam_type: session.exam_type,
+      session_id: sessionId,
+    };
   }
 
   /** Best-effort mirror into legacy results table; RCC uses student_exam_reports. */
@@ -378,14 +448,26 @@ export class ResultControlService {
         `INSERT INTO academic_exam_results (
            tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, grade, status
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,'PUBLISHED')`,
-        [tenantId, studentUserId, courseId, examType, marksObtained, maxMarks, grade],
+        [
+          tenantId,
+          studentUserId,
+          courseId,
+          examType,
+          marksObtained,
+          maxMarks,
+          grade,
+        ],
       );
     } catch {
       // Ignore schema drift on legacy table; declaration still succeeds via student_exam_reports.
     }
   }
 
-  async getSessionForCourse(tenantId: string, courseId: string, examType: string) {
+  async getSessionForCourse(
+    tenantId: string,
+    courseId: string,
+    examType: string,
+  ) {
     const rows = await this.db.query(
       `SELECT * FROM exam_result_sessions
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
@@ -395,30 +477,44 @@ export class ResultControlService {
     return rows[0] ?? null;
   }
 
-  assertFacultyEntryAllowed(session: {
-    entry_status: string;
-    marks_locked: boolean;
-    entry_open_at?: string | Date | null;
-    entry_close_at?: string | Date | null;
-    declared_at?: string | Date | null;
-  } | null) {
+  assertFacultyEntryAllowed(
+    session: {
+      entry_status: string;
+      marks_locked: boolean;
+      entry_open_at?: string | Date | null;
+      entry_close_at?: string | Date | null;
+      declared_at?: string | Date | null;
+    } | null,
+  ) {
     if (!session) {
-      throw new BadRequestException('Marks entry has not been opened by Exam Cell for this exam.');
+      throw new BadRequestException(
+        'Marks entry has not been opened by Exam Cell for this exam.',
+      );
     }
     if (session.declared_at) {
-      throw new BadRequestException('Results already declared. Marks are locked.');
+      throw new BadRequestException(
+        'Results already declared. Marks are locked.',
+      );
     }
     if (session.entry_status !== 'OPEN') {
-      throw new BadRequestException('Marks entry is closed. Contact Exam Cell to reopen.');
+      throw new BadRequestException(
+        'Marks entry is closed. Contact Exam Cell to reopen.',
+      );
     }
     if (session.marks_locked) {
       throw new BadRequestException('Marks entry is locked by Exam Cell.');
     }
     const now = Date.now();
-    if (session.entry_open_at && new Date(session.entry_open_at).getTime() > now) {
+    if (
+      session.entry_open_at &&
+      new Date(session.entry_open_at).getTime() > now
+    ) {
       throw new BadRequestException('Marks entry window has not opened yet.');
     }
-    if (session.entry_close_at && new Date(session.entry_close_at).getTime() < now) {
+    if (
+      session.entry_close_at &&
+      new Date(session.entry_close_at).getTime() < now
+    ) {
       throw new BadRequestException('Marks entry window has closed.');
     }
   }

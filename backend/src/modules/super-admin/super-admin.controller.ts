@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
@@ -37,8 +48,15 @@ export class SuperAdminController {
 
   @Post('entities')
   @EntityCreatorOnly()
-  createEntity(@Req() req: { user: AuthUser }, @Body() dto: CreateOrgEntityDto) {
-    return this.orgEntities.createEntity(this.tenant(req), req.user.user_id, dto);
+  createEntity(
+    @Req() req: { user: AuthUser },
+    @Body() dto: CreateOrgEntityDto,
+  ) {
+    return this.orgEntities.createEntity(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Get('entities/grantable-users')
@@ -89,7 +107,13 @@ export class SuperAdminController {
   @Post('sections')
   createSection(
     @Req() req: { user: AuthUser },
-    @Body() dto: { section_name: string; batch_id?: string; program_id?: number; capacity?: number },
+    @Body()
+    dto: {
+      section_name: string;
+      batch_id?: string;
+      program_id?: number;
+      capacity?: number;
+    },
   ) {
     return this.superAdmin.createSection(this.tenant(req), dto);
   }
@@ -97,9 +121,19 @@ export class SuperAdminController {
   @Post('assignments')
   assign(
     @Req() req: { user: AuthUser },
-    @Body() dto: { user_id: string; assignment_type: string; entity_type: string; entity_id: string },
+    @Body()
+    dto: {
+      user_id: string;
+      assignment_type: string;
+      entity_type: string;
+      entity_id: string;
+    },
   ) {
-    return this.superAdmin.assignEntity(this.tenant(req), req.user.user_id, dto);
+    return this.superAdmin.assignEntity(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Post('sections/bulk-assign')

@@ -14,14 +14,19 @@ export interface ExamEligibilityResult {
   attendance_percent: number;
   min_required: number;
   exempted: boolean;
-  reasons: Array<{ code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES'; message: string; details?: unknown }>;
+  reasons: Array<{
+    code: 'ATTENDANCE_SHORTFALL' | 'PENDING_FEE_DUES';
+    message: string;
+    details?: unknown;
+  }>;
 }
 
 @Injectable()
 export class ExamsService {
   constructor(
     @InjectRepository(ExamSchedule) private schedules: Repository<ExamSchedule>,
-    @InjectRepository(ExamApplication) private applications: Repository<ExamApplication>,
+    @InjectRepository(ExamApplication)
+    private applications: Repository<ExamApplication>,
     @InjectRepository(User) private users: Repository<User>,
     @InjectDataSource() private readonly db: DataSource,
     private readonly finance: FinanceService,
@@ -29,7 +34,9 @@ export class ExamsService {
     private readonly attendanceEligibility: AttendanceEligibilityService,
   ) {}
 
-  async listUpcomingSchedulesForStudent(studentUserId: string): Promise<ExamSchedule[]> {
+  async listUpcomingSchedulesForStudent(
+    studentUserId: string,
+  ): Promise<ExamSchedule[]> {
     const today = new Date().toISOString().slice(0, 10);
     return this.schedules
       .createQueryBuilder('s')
@@ -54,7 +61,10 @@ export class ExamsService {
     );
   }
 
-  async createApplication(studentUserId: string, dto: CreateExamApplicationDto): Promise<ExamApplication> {
+  async createApplication(
+    studentUserId: string,
+    dto: CreateExamApplicationDto,
+  ): Promise<ExamApplication> {
     const application = this.applications.create({
       student_user_id: studentUserId,
       subject_id: dto.subject_id,
@@ -64,8 +74,11 @@ export class ExamsService {
     });
 
     if (dto.application_type === 'RE_EVALUATION') {
-      const student = await this.users.findOne({ where: { user_id: studentUserId } });
-      const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+      const student = await this.users.findOne({
+        where: { user_id: studentUserId },
+      });
+      const tenantId =
+        student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
       const academicYear = this.getAcademicYear();
       const dueDate = this.addDays(new Date(), 3).toISOString().slice(0, 10);
       const demand = await this.finance.createDemand(
@@ -84,12 +97,19 @@ export class ExamsService {
     return this.applications.save(application);
   }
 
-  async checkEligibility(studentUserId: string): Promise<ExamEligibilityResult> {
-    const student = await this.users.findOne({ where: { user_id: studentUserId } });
-    const tenantId = student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  async checkEligibility(
+    studentUserId: string,
+  ): Promise<ExamEligibilityResult> {
+    const student = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
+    const tenantId =
+      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
 
     const [attendance, pendingDues] = await Promise.all([
-      this.attendanceEligibility.evaluate(tenantId, studentUserId, { context: 'EXAM_DESK' }),
+      this.attendanceEligibility.evaluate(tenantId, studentUserId, {
+        context: 'EXAM_DESK',
+      }),
       this.finance.getPendingDues(studentUserId),
     ]);
 
@@ -136,7 +156,9 @@ export class ExamsService {
       throw new ForbiddenException(top?.message ?? 'Blocked');
     }
 
-    const user = await this.users.findOne({ where: { user_id: studentUserId } });
+    const user = await this.users.findOne({
+      where: { user_id: studentUserId },
+    });
     const schedules = await this.listUpcomingSchedulesForStudent(studentUserId);
 
     return this.pdf.generate({

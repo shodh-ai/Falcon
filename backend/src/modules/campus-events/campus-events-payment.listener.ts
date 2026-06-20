@@ -26,7 +26,9 @@ export class CampusEventsPaymentListener {
         payload.paymentId ?? `webhook_${Date.now()}`,
       );
     } catch (e) {
-      this.logger.warn(`Event registration finalize skipped: ${e instanceof Error ? e.message : e}`);
+      this.logger.warn(
+        `Event registration finalize skipped: ${e instanceof Error ? e.message : e}`,
+      );
     }
   }
 }

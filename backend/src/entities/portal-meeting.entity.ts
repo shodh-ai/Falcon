@@ -14,7 +14,12 @@ import { PortalMeetingParticipant } from './portal-meeting-participant.entity';
 import { PortalMeetingMinutes } from './portal-meeting-minutes.entity';
 
 export type PortalMeetingMode = 'SCHEDULED' | 'REQUESTED';
-export type PortalMeetingStatus = 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'CANCELLED' | 'COMPLETED';
+export type PortalMeetingStatus =
+  | 'PENDING'
+  | 'CONFIRMED'
+  | 'DECLINED'
+  | 'CANCELLED'
+  | 'COMPLETED';
 
 @Entity('portal_meetings')
 @Index(['tenant_id', 'starts_at'])

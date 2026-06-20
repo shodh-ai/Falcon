@@ -18,6 +18,7 @@ type Row = {
   total_modules: number;
   coverage_percent: number;
   behind_schedule: boolean;
+  days_behind?: number;
 };
 
 export default function HodSyllabusTrackingPage() {
@@ -93,7 +94,9 @@ export default function HodSyllabusTrackingPage() {
                   <span className="text-xs font-bold tabular-nums">{r.coverage_percent}%</span>
                 </div>
                 {r.behind_schedule ? (
-                  <p className="mt-1 text-sm text-muted-foreground">Behind schedule</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Behind schedule{r.days_behind ? ` · ${r.days_behind} days behind plan` : ''}
+                  </p>
                 ) : null}
               </div>
             ),

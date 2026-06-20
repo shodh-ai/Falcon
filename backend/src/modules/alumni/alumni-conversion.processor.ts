@@ -16,7 +16,9 @@ export class AlumniConversionProcessor extends WorkerHost {
   }
 
   async process(job: Job<AlumniConversionJob>) {
-    this.logger.log(`Processing alumni conversion job for ${job.data.studentUserId}`);
+    this.logger.log(
+      `Processing alumni conversion job for ${job.data.studentUserId}`,
+    );
     return this.conversion.runConversion(job.data);
   }
 }

@@ -15,7 +15,9 @@ const DEFAULT_BANDS: GradeBand[] = [
   { minPercent: 0, maxPercent: 39.99, grade: 'F', gradePoints: 0 },
 ];
 
-export function parseGradeBands(rules: Record<string, unknown> | null | undefined): GradeBand[] {
+export function parseGradeBands(
+  rules: Record<string, unknown> | null | undefined,
+): GradeBand[] {
   const raw = rules?.bands ?? rules?.gradeBands ?? rules?.grades;
   if (!Array.isArray(raw) || raw.length === 0) return DEFAULT_BANDS;
   const bands = raw
@@ -25,8 +27,12 @@ export function parseGradeBands(rules: Record<string, unknown> | null | undefine
       grade: String(row.grade ?? 'F'),
       gradePoints: Number(row.gradePoints ?? row.grade_points ?? 0),
     }))
-    .filter((b) => Number.isFinite(b.minPercent) && Number.isFinite(b.maxPercent));
-  return bands.length ? bands.sort((a, b) => b.minPercent - a.minPercent) : DEFAULT_BANDS;
+    .filter(
+      (b) => Number.isFinite(b.minPercent) && Number.isFinite(b.maxPercent),
+    );
+  return bands.length
+    ? bands.sort((a, b) => b.minPercent - a.minPercent)
+    : DEFAULT_BANDS;
 }
 
 export function computeGradeFromPercent(
@@ -39,7 +45,9 @@ export function computeGradeFromPercent(
       return { grade: band.grade, gradePoints: band.gradePoints };
     }
   }
-  const fail = bands.find((b) => b.grade === 'F') ?? DEFAULT_BANDS[DEFAULT_BANDS.length - 1];
+  const fail =
+    bands.find((b) => b.grade === 'F') ??
+    DEFAULT_BANDS[DEFAULT_BANDS.length - 1];
   return { grade: fail.grade, gradePoints: fail.gradePoints };
 }
 
