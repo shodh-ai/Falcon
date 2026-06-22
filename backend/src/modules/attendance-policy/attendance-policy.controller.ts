@@ -120,27 +120,12 @@ export class AttendancePolicyController {
     );
   }
 
-  // --- Dean / Exam Cell: final approval queue for exemptions ---
+  // --- Exam Cell: HOD-approved exemptions (admit card may now be generated) ---
 
-  @Get('final/exemptions')
-  @Roles('Dean', 'ExamCell', 'SuperAdmin')
-  finalExemptionQueue(@Req() req: { user: AuthUser }) {
-    return this.policy.listFinalExemptionQueue(this.tenant(req));
-  }
-
-  @Post('final/exemptions/:id/decision')
-  @Roles('Dean', 'ExamCell', 'SuperAdmin')
-  finalDecideExemption(
-    @Req() req: { user: AuthUser },
-    @Param('id') id: string,
-    @Body() dto: DecisionBody,
-  ) {
-    return this.policy.finalDecideExemption(
-      this.tenant(req),
-      req.user.user_id,
-      id,
-      dto,
-    );
+  @Get('approved/exemptions')
+  @Roles('ExamCell', 'SuperAdmin')
+  approvedExemptions(@Req() req: { user: AuthUser }) {
+    return this.policy.listApprovedExemptions(this.tenant(req));
   }
 
   private tenant(req: { user: AuthUser }) {

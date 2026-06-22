@@ -305,6 +305,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Mentorship', href: '/student/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'meeting'] },
         { label: 'Placements & Internships', href: '/student/placements', icon: Briefcase, keywords: ['placement', 'jobs', 'internship'] },
         { label: 'Grievances & Helpdesk', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'discipline', 'grievance'] },
+        { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'sexual harassment', 'bullying', 'posh'] },
       ],
     },
   ],
@@ -324,6 +325,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Research Grants', href: '/student/research', icon: FlaskConical },
     { label: 'Degree & Convocation', href: '/student/certificates', icon: GraduationCap },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
+    { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield },
   ],
 };
 
@@ -354,6 +356,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
         { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
         { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
+        { label: 'Safety Notices', href: '/faculty/safety-notices', icon: Shield, keywords: ['ragging', 'harassment', 'concern', 'notice'] },
       ],
     },
     {
@@ -400,6 +403,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
         { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
         { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
+        { label: 'Safety Notices', href: '/faculty/safety-notices', icon: Shield, keywords: ['ragging', 'harassment', 'concern', 'notice'] },
       ],
     },
     {
@@ -461,6 +465,7 @@ export const hrPortal: PortalConfig = {
       title: 'Grievances & Support',
       items: [
         { label: 'Grievances Escalation', href: '/hr/grievances', icon: AlertTriangle, keywords: ['ticket', 'escalation', 'sla', 'hr', 'payroll', 'grievance'], roles: ['HRAdmin', 'HR', 'SuperAdmin'] },
+        { label: 'Safety Concerns (ICC)', href: '/hr/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'posh', 'sexual harassment'], roles: ['HRAdmin', 'HR', 'SuperAdmin'] },
       ],
     },
     {
@@ -550,6 +555,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
+        { label: 'Safety Concerns', href: '/hod/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'sexual harassment'] },
       ],
     },
     myHrOperationsNavGroup('hod'),
@@ -587,6 +593,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
+        { label: 'Safety Concerns', href: '/hod/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment'] },
       ],
     },
     myHrOperationsNavGroup('hod'),
@@ -627,6 +634,7 @@ export const deanPortal: PortalConfig = {
         { label: 'Student Monitor', href: '/dean/students/monitor', icon: GraduationCap, keywords: ['students', 'risk'] },
         { label: 'Defaulters', href: '/dean/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades'] },
         { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['escalation', 'ticket'] },
+        { label: 'Safety Concerns', href: '/dean/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'posh'] },
       ],
     },
     {
@@ -712,6 +720,7 @@ export const hostelAdminPortal: PortalConfig = {
         { label: 'Fines & Damages', href: '/hostel-admin/tickets', icon: Ticket, keywords: ['damage', 'maintenance'] },
         { label: 'Mess Management', href: '/hostel-admin/mess', icon: UtensilsCrossed, keywords: ['menu', 'weekly'] },
         { label: 'Grievance Escalations', href: '/hostel-admin/grievances', icon: LifeBuoy, keywords: ['maintenance', 'ticket', 'escalation'] },
+        { label: 'Safety Concerns', href: '/hostel-admin/safety-concerns', icon: Shield, keywords: ['ragging', 'hostel', 'harassment'] },
         { label: 'Notifications', href: '/hostel-admin/notifications', icon: Bell, keywords: ['broadcast', 'sms', 'email'] },
         { label: 'Mess Scanner', href: '/hostel-admin/scanner', icon: QrCode, keywords: ['wallet', 'meal'] },
       ],
@@ -994,12 +1003,14 @@ export const disciplinaryCommitteePortal: PortalConfig = {
       items: [
         { label: 'Command Centre', href: '/disciplinary-committee/dashboard', icon: LayoutDashboard, keywords: ['dc', 'dashboard'] },
         { label: 'Disciplinary Queue', href: '/disciplinary-committee/queue', icon: Scale, keywords: ['pending', 'review', 'approve', 'demerit'] },
+        { label: 'Safety Concerns', href: '/disciplinary-committee/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'sexual harassment'] },
       ],
     },
   ],
   commandItems: [
     { label: 'DC Dashboard', href: '/disciplinary-committee/dashboard', icon: LayoutDashboard },
     { label: 'Disciplinary Queue', href: '/disciplinary-committee/queue', icon: Scale },
+    { label: 'Safety Concerns', href: '/disciplinary-committee/safety-concerns', icon: Shield },
   ],
 };
 
@@ -1014,7 +1025,7 @@ export const examCellPortal: PortalConfig = {
         { label: 'Command Center', href: '/exam-cell/dashboard', icon: LayoutDashboard, keywords: ['coe', 'exam cell'] },
         { label: 'Master Exam Schedule', href: '/exam-cell/schedule', icon: CalendarDays, keywords: ['mid term', 'end term'] },
         { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
-        { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'low attendance', 'admit card', 'approve'] },
+        { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'low attendance', 'admit card', 'approved'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms'] },
         { label: 'Resource Allocation', href: '/exam-cell/resource-allocation', icon: LayoutGrid, keywords: ['coordinator', 'invigilator', 'room', 'subject'] },
         { label: 'Invigilation Roster', href: '/exam-cell/invigilation', icon: Eye, keywords: ['faculty', 'duty'] },

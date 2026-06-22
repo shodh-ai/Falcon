@@ -39,12 +39,17 @@ export interface ThresholdRequest {
   created_at: string;
 }
 
+export function proofDocHref(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `/api/uploads/download?path=${encodeURIComponent(url)}`;
+}
+
 export function exemptionStatusLabel(status: ExemptionStatus): string {
   switch (status) {
     case 'PENDING_HOD':
       return 'Pending HOD';
     case 'RECOMMENDED':
-      return 'With Dean / Exam Cell';
+      return 'Pending HOD';
     case 'APPROVED':
       return 'Approved';
     case 'REJECTED':

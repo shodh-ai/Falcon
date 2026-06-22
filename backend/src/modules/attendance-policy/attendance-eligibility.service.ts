@@ -16,7 +16,7 @@ export interface AttendanceEligibility {
 /**
  * Single source of truth for "is this student attendance-eligible for exams".
  * Resolves the department's effective threshold (default 75%, relaxed by an
- * approved HOD/Dean policy change) and honours individual approved exemptions.
+ * approved HOD/Dean policy change) and honours HOD-approved individual exemptions.
  */
 @Injectable()
 export class AttendanceEligibilityService {
@@ -80,7 +80,7 @@ export class AttendanceEligibilityService {
       .query(
         `SELECT exemption_id FROM student_attendance_exemptions
          WHERE tenant_id = $1 AND student_user_id = $2 AND status = 'APPROVED'
-         ORDER BY final_decided_at DESC NULLS LAST, created_at DESC
+         ORDER BY hod_decided_at DESC NULLS LAST, final_decided_at DESC NULLS LAST, created_at DESC
          LIMIT 1`,
         [tenantId, studentUserId],
       )
