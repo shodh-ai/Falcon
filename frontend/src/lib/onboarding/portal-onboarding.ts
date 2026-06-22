@@ -56,6 +56,10 @@ export const STUDENT_DOC_LABELS: Record<string, string> = {
   '12TH_MARKSHEET': '12th Marksheet',
 };
 
+export const BLOOD_GROUP_OPTIONS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
+
+export const GENDER_OPTIONS = ['Male', 'Female', 'Other', 'Prefer not to say'] as const;
+
 export function getOnboardingStepPath(
   portalPrefix: PortalOnboardingConfig['portalPrefix'],
   status: string | undefined | null,

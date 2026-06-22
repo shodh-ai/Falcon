@@ -133,7 +133,7 @@ abstract class BaseOnboardingController {
   }
 
   protected tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? '';
+    return this.onboarding.resolveTenantId(req.user.tenant_id);
   }
 
   protected async persistFile(

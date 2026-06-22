@@ -1,16 +1,36 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileCheck2, Send } from 'lucide-react';
+import {
+  FileCheck2,
+  Home,
+  Loader2,
+  Send,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { OnboardingDocDropzone } from '@/components/student/OnboardingDocDropzone';
+import {
+  OnboardingAlert,
+  OnboardingDivider,
+  OnboardingField,
+  OnboardingPanel,
+  OnboardingSection,
+  OnboardingSidebarCard,
+  onboardingInputClass,
+  onboardingSelectClass,
+  onboardingTextareaClass,
+} from '@/components/onboarding/onboarding-ui';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import {
+  BLOOD_GROUP_OPTIONS,
+  GENDER_OPTIONS,
   STAFF_DEGREE_LEVELS,
   STAFF_DOC_LABELS,
   STUDENT_DOC_LABELS,
@@ -35,8 +55,128 @@ function parseApiError(err: unknown) {
   return err.message;
 }
 
-const selectClassName =
-  'w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-navy/20';
+function validateStudentForm(values: {
+  bloodGroup: string;
+  mobile: string;
+  abcId: string;
+  gender: string;
+  dateOfBirth: string;
+  fatherName: string;
+  motherName: string;
+  parentPhone: string;
+  emergencyContactName: string;
+  permanentAddress: string;
+  currentAddress: string;
+}) {
+  const missing: string[] = [];
+  if (!values.bloodGroup.trim()) missing.push('Blood group');
+  if (!values.mobile.trim()) missing.push('Student mobile');
+  if (!values.abcId.trim()) missing.push('ABC ID');
+  if (!values.gender.trim()) missing.push('Gender');
+  if (!values.dateOfBirth.trim()) missing.push('Date of birth');
+  if (!values.fatherName.trim()) missing.push("Father's name");
+  if (!values.motherName.trim()) missing.push("Mother's name");
+  if (!values.parentPhone.trim()) missing.push('Parent contact number');
+  if (!values.emergencyContactName.trim()) missing.push('Emergency contact name');
+  if (!values.permanentAddress.trim()) missing.push('Permanent address');
+  if (!values.currentAddress.trim()) missing.push('Current address');
+  return missing;
+}
+
+function DocumentsSidebar({
+  docTypes,
+  docLabels,
+  documents,
+  uploading,
+  uploadedCount,
+  onUpload,
+  className,
+}: {
+  docTypes: string[];
+  docLabels: Record<string, string>;
+  documents: OnboardingDoc[];
+  uploading: string | null;
+  uploadedCount: number;
+  onUpload: (docType: string, file: File) => void;
+  className?: string;
+}) {
+  const pct = Math.round((uploadedCount / docTypes.length) * 100);
+
+  return (
+    <OnboardingSidebarCard
+      className={className}
+      title="Document checklist"
+      description={`${uploadedCount} of ${docTypes.length} uploaded · ${pct}% complete`}
+    >
+      <div className="mb-1 h-1.5 overflow-hidden rounded-full bg-white">
+        <div
+          className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="space-y-2.5">
+        {docTypes.map((docType) => {
+          const existing = documents.find((d) => d.doc_type === docType);
+          const isUploading = uploading === docType;
+          return (
+            <div key={docType} className="relative">
+              {isUploading ? (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/80">
+                  <Loader2 className="h-5 w-5 animate-spin text-sgvu-navy" />
+                </div>
+              ) : null}
+              <OnboardingDocDropzone
+                label={docLabels[docType]}
+                hint={docType === 'PHOTO' ? 'JPG or PNG · Max 5MB' : 'PDF or image · Max 5MB'}
+                accept={docType === 'PHOTO' ? '.jpg,.jpeg,.png,image/jpeg,image/png' : undefined}
+                disabled={uploading !== null}
+                fileName={existing?.file_path ? docLabels[docType] : null}
+                onFile={(file) => onUpload(docType, file)}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </OnboardingSidebarCard>
+  );
+}
+
+function SubmitBlock({
+  submitting,
+  uploading,
+  onSubmit,
+}: {
+  submitting: boolean;
+  uploading: string | null;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        className="h-11 w-full rounded-lg bg-sgvu-navy text-sm font-semibold hover:bg-sgvu-navy/90"
+        disabled={submitting || uploading !== null}
+        onClick={onSubmit}
+      >
+        {submitting ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Submitting…
+          </>
+        ) : (
+          <>
+            <Send className="mr-2 h-4 w-4" />
+            Submit for verification
+          </>
+        )}
+      </Button>
+      <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+        Reviewed by administration before portal access is granted.
+      </p>
+    </div>
+  );
+}
 
 export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) {
   const api = useAuthedApi();
@@ -80,6 +220,11 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const uploadedCount = useMemo(
+    () => docTypes.filter((t) => documents.some((d) => d.doc_type === t && d.file_path)).length,
+    [docTypes, documents],
+  );
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -146,6 +291,34 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   };
 
   const saveAndSubmit = async () => {
+    if (!isStaff) {
+      const missing = validateStudentForm({
+        bloodGroup,
+        mobile,
+        abcId,
+        gender,
+        dateOfBirth,
+        fatherName,
+        motherName,
+        parentPhone,
+        emergencyContactName,
+        permanentAddress,
+        currentAddress,
+      });
+      if (missing.length) {
+        toast.error(`Please fill: ${missing.join(', ')}`);
+        return;
+      }
+    }
+
+    const missingDocs = docTypes.filter(
+      (type) => !documents.some((d) => d.doc_type === type && d.file_path),
+    );
+    if (missingDocs.length) {
+      toast.error(`Upload all documents: ${missingDocs.map((t) => docLabels[t]).join(', ')}`);
+      return;
+    }
+
     setSubmitting(true);
     try {
       const payload = isStaff
@@ -203,223 +376,174 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
   };
 
   if (loading) {
-    return <p className="text-center text-sm text-muted-foreground">Loading profile…</p>;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-border/60 bg-white py-20 shadow-sm">
+        <Loader2 className="h-9 w-9 animate-spin text-sgvu-navy" />
+        <p className="text-sm text-muted-foreground">Loading your profile…</p>
+      </div>
+    );
   }
 
+  const docsSidebar = (
+    <DocumentsSidebar
+      docTypes={docTypes}
+      docLabels={docLabels}
+      documents={documents}
+      uploading={uploading}
+      uploadedCount={uploadedCount}
+      onUpload={(type, file) => void uploadDoc(type, file)}
+    />
+  );
+
   return (
-    <div className="space-y-6">
-      {adminRemarks && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          Admin feedback: {adminRemarks}. Please re-upload clearer documents and resubmit.
-        </div>
-      )}
+    <div className="space-y-5">
+      {adminRemarks ? (
+        <OnboardingAlert title="Admin feedback">
+          {adminRemarks}. Please re-upload clearer documents and resubmit.
+        </OnboardingAlert>
+      ) : null}
 
-      <Card className="border-sgvu-navy/10 shadow-lg">
-        <CardHeader>
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-sgvu-navy/10">
-            <FileCheck2 className="h-5 w-5 text-sgvu-navy" />
-          </div>
-          <CardTitle className="text-sgvu-navy">Step 2 · Profile & Document Vault</CardTitle>
-          <CardDescription>
-            {isStaff
-              ? 'Complete your NAAC master record — personal details, KYC, research profile, and mandatory documents.'
-              : 'Complete your vital information and upload all mandatory documents.'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-sgvu-navy">Personal details</h3>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <label htmlFor="blood" className="text-sm font-medium">Blood Group</label>
-                <Input id="blood" value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="mobile" className="text-sm font-medium">
-                  {isStaff ? 'Mobile Number' : 'Student Mobile'}
-                </label>
-                <Input id="mobile" value={mobile} onChange={(e) => setMobile(e.target.value)} required />
-              </div>
-              {!isStaff && (
-                <div className="space-y-2">
-                  <label htmlFor="id-field" className="text-sm font-medium">ABC ID</label>
-                  <Input
-                    id="id-field"
-                    value={abcId}
-                    onChange={(e) => setAbcId(e.target.value)}
-                    placeholder="Your 12-digit Academic Bank ID (unique per student)"
-                    required
-                  />
-                </div>
-              )}
-              <div className="space-y-2">
-                <label htmlFor="gender" className="text-sm font-medium">Gender</label>
-                <Input id="gender" value={gender} onChange={(e) => setGender(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="dob" className="text-sm font-medium">Date of Birth</label>
-                <Input id="dob" type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} required />
-              </div>
-            </div>
-          </div>
-
-          {isStaff && (
-            <>
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-sgvu-navy">KYC & payroll</h3>
-                <p className="text-xs text-muted-foreground">
-                  Enter account numbers below — uploading Aadhaar/PAN files alone does not fill these fields.
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label htmlFor="pan" className="text-sm font-medium">PAN Number</label>
-                    <Input id="pan" value={panNumber} onChange={(e) => setPanNumber(e.target.value.toUpperCase())} required />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="aadhaar" className="text-sm font-medium">Aadhaar Number</label>
-                    <Input id="aadhaar" value={aadhaarNumber} onChange={(e) => setAadhaarNumber(e.target.value)} required />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="bank" className="text-sm font-medium">Bank Account Number</label>
-                    <Input id="bank" value={bankAccountNo} onChange={(e) => setBankAccountNo(e.target.value)} required />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="ifsc" className="text-sm font-medium">IFSC Code</label>
-                    <Input id="ifsc" value={ifscCode} onChange={(e) => setIfscCode(e.target.value.toUpperCase())} required />
-                  </div>
-                  <div className="space-y-2 sm:col-span-2">
-                    <label htmlFor="uan" className="text-sm font-medium">UAN (PF) — optional</label>
-                    <Input id="uan" value={pfUan} onChange={(e) => setPfUan(e.target.value)} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-sgvu-navy">Research & experience</h3>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label htmlFor="orcid" className="text-sm font-medium">ORCID ID</label>
-                    <Input id="orcid" placeholder="0000-0002-1825-0097" value={orcidId} onChange={(e) => setOrcidId(e.target.value)} required />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="scopus" className="text-sm font-medium">Scopus ID</label>
-                    <Input id="scopus" value={scopusId} onChange={(e) => setScopusId(e.target.value)} />
-                  </div>
-                  <div className="space-y-2 sm:col-span-2">
-                    <label htmlFor="scholar" className="text-sm font-medium">Google Scholar URL</label>
-                    <Input id="scholar" type="url" value={googleScholarUrl} onChange={(e) => setGoogleScholarUrl(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="teaching-exp" className="text-sm font-medium">Teaching experience (years)</label>
-                    <Input id="teaching-exp" type="number" step="0.1" min="0" value={totalExperienceYears} onChange={(e) => setTotalExperienceYears(e.target.value)} required />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="industry-exp" className="text-sm font-medium">Industry experience (years)</label>
-                    <Input id="industry-exp" type="number" step="0.1" min="0" value={industryExperienceYears} onChange={(e) => setIndustryExperienceYears(e.target.value)} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-sgvu-navy">Highest qualification</h3>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label htmlFor="degree-level" className="text-sm font-medium">Degree level</label>
-                    <select id="degree-level" className={selectClassName} value={degreeLevel} onChange={(e) => setDegreeLevel(e.target.value)} required>
-                      {STAFF_DEGREE_LEVELS.map((level) => (
-                        <option key={level} value={level}>{level}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="degree-name" className="text-sm font-medium">Degree name</label>
-                    <Input id="degree-name" placeholder="e.g. M.Tech in AI" value={degreeName} onChange={(e) => setDegreeName(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="university" className="text-sm font-medium">University</label>
-                    <Input id="university" value={university} onChange={(e) => setUniversity(e.target.value)} required />
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="passing-year" className="text-sm font-medium">Passing year</label>
-                    <Input id="passing-year" type="number" value={passingYear} onChange={(e) => setPassingYear(e.target.value)} required />
-                  </div>
-                  <div className="space-y-2 sm:col-span-2">
-                    <label htmlFor="specialization" className="text-sm font-medium">Specialization</label>
-                    <Input id="specialization" value={specialization} onChange={(e) => setSpecialization(e.target.value)} />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          {!isStaff && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-sgvu-navy">Parent details</h3>
+      <OnboardingPanel
+        icon={FileCheck2}
+        title="Profile & documents"
+        description={
+          isStaff
+            ? 'Complete your NAAC master record with personal details, KYC, and mandatory documents.'
+            : 'Tell us about yourself and upload the required documents. Fields marked * are mandatory.'
+        }
+      >
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-8 xl:gap-10">
+          {/* Form column */}
+          <div className="space-y-8">
+            <OnboardingSection title="Personal details" icon={UserRound} description="Basic information for your record">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Input placeholder="Father's name" value={fatherName} onChange={(e) => setFatherName(e.target.value)} required />
-                <Input placeholder="Mother's name" value={motherName} onChange={(e) => setMotherName(e.target.value)} required />
-                <Input placeholder="Parent contact number" value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} required />
-                <Input placeholder="Parent occupation" value={parentOccupation} onChange={(e) => setParentOccupation(e.target.value)} />
-                <Input placeholder="Annual income / scholarships" value={annualIncome} onChange={(e) => setAnnualIncome(e.target.value)} />
+                <FormField id="blood" label="Blood group" required>
+                  <select id="blood" className={onboardingSelectClass} value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} required>
+                    <option value="">Select</option>
+                    {BLOOD_GROUP_OPTIONS.map((bg) => (
+                      <option key={bg} value={bg}>{bg}</option>
+                    ))}
+                  </select>
+                </FormField>
+
+                <FormField id="mobile" label={isStaff ? 'Mobile number' : 'Student mobile'} required>
+                  <Input id="mobile" inputMode="tel" placeholder="10-digit number" className={onboardingInputClass} value={mobile} onChange={(e) => setMobile(e.target.value)} required />
+                </FormField>
+
+                {!isStaff ? (
+                  <FormField id="abc-id" label="ABC ID" required hint="12-digit Academic Bank of Credits ID" className="sm:col-span-2">
+                    <Input id="abc-id" inputMode="numeric" placeholder="123456789012" className={onboardingInputClass} value={abcId} onChange={(e) => setAbcId(e.target.value.replace(/\D/g, '').slice(0, 12))} required />
+                  </FormField>
+                ) : null}
+
+                <FormField id="gender" label="Gender" required>
+                  <select id="gender" className={onboardingSelectClass} value={gender} onChange={(e) => setGender(e.target.value)} required>
+                    <option value="">Select</option>
+                    {GENDER_OPTIONS.map((g) => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </FormField>
+
+                <FormField id="dob" label="Date of birth" required>
+                  <Input id="dob" type="date" className={onboardingInputClass} value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} required />
+                </FormField>
               </div>
-            </div>
-          )}
+            </OnboardingSection>
 
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-sgvu-navy">Emergency & address</h3>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Input placeholder="Emergency contact name" value={emergencyContactName} onChange={(e) => setEmergencyContactName(e.target.value)} required />
-              {isStaff && (
-                <Input placeholder="Emergency contact phone" value={emergencyContactPhone} onChange={(e) => setEmergencyContactPhone(e.target.value)} required />
-              )}
-              <textarea
-                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm sm:col-span-1"
-                placeholder="Permanent address"
-                value={permanentAddress}
-                onChange={(e) => setPermanentAddress(e.target.value)}
-                required
-              />
-              <textarea
-                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm sm:col-span-1"
-                placeholder="Current address"
-                value={currentAddress}
-                onChange={(e) => setCurrentAddress(e.target.value)}
-                required
-              />
+            {isStaff ? (
+              <>
+                <OnboardingDivider />
+                <OnboardingSection title="KYC & payroll">
+                  <p className="mb-3 text-xs text-muted-foreground">Enter numbers below — uploading files alone does not fill these fields.</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField id="pan" label="PAN number" required><Input id="pan" className={onboardingInputClass} value={panNumber} onChange={(e) => setPanNumber(e.target.value.toUpperCase())} required /></FormField>
+                    <FormField id="aadhaar" label="Aadhaar number" required><Input id="aadhaar" className={onboardingInputClass} value={aadhaarNumber} onChange={(e) => setAadhaarNumber(e.target.value)} required /></FormField>
+                    <FormField id="bank" label="Bank account" required><Input id="bank" className={onboardingInputClass} value={bankAccountNo} onChange={(e) => setBankAccountNo(e.target.value)} required /></FormField>
+                    <FormField id="ifsc" label="IFSC code" required><Input id="ifsc" className={onboardingInputClass} value={ifscCode} onChange={(e) => setIfscCode(e.target.value.toUpperCase())} required /></FormField>
+                    <FormField id="uan" label="UAN (PF)" className="sm:col-span-2"><Input id="uan" className={onboardingInputClass} value={pfUan} onChange={(e) => setPfUan(e.target.value)} /></FormField>
+                  </div>
+                </OnboardingSection>
+                <OnboardingDivider />
+                <OnboardingSection title="Research & experience">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField id="orcid" label="ORCID ID" required><Input id="orcid" className={onboardingInputClass} placeholder="0000-0002-1825-0097" value={orcidId} onChange={(e) => setOrcidId(e.target.value)} required /></FormField>
+                    <FormField id="scopus" label="Scopus ID"><Input id="scopus" className={onboardingInputClass} value={scopusId} onChange={(e) => setScopusId(e.target.value)} /></FormField>
+                    <FormField id="scholar" label="Google Scholar URL" className="sm:col-span-2"><Input id="scholar" type="url" className={onboardingInputClass} value={googleScholarUrl} onChange={(e) => setGoogleScholarUrl(e.target.value)} /></FormField>
+                    <FormField id="teaching-exp" label="Teaching experience (years)" required><Input id="teaching-exp" type="number" step="0.1" min="0" className={onboardingInputClass} value={totalExperienceYears} onChange={(e) => setTotalExperienceYears(e.target.value)} required /></FormField>
+                    <FormField id="industry-exp" label="Industry experience (years)"><Input id="industry-exp" type="number" step="0.1" min="0" className={onboardingInputClass} value={industryExperienceYears} onChange={(e) => setIndustryExperienceYears(e.target.value)} /></FormField>
+                  </div>
+                </OnboardingSection>
+                <OnboardingDivider />
+                <OnboardingSection title="Highest qualification">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField id="degree-level" label="Degree level" required>
+                      <select id="degree-level" className={onboardingSelectClass} value={degreeLevel} onChange={(e) => setDegreeLevel(e.target.value)} required>
+                        {STAFF_DEGREE_LEVELS.map((level) => (<option key={level} value={level}>{level}</option>))}
+                      </select>
+                    </FormField>
+                    <FormField id="degree-name" label="Degree name"><Input id="degree-name" className={onboardingInputClass} placeholder="M.Tech in AI" value={degreeName} onChange={(e) => setDegreeName(e.target.value)} /></FormField>
+                    <FormField id="university" label="University" required><Input id="university" className={onboardingInputClass} value={university} onChange={(e) => setUniversity(e.target.value)} required /></FormField>
+                    <FormField id="passing-year" label="Passing year" required><Input id="passing-year" type="number" className={onboardingInputClass} value={passingYear} onChange={(e) => setPassingYear(e.target.value)} required /></FormField>
+                    <FormField id="specialization" label="Specialization" className="sm:col-span-2"><Input id="specialization" className={onboardingInputClass} value={specialization} onChange={(e) => setSpecialization(e.target.value)} /></FormField>
+                  </div>
+                </OnboardingSection>
+              </>
+            ) : (
+              <>
+                <OnboardingDivider />
+                <OnboardingSection title="Parent / guardian" icon={Users}>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField id="father" label="Father's name" required><Input id="father" className={onboardingInputClass} value={fatherName} onChange={(e) => setFatherName(e.target.value)} required /></FormField>
+                    <FormField id="mother" label="Mother's name" required><Input id="mother" className={onboardingInputClass} value={motherName} onChange={(e) => setMotherName(e.target.value)} required /></FormField>
+                    <FormField id="parent-phone" label="Parent contact" required><Input id="parent-phone" inputMode="tel" className={onboardingInputClass} value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} required /></FormField>
+                    <FormField id="parent-occupation" label="Parent occupation"><Input id="parent-occupation" className={onboardingInputClass} value={parentOccupation} onChange={(e) => setParentOccupation(e.target.value)} /></FormField>
+                    <FormField id="annual-income" label="Annual income / scholarships" className="sm:col-span-2"><Input id="annual-income" className={onboardingInputClass} value={annualIncome} onChange={(e) => setAnnualIncome(e.target.value)} /></FormField>
+                  </div>
+                </OnboardingSection>
+              </>
+            )}
+
+            <OnboardingDivider />
+
+            <OnboardingSection title="Emergency & address" icon={Home} description="For campus records and emergency contact">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField id="emergency-name" label="Emergency contact name" required className="sm:col-span-2">
+                  <Input id="emergency-name" className={onboardingInputClass} value={emergencyContactName} onChange={(e) => setEmergencyContactName(e.target.value)} required />
+                </FormField>
+                {isStaff ? (
+                  <FormField id="emergency-phone" label="Emergency contact phone" required className="sm:col-span-2">
+                    <Input id="emergency-phone" inputMode="tel" className={onboardingInputClass} value={emergencyContactPhone} onChange={(e) => setEmergencyContactPhone(e.target.value)} required />
+                  </FormField>
+                ) : null}
+                <FormField id="permanent-address" label="Permanent address" required>
+                  <textarea id="permanent-address" className={onboardingTextareaClass} placeholder="House, street, city, PIN" value={permanentAddress} onChange={(e) => setPermanentAddress(e.target.value)} required />
+                </FormField>
+                <FormField id="current-address" label="Current address" required>
+                  <textarea id="current-address" className={onboardingTextareaClass} placeholder="Hostel or rental address" value={currentAddress} onChange={(e) => setCurrentAddress(e.target.value)} required />
+                </FormField>
+              </div>
+            </OnboardingSection>
+
+            {/* Mobile documents + submit */}
+            <div className="space-y-4 lg:hidden">
+              <OnboardingDivider />
+              {docsSidebar}
+              <SubmitBlock submitting={submitting} uploading={uploading} onSubmit={() => void saveAndSubmit()} />
             </div>
           </div>
 
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-sgvu-navy">Mandatory documents</h3>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {docTypes.map((docType) => {
-                const existing = documents.find((d) => d.doc_type === docType);
-                return (
-                  <OnboardingDocDropzone
-                    key={docType}
-                    label={docLabels[docType]}
-                    hint={docType === 'PHOTO' ? 'JPG or PNG · Max 5MB' : 'PDF or image · Max 5MB'}
-                    accept={docType === 'PHOTO' ? '.jpg,.jpeg,.png,image/jpeg,image/png' : undefined}
-                    disabled={uploading !== null}
-                    fileName={existing?.file_path ? docLabels[docType] : null}
-                    onFile={(file) => void uploadDoc(docType, file)}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          <Button
-            type="button"
-            className="w-full bg-sgvu-navy hover:bg-sgvu-navy/90"
-            disabled={submitting || uploading !== null}
-            onClick={() => void saveAndSubmit()}
-          >
-            <Send className="mr-2 h-4 w-4" />
-            {submitting ? 'Submitting…' : 'Submit for Verification'}
-          </Button>
-        </CardContent>
-      </Card>
+          {/* Desktop sidebar */}
+          <aside className={cn('hidden space-y-4 lg:sticky lg:top-8 lg:block lg:self-start')}>
+            {docsSidebar}
+            <SubmitBlock submitting={submitting} uploading={uploading} onSubmit={() => void saveAndSubmit()} />
+          </aside>
+        </div>
+      </OnboardingPanel>
     </div>
   );
+}
+
+function FormField(props: ComponentProps<typeof OnboardingField>) {
+  return <OnboardingField {...props} />;
 }

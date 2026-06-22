@@ -24,17 +24,43 @@ type OnboardingDocRow = {
   uploaded_at: string;
 };
 
-function isPgUniqueViolation(err: unknown, columnHint?: string): boolean {
+function pgErrorCode(err: unknown): string | undefined {
   const pgErr = err as {
     code?: string;
-    detail?: string;
-    driverError?: { code?: string; detail?: string };
+    driverError?: { code?: string };
   };
-  const code = pgErr.code ?? pgErr.driverError?.code;
-  if (code !== '23505') return false;
+  return pgErr.code ?? pgErr.driverError?.code;
+}
+
+function isPgUniqueViolation(err: unknown, columnHint?: string): boolean {
+  if (pgErrorCode(err) !== '23505') return false;
   if (!columnHint) return true;
+  const pgErr = err as { detail?: string; driverError?: { detail?: string } };
   const detail = pgErr.detail ?? pgErr.driverError?.detail ?? '';
   return detail.includes(columnHint);
+}
+
+function mapProfileSaveError(err: unknown): never {
+  if (isPgUniqueViolation(err, 'abc_id')) {
+    throw new BadRequestException(
+      'This ABC ID is already registered to another student. Use your own 12-digit Academic Bank ID.',
+    );
+  }
+  const code = pgErrorCode(err);
+  if (code === '42703') {
+    throw new BadRequestException(
+      'Profile storage is not fully configured. Please contact support.',
+    );
+  }
+  if (code === '22001') {
+    throw new BadRequestException(
+      'One or more fields exceed the allowed length. Please shorten your entries.',
+    );
+  }
+  if (code === '22007' || code === '22008') {
+    throw new BadRequestException('Invalid date of birth. Use the date picker format.');
+  }
+  throw err;
 }
 
 type ProfileBody = {
@@ -86,9 +112,10 @@ export class StudentOnboardingService {
   }
 
   async getStatus(tenantId: string, userId: string) {
-    const user = await this.getUserRow(tenantId, userId);
+    const tenant = this.resolveTenantId(tenantId);
+    const user = await this.getUserRow(tenant, userId);
     const kind = resolveOnboardingPortalKind(user.role_name);
-    const docs = await this.listDocs(tenantId, userId, kind);
+    const docs = await this.listDocs(tenant, userId, kind);
     return {
       portal_kind: kind,
       onboarding_status: user.onboarding_status,
@@ -116,13 +143,14 @@ export class StudentOnboardingService {
       );
     }
 
+    const tenant = this.resolveTenantId(tenantId);
     const [row] = await this.dataSource.query<
       Array<{ password_hash: string | null; onboarding_status: string }>
     >(
       `SELECT password_hash, onboarding_status
        FROM users
        WHERE user_id = $1 AND tenant_id = $2`,
-      [userId, tenantId],
+      [userId, tenant],
     );
     if (!row?.password_hash)
       throw new UnauthorizedException('Invalid current password');
@@ -140,16 +168,17 @@ export class StudentOnboardingService {
       `UPDATE users
        SET password_hash = $1, onboarding_status = 'PENDING_DOCUMENTS', updated_at = NOW()
        WHERE user_id = $2 AND tenant_id = $3`,
-      [hash, userId, tenantId],
+      [hash, userId, tenant],
     );
 
     return { onboarding_status: 'PENDING_DOCUMENTS' };
   }
 
   async getStep2Profile(tenantId: string, userId: string) {
-    const user = await this.getUserRow(tenantId, userId);
+    const tenant = this.resolveTenantId(tenantId);
+    const user = await this.getUserRow(tenant, userId);
     const kind = resolveOnboardingPortalKind(user.role_name);
-    const docs = await this.listDocs(tenantId, userId, kind);
+    const docs = await this.listDocs(tenant, userId, kind);
 
     if (kind === 'staff') {
       const profile = user.onboarding_profile ?? {};
@@ -217,7 +246,7 @@ export class StudentOnboardingService {
       `SELECT sp.blood_group, sp.abc_id, sp.gender, sp.date_of_birth, sp.parent_info
        FROM student_profiles sp
        WHERE sp.user_id = $1 AND sp.tenant_id = $2`,
-      [userId, tenantId],
+      [userId, tenant],
     );
 
     const parentInfo = profile?.parent_info ?? {};
@@ -251,13 +280,14 @@ export class StudentOnboardingService {
   }
 
   async saveStep2Profile(tenantId: string, userId: string, body: ProfileBody) {
-    const user = await this.getUserRow(tenantId, userId);
+    const tenant = this.resolveTenantId(tenantId);
+    const user = await this.getUserRow(tenant, userId);
     const kind = resolveOnboardingPortalKind(user.role_name);
 
     if (kind === 'staff') {
-      return this.saveStaffProfile(tenantId, userId, body);
+      return this.saveStaffProfile(tenant, userId, body);
     }
-    return this.saveStudentProfile(tenantId, userId, body);
+    return this.saveStudentProfile(tenant, userId, body);
   }
 
   async registerDocument(
@@ -712,11 +742,13 @@ export class StudentOnboardingService {
         `INSERT INTO student_profiles (tenant_id, user_id, blood_group, abc_id, gender, date_of_birth, parent_info, status)
          VALUES ($1, $2, $3, $4, $5, $6::date, $7::jsonb, 'ACTIVE')
          ON CONFLICT (user_id) DO UPDATE SET
+           tenant_id = COALESCE(student_profiles.tenant_id, EXCLUDED.tenant_id),
            blood_group = EXCLUDED.blood_group,
            abc_id = EXCLUDED.abc_id,
            gender = EXCLUDED.gender,
            date_of_birth = EXCLUDED.date_of_birth,
            parent_info = COALESCE(student_profiles.parent_info, '{}'::jsonb) || EXCLUDED.parent_info,
+           status = COALESCE(student_profiles.status, 'ACTIVE'),
            updated_at = NOW()`,
         [
           tenantId,
@@ -740,12 +772,7 @@ export class StudentOnboardingService {
         ],
       );
     } catch (err) {
-      if (isPgUniqueViolation(err, 'abc_id')) {
-        throw new BadRequestException(
-          'This ABC ID is already registered to another student. Use your own 12-digit Academic Bank ID.',
-        );
-      }
-      throw err;
+      mapProfileSaveError(err);
     }
 
     return this.getStep2Profile(tenantId, userId);
