@@ -299,6 +299,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Venue Booking', href: '/student/venues', icon: Building2, keywords: ['room', 'gd', 'seminar', 'hall', 'classroom', 'booking'] },
         { label: 'E-Cell & Incubation', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
         { label: 'Research Grants', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
+        { label: 'Ph.D. Programme', href: '/student/phd', icon: GraduationCap, keywords: ['phd', 'pet', 'doctorate', 'research', 'thesis'] },
       ],
     },
     {
@@ -327,6 +328,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Venue Booking', href: '/student/venues', icon: Building2 },
     { label: 'E-Cell Hub', href: '/student/e-cell', icon: Rocket },
     { label: 'Research Grants', href: '/student/research', icon: FlaskConical },
+    { label: 'Ph.D. Programme', href: '/student/phd', icon: GraduationCap },
     { label: 'Degree & Convocation', href: '/student/certificates', icon: GraduationCap },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
     { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield },
@@ -371,6 +373,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
         { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
+        { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
       ],
     },
     {
@@ -418,6 +421,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
         { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
+        { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
       ],
     },
     {
@@ -639,6 +643,7 @@ export const deanPortal: PortalConfig = {
         { label: 'Defaulters', href: '/dean/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades'] },
         { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['escalation', 'ticket'] },
         { label: 'Safety Concerns', href: '/dean/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'posh'] },
+        { label: 'Ph.D. Degree Awards', href: '/dean/phd/approvals', icon: GraduationCap, keywords: ['phd', 'bom', 'viva', 'degree'] },
       ],
     },
     {
@@ -916,6 +921,7 @@ export const iqacPortal: PortalConfig = {
         { label: 'Progression & Placements', href: '/iqac/student-outcomes', icon: GraduationCap, keywords: ['lpa', 'alumni', 'placed'] },
         { label: 'Student Achievements', href: '/iqac/student-achievements', icon: Award, keywords: ['certificates', 'naac'] },
         { label: 'Student R&D Grants', href: '/iqac/rnd', icon: FlaskConical, keywords: ['research grant', 'ranking', 'naac'] },
+        { label: 'Ph.D. Scholar Pipeline', href: '/research/scholars', icon: GraduationCap, keywords: ['phd', 'scholar', 'lifecycle'] },
       ],
     },
     {
@@ -1015,6 +1021,31 @@ export const disciplinaryCommitteePortal: PortalConfig = {
     { label: 'DC Dashboard', href: '/disciplinary-committee/dashboard', icon: LayoutDashboard },
     { label: 'Disciplinary Queue', href: '/disciplinary-committee/queue', icon: Scale },
     { label: 'Safety Concerns', href: '/disciplinary-committee/safety-concerns', icon: Shield },
+  ],
+};
+
+export const researchPortal: PortalConfig = {
+  personaLabel: 'Research & Ph.D.',
+  personaTitle: 'Ph.D. Lifecycle Management',
+  homeHref: '/research/drc/applications',
+  navGroups: [
+    {
+      title: 'Ph.D. Lifecycle',
+      items: [
+        { label: 'Scholar Pipeline', href: '/research/scholars', icon: GraduationCap, keywords: ['phd', 'pipeline'], roles: ['IQAC', 'SuperAdmin', 'Dean', 'Chairman'] },
+        { label: 'DRC Applications', href: '/research/drc/applications', icon: ClipboardList, keywords: ['pet', 'admission', 'interview'], roles: ['DRC_MEMBER', 'SuperAdmin'] },
+        { label: 'RAC Reviews', href: '/research/rac/reviews', icon: Users, keywords: ['guide', 'progress', 'synopsis'], roles: ['RAC_MEMBER', 'SuperAdmin'] },
+        { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText, keywords: ['thesis', 'viva', 'synopsis'], roles: ['RRC_MEMBER', 'SuperAdmin'] },
+        { label: 'Adjudicator Reviews', href: '/research/adjudicator/reviews', icon: Scale, keywords: ['synopsis', 'thesis', 'evaluation'], roles: ['PHD_ADJUDICATOR', 'SuperAdmin'] },
+        { label: 'Research Grants', href: '/research/grants', icon: FlaskConical, keywords: ['grants', 'funding'], roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Chairman'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'DRC Applications', href: '/research/drc/applications', icon: ClipboardList },
+    { label: 'RAC Reviews', href: '/research/rac/reviews', icon: Users },
+    { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText },
+    { label: 'Scholar Pipeline', href: '/research/scholars', icon: GraduationCap },
   ],
 };
 
@@ -1272,6 +1303,7 @@ export const adminPortal: PortalConfig = {
         { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
         { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['SuperAdmin'] },
         { label: 'University Directory', href: '/directory', icon: Contact, roles: ['SuperAdmin', 'Registrar', 'President'] },
+        { label: 'Ph.D. Admissions & Awards', href: '/admin/phd/admissions', icon: GraduationCap, roles: ['SuperAdmin', 'Registrar'] },
       ],
     },
   ],

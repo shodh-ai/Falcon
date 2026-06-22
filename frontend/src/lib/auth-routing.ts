@@ -74,6 +74,22 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/disciplinary-committee/dashboard';
   }
 
+  if (r === 'drc_member' || r === 'drc member') {
+    return '/research/drc/applications';
+  }
+
+  if (r === 'rac_member' || r === 'rac member') {
+    return '/research/rac/reviews';
+  }
+
+  if (r === 'rrc_member' || r === 'rrc member') {
+    return '/research/rrc/reviews';
+  }
+
+  if (r === 'phd_adjudicator' || r === 'phd adjudicator') {
+    return '/research/adjudicator/reviews';
+  }
+
   if (r === 'placementcell' || r === 'placement cell') {
     return '/placements/dashboard';
   }
@@ -307,7 +323,7 @@ const portalRoles: Record<string, string[]> = {
   '/super-admin': ['superadmin'],
   '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
   '/clinic-admin': ['registrar', 'superadmin'],
-  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin'],
+  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator'],
 };
 
 /** Derive the active workspace role from the current pathname (for multi-role users). */
