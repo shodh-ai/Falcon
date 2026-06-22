@@ -485,43 +485,45 @@ export class EcellFounderService {
 
   @Interval(60_000)
   async completePastMeetingsAndRequestFeedback() {
-    try {
-      const tableExists = await this.db.query(
-        `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'ecell_mentor_meetings') AS exists`
+    type CompletedMeetingRow = {
+      meeting_id: string;
+      tenant_id: string;
+      mentor_user_id: string;
+      requested_by_user_id: string;
+      topic: string;
+      startup_name: string | null;
+    };
+    const [due = []] = (await this.db.query(
+      `UPDATE ecell_mentor_meetings
+       SET status = 'COMPLETED',
+           feedback_requested_at = NOW(),
+           updated_at = NOW()
+       WHERE status = 'ACCEPTED'
+         AND requested_time < NOW() - INTERVAL '1 hour'
+       RETURNING meeting_id, tenant_id, mentor_user_id, requested_by_user_id, topic,
+                 (SELECT startup_name FROM ecell_projects p WHERE p.project_id = ecell_mentor_meetings.project_id) AS startup_name`,
+    )) as [CompletedMeetingRow[], number];
+    for (const row of due) {
+      if (!row.tenant_id || !row.mentor_user_id) continue;
+      const mentorRows = await this.db.query(
+        `SELECT u.name, r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1`,
+        [row.mentor_user_id],
       );
-      if (!tableExists[0]?.exists) return;
-
-      const due = await this.db.query(
-        `UPDATE ecell_mentor_meetings
-         SET status = 'COMPLETED',
-             feedback_requested_at = NOW(),
-             updated_at = NOW()
-         WHERE status = 'ACCEPTED'
-           AND requested_time < NOW() - INTERVAL '1 hour'
-         RETURNING meeting_id, tenant_id, mentor_user_id, requested_by_user_id, topic,
-                   (SELECT startup_name FROM ecell_projects p WHERE p.project_id = ecell_mentor_meetings.project_id) AS startup_name`,
+      const mentor = mentorRows[0] as
+        | { name: string; role_name: string }
+        | undefined;
+      this.notify.ecellMentorFeedbackRequested({
+        tenantId: row.tenant_id,
+        userId: row.mentor_user_id,
+        startupName: row.startup_name ?? 'Startup',
+        topic: row.topic ?? 'Mentoring session',
+        actionLink: this.mentorPortalLink(mentor?.role_name ?? 'Faculty'),
+      });
+    }
+    if (due.length) {
+      this.logger.debug(
+        `Marked ${due.length} e-cell mentor meeting(s) completed`,
       );
-      for (const row of due as Array<Record<string, unknown>>) {
-        const mentorRows = await this.db.query(
-          `SELECT u.name, r.role_name FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1`,
-          [row.mentor_user_id],
-        );
-        const mentor = mentorRows[0] as { name: string; role_name: string } | undefined;
-        this.notify.ecellMentorFeedbackRequested({
-          tenantId: String(row.tenant_id),
-          userId: String(row.mentor_user_id),
-          startupName: String(row.startup_name ?? 'Startup'),
-          topic: String(row.topic ?? 'Mentoring session'),
-          actionLink: this.mentorPortalLink(mentor?.role_name ?? 'Faculty'),
-        });
-      }
-      if (due.length) {
-        this.logger.debug(`Marked ${due.length} e-cell mentor meeting(s) completed`);
-      }
-    } catch (e) {
-      // Table might not exist yet, suppress error to prevent log pollution
-      if (e.message?.includes('does not exist')) return;
-      this.logger.error('Failed to complete past mentor meetings', e);
     }
   }
 

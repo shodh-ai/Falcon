@@ -3,6 +3,13 @@
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
+  "moduleNameMapper": {
+    "^archiver$": "<rootDir>/mocks/archiver.mock.ts",
+    "^uuid$": "<rootDir>/mocks/uuid.mock.ts"
+  },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(uuid|archiver)/)"
+  ],
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   }

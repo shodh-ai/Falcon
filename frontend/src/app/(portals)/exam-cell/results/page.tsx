@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ChevronRight, Lock, Eye, Send } from 'lucide-react';
+import { CheckCircle2, ChevronRight, Lock, Eye, Send, type LucideIcon } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -77,12 +77,12 @@ const EXAM_TYPES = ['INTERNAL', 'CAT1', 'CAT2', 'END_TERM', 'PRACTICAL'];
 
 type WorkflowStep = 'review' | 'lock' | 'declare' | 'preview' | 'done';
 
-const WORKFLOW_STEPS: { key: WorkflowStep; label: string }[] = [
-  { key: 'review', label: 'Review Pending' },
-  { key: 'lock', label: 'Lock Submissions' },
-  { key: 'declare', label: 'Apply Rules' },
-  { key: 'preview', label: 'Preview & Publish' },
-  { key: 'done', label: 'Results Declared' }
+const WORKFLOW_STEPS: { key: WorkflowStep; label: string; icon: LucideIcon }[] = [
+  { key: 'review', label: 'Review Pending', icon: Eye },
+  { key: 'lock', label: 'Lock Submissions', icon: Lock },
+  { key: 'declare', label: 'Apply Rules', icon: Send },
+  { key: 'preview', label: 'Preview & Publish', icon: Eye },
+  { key: 'done', label: 'Results Declared', icon: CheckCircle2 },
 ];
 function statusBadge(status: string) {
   if (status === 'OPEN') return 'default';
