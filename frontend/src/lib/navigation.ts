@@ -28,6 +28,7 @@ import {
   Eye,
   FlaskConical,
   LineChart,
+  PieChart,
   NotebookPen,
   CalendarClock,
   Microscope,
@@ -610,7 +611,7 @@ export const deanPortal: PortalConfig = {
       items: [
         { label: 'Course Allocation Review', href: '/dean/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'review'] },
         { label: 'Syllabus Tracking', href: '/dean/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'coverage'] },
-        { label: 'Result Analytics', href: '/dean/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'grades'] },
+        { label: 'Result Analytics', href: '/dean/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'grades', 'mid-term', 'pie chart'] },
       ],
     },
     {
@@ -1052,6 +1053,7 @@ export const presidentPortal: PortalConfig = {
       items: [
         { label: 'Executive Summary', href: '/president/executive-summary', icon: LayoutDashboard, keywords: ['revenue', 'headcount'] },
         { label: 'Academics', href: '/president/academics', icon: GraduationCap, keywords: ['pass fail', 'attendance', 'schools'] },
+        { label: 'Result Insights', href: '/president/insights', icon: PieChart, keywords: ['grades', 'pie chart', 'academic'] },
         { label: 'Finance', href: '/president/finance', icon: Wallet, keywords: ['collected', 'pending', 'charts'] },
         { label: 'Compliance', href: '/president/compliance', icon: Shield, keywords: ['iqac', 'defaulting'] },
         { label: 'HR Analytics', href: '/president/hr-analytics', icon: Users, keywords: ['retention', 'faculty student ratio', 'payroll'] },
@@ -1088,6 +1090,7 @@ export const leadershipPortal: PortalConfig = {
         { label: 'Pillar 1 · Financial P&L + Cash Flow', href: '/leadership/finance', icon: Wallet, keywords: ['sankey', 'waterfall', 'p&l', 'cash flow'] },
         { label: 'Pillar 2 · Admissions Funnel', href: '/leadership/admissions-funnel', icon: TrendingUp, keywords: ['leads', 'applications', 'enrolled', 'conversion'] },
         { label: 'Pillar 3 · Academic & Brand Value', href: '/leadership/academics', icon: GraduationCap, keywords: ['placements heatmap', 'naac', 'iqac', 'faculty phd'] },
+        { label: 'Result Insights', href: '/leadership/insights', icon: PieChart, keywords: ['grades', 'pie chart', 'academic'] },
         { label: 'Pillar 4 · HR & Payroll Economics', href: '/leadership/hr-ops', icon: Users, keywords: ['payroll', 'attrition', 'cost vs revenue'] },
         { label: 'Pillar 5 · Infrastructure & Assets', href: '/leadership/infrastructure', icon: Building2, keywords: ['hostel occupancy', 'assets', 'maintenance'] },
         { label: 'Pillar 6 · Grievances Escalation', href: '/leadership/issues', icon: AlertTriangle, keywords: ['grievance', 'sla', 'compliance'] },
