@@ -35,9 +35,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
+      className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-svh">
         {runtimeApiUrl && !runtimeApiUrl.includes('localhost') ? (
           <script
             dangerouslySetInnerHTML={{
