@@ -49,12 +49,12 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   );
 
   return (
-    <div className="min-h-screen bg-sgvu-surface">
-      <div className="fixed inset-y-0 left-0 z-30 hidden lg:block">{sidebar}</div>
+    <div className="bg-sgvu-surface">
+      <div className="fixed inset-y-0 left-0 z-30 hidden h-svh lg:block">{sidebar}</div>
 
       <div
         className={cn(
-          'flex min-h-screen flex-col transition-[padding] duration-200',
+          'flex h-svh flex-col overflow-hidden transition-[padding] duration-200',
           collapsed ? 'lg:pl-[var(--sidebar-width-collapsed)]' : 'lg:pl-[var(--sidebar-width)]',
         )}
       >
@@ -67,7 +67,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
           onMobileOpenChange={setMobileOpen}
         />
 
-        <main className="flex-1 pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
+        <main className="min-h-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
           <div className={cn('mx-auto w-full px-3 py-4 sm:px-6 sm:py-5', contentMaxWidthClass)}>
             {children}
           </div>
