@@ -527,7 +527,8 @@ export class FacultyProfileService {
     const projectGuides = await this.dataSource.query(
       `SELECT g.guide_id, g.project_title, g.program AS project_type, u.name AS student_name
        FROM faculty_project_guides g
-       INNER JOIN users u ON u.user_id = g.student_user_id
+       INNER JOIN project_guide_students pgs ON pgs.guide_id = g.guide_id
+       INNER JOIN users u ON u.user_id = pgs.student_user_id
        WHERE g.tenant_id = $1 AND g.faculty_user_id = $2
        ORDER BY g.created_at DESC`,
       [tenantId, userId],

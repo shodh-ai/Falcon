@@ -16,6 +16,7 @@ import {
   attendanceHeatmapColor,
   type CalculatedAttendanceStatus,
 } from '@/lib/hr-attendance-status';
+import { cn } from '@/lib/utils';
 
 export type CalendarDay = {
   date: string;
@@ -41,6 +42,7 @@ type MatrixPayload = {
 type Props = {
   title?: string;
   month?: string;
+  holidays?: { title: string; date: string; type: string }[];
   /** When true, renders calendar grid only (no outer card chrome). */
   embedded?: boolean;
 } & ({ mode: 'self' } | { mode: 'matrix' });
@@ -121,25 +123,59 @@ export function HrAttendanceCalendar(props: Props) {
       )}
 
       {!loading && props.mode === 'self' && selfData && (
-        <div className="grid grid-cols-7 gap-2">
+        <div className="grid grid-cols-7 gap-px bg-slate-100 rounded-lg overflow-hidden border border-slate-100">
           {dayLabels.map((d) => (
-            <div key={d} className="text-center text-xs font-medium text-muted-foreground">
+            <div key={d} className="bg-slate-50 py-2 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">
               {d}
             </div>
           ))}
-          {Array.from({ length: leading }).map((_, i) => (
-            <div key={`pad-${i}`} />
-          ))}
-          {selfData.days.map((day) => {
-            const style = attendanceCircleStyle(day.calculated_status);
+          
+          {Array.from({ length: 42 }, (_, i) => {
+            const dayNum = i - leading + 1;
+            const d = (dayNum < 1 || dayNum > daysInMonth) ? null : dayNum;
+            const strDate = d ? `${year}-${String(monthNum).padStart(2, '0')}-${String(d).padStart(2, '0')}` : '';
+            const attDay = d ? selfData.days.find(x => x.date === strDate) : null;
+            const isToday = d === new Date().getDate() && monthNum === new Date().getMonth() + 1 && year === new Date().getFullYear();
+            const circleStyle = attDay ? attendanceCircleStyle(attDay.calculated_status) : undefined;
+            
+            const dayHolidays = d && props.holidays ? props.holidays.filter((h) => h.date.startsWith(strDate)) : [];
+            
             return (
-              <div key={day.date} className="flex flex-col items-center gap-1" title={day.tooltip}>
-                <span
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-[10px] font-semibold"
-                  style={style}
-                >
-                  {new Date(`${day.date}T12:00:00`).getDate()}
-                </span>
+              <div 
+                key={i} 
+                className={cn(
+                  "min-h-[72px] bg-white p-1.5 transition-colors relative group hover:bg-blue-50/50",
+                  !d && "bg-slate-50/50"
+                )}
+              >
+                {d && (
+                  <>
+                    <span 
+                      className={cn(
+                        "inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold mb-1",
+                        isToday && !attDay ? "bg-blue-600 text-white" : (!attDay ? "text-slate-700 group-hover:text-blue-600" : "")
+                      )}
+                      style={circleStyle}
+                      title={attDay?.tooltip}
+                    >
+                      {d}
+                    </span>
+                    
+                    <div className="space-y-1">
+                      {dayHolidays.map((h, hIdx) => (
+                        <div key={hIdx} className={cn(
+                          "text-[10px] px-1.5 py-1 rounded font-medium flex items-center justify-between gap-1",
+                          h.type === 'MANDATORY' ? "bg-red-50 text-red-700 border border-red-100" : "bg-orange-50 text-orange-700 border border-orange-100"
+                        )}>
+                          <div className="truncate flex items-center gap-1">
+                            <span className="font-bold opacity-80">{h.type === 'RESTRICTED' ? 'RH' : 'M'}</span>
+                            <span className="truncate" title={h.title}>{h.title}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             );
           })}
