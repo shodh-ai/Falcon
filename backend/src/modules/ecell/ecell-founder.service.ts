@@ -30,7 +30,7 @@ export class EcellFounderService {
     private readonly redis: RedisService,
     private readonly notify: NotificationEmitterService,
     private readonly integrations: NotificationService,
-  ) { }
+  ) {}
 
   private tenant(tenantId?: string) {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
@@ -493,7 +493,7 @@ export class EcellFounderService {
       topic: string;
       startup_name: string | null;
     };
-    const [due = []] = (await this.db.query(
+    const [due = []] = await this.db.query(
       `UPDATE ecell_mentor_meetings
        SET status = 'COMPLETED',
            feedback_requested_at = NOW(),
@@ -502,7 +502,7 @@ export class EcellFounderService {
          AND requested_time < NOW() - INTERVAL '1 hour'
        RETURNING meeting_id, tenant_id, mentor_user_id, requested_by_user_id, topic,
                  (SELECT startup_name FROM ecell_projects p WHERE p.project_id = ecell_mentor_meetings.project_id) AS startup_name`,
-    )) as [CompletedMeetingRow[], number];
+    );
     for (const row of due) {
       if (!row.tenant_id || !row.mentor_user_id) continue;
       const mentorRows = await this.db.query(

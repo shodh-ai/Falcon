@@ -1017,7 +1017,6 @@ export class HrController {
 
   @Patch('leaves/:leaveId/approve')
   @Roles('HOD', 'Dean', 'SuperAdmin')
-  @HrPermission('leaves', 'write')
   hodApproveLeave(
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },
@@ -1031,7 +1030,6 @@ export class HrController {
 
   @Patch('leaves/:leaveId/reject')
   @Roles('HOD', 'Dean', 'SuperAdmin')
-  @HrPermission('leaves', 'write')
   hodRejectLeave(
     @Param('leaveId') leaveId: string,
     @Req() req: { user: AuthUser },

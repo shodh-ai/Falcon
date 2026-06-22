@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   IsNumber,
   IsOptional,
@@ -18,6 +19,7 @@ export class SubmitEcellProjectDto {
   @IsString()
   pitch_deck_url?: string;
 
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   requested_funding!: number;

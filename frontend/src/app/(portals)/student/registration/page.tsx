@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { BookMarked, CheckSquare, GraduationCap } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
@@ -12,16 +13,42 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useAuthedApi } from '@/lib/api';
 
+type EnrollmentRow = {
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  credits: number;
+  semester: number;
+  course_type?: string;
+};
+
 type RegistrationData = {
   current_semester: number;
   credits_earned: number;
   credits_required: number;
   electives_needed: number;
   electives_max: number;
-  core_enrollments: { course_code: string; course_name: string; credits: number; semester: number; course_type?: string }[];
-  elective_enrollments: { course_code: string; course_name: string; credits: number; semester: number }[];
+  core_enrollments: EnrollmentRow[];
+  elective_enrollments: EnrollmentRow[];
   available_electives: { course_id: string; course_code: string; course_name: string; credits: number }[];
 };
+
+function EnrollmentCard({ enrollment, registered }: { enrollment: EnrollmentRow; registered?: boolean }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border bg-white p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <p className="font-medium text-sgvu-navy">
+        {enrollment.course_code} — {enrollment.course_name} ({enrollment.credits} cr) · Sem {enrollment.semester}
+        {registered ? ' · registered' : ' · CORE'}
+      </p>
+      <Link
+        href={`/student/courses/${enrollment.course_id}`}
+        className="shrink-0 text-xs font-semibold text-sgvu-navy underline hover:text-sgvu-gold"
+      >
+        Open workspace
+      </Link>
+    </div>
+  );
+}
 
 export default function StudentRegistrationPage() {
   const api = useAuthedApi();
@@ -91,9 +118,7 @@ export default function StudentRegistrationPage() {
         ) : (
           <div className="space-y-2">
             {(data?.core_enrollments ?? []).map((e) => (
-              <div key={e.course_code} className="rounded-2xl border bg-white p-4 text-sm font-medium text-sgvu-navy">
-                {e.course_code} — {e.course_name} ({e.credits} cr) · Sem {e.semester} · CORE
-              </div>
+              <EnrollmentCard key={e.course_id} enrollment={e} />
             ))}
           </div>
         )}
@@ -144,9 +169,7 @@ export default function StudentRegistrationPage() {
               </div>
             )}
             {(data?.elective_enrollments ?? []).map((e) => (
-              <div key={e.course_code} className="rounded-2xl border border-sgvu-gold/30 bg-sgvu-gold/5 p-4 text-sm">
-                ✓ {e.course_code} — {e.course_name} (registered)
-              </div>
+              <EnrollmentCard key={e.course_id} enrollment={e} registered />
             ))}
             <Button
               disabled={registering || selectedElectives.length === 0 || selectedElectives.length > 2}

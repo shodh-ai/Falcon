@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
 import { basename, resolve } from 'path';
 import { extname, join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -384,6 +390,34 @@ export class CourseLmsService {
     };
   }
 
+  async deleteCourseMaterial(
+    facultyUserId: string,
+    tenantId: string,
+    materialId: string,
+  ) {
+    const material = await this.materials.findOne({
+      where: { material_id: materialId, tenant_id: tenantId },
+    });
+    if (!material) throw new NotFoundException('Material not found');
+
+    const ownsMaterial = material.faculty_user_id === facultyUserId;
+    if (!ownsMaterial) {
+      try {
+        await this.assertFacultyTeaches(
+          material.course_id,
+          facultyUserId,
+          tenantId,
+        );
+      } catch {
+        throw new ForbiddenException('You cannot delete this material');
+      }
+    }
+
+    await this.removeStoredFile(material);
+    await this.materials.remove(material);
+    return { deleted: true, material_id: materialId };
+  }
+
   async getMaterialForStudentDownload(
     studentUserId: string,
     tenantId: string,
@@ -520,6 +554,26 @@ export class CourseLmsService {
         courseName,
         materialTitle,
       });
+    }
+  }
+
+  private async removeStoredFile(material: CourseMaterial) {
+    if (material.file_key && this.objectStorage.isEnabled()) {
+      return;
+    }
+    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+    const filePath = material.file_path.startsWith('/')
+      ? material.file_path
+      : resolve(process.cwd(), material.file_path);
+    const resolved = filePath.includes(uploadRoot)
+      ? filePath
+      : resolve(uploadRoot, material.file_path);
+    if (existsSync(resolved)) {
+      try {
+        unlinkSync(resolved);
+      } catch {
+        /* best-effort disk cleanup */
+      }
     }
   }
 

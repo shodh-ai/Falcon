@@ -26,8 +26,9 @@ export class ObjectStorageService implements OnModuleInit {
   private enabled: boolean;
 
   constructor(private readonly config: ConfigService) {
-    const endpoint = this.config.get<string>('S3_ENDPOINT');
-    this.enabled = Boolean(endpoint || this.config.get('S3_BUCKET'));
+    const endpoint = this.config.get<string>('S3_ENDPOINT')?.trim();
+    // Disk fallback unless MinIO/S3 endpoint is explicitly configured (.env.example).
+    this.enabled = Boolean(endpoint);
     this.bucket = this.config.get<string>('S3_BUCKET', 'falcon-uploads');
 
     this.client = new S3Client({

@@ -1,7 +1,7 @@
 'use client';
 
 import { DragEvent, FormEvent, useState } from 'react';
-import { FileText, Plus, Upload, X } from 'lucide-react';
+import { BookOpen, FileText, Plus, Trash2, Upload, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 import {
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import type { FacultyWorkspace } from '@/lib/api/lms';
+import type { FacultyWorkspace, LmsMaterial } from '@/lib/api/lms';
 import { postMultipart } from '@/lib/api/lms';
 
 type Props = {
@@ -40,6 +40,39 @@ function moduleStatusBadge(status: string) {
   );
 }
 
+function MaterialRow({
+  material,
+  badgeLabel,
+  onDelete,
+  deleting,
+}: {
+  material: LmsMaterial;
+  badgeLabel: string;
+  onDelete: (materialId: string) => void;
+  deleting: string | null;
+}) {
+  return (
+    <li className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+      <FileText className="h-4 w-4 shrink-0 text-sgvu-gold" />
+      <span className="min-w-0 flex-1 truncate font-medium text-sgvu-navy">{material.title}</span>
+      <Badge variant="secondary" className="shrink-0 text-[10px]">
+        {badgeLabel}
+      </Badge>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-8 shrink-0 px-2 text-muted-foreground hover:text-red-600"
+        disabled={deleting === material.material_id}
+        onClick={() => onDelete(material.material_id)}
+        aria-label={`Delete ${material.title}`}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+    </li>
+  );
+}
+
 export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const api = useAuthedApi();
   const { token } = useAuth();
@@ -51,6 +84,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [syllabusFile, setSyllabusFile] = useState<File | null>(null);
   const [syllabusUploading, setSyllabusUploading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function addModule(e: FormEvent) {
     e.preventDefault();
@@ -96,6 +130,20 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
     }
   }
 
+  async function deleteMaterial(materialId: string) {
+    if (!confirm('Delete this file? Students will no longer be able to download it.')) return;
+    setDeletingId(materialId);
+    try {
+      await api.del(`/api/academics/faculty/courses/materials/${materialId}`);
+      toast.success('Material deleted');
+      onRefresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const uploadModule = workspace.modules.find((m) => m.module_id === uploadModuleId);
   const syllabusMaterials = workspace.syllabus_materials ?? [];
 
@@ -130,58 +178,54 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   }
 
   return (
-    <div className="space-y-4">
-      <FacultyPanel
-        title="Add module / unit"
-        description="Organize the syllabus into units, then upload notes or slides under each one"
-      >
-        <form onSubmit={addModule} className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Input
-            placeholder="e.g. Unit 1 — Introduction"
-            value={newModuleTitle}
-            onChange={(e) => setNewModuleTitle(e.target.value)}
-            className="flex-1"
-          />
-          <Button type="submit" disabled={addingModule || !newModuleTitle.trim()} className="shrink-0 gap-1.5">
-            <Plus className="h-4 w-4" />
-            Add unit
-          </Button>
-        </form>
-      </FacultyPanel>
+    <div className="space-y-5">
+      <section className="overflow-hidden rounded-xl border border-sgvu-gold/35 bg-gradient-to-br from-sgvu-gold/12 via-sgvu-gold/5 to-background">
+        <div className="border-b border-sgvu-gold/20 bg-sgvu-gold/10 px-4 py-3 sm:px-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sgvu-gold/25 text-sgvu-navy">
+              <BookOpen className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-bold text-sgvu-navy">Course Syllabus</h2>
+                <Badge variant="secondary" className="text-[10px]">
+                  {syllabusMaterials.length} file{syllabusMaterials.length === 1 ? '' : 's'}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pinned at the top for all students — separate from unit notes
+              </p>
+            </div>
+          </div>
+        </div>
 
-      <FacultyPanel
-        title="Course Syllabus & Lesson Plan"
-        description="Pinned above all units for faculty and students"
-        count={syllabusMaterials.length}
-      >
-        <div className="space-y-3">
+        <div className="space-y-4 p-4 sm:p-5">
           {syllabusMaterials.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No syllabus file uploaded yet.</p>
+            <p className="text-sm text-muted-foreground">No syllabus uploaded yet.</p>
           ) : (
-            <ul className="space-y-2">
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {syllabusMaterials.map((m) => (
-                <li
+                <MaterialRow
                   key={m.material_id}
-                  className="flex items-center gap-2 rounded-lg border border-sgvu-gold/40 bg-sgvu-gold/10 px-3 py-2 text-sm"
-                >
-                  <FileText className="h-4 w-4 shrink-0 text-sgvu-gold" />
-                  <span className="font-medium text-sgvu-navy">{m.title}</span>
-                  <Badge variant="secondary" className="ml-auto text-[10px]">
-                    SYLLABUS
-                  </Badge>
-                </li>
+                  material={m}
+                  badgeLabel="SYLLABUS"
+                  onDelete={(id) => void deleteMaterial(id)}
+                  deleting={deletingId}
+                />
               ))}
             </ul>
           )}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+
+          <div className="flex flex-col gap-2 rounded-xl border border-dashed border-sgvu-gold/40 bg-background/80 p-3 sm:flex-row sm:items-center">
             <Input
               type="file"
               accept=".pdf,.ppt,.pptx,application/pdf"
+              className="flex-1 border-0 bg-transparent file:mr-3 file:rounded-md file:border-0 file:bg-sgvu-navy/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-sgvu-navy"
               onChange={(e) => setSyllabusFile(e.target.files?.[0] ?? null)}
             />
             <Button
               type="button"
-              className="gap-1.5"
+              className="shrink-0 gap-1.5 sm:w-auto"
               disabled={!syllabusFile || syllabusUploading}
               onClick={() => void uploadSyllabus()}
             >
@@ -190,82 +234,92 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
             </Button>
           </div>
         </div>
-      </FacultyPanel>
+      </section>
 
-      {workspace.modules.length === 0 ? (
-        <FacultyEmptyState
-          title="No units yet"
-          description="Add your first module above, then upload PDF or PPT materials for enrolled students."
-        />
-      ) : (
-        <FacultyPanel
-          title="Syllabus units"
-          count={workspace.modules.length}
-          description="Reference materials grouped by unit"
-        >
-          <div className="space-y-3">
-            {workspace.modules.map((mod) => (
-              <div
-                key={mod.module_id}
-                className="rounded-xl border border-border/60 bg-background p-4 shadow-sm transition-shadow hover:shadow-md"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md bg-sgvu-navy/10 px-2 py-0.5 text-xs font-bold text-sgvu-navy">
-                        Unit {mod.module_number}
-                      </span>
-                      <h3 className="font-semibold text-sgvu-navy">{mod.title}</h3>
-                    </div>
-                    {mod.description ? (
-                      <p className="mt-1 text-sm text-muted-foreground">{mod.description}</p>
-                    ) : null}
-                  </div>
-                  {moduleStatusBadge(mod.status)}
-                </div>
+      <FacultyPanel
+        title="Unit notes & materials"
+        description="Organize notes and slides by unit"
+        count={workspace.modules.length}
+      >
+          <form onSubmit={addModule} className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Input
+              placeholder="e.g. Unit 1 — Introduction"
+              value={newModuleTitle}
+              onChange={(e) => setNewModuleTitle(e.target.value)}
+              className="flex-1"
+            />
+            <Button type="submit" disabled={addingModule || !newModuleTitle.trim()} className="shrink-0 gap-1.5">
+              <Plus className="h-4 w-4" />
+              Add unit
+            </Button>
+          </form>
 
-                <div className="mt-3">
-                  {mod.materials.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No materials uploaded for this unit.</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {mod.materials.map((m) => (
-                        <li
-                          key={m.material_id}
-                          className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm"
-                        >
-                          <FileText className="h-4 w-4 shrink-0 text-sgvu-gold" />
-                          <span className="font-medium text-sgvu-navy">{m.title}</span>
-                          <Badge variant="secondary" className="ml-auto text-[10px]">
-                            {m.material_type}
-                          </Badge>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-3 gap-1.5"
-                  onClick={() => setUploadModuleId(mod.module_id)}
+          {workspace.modules.length === 0 ? (
+            <FacultyEmptyState
+              title="No units yet"
+              description="Add your first unit above, then upload PDF or PPT notes for enrolled students."
+            />
+          ) : (
+            <div className="space-y-3">
+              {workspace.modules.map((mod) => (
+                <div
+                  key={mod.module_id}
+                  className="rounded-xl border border-border/60 bg-background p-4 shadow-sm transition-shadow hover:shadow-md"
                 >
-                  <Upload className="h-3.5 w-3.5" />
-                  Upload material
-                </Button>
-              </div>
-            ))}
-          </div>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-md bg-sgvu-navy/10 px-2 py-0.5 text-xs font-bold text-sgvu-navy">
+                          Unit {mod.module_number}
+                        </span>
+                        <h3 className="font-semibold text-sgvu-navy">{mod.title}</h3>
+                      </div>
+                      {mod.description ? (
+                        <p className="mt-1 text-sm text-muted-foreground">{mod.description}</p>
+                      ) : null}
+                    </div>
+                    {moduleStatusBadge(mod.status)}
+                  </div>
+
+                  <div className="mt-3">
+                    {mod.materials.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No notes uploaded for this unit.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {mod.materials.map((m) => (
+                          <MaterialRow
+                            key={m.material_id}
+                            material={m}
+                            badgeLabel={m.material_type}
+                            onDelete={(id) => void deleteMaterial(id)}
+                            deleting={deletingId}
+                          />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-3 gap-1.5"
+                    onClick={() => setUploadModuleId(mod.module_id)}
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload notes
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </FacultyPanel>
-      )}
 
       {uploadModuleId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
             <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-5 py-4">
               <div>
-                <p className="text-sm font-bold text-sgvu-navy">Upload material</p>
+                <p className="text-sm font-bold text-sgvu-navy">Upload notes</p>
                 {uploadModule ? (
                   <p className="text-xs text-muted-foreground">
                     Unit {uploadModule.module_number}: {uploadModule.title}

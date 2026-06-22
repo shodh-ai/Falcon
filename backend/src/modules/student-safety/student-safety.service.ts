@@ -9,12 +9,23 @@ import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 const CONCERN_TYPES = ['RAGGING', 'SEXUAL_HARASSMENT'] as const;
-const ACCUSED_TYPES = ['FACULTY', 'STUDENT', 'SENIOR', 'STAFF', 'OTHER'] as const;
+const ACCUSED_TYPES = [
+  'FACULTY',
+  'STUDENT',
+  'SENIOR',
+  'STAFF',
+  'OTHER',
+] as const;
 const ACTIVE_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'] as const;
 
 type ConcernType = (typeof CONCERN_TYPES)[number];
 type AccusedType = (typeof ACCUSED_TYPES)[number];
-type ConcernStatus = 'SUBMITTED' | 'UNDER_REVIEW' | 'ESCALATED' | 'RESOLVED' | 'CLOSED';
+type ConcernStatus =
+  | 'SUBMITTED'
+  | 'UNDER_REVIEW'
+  | 'ESCALATED'
+  | 'RESOLVED'
+  | 'CLOSED';
 
 interface CreateConcernDto {
   concern_type?: string;
@@ -41,15 +52,23 @@ export class StudentSafetyService {
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  async createConcern(tenantId: string, reporterUserId: string, dto: CreateConcernDto) {
+  async createConcern(
+    tenantId: string,
+    reporterUserId: string,
+    dto: CreateConcernDto,
+  ) {
     const concernType = (dto.concern_type ?? '').toUpperCase() as ConcernType;
     const accusedType = (dto.accused_type ?? '').toUpperCase() as AccusedType;
 
     if (!CONCERN_TYPES.includes(concernType)) {
-      throw new BadRequestException(`concern_type must be one of: ${CONCERN_TYPES.join(', ')}`);
+      throw new BadRequestException(
+        `concern_type must be one of: ${CONCERN_TYPES.join(', ')}`,
+      );
     }
     if (!ACCUSED_TYPES.includes(accusedType)) {
-      throw new BadRequestException(`accused_type must be one of: ${ACCUSED_TYPES.join(', ')}`);
+      throw new BadRequestException(
+        `accused_type must be one of: ${ACCUSED_TYPES.join(', ')}`,
+      );
     }
     if (!dto.incident_description?.trim()) {
       throw new BadRequestException('Please describe what happened.');
@@ -68,14 +87,24 @@ export class StudentSafetyService {
       [tenantId, reporterUserId, ACTIVE_STATUSES],
     );
     if (open.length > 0) {
-      throw new BadRequestException('You already have an active safety concern under review.');
+      throw new BadRequestException(
+        'You already have an active safety concern under review.',
+      );
     }
 
     if (dto.accused_user_id) {
-      await this.validateAccusedUser(tenantId, accusedType, dto.accused_user_id);
+      await this.validateAccusedUser(
+        tenantId,
+        accusedType,
+        dto.accused_user_id,
+      );
     }
 
-    const routedRoles = this.resolveRouting(concernType, accusedType, !!dto.is_hostel_related);
+    const routedRoles = this.resolveRouting(
+      concernType,
+      accusedType,
+      !!dto.is_hostel_related,
+    );
     const evidenceUrls = Array.isArray(dto.evidence_urls)
       ? dto.evidence_urls.filter((u) => typeof u === 'string' && u.trim())
       : [];
@@ -104,12 +133,16 @@ export class StudentSafetyService {
     );
     const concern = rows[0];
 
-    const [reporter] = await this.db.query(`SELECT name FROM users WHERE user_id = $1`, [
-      reporterUserId,
-    ]);
+    const [reporter] = await this.db.query(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [reporterUserId],
+    );
 
     await this.notifyRoles(tenantId, routedRoles, {
-      title: concernType === 'SEXUAL_HARASSMENT' ? 'Sexual harassment concern' : 'Ragging concern',
+      title:
+        concernType === 'SEXUAL_HARASSMENT'
+          ? 'Sexual harassment concern'
+          : 'Ragging concern',
       message: `A new ${concernType === 'SEXUAL_HARASSMENT' ? 'sexual harassment' : 'ragging'} concern was submitted and requires review.`,
       actionLink: this.actionLinkForRole(routedRoles[0]),
       requesterName: reporter?.name,
@@ -117,7 +150,11 @@ export class StudentSafetyService {
     });
 
     if (accusedType === 'FACULTY' && dto.accused_user_id) {
-      await this.notifyAccusedFaculty(tenantId, dto.accused_user_id, concernType);
+      await this.notifyAccusedFaculty(
+        tenantId,
+        dto.accused_user_id,
+        concernType,
+      );
       await this.db.query(
         `UPDATE student_safety_concerns SET accused_notified_at = NOW(), updated_at = NOW()
          WHERE concern_id = $1`,
@@ -144,7 +181,9 @@ export class StudentSafetyService {
   listAccusedOptions(tenantId: string, accusedType: string) {
     const normalized = (accusedType ?? '').toUpperCase() as AccusedType;
     if (!ACCUSED_TYPES.includes(normalized)) {
-      throw new BadRequestException(`type must be one of: ${ACCUSED_TYPES.join(', ')}`);
+      throw new BadRequestException(
+        `type must be one of: ${ACCUSED_TYPES.join(', ')}`,
+      );
     }
     const roleMap: Record<AccusedType, string[]> = {
       FACULTY: ['Faculty'],
@@ -215,11 +254,15 @@ export class StudentSafetyService {
     }
 
     const nextStatus = dto.status ?? 'UNDER_REVIEW';
-    if (!['UNDER_REVIEW', 'ESCALATED', 'RESOLVED', 'CLOSED'].includes(nextStatus)) {
+    if (
+      !['UNDER_REVIEW', 'ESCALATED', 'RESOLVED', 'CLOSED'].includes(nextStatus)
+    ) {
       throw new BadRequestException('Invalid status.');
     }
 
-    const resolvedAt = ['RESOLVED', 'CLOSED'].includes(nextStatus) ? new Date() : null;
+    const resolvedAt = ['RESOLVED', 'CLOSED'].includes(nextStatus)
+      ? new Date()
+      : null;
 
     await this.db.query(
       `UPDATE student_safety_concerns
@@ -363,7 +406,11 @@ export class StudentSafetyService {
       [tenantId, roleNames],
     );
     for (const row of recipients as Array<{ user_id: string }>) {
-      this.notify.approvalRequired({ tenantId, userId: row.user_id, ...payload });
+      this.notify.approvalRequired({
+        tenantId,
+        userId: row.user_id,
+        ...payload,
+      });
     }
   }
 
@@ -399,7 +446,10 @@ export class StudentSafetyService {
     if (accusedType === 'FACULTY' && !facultyRoles.includes(user.role_name)) {
       throw new BadRequestException('Selected user is not faculty.');
     }
-    if ((accusedType === 'STUDENT' || accusedType === 'SENIOR') && user.role_name !== 'Student') {
+    if (
+      (accusedType === 'STUDENT' || accusedType === 'SENIOR') &&
+      user.role_name !== 'Student'
+    ) {
       throw new BadRequestException('Selected user is not a student.');
     }
   }
@@ -415,7 +465,8 @@ export class StudentSafetyService {
 
   private normalizeRole(role: string): string {
     const r = role.trim();
-    if (r.toLowerCase() === 'dc_member' || r.toLowerCase() === 'dc member') return 'DC_MEMBER';
+    if (r.toLowerCase() === 'dc_member' || r.toLowerCase() === 'dc member')
+      return 'DC_MEMBER';
     if (r.toLowerCase() === 'hradmin') return 'HR';
     return r;
   }
@@ -429,7 +480,10 @@ export class StudentSafetyService {
       `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
       [hodUserId],
     );
-    const [hod] = await this.db.query(`SELECT dept_id FROM users WHERE user_id = $1`, [hodUserId]);
+    const [hod] = await this.db.query(
+      `SELECT dept_id FROM users WHERE user_id = $1`,
+      [hodUserId],
+    );
     return Array.from(
       new Set<number>([
         ...direct.map((row: { dept_id: number }) => Number(row.dept_id)),

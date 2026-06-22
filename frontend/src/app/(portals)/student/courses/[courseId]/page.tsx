@@ -47,8 +47,8 @@ export default function StudentCourseWorkspacePage() {
         title={`${data.course.course_code} — ${data.course.course_name}`}
         description="Course materials and digital assignments (VTOP-style LMS)."
         actions={
-          <Link href="/student/registration" className="text-sm font-semibold text-sgvu-navy underline">
-            My subjects
+          <Link href="/student/courses" className="text-sm font-semibold text-sgvu-navy underline">
+            All courses
           </Link>
         }
       />

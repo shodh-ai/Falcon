@@ -5,8 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays,
   CheckCircle2,
-  CreditCard,
-  FileCheck2,
   GraduationCap,
   IdCard,
   LockKeyhole,
@@ -95,6 +93,31 @@ function formatCountdown(ms: number) {
 function displayValue(value: unknown) {
   if (value === null || value === undefined || value === '') return 'Not on file';
   return String(value);
+}
+
+function formatDateOfBirth(value: string | null) {
+  if (!value) return 'Not on file';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatGender(value: string | null) {
+  if (!value) return 'Not on file';
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+function formatAnnualIncome(value: string | null | undefined) {
+  if (!value) return null;
+  const num = Number(String(value).replace(/[^\d.]/g, ''));
+  if (!Number.isNaN(num) && num > 0) {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(num);
+  }
+  return value;
 }
 
 function hasProfileValue(value: unknown) {
@@ -368,21 +391,25 @@ export default function StudentProfilePage() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <StudentInfoTile label="Email" value={profile.email} icon={Mail} />
-        <StudentInfoTile label="Mobile" value={profile.mobile} icon={Phone} />
-        <StudentInfoTile label="Blood Group" value={profile.blood_group} icon={Sparkles} />
-        <StudentInfoTile label="ABC ID" value={profile.abc_id} icon={IdCard} />
-        <StudentInfoTile label="Program / Branch" value={`${profile.program} — ${profile.branch}`} icon={GraduationCap} />
+      <section className="grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StudentInfoTile label="Email" value={profile.email} icon={Mail} className="h-full" />
+        <StudentInfoTile label="Mobile" value={profile.mobile} icon={Phone} className="h-full" />
+        <StudentInfoTile label="Blood group" value={profile.blood_group} icon={Sparkles} className="h-full" />
+        <StudentInfoTile label="ABC ID" value={profile.abc_id} icon={IdCard} className="h-full" />
+        <StudentInfoTile label="Gender" value={formatGender(profile.gender)} icon={UserRound} className="h-full" />
+        <StudentInfoTile label="Date of birth" value={formatDateOfBirth(profile.date_of_birth)} icon={CalendarDays} className="h-full" />
         <StudentInfoTile
-          label="Gender / DOB"
-          value={`${profile.gender ?? 'Not on file'} / ${profile.date_of_birth ?? 'Not on file'}`}
-          icon={CalendarDays}
+          label="Session"
+          value={profile.session ?? 'Not on file'}
+          icon={GraduationCap}
+          className="h-full"
         />
+        <StudentInfoTile label="Semester" value={`Semester ${profile.semester}`} icon={GraduationCap} className="h-full" />
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
+      <div className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+          <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
           <CardHeader className="border-b border-border/70 bg-white/80 pb-4">
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
@@ -417,7 +444,13 @@ export default function StudentProfilePage() {
                       onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
                     />
                   ) : (
-                    <ProfileFieldValue value={(parentForm as Record<string, unknown>)[key]} />
+                    <ProfileFieldValue
+                      value={
+                        key === 'annual_income'
+                          ? formatAnnualIncome((parentForm as Record<string, string>)[key])
+                          : (parentForm as Record<string, unknown>)[key]
+                      }
+                    />
                   )}
                 </ProfileFieldRow>
               ))}
@@ -475,16 +508,19 @@ export default function StudentProfilePage() {
         <div className="space-y-6">
           <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
             <CardHeader className="border-b border-border/70 bg-slate-50/50 pb-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Bank details</CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">Bank details</CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">Used for refunds and scholarship disbursements</p>
+                </div>
                 <Button variant="outline" size="sm" onClick={() => (editingBank ? void saveBankDetails() : setEditingBank(true))}>
                   {editingBank ? 'Save' : 'Edit'}
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="grid gap-4 pt-5 sm:grid-cols-2">
+            <CardContent className="pt-5">
               {editingBank ? (
-                <>
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Bank name</label>
                     <Input className="mt-2" value={bankData.bank_name} onChange={(e) => setBankData({ ...bankData, bank_name: e.target.value })} />
@@ -497,73 +533,84 @@ export default function StudentProfilePage() {
                     <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">IFSC</label>
                     <Input className="mt-2" value={bankData.ifsc_code} onChange={(e) => setBankData({ ...bankData, ifsc_code: e.target.value })} />
                   </div>
-                </>
+                </div>
               ) : (
-                <>
-                  <StudentInfoTile label="Bank" value={profile.bank_details?.bank_name} icon={CreditCard} />
-                  <StudentInfoTile label="Account" value={profile.bank_details?.account_number} icon={FileCheck2} />
-                  <StudentInfoTile label="IFSC" value={profile.bank_details?.ifsc_code} icon={FileCheck2} />
-                </>
+                <ProfileDetailSection title="Bank account">
+                  <ProfileFieldRow label="Bank name">
+                    <ProfileFieldValue value={profile.bank_details?.bank_name} />
+                  </ProfileFieldRow>
+                  <ProfileFieldRow label="Account number">
+                    <ProfileFieldValue value={profile.bank_details?.account_number} />
+                  </ProfileFieldRow>
+                  <ProfileFieldRow label="IFSC code">
+                    <ProfileFieldValue value={profile.bank_details?.ifsc_code} />
+                  </ProfileFieldRow>
+                </ProfileDetailSection>
               )}
             </CardContent>
           </Card>
 
-          <Card className="border-emerald-200/70 bg-emerald-50/60">
-            <CardContent className="space-y-3 pt-6">
-              <div className="flex items-center justify-between rounded-2xl bg-white/80 p-3 text-sm">
-                <span className="font-semibold">Onboarding</span>
-                <Badge variant={profile.onboarding_status === 'COMPLETED' ? 'success' : 'warning'}>
-                  {profile.onboarding_status ?? 'Not started'}
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between rounded-2xl bg-white/80 p-3 text-sm">
-                <span className="font-semibold">Aadhaar</span>
-                <Badge variant={profile.aadhaar_masked || profile.onboarding_documents?.some((doc) => doc.doc_type === 'AADHAAR') ? 'success' : 'warning'}>
-                  {profile.aadhaar_masked ?? profile.onboarding_documents?.find((doc) => doc.doc_type === 'AADHAAR')?.status ?? 'Not on file'}
-                </Badge>
-              </div>
-              <div className="space-y-2 rounded-2xl bg-white/80 p-3 text-sm">
-                <p className="font-semibold">Onboarding documents</p>
-                <div className="grid gap-2">
-                  {(profile.onboarding_documents ?? []).length > 0 ? (
-                    profile.onboarding_documents?.map((doc) => (
-                      <div key={doc.doc_type} className="flex items-center justify-between gap-3 text-xs">
-                        <span className="text-muted-foreground">{ONBOARDING_DOC_LABELS[doc.doc_type] ?? doc.doc_type}</span>
-                        <Badge variant={doc.status === 'APPROVED' ? 'success' : doc.status === 'REJECTED' ? 'destructive' : 'outline'}>
-                          {doc.status}
-                        </Badge>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No onboarding documents uploaded.</p>
-                  )}
+          <Card className="overflow-hidden border-emerald-200/70 bg-emerald-50/40 shadow-sm">
+            <CardHeader className="border-b border-emerald-200/60 pb-4">
+              <CardTitle className="text-base">Identity & documents</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
+                  <span className="font-medium text-sgvu-navy">Onboarding</span>
+                  <Badge variant={profile.onboarding_status === 'COMPLETED' ? 'success' : 'warning'}>
+                    {profile.onboarding_status ?? 'Not started'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
+                  <span className="font-medium text-sgvu-navy">Aadhaar</span>
+                  <Badge variant={profile.aadhaar_masked || profile.onboarding_documents?.some((doc) => doc.doc_type === 'AADHAAR') ? 'success' : 'warning'}>
+                    {profile.aadhaar_masked ?? profile.onboarding_documents?.find((doc) => doc.doc_type === 'AADHAAR')?.status ?? 'Not on file'}
+                  </Badge>
                 </div>
               </div>
-              <div className="flex gap-2 rounded-2xl border border-emerald-200 bg-white/70 p-3 text-xs">
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <ProfileDetailSection title="Onboarding documents">
+                {(profile.onboarding_documents ?? []).length > 0 ? (
+                  profile.onboarding_documents?.map((doc) => (
+                    <ProfileFieldRow key={doc.doc_type} label={ONBOARDING_DOC_LABELS[doc.doc_type] ?? doc.doc_type}>
+                      <Badge variant={doc.status === 'APPROVED' ? 'success' : doc.status === 'REJECTED' ? 'destructive' : 'outline'}>
+                        {doc.status}
+                      </Badge>
+                    </ProfileFieldRow>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-sm text-muted-foreground">No onboarding documents uploaded.</div>
+                )}
+              </ProfileDetailSection>
+              <p className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-white/70 px-3 py-2.5 text-xs text-muted-foreground">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                 Scholarship eligibility uses annual income on file.
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-sgvu-gold/30 shadow-lg">
-            <CardHeader className="bg-gradient-to-r from-sgvu-gold/20 to-white pb-5">
-              <CardTitle className="text-base">Request profile correction</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <textarea
-                className="min-h-28 w-full resize-none rounded-2xl border px-4 py-3 text-sm"
-                placeholder="Describe the correction needed…"
-                value={requestNote}
-                onChange={(e) => setRequestNote(e.target.value)}
-              />
-              <Button onClick={() => void submitUpdateRequest()} disabled={!correctionReady}>
-                <Send className="h-4 w-4" />
-                Submit to Admin
-              </Button>
+              </p>
             </CardContent>
           </Card>
         </div>
+        </div>
+
+        <Card className="border-sgvu-gold/30 shadow-lg">
+          <CardHeader className="border-b border-sgvu-gold/20 bg-gradient-to-r from-sgvu-gold/15 to-white pb-4">
+            <CardTitle className="text-base">Request profile correction</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Describe what needs to change. An admin can unlock a 15-minute edit window after review.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-5">
+            <textarea
+              className="min-h-28 w-full resize-none rounded-xl border px-4 py-3 text-sm"
+              placeholder="Describe the correction needed…"
+              value={requestNote}
+              onChange={(e) => setRequestNote(e.target.value)}
+            />
+            <Button onClick={() => void submitUpdateRequest()} disabled={!correctionReady}>
+              <Send className="h-4 w-4" />
+              Submit to Admin
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     </StudentPageShell>
   );

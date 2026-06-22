@@ -74,7 +74,9 @@ export class AttendancePolicyService {
       );
     }
     if (evaluation.threshold_source === 'EXEMPTION') {
-      throw new BadRequestException('You already have an approved attendance exemption.');
+      throw new BadRequestException(
+        'You already have an approved attendance exemption.',
+      );
     }
 
     const open = await this.db.query(
@@ -160,9 +162,15 @@ export class AttendancePolicyService {
     exemptionId: string,
     dto: DecisionDto,
   ) {
-    const exemption = await this.loadExemptionInHodScope(tenantId, hodUserId, exemptionId);
+    const exemption = await this.loadExemptionInHodScope(
+      tenantId,
+      hodUserId,
+      exemptionId,
+    );
     if (!['PENDING_HOD', 'RECOMMENDED'].includes(exemption.status)) {
-      throw new BadRequestException('This request is no longer pending your review.');
+      throw new BadRequestException(
+        'This request is no longer pending your review.',
+      );
     }
 
     if (dto.decision === 'REJECT') {
@@ -192,9 +200,10 @@ export class AttendancePolicyService {
       [exemptionId, hodUserId, dto.remarks ?? null],
     );
 
-    const [student] = await this.db.query(`SELECT name FROM users WHERE user_id = $1`, [
-      exemption.student_user_id,
-    ]);
+    const [student] = await this.db.query(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [exemption.student_user_id],
+    );
     this.notify.approvalRequired({
       tenantId,
       userId: exemption.student_user_id,

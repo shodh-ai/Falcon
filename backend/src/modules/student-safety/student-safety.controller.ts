@@ -1,10 +1,25 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StudentSafetyService } from './student-safety.service';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; primaryRole?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  primaryRole?: string;
+};
 
 @Controller('api/student-safety')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -39,17 +54,18 @@ export class StudentSafetyController {
 
   @Get('accused-options')
   @Roles('Student', 'SuperAdmin')
-  accusedOptions(
-    @Req() req: { user: AuthUser },
-    @Query('type') type: string,
-  ) {
+  accusedOptions(@Req() req: { user: AuthUser }, @Query('type') type: string) {
     return this.safety.listAccusedOptions(this.tenant(req), type ?? '');
   }
 
   @Get('dc/concerns')
   @Roles('DC_MEMBER', 'SuperAdmin')
   dcConcerns(@Req() req: { user: AuthUser }) {
-    return this.safety.listForRole(this.tenant(req), 'DC_MEMBER', req.user.user_id);
+    return this.safety.listForRole(
+      this.tenant(req),
+      'DC_MEMBER',
+      req.user.user_id,
+    );
   }
 
   @Get('hod/concerns')
@@ -73,7 +89,11 @@ export class StudentSafetyController {
   @Get('warden/concerns')
   @Roles('Warden', 'SuperAdmin')
   wardenConcerns(@Req() req: { user: AuthUser }) {
-    return this.safety.listForRole(this.tenant(req), 'Warden', req.user.user_id);
+    return this.safety.listForRole(
+      this.tenant(req),
+      'Warden',
+      req.user.user_id,
+    );
   }
 
   @Get('faculty/notices')
@@ -95,7 +115,13 @@ export class StudentSafetyController {
     },
   ) {
     const role = req.user.primaryRole ?? req.user.role ?? 'SuperAdmin';
-    return this.safety.updateConcern(this.tenant(req), req.user.user_id, role, id, dto);
+    return this.safety.updateConcern(
+      this.tenant(req),
+      req.user.user_id,
+      role,
+      id,
+      dto,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

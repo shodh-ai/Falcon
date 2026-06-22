@@ -370,7 +370,7 @@ export class VenueBookingService {
     );
 
     const qrToken = randomBytes(20).toString('hex');
-    const [updated = []] = (await this.db.query(
+    const [updated = []] = await this.db.query(
       `UPDATE venue_bookings
        SET status = 'APPROVED',
            approved_by_user_id = $3,
@@ -380,7 +380,7 @@ export class VenueBookingService {
        WHERE tenant_id = $1 AND booking_id = $2
        RETURNING *`,
       [tenantId, bookingId, approverUserId, remarks ?? null, qrToken],
-    )) as [Record<string, unknown>[], number];
+    );
 
     this.notify.venueBookingApproved({
       tenantId,
@@ -410,7 +410,7 @@ export class VenueBookingService {
     }
     this.assertApproverCanAct(approverRoleKeys, booking.approver_role);
 
-    const [updated = []] = (await this.db.query(
+    const [updated = []] = await this.db.query(
       `UPDATE venue_bookings
        SET status = 'REJECTED',
            approved_by_user_id = $3,
@@ -419,7 +419,7 @@ export class VenueBookingService {
        WHERE tenant_id = $1 AND booking_id = $2
        RETURNING *`,
       [tenantId, bookingId, approverUserId, remarks ?? null],
-    )) as [Record<string, unknown>[], number];
+    );
 
     this.notify.venueBookingRejected({
       tenantId,
@@ -441,7 +441,7 @@ export class VenueBookingService {
   async expireStalePendingBookings() {
     try {
       const tableExists = await this.db.query(
-        `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'venue_bookings') AS exists`
+        `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'venue_bookings') AS exists`,
       );
       if (!tableExists[0]?.exists) return;
 
@@ -451,12 +451,12 @@ export class VenueBookingService {
         student_user_id: string;
         venue_id: string;
       };
-      const [expired = []] = (await this.db.query(
+      const [expired = []] = await this.db.query(
         `UPDATE venue_bookings
          SET status = 'EXPIRED', updated_at = NOW()
          WHERE status = 'PENDING_APPROVAL' AND start_time < NOW()
          RETURNING booking_id, tenant_id, student_user_id, venue_id`,
-      )) as [ExpiredBookingRow[], number];
+      );
       if (!expired.length) return;
 
       for (const row of expired) {

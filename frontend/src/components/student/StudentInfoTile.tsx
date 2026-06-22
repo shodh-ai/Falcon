@@ -19,20 +19,25 @@ export function StudentInfoTile({
   icon?: ComponentType<{ className?: string }>;
   className?: string;
 }) {
+  const shown = displayValue(value);
   return (
     <div
       className={cn(
-        'group rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-sgvu-gold/50 hover:shadow-md',
+        'group flex h-full flex-col rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-sgvu-gold/50 hover:shadow-md',
         className,
       )}
     >
-      {Icon ? (
-        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy transition group-hover:bg-sgvu-gold/20">
-          <Icon className="h-5 w-5" />
-        </div>
-      ) : null}
-      <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-      <p className="mt-1 break-words text-sm font-semibold leading-6 text-sgvu-navy">{displayValue(value)}</p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
+        {Icon ? (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy transition group-hover:bg-sgvu-gold/20">
+            <Icon className="h-4 w-4" />
+          </div>
+        ) : null}
+      </div>
+      <p className="mt-auto pt-3 text-sm font-semibold leading-snug text-sgvu-navy" title={shown}>
+        {shown}
+      </p>
     </div>
   );
 }

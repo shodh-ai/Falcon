@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -1452,6 +1453,19 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       courseId,
       { title: body.title ?? '', module_number: body.module_number },
+    );
+  }
+
+  @Delete('faculty/courses/materials/:materialId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  deleteCourseMaterial(
+    @Param('materialId') materialId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.deleteCourseMaterial(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      materialId,
     );
   }
 

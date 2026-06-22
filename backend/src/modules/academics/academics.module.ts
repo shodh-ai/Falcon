@@ -84,7 +84,14 @@ import { InsightsController } from './insights.controller';
       HelpdeskTicket,
     ]),
   ],
-  controllers: [AcademicsController, ProctorController, CertificatesController, EarlyWarningController, FacultyProfileController, InsightsController],
+  controllers: [
+    AcademicsController,
+    ProctorController,
+    CertificatesController,
+    EarlyWarningController,
+    FacultyProfileController,
+    InsightsController,
+  ],
   providers: [
     AcademicsService,
     AcademicsFacultyService,
@@ -117,4 +124,4 @@ import { InsightsController } from './insights.controller';
     InsightsService,
   ],
 })
-export class AcademicsModule { }
+export class AcademicsModule {}

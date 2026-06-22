@@ -128,8 +128,15 @@ export default function StudentEcellPage() {
     try {
       const body = new FormData();
       body.append('file', file);
-      const res = await api.post<{ url: string }>('/api/uploads/single', body);
-      setForm((f) => ({ ...f, pitch_deck_url: res.url }));
+      const res = await api.post<{ url?: string; path?: string; key?: string }>(
+        '/api/uploads/single',
+        body,
+      );
+      const pitchUrl = res.url ?? res.path ?? res.key;
+      if (!pitchUrl) {
+        throw new Error('Upload did not return a file reference');
+      }
+      setForm((f) => ({ ...f, pitch_deck_url: pitchUrl }));
       toast.success('Pitch deck uploaded');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
@@ -149,9 +156,11 @@ export default function StudentEcellPage() {
     }
     setSubmitting(true);
     try {
-      await ecellApi.submitProject(form);
+      await ecellApi.submitProject({
+        ...form,
+        requested_funding: Number(form.requested_funding) || 0,
+      });
       toast.success('Incubation pitch submitted');
-      await load();
       setPreTab('tracker');
       setForm({
         startup_name: '',
@@ -159,6 +168,11 @@ export default function StudentEcellPage() {
         pitch_deck_url: '',
         requested_funding: 50000,
       });
+      try {
+        await load();
+      } catch {
+        toast.warning('Pitch saved — refresh the tracker if it does not update');
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not submit pitch');
     } finally {

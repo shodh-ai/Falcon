@@ -281,6 +281,7 @@ export const studentPortal: PortalConfig = {
       title: 'Academics & Examinations',
       items: [
         { label: 'Subjects & Registration (CBCS)', href: '/student/registration', icon: BookOpen, keywords: ['cbcs', 'electives', 'credits', 'courses'] },
+        { label: 'Course Page & DA', href: '/student/courses', icon: NotebookPen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'syllabus', 'lms'] },
         { label: 'Attendance & Progression', href: '/student/attendance', icon: ClipboardCheck, keywords: ['attendance', 'semester', 'progression'] },
         { label: 'Marks & Grade Cards', href: '/student/marks', icon: TrendingUp, keywords: ['sgpa', 'cgpa', 'backlog', 'atkt', 'grades'] },
         { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList, keywords: ['admit card', 'seating', 'ufm', 'revaluation'] },
@@ -314,6 +315,7 @@ export const studentPortal: PortalConfig = {
     { label: 'My Profile', href: '/student/profile', icon: UserRoundCog },
     { label: 'Admission Vault', href: '/student/admission-vault', icon: Archive },
     { label: 'CBCS Registration', href: '/student/registration', icon: BookOpen },
+    { label: 'Course Page & DA', href: '/student/courses', icon: NotebookPen },
     { label: 'Attendance', href: '/student/attendance', icon: ClipboardCheck },
     { label: 'Marks', href: '/student/marks', icon: TrendingUp },
     { label: 'Exam Desk', href: '/student/exams', icon: ClipboardList },
