@@ -1490,6 +1490,98 @@ export class CampusEventsService {
     );
   }
 
+  async listClubsAndChapters(tenantId: string, studentUserId: string) {
+    return this.dataSource.query(
+      `SELECT c.club_id,
+              c.name,
+              c.description,
+              c.club_type,
+              c.applications_open,
+              c.focus_area,
+              fa.name AS faculty_advisor_name,
+              sc.name AS coordinator_name,
+              a.application_id,
+              a.status AS application_status,
+              a.created_at AS applied_at,
+              (SELECT COUNT(*)::int FROM campus_club_applications m
+               WHERE m.club_id = c.club_id AND m.status = 'APPROVED') AS member_count
+       FROM campus_clubs c
+       LEFT JOIN users fa ON fa.user_id = c.faculty_advisor_id
+       LEFT JOIN users sc ON sc.user_id = c.student_coordinator_id
+       LEFT JOIN campus_club_applications a
+         ON a.club_id = c.club_id
+        AND a.student_user_id = $2
+        AND a.tenant_id = $1
+       WHERE c.tenant_id = $1
+       ORDER BY c.club_type ASC, c.name ASC`,
+      [tenantId, studentUserId],
+    );
+  }
+
+  async applyToClub(
+    tenantId: string,
+    studentUserId: string,
+    clubId: string,
+    motivation?: string,
+  ) {
+    const clubs = await this.dataSource.query<
+      Array<{ club_id: string; name: string; applications_open: boolean }>
+    >(
+      `SELECT club_id, name, applications_open FROM campus_clubs
+       WHERE club_id = $1 AND tenant_id = $2`,
+      [clubId, tenantId],
+    );
+    const club = clubs[0];
+    if (!club) throw new NotFoundException('Club or chapter not found');
+    if (!club.applications_open) {
+      throw new BadRequestException('Applications are closed for this group');
+    }
+
+    const existing = await this.dataSource.query<
+      Array<{ application_id: string; status: string }>
+    >(
+      `SELECT application_id, status FROM campus_club_applications
+       WHERE club_id = $1 AND student_user_id = $2 AND tenant_id = $3`,
+      [clubId, studentUserId, tenantId],
+    );
+    const row = existing[0];
+    if (row?.status === 'APPROVED') {
+      throw new BadRequestException('You are already a member');
+    }
+    if (row?.status === 'PENDING') {
+      throw new BadRequestException('Your application is already pending review');
+    }
+
+    const motivationText = motivation?.trim() || null;
+
+    if (row?.status === 'REJECTED') {
+      const updated = await this.dataSource.query(
+        `UPDATE campus_club_applications
+         SET status = 'PENDING', motivation = $2, reviewed_at = NULL, created_at = NOW()
+         WHERE application_id = $1 AND tenant_id = $3
+         RETURNING *`,
+        [row.application_id, motivationText, tenantId],
+      );
+      return {
+        application: updated[0],
+        club_name: club.name,
+        message: 'Application resubmitted',
+      };
+    }
+
+    const inserted = await this.dataSource.query(
+      `INSERT INTO campus_club_applications (tenant_id, club_id, student_user_id, motivation)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [tenantId, clubId, studentUserId, motivationText],
+    );
+    return {
+      application: inserted[0],
+      club_name: club.name,
+      message: 'Application submitted',
+    };
+  }
+
   async listClubEvents(tenantId: string, studentId: string) {
     return this.dataSource.query(
       `SELECT e.*,

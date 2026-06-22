@@ -136,6 +136,30 @@ export class CampusEventsController {
     return this.events.getMyTickets(this.tenant(req), req.user.user_id);
   }
 
+  @Get('clubs')
+  @Roles('Student', 'Faculty')
+  listClubsAndChapters(@Req() req: { user: AuthUser }) {
+    return this.events.listClubsAndChapters(
+      this.tenant(req),
+      req.user.user_id,
+    );
+  }
+
+  @Post('clubs/:clubId/apply')
+  @Roles('Student')
+  applyToClub(
+    @Req() req: { user: AuthUser },
+    @Param('clubId') clubId: string,
+    @Body() body: { motivation?: string },
+  ) {
+    return this.events.applyToClub(
+      this.tenant(req),
+      req.user.user_id,
+      clubId,
+      body.motivation,
+    );
+  }
+
   @Get('me/club-coordinator')
   @Roles('Student')
   clubCoordinator(@Req() req: { user: AuthUser }) {

@@ -37,6 +37,21 @@ export type CampusEvent = {
 export type BlockedDate = { date: string; title: string };
 export type Venue = { venue_id: string; name: string; location_label?: string };
 
+export type CampusClubDirectoryRow = {
+  club_id: string;
+  name: string;
+  description: string | null;
+  club_type: 'CLUB' | 'CHAPTER' | string;
+  applications_open: boolean;
+  focus_area: string | null;
+  faculty_advisor_name: string | null;
+  coordinator_name: string | null;
+  application_id: string | null;
+  application_status: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+  applied_at: string | null;
+  member_count: number;
+};
+
 export type EventRegistration = {
   registration_id: string;
   event_id: string;
@@ -94,6 +109,12 @@ export function createCampusEventsApi(api: AuthedApi) {
         { registration_id: registrationId, payment_ref: paymentRef },
       ),
     myTickets: () => api.get<EventRegistration[]>('/api/campus-events/my-tickets'),
+    listClubsDirectory: () => api.get<CampusClubDirectoryRow[]>('/api/campus-events/clubs'),
+    applyToClub: (clubId: string, motivation?: string) =>
+      api.post<{ application: { application_id: string; status: string }; club_name: string; message: string }>(
+        `/api/campus-events/clubs/${clubId}/apply`,
+        { motivation },
+      ),
     isClubCoordinator: () =>
       api.get<{ is_coordinator: boolean }>('/api/campus-events/me/club-coordinator'),
     myClubs: () => api.get<{ club_id: string; name: string }[]>('/api/campus-events/coordinator/clubs'),
