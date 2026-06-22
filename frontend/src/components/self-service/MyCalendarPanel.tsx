@@ -70,7 +70,7 @@ export function MyCalendarPanel() {
             onChange={(e) => setMonth(e.target.value)}
           />
         </div>
-        <HrAttendanceCalendar mode="self" month={month} embedded />
+        <HrAttendanceCalendar mode="self" month={month} embedded holidays={data?.holidays} />
       </FacultyPanel>
 
       {metaLoading ? (
