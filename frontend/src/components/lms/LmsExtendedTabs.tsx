@@ -4,20 +4,14 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2, MessageSquare, Video } from 'lucide-react';
+import { Loader2, MessageSquare } from 'lucide-react';
 import { FacultyPanel, FacultyEmptyState } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LiveClassCard } from '@/components/lms/LiveClassCard';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
-
-type LiveClass = {
-  live_class_id: string;
-  title: string;
-  meeting_url: string;
-  starts_at: string;
-  ends_at: string;
-};
+import type { LiveClassRow } from '@/lib/live-classes';
 
 type Thread = {
   thread_id: string;
@@ -40,7 +34,7 @@ type ForumThreadForm = z.infer<typeof forumThreadSchema>;
 
 export function LmsExtendedTabs({ courseId, mode }: { courseId: string; mode: 'faculty' | 'student' }) {
   const api = useAuthedApi();
-  const [liveClasses, setLiveClasses] = useState<LiveClass[]>([]);
+  const [liveClasses, setLiveClasses] = useState<LiveClassRow[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [submittingLive, setSubmittingLive] = useState(false);
   const [submittingForum, setSubmittingForum] = useState(false);
@@ -58,12 +52,12 @@ export function LmsExtendedTabs({ courseId, mode }: { courseId: string; mode: 'f
   });
 
   useEffect(() => {
-    void api.get<LiveClass[]>(`/api/lms/courses/${courseId}/live-classes`).then(setLiveClasses).catch(() => setLiveClasses([]));
+    void api
+      .get<LiveClassRow[]>(`/api/lms/courses/${courseId}/live-classes`)
+      .then(setLiveClasses)
+      .catch(() => setLiveClasses([]));
     void api.get<Thread[]>(`/api/lms/courses/${courseId}/forums`).then(setThreads).catch(() => setThreads([]));
-    if (mode === 'student') {
-      void api.get<LiveClass[]>('/api/lms/live-classes/active').then(setLiveClasses).catch(() => undefined);
-    }
-  }, [api, courseId, mode]);
+  }, [api, courseId]);
 
   async function onCreateLiveClass(values: LiveClassForm) {
     setSubmittingLive(true);
@@ -79,7 +73,7 @@ export function LmsExtendedTabs({ courseId, mode }: { courseId: string; mode: 'f
       });
       toast.success('Live class scheduled');
       liveForm.reset();
-      const updated = await api.get<LiveClass[]>(`/api/lms/courses/${courseId}/live-classes`);
+      const updated = await api.get<LiveClassRow[]>(`/api/lms/courses/${courseId}/live-classes`);
       setLiveClasses(updated);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to schedule live class');
@@ -129,23 +123,7 @@ export function LmsExtendedTabs({ courseId, mode }: { courseId: string; mode: 'f
           />
         ) : (
           liveClasses.map((lc) => (
-            <div
-              key={lc.live_class_id}
-              className="rounded-xl border border-border/60 bg-muted/20 p-3 text-sm"
-            >
-              <div className="flex items-start gap-2">
-                <Video className="mt-0.5 h-4 w-4 shrink-0 text-sgvu-gold" />
-                <div>
-                  <p className="font-medium text-sgvu-navy">{lc.title}</p>
-                  <p className="text-muted-foreground">{new Date(lc.starts_at).toLocaleString()}</p>
-                </div>
-              </div>
-              {mode === 'student' && (
-                <Button size="sm" className="mt-2" asChild>
-                  <a href={lc.meeting_url} target="_blank" rel="noreferrer">Join now</a>
-                </Button>
-              )}
-            </div>
+            <LiveClassCard key={lc.live_class_id} liveClass={lc} showJoin={mode === 'student'} />
           ))
         )}
         {mode === 'faculty' && (

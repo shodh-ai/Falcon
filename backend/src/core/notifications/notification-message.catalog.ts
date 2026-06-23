@@ -3,6 +3,7 @@ import type {
   AlumniConversionRequestedPayload,
   AttendanceWarningPayload,
   CourseMaterialAddedPayload,
+  LiveClassScheduledPayload,
   EventProposedPayload,
   EventTierPayload,
   EventRejectedPayload,
@@ -135,6 +136,33 @@ export function courseMaterialAddedMessage(
       metadata: {
         courseId: payload.courseId,
         materialTitle: payload.materialTitle,
+      },
+    },
+    overrides,
+  );
+}
+
+export function liveClassScheduledMessage(
+  payload: LiveClassScheduledPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const when = new Date(payload.startsAt).toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: `Live class — ${payload.courseCode ?? payload.courseName}`,
+      message: `${payload.liveClassTitle} is scheduled for ${when}. Join from your course workspace when the session starts.`,
+      actionLink: payload.actionLink ?? `/student/courses/${payload.courseId}?tab=live`,
+      actionLabel: 'Open live session',
+      severity: 'info',
+      intent: 'info',
+      metadata: {
+        courseId: payload.courseId,
+        liveClassTitle: payload.liveClassTitle,
+        startsAt: payload.startsAt,
       },
     },
     overrides,
