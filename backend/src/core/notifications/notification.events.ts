@@ -10,6 +10,7 @@ export const NotificationEvents = {
   ACADEMICS_TIMETABLE_CHANGED: 'academics.timetable_changed',
   ACADEMICS_MARKS_PUBLISHED: 'academics.marks_published',
   ACADEMICS_COURSE_MATERIAL_ADDED: 'academics.course_material_added',
+  ACADEMICS_LIVE_CLASS_SCHEDULED: 'academics.live_class_scheduled',
   OPERATIONS_GATE_PASS_UPDATED: 'operations.gate_pass_updated',
   HR_LEAVE_APPROVED: 'hr.leave_approved',
   HR_PENALTY_APPLIED: 'hr.penalty_applied',
@@ -105,6 +106,14 @@ export type CourseMaterialAddedPayload = BaseNotificationPayload & {
   courseId: string;
   courseName: string;
   materialTitle: string;
+};
+
+export type LiveClassScheduledPayload = BaseNotificationPayload & {
+  courseId: string;
+  courseName: string;
+  courseCode?: string;
+  liveClassTitle: string;
+  startsAt: string;
 };
 
 export type GatePassUpdatedPayload = BaseNotificationPayload & {

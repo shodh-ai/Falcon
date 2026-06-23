@@ -159,12 +159,14 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getFacultyCourseAttendanceAnalytics(
     @Param('courseId') courseId: string,
+    @Query('date') date: string | undefined,
     @Req() req: { user: AuthUser },
   ) {
     return this.facultyAcademics.getAttendanceAnalytics(
       courseId,
       req.user.user_id,
       this.resolveTenantId(req.user),
+      date,
     );
   }
 

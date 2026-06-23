@@ -15,6 +15,7 @@ import {
   type ExamResultsPublishedPayload,
   type ExamRevaluationPayload,
   type MarksPublishedPayload,
+  type LiveClassScheduledPayload,
   type MeetingRequestedPayload,
   type MeetingRespondedPayload,
   type TicketReplyPayload,
@@ -93,6 +94,10 @@ export class NotificationEmitterService {
       NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED,
       payload,
     );
+  }
+
+  liveClassScheduled(payload: LiveClassScheduledPayload) {
+    this.events.emit(NotificationEvents.ACADEMICS_LIVE_CLASS_SCHEDULED, payload);
   }
 
   gatePassUpdated(payload: GatePassUpdatedPayload) {

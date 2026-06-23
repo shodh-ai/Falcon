@@ -8,6 +8,7 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { Badge } from '@/components/ui/badge';
+import { StudentLiveClassUpdates } from '@/components/lms/StudentLiveClassUpdates';
 import { useStudentCourses } from '@/components/student/useStudentCourses';
 
 export default function StudentCoursesIndexPage() {
@@ -33,6 +34,8 @@ export default function StudentCoursesIndexPage() {
           ) : null
         }
       />
+
+      <StudentLiveClassUpdates />
 
       {courses.length === 0 ? (
         isFetchError ? (

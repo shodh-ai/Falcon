@@ -8,6 +8,7 @@ import {
   alumniConversionRequestedMessage,
   attendanceWarningMessage,
   courseMaterialAddedMessage,
+  liveClassScheduledMessage,
   eventPendingEstateMessage,
   eventPendingFinanceMessage,
   eventPendingHodMessage,
@@ -66,6 +67,7 @@ import {
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
   type CourseMaterialAddedPayload,
+  type LiveClassScheduledPayload,
   type ExamRevaluationPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
@@ -161,6 +163,16 @@ export class NotificationEventsListener {
   @OnEvent(NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED)
   async onCourseMaterialAdded(payload: CourseMaterialAddedPayload) {
     const msg = courseMaterialAddedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ACADEMICS_LIVE_CLASS_SCHEDULED)
+  async onLiveClassScheduled(payload: LiveClassScheduledPayload) {
+    const msg = liveClassScheduledMessage(payload, {
       title: payload.title,
       message: payload.message,
       actionLink: payload.actionLink,

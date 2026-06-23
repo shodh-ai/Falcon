@@ -16,7 +16,7 @@ import { CreateLiveClassDto } from './dto/create-live-class.dto';
 import { CreateForumThreadDto } from './dto/create-forum-thread.dto';
 import { CreateForumReplyDto } from './dto/create-forum-reply.dto';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
 
 @Controller('api/lms')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -81,15 +81,29 @@ export class LmsExtendedController {
   }
 
   @Get('courses/:courseId/live-classes')
-  @Roles('Faculty', 'Student', 'SuperAdmin')
-  listLive(@Param('courseId') courseId: string) {
-    return this.lms.listLiveClasses(courseId);
+  @Roles('Faculty', 'Student', 'SuperAdmin', 'HOD', 'Dean')
+  listLive(@Param('courseId') courseId: string, @Req() req: { user: AuthUser }) {
+    return this.lms.listLiveClasses(
+      courseId,
+      this.tenant(req),
+      req.user.user_id,
+      this.roles(req),
+    );
+  }
+
+  @Get('live-classes/updates')
+  @Roles('Student')
+  studentLiveUpdates(@Req() req: { user: AuthUser }) {
+    return this.lms.listStudentLiveClassUpdates(
+      req.user.user_id,
+      this.tenant(req),
+    );
   }
 
   @Get('live-classes/active')
   @Roles('Student')
   activeLive(@Req() req: { user: AuthUser }) {
-    return this.lms.listActiveLiveClasses(req.user.user_id);
+    return this.lms.listActiveLiveClasses(req.user.user_id, this.tenant(req));
   }
 
   @Post('forums/threads')
@@ -128,5 +142,13 @@ export class LmsExtendedController {
 
   private tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private roles(req: { user: AuthUser }) {
+    return req.user.roles?.length
+      ? req.user.roles
+      : req.user.role
+        ? [req.user.role]
+        : [];
   }
 }

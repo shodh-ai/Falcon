@@ -156,7 +156,9 @@ function MarkAttendanceContent() {
           ),
         ]);
         const courseAnalytics = await api
-          .get<AttendanceAnalytics>(`/api/academics/faculty/course/${selectedCourseId}/attendance/analytics`)
+          .get<AttendanceAnalytics>(
+            `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
+          )
           .catch(() => null);
         if (cancelled) return;
         setStudents(roster);
@@ -243,7 +245,9 @@ function MarkAttendanceContent() {
       }
       setMissingAlerts((prev) => prev.filter((row) => row.course_id !== selectedCourseId));
       const courseAnalytics = await api
-        .get<AttendanceAnalytics>(`/api/academics/faculty/course/${selectedCourseId}/attendance/analytics`)
+        .get<AttendanceAnalytics>(
+          `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
+        )
         .catch(() => null);
       setAnalytics(courseAnalytics);
     } catch (e) {
@@ -364,11 +368,11 @@ function MarkAttendanceContent() {
                   <div className="space-y-4">
                     <div className="grid gap-3 md:grid-cols-3">
                       <FacultyMetricChip
-                        label="Scheduled classes"
+                        label="Sessions scheduled"
                         value={`${analytics.health.scheduled_classes}`}
                       />
                       <FacultyMetricChip
-                        label="Conducted"
+                        label="Attendance marked"
                         value={`${analytics.health.conducted_classes}`}
                         emphasis
                       />

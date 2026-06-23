@@ -423,6 +423,7 @@ export class AcademicsFacultyService {
     courseId: string,
     facultyUserId: string,
     tenantId: string,
+    date = localDateString(),
   ) {
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
     const [health] = await this.dataSource.query<
@@ -432,7 +433,22 @@ export class AcademicsFacultyService {
         average_attendance_percent: string | null;
       }>
     >(
-      `WITH conducted AS (
+      `WITH day_slots AS (
+         SELECT COUNT(*)::int AS scheduled_classes
+         FROM academic_timetables t
+         WHERE t.tenant_id = $1
+           AND t.faculty_user_id = $3
+           AND t.day_of_week = EXTRACT(ISODOW FROM $4::date)::int
+       ),
+       day_conducted AS (
+         SELECT COUNT(*)::int AS conducted_classes
+         FROM course_attendance_logs cal
+         WHERE cal.tenant_id = $1
+           AND cal.faculty_user_id = $3
+           AND cal.date = $4::date
+           AND cal.timetable_id IS NOT NULL
+       ),
+       conducted AS (
          SELECT
            cal.log_id,
            COUNT(entries.value)::numeric AS total_students,
@@ -447,11 +463,11 @@ export class AcademicsFacultyService {
          GROUP BY cal.log_id
        )
        SELECT
-         (SELECT COUNT(*)::text FROM academic_timetables WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3) AS scheduled_classes,
-         COUNT(*)::text AS conducted_classes,
+         (SELECT scheduled_classes::text FROM day_slots) AS scheduled_classes,
+         (SELECT conducted_classes::text FROM day_conducted) AS conducted_classes,
          ROUND(AVG((present_students / NULLIF(total_students, 0)) * 100), 2)::text AS average_attendance_percent
        FROM conducted`,
-      [tenantId, courseId, facultyUserId],
+      [tenantId, courseId, facultyUserId, date],
     );
 
     const defaulters = await this.dataSource.query(
