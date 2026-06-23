@@ -166,6 +166,7 @@ export default function FacultyIqacPage() {
               <Input
                 className="mt-4 max-w-md mx-auto"
                 type="file"
+                disabled={!selectedAssignmentId}
                 onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)}
               />
             </div>
@@ -204,7 +205,7 @@ export default function FacultyIqacPage() {
                               : 'secondary'
                         }
                       >
-                        {submission.ai_status ?? 'PENDING'}
+                        {submission.ai_status ?? 'N/A (Not PDF)'}
                       </Badge>
                       {submission.ai_remarks && (
                         <p className="mt-2 text-xs text-muted-foreground">{submission.ai_remarks}</p>
