@@ -127,7 +127,7 @@ export class TasksService {
   async findUserAssignments(
     userId: string,
     status?: string,
-  ): Promise<TaskAssignment[]> {
+  ): Promise<any[]> {
     const queryBuilder = this.taskAssignmentRepository
       .createQueryBuilder('assignment')
       .leftJoinAndSelect('assignment.task', 'task')
@@ -138,7 +138,26 @@ export class TasksService {
       queryBuilder.andWhere('assignment.status = :status', { status });
     }
 
-    return queryBuilder.getMany();
+    const assignments = await queryBuilder.getMany();
+
+    const assignmentIds = assignments.map((a) => a.assignment_id);
+    if (assignmentIds.length === 0) {
+      return [];
+    }
+
+    const submissions = await this.submissionRepository
+      .createQueryBuilder('submission')
+      .where('submission.assignment_id IN (:...assignmentIds)', {
+        assignmentIds,
+      })
+      .getMany();
+
+    return assignments.map((assignment) => ({
+      ...assignment,
+      submissions: submissions.filter(
+        (submission) => submission.assignment_id === assignment.assignment_id,
+      ),
+    }));
   }
 
   async findAllAssignments(): Promise<TaskAssignment[]> {
@@ -318,7 +337,7 @@ export class TasksService {
 
     return this.submissionRepository.find({
       where: { assignment_id: In(assignmentIds) },
-      relations: ['assignment'],
+      relations: ['assignment', 'assignment.task'],
     });
   }
 
