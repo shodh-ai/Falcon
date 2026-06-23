@@ -1277,8 +1277,8 @@ export const adminPortal: PortalConfig = {
   ],
   commandItems: [
     { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
-    { label: 'Pending Approvals', href: '/admin/dashboard', icon: ListChecks },
+    { label: 'Pending Approvals', href: '/admin/inbox', icon: ListChecks },
     { label: 'University Directory', href: '/directory', icon: Contact },
-    { label: 'Export Reports', href: '/admin/dashboard', icon: BarChart3, roles: ['SuperAdmin', 'President', 'IQAC'] },
+    { label: 'Export Reports', href: '/admin/reports', icon: BarChart3, roles: ['SuperAdmin', 'President', 'IQAC'] },
   ],
 };
