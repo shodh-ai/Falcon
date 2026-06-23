@@ -67,10 +67,11 @@ export function MentorshipStudentChat() {
       icon={MessageCircle}
       tone="gold"
       action={
-        <Button variant="outline" size="sm" asChild>
+        <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
           <Link href="/student/helpdesk">
-            <Ticket className="mr-1 h-4 w-4" />
-            Raise Formal Ticket
+            <Ticket className="mr-1 h-4 w-4 shrink-0" />
+            <span className="sm:hidden">Raise Ticket</span>
+            <span className="hidden sm:inline">Raise Formal Ticket</span>
           </Link>
         </Button>
       }

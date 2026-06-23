@@ -42,19 +42,19 @@ export function StudentSectionCard({
   return (
     <Card className={cn('overflow-hidden', toneStyles[tone], className)}>
       <CardHeader className={cn('pb-4', headerClassName)}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
             {Icon ? (
               <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl', iconTone[tone])}>
                 <Icon className="h-5 w-5" />
               </div>
             ) : null}
-            <div>
+            <div className="min-w-0">
               <CardTitle className="text-base">{title}</CardTitle>
               {description ? <CardDescription className="mt-1">{description}</CardDescription> : null}
             </div>
           </div>
-          {action}
+          {action ? <div className="w-full shrink-0 sm:w-auto">{action}</div> : null}
         </div>
       </CardHeader>
       <CardContent className={contentClassName}>{children}</CardContent>

@@ -63,6 +63,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
         <AppTopBar
           config={launchConfig}
           pageTitle={isHome ? launchConfig.personaTitle : activeNav?.label ?? launchConfig.personaTitle}
+          pageShortTitle={isHome ? undefined : activeNav?.shortLabel}
           profileHref={profileHref}
           headerExtra={headerExtra}
           mobileOpen={mobileOpen}

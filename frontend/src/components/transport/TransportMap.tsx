@@ -61,7 +61,10 @@ export function TransportMap({
   height?: number;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-sgvu-gold/30" style={{ height }}>
+    <div
+      className="transport-map relative isolate z-0 overflow-hidden rounded-xl border border-border/70"
+      style={{ height }}
+    >
       <MapContainer center={center} zoom={12} scrollWheelZoom className="h-full w-full">
         <Recenter center={center} />
         <TileLayer

@@ -7,7 +7,6 @@ import { ArrowLeft, Bell, CheckCheck, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
   filterNotifications,
   useNotificationHistory,
@@ -16,20 +15,15 @@ import {
 import { toast } from '@/lib/notifications/falcon-toast';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
+import { notificationSummary } from '@/lib/notifications/notification-display';
+import { NotificationFilterBar } from '@/components/notifications/NotificationFilterBar';
 import {
   NotificationEmptyState,
   NotificationItem,
   NOTIFICATION_CATEGORY_FILTERS,
 } from '@/components/notifications/NotificationItem';
-import { cn } from '@/lib/utils';
 
 type FilterTab = 'all' | 'unread' | 'action_required';
-
-const FILTER_TABS: { id: FilterTab; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'unread', label: 'Unread' },
-  { id: 'action_required', label: 'Action required' },
-];
 
 export default function NotificationsPage() {
   const router = useRouter();
@@ -45,6 +39,7 @@ export default function NotificationsPage() {
   );
   const unreadCount = items.filter((n) => n.unread).length;
   const actionCount = items.filter((n) => n.intent === 'action_required' && n.unread).length;
+  const summary = notificationSummary(unreadCount, actionCount);
 
   if (authLoading) {
     return (
@@ -102,8 +97,8 @@ export default function NotificationsPage() {
           </Link>
         </Button>
 
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <div className="mb-2 flex items-center gap-2">
               <Bell className="h-6 w-6 text-sgvu-gold" />
               <h1 className="text-2xl font-black text-sgvu-navy">Notification Center</h1>
@@ -111,55 +106,47 @@ export default function NotificationsPage() {
             <p className="text-sm text-muted-foreground">
               Updates, approvals, and alerts from across Falcon — with clear next steps.
             </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {unreadCount > 0 && <Badge variant="destructive">{unreadCount} unread</Badge>}
-              {actionCount > 0 && (
-                <Badge variant="outline" className="border-amber-300 text-amber-800">
-                  {actionCount} need action
-                </Badge>
-              )}
-            </div>
+            {summary && (
+              <p className="mt-2 text-xs font-medium text-muted-foreground">{summary}</p>
+            )}
           </div>
-          <Button variant="outline" size="sm" onClick={markAll} disabled={unreadCount === 0}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full sm:w-auto"
+            onClick={markAll}
+            disabled={unreadCount === 0}
+          >
             <CheckCheck className="mr-1 h-4 w-4" />
             Mark all read
           </Button>
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {FILTER_TABS.map((tab) => (
-          <Button
-            key={tab.id}
-            size="sm"
-            variant={filter === tab.id ? 'default' : 'outline'}
-            onClick={() => setFilter(tab.id)}
-          >
-            {tab.label}
-          </Button>
-        ))}
-      </div>
-
-      <div className="mb-4">
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className={cn(
-            'h-9 rounded-md border border-input bg-background px-3 text-sm',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          )}
-        >
-          {NOTIFICATION_CATEGORY_FILTERS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+      <div className="mb-3 space-y-3">
+        <NotificationFilterBar
+          options={[
+            { id: 'all' as const, label: 'All' },
+            { id: 'unread' as const, label: 'Unread', count: unreadCount },
+            { id: 'action_required' as const, label: 'Action required', count: actionCount },
+          ]}
+          active={filter}
+          onChange={setFilter}
+        />
+        <NotificationFilterBar
+          options={NOTIFICATION_CATEGORY_FILTERS.map((opt) => ({
+            id: opt.value,
+            label: opt.label,
+          }))}
+          active={category}
+          onChange={setCategory}
+          size="sm"
+        />
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">
+          <CardTitle className="text-base text-sgvu-navy">
             {filter === 'action_required'
               ? 'Pending actions'
               : filter === 'unread'

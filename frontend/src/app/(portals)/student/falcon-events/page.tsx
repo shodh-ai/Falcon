@@ -91,9 +91,9 @@ export default function FalconEventsPage() {
 
       <StudentTabBar
         tabs={[
-          { id: 'events', label: 'Events & Fests', count: events.length },
-          { id: 'clubs', label: 'Clubs & Chapters' },
-          { id: 'points', label: 'Extra-Curricular Points' },
+          { id: 'events', label: 'Events & Fests', shortLabel: 'Events', count: events.length },
+          { id: 'clubs', label: 'Clubs & Chapters', shortLabel: 'Clubs' },
+          { id: 'points', label: 'Extra-Curricular Points', shortLabel: 'Points' },
         ]}
         active={tab}
         onChange={selectTab}

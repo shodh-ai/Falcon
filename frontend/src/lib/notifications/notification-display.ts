@@ -46,6 +46,31 @@ export const INTENT_LABELS: Record<NotificationIntent, string> = {
   alert: 'Alert',
 };
 
+export const META_PILL_CLASS =
+  'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide';
+
+export const INTENT_STYLES: Record<NotificationIntent, string> = {
+  info: 'border-blue-200 bg-blue-50 text-blue-800',
+  action_required: 'border-red-200 bg-red-50 text-red-700',
+  status_update: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  alert: 'border-amber-200 bg-amber-50 text-amber-800',
+};
+
+/** Summary line for bell dropdown / page headers */
+export function notificationSummary(unread: number, actionRequired: number): string | null {
+  if (unread === 0) return null;
+  if (actionRequired === unread && actionRequired > 0) {
+    return actionRequired === 1
+      ? '1 item needs your action'
+      : `${actionRequired} items need your action`;
+  }
+  const unreadPart = unread === 1 ? '1 unread' : `${unread} unread`;
+  if (actionRequired === 0) return unreadPart;
+  const actionPart =
+    actionRequired === 1 ? '1 needs action' : `${actionRequired} need action`;
+  return `${unreadPart} · ${actionPart}`;
+}
+
 export function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category.replace(/_/g, ' ');
 }

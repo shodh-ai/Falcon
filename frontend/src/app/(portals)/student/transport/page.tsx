@@ -239,9 +239,9 @@ export default function StudentTransportPage() {
 
       <StudentTabBar
         tabs={[
-          { id: 'find' as Tab, label: 'Find Route' },
-          { id: 'pass' as Tab, label: 'My Pass' },
-          { id: 'track' as Tab, label: 'Track Bus' },
+          { id: 'find' as Tab, label: 'Find Route', shortLabel: 'Find' },
+          { id: 'pass' as Tab, label: 'My Pass', shortLabel: 'Pass' },
+          { id: 'track' as Tab, label: 'Track Bus', shortLabel: 'Track' },
         ]}
         active={tab}
         onChange={setTab}
@@ -302,6 +302,7 @@ export default function StudentTransportPage() {
             center={home}
             homeLocation={home}
             stops={mapStops}
+            height={300}
             onSelectStop={(s) => {
               const full = stops.find((x) => x.stop_id === s.stop_id) ?? null;
               setSelected(full);
@@ -423,7 +424,12 @@ export default function StudentTransportPage() {
                   )}
                 </CardContent>
               </Card>
-              <TransportMap center={trackCenter} stops={[]} busLocation={busLocation} homeLocation={
+              <TransportMap
+                center={trackCenter}
+                stops={[]}
+                busLocation={busLocation}
+                height={300}
+                homeLocation={
                 live?.stop_lat && live?.stop_lng ? [live.stop_lat, live.stop_lng] : null
               } />
               {!busLocation && (

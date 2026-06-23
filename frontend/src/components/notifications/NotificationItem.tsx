@@ -1,12 +1,13 @@
 'use client';
 
 import { ArrowRight, BellOff } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { AppNotification } from '@/hooks/useNotifications';
 import {
   CATEGORY_LABELS,
   INTENT_LABELS,
+  INTENT_STYLES,
+  META_PILL_CLASS,
   SEVERITY_STYLES,
   categoryLabel,
   formatRelativeTime,
@@ -34,48 +35,31 @@ export function NotificationItem({
       type="button"
       onClick={onClick}
       className={cn(
-        'group w-full rounded-xl border text-left transition hover:bg-muted/40',
-        n.unread ? 'border-sgvu-gold/40 bg-sgvu-gold/5' : 'border-border/70 bg-background',
+        'group w-full rounded-xl border text-left transition hover:border-sgvu-navy/20 hover:bg-muted/30',
+        n.unread ? 'border-sgvu-gold/50 bg-sgvu-gold/5' : 'border-border/70 bg-background',
         compact ? 'p-3' : 'p-4',
         className,
       )}
     >
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <span
-          className={cn(
-            'rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-            severityStyle,
-          )}
-        >
-          {categoryLabel(n.category)}
-        </span>
-        {n.intent === 'action_required' && (
-          <Badge variant="destructive" className="text-[10px]">
-            {intentLabel}
-          </Badge>
-        )}
-        {n.intent !== 'action_required' && (
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {intentLabel}
-          </span>
-        )}
-        {n.unread && (
-          <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-destructive" aria-hidden />
-        )}
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className={cn(META_PILL_CLASS, severityStyle)}>{categoryLabel(n.category)}</span>
+          <span className={cn(META_PILL_CLASS, INTENT_STYLES[n.intent])}>{intentLabel}</span>
+        </div>
         {n.createdAt && (
-          <span className={cn('text-xs text-muted-foreground', !n.unread && 'ml-auto')}>
+          <span className="shrink-0 whitespace-nowrap pt-0.5 text-xs text-muted-foreground">
             {formatRelativeTime(n.createdAt)}
           </span>
         )}
       </div>
 
-      <p className={cn('font-semibold text-foreground', compact ? 'text-sm' : 'text-base')}>
+      <p className={cn('font-semibold text-sgvu-navy', compact ? 'text-sm' : 'text-base')}>
         {n.title}
       </p>
       <p
         className={cn(
           'mt-1 text-muted-foreground',
-          compact ? 'line-clamp-2 text-xs' : 'text-sm',
+          compact ? 'text-xs leading-relaxed' : 'text-sm leading-relaxed',
         )}
       >
         {n.body}
@@ -107,6 +91,6 @@ export function NotificationEmptyState({ compact = false }: { compact?: boolean 
 }
 
 export const NOTIFICATION_CATEGORY_FILTERS = [
-  { value: 'ALL', label: 'All categories' },
+  { value: 'ALL', label: 'All' },
   ...Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label })),
 ];

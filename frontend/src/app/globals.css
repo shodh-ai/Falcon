@@ -132,3 +132,44 @@ body {
   min-height: 44px;
   min-width: 44px;
 }
+
+/* Keep Leaflet layers inside their card — default Leaflet z-index (400+) paints over mobile nav sheets (z-50) */
+.transport-map .leaflet-container,
+.transport-map .leaflet-pane,
+.transport-map .leaflet-top,
+.transport-map .leaflet-bottom,
+.transport-map .leaflet-control {
+  z-index: 0 !important;
+}
+
+.transport-map .leaflet-tile-pane {
+  z-index: 1 !important;
+}
+
+.transport-map .leaflet-overlay-pane {
+  z-index: 2 !important;
+}
+
+.transport-map .leaflet-marker-pane {
+  z-index: 3 !important;
+}
+
+.transport-map .leaflet-popup-pane {
+  z-index: 4 !important;
+}
+
+.transport-map .leaflet-control-container {
+  z-index: 5 !important;
+}
+
+/* Hide scrollbars on horizontal tab rails (global * rule styles thumbs gold) */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
