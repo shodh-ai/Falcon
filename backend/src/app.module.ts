@@ -55,6 +55,7 @@ import { MeetingsModule } from './modules/meetings/meetings.module';
 import { DemeritsModule } from './modules/demerits/demerits.module';
 import { AttendancePolicyModule } from './modules/attendance-policy/attendance-policy.module';
 import { StudentSafetyModule } from './modules/student-safety/student-safety.module';
+import { PhdLifecycleModule } from './modules/phd-lifecycle/phd-lifecycle.module';
 import { VenueBookingModule } from './modules/venue-booking/venue-booking.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
 import { AcademicRndModule } from './modules/academic-rnd/academic-rnd.module';
@@ -178,6 +179,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     DemeritsModule,
     AttendancePolicyModule,
     StudentSafetyModule,
+    PhdLifecycleModule,
     VenueBookingModule,
     MasterDataModule,
     AcademicRndModule,
