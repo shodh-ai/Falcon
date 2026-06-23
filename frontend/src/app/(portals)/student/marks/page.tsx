@@ -15,6 +15,7 @@ import { API_URL } from '@/lib/api/client';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
+import { isLaunchModuleEnabled } from '@/lib/launch-modules';
 
 type CourseRow = {
   course_id: string;
@@ -500,9 +501,11 @@ export default function StudentMarksPage() {
                             <Button size="sm" variant="outline" asChild>
                               <Link href="/student/exams?intent=revaluation">Re-evaluation</Link>
                             </Button>
-                            <Button size="sm" variant="default" asChild>
-                              <Link href="/student/finance?intent=arrear">Arrear Exam</Link>
-                            </Button>
+                            {isLaunchModuleEnabled('finance') && (
+                              <Button size="sm" variant="default" asChild>
+                                <Link href="/student/finance?intent=arrear">Arrear Exam</Link>
+                              </Button>
+                            )}
                           </span>
                         </td>
                       </tr>

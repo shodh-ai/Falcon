@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { AppTopBar } from '@/components/layout/AppTopBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
+import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
 import type { PortalConfig } from '@/lib/navigation';
 
 interface AppShellProps {
@@ -33,15 +34,16 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+  const launchConfig = useMemo(() => filterPortalConfigForLaunchModules(config), [config]);
 
-  const activeNav = useMemo(() => findActiveNavItem(config, pathname), [config, pathname]);
-  const isHome = pathname === config.homeHref;
-  const mobileItems = config.mobileNavItems ?? config.commandItems.slice(0, 4);
+  const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
+  const isHome = pathname === launchConfig.homeHref;
+  const mobileItems = launchConfig.mobileNavItems ?? launchConfig.commandItems.slice(0, 4);
 
   const sidebar = (
     <AppSidebar
-      personaLabel={config.personaLabel}
-      navGroups={config.navGroups}
+      personaLabel={launchConfig.personaLabel}
+      navGroups={launchConfig.navGroups}
       collapsed={collapsed}
       onToggleCollapse={() => setCollapsed((v) => !v)}
       className="h-full"
@@ -59,8 +61,8 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
         )}
       >
         <AppTopBar
-          config={config}
-          pageTitle={isHome ? config.personaTitle : activeNav?.label ?? config.personaTitle}
+          config={launchConfig}
+          pageTitle={isHome ? launchConfig.personaTitle : activeNav?.label ?? launchConfig.personaTitle}
           profileHref={profileHref}
           headerExtra={headerExtra}
           mobileOpen={mobileOpen}

@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
 import { LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
 import { cn } from '@/lib/utils';
+import { isLaunchModuleEnabled } from '@/lib/launch-modules';
 
 type Profile360 = {
   type: 'student' | 'faculty';
@@ -62,7 +63,11 @@ export function Profile360View({ userId }: { userId: string }) {
   const id = String(profile.user.enrollment_no ?? profile.user.employee_id ?? '—');
   const email = String(profile.user.official_email ?? '—');
   const roleLine = `${String(profile.user.role_name)} · ${String(profile.user.dept_name ?? 'University-wide')}`;
-  const tabs = Object.keys(profile.tabs).filter((k) => TAB_LABELS[k]);
+  const tabs = Object.keys(profile.tabs).filter(
+    (k) =>
+      TAB_LABELS[k] &&
+      !(k === 'finance' && !isLaunchModuleEnabled('finance')),
+  );
   const tabData = profile.tabs[tab];
 
   return (

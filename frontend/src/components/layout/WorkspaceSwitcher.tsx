@@ -18,6 +18,7 @@ import {
   getWorkspaceLabelForRole,
   getWorkspaceShortLabelForRole,
 } from '@/lib/auth-routing';
+import { isRoleWorkspaceEnabled } from '@/lib/launch-modules';
 import { HEADER_CONTROL_CLASS } from '@/components/layout/header-styles';
 import { cn } from '@/lib/utils';
 
@@ -25,7 +26,9 @@ export function WorkspaceSwitcher() {
   const { user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const roles = Array.from(new Set(user?.roles?.length ? user.roles : user?.role ? [user.role] : []));
+  const roles = Array.from(new Set(user?.roles?.length ? user.roles : user?.role ? [user.role] : [])).filter(
+    (role) => isRoleWorkspaceEnabled(role),
+  );
 
   if (roles.length <= 1) return null;
 

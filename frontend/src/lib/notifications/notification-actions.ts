@@ -1,4 +1,5 @@
 import { downloadExportJob, parseExportJobId } from '@/lib/api/api.hr-documents';
+import { isLaunchModuleEnabled } from '@/lib/launch-modules';
 
 export type NotificationActionRouter = {
   push: (path: string) => void;
@@ -28,7 +29,10 @@ export async function handleNotificationAction(
     if (legacyHelpdesk) {
       path = `/student/helpdesk?ticket=${encodeURIComponent(legacyHelpdesk[1])}`;
     }
-    router.push(path === '/student/fees' ? '/student/finance' : path);
+    if (path === '/student/fees') {
+      path = isLaunchModuleEnabled('finance') ? '/student/finance' : '/student/dashboard';
+    }
+    router.push(path);
     return 'navigate';
   }
 

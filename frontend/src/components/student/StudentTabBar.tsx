@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +21,8 @@ export function StudentTabBar<T extends string>({
   onChange: (id: T) => void;
   className?: string;
 }) {
+  const pillLayoutId = useId();
+
   return (
     <div className={cn('flex flex-wrap gap-2 rounded-2xl border border-border/70 bg-muted/30 p-1.5', className)}>
       {tabs.map((tab) => {
@@ -36,7 +39,7 @@ export function StudentTabBar<T extends string>({
           >
             {isActive && (
               <motion.span
-                layoutId="student-tab-pill"
+                layoutId={pillLayoutId}
                 className="absolute inset-0 rounded-xl bg-sgvu-navy shadow-sm"
                 transition={{ type: 'spring', stiffness: 380, damping: 32 }}
               />

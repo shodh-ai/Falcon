@@ -6,6 +6,7 @@ import {
   getOnboardingStepPath,
   needsPortalOnboarding,
 } from '@/lib/onboarding/portal-onboarding';
+import { isPathHiddenForLaunch, isRoleWorkspaceEnabled } from '@/lib/launch-modules';
 
 export function getDashboardPathForRole(role: string | undefined | null): string {
   const r = (role ?? '').trim().toLowerCase();
@@ -39,7 +40,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
   }
 
   if (r === 'accountant') {
-    return '/finance/dashboard';
+    return isRoleWorkspaceEnabled('accountant') ? '/finance/dashboard' : '/dashboard';
   }
 
   if (r === 'iqac') {
@@ -47,7 +48,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
   }
 
   if (r === 'librarian') {
-    return '/library/dashboard';
+    return isRoleWorkspaceEnabled('librarian') ? '/library/dashboard' : '/dashboard';
   }
 
   if (r === 'president') {
@@ -365,6 +366,10 @@ export function canRoleAccessPath(
     return roles.some((role) =>
       ['chairman', 'president', 'superadmin', 'registrar', 'hradmin', 'hr', 'hod', 'dean', 'warden', 'faculty'].includes(role),
     );
+  }
+
+  if (isPathHiddenForLaunch(pathname)) {
+    return false;
   }
 
   if (pathname.startsWith('/admin-ops/directory') || pathname.startsWith('/directory/')) {

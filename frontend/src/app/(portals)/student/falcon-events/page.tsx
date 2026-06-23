@@ -11,6 +11,7 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
+import { ClubsChaptersPanel } from '@/components/student/ClubsChaptersPanel';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,18 +23,27 @@ type ExtraData = {
   totals: { activity_type: string; credits: number }[];
 };
 
-type Tab = 'events' | 'points';
+type Tab = 'events' | 'clubs' | 'points';
+
+function tabFromSearchParam(value: string | null): Tab {
+  if (value === 'clubs' || value === 'points') return value;
+  return 'events';
+}
 
 export default function FalconEventsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const api = useAuthedApi();
   const eventsApi = useMemo(() => createCampusEventsApi(api), [api]);
-  const [tab, setTab] = useState<Tab>(searchParams.get('tab') === 'points' ? 'points' : 'events');
+  const [tab, setTab] = useState<Tab>(() => tabFromSearchParam(searchParams.get('tab')));
   const [events, setEvents] = useState<CampusEvent[]>([]);
   const [tickets, setTickets] = useState<EventRegistration[]>([]);
   const [extra, setExtra] = useState<ExtraData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setTab(tabFromSearchParam(searchParams.get('tab')));
+  }, [searchParams]);
 
   const load = useCallback(async () => {
     const [cal, tk, ex] = await Promise.all([
@@ -47,8 +57,14 @@ export default function FalconEventsPage() {
   }, [api, eventsApi]);
 
   useEffect(() => {
-    void load().catch(() => toast.error('Could not load Falcon Events')).finally(() => setLoading(false));
+    void load().catch(() => toast.error('Could not load events & clubs')).finally(() => setLoading(false));
   }, [load]);
+
+  function selectTab(next: Tab) {
+    setTab(next);
+    const query = next === 'events' ? '' : `?tab=${next}`;
+    router.replace(`/student/falcon-events${query}`, { scroll: false });
+  }
 
   async function register(eventId: string) {
     try {
@@ -64,22 +80,23 @@ export default function FalconEventsPage() {
     }
   }
 
-  if (loading) return <StudentLoadingState label="Loading Falcon Events…" />;
+  if (loading) return <StudentLoadingState label="Loading events & clubs…" />;
 
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
-        title="Falcon Events"
-        description="Club fests, hackathons, and your NCC/NSS/SODECA points — one tabbed hub."
+        title="Events & Clubs"
+        description="Club fests, chapter memberships, and your NCC/NSS/SODECA points — one hub."
       />
 
       <StudentTabBar
         tabs={[
-          { id: 'events', label: 'Club Events & Fests', count: events.length },
-          { id: 'points', label: 'My Extra-Curricular Points' },
+          { id: 'events', label: 'Events & Fests', count: events.length },
+          { id: 'clubs', label: 'Clubs & Chapters' },
+          { id: 'points', label: 'Extra-Curricular Points' },
         ]}
         active={tab}
-        onChange={setTab}
+        onChange={selectTab}
       />
 
       {tab === 'events' ? (
@@ -113,6 +130,8 @@ export default function FalconEventsPage() {
             </StudentSectionCard>
           )}
         </div>
+      ) : tab === 'clubs' ? (
+        <ClubsChaptersPanel />
       ) : (
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-3">

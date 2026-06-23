@@ -86,14 +86,6 @@ export const HUB_TILES: HubTile[] = [
     bg: '#f1f5f9',
     route: '/campus/profile',
   },
-  {
-    id: 'finance',
-    label: 'Fee Finance',
-    icon: 'card-outline',
-    color: '#08234a',
-    bg: '#ecfdf5',
-    route: '/campus/profile',
-  },
 ];
 
 interface CampusHubTileProps {

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { isLaunchModuleEnabled } from '@/lib/launch-modules';
 
 type Allocation = {
   hostel_block: string | null;
@@ -161,8 +162,12 @@ export default function CampusLifePage() {
               <p className="text-xs uppercase tracking-wider text-white/70">Falcon Pay balance</p>
               <p className="text-3xl font-black">₹{Number(wallet?.current_balance ?? 0).toFixed(2)}</p>
             </div>
-            <Button asChild variant="secondary" size="sm">
-              <Link href="/student/finance">Top up via Finance</Link>
+            <Button asChild variant="secondary" size="sm" disabled={!isLaunchModuleEnabled('finance')}>
+              {isLaunchModuleEnabled('finance') ? (
+                <Link href="/student/finance">Top up via Finance</Link>
+              ) : (
+                <span>Top-up coming soon</span>
+              )}
             </Button>
           </div>
 

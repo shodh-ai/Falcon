@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { useLeadershipIntelligenceOptional } from '@/components/leadership/intelligence/LeadershipIntelligenceProvider';
 import { FinancialTickerGrid } from '@/components/leadership/intelligence/FinancialTickerTape';
+import { isLaunchModuleEnabled } from '@/lib/launch-modules';
 
 export function LeadershipAlertBadge() {
+  if (!isLaunchModuleEnabled('finance')) return null;
   const ctx = useLeadershipIntelligenceOptional();
   const count = ctx?.alertCount ?? 0;
   if (count === 0) return null;
@@ -19,6 +21,7 @@ export function LeadershipAlertBadge() {
 }
 
 export function LeadershipMiniTicker() {
+  if (!isLaunchModuleEnabled('finance')) return null;
   const ctx = useLeadershipIntelligenceOptional();
   if (!ctx?.ticker) return null;
   return (
