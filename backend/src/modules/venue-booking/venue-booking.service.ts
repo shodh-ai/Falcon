@@ -214,9 +214,8 @@ export class VenueBookingService {
     );
 
     const studentRows = await this.db.query(
-      `SELECT u.name, sp.semester
+      `SELECT u.name
        FROM users u
-       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        WHERE u.user_id = $1`,
       [studentUserId],
     );
@@ -304,11 +303,10 @@ export class VenueBookingService {
     return this.db.query(
       `SELECT b.booking_id, b.start_time, b.end_time, b.purpose, b.status, b.created_at,
               v.name AS venue_name, v.approver_role,
-              u.name AS student_name, sp.semester
+              u.name AS student_name, NULL AS semester
        FROM venue_bookings b
        JOIN campus_venues v ON v.venue_id = b.venue_id
        JOIN users u ON u.user_id = b.student_user_id
-       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        WHERE b.tenant_id = $1
          AND b.status = 'PENDING_APPROVAL'
          AND v.approver_role = ANY($2::text[])
