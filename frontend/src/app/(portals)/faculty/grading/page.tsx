@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send } from 'lucide-react';
-import Link from 'next/link';
 import {
   FacultyPageHeader,
   FacultyPageShell,

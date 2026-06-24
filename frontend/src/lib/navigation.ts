@@ -351,7 +351,6 @@ export const facultyPortal: PortalConfig = {
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Weekly Tests Configuration', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
-        { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
 
       ],
@@ -400,7 +399,6 @@ export const facultyPortal: PortalConfig = {
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Weekly Tests Configuration', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
-        { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
 
       ],

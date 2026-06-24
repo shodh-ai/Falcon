@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Search } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { Loader2 } from 'lucide-react';
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -12,239 +12,240 @@ import {
   FacultyMetricChip,
 } from '@/components/faculty';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
-import { Button } from '@/components/ui/button';
+import {
+  FacultyStudentReport,
+  type FacultyStudentReportData,
+} from '@/components/faculty/FacultyStudentReport';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
-type AnalyticsRow = {
+type StudentSearchResult = {
   student_user_id: string;
   name: string;
+  official_email: string;
+  roll_number: string;
+  department: string | null;
   course_id: string;
   course_code: string;
-  attendance_percent: string;
-  internal_avg_percent: number;
+  course_name: string;
+  internal_avg_percent: string | number;
+  assignments_submitted: number;
 };
 
-function analyticsRowKey(r: AnalyticsRow) {
-  return `${r.student_user_id}:${r.course_id}`;
+function resultKey(student: StudentSearchResult) {
+  return `${student.course_id}:${student.student_user_id}`;
 }
 
-function dedupeAnalyticsRows(rows: AnalyticsRow[]) {
-  const byKey = new Map<string, AnalyticsRow>();
-  for (const row of rows) {
-    byKey.set(analyticsRowKey(row), row);
-  }
-  return [...byKey.values()];
-}
-
-function isAtRisk(r: AnalyticsRow) {
-  return Number(r.attendance_percent) < 75 || Number(r.internal_avg_percent) < 40;
-}
-
-function StudentAnalyticsRow({
-  row,
-  onLogRemedial,
-  compact,
-}: {
-  row: AnalyticsRow;
-  onLogRemedial: (row: AnalyticsRow, action: string) => Promise<void>;
-  compact?: boolean;
-}) {
-  const [action, setAction] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const atRisk = isAtRisk(row);
-
-  async function submit() {
-    if (!action.trim()) {
-      toast.error('Describe the remedial action');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await onLogRemedial(row, action);
-      setAction('');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div
-      className={cn(
-        'rounded-xl border border-border/60 bg-background p-4 shadow-sm',
-        atRisk && 'border-amber-200/80 bg-amber-50/30',
-      )}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="font-semibold text-sgvu-navy">{row.name}</p>
-          <p className="text-xs text-muted-foreground">{row.course_code}</p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <Badge variant={Number(row.attendance_percent) < 75 ? 'destructive' : 'secondary'} className="text-[10px]">
-            Attendance {row.attendance_percent}%
-          </Badge>
-          <Badge variant={Number(row.internal_avg_percent) < 40 ? 'destructive' : 'secondary'} className="text-[10px]">
-            Internals {Math.round(row.internal_avg_percent)}%
-          </Badge>
-          {atRisk ? (
-            <Badge variant="destructive" className="text-[10px]">At risk</Badge>
-          ) : (
-            <Badge variant="outline" className="text-[10px]">On track</Badge>
-          )}
-        </div>
-      </div>
-      {!compact && (
-        <div className="mt-3 flex gap-2">
-          <Input
-            className="h-9 flex-1"
-            placeholder="Remedial class summary"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-          />
-          <Button size="sm" variant="outline" disabled={submitting} onClick={() => void submit()}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Log remedial'}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
+function scoreLabel(value: string | number) {
+  return `${Math.round(Number(value ?? 0))}%`;
 }
 
 export default function FacultyAnalyticsPage() {
   const api = useAuthedApi();
   const { courses } = useFacultyCourses();
   const [courseId, setCourseId] = useState('');
-  const [rows, setRows] = useState<AnalyticsRow[]>([]);
-  const [remedialLogs, setRemedialLogs] = useState<
-    { remedial_id: string; student_name: string; course_code: string | null; action_taken: string; created_at: string }[]
-  >([]);
-  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [students, setStudents] = useState<StudentSearchResult[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [report, setReport] = useState<FacultyStudentReportData | null>(null);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
+
+  const effectiveCourseId = courseId || courses[0]?.course_id || '';
 
   useEffect(() => {
-    setLoading(true);
-    const q = courseId ? `?courseId=${encodeURIComponent(courseId)}` : '';
-    void Promise.all([
-      api.get<AnalyticsRow[]>(`/api/academics/faculty/workspaces/analytics${q}`),
-      api.get<
-        { remedial_id: string; student_name: string; course_code: string | null; action_taken: string; created_at: string }[]
-      >('/api/academics/faculty/workspaces/remedial'),
-    ])
-      .then(([analytics, logs]) => {
-        setRows(analytics);
-        setRemedialLogs(logs);
-      })
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : 'Failed to load analytics');
-        setRows([]);
-      })
-      .finally(() => setLoading(false));
-  }, [api, courseId]);
-
-  const allRows = dedupeAnalyticsRows(rows);
-  const atRisk = allRows.filter(isAtRisk);
-
-  async function logRemedial(row: AnalyticsRow, actionTaken: string) {
-    try {
-      await api.post('/api/academics/faculty/workspaces/remedial', {
-        student_user_id: row.student_user_id,
-        course_id: row.course_id,
-        reason: Number(row.attendance_percent) < 75 ? 'LOW_ATTENDANCE' : 'LOW_INTERNALS',
-        action_taken: actionTaken,
-      });
-      toast.success('Remedial class logged');
-      const logs = await api.get<
-        { remedial_id: string; student_name: string; course_code: string | null; action_taken: string; created_at: string }[]
-      >('/api/academics/faculty/workspaces/remedial');
-      setRemedialLogs(logs);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to log remedial action');
-      throw e;
+    if (!effectiveCourseId) {
+      return;
     }
-  }
+
+    let active = true;
+    const params = new URLSearchParams({ courseId: effectiveCourseId });
+    if (query.trim()) params.set('q', query.trim());
+
+    async function loadStudents() {
+      setLoadingStudents(true);
+      try {
+        const rows = await api.get<StudentSearchResult[]>(
+          `/api/academics/faculty/workspaces/analytics/students?${params.toString()}`,
+        );
+        if (!active) return;
+        setStudents(rows);
+        setSelectedStudentId((current) => {
+          if (current && rows.some((student) => student.student_user_id === current)) return current;
+          return rows[0]?.student_user_id ?? '';
+        });
+      } catch (error) {
+        if (!active) return;
+        toast.error(error instanceof Error ? error.message : 'Failed to search students');
+        setStudents([]);
+        setSelectedStudentId('');
+      } finally {
+        if (active) setLoadingStudents(false);
+      }
+    }
+
+    void loadStudents();
+
+    return () => {
+      active = false;
+    };
+  }, [api, effectiveCourseId, query]);
+
+  useEffect(() => {
+    if (!effectiveCourseId || !selectedStudentId) {
+      return;
+    }
+
+    let active = true;
+    const params = new URLSearchParams({ courseId: effectiveCourseId });
+
+    async function loadReport() {
+      setLoadingReport(true);
+      try {
+        const data = await api.get<FacultyStudentReportData>(
+          `/api/academics/faculty/workspaces/analytics/students/${encodeURIComponent(selectedStudentId)}/report?${params.toString()}`,
+        );
+        if (active) setReport(data);
+      } catch (error) {
+        if (!active) return;
+        toast.error(error instanceof Error ? error.message : 'Failed to load student analysis');
+        setReport(null);
+      } finally {
+        if (active) setLoadingReport(false);
+      }
+    }
+
+    void loadReport();
+
+    return () => {
+      active = false;
+    };
+  }, [api, effectiveCourseId, selectedStudentId]);
+
+  const selectedCourse = courses.find((course) => course.course_id === effectiveCourseId);
+  const visibleReport = effectiveCourseId && selectedStudentId ? report : null;
 
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Students below 75% attendance or weak internals — log remedial interventions."
+        description="Search students in a selected subject by roll/student ID, email, or name. This report excludes attendance and focuses on academic signals faculty should act on."
         meta={
-          !loading ? (
-            <>
-              <FacultyMetricChip label="Enrolled" value={allRows.length} emphasis />
-              <FacultyMetricChip label="At risk" value={atRisk.length} />
-              <FacultyMetricChip label="Remedial logs" value={remedialLogs.length} />
-            </>
-          ) : null
+          <>
+            <FacultyMetricChip label="Subject" value={selectedCourse?.course_code ?? 'Select'} emphasis />
+            <FacultyMetricChip label="Students found" value={students.length} />
+            <FacultyMetricChip
+              label="Selected score"
+              value={report ? `${report.summary.internal_avg_percent}%` : 'N/A'}
+            />
+            <FacultyMetricChip
+              label="Pending DA"
+              value={report ? report.summary.pending_assignments : 'N/A'}
+            />
+          </>
         }
       />
 
-      <div className="max-w-xs">
-        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Filter by course</label>
-        <select
-          className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
-          value={courseId}
-          onChange={(e) => setCourseId(e.target.value)}
-        >
-          <option value="">All my courses</option>
-          {courses.map((c) => (
-            <option key={c.course_id} value={c.course_id}>{c.course_code}</option>
-          ))}
-        </select>
-      </div>
-
-      {loading && <FacultyPageLoading label="Loading analytics…" />}
-
-      {!loading && (
-        <FacultyPanel
-          title="At-risk students"
-          count={atRisk.length}
-          description="Below 75% attendance or under 40% internals"
-        >
-          <div className="space-y-3">
-            {atRisk.map((r) => (
-              <StudentAnalyticsRow key={analyticsRowKey(r)} row={r} onLogRemedial={logRemedial} />
-            ))}
-            {atRisk.length === 0 && (
-              <FacultyEmptyState description="No at-risk students in this filter." />
-            )}
-          </div>
-        </FacultyPanel>
-      )}
-
-      {!loading && remedialLogs.length > 0 && (
-        <FacultyPanel title="Recent remedial logs" count={remedialLogs.length}>
-          <div className="space-y-2">
-            {remedialLogs.slice(0, 10).map((log) => (
-              <div key={log.remedial_id} className="rounded-lg border border-border/50 bg-muted/20 px-4 py-3 text-sm">
-                <p className="font-medium text-sgvu-navy">
-                  {log.student_name} · {log.course_code ?? 'General'}
-                </p>
-                <p className="text-muted-foreground">{log.action_taken}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(log.created_at).toLocaleString()}
-                </p>
+      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="space-y-4">
+          <FacultyPanel title="Find Student" description="Pick a subject, then search by ID or name.">
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Subject</label>
+                <select
+                  className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                  value={effectiveCourseId}
+                  onChange={(event) => {
+                    setCourseId(event.target.value);
+                    setSelectedStudentId('');
+                    setReport(null);
+                  }}
+                >
+                  {courses.length === 0 ? <option value="">No subjects assigned</option> : null}
+                  {courses.map((course) => (
+                    <option key={course.course_id} value={course.course_id}>
+                      {course.course_code} · {course.course_name}
+                    </option>
+                  ))}
+                </select>
               </div>
-            ))}
-          </div>
-        </FacultyPanel>
-      )}
 
-      {!loading && allRows.length > 0 && (
-        <FacultyPanel title="All enrolled students" count={allRows.length}>
-          <div className="space-y-3">
-            {allRows.map((r) => (
-              <StudentAnalyticsRow
-                key={`all-${analyticsRowKey(r)}`}
-                row={r}
-                onLogRemedial={logRemedial}
-                compact={!isAtRisk(r)}
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Student ID or name</label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Search roll no, ID, email, or name"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    disabled={!effectiveCourseId}
+                  />
+                </div>
+              </div>
+            </div>
+          </FacultyPanel>
+
+          <FacultyPanel title="Subject Students" count={students.length}>
+            {loadingStudents ? (
+              <FacultyPageLoading label="Searching students..." />
+            ) : students.length === 0 ? (
+              <FacultyEmptyState
+                description={
+                  effectiveCourseId
+                    ? 'No students match this search in the selected subject.'
+                    : 'Select a subject to search enrolled students.'
+                }
+                className="py-6"
               />
-            ))}
-          </div>
-        </FacultyPanel>
-      )}
+            ) : (
+              <div className="space-y-2">
+                {students.map((student) => {
+                  const selected = selectedStudentId === student.student_user_id;
+                  return (
+                    <button
+                      key={resultKey(student)}
+                      type="button"
+                      onClick={() => setSelectedStudentId(student.student_user_id)}
+                      className={cn(
+                        'w-full rounded-xl border p-3 text-left text-sm transition hover:border-sgvu-gold/70 hover:bg-sgvu-gold/5',
+                        selected ? 'border-sgvu-gold bg-sgvu-gold/10' : 'border-border/60 bg-background',
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-sgvu-navy">{student.name}</p>
+                          <p className="truncate text-xs text-muted-foreground">{student.roll_number}</p>
+                          <p className="truncate text-xs text-muted-foreground">{student.official_email}</p>
+                        </div>
+                        <Badge variant={Number(student.internal_avg_percent) < 40 ? 'destructive' : 'secondary'} className="text-[10px]">
+                          {scoreLabel(student.internal_avg_percent)}
+                        </Badge>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </FacultyPanel>
+        </div>
+
+        <div className="min-w-0">
+          {loadingReport ? (
+            <FacultyPageLoading label="Preparing student analysis..." />
+          ) : visibleReport ? (
+            <FacultyStudentReport report={visibleReport} />
+          ) : (
+            <FacultyPanel title="Student Analysis">
+              <FacultyEmptyState
+                description="Select a student to view graphical and numerical analysis for the selected subject."
+                className="py-12"
+              />
+            </FacultyPanel>
+          )}
+        </div>
+      </div>
     </FacultyPageShell>
   );
 }

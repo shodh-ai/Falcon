@@ -14,12 +14,61 @@ import {
   type PhdApplicationType,
 } from './phd-lifecycle.constants';
 
-interface CreateApplicationDto {
+interface EligibilityEvidence {
+  entrance_exam_type?: string;
+  entrance_score?: number;
+  direct_phd_merit_approved?: boolean;
+}
+
+interface CreateApplicationDto extends EligibilityEvidence {
   application_type?: string;
   proposed_topic?: string;
   applicant_name?: string;
   applicant_email?: string;
   document_urls?: string[];
+}
+
+/** Minimum CGPA for the B.Tech direct-PhD merit route. */
+const PHD_DIRECT_MIN_CGPA = 8.0;
+/** "Cleared second year" = currently in semester 5 or higher (4 semesters completed). */
+const PHD_CLEARED_SECOND_YEAR_SEMESTER = 5;
+/** Latest academic-record semester that also confirms second year cleared. */
+const PHD_CLEARED_SECOND_YEAR_RECORD = 4;
+/** Minimum CGPA for the postgraduate route (soft check, only applied when known). */
+const PHD_PG_MIN_CGPA = 5.5;
+/** Qualifying-score cutoffs by entrance exam type for the direct route. */
+const PHD_ENTRANCE_CUTOFFS: Record<string, number> = {
+  PET: 50,
+  GATE: 400,
+  NET: 50,
+  UGC_NET: 50,
+  CSIR_NET: 50,
+};
+
+export type EligibilityRoute = 'PG' | 'BTECH_DIRECT' | null;
+
+export interface EligibilityRequirement {
+  label: string;
+  met: boolean;
+  pending?: boolean;
+}
+
+export interface EligibilityResult {
+  can_apply: boolean;
+  route: EligibilityRoute;
+  route_label: string;
+  requires_entrance_proof: boolean;
+  reasons: string[];
+  requirements: EligibilityRequirement[];
+  academic: {
+    program_label: string | null;
+    classification: 'PG' | 'BTECH' | 'OTHER_UG' | 'UNKNOWN';
+    latest_semester: number;
+    cleared_second_year: boolean;
+    cgpa: number | null;
+    active_backlogs: number;
+    is_masters: boolean;
+  };
 }
 
 interface PerformActionDto {
@@ -38,13 +87,27 @@ export class PhdLifecycleService {
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  async createApplication(tenantId: string, userId: string, dto: CreateApplicationDto) {
+  async createApplication(
+    tenantId: string,
+    userId: string,
+    dto: CreateApplicationDto,
+    actorRole?: string,
+  ) {
     const appType = (dto.application_type ?? 'PET').toUpperCase() as PhdApplicationType;
     if (!PHD_APPLICATION_TYPES.includes(appType)) {
       throw new BadRequestException('application_type must be PET or PET_EXEMPTION');
     }
     if (!dto.proposed_topic?.trim()) {
       throw new BadRequestException('Proposed research topic is required.');
+    }
+
+    const eligibility = await this.evaluateEligibility(tenantId, userId, dto, true, actorRole);
+    if (!eligibility.can_apply) {
+      throw new BadRequestException(
+        eligibility.reasons.length
+          ? `You are not eligible to apply for Ph.D. yet: ${eligibility.reasons.join(' ')}`
+          : 'You are not eligible to apply for Ph.D. yet.',
+      );
     }
 
     const open = await this.db.query(
@@ -64,11 +127,25 @@ export class PhdLifecycleService {
       [userId],
     );
 
+    const metadata = {
+      eligibility_route: eligibility.route,
+      eligibility_classification: eligibility.academic.classification,
+      evaluated_cgpa: eligibility.academic.cgpa,
+      evaluated_semester: eligibility.academic.latest_semester,
+      cleared_second_year: eligibility.academic.cleared_second_year,
+      entrance_exam_type:
+        eligibility.route === 'BTECH_DIRECT' ? dto.entrance_exam_type?.trim() ?? null : null,
+      entrance_score:
+        eligibility.route === 'BTECH_DIRECT' ? dto.entrance_score ?? null : null,
+      direct_phd_merit_approved:
+        eligibility.route === 'BTECH_DIRECT' ? Boolean(dto.direct_phd_merit_approved) : false,
+    };
+
     const rows = await this.db.query(
       `INSERT INTO phd_candidates (
          tenant_id, user_id, applicant_name, applicant_email, application_type,
-         proposed_topic, dept_id, lifecycle_stage, lifecycle_status, pending_actor_role
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'ADMISSION','APPLICATION_SUBMITTED','DRC_MEMBER')
+         proposed_topic, dept_id, lifecycle_stage, lifecycle_status, pending_actor_role, metadata
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'ADMISSION','APPLICATION_SUBMITTED','DRC_MEMBER',$8::jsonb)
        RETURNING *`,
       [
         tenantId,
@@ -78,6 +155,7 @@ export class PhdLifecycleService {
         appType,
         dto.proposed_topic.trim(),
         user?.dept_id ?? null,
+        JSON.stringify(metadata),
       ],
     );
 
@@ -89,6 +167,232 @@ export class PhdLifecycleService {
     });
 
     return rows[0];
+  }
+
+  getApplicationEligibility(tenantId: string, userId: string, actorRole?: string) {
+    return this.evaluateEligibility(tenantId, userId, undefined, false, actorRole);
+  }
+
+  private entranceSatisfied(evidence?: EligibilityEvidence): boolean {
+    if (!evidence) return false;
+    if (evidence.direct_phd_merit_approved === true) return true;
+    const type = (evidence.entrance_exam_type ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+    const score = evidence.entrance_score;
+    if (!type || score === undefined || score === null || Number.isNaN(Number(score))) {
+      return false;
+    }
+    const cutoff = PHD_ENTRANCE_CUTOFFS[type] ?? 50;
+    return Number(score) >= cutoff;
+  }
+
+  private async evaluateEligibility(
+    tenantId: string,
+    userId: string,
+    evidence: EligibilityEvidence | undefined,
+    enforce: boolean,
+    actorRole?: string,
+  ): Promise<EligibilityResult> {
+    if (this.normalizeRole(actorRole ?? '') === 'SuperAdmin') {
+      return {
+        can_apply: true,
+        route: 'PG',
+        route_label: 'Administrative override',
+        requires_entrance_proof: false,
+        reasons: [],
+        requirements: [{ label: 'SuperAdmin override', met: true }],
+        academic: {
+          program_label: null,
+          classification: 'UNKNOWN',
+          latest_semester: 0,
+          cleared_second_year: true,
+          cgpa: null,
+          active_backlogs: 0,
+          is_masters: false,
+        },
+      };
+    }
+
+    const [latestRecord] = await this.db
+      .query(
+        `SELECT semester, cgpa, backlog_count, progression_status
+         FROM academic_records
+         WHERE tenant_id = $1 AND student_user_id = $2
+         ORDER BY academic_year DESC, semester DESC
+         LIMIT 1`,
+        [tenantId, userId],
+      )
+      .catch(() => [] as Array<Record<string, unknown>>);
+
+    const [enrollAgg] = await this.db
+      .query(
+        `SELECT COALESCE(MAX(semester), 0)::int AS max_semester
+         FROM student_course_enrollments
+         WHERE tenant_id = $1 AND student_user_id = $2`,
+        [tenantId, userId],
+      )
+      .catch(() => [{ max_semester: 0 }]);
+
+    const [backlogAgg] = await this.db
+      .query(
+        `SELECT COUNT(*)::int AS active_backlogs
+         FROM student_backlog_history
+         WHERE tenant_id = $1 AND student_user_id = $2 AND status = 'ACTIVE'`,
+        [tenantId, userId],
+      )
+      .catch(() => [{ active_backlogs: 0 }]);
+
+    const [application] = await this.db
+      .query(
+        `SELECT program_applied
+         FROM student_applications
+         WHERE tenant_id = $1 AND student_user_id = $2
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [tenantId, userId],
+      )
+      .catch(() => [] as Array<{ program_applied: string }>);
+
+    const priorQuals = await this.db
+      .query(
+        `SELECT qualification_level, cgpa
+         FROM previous_qualification_records
+         WHERE tenant_id = $1 AND student_user_id = $2`,
+        [tenantId, userId],
+      )
+      .catch(() => [] as Array<{ qualification_level: string; cgpa: number | null }>);
+
+    const programLabel: string | null = application?.program_applied?.trim() || null;
+    const programUpper = (programLabel ?? '').toUpperCase();
+    const priorLevels = (priorQuals as Array<{ qualification_level: string }>).map((q) =>
+      (q.qualification_level ?? '').toUpperCase(),
+    );
+
+    const PG_RE = /\b(M\.?\s?TECH|M\.?\s?E\b|M\.?\s?SC|M\.?\s?A\b|M\.?\s?COM|MBA|MCA|LLM|MASTER|POST.?GRAD|\bPG\b)/;
+    const BTECH_RE = /\b(B\.?\s?TECH|B\.?\s?E\b|BACHELOR OF (TECH|ENGINEER)|BTECH)/;
+
+    const isMasters =
+      priorLevels.some((l) => PG_RE.test(l)) || PG_RE.test(programUpper);
+    const isBtech = BTECH_RE.test(programUpper);
+
+    const recordSemester = Number(latestRecord?.semester ?? 0) || 0;
+    const enrolledSemester = Number(enrollAgg?.max_semester ?? 0) || 0;
+    const latestSemester = Math.max(recordSemester, enrolledSemester);
+
+    const recordBacklogs = Number(latestRecord?.backlog_count ?? 0) || 0;
+    const activeBacklogs = Math.max(recordBacklogs, Number(backlogAgg?.active_backlogs ?? 0) || 0);
+
+    const recordCgpa =
+      latestRecord?.cgpa !== undefined && latestRecord?.cgpa !== null
+        ? Number(latestRecord.cgpa)
+        : null;
+    const priorCgpaValues = (priorQuals as Array<{ cgpa: number | null }>)
+      .map((q) => (q.cgpa === null || q.cgpa === undefined ? null : Number(q.cgpa)))
+      .filter((v): v is number => v !== null);
+    const cgpa =
+      recordCgpa !== null
+        ? recordCgpa
+        : priorCgpaValues.length
+          ? Math.max(...priorCgpaValues)
+          : null;
+
+    const clearedSecondYear =
+      enrolledSemester >= PHD_CLEARED_SECOND_YEAR_SEMESTER ||
+      recordSemester >= PHD_CLEARED_SECOND_YEAR_RECORD;
+
+    const classification: EligibilityResult['academic']['classification'] = isMasters
+      ? 'PG'
+      : isBtech
+        ? 'BTECH'
+        : programLabel || latestSemester > 0
+          ? 'OTHER_UG'
+          : 'UNKNOWN';
+
+    const academic = {
+      program_label: programLabel,
+      classification,
+      latest_semester: latestSemester,
+      cleared_second_year: clearedSecondYear,
+      cgpa,
+      active_backlogs: activeBacklogs,
+      is_masters: isMasters,
+    };
+
+    if (classification === 'PG') {
+      const noBacklog = activeBacklogs === 0;
+      const cgpaOk = cgpa === null || cgpa >= PHD_PG_MIN_CGPA;
+      const requirements: EligibilityRequirement[] = [
+        { label: 'Postgraduate / master’s-level qualification', met: true },
+        { label: 'No active backlogs', met: noBacklog },
+        { label: `Minimum CGPA ${PHD_PG_MIN_CGPA.toFixed(1)}`, met: cgpaOk },
+      ];
+      const reasons: string[] = [];
+      if (!noBacklog) reasons.push('Clear all active backlogs before applying.');
+      if (!cgpaOk) reasons.push(`CGPA must be at least ${PHD_PG_MIN_CGPA.toFixed(1)}.`);
+      return {
+        can_apply: reasons.length === 0,
+        route: 'PG',
+        route_label: 'Postgraduate route',
+        requires_entrance_proof: false,
+        reasons,
+        requirements,
+        academic,
+      };
+    }
+
+    if (classification === 'BTECH') {
+      const noBacklog = activeBacklogs === 0;
+      const cgpaOk = cgpa !== null && cgpa >= PHD_DIRECT_MIN_CGPA;
+      const entranceMet = this.entranceSatisfied(evidence);
+      const requirements: EligibilityRequirement[] = [
+        { label: 'B.Tech / B.E. programme', met: true },
+        { label: 'Cleared second year (semester 5 or higher)', met: clearedSecondYear },
+        { label: 'No active backlogs', met: noBacklog },
+        { label: `CGPA ≥ ${PHD_DIRECT_MIN_CGPA.toFixed(1)}`, met: cgpaOk },
+        {
+          label: 'Qualifying entrance (PET/GATE/NET) or approved direct-PhD merit',
+          met: entranceMet,
+          pending: !enforce && !entranceMet,
+        },
+      ];
+      const academicMet = clearedSecondYear && noBacklog && cgpaOk;
+      const reasons: string[] = [];
+      if (!clearedSecondYear)
+        reasons.push('Direct Ph.D. is open only after clearing the second year of B.Tech.');
+      if (!noBacklog) reasons.push('Clear all active backlogs before applying.');
+      if (!cgpaOk) reasons.push(`CGPA must be at least ${PHD_DIRECT_MIN_CGPA.toFixed(1)}.`);
+      if (enforce && academicMet && !entranceMet)
+        reasons.push(
+          'Provide a qualifying entrance score (PET/GATE/NET) or approved direct-PhD merit.',
+        );
+      return {
+        can_apply: enforce ? academicMet && entranceMet : academicMet,
+        route: 'BTECH_DIRECT',
+        route_label: 'B.Tech direct-PhD route',
+        requires_entrance_proof: true,
+        reasons,
+        requirements,
+        academic,
+      };
+    }
+
+    return {
+      can_apply: false,
+      route: null,
+      route_label: 'Not eligible',
+      requires_entrance_proof: false,
+      reasons: [
+        classification === 'OTHER_UG'
+          ? 'Ph.D. applications are open to postgraduate candidates or B.Tech direct-PhD candidates only.'
+          : 'No academic record found to evaluate Ph.D. eligibility. Please complete your academic profile.',
+      ],
+      requirements: [
+        {
+          label: 'Postgraduate qualification or B.Tech direct-PhD eligibility',
+          met: false,
+        },
+      ],
+      academic,
+    };
   }
 
   listMyApplications(tenantId: string, userId: string) {

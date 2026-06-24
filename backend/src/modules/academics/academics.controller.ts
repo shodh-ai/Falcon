@@ -1331,6 +1331,36 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/analytics/students')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  searchAnalyticsStudents(
+    @Req() req: { user: AuthUser },
+    @Query('courseId') courseId: string,
+    @Query('q') q?: string,
+  ) {
+    return this.facultyWorkspaces.searchFacultySubjectStudents(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      q,
+    );
+  }
+
+  @Get('faculty/workspaces/analytics/students/:studentUserId/report')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  facultySubjectStudentReport(
+    @Req() req: { user: AuthUser },
+    @Param('studentUserId') studentUserId: string,
+    @Query('courseId') courseId: string,
+  ) {
+    return this.facultyWorkspaces.getFacultySubjectStudentReport(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      studentUserId,
+    );
+  }
+
   @Get('faculty/workspaces/logbook')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listLogbook(

@@ -1262,6 +1262,334 @@ export class FacultyWorkspacesService {
     );
   }
 
+  async searchFacultySubjectStudents(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    query?: string,
+    limit = 25,
+  ) {
+    await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
+
+    const params: unknown[] = [tenantId, facultyUserId, courseId];
+    let searchFilter = '';
+    const trimmed = query?.trim();
+    if (trimmed) {
+      params.push(`%${trimmed.toLowerCase()}%`);
+      const qIdx = params.length;
+      searchFilter = ` AND (
+        lower(u.name) LIKE $${qIdx}
+        OR lower(u.official_email) LIKE $${qIdx}
+        OR lower(u.user_id::text) LIKE $${qIdx}
+        OR lower(${ROLL_NUMBER_SQL}) LIKE $${qIdx}
+      )`;
+    }
+    params.push(Math.min(Math.max(limit, 1), 50));
+
+    return this.dataSource.query(
+      `SELECT DISTINCT
+         u.user_id AS student_user_id,
+         u.name,
+         u.official_email,
+         ${ROLL_NUMBER_SQL} AS roll_number,
+         d.dept_name AS department,
+         c.course_id,
+         c.course_code,
+         c.course_name,
+         COALESCE((
+           SELECT ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2)
+           FROM academic_marks m
+           WHERE m.tenant_id = e.tenant_id
+             AND m.student_user_id = e.student_user_id
+             AND m.course_id = e.course_id
+             AND m.status = 'PUBLISHED'
+         ), 0) AS internal_avg_percent,
+         (
+           SELECT COUNT(*)::int
+           FROM assignment_submissions sub
+           INNER JOIN academic_assignments aa ON aa.assignment_id = sub.assignment_id
+           WHERE aa.tenant_id = e.tenant_id
+             AND aa.course_id = e.course_id
+             AND sub.student_user_id = e.student_user_id
+         ) AS assignments_submitted
+       FROM student_course_enrollments e
+       INNER JOIN users u ON u.user_id = e.student_user_id
+       INNER JOIN academic_courses c ON c.course_id = e.course_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'ENROLLED'
+         AND e.course_id = $3
+         AND EXISTS (
+           SELECT 1 FROM academic_timetables t
+           WHERE t.course_id = e.course_id
+             AND t.faculty_user_id = $2
+             AND t.tenant_id = e.tenant_id
+         )
+         ${searchFilter}
+       ORDER BY u.name ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+  }
+
+  async getFacultySubjectStudentReport(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    studentUserId: string,
+  ) {
+    await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
+
+    const [studentRows, statsRows, assignmentRows, demeritRows, summaryRows, academicRows] =
+      await Promise.all([
+        this.dataSource.query(
+          `SELECT u.user_id AS student_user_id, u.name, u.official_email,
+                  ${ROLL_NUMBER_SQL} AS roll_number,
+                  sp.batch, d.dept_name AS department
+           FROM student_course_enrollments e
+           INNER JOIN users u ON u.user_id = e.student_user_id
+           LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+           LEFT JOIN departments d ON d.dept_id = u.dept_id
+           WHERE e.tenant_id = $1
+             AND e.course_id = $2
+             AND e.student_user_id = $3
+             AND e.status = 'ENROLLED'
+           LIMIT 1`,
+          [tenantId, courseId, studentUserId],
+        ),
+        this.dataSource.query(
+          `WITH scores AS (
+             SELECT e.student_user_id,
+                    COALESCE(
+                      ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2),
+                      0
+                    ) AS score
+             FROM student_course_enrollments e
+             LEFT JOIN academic_marks m
+               ON m.tenant_id = e.tenant_id
+              AND m.course_id = e.course_id
+              AND m.student_user_id = e.student_user_id
+              AND m.status = 'PUBLISHED'
+             WHERE e.tenant_id = $1
+               AND e.course_id = $2
+               AND e.status = 'ENROLLED'
+             GROUP BY e.student_user_id
+           ),
+           ranked AS (
+             SELECT student_user_id, score,
+                    RANK() OVER (ORDER BY score DESC, student_user_id) AS class_rank,
+                    COUNT(*) OVER () AS class_size,
+                    ROUND(AVG(score) OVER (), 2) AS class_average_percent
+             FROM scores
+           )
+           SELECT c.course_id, c.course_code, c.course_name,
+                  r.score AS internal_avg_percent,
+                  r.class_average_percent,
+                  r.class_rank::int,
+                  r.class_size::int,
+                  (
+                    SELECT COALESCE(json_agg(
+                      json_build_object(
+                        'exam_type', m.exam_type,
+                        'marks_obtained', m.marks_obtained,
+                        'max_marks', m.max_marks,
+                        'percent', ROUND(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100, 2)
+                      ) ORDER BY m.exam_type
+                    ), '[]'::json)
+                    FROM academic_marks m
+                    WHERE m.tenant_id = $1
+                      AND m.course_id = $2
+                      AND m.student_user_id = $3
+                      AND m.status = 'PUBLISHED'
+                  ) AS marks,
+                  (
+                    SELECT COUNT(*)::int
+                    FROM academic_assignments aa
+                    WHERE aa.tenant_id = $1 AND aa.course_id = $2
+                  ) AS assignments_total,
+                  (
+                    SELECT COUNT(*)::int
+                    FROM assignment_submissions sub
+                    INNER JOIN academic_assignments aa ON aa.assignment_id = sub.assignment_id
+                    WHERE aa.tenant_id = $1 AND aa.course_id = $2 AND sub.student_user_id = $3
+                  ) AS assignments_submitted,
+                  (
+                    SELECT COUNT(*)::int
+                    FROM assignment_submissions sub
+                    INNER JOIN academic_assignments aa ON aa.assignment_id = sub.assignment_id
+                    WHERE aa.tenant_id = $1
+                      AND aa.course_id = $2
+                      AND sub.student_user_id = $3
+                      AND sub.marks_awarded IS NOT NULL
+                  ) AS assignments_graded,
+                  (
+                    SELECT COALESCE(
+                      ROUND(AVG(sub.marks_awarded::numeric / NULLIF(aa.max_marks, 0) * 100), 2),
+                      0
+                    )
+                    FROM assignment_submissions sub
+                    INNER JOIN academic_assignments aa ON aa.assignment_id = sub.assignment_id
+                    WHERE aa.tenant_id = $1
+                      AND aa.course_id = $2
+                      AND sub.student_user_id = $3
+                      AND sub.marks_awarded IS NOT NULL
+                  ) AS graded_assignment_avg_percent
+           FROM academic_courses c
+           INNER JOIN ranked r ON r.student_user_id = $3
+           WHERE c.tenant_id = $1 AND c.course_id = $2
+           LIMIT 1`,
+          [tenantId, courseId, studentUserId],
+        ),
+        this.dataSource.query(
+          `SELECT aa.assignment_id, aa.title, aa.max_marks, aa.due_date,
+                  sub.submitted_at, sub.marks_awarded, sub.faculty_remarks,
+                  CASE
+                    WHEN sub.submission_id IS NULL THEN 'PENDING'
+                    WHEN sub.marks_awarded IS NULL THEN 'SUBMITTED'
+                    ELSE 'GRADED'
+                  END AS status
+           FROM academic_assignments aa
+           LEFT JOIN assignment_submissions sub
+             ON sub.assignment_id = aa.assignment_id
+            AND sub.student_user_id = $3
+            AND sub.tenant_id = aa.tenant_id
+           WHERE aa.tenant_id = $1 AND aa.course_id = $2
+           ORDER BY aa.due_date DESC
+           LIMIT 12`,
+          [tenantId, courseId, studentUserId],
+        ),
+        this.dataSource.query(
+          `SELECT di.incident_id, di.category, di.points, di.description, di.status,
+                  di.created_at, c.course_code
+           FROM demerit_incidents di
+           INNER JOIN academic_courses c ON c.course_id = di.course_id
+           WHERE di.tenant_id = $1
+             AND di.course_id = $2
+             AND di.student_user_id = $3
+             AND di.status = 'APPROVED_BY_DC'
+           ORDER BY di.created_at DESC
+           LIMIT 20`,
+          [tenantId, courseId, studentUserId],
+        ).catch(() => []),
+        this.dataSource.query(
+          `SELECT cumulative_demerit_points, is_subject_back_triggered, subject_back_triggered_at
+           FROM student_academic_summaries
+           WHERE tenant_id = $1 AND student_user_id = $2`,
+          [tenantId, studentUserId],
+        ).catch(() => []),
+        this.dataSource.query(
+          `SELECT academic_year, semester, sgpa, cgpa, backlog_count, progression_status, remarks
+           FROM academic_records
+           WHERE tenant_id = $1 AND student_user_id = $2
+           ORDER BY academic_year DESC, semester DESC
+           LIMIT 1`,
+          [tenantId, studentUserId],
+        ).catch(() => []),
+      ]);
+
+    const student = studentRows[0];
+    const stats = statsRows[0];
+    if (!student || !stats) throw new NotFoundException('Student not found in this subject');
+
+    const assignmentsTotal = Number(stats.assignments_total ?? 0);
+    const assignmentsSubmitted = Number(stats.assignments_submitted ?? 0);
+    const pendingAssignments = Math.max(assignmentsTotal - assignmentsSubmitted, 0);
+    const internalAvg = Number(stats.internal_avg_percent ?? 0);
+    const classAverage = Number(stats.class_average_percent ?? 0);
+    const demeritPoints = (demeritRows as Array<{ points: number }>).reduce(
+      (sum, row) => sum + Number(row.points ?? 0),
+      0,
+    );
+    const academic = academicRows[0] ?? null;
+    const academicSummary = summaryRows[0] ?? null;
+    const flags: Array<{ label: string; severity: 'LOW' | 'MEDIUM' | 'HIGH'; detail: string }> = [];
+
+    if (internalAvg < 40) {
+      flags.push({
+        label: 'Weak internals',
+        severity: 'HIGH',
+        detail: 'Internal score is below the 40% academic concern threshold.',
+      });
+    }
+    if (classAverage > 0 && internalAvg + 10 < classAverage) {
+      flags.push({
+        label: 'Below class average',
+        severity: 'MEDIUM',
+        detail: `Student is ${Math.round(classAverage - internalAvg)} points below the subject average.`,
+      });
+    }
+    if (pendingAssignments > 0) {
+      flags.push({
+        label: 'Pending assignments',
+        severity: pendingAssignments > 1 ? 'HIGH' : 'MEDIUM',
+        detail: `${pendingAssignments} assignment${pendingAssignments === 1 ? '' : 's'} pending in this subject.`,
+      });
+    }
+    if (demeritPoints > 0) {
+      flags.push({
+        label: 'Disciplinary points',
+        severity: 'MEDIUM',
+        detail: `${demeritPoints} approved demerit point${demeritPoints === 1 ? '' : 's'} in this subject.`,
+      });
+    }
+    if (Number(academic?.backlog_count ?? 0) > 0) {
+      flags.push({
+        label: 'Backlog history',
+        severity: 'HIGH',
+        detail: `${academic.backlog_count} backlog${Number(academic.backlog_count) === 1 ? '' : 's'} in latest academic record.`,
+      });
+    }
+
+    return {
+      student,
+      subject: {
+        course_id: stats.course_id,
+        course_code: stats.course_code,
+        course_name: stats.course_name,
+      },
+      summary: {
+        internal_avg_percent: Math.round(internalAvg),
+        class_average_percent: Math.round(classAverage),
+        class_rank: Number(stats.class_rank ?? 0),
+        class_size: Number(stats.class_size ?? 0),
+        assignments_total: assignmentsTotal,
+        assignments_submitted: assignmentsSubmitted,
+        assignments_graded: Number(stats.assignments_graded ?? 0),
+        pending_assignments: pendingAssignments,
+        assignment_completion_percent:
+          assignmentsTotal > 0
+            ? Math.round((assignmentsSubmitted / assignmentsTotal) * 100)
+            : 0,
+        graded_assignment_avg_percent: Math.round(
+          Number(stats.graded_assignment_avg_percent ?? 0),
+        ),
+        course_demerit_points: demeritPoints,
+        cumulative_demerit_points: Number(
+          academicSummary?.cumulative_demerit_points ?? demeritPoints,
+        ),
+        is_subject_back_triggered: Boolean(
+          academicSummary?.is_subject_back_triggered,
+        ),
+      },
+      academic: academic
+        ? {
+            academic_year: academic.academic_year,
+            semester: academic.semester,
+            sgpa: Number(academic.sgpa ?? 0),
+            cgpa: Number(academic.cgpa ?? 0),
+            backlog_count: Number(academic.backlog_count ?? 0),
+            progression_status: academic.progression_status,
+            remarks: academic.remarks,
+          }
+        : null,
+      marks: stats.marks ?? [],
+      assignments: assignmentRows,
+      demerits: demeritRows,
+      risk_flags: flags,
+    };
+  }
+
   async listLogbook(
     facultyUserId: string,
     tenantId: string,
