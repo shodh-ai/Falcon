@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { Select } from '@/components/ui/select';
 
 type ResearchLog = {
   research_id: string;
@@ -82,8 +83,8 @@ export default function FacultyResearchPage() {
             onChange={(e) => setForm({ ...form, journal_name: e.target.value })}
             placeholder="Journal / conference"
           />
-          <select
-            className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+          <Select
+            className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
             value={form.indexing_type}
             onChange={(e) => setForm({ ...form, indexing_type: e.target.value })}
           >
@@ -91,9 +92,9 @@ export default function FacultyResearchPage() {
             <option value="WOS">Web of Science</option>
             <option value="UGC_CARE">UGC-CARE</option>
             <option value="OTHER">Other</option>
-          </select>
-          <select
-            className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+          </Select>
+          <Select
+            className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
             value={form.publication_type}
             onChange={(e) => setForm({ ...form, publication_type: e.target.value })}
           >
@@ -102,7 +103,7 @@ export default function FacultyResearchPage() {
             <option value="PATENT">Patent</option>
             <option value="BOOK">Book</option>
             <option value="BOOK_CHAPTER">Book chapter</option>
-          </select>
+          </Select>
           <Input
             type="date"
             value={form.published_date}

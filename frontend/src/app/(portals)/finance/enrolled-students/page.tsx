@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState, useRef } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -66,7 +67,7 @@ export default function FinanceEnrolledStudentsPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
               />
-              <select 
+              <Select 
                 className="border rounded px-3 py-2 text-sm"
                 value={year}
                 onChange={(e) => setYear(e.target.value)}
@@ -76,8 +77,8 @@ export default function FinanceEnrolledStudentsPage() {
                 <option value="2025">2025</option>
                 <option value="2026">2026</option>
                 <option value="2027">2027</option>
-              </select>
-              <select 
+              </Select>
+              <Select 
                 className="border rounded px-3 py-2 text-sm"
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
@@ -87,7 +88,7 @@ export default function FinanceEnrolledStudentsPage() {
                 <option value="2">Mechanical Engineering</option>
                 <option value="3">Civil Engineering</option>
                 <option value="4">Electrical Engineering</option>
-              </select>
+              </Select>
             </div>
 
             <input 

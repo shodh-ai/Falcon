@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { CalendarClock, Check, FileText, Plus, Send, Users, X } from 'lucide-react';
@@ -334,7 +335,7 @@ export function MeetingWorkspace({
           </CardHeader>
           <CardContent>
             <form onSubmit={(e) => void submitRequest(e)} className="space-y-4">
-              <select
+              <Select
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={requestForm.recipient_user_id}
                 onChange={(e) => setRequestForm({ ...requestForm, recipient_user_id: e.target.value })}
@@ -346,7 +347,7 @@ export function MeetingWorkspace({
                     {p.name} ({p.role_name})
                   </option>
                 ))}
-              </select>
+              </Select>
               <Input placeholder="Title" value={requestForm.title} onChange={(e) => setRequestForm({ ...requestForm, title: e.target.value })} required />
               <Input placeholder="Venue" value={requestForm.venue} onChange={(e) => setRequestForm({ ...requestForm, venue: e.target.value })} required />
               <Input

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -66,14 +67,14 @@ export default function AdminAcademicsPage() {
             </label>
             <label className="space-y-1 text-sm">
               <span className="font-medium">Sort by</span>
-              <select
+              <Select
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as 'name' | 'merit')}
               >
                 <option value="name">Name (alphabetical)</option>
                 <option value="merit">Merit (attendance %)</option>
-              </select>
+              </Select>
             </label>
           </div>
           <Button disabled={assigning} onClick={() => void assignRollNumbers()}>

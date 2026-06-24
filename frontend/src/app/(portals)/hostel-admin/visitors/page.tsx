@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,14 +68,14 @@ export default function HostelVisitorsPage() {
             onKeyDown={(e) => e.key === 'Enter' && void process()}
           />
         </div>
-        <select
+        <Select
           className="rounded-lg border px-3 py-2 text-sm"
           value={action}
           onChange={(e) => setAction(e.target.value as 'ENTRY' | 'EXIT')}
         >
           <option value="ENTRY">Entry</option>
           <option value="EXIT">Exit</option>
-        </select>
+        </Select>
         <Button className="bg-sgvu-navy" onClick={() => void process()}>
           Process
         </Button>

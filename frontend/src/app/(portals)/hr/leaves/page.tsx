@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
 import { CalendarOff, Inbox, UserPlus } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -261,7 +262,7 @@ export default function HrLeavesPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={submitOnBehalf} className="space-y-3">
-                <select
+                <Select
                   className="w-full rounded-md border px-2 py-2 text-sm"
                   required
                   value={onBehalf.staff_user_id}
@@ -273,8 +274,8 @@ export default function HrLeavesPage() {
                       {s.name} {s.employee_id ? `(${s.employee_id})` : ''}
                     </option>
                   ))}
-                </select>
-                <select
+                </Select>
+                <Select
                   className="w-full rounded-md border px-2 py-2 text-sm"
                   value={onBehalf.request_type}
                   onChange={(e) =>
@@ -287,9 +288,9 @@ export default function HrLeavesPage() {
                   <option value="ON_DUTY">On Duty (OD)</option>
                   <option value="LEAVE">Leave</option>
                   <option value="REGULARIZATION">Regularisation</option>
-                </select>
+                </Select>
                 {onBehalf.request_type === 'LEAVE' && (
-                  <select
+                  <Select
                     className="w-full rounded-md border px-2 py-2 text-sm"
                     value={onBehalf.leave_type}
                     onChange={(e) => setOnBehalf((f) => ({ ...f, leave_type: e.target.value }))}
@@ -297,7 +298,7 @@ export default function HrLeavesPage() {
                     <option value="CL">Casual (CL)</option>
                     <option value="SL">Sick (SL)</option>
                     <option value="EL">Earned (EL)</option>
-                  </select>
+                  </Select>
                 )}
                 {onBehalf.request_type === 'REGULARIZATION' ? (
                   <Input

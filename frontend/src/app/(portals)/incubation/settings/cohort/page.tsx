@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -98,7 +99,7 @@ export default function IncubationCohortSettingsPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium">Level 1 Approver Role</label>
-              <select
+              <Select
                 className={selectClassName}
                 value={form.level_1_approver_role}
                 onChange={(e) => setForm((f) => ({ ...f, level_1_approver_role: e.target.value }))}
@@ -108,11 +109,11 @@ export default function IncubationCohortSettingsPage() {
                     {role}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Level 2 Approver Role</label>
-              <select
+              <Select
                 className={selectClassName}
                 value={form.level_2_approver_role}
                 onChange={(e) => setForm((f) => ({ ...f, level_2_approver_role: e.target.value }))}
@@ -122,7 +123,7 @@ export default function IncubationCohortSettingsPage() {
                     {role}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

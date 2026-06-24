@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
@@ -249,7 +250,7 @@ export default function PlacementDrivesPage() {
           </DialogHeader>
           <form onSubmit={(e) => void createDrive(e)} className="grid gap-4 sm:grid-cols-2">
             <PlacementFormField label="Company" required className="sm:col-span-2">
-              <select
+              <Select
                 className={selectClassName}
                 value={form.company_id}
                 required
@@ -261,7 +262,7 @@ export default function PlacementDrivesPage() {
                     {c.company_name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </PlacementFormField>
             <PlacementFormField label="Job role" required>
               <Input

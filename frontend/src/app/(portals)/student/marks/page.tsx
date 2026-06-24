@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronRight, Download } from 'lucide-react';
@@ -389,7 +390,7 @@ export default function StudentMarksPage() {
           {semesterOptions.length > 0 && (
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-xs text-muted-foreground">Semester</span>
-              <select
+              <Select
                 className="rounded-md border border-input bg-background px-3 py-2 text-sm"
                 value={componentSemester ?? ''}
                 onChange={(e) => setComponentSemester(Number(e.target.value))}
@@ -399,7 +400,7 @@ export default function StudentMarksPage() {
                     Semester {n}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
         </CardHeader>

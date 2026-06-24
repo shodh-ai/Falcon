@@ -12,6 +12,7 @@ import {
 } from '@/components/hod/HodPagePrimitives';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { Select } from '@/components/ui/select';
 
 type UnassignedItem = {
   allocation_id: string;
@@ -112,15 +113,7 @@ export default function HodTeachingLoadPage() {
       ) : (
         <HodTableWrap>
           <table className="w-full text-sm">
-            <HodTableHead>
-              <tr>
-                <th className="px-4 py-3 text-left">Subject</th>
-                <th className="px-4 py-3 text-left">Program / Semester</th>
-                <th className="px-4 py-3 text-left">Year</th>
-                <th className="px-4 py-3 text-left">Assign faculty</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </HodTableHead>
+            <HodTableHead columns={['Subject', 'Program / Semester', 'Year', 'Assign faculty', '']} />
             <tbody className="divide-y divide-border/60">
               {items.map((item) => (
                 <tr key={item.allocation_id} className="bg-red-50/30">
@@ -137,7 +130,7 @@ export default function HodTeachingLoadPage() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{item.academic_year}</td>
                   <td className="px-4 py-3">
-                    <select
+                    <Select
                       className="w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={draft[item.allocation_id] ?? ''}
                       onChange={(e) =>
@@ -153,7 +146,7 @@ export default function HodTeachingLoadPage() {
                           {f.name}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Button

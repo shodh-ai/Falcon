@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -94,7 +95,7 @@ export function ProxyTeachingDialog({
               <span className="font-semibold">{lec.course_code}</span> · {lec.lecture_date} ·{' '}
               {String(lec.start_time).slice(0, 5)}
             </div>
-            <select
+            <Select
               className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
               value={selections[key] ?? ''}
               onChange={(e) => setSelections((s) => ({ ...s, [key]: e.target.value }))}
@@ -103,7 +104,7 @@ export function ProxyTeachingDialog({
               {colleagues.map((c) => (
                 <option key={c.user_id} value={c.user_id}>{c.name}</option>
               ))}
-            </select>
+            </Select>
           </div>
         );
       })}

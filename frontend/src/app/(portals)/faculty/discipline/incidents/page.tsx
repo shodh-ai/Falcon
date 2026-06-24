@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Upload } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -204,7 +205,7 @@ export default function FacultyDisciplineIncidentsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Student</label>
-              <select
+              <Select
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={form.student_pick}
                 onChange={(e) => setForm((f) => ({ ...f, student_pick: e.target.value, student_ref: '' }))}
@@ -216,7 +217,7 @@ export default function FacultyDisciplineIncidentsPage() {
                     {s.enrollment_number ? ` · ${s.enrollment_number}` : ''}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Or enrollment / email</label>
@@ -228,7 +229,7 @@ export default function FacultyDisciplineIncidentsPage() {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Subject / course</label>
-              <select
+              <Select
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={form.subject_id}
                 onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}
@@ -239,11 +240,11 @@ export default function FacultyDisciplineIncidentsPage() {
                     {c.course_code} — {c.course_name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Category</label>
-              <select
+              <Select
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={form.category}
                 onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
@@ -253,7 +254,7 @@ export default function FacultyDisciplineIncidentsPage() {
                     {label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Points requested</label>

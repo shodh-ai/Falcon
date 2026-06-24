@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 
@@ -29,7 +30,7 @@ export function HostelScopeBar({
   }, [api, allowAll, onChange, value]);
 
   return (
-    <select
+    <Select
       className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -40,6 +41,6 @@ export function HostelScopeBar({
           {h.hostel_name}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Paperclip } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -116,7 +117,7 @@ export function StudentExemptionPanel({ canRequest }: { canRequest: boolean }) {
 
       {open && canRequest && !hasOpen ? (
         <div className="space-y-2 border-t pt-3">
-          <select
+          <Select
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
@@ -126,7 +127,7 @@ export function StudentExemptionPanel({ canRequest }: { canRequest: boolean }) {
                 {r.label}
               </option>
             ))}
-          </select>
+          </Select>
           <textarea
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
             rows={3}

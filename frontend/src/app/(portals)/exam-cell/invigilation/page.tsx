@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -177,13 +178,13 @@ export default function ExamCellInvigilationPage() {
             <CardHeader><CardTitle className="text-base">Assign faculty to room</CardTitle></CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="lg:col-span-2">
-                <select className="w-full rounded-md border px-3 py-2 text-sm" value={examId} onChange={(e) => setExamId(e.target.value)}>
+                <Select className="w-full rounded-md border px-3 py-2 text-sm" value={examId} onChange={(e) => setExamId(e.target.value)}>
                   {schedules.map((s) => (
                     <option key={s.exam_schedule_id} value={s.exam_schedule_id}>{s.exam_type} · {String(s.exam_date).slice(0, 10)}</option>
                   ))}
-                </select>
+                </Select>
               </div>
-              <select className="rounded-md border px-3 py-2 text-sm" value={block} onChange={(e) => {
+              <Select className="rounded-md border px-3 py-2 text-sm" value={block} onChange={(e) => {
                 setBlock(e.target.value);
                 setRoom('');
               }}>
@@ -191,20 +192,20 @@ export default function ExamCellInvigilationPage() {
                 {blocksHalls.map((b) => (
                   <option key={b.block} value={b.block}>{b.block}</option>
                 ))}
-              </select>
-              <select className="rounded-md border px-3 py-2 text-sm" value={room} onChange={(e) => setRoom(e.target.value)} disabled={!block}>
+              </Select>
+              <Select className="rounded-md border px-3 py-2 text-sm" value={room} onChange={(e) => setRoom(e.target.value)} disabled={!block}>
                 <option value="">Select Hall</option>
                 {selectedBlockHalls.map((h) => (
                   <option key={h.name} value={h.name}>{h.name}</option>
                 ))}
-              </select>
+              </Select>
               <div className="sm:col-span-2 lg:col-span-4">
-                <select className="w-full rounded-md border px-3 py-2 text-sm" value={facultyId} onChange={(e) => setFacultyId(e.target.value)}>
+                <Select className="w-full rounded-md border px-3 py-2 text-sm" value={facultyId} onChange={(e) => setFacultyId(e.target.value)}>
                   <option value="">Select available faculty</option>
                   {faculty.map((f) => (
                     <option key={f.user_id} value={f.user_id}>{f.name}</option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div className="sm:col-span-2 lg:col-span-4 flex justify-between items-center mt-2">
                 <Button onClick={() => void assign()} disabled={!room || !facultyId || !examId}>Assign</Button>
