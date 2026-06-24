@@ -155,6 +155,11 @@ export class WeeklyTestsService {
   @Cron(CronExpression.EVERY_MINUTE)
   async handleAutoGradeAndPublish() {
     try {
+      const tableExists = await this.dataSource.query(
+        `SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'weekly_tests') AS exists`,
+      );
+      if (!tableExists[0]?.exists) return;
+
       // 1. Update tests whose end_time has passed to COMPLETED
       await this.dataSource.query(
         `UPDATE weekly_tests SET status = 'COMPLETED' WHERE status IN ('SCHEDULED', 'ACTIVE') AND end_time < NOW()`

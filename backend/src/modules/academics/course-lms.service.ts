@@ -15,9 +15,11 @@ import {
 import { basename, resolve } from 'path';
 import { extname, join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { CourseModule } from '../../entities/course-module.entity';
 import { CourseMaterial } from '../../entities/course-material.entity';
+import { CourseMaterialVisibility } from '../../entities/course-material-visibility.entity';
+import { CourseAllocation } from '../../entities/course-allocation.entity';
 import { AcademicCourse } from '../../entities/academic-course.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
@@ -33,6 +35,10 @@ export class CourseLmsService {
     private readonly modules: Repository<CourseModule>,
     @InjectRepository(CourseMaterial)
     private readonly materials: Repository<CourseMaterial>,
+    @InjectRepository(CourseMaterialVisibility)
+    private readonly materialVisibility: Repository<CourseMaterialVisibility>,
+    @InjectRepository(CourseAllocation)
+    private readonly allocations: Repository<CourseAllocation>,
     @InjectRepository(AcademicCourse)
     private readonly courses: Repository<AcademicCourse>,
     @InjectRepository(StudentCourseEnrollment)
@@ -61,13 +67,68 @@ export class CourseLmsService {
       where: { tenant_id: tenantId, course_id: courseId },
       order: { uploaded_at: 'DESC' },
     });
+    const visibilityByMaterial = await this.loadVisibilityByMaterial(
+      materials.map((m) => m.material_id),
+    );
     return {
       course,
       syllabus_materials: this.mapMaterials(
         materials.filter((m) => m.material_type === 'SYLLABUS'),
+        visibilityByMaterial,
       ),
-      modules: moduleRows.map((m) => this.mapModule(m, materials)),
+      modules: moduleRows.map((m) =>
+        this.mapModule(m, materials, visibilityByMaterial),
+      ),
       syllabus_configured: moduleRows.length > 0,
+    };
+  }
+
+  async getMaterialPublishTargets(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+  ) {
+    await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    const course = await this.getCourseOrFail(courseId, tenantId);
+    const rows = await this.dataSource.query<
+      Array<{
+        allocation_id: string;
+        program_name: string | null;
+        semester: string | null;
+        subject_code: string;
+        subject_name: string;
+      }>
+    >(
+      `SELECT a.allocation_id, a.program_name, a.semester, s.subject_code, s.subject_name
+       FROM academic_course_allocations a
+       JOIN academic_subjects s ON s.subject_id = a.subject_id
+       WHERE a.tenant_id = $1
+         AND a.faculty_user_id = $2
+         AND a.course_id = $3
+         AND a.status = 'ACTIVE'
+       ORDER BY a.program_name NULLS LAST, a.semester NULLS LAST`,
+      [tenantId, facultyUserId, courseId],
+    );
+
+    return {
+      course: {
+        course_id: course.course_id,
+        course_code: course.course_code,
+        course_name: course.course_name,
+      },
+      targets: rows.map((row) => ({
+        allocation_id: row.allocation_id,
+        label: this.formatAllocationLabel(
+          row.program_name,
+          row.semester,
+          row.subject_name,
+        ),
+        program_name: row.program_name,
+        semester: row.semester,
+        subject_code: row.subject_code,
+        subject_name: row.subject_name,
+      })),
+      cross_section_available: rows.length > 1,
     };
   }
 
@@ -132,7 +193,7 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     file: Express.Multer.File,
-    dto: { title?: string; material_type?: string },
+    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -159,17 +220,28 @@ export class CourseLmsService {
       }),
     );
 
+    const allocationIds = this.parseAllocationIds(dto.allocation_ids);
+    await this.attachMaterialVisibility(
+      material.material_id,
+      allocationIds,
+      facultyUserId,
+      tenantId,
+      mod.course_id,
+    );
+
     mod.status = 'COMPLETED';
     mod.completed_at = new Date();
     mod.actual_completion_date = new Date().toISOString().slice(0, 10);
     await this.modules.save(mod);
 
     const course = await this.getCourseOrFail(mod.course_id, tenantId);
-    await this.notifyEnrolledStudents(
+    await this.notifyStudentsForMaterial(
       tenantId,
       mod.course_id,
       course.course_name,
       material.title,
+      material.material_id,
+      allocationIds,
     );
 
     return { module: mod, material };
@@ -212,7 +284,7 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     file: Express.Multer.File,
-    dto: { title?: string; material_type?: string },
+    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -223,6 +295,7 @@ export class CourseLmsService {
 
     const course = await this.getCourseOrFail(mod.course_id, tenantId);
     const materialType = (dto.material_type ?? 'NOTES').toUpperCase();
+    const allocationIds = this.parseAllocationIds(dto.allocation_ids);
     const stored = await this.persistFile(tenantId, file);
     const material = await this.materials.save(
       this.materials.create({
@@ -237,11 +310,21 @@ export class CourseLmsService {
       }),
     );
 
-    await this.notifyEnrolledStudents(
+    await this.attachMaterialVisibility(
+      material.material_id,
+      allocationIds,
+      facultyUserId,
+      tenantId,
+      mod.course_id,
+    );
+
+    await this.notifyStudentsForMaterial(
       tenantId,
       mod.course_id,
       course.course_name,
       material.title,
+      material.material_id,
+      allocationIds,
     );
 
     return { module: mod, material };
@@ -252,7 +335,7 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     files: Express.Multer.File[],
-    dto: { title?: string; material_type?: string },
+    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -264,10 +347,11 @@ export class CourseLmsService {
 
     const course = await this.getCourseOrFail(mod.course_id, tenantId);
     const materialType = (dto.material_type ?? 'NOTES').toUpperCase();
+    const allocationIds = this.parseAllocationIds(dto.allocation_ids);
     const materials = await Promise.all(
       files.map(async (file) => {
         const stored = await this.persistFile(tenantId, file);
-        return this.materials.save(
+        const material = await this.materials.save(
           this.materials.create({
             tenant_id: tenantId,
             course_id: mod.course_id,
@@ -282,16 +366,26 @@ export class CourseLmsService {
             material_type: materialType,
           }),
         );
+        await this.attachMaterialVisibility(
+          material.material_id,
+          allocationIds,
+          facultyUserId,
+          tenantId,
+          mod.course_id,
+        );
+        return material;
       }),
     );
 
     await Promise.all(
       materials.map((material) =>
-        this.notifyEnrolledStudents(
+        this.notifyStudentsForMaterial(
           tenantId,
           mod.course_id,
           course.course_name,
           material.title,
+          material.material_id,
+          allocationIds,
         ),
       ),
     );
@@ -304,7 +398,7 @@ export class CourseLmsService {
     tenantId: string,
     courseId: string,
     file: Express.Multer.File,
-    dto: { title?: string },
+    dto: { title?: string; allocation_ids?: string | string[] },
   ) {
     await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
     if (!file) throw new BadRequestException('Syllabus file is required');
@@ -322,11 +416,21 @@ export class CourseLmsService {
         material_type: 'SYLLABUS',
       }),
     );
-    await this.notifyEnrolledStudents(
+    const allocationIds = this.parseAllocationIds(dto.allocation_ids);
+    await this.attachMaterialVisibility(
+      material.material_id,
+      allocationIds,
+      facultyUserId,
+      tenantId,
+      courseId,
+    );
+    await this.notifyStudentsForMaterial(
       tenantId,
       courseId,
       course.course_name,
       material.title,
+      material.material_id,
+      allocationIds,
     );
     return { material };
   }
@@ -356,6 +460,13 @@ export class CourseLmsService {
     const materials = await this.materials.find({
       where: { tenant_id: tenantId, course_id: courseId },
     });
+    const visibleMaterials = await this.filterMaterialsForStudent(
+      tenantId,
+      studentUserId,
+      courseId,
+      materials,
+      enrollment,
+    );
 
     const completed = modules.filter((m) => m.status === 'COMPLETED').length;
     const total = modules.length;
@@ -382,9 +493,9 @@ export class CourseLmsService {
         total,
         percent: total > 0 ? Math.round((completed / total) * 100) : 0,
       },
-      modules: modules.map((m) => this.mapModule(m, materials)),
+      modules: modules.map((m) => this.mapModule(m, visibleMaterials)),
       syllabus_materials: this.mapMaterials(
-        materials.filter((m) => m.material_type === 'SYLLABUS'),
+        visibleMaterials.filter((m) => m.material_type === 'SYLLABUS'),
       ),
       assignments: courseAssignments,
     };
@@ -437,6 +548,15 @@ export class CourseLmsService {
     });
     if (!enrolled) throw new ForbiddenException('Not enrolled in this course');
 
+    const canAccess = await this.studentCanAccessMaterial(
+      tenantId,
+      studentUserId,
+      material,
+      enrolled,
+    );
+    if (!canAccess)
+      throw new ForbiddenException('This material is not published to your section');
+
     return material;
   }
 
@@ -467,7 +587,11 @@ export class CourseLmsService {
     };
   }
 
-  private mapModule(mod: CourseModule, materials: CourseMaterial[]) {
+  private mapModule(
+    mod: CourseModule,
+    materials: CourseMaterial[],
+    visibilityByMaterial?: Map<string, string[]>,
+  ) {
     const linked = materials.filter(
       (m) => m.module_id === mod.module_id && m.material_type !== 'SYLLABUS',
     );
@@ -481,16 +605,20 @@ export class CourseLmsService {
       planned_completion_date: mod.planned_completion_date,
       actual_completion_date: mod.actual_completion_date,
       hod_approval_status: mod.hod_approval_status,
-      materials: this.mapMaterials(linked),
+      materials: this.mapMaterials(linked, visibilityByMaterial),
     };
   }
 
-  private mapMaterials(materials: CourseMaterial[]) {
+  private mapMaterials(
+    materials: CourseMaterial[],
+    visibilityByMaterial?: Map<string, string[]>,
+  ) {
     return materials.map((m) => ({
       material_id: m.material_id,
       title: m.title,
       material_type: m.material_type,
       uploaded_at: m.uploaded_at,
+      published_sections: visibilityByMaterial?.get(m.material_id) ?? [],
     }));
   }
 
@@ -547,6 +675,283 @@ export class CourseLmsService {
       select: ['student_user_id'],
     });
     for (const row of enrolled) {
+      this.notificationEmitter.courseMaterialAdded({
+        tenantId,
+        userId: row.student_user_id,
+        courseId,
+        courseName,
+        materialTitle,
+      });
+    }
+  }
+
+  private parseAllocationIds(raw?: string | string[]): string[] {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(Boolean);
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        return Array.isArray(parsed)
+          ? parsed.filter((v): v is string => typeof v === 'string' && !!v)
+          : [];
+      } catch {
+        return [];
+      }
+    }
+    return trimmed.split(',').map((v) => v.trim()).filter(Boolean);
+  }
+
+  private formatAllocationLabel(
+    programName: string | null,
+    semester: string | null,
+    subjectName: string,
+  ) {
+    const program = programName?.trim() || 'Program';
+    const sem = semester?.trim() || 'Section';
+    return `${program} (${sem}) — ${subjectName}`;
+  }
+
+  private parseAllocationSemester(semester: string | null): {
+    semesterNum: number | null;
+    sectionCode: string | null;
+  } {
+    if (!semester?.trim()) return { semesterNum: null, sectionCode: null };
+    const parts = semester.trim().split('-');
+    const roman = parts[0]?.trim().toUpperCase() ?? '';
+    const sectionCode = parts[1]?.trim().toUpperCase() || null;
+    return {
+      semesterNum: this.romanToInt(roman),
+      sectionCode,
+    };
+  }
+
+  private romanToInt(value: string): number | null {
+    const map: Record<string, number> = {
+      I: 1,
+      II: 2,
+      III: 3,
+      IV: 4,
+      V: 5,
+      VI: 6,
+      VII: 7,
+      VIII: 8,
+    };
+    return map[value] ?? null;
+  }
+
+  private normalizeProgram(value: string | null | undefined) {
+    return (value ?? '').replace(/\s+/g, '').toUpperCase();
+  }
+
+  private async attachMaterialVisibility(
+    materialId: string,
+    allocationIds: string[],
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+  ) {
+    if (!allocationIds.length) return;
+
+    const valid = await this.allocations
+      .createQueryBuilder('a')
+      .where('a.tenant_id = :tenantId', { tenantId })
+      .andWhere('a.faculty_user_id = :facultyUserId', { facultyUserId })
+      .andWhere('a.course_id = :courseId', { courseId })
+      .andWhere('a.allocation_id IN (:...allocationIds)', { allocationIds })
+      .getMany();
+
+    if (!valid.length) {
+      throw new BadRequestException(
+        'No valid teaching sections selected for publish',
+      );
+    }
+
+    await this.materialVisibility.save(
+      valid.map((row) =>
+        this.materialVisibility.create({
+          material_id: materialId,
+          allocation_id: row.allocation_id,
+        }),
+      ),
+    );
+  }
+
+  private async loadVisibilityByMaterial(materialIds: string[]) {
+    const map = new Map<string, string[]>();
+    if (!materialIds.length) return map;
+
+    const rows = await this.dataSource.query<
+      Array<{ material_id: string; label: string }>
+    >(
+      `SELECT v.material_id,
+              COALESCE(a.program_name, 'Program') || ' (' || COALESCE(a.semester, 'Section') || ')' AS label
+       FROM course_material_visibility v
+       JOIN academic_course_allocations a ON a.allocation_id = v.allocation_id
+       WHERE v.material_id = ANY($1::uuid[])
+       ORDER BY a.program_name, a.semester`,
+      [materialIds],
+    );
+
+    for (const row of rows) {
+      const existing = map.get(row.material_id) ?? [];
+      existing.push(row.label);
+      map.set(row.material_id, existing);
+    }
+    return map;
+  }
+
+  private async filterMaterialsForStudent(
+    tenantId: string,
+    studentUserId: string,
+    courseId: string,
+    materials: CourseMaterial[],
+    enrollment: StudentCourseEnrollment,
+  ) {
+    if (!materials.length) return materials;
+
+    const materialIds = materials.map((m) => m.material_id);
+    const visibilityRows = await this.dataSource.query<
+      Array<{ material_id: string; allocation_id: string }>
+    >(
+      `SELECT material_id, allocation_id
+       FROM course_material_visibility
+       WHERE material_id = ANY($1::uuid[])`,
+      [materialIds],
+    );
+
+    const visibilityByMaterial = new Map<string, string[]>();
+    for (const row of visibilityRows) {
+      const list = visibilityByMaterial.get(row.material_id) ?? [];
+      list.push(row.allocation_id);
+      visibilityByMaterial.set(row.material_id, list);
+    }
+
+    const profileRows = await this.dataSource.query<
+      Array<{ batch: string | null }>
+    >(
+      `SELECT batch FROM student_profiles WHERE user_id = $1 LIMIT 1`,
+      [studentUserId],
+    );
+    const studentProgram = this.normalizeProgram(profileRows[0]?.batch);
+
+    const allocationIds = [
+      ...new Set(visibilityRows.map((row) => row.allocation_id)),
+    ];
+    const allocationRows = allocationIds.length
+      ? await this.allocations.find({
+          where: { allocation_id: In(allocationIds) },
+        })
+      : [];
+
+    const allocationMap = new Map(
+      allocationRows.map((row) => [row.allocation_id, row]),
+    );
+
+    return materials.filter((material) => {
+      const scopedIds = visibilityByMaterial.get(material.material_id);
+      if (!scopedIds?.length) return true;
+      return scopedIds.some((allocationId) => {
+        const allocation = allocationMap.get(allocationId);
+        if (!allocation) return false;
+        return this.enrollmentMatchesAllocation(enrollment, allocation, studentProgram);
+      });
+    });
+  }
+
+  private async studentCanAccessMaterial(
+    tenantId: string,
+    studentUserId: string,
+    material: CourseMaterial,
+    enrollment: StudentCourseEnrollment,
+  ) {
+    const visible = await this.filterMaterialsForStudent(
+      tenantId,
+      studentUserId,
+      material.course_id,
+      [material],
+      enrollment,
+    );
+    return visible.length > 0;
+  }
+
+  private enrollmentMatchesAllocation(
+    enrollment: StudentCourseEnrollment,
+    allocation: CourseAllocation,
+    studentProgram: string,
+  ) {
+    const { semesterNum, sectionCode } = this.parseAllocationSemester(
+      allocation.semester,
+    );
+    if (semesterNum != null && enrollment.semester !== semesterNum) return false;
+
+    const allocationProgram = this.normalizeProgram(allocation.program_name);
+    if (
+      studentProgram &&
+      allocationProgram &&
+      studentProgram !== allocationProgram
+    ) {
+      return false;
+    }
+
+    const enrollmentSection = enrollment.section_code?.trim().toUpperCase() ?? null;
+    if (sectionCode && enrollmentSection && enrollmentSection !== sectionCode) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private async notifyStudentsForMaterial(
+    tenantId: string,
+    courseId: string,
+    courseName: string,
+    materialTitle: string,
+    materialId: string,
+    allocationIds: string[],
+  ) {
+    if (!allocationIds.length) {
+      await this.notifyEnrolledStudents(
+        tenantId,
+        courseId,
+        courseName,
+        materialTitle,
+      );
+      return;
+    }
+
+    const rows = await this.dataSource.query<Array<{ student_user_id: string }>>(
+      `SELECT DISTINCT e.student_user_id
+       FROM student_course_enrollments e
+       LEFT JOIN student_profiles sp ON sp.user_id = e.student_user_id
+       JOIN course_material_visibility v ON v.material_id = $4
+       JOIN academic_course_allocations a ON a.allocation_id = v.allocation_id
+       WHERE e.tenant_id = $1
+         AND e.course_id = $2
+         AND e.status = 'ENROLLED'
+         AND v.allocation_id = ANY($3::uuid[])
+         AND (
+           a.semester IS NULL
+           OR split_part(a.semester, '-', 1) = ''
+           OR CASE upper(split_part(a.semester, '-', 1))
+             WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4
+             WHEN 'V' THEN 5 WHEN 'VI' THEN 6 WHEN 'VII' THEN 7 WHEN 'VIII' THEN 8
+             ELSE NULL END = e.semester
+         )
+         AND (
+           sp.batch IS NULL OR a.program_name IS NULL
+           OR upper(replace(sp.batch, ' ', '')) = upper(replace(a.program_name, ' ', ''))
+         )
+         AND (
+           e.section_code IS NULL
+           OR split_part(a.semester, '-', 2) = ''
+           OR upper(e.section_code) = upper(split_part(a.semester, '-', 2))
+         )`,
+      [tenantId, courseId, allocationIds, materialId],
+    );
+
+    for (const row of rows) {
       this.notificationEmitter.courseMaterialAdded({
         tenantId,
         userId: row.student_user_id,

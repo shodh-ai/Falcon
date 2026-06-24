@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, FormEvent, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useState } from 'react';
 import { BookOpen, FileText, Plus, Trash2, Upload, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -13,7 +13,11 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import type { FacultyWorkspace, LmsMaterial } from '@/lib/api/lms';
+import type {
+  FacultyWorkspace,
+  LmsMaterial,
+  MaterialPublishTargetsResponse,
+} from '@/lib/api/lms';
 import { postMultipart } from '@/lib/api/lms';
 
 type Props = {
@@ -55,6 +59,11 @@ function MaterialRow({
     <li className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm">
       <FileText className="h-4 w-4 shrink-0 text-sgvu-gold" />
       <span className="min-w-0 flex-1 truncate font-medium text-sgvu-navy">{material.title}</span>
+      {material.published_sections && material.published_sections.length > 0 ? (
+        <Badge variant="outline" className="shrink-0 max-w-[140px] truncate text-[10px]" title={material.published_sections.join(', ')}>
+          {material.published_sections.length} section{material.published_sections.length === 1 ? '' : 's'}
+        </Badge>
+      ) : null}
       <Badge variant="secondary" className="shrink-0 text-[10px]">
         {badgeLabel}
       </Badge>
@@ -85,6 +94,39 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [syllabusUploading, setSyllabusUploading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [publishTargets, setPublishTargets] = useState<MaterialPublishTargetsResponse | null>(null);
+  const [selectedAllocations, setSelectedAllocations] = useState<string[]>([]);
+  const [loadingTargets, setLoadingTargets] = useState(false);
+
+  useEffect(() => {
+    if (!uploadModuleId) {
+      setPublishTargets(null);
+      setSelectedAllocations([]);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingTargets(true);
+    void api
+      .get<MaterialPublishTargetsResponse>(
+        `/api/academics/faculty/courses/${courseId}/material-publish-targets`,
+      )
+      .then((data) => {
+        if (cancelled) return;
+        setPublishTargets(data);
+        setSelectedAllocations(data.targets.map((target) => target.allocation_id));
+      })
+      .catch(() => {
+        if (!cancelled) setPublishTargets(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTargets(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, courseId, uploadModuleId]);
 
   async function addModule(e: FormEvent) {
     e.preventDefault();
@@ -109,8 +151,13 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
     if (!uploadModuleId || uploadFiles.length === 0 || !token) return;
     const form = new FormData();
     uploadFiles.forEach((file) => form.append('files', file));
-    if (uploadFiles.length === 1) form.append('title', uploadTitle.trim() || uploadFiles[0].name);
+    if (uploadTitle.trim() && uploadFiles.length === 1) {
+      form.append('title', uploadTitle.trim());
+    }
     form.append('material_type', 'NOTES');
+    if (publishTargets?.cross_section_available && selectedAllocations.length > 0) {
+      form.append('allocation_ids', JSON.stringify(selectedAllocations));
+    }
     setUploading(true);
     try {
       await postMultipart(
@@ -122,6 +169,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
       setUploadModuleId(null);
       setUploadFiles([]);
       setUploadTitle('');
+      setSelectedAllocations([]);
       onRefresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
@@ -389,8 +437,58 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   PDF or PPT · Max 10MB · Notifies enrolled students
                 </p>
               </div>
+              {publishTargets?.cross_section_available ? (
+                <div className="space-y-2 rounded-xl border border-sgvu-gold/30 bg-sgvu-gold/5 p-3">
+                  <p className="text-xs font-semibold text-sgvu-navy">
+                    You teach {publishTargets.course.course_name} to multiple sections. Where should these notes appear?
+                  </p>
+                  {loadingTargets ? (
+                    <p className="text-xs text-muted-foreground">Loading sections…</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {publishTargets.targets.map((target) => {
+                        const checked = selectedAllocations.includes(target.allocation_id);
+                        return (
+                          <li key={target.allocation_id} className="flex items-start gap-2">
+                            <input
+                              id={`alloc-${target.allocation_id}`}
+                              type="checkbox"
+                              checked={checked}
+                              className="mt-0.5 h-4 w-4 rounded border-border accent-sgvu-navy"
+                              onChange={(e) => {
+                                setSelectedAllocations((prev) =>
+                                  e.target.checked
+                                    ? [...prev, target.allocation_id]
+                                    : prev.filter((id) => id !== target.allocation_id),
+                                );
+                              }}
+                            />
+                            <label
+                              htmlFor={`alloc-${target.allocation_id}`}
+                              className="cursor-pointer text-xs leading-relaxed text-sgvu-navy"
+                            >
+                              {target.program_name ?? 'Program'} ({target.semester ?? 'Section'})
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    One upload is stored once and published to every checked section.
+                  </p>
+                </div>
+              ) : null}
               <div className="flex gap-2 pt-1">
-                <Button type="submit" disabled={uploadFiles.length === 0 || uploading} className="gap-1.5">
+                <Button
+                  type="submit"
+                  disabled={
+                    uploadFiles.length === 0
+                    || uploading
+                    || (publishTargets?.cross_section_available === true && selectedAllocations.length === 0)
+                  }
+                  className="gap-1.5"
+                >
                   <Upload className="h-4 w-4" />
                   {uploading ? 'Uploading…' : `Upload ${uploadFiles.length || ''}`}
                 </Button>

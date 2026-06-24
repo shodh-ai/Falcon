@@ -7,6 +7,7 @@ import { Program } from '../../entities/program.entity';
 import { Department } from '../../entities/department.entity';
 import { Batch } from '../../entities/batch.entity';
 import { AuthModule } from '../../auth/auth.module';
+import { AcademicsModule } from '../academics/academics.module';
 import { SuperAdminController } from './super-admin.controller';
 import { SuperAdminService } from './super-admin.service';
 import { ImpersonationService } from './impersonation.service';
@@ -18,6 +19,7 @@ import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
     TypeOrmModule.forFeature([Campus, School, Program, Department, Batch]),
     JwtModule.register({}),
     AuthModule,
+    AcademicsModule,
   ],
   controllers: [SuperAdminController],
   providers: [

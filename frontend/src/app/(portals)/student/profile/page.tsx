@@ -215,7 +215,7 @@ export default function StudentProfilePage() {
   }, [api]);
 
   useEffect(() => {
-    void loadProfile().finally(() => setLoading(false));
+    void loadProfile().catch(() => {}).finally(() => setLoading(false));
   }, [loadProfile]);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Campus } from '../../entities/campus.entity';
@@ -27,10 +27,12 @@ export class SuperAdminService {
       order: { dept_id: 'ASC' },
     });
     const programs = await this.programs.find({ order: { program_id: 'ASC' } });
-    const sections = await this.dataSource.query(
-      `SELECT section_id, section_name, batch_id, program_id, capacity FROM academic_sections WHERE tenant_id = $1 ORDER BY section_name`,
-      [tenantId],
-    );
+    const sections = (await this.tableExists('academic_sections'))
+      ? await this.dataSource.query(
+          `SELECT section_id, section_name, batch_id, program_id, capacity FROM academic_sections WHERE tenant_id = $1 ORDER BY section_name`,
+          [tenantId],
+        )
+      : [];
     const batchRows = await this.batches.find({ order: { batch_id: 'ASC' } });
 
     return {
@@ -76,17 +78,60 @@ export class SuperAdminService {
       entity_id: string;
     },
   ) {
+    const userId = this.requireUuid(dto.user_id, 'user_id');
+    const entityId = dto.entity_id?.trim();
+    if (!entityId) {
+      throw new BadRequestException('entity_id is required');
+    }
+
+    const user = await this.dataSource.query<{ user_id: string }[]>(
+      `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND is_active = true`,
+      [userId, tenantId],
+    );
+    if (!user[0]) {
+      throw new BadRequestException('User not found or inactive in this tenant');
+    }
+
     if (dto.assignment_type === 'DEAN' && dto.entity_type === 'SCHOOL') {
+      const schoolId = Number(entityId);
+      if (!Number.isInteger(schoolId) || schoolId <= 0) {
+        throw new BadRequestException('School ID must be a positive number');
+      }
+      const school = await this.dataSource.query<{ school_id: number }[]>(
+        `SELECT school_id FROM schools WHERE school_id = $1`,
+        [schoolId],
+      );
+      if (!school[0]) {
+        throw new BadRequestException(`School #${schoolId} not found`);
+      }
       await this.dataSource.query(
         `UPDATE schools SET dean_user_id = $1 WHERE school_id = $2`,
-        [dto.user_id, Number(dto.entity_id)],
+        [userId, schoolId],
       );
-    }
-    if (dto.assignment_type === 'HOD' && dto.entity_type === 'DEPARTMENT') {
+    } else if (dto.assignment_type === 'HOD' && dto.entity_type === 'DEPARTMENT') {
+      const deptId = Number(entityId);
+      if (!Number.isInteger(deptId) || deptId <= 0) {
+        throw new BadRequestException('Department ID must be a positive number');
+      }
+      const dept = await this.dataSource.query<{ dept_id: number }[]>(
+        `SELECT dept_id FROM departments WHERE dept_id = $1`,
+        [deptId],
+      );
+      if (!dept[0]) {
+        throw new BadRequestException(`Department #${deptId} not found`);
+      }
       await this.dataSource.query(
         `UPDATE departments SET hod_user_id = $1 WHERE dept_id = $2`,
-        [dto.user_id, Number(dto.entity_id)],
+        [userId, deptId],
       );
+    } else {
+      throw new BadRequestException(
+        'Unsupported assignment. Use DEAN/SCHOOL or HOD/DEPARTMENT.',
+      );
+    }
+
+    if (!(await this.tableExists('hierarchy_assignments'))) {
+      return { assigned: true, pending_migration: true };
     }
 
     const rows = await this.dataSource.query(
@@ -94,24 +139,60 @@ export class SuperAdminService {
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (tenant_id, user_id, assignment_type, entity_type, entity_id) DO NOTHING
        RETURNING *`,
-      [
-        tenantId,
-        dto.user_id,
-        dto.assignment_type,
-        dto.entity_type,
-        dto.entity_id,
-      ],
+      [tenantId, userId, dto.assignment_type, dto.entity_type, entityId],
     );
 
-    await this.audit.log({
-      userId: actorUserId,
-      action: 'HIERARCHY_ASSIGN',
-      entityType: dto.entity_type,
-      entityId: dto.entity_id,
-      details: dto,
-    });
+    try {
+      await this.audit.log({
+        userId: actorUserId,
+        action: 'HIERARCHY_ASSIGN',
+        entityType: dto.entity_type,
+        entityId: dto.entity_id,
+        details: dto,
+      });
+    } catch {
+      /* audit failure must not block hierarchy assignment */
+    }
 
     return rows[0] ?? { assigned: true };
+  }
+
+  async listAssignableUsers(tenantId: string, q?: string) {
+    const term = q?.trim();
+    return this.dataSource.query<
+      { user_id: string; name: string; email: string; role_name: string }[]
+    >(
+      `SELECT u.user_id, u.name, u.official_email AS email, r.role_name
+       FROM users u
+       INNER JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND u.deleted_at IS NULL
+         AND r.role_name IN ('Dean', 'HOD', 'Faculty', 'SuperAdmin')
+         AND (
+           $2::text IS NULL OR $2 = ''
+           OR u.name ILIKE '%' || $2 || '%'
+           OR u.official_email ILIKE '%' || $2 || '%'
+         )
+       ORDER BY u.name ASC
+       LIMIT 50`,
+      [tenantId, term ?? ''],
+    );
+  }
+
+  private requireUuid(value: string, label: string): string {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      throw new BadRequestException(`${label} is required`);
+    }
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        trimmed,
+      )
+    ) {
+      throw new BadRequestException(`${label} must be a valid UUID`);
+    }
+    return trimmed;
   }
 
   async bulkAssignSection(
@@ -120,6 +201,10 @@ export class SuperAdminService {
     sectionId: string,
     studentUserIds: string[],
   ) {
+    if (!(await this.tableExists('section_student_members'))) {
+      return { section_id: sectionId, assigned: 0, pending_migration: true };
+    }
+
     for (const studentUserId of studentUserIds) {
       await this.dataSource.query(
         `INSERT INTO section_student_members (tenant_id, section_id, student_user_id)
@@ -127,17 +212,23 @@ export class SuperAdminService {
         [tenantId, sectionId, studentUserId],
       );
     }
-    await this.audit.log({
-      userId: actorUserId,
-      action: 'SECTION_BULK_ASSIGN',
-      entityType: 'SECTION',
-      entityId: sectionId,
-      details: { count: studentUserIds.length },
-    });
+    try {
+      await this.audit.log({
+        userId: actorUserId,
+        action: 'SECTION_BULK_ASSIGN',
+        entityType: 'SECTION',
+        entityId: sectionId,
+        details: { count: studentUserIds.length },
+      });
+    } catch {
+      /* non-blocking */
+    }
     return { section_id: sectionId, assigned: studentUserIds.length };
   }
 
-  listAssignments(tenantId: string) {
+  async listAssignments(tenantId: string) {
+    if (!(await this.tableExists('hierarchy_assignments'))) return [];
+
     return this.dataSource.query(
       `SELECT a.*, u.name AS user_name, u.official_email
        FROM hierarchy_assignments a
@@ -148,7 +239,9 @@ export class SuperAdminService {
     );
   }
 
-  listImpersonationSessions(tenantId: string) {
+  async listImpersonationSessions(tenantId: string) {
+    if (!(await this.tableExists('impersonation_sessions'))) return [];
+
     return this.dataSource.query(
       `SELECT s.*, i.name AS impersonator_name, t.name AS target_name
        FROM impersonation_sessions s
@@ -160,7 +253,20 @@ export class SuperAdminService {
     );
   }
 
-  listHrOverrideLogs(tenantId: string) {
+  private async tableExists(tableName: string): Promise<boolean> {
+    const rows = await this.dataSource.query<{ exists: boolean }[]>(
+      `SELECT EXISTS (
+         SELECT 1 FROM pg_tables
+         WHERE schemaname = 'public' AND tablename = $1
+       ) AS exists`,
+      [tableName],
+    );
+    return Boolean(rows[0]?.exists);
+  }
+
+  async listHrOverrideLogs(tenantId: string) {
+    if (!(await this.tableExists('hr_override_logs'))) return [];
+
     return this.dataSource.query(
       `SELECT log_id, employee_id, assigned_approver, bypassed_by, type_of_action, type_of_request, date_and_time 
        FROM hr_override_logs 

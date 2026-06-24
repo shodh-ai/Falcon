@@ -21,6 +21,9 @@ export class Subject extends BaseSoftDeleteEntity {
   @Column({ length: 200 })
   subject_name: string;
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  subject_shortname: string | null;
+
   @Column({ type: 'int' })
   program_id: number;
 
@@ -32,6 +35,9 @@ export class Subject extends BaseSoftDeleteEntity {
 
   @Column({ length: 30, default: 'THEORY' })
   subject_type: string;
+
+  @Column({ type: 'boolean', default: true })
+  is_active: boolean;
 
   @CreateDateColumn()
   created_at: Date;

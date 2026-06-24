@@ -20,8 +20,10 @@ export default function OverrideLogsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get<OverrideLog[]>('/api/super-admin/override-logs')
+    api
+      .get<OverrideLog[]>('/api/super-admin/override-logs')
       .then(setLogs)
+      .catch(() => setLogs([]))
       .finally(() => setLoading(false));
   }, [api]);
 

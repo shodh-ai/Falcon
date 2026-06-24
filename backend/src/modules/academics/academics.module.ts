@@ -24,6 +24,8 @@ import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { User } from '../../entities/user.entity';
+import { CourseAllocation } from '../../entities/course-allocation.entity';
+import { CourseMaterialVisibility } from '../../entities/course-material-visibility.entity';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
 import { AcademicsController } from './academics.controller';
 import { AcademicsService } from './academics.service';
@@ -50,6 +52,7 @@ import { EarlyWarningService } from './early-warning.service';
 import { EarlyWarningController } from './early-warning.controller';
 import { InsightsService } from './insights.service';
 import { InsightsController } from './insights.controller';
+import { CourseAllocationBulkService } from './course-allocation-bulk.service';
 
 @Module({
   imports: [
@@ -81,6 +84,8 @@ import { InsightsController } from './insights.controller';
       StaffLeaveRequest,
       StaffGatePass,
       User,
+      CourseAllocation,
+      CourseMaterialVisibility,
       HelpdeskTicket,
     ]),
   ],
@@ -108,6 +113,7 @@ import { InsightsController } from './insights.controller';
     MarksHistoryService,
     EarlyWarningService,
     InsightsService,
+    CourseAllocationBulkService,
   ],
   exports: [
     AcademicsService,
@@ -122,6 +128,7 @@ import { InsightsController } from './insights.controller';
     MarksheetPdfService,
     MarksHistoryService,
     InsightsService,
+    CourseAllocationBulkService,
   ],
 })
 export class AcademicsModule {}

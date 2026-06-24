@@ -117,6 +117,7 @@ export function HodCommandCenter() {
   const api = useAuthedApi();
   const istNow = useIstClock();
   const [data, setData] = useState<CommandCenterPayload | null>(null);
+  const [unassignedLoad, setUnassignedLoad] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
@@ -126,8 +127,12 @@ export function HodCommandCenter() {
       if (!silent) setLoading(true);
       else setRefreshing(true);
       try {
-        const payload = await api.get<CommandCenterPayload>('/api/academics/hod/command-center');
+        const [payload, unassigned] = await Promise.all([
+          api.get<CommandCenterPayload>('/api/academics/hod/command-center'),
+          api.get<{ count: number }>('/api/academics/hod/teaching-load/unassigned/count').catch(() => ({ count: 0 })),
+        ]);
         setData(payload);
+        setUnassignedLoad(unassigned.count);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load command center');
         if (!silent) setData(null);
@@ -270,6 +275,28 @@ export function HodCommandCenter() {
       />
 
       <TodayBirthdaysWidget />
+
+      {unassignedLoad > 0 ? (
+        <Link
+          href="/hod/academics/teaching-load"
+          className="block rounded-xl border border-red-200 bg-red-50 px-5 py-4 shadow-sm transition-colors hover:bg-red-100/80"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-8 w-8 text-red-600" />
+              <div>
+                <p className="font-semibold text-red-800">
+                  {unassignedLoad} Subject{unassignedLoad === 1 ? '' : 's'} Unassigned
+                </p>
+                <p className="text-sm text-red-700/90">
+                  NF rows from the Course Allocation Matrix need faculty assignment.
+                </p>
+              </div>
+            </div>
+            <span className="text-sm font-medium text-red-800">Assign →</span>
+          </div>
+        </Link>
+      ) : null}
 
       {facultyPulse ? (
         <div className="rounded-xl border border-gray-100 bg-white px-5 py-4 shadow-sm">

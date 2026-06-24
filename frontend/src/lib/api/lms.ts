@@ -10,7 +10,28 @@ export type LmsModule = {
   materials: { material_id: string; title: string; material_type: string; uploaded_at?: string }[];
 };
 
-export type LmsMaterial = { material_id: string; title: string; material_type: string; uploaded_at?: string };
+export type LmsMaterial = {
+  material_id: string;
+  title: string;
+  material_type: string;
+  uploaded_at?: string;
+  published_sections?: string[];
+};
+
+export type MaterialPublishTarget = {
+  allocation_id: string;
+  label: string;
+  program_name: string | null;
+  semester: string | null;
+  subject_code: string;
+  subject_name: string;
+};
+
+export type MaterialPublishTargetsResponse = {
+  course: { course_id?: string; course_code: string; course_name: string };
+  targets: MaterialPublishTarget[];
+  cross_section_available: boolean;
+};
 
 export type FacultyWorkspace = {
   course: { course_id?: string; course_code: string; course_name: string; credits: number };

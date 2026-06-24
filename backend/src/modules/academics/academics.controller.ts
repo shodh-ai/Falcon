@@ -34,6 +34,7 @@ import { CourseLmsService } from './course-lms.service';
 import { AcademicProxyService } from './academic-proxy.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
+import { CourseAllocationBulkService } from './course-allocation-bulk.service';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
@@ -53,6 +54,7 @@ export class AcademicsController {
     private readonly academicProxy: AcademicProxyService,
     private readonly marksheetPdf: MarksheetPdfService,
     private readonly marksHistoryService: MarksHistoryService,
+    private readonly courseAllocationBulk: CourseAllocationBulkService,
   ) {}
 
   @Get('subjects')
@@ -539,6 +541,40 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       req.user.user_id,
       dto,
+    );
+  }
+
+  @Get('hod/teaching-load/unassigned')
+  @Roles('HOD', 'SuperAdmin')
+  hodUnassignedTeachingLoad(@Req() req: { user: AuthUser }) {
+    return this.courseAllocationBulk.listUnassignedForHod(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Get('hod/teaching-load/unassigned/count')
+  @Roles('HOD', 'SuperAdmin')
+  async hodUnassignedTeachingLoadCount(@Req() req: { user: AuthUser }) {
+    const count = await this.courseAllocationBulk.countUnassigned(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+    return { count };
+  }
+
+  @Patch('hod/teaching-load/:allocationId/assign')
+  @Roles('HOD', 'SuperAdmin')
+  hodAssignTeachingLoad(
+    @Req() req: { user: AuthUser },
+    @Param('allocationId') allocationId: string,
+    @Body() dto: { faculty_user_id: string },
+  ) {
+    return this.courseAllocationBulk.assignFacultyToAllocation(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      allocationId,
+      dto.faculty_user_id,
     );
   }
 
@@ -1466,6 +1502,19 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/courses/:courseId/material-publish-targets')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getMaterialPublishTargets(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.getMaterialPublishTargets(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+    );
+  }
+
   @Post('faculty/courses/:courseId/syllabus-material')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   @UseInterceptors(courseMaterialInterceptor())
@@ -1473,7 +1522,7 @@ export class AcademicsController {
     @Param('courseId') courseId: string,
     @Req() req: { user: AuthUser },
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { title?: string },
+    @Body() body: { title?: string; allocation_ids?: string | string[] },
   ) {
     return this.courseLms.uploadCourseSyllabus(
       req.user.user_id,
@@ -1534,7 +1583,7 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFiles() files: Express.Multer.File[],
-    @Body() body: { title?: string; material_type?: string },
+    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
   ) {
     return this.courseLms.uploadModuleMaterials(
       req.user.user_id,
@@ -1552,7 +1601,7 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { title?: string; material_type?: string },
+    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
   ) {
     return this.courseLms.completeModuleWithUpload(
       req.user.user_id,

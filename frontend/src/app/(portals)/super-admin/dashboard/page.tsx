@@ -47,6 +47,19 @@ export default function SuperAdminDashboardPage() {
         </Card>
         <Card>
           <CardHeader>
+            <CardTitle className="text-base">Course Allocation Matrix</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Bulk-import teaching load from HOD Excel — auto-creates subjects, maps faculty, and provisions LMS workspaces.
+            </p>
+            <Button asChild>
+              <Link href="/super-admin/academics/course-mapper">Open bulk mapper</Link>
+            </Button>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
             <CardTitle className="text-base">Impersonation</CardTitle>
           </CardHeader>
           <CardContent>

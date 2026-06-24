@@ -51,4 +51,8 @@ export class StudentCourseEnrollment extends BaseTenantEntity {
   /** Semester roll number — may change each term (sections / electives). */
   @Column({ type: 'varchar', length: 50, nullable: true })
   roll_number: string | null;
+
+  /** Section within semester (e.g. A, B) for cross-section material visibility. */
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  section_code: string | null;
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,8 +9,15 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
@@ -21,6 +29,10 @@ import { ImpersonationService } from './impersonation.service';
 import { OrgEntityService } from './org-entity.service';
 import { CreateOrgEntityDto } from './dto/create-org-entity.dto';
 import { GrantEntityAccessDto } from './dto/grant-entity-access.dto';
+import {
+  CourseAllocationBulkService,
+  type CourseAllocationRowInput,
+} from '../academics/course-allocation-bulk.service';
 
 type AuthUser = {
   user_id: string;
@@ -38,6 +50,7 @@ export class SuperAdminController {
     private readonly superAdmin: SuperAdminService,
     private readonly impersonation: ImpersonationService,
     private readonly orgEntities: OrgEntityService,
+    private readonly courseAllocationBulk: CourseAllocationBulkService,
   ) {}
 
   @Get('entities')
@@ -118,6 +131,14 @@ export class SuperAdminController {
     return this.superAdmin.createSection(this.tenant(req), dto);
   }
 
+  @Get('hierarchy/assignable-users')
+  hierarchyAssignableUsers(
+    @Req() req: { user: AuthUser },
+    @Query('q') q?: string,
+  ) {
+    return this.superAdmin.listAssignableUsers(this.tenant(req), q);
+  }
+
   @Post('assignments')
   assign(
     @Req() req: { user: AuthUser },
@@ -190,5 +211,49 @@ export class SuperAdminController {
   @Get('override-logs')
   listOverrideLogs(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listHrOverrideLogs(this.tenant(req));
+  }
+
+  @Get('academics/course-mapper/template')
+  async courseMapperTemplate(@Res({ passthrough: true }) res: Response) {
+    const buffer = await this.courseAllocationBulk.buildTemplateBuffer();
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition':
+        'attachment; filename="course-allocation-matrix-template.xlsx"',
+    });
+    return new StreamableFile(buffer);
+  }
+
+  @Post('academics/course-mapper/preview')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async courseMapperPreview(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: { user: AuthUser },
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const rows = await this.courseAllocationBulk.parseUploadFile(
+      file.buffer,
+      file.originalname,
+    );
+    return this.courseAllocationBulk.buildPreview(this.tenant(req), rows);
+  }
+
+  @Post('academics/course-mapper/execute')
+  executeCourseMapper(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: { academic_year: string; rows: CourseAllocationRowInput[] },
+  ) {
+    return this.courseAllocationBulk.executeBulkMap(
+      this.tenant(req),
+      dto.academic_year,
+      dto.rows,
+    );
   }
 }
