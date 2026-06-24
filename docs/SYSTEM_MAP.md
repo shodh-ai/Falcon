@@ -230,7 +230,7 @@ Each section lists: **home path**, **primary portal features**, **additional por
 | Group | Features |
 |-------|----------|
 | Home | Dashboard |
-| Academics & Teaching | Timetable & Extra Classes, Mark Attendance, Course Page & Syllabus, Digital Assignments, Examinations & Grading, CO-PO Mapping, Student Analytics, Digital Class Logbook |
+| Academics & Teaching | Timetable & Extra Classes, Mark Attendance, Course Page & Syllabus, Digital Assignments, Examinations & Grading, Student Analytics, Digital Class Logbook |
 | Students & Mentoring | Mentorship & Approvals, Project & Lab Guides |
 | Research & Duties | Library OPAC, Exam Invigilation Duty, Research & Publications |
 | Administration | Pending Approvals (Inbox), Falcon Core Tasks (IQAC), Event Approvals |

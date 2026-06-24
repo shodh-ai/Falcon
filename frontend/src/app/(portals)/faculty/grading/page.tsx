@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send } from 'lucide-react';
-import Link from 'next/link';
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -206,7 +205,7 @@ export default function FacultyGradingPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Spreadsheet-style marks entry with max-marks validation. Link assessments to COs via CO-PO Mapping."
+        description="Spreadsheet-style marks entry with max-marks validation."
         meta={
           courseId ? (
             <>
@@ -216,11 +215,6 @@ export default function FacultyGradingPage() {
               <FacultyMetricChip label="Marks entered" value={enteredCount} />
             </>
           ) : null
-        }
-        actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/faculty/grading/copo">CO-PO Mapping</Link>
-          </Button>
         }
       />
 

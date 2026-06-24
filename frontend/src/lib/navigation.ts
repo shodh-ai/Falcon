@@ -349,7 +349,6 @@ export const facultyPortal: PortalConfig = {
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
-        { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
 
       ],
@@ -397,7 +396,6 @@ export const facultyPortal: PortalConfig = {
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
-        { label: 'CO-PO Mapping', href: '/faculty/grading/copo', icon: GraduationCap, keywords: ['nba', 'naac', 'outcomes', 'co', 'po'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
 
       ],
