@@ -33,11 +33,11 @@ export default function FacultyWeeklyTestsPage() {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  
+
   // Answer key array, length 10
   const [answerKey, setAnswerKey] = useState<string[]>(Array(10).fill(''));
   const [isAnswerKeyModalOpen, setIsAnswerKeyModalOpen] = useState(false);
-  
+
   const [submitting, setSubmitting] = useState(false);
 
   // My tests state
@@ -103,14 +103,14 @@ export default function FacultyWeeklyTestsPage() {
       });
 
       toast.success('Weekly test scheduled successfully!');
-      
+
       // Reset form
       setCourseId('');
       setStartTime('');
       setEndTime('');
       setFile(null);
       setAnswerKey(Array(10).fill(''));
-      
+
       // Refresh tests list
       fetchMyTests();
     } catch (e) {
@@ -127,7 +127,7 @@ export default function FacultyWeeklyTestsPage() {
       [0, 1, 2, 3, 4],
       [5, 6, 7, 8, 9]
     ];
-    
+
     return (
       <div className="overflow-x-auto w-full py-4">
         <table className="w-full text-sm">
@@ -272,7 +272,7 @@ export default function FacultyWeeklyTestsPage() {
                       <Button variant="outline" onClick={() => setIsAnswerKeyModalOpen(false)}>
                         Cancel
                       </Button>
-                      <Button 
+                      <Button
                         onClick={() => setIsAnswerKeyModalOpen(false)}
                         disabled={!isAnswerKeyComplete}
                       >

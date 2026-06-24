@@ -391,7 +391,9 @@ export class FacultyWorkspacesService {
       throw new BadRequestException('Invalid exam_type');
     }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
-    if (dto.exam_type !== 'QUIZ') {
+    const isDirectPublish = ['QUIZ', 'GA1', 'GA2'].includes(dto.exam_type);
+    
+    if (!isDirectPublish) {
       const session = await this.getResultSession(
         tenantId,
         dto.course_id,
@@ -400,7 +402,7 @@ export class FacultyWorkspacesService {
       this.assertFacultyEntryAllowed(session);
     }
 
-    if (dto.exam_type !== 'QUIZ') {
+    if (!isDirectPublish) {
       const locked = await this.dataSource.query(
         `SELECT 1 FROM academic_marks
          WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
@@ -459,7 +461,7 @@ export class FacultyWorkspacesService {
              ELSE EXCLUDED.co_mapped
            END,
            status = CASE
-             WHEN EXCLUDED.exam_type = 'QUIZ' THEN 'DRAFT'
+             WHEN EXCLUDED.exam_type IN ('QUIZ', 'GA1', 'GA2') THEN 'DRAFT'
              WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
              ELSE 'DRAFT'
            END,
@@ -478,13 +480,14 @@ export class FacultyWorkspacesService {
     examType: string,
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
-    if (examType !== 'QUIZ') {
+    const isDirectPublish = ['QUIZ', 'GA1', 'GA2'].includes(examType);
+    if (!isDirectPublish) {
       const session = await this.getResultSession(tenantId, courseId, examType);
       this.assertFacultyEntryAllowed(session);
     }
-    const targetStatus = examType === 'QUIZ' ? 'PUBLISHED' : 'PENDING_COE';
+    const targetStatus = isDirectPublish ? 'PUBLISHED' : 'PENDING_COE';
     const statusCondition =
-      examType === 'QUIZ'
+      isDirectPublish
         ? `status IN ('DRAFT', 'PENDING_COE', 'PUBLISHED')`
         : `status = 'DRAFT'`;
     const result = await this.dataSource.query(

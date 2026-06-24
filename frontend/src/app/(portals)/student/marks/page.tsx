@@ -403,68 +403,55 @@ export default function StudentMarksPage() {
             </label>
           )}
         </CardHeader>
-        <CardContent className="space-y-2">
-          {!componentSemesterData?.subjects?.length && (
-            <p className="text-sm text-muted-foreground">
+        <CardContent className="p-0">
+          {!componentSemesterData?.subjects?.length ? (
+            <p className="text-sm text-muted-foreground px-4 py-4 text-center">
               No subjects for this semester, or marks have not been published yet. Faculty must click
               &ldquo;Publish to students&rdquo; after saving draft marks — draft marks are not visible here.
             </p>
-          )}
-          {(componentSemesterData?.subjects ?? []).map((sub) => {
-            const open = expandedSubjects.has(sub.course_id);
-            const hasComponents = sub.components.length > 0;
-            return (
-              <div key={sub.course_id} className="overflow-hidden rounded-lg border border-border">
-                <button
-                  type="button"
-                  onClick={() => toggleSubject(sub.course_id)}
-                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm hover:bg-muted/40"
-                >
-                  <span>
-                    <span className="font-mono text-xs text-muted-foreground">{sub.course_code}</span>
-                    <span className="mx-2 text-muted-foreground">·</span>
-                    <span className="font-medium">{sub.course_name}</span>
-                  </span>
-                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                    {hasComponents && (
-                      <span className="font-semibold text-foreground">
-                        Internal: {sub.total_internal_obtained}/{sub.total_internal_max}
-                      </span>
-                    )}
-                    {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </span>
-                </button>
-                {open && (
-                  <div className="border-t border-border px-4 pb-4">
-                    {!hasComponents ? (
-                      <p className="pt-3 text-sm text-muted-foreground">
-                        Published component marks will appear here once faculty releases them.
-                      </p>
-                    ) : (
-                      <table className="mt-3 w-full text-sm">
-                        <tbody>
-                          {sub.components.map((c) => (
-                            <tr key={c.key} className="border-b border-border/50 last:border-0">
-                              <td className="py-2 text-muted-foreground">{c.label}</td>
-                              <td className="py-2 text-right font-medium tabular-nums">
-                                {c.marks_obtained}/{c.max_marks}
-                              </td>
-                            </tr>
-                          ))}
-                          <tr className="font-semibold">
-                            <td className="pt-3">Total Internal Marks</td>
-                            <td className="pt-3 text-right tabular-nums">
-                              {sub.total_internal_obtained}/{sub.total_internal_max}
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-muted-foreground border-b border-border">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Subject</th>
+                    <th className="px-4 py-3 text-center font-medium whitespace-nowrap">WT1<br/><span className="text-[10px] opacity-70">(Max 10)</span></th>
+                    <th className="px-4 py-3 text-center font-medium whitespace-nowrap">WT2<br/><span className="text-[10px] opacity-70">(Max 10)</span></th>
+                    <th className="px-4 py-3 text-center font-medium whitespace-nowrap">GA1<br/><span className="text-[10px] opacity-70">(Max 5)</span></th>
+                    <th className="px-4 py-3 text-center font-medium whitespace-nowrap">GA2<br/><span className="text-[10px] opacity-70">(Max 5)</span></th>
+                    <th className="px-4 py-3 text-center font-medium whitespace-nowrap">MTE1<br/><span className="text-[10px] opacity-70">(Max 15)</span></th>
+                    <th className="px-4 py-3 text-center font-medium whitespace-nowrap">MTE2<br/><span className="text-[10px] opacity-70">(Max 15)</span></th>
+                    <th className="px-4 py-3 text-center font-medium whitespace-nowrap">ETE<br/><span className="text-[10px] opacity-70">(Max 40)</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {componentSemesterData.subjects.map((sub) => {
+                    const getMark = (type: string) => sub.components.find((c) => c.key.startsWith(type));
+                    return (
+                      <tr key={sub.course_id} className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors">
+                        <td className="px-4 py-4">
+                          <div className="font-semibold text-sgvu-navy">{sub.course_code}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{sub.course_name}</div>
+                        </td>
+                        {['WT1', 'WT2', 'GA1', 'GA2', 'MTE1', 'MTE2', 'ETE'].map((type) => {
+                          const mark = getMark(type);
+                          return (
+                            <td key={type} className="px-4 py-4 text-center tabular-nums">
+                              {mark ? (
+                                <span className="font-medium text-foreground">{mark.marks_obtained}</span>
+                              ) : (
+                                <span className="text-muted-foreground/50">-</span>
+                              )}
                             </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
