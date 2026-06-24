@@ -22,6 +22,7 @@ const categories = [
   { label: 'Maintenance', value: 'HOSTEL' },
   { label: 'Academics', value: 'ACADEMICS' },
   { label: 'Finance', value: 'FINANCE' },
+  { label: 'Other', value: 'OTHER' },
 ] as const;
 
 type TicketRow = {
@@ -152,19 +153,29 @@ export default function StudentHelpdeskPage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <StudentSectionCard title="Raise new ticket" description="Describe your issue clearly for faster resolution" icon={MessageSquarePlus} tone="gold">
+        <StudentSectionCard title="Raise new ticket" description="Describe your issue clearly for faster resolution" icon={MessageSquarePlus} tone="gold" className="overflow-visible">
           <div className="space-y-3">
-            <select
-              className="h-11 w-full rounded-xl border border-input bg-background px-4 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={form.category}
-              onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))}
-            >
-              {categories.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-2">
+              {categories.map((item) => {
+                const selected = form.category === item.value;
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setForm((prev) => ({ ...prev, category: item.value }))}
+                    className={`rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition ${
+                      item.value === 'OTHER' ? 'col-span-2' : ''
+                    } ${
+                      selected
+                        ? 'border-sgvu-navy bg-sgvu-navy text-white shadow-sm'
+                        : 'border-input bg-background text-sgvu-navy hover:border-sgvu-gold/50'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
             <Input placeholder="Short subject" value={form.subject} onChange={(event) => setForm((prev) => ({ ...prev, subject: event.target.value }))} />
             <textarea
               className="min-h-24 w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm leading-6 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

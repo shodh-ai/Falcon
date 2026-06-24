@@ -11,6 +11,13 @@ const COMPONENT_LABELS: Record<string, string> = {
   INTERNAL: 'Internal Assessment',
   END_TERM: 'End-Term',
   ASSIGNMENT: 'Digital Assignment 1 (DA-1)',
+  WT1: 'Weekly Test 1 (WT-1)',
+  WT2: 'Weekly Test 2 (WT-2)',
+  GA1: 'Graded Assignment 1 (GA-1)',
+  GA2: 'Graded Assignment 2 (GA-2)',
+  MTE1: 'Mid Term Exam 1 (MTE-1)',
+  MTE2: 'Mid Term Exam 2 (MTE-2)',
+  ETE: 'End Term Exam (ETE)',
 };
 
 @Injectable()
@@ -317,6 +324,13 @@ export class MarksHistoryService {
           'QUIZ',
           'INTERNAL',
           'END_TERM',
+          'WT1',
+          'WT2',
+          'GA1',
+          'GA2',
+          'MTE1',
+          'MTE2',
+          'ETE',
         ];
         components.sort((a, b) => {
           const ai = order.findIndex((k) => a.key.startsWith(k));

@@ -15,6 +15,7 @@ import type { PortalConfig } from '@/lib/navigation';
 interface AppTopBarProps {
   config: PortalConfig;
   pageTitle: string;
+  pageShortTitle?: string;
   profileHref?: string;
   headerExtra?: ReactNode;
   mobileOpen: boolean;
@@ -24,6 +25,7 @@ interface AppTopBarProps {
 export function AppTopBar({
   config,
   pageTitle,
+  pageShortTitle,
   profileHref,
   headerExtra,
   mobileOpen,
@@ -61,7 +63,14 @@ export function AppTopBar({
 
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-bold tracking-tight text-sgvu-navy sm:text-lg">
-            {pageTitle}
+            {pageShortTitle ? (
+              <>
+                <span className="sm:hidden">{pageShortTitle}</span>
+                <span className="hidden sm:inline">{pageTitle}</span>
+              </>
+            ) : (
+              pageTitle
+            )}
           </h1>
           <p className="truncate text-[11px] font-medium text-sgvu-navy/50">{config.personaLabel}</p>
         </div>

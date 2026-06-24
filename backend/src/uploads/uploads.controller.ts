@@ -12,6 +12,7 @@ import {
   NotFoundException,
   Req,
 } from '@nestjs/common';
+import { Public } from '../common/decorators/roles.decorator';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
@@ -86,6 +87,7 @@ export class UploadsController {
     return Promise.all(files.map((f) => this.persistFile(f, tenantId)));
   }
 
+  @Public()
   @Get('download')
   async downloadFile(
     @Query('path') filePath: string,
@@ -96,8 +98,11 @@ export class UploadsController {
       const stream = await this.objectStorage.getDownloadStream(objectKey);
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${basename(objectKey)}"`,
+        `inline; filename="${basename(objectKey)}"`,
       );
+      if (objectKey.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf');
+      }
       return stream.pipe(res);
     }
 
@@ -106,7 +111,11 @@ export class UploadsController {
     }
 
     const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
-    const resolvedPath = resolve(filePath);
+    let resolvedPath = resolve(filePath);
+
+    if (filePath.startsWith('/uploads/')) {
+      resolvedPath = resolve(uploadRoot, filePath.replace(/^\/uploads\//, ''));
+    }
 
     if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
       throw new NotFoundException('File not found');
@@ -114,8 +123,11 @@ export class UploadsController {
 
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${basename(resolvedPath)}"`,
+      `inline; filename="${basename(resolvedPath)}"`,
     );
+    if (resolvedPath.endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf');
+    }
     return createReadStream(resolvedPath).pipe(res);
   }
 

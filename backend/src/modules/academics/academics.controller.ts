@@ -1043,6 +1043,32 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/course/:courseId/unified-marks')
+  @Roles('Faculty')
+  getUnifiedCourseMarks(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+  ) {
+    return this.facultyWorkspaces.getUnifiedCourseMarks(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+    );
+  }
+
+  @Post('faculty/workspaces/course/:courseId/publish-all')
+  @Roles('Faculty')
+  publishAllCourseMarks(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+  ) {
+    return this.facultyWorkspaces.publishAllCourseMarks(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+    );
+  }
+
   @Get('faculty/workspaces/copo')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listCoPo(
