@@ -19,43 +19,34 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 
-const EXAM_TYPES = ['CAT1', 'CAT2', 'QUIZ', 'INTERNAL', 'END_TERM'] as const;
+const MARK_COLUMNS = [
+  { id: 'WT1', label: 'WT1', max: 10, readOnly: true },
+  { id: 'WT2', label: 'WT2', max: 10, readOnly: true },
+  { id: 'GA1', label: 'GA1', max: 5, readOnly: false },
+  { id: 'GA2', label: 'GA2', max: 5, readOnly: false },
+  { id: 'MTE1', label: 'MTE1', max: 15, readOnly: false },
+  { id: 'MTE2', label: 'MTE2', max: 15, readOnly: false },
+  { id: 'ETE', label: 'ETE', max: 40, readOnly: false },
+] as const;
 
-type MarkRow = {
+type UnifiedMarkRow = {
   student_user_id: string;
   name: string;
   roll_number: string;
-  marks_obtained: number | null;
-  max_marks: number;
-  co_mapped: string | null;
-  status?: string | null;
-};
-
-type MarksPayload = {
-  exam_type: string;
-  course_id: string;
-  max_marks_default: number;
-  publish_status: string;
-  entry_allowed?: boolean;
-  result_session?: {
-    session_id: string;
-    entry_status: string;
-    marks_locked: boolean;
-    declared_at?: string | null;
-  } | null;
-  rows: MarkRow[];
+  marks: Record<
+    string,
+    {
+      obtained: number | null;
+      status: string | null;
+    }
+  >;
 };
 
 export default function FacultyGradingPage() {
   const api = useAuthedApi();
   const { courses, loading: coursesLoading } = useFacultyCourses();
   const [courseId, setCourseId] = useState('');
-  const [examType, setExamType] = useState<(typeof EXAM_TYPES)[number]>('CAT1');
-  const [maxMarks, setMaxMarks] = useState(50);
-  const [rows, setRows] = useState<MarkRow[]>([]);
-  const [publishStatus, setPublishStatus] = useState('DRAFT');
-  const [entryAllowed, setEntryAllowed] = useState(false);
-  const [sessionStatus, setSessionStatus] = useState<string | null>(null);
+  const [rows, setRows] = useState<UnifiedMarkRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -73,15 +64,11 @@ export default function FacultyGradingPage() {
       setLoading(true);
       setRosterError(null);
       try {
-        const data = await api.get<MarksPayload>(
-          `/api/academics/faculty/workspaces/marks?courseId=${encodeURIComponent(courseId)}&examType=${examType}`,
+        const data = await api.get<UnifiedMarkRow[]>(
+          `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
         );
         if (!cancelled) {
-          setRows(data.rows);
-          setMaxMarks(data.max_marks_default ?? 50);
-          setPublishStatus(data.publish_status);
-          setEntryAllowed(data.entry_allowed ?? false);
-          setSessionStatus(data.result_session?.entry_status ?? null);
+          setRows(data);
         }
       } catch (e) {
         if (!cancelled) {
@@ -97,54 +84,88 @@ export default function FacultyGradingPage() {
     return () => {
       cancelled = true;
     };
-  }, [api, courseId, examType]);
+  }, [api, courseId]);
 
-  function updateMark(studentId: string, value: string) {
+  function updateMark(studentId: string, examType: string, value: string) {
+    const col = MARK_COLUMNS.find((c) => c.id === examType);
+    if (!col) return;
     const num = value === '' ? null : Number(value);
+
     setRows((prev) =>
       prev.map((r) => {
         if (r.student_user_id !== studentId) return r;
-        if (num !== null && num > maxMarks) {
-          toast.error(`Cannot exceed ${maxMarks}`);
+        if (num !== null && num > col.max) {
+          toast.error(`Cannot exceed ${col.max} for ${examType}`);
           return r;
         }
-        return { ...r, marks_obtained: num };
+        return {
+          ...r,
+          marks: {
+            ...r.marks,
+            [examType]: {
+              ...(r.marks[examType] || { status: 'DRAFT' }),
+              obtained: num,
+            },
+          },
+        };
       }),
     );
   }
 
   async function saveDraft(): Promise<boolean> {
     if (!courseId) return false;
-    const entries = rows
-      .filter(
-        (r) =>
-          r.marks_obtained !== null &&
-          r.status !== 'PENDING_COE' &&
-          r.status !== 'PUBLISHED',
-      )
-      .map((r) => ({
-        student_user_id: r.student_user_id,
-        marks_obtained: r.marks_obtained,
-        co_mapped: r.co_mapped,
-      }));
-    if (entries.length === 0) {
-      toast.error('Enter marks for at least one student before saving.');
+
+    const entriesByExamType: Record<
+      string,
+      { student_user_id: string; marks_obtained: number }[]
+    > = {};
+
+    for (const r of rows) {
+      for (const col of MARK_COLUMNS) {
+        if (col.readOnly) continue;
+        const m = r.marks[col.id];
+        if (
+          m &&
+          m.obtained !== null &&
+          m.status !== 'PENDING_COE' &&
+          m.status !== 'PUBLISHED'
+        ) {
+          if (!entriesByExamType[col.id]) {
+            entriesByExamType[col.id] = [];
+          }
+          entriesByExamType[col.id].push({
+            student_user_id: r.student_user_id,
+            marks_obtained: m.obtained,
+          });
+        }
+      }
+    }
+
+    const typesToSave = Object.keys(entriesByExamType);
+    if (typesToSave.length === 0) {
+      toast.error('No new marks to save.');
       return false;
     }
+
     setSaving(true);
     try {
-      await api.post('/api/academics/faculty/workspaces/marks/draft', {
-        course_id: courseId,
-        exam_type: examType,
-        max_marks: maxMarks,
-        entries,
-      });
-      toast.success('Draft saved');
-      const data = await api.get<MarksPayload>(
-        `/api/academics/faculty/workspaces/marks?courseId=${encodeURIComponent(courseId)}&examType=${examType}`,
+      for (const examType of typesToSave) {
+        const entries = entriesByExamType[examType];
+        const col = MARK_COLUMNS.find((c) => c.id === examType);
+        await api.post('/api/academics/faculty/workspaces/marks/draft', {
+          course_id: courseId,
+          exam_type: examType,
+          max_marks: col?.max || 100,
+          entries,
+        });
+      }
+
+      toast.success('Draft saved successfully');
+      // Reload
+      const data = await api.get<UnifiedMarkRow[]>(
+        `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
       );
-      setRows(data.rows);
-      setPublishStatus(data.publish_status);
+      setRows(data);
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
@@ -154,26 +175,28 @@ export default function FacultyGradingPage() {
     }
   }
 
-  async function publish() {
+  async function publishAll() {
     if (!courseId) return;
     setSaving(true);
     try {
-      const draftOk = await saveDraft();
-      if (!draftOk) return;
-      const result = await api.post<{ published: number }>('/api/academics/faculty/workspaces/marks/publish', {
-        course_id: courseId,
-        exam_type: examType,
-      });
-      if ((result.published ?? 0) === 0) {
-        toast.warning('No draft marks were published. Save draft marks first.');
-        return;
-      }
-      toast.success(`Marks submitted to Exam Cell for ${result.published} student${result.published === 1 ? '' : 's'}`);
-      const data = await api.get<MarksPayload>(
-        `/api/academics/faculty/workspaces/marks?courseId=${encodeURIComponent(courseId)}&examType=${examType}`,
+      // Auto-save draft before publishing
+      await saveDraft();
+
+      const result = await api.post<{ published: number }>(
+        `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/publish-all`,
       );
-      setRows(data.rows);
-      setPublishStatus(data.publish_status);
+      
+      if ((result.published ?? 0) === 0) {
+        toast.warning('No marks were published.');
+      } else {
+        toast.success(`Published marks for course successfully.`);
+      }
+      
+      // Reload
+      const data = await api.get<UnifiedMarkRow[]>(
+        `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
+      );
+      setRows(data);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Publish failed');
     } finally {
@@ -181,60 +204,28 @@ export default function FacultyGradingPage() {
     }
   }
 
-  const enteredCount = rows.filter((r) => r.marks_obtained !== null).length;
-  const draftSubmitCount = rows.filter(
-    (r) => (r.status === 'DRAFT' || !r.status) && r.marks_obtained !== null,
-  ).length;
-  const editableDraftCount = rows.filter(
-    (r) =>
-      r.marks_obtained !== null &&
-      r.status !== 'PENDING_COE' &&
-      r.status !== 'PUBLISHED',
-  ).length;
-  const allSubmitted =
-    rows.length > 0 &&
-    rows.every((r) => r.status === 'PENDING_COE' || r.status === 'PUBLISHED');
-  const canSaveDraft = !!courseId && entryAllowed && publishStatus !== 'PUBLISHED' && editableDraftCount > 0;
-  const canSubmit = !!courseId && entryAllowed && draftSubmitCount > 0;
-
-  function statusLabel(status: string) {
-    if (status === 'PARTIAL') return 'Partially submitted';
-    if (status === 'PENDING_COE') return 'Submitted to Exam Cell';
-    return status;
-  }
+  const isPublishable = rows.some((r) =>
+    MARK_COLUMNS.some((c) => {
+      const m = r.marks[c.id];
+      return m && m.obtained !== null && m.status !== 'PUBLISHED';
+    })
+  );
 
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Spreadsheet-style marks entry with max-marks validation. Link assessments to COs via CO-PO Mapping."
+        description="Unified Marks Entry for all assessments."
         meta={
           courseId ? (
             <>
               <FacultyMetricChip label="Course" value={selectedCourse?.course_code ?? '—'} emphasis />
-              <FacultyMetricChip label="Assessment" value={examType.replace('_', ' ')} />
               <FacultyMetricChip label="Students" value={rows.length} />
-              <FacultyMetricChip label="Marks entered" value={enteredCount} />
             </>
           ) : null
         }
-        actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/faculty/grading/copo">CO-PO Mapping</Link>
-          </Button>
-        }
       />
 
-      {courseId && !entryAllowed ? (
-        <FacultyErrorBanner
-          message={
-            sessionStatus
-              ? `Marks entry is ${sessionStatus.toLowerCase()}. Exam Cell must open the result session before you can enter or submit marks.`
-              : 'Exam Cell has not opened marks entry for this course and exam type yet.'
-          }
-        />
-      ) : null}
-
-      <FacultyPanel title="Assessment setup" description="Choose course, exam type, and max marks">
+      <FacultyPanel title="Select Course" description="Choose a course to load the grading roster">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
@@ -252,77 +243,49 @@ export default function FacultyGradingPage() {
               ))}
             </select>
           </label>
-          <label className="text-sm">
-            <span className="mb-1.5 block font-medium text-sgvu-navy">Assessment type</span>
-            <select
-              className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
-              value={examType}
-              onChange={(e) => setExamType(e.target.value as (typeof EXAM_TYPES)[number])}
-            >
-              {EXAM_TYPES.map((t) => (
-                <option key={t} value={t}>{t.replace('_', ' ')}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm">
-            <span className="mb-1.5 block font-medium text-sgvu-navy">Max marks</span>
-            <Input
-              type="number"
-              min={1}
-              value={maxMarks}
-              onChange={(e) => setMaxMarks(Number(e.target.value) || 50)}
-            />
-          </label>
-          <div className="flex items-end">
-            <Badge
-              variant={publishStatus === 'PUBLISHED' || (examType === 'QUIZ' && publishStatus === 'PENDING_COE') ? 'default' : publishStatus === 'PENDING_COE' ? 'outline' : 'secondary'}
-              className="text-xs font-semibold uppercase tracking-wide"
-            >
-              {examType === 'QUIZ' && publishStatus === 'PENDING_COE' ? 'PUBLISHED' : publishStatus === 'PENDING_COE' ? 'Submitted to Exam Cell' : publishStatus}
-            </Badge>
-          </div>
         </div>
       </FacultyPanel>
 
       <FacultyPanel
-        title="Student marks"
+        title="Student Marks Ledger"
         count={rows.length}
-        description="Enter marks per student — CO mapping optional"
+        description="Enter marks for all manual components. WT1 and WT2 are auto-graded."
       >
         <div className="mb-4 flex flex-wrap justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={!courseId || saving || !entryAllowed || (examType !== 'QUIZ' && (publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'))} onClick={() => void saveDraft()}>
+          <Button variant="outline" size="sm" disabled={!courseId || saving || loading} onClick={() => void saveDraft()}>
             {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
-            Save draft
+            Save Draft
           </Button>
-          <Button size="sm" disabled={!courseId || saving || !entryAllowed || (examType !== 'QUIZ' && (publishStatus === 'PENDING_COE' || publishStatus === 'PUBLISHED'))} onClick={() => void publish()}>
+          <Button size="sm" disabled={!courseId || saving || loading || !isPublishable} onClick={() => void publishAll()}>
             <Send className="mr-1 h-4 w-4" />
-            {examType === 'QUIZ' ? 'Publish Quiz Scores' : 'Submit to Exam Cell'}
+            Publish All Marks
           </Button>
         </div>
 
-      {loading ? (
-        <FacultyInlineLoading label="Loading marks…" />
-      ) : !courseId ? (
-        <FacultyEmptyState description="Select a course to load the class roster." />
-      ) : rosterError ? (
-        <FacultyErrorBanner message={rosterError} />
-      ) : rows.length === 0 ? (
-        <FacultyEmptyState description="No enrolled students found for this course." />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead>
-              <tr className="border-b border-border/60 text-left text-xs font-medium text-muted-foreground">
-                <th className="pb-2 pr-4">Roll</th>
-                <th className="pb-2 pr-4">Student</th>
-                <th className="pb-2 pr-4">CO</th>
-                <th className="pb-2">Marks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const rowLocked = examType !== 'QUIZ' && (row.status === 'PENDING_COE' || row.status === 'PUBLISHED');
-                return (
+        {loading ? (
+          <FacultyInlineLoading label="Loading roster…" />
+        ) : !courseId ? (
+          <FacultyEmptyState description="Select a course to view the roster." />
+        ) : rosterError ? (
+          <FacultyErrorBanner message={rosterError} />
+        ) : rows.length === 0 ? (
+          <FacultyEmptyState description="No enrolled students found for this course." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[800px] text-sm">
+              <thead>
+                <tr className="border-b border-border/60 text-left text-xs font-medium text-muted-foreground">
+                  <th className="pb-2 pr-4">Roll Number</th>
+                  <th className="pb-2 pr-4">Student</th>
+                  {MARK_COLUMNS.map((col) => (
+                    <th key={col.id} className="pb-2 pr-2 text-center">
+                      {col.label} <span className="block text-[10px] opacity-70">(Max {col.max})</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
                   <tr key={row.student_user_id} className="border-b border-border/40">
                     <td className="py-2.5 pr-4 text-xs font-medium text-muted-foreground">
                       {row.roll_number && row.roll_number.length <= 24 && !row.roll_number.includes('0000-4000')
@@ -331,51 +294,38 @@ export default function FacultyGradingPage() {
                     </td>
                     <td className="py-2.5 pr-4 font-medium text-sgvu-navy">
                       {row.name}
-                      {rowLocked ? (
-                        <Badge variant="outline" className="ml-2 text-[10px] uppercase">
-                          {row.status === 'PUBLISHED' ? 'Published' : 'Submitted'}
-                        </Badge>
-                      ) : null}
                     </td>
-                    <td className="py-2.5 pr-4">
-                      <Input
-                        className="h-8 w-20"
-                        placeholder="CO1"
-                        defaultValue={row.co_mapped ?? ''}
-                        disabled={rowLocked || !entryAllowed}
-                        onBlur={(e) =>
-                          setRows((prev) =>
-                            prev.map((r) =>
-                              r.student_user_id === row.student_user_id
-                                ? { ...r, co_mapped: e.target.value || null }
-                                : r,
-                            ),
-                          )
-                        }
-                      />
-                    </td>
-                    <td className="py-2.5">
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={maxMarks}
-                          className="h-8 w-24"
-                          value={row.marks_obtained ?? ''}
-                          disabled={rowLocked || !entryAllowed}
-                          onChange={(e) => updateMark(row.student_user_id, e.target.value)}
-                        />
-                        <span className="text-muted-foreground">/ {maxMarks}</span>
-                      </div>
-                    </td>
+                    {MARK_COLUMNS.map((col) => {
+                      const m = row.marks[col.id];
+                      const isLocked = m && (m.status === 'PUBLISHED' || m.status === 'PENDING_COE');
+                      return (
+                        <td key={col.id} className="py-2.5 pr-2 text-center">
+                          <div className="flex flex-col items-center">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={col.max}
+                              className={`h-8 w-16 text-center ${isLocked ? 'bg-muted/50 border-transparent text-muted-foreground' : ''}`}
+                              value={m?.obtained ?? ''}
+                              disabled={col.readOnly || isLocked}
+                              onChange={(e) => updateMark(row.student_user_id, col.id, e.target.value)}
+                            />
+                            {m?.status && m.status !== 'DRAFT' && (
+                              <span className="text-[9px] uppercase mt-1 tracking-wider text-muted-foreground/80 font-medium">
+                                {m.status}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </FacultyPanel>
-    </FacultyPageShell >
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </FacultyPanel>
+    </FacultyPageShell>
   );
 }
