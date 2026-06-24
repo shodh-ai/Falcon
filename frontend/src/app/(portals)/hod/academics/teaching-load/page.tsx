@@ -112,15 +112,7 @@ export default function HodTeachingLoadPage() {
       ) : (
         <HodTableWrap>
           <table className="w-full text-sm">
-            <HodTableHead>
-              <tr>
-                <th className="px-4 py-3 text-left">Subject</th>
-                <th className="px-4 py-3 text-left">Program / Semester</th>
-                <th className="px-4 py-3 text-left">Year</th>
-                <th className="px-4 py-3 text-left">Assign faculty</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </HodTableHead>
+            <HodTableHead columns={['Subject', 'Program / Semester', 'Year', 'Assign faculty', '']} />
             <tbody className="divide-y divide-border/60">
               {items.map((item) => (
                 <tr key={item.allocation_id} className="bg-red-50/30">

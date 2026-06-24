@@ -62,7 +62,7 @@ export default function FacultyWeeklyTestsPage() {
   const handleDeleteTest = async (testId: string) => {
     if (!confirm('Are you sure you want to delete this test? It will be permanently removed for all students.')) return;
     try {
-      await api.delete(`/api/weekly-tests/faculty/${testId}`);
+      await api.del(`/api/weekly-tests/faculty/${testId}`);
       toast.success('Test deleted successfully');
       fetchMyTests();
     } catch (e: any) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, FormEvent, useEffect, useState } from 'react';
+import { DragEvent, FormEvent, useState } from 'react';
 import { BookOpen, FileText, Plus, Trash2, Upload, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -98,35 +98,33 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [selectedAllocations, setSelectedAllocations] = useState<string[]>([]);
   const [loadingTargets, setLoadingTargets] = useState(false);
 
-  useEffect(() => {
-    if (!uploadModuleId) {
-      setPublishTargets(null);
-      setSelectedAllocations([]);
-      return;
-    }
+  function closeUploadModal() {
+    setUploadModuleId(null);
+    setUploadFiles([]);
+    setUploadTitle('');
+    setPublishTargets(null);
+    setSelectedAllocations([]);
+  }
 
-    let cancelled = false;
+  async function openUploadModal(moduleId: string) {
+    setUploadModuleId(moduleId);
+    setUploadFiles([]);
+    setUploadTitle('');
+    setPublishTargets(null);
+    setSelectedAllocations([]);
     setLoadingTargets(true);
-    void api
-      .get<MaterialPublishTargetsResponse>(
+    try {
+      const data = await api.get<MaterialPublishTargetsResponse>(
         `/api/academics/faculty/courses/${courseId}/material-publish-targets`,
-      )
-      .then((data) => {
-        if (cancelled) return;
-        setPublishTargets(data);
-        setSelectedAllocations(data.targets.map((target) => target.allocation_id));
-      })
-      .catch(() => {
-        if (!cancelled) setPublishTargets(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingTargets(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [api, courseId, uploadModuleId]);
+      );
+      setPublishTargets(data);
+      setSelectedAllocations(data.targets.map((target) => target.allocation_id));
+    } catch {
+      setPublishTargets(null);
+    } finally {
+      setLoadingTargets(false);
+    }
+  }
 
   async function addModule(e: FormEvent) {
     e.preventDefault();
@@ -166,10 +164,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
         form,
       );
       toast.success(`${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded — students notified`);
-      setUploadModuleId(null);
-      setUploadFiles([]);
-      setUploadTitle('');
-      setSelectedAllocations([]);
+      closeUploadModal();
       onRefresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
@@ -351,7 +346,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                     size="sm"
                     variant="outline"
                     className="mt-3 gap-1.5"
-                    onClick={() => setUploadModuleId(mod.module_id)}
+                    onClick={() => void openUploadModal(mod.module_id)}
                   >
                     <Upload className="h-3.5 w-3.5" />
                     Upload notes
@@ -376,10 +371,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setUploadModuleId(null);
-                  setUploadFiles([]);
-                }}
+                onClick={closeUploadModal}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-sgvu-navy"
                 aria-label="Close"
               >
@@ -492,14 +484,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   <Upload className="h-4 w-4" />
                   {uploading ? 'Uploading…' : `Upload ${uploadFiles.length || ''}`}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setUploadModuleId(null);
-                    setUploadFiles([]);
-                  }}
-                >
+                <Button type="button" variant="outline" onClick={closeUploadModal}>
                   Cancel
                 </Button>
               </div>
