@@ -49,6 +49,24 @@ export type PhdCandidate = {
   }>;
 };
 
+export type PhdEligibility = {
+  can_apply: boolean;
+  route: 'PG' | 'BTECH_DIRECT' | null;
+  route_label: string;
+  requires_entrance_proof: boolean;
+  reasons: string[];
+  requirements: Array<{ label: string; met: boolean; pending?: boolean }>;
+  academic: {
+    program_label: string | null;
+    classification: 'PG' | 'BTECH' | 'OTHER_UG' | 'UNKNOWN';
+    latest_semester: number;
+    cleared_second_year: boolean;
+    cgpa: number | null;
+    active_backlogs: number;
+    is_masters: boolean;
+  };
+};
+
 const STATUS_LABELS: Record<string, string> = {
   APPLICATION_SUBMITTED: 'Application submitted',
   APPLICATION_SCRUTINY_RECOMMENDED: 'Scrutiny recommended',

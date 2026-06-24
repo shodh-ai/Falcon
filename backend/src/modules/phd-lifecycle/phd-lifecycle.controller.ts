@@ -24,6 +24,13 @@ type AuthUser = {
 export class PhdLifecycleController {
   constructor(private readonly phd: PhdLifecycleService) {}
 
+  @Get('applications/eligibility')
+  @Roles('Student', 'Applicant', 'SuperAdmin')
+  applicationEligibility(@Req() req: { user: AuthUser }) {
+    const role = req.user.primaryRole ?? req.user.role;
+    return this.phd.getApplicationEligibility(this.tenant(req), req.user.user_id, role);
+  }
+
   @Post('applications')
   @Roles('Student', 'Applicant', 'SuperAdmin')
   createApplication(
@@ -35,9 +42,13 @@ export class PhdLifecycleController {
       applicant_name?: string;
       applicant_email?: string;
       document_urls?: string[];
+      entrance_exam_type?: string;
+      entrance_score?: number;
+      direct_phd_merit_approved?: boolean;
     },
   ) {
-    return this.phd.createApplication(this.tenant(req), req.user.user_id, dto);
+    const role = req.user.primaryRole ?? req.user.role;
+    return this.phd.createApplication(this.tenant(req), req.user.user_id, dto, role);
   }
 
   @Get('applications/mine')
