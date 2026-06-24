@@ -273,8 +273,7 @@ export const studentPortal: PortalConfig = {
       items: [
         { label: 'My Profile & Master Data', href: '/student/profile', icon: UserRoundCog, keywords: ['profile', 'aadhaar', 'scholarship', 'enrollment'] },
         { label: 'Admission & Document Vault', href: '/student/admission-vault', icon: Archive, keywords: ['admission', 'counseling', 'entrance', 'migration'] },
-        { label: 'Exit & Alumni Transition', href: '/student/exit', icon: DoorOpen, keywords: ['no dues', 'degree', 'alumni', 'graduation'] },
-        { label: 'Degree & Convocation', href: '/student/certificates', icon: GraduationCap, keywords: ['degree', 'convocation', 'transcript', 'certificate'] },
+        { label: 'Graduation & Alumni', href: '/student/exit', icon: GraduationCap, keywords: ['exit', 'no dues', 'degree', 'convocation', 'alumni', 'graduation', 'certificate'] },
       ],
     },
     {
@@ -294,7 +293,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Campus Life', href: '/student/campus-life', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'wallet', 'campus'] },
         { label: 'Transport Hub', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
         { label: 'Library & Dues', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
-        { label: 'Events & Clubs', href: '/student/falcon-events', icon: PartyPopper, keywords: ['falcon events', 'clubs', 'chapters', 'tickets', 'ncc', 'nss', 'fest', 'membership'] },
+        { label: 'Events & Clubs', href: '/student/falcon-events', icon: PartyPopper, keywords: ['falcon events', 'clubs', 'chapters', 'tickets', 'ncc', 'nss', 'fest', 'membership'], shortLabel: 'Events' },
         { label: 'Venue Booking', href: '/student/venues', icon: Building2, keywords: ['room', 'gd', 'seminar', 'hall', 'classroom', 'booking'] },
         { label: 'E-Cell & Incubation', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
         { label: 'Research Grants', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
@@ -305,8 +304,8 @@ export const studentPortal: PortalConfig = {
       title: 'Support & Placements',
       items: [
         { label: 'Mentorship', href: '/student/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'meeting'] },
-        { label: 'Placements & Internships', href: '/student/placements', icon: Briefcase, keywords: ['placement', 'jobs', 'internship'] },
-        { label: 'Grievances & Helpdesk', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'discipline', 'grievance'] },
+        { label: 'Placements & Internships', href: '/student/placements', icon: Briefcase, keywords: ['placement', 'jobs', 'internship'], shortLabel: 'Placements' },
+        { label: 'Grievances & Helpdesk', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'discipline', 'grievance'], shortLabel: 'Helpdesk' },
         { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'sexual harassment', 'bullying', 'posh'] },
       ],
     },
@@ -327,7 +326,7 @@ export const studentPortal: PortalConfig = {
     { label: 'E-Cell Hub', href: '/student/e-cell', icon: Rocket },
     { label: 'Research Grants', href: '/student/research', icon: FlaskConical },
     { label: 'Ph.D. Programme', href: '/student/phd', icon: GraduationCap },
-    { label: 'Degree & Convocation', href: '/student/certificates', icon: GraduationCap },
+    { label: 'Graduation & Alumni', href: '/student/exit', icon: GraduationCap },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
     { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield },
   ],

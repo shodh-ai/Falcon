@@ -10,6 +10,12 @@ type Props = {
   compact?: boolean;
 };
 
+const MOBILE_STAGE_LABELS: Partial<Record<PlacementPipelineStage, string>> = {
+  APTITUDE_CLEARED: 'Aptitude',
+  TECH_INTERVIEW: 'Tech',
+  HR_INTERVIEW: 'HR',
+};
+
 export function PlacementApplicationTracker({ stage, rejectedAtStage, compact }: Props) {
   const isRejected = stage === 'REJECTED';
   const activeIndex = isRejected
@@ -18,7 +24,7 @@ export function PlacementApplicationTracker({ stage, rejectedAtStage, compact }:
 
   return (
     <div className={cn('w-full', compact ? 'py-1' : 'py-2')}>
-      <div className="flex items-center gap-0">
+      <div className="flex items-center">
         {PLACEMENT_TRACKER_STEPS.map((step, index) => {
           const done = !isRejected && index < activeIndex;
           const current = !isRejected && index === activeIndex;
@@ -27,37 +33,28 @@ export function PlacementApplicationTracker({ stage, rejectedAtStage, compact }:
 
           return (
             <div key={step} className="flex flex-1 items-center">
-              <div className="flex flex-col items-center gap-1">
-                <div
-                  className={cn(
-                    'flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold transition',
-                    rejectedHere && 'border-red-500 bg-red-500 text-white',
-                    current && !rejectedHere && 'border-emerald-500 bg-emerald-500 text-white',
-                    done && 'border-emerald-500 bg-emerald-50 text-emerald-700',
-                    upcoming && !rejectedHere && 'border-border bg-muted text-muted-foreground',
-                  )}
-                >
-                  {rejectedHere ? <X className="h-3.5 w-3.5" /> : done || current ? <Check className="h-3.5 w-3.5" /> : index + 1}
-                </div>
-                {!compact && (
-                  <span
-                    className={cn(
-                      'max-w-[4.5rem] text-center text-[10px] font-medium leading-tight',
-                      rejectedHere && 'text-red-600',
-                      current && !rejectedHere && 'text-emerald-700',
-                      done && 'text-emerald-600',
-                      upcoming && 'text-muted-foreground',
-                    )}
-                  >
-                    {PLACEMENT_STAGE_LABELS[step]}
-                  </span>
+              <div
+                className={cn(
+                  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold transition',
+                  rejectedHere && 'border-red-500 bg-red-500 text-white',
+                  current && !rejectedHere && 'border-emerald-500 bg-emerald-500 text-white',
+                  done && 'border-emerald-500 bg-emerald-50 text-emerald-700',
+                  upcoming && !rejectedHere && 'border-border bg-muted text-muted-foreground',
+                )}
+              >
+                {rejectedHere ? (
+                  <X className="h-3.5 w-3.5" />
+                ) : done || current ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  index + 1
                 )}
               </div>
               {index < PLACEMENT_TRACKER_STEPS.length - 1 && (
                 <div
                   className={cn(
-                    'mx-1 h-0.5 flex-1 rounded-full',
-                    rejectedHere ? 'bg-red-300' : done || current ? 'bg-emerald-400' : 'bg-border',
+                    'mx-1 h-0.5 min-w-[0.35rem] flex-1 rounded-full',
+                    rejectedHere ? 'bg-red-300' : done ? 'bg-emerald-400' : 'bg-border',
                   )}
                 />
               )}
@@ -65,6 +62,37 @@ export function PlacementApplicationTracker({ stage, rejectedAtStage, compact }:
           );
         })}
       </div>
+
+      {!compact && (
+        <div className="mt-1.5 flex">
+          {PLACEMENT_TRACKER_STEPS.map((step, index) => {
+            const done = !isRejected && index < activeIndex;
+            const current = !isRejected && index === activeIndex;
+            const rejectedHere = isRejected && index === activeIndex;
+            const upcoming = index > activeIndex;
+            const label = PLACEMENT_STAGE_LABELS[step];
+            const mobileLabel = MOBILE_STAGE_LABELS[step] ?? label;
+
+            return (
+              <div key={step} className="flex flex-1 justify-center px-0.5">
+                <span
+                  className={cn(
+                    'min-h-[2rem] max-w-[3.25rem] text-center text-[9px] font-medium leading-tight sm:max-w-[4.5rem] sm:text-[10px]',
+                    rejectedHere && 'text-red-600',
+                    current && !rejectedHere && 'text-emerald-700',
+                    done && 'text-emerald-600',
+                    upcoming && 'text-muted-foreground',
+                  )}
+                >
+                  <span className="sm:hidden">{mobileLabel}</span>
+                  <span className="hidden sm:inline">{label}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {isRejected && !compact && (
         <p className="mt-2 text-xs font-medium text-red-600">
           Not progressed beyond {PLACEMENT_STAGE_LABELS[rejectedAtStage ?? 'APPLIED']}

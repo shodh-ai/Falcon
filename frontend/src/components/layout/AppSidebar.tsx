@@ -67,7 +67,7 @@ export function AppSidebar({
         </Button>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1 px-2 py-4">
+      <ScrollArea className="min-h-0 flex-1 px-2 py-4 [&_[data-radix-scroll-area-thumb]]:bg-white/20 [&_[data-radix-scroll-area-thumb]:hover]:bg-white/30">
         <nav className="space-y-4">
           {navGroups.map((group) => (
             <div key={group.title}>

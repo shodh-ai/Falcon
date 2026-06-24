@@ -42,6 +42,32 @@ function formatTime(hhmmss: string) {
   return String(hhmmss).slice(0, 5);
 }
 
+function formatExamDate(iso: string) {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatExamType(type: string) {
+  return type.replace(/_/g, ' ');
+}
+
+function ExamTypeBadge({ type }: { type: string }) {
+  return (
+    <Badge
+      variant="outline"
+      className="shrink-0 border-sgvu-navy/20 bg-sgvu-navy/5 text-[10px] font-bold uppercase tracking-wide text-sgvu-navy"
+    >
+      {formatExamType(type)}
+    </Badge>
+  );
+}
+
 type ExamDesk = {
   ufm_cases: { description: string; penalty_applied?: string; incident_type?: string }[];
   seating: {
@@ -236,7 +262,12 @@ export default function StudentExamsPage() {
       ) : null}
 
       <StudentTabBar
-        tabs={tabs.map((t) => ({ id: t.key, label: t.label }))}
+        tabs={tabs.map((t) => ({
+          id: t.key,
+          label: t.label,
+          shortLabel:
+            t.key === 'schedule' ? 'Schedule' : t.key === 'admit' ? 'Admit' : 'Re-eval',
+        }))}
         active={tab}
         onChange={setTab}
       />
@@ -253,32 +284,71 @@ export default function StudentExamsPage() {
             ) : schedules.length === 0 ? (
               <p className="text-sm text-muted-foreground">No upcoming exams found.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="py-2 pr-3">Date</th>
-                      <th className="py-2 pr-3">Time</th>
-                      <th className="py-2 pr-3">Type</th>
-                      <th className="py-2 pr-3">Venue</th>
-                      <th className="py-2">Seat</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {schedules.map((s) => (
-                      <tr key={s.exam_schedule_id} className="border-b last:border-0">
-                        <td className="py-2 pr-3 font-medium text-sgvu-navy">{s.exam_date}</td>
-                        <td className="py-2 pr-3">{formatTime(s.start_time)} – {formatTime(s.end_time)}</td>
-                        <td className="py-2 pr-3">
-                          <Badge variant="secondary">{s.exam_type.replace('_', ' ')}</Badge>
-                        </td>
-                        <td className="py-2 pr-3">{s.venue}</td>
-                        <td className="py-2">{s.seat_no ?? '—'}</td>
+              <>
+                <div className="space-y-3 md:hidden">
+                  {schedules.map((s) => (
+                    <div
+                      key={s.exam_schedule_id}
+                      className="rounded-xl border border-border/70 bg-muted/20 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sgvu-navy">{formatExamDate(s.exam_date)}</p>
+                          <p className="mt-0.5 text-sm text-muted-foreground">
+                            {formatTime(s.start_time)} – {formatTime(s.end_time)}
+                          </p>
+                        </div>
+                        <ExamTypeBadge type={s.exam_type} />
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Venue
+                          </p>
+                          <p className="mt-0.5 text-sm font-medium leading-snug text-sgvu-navy">{s.venue}</p>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Seat
+                          </p>
+                          <p className="mt-0.5 text-sm font-medium text-sgvu-navy">
+                            {s.seat_no ?? 'Not assigned'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="hidden overflow-x-auto md:block">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="py-2 pr-3">Date</th>
+                        <th className="py-2 pr-3">Time</th>
+                        <th className="py-2 pr-3">Type</th>
+                        <th className="py-2 pr-3">Venue</th>
+                        <th className="py-2">Seat</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {schedules.map((s) => (
+                        <tr key={s.exam_schedule_id} className="border-b last:border-0">
+                          <td className="py-3 pr-3 font-medium text-sgvu-navy">{formatExamDate(s.exam_date)}</td>
+                          <td className="whitespace-nowrap py-3 pr-3">
+                            {formatTime(s.start_time)} – {formatTime(s.end_time)}
+                          </td>
+                          <td className="py-3 pr-3">
+                            <ExamTypeBadge type={s.exam_type} />
+                          </td>
+                          <td className="py-3 pr-3">{s.venue}</td>
+                          <td className="py-3">{s.seat_no ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

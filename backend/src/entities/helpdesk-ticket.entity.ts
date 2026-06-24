@@ -16,7 +16,8 @@ export type HelpdeskTicketCategory =
   | 'HR'
   | 'FACILITIES'
   | 'MENTORSHIP'
-  | 'STUDENT_PROFILE';
+  | 'STUDENT_PROFILE'
+  | 'OTHER';
 export type HelpdeskTicketStatus =
   | 'PENDING'
   | 'IN_PROGRESS'

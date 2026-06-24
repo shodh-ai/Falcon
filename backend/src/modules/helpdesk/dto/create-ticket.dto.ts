@@ -18,6 +18,7 @@ export class CreateTicketDto {
     'FACILITIES',
     'MENTORSHIP',
     'STUDENT_PROFILE',
+    'OTHER',
   ])
   category: HelpdeskTicketCategory;
 

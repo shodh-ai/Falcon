@@ -238,6 +238,14 @@ export class WorkflowRoutingService {
             'STUDENT_PROFILE_HOD_FALLBACK',
           );
         }
+      case 'OTHER': {
+        const admin =
+          (await this.resolveUserByRole('SuperAdmin', tenantId)) ||
+          (await this.resolveUserByRole('Admin', tenantId)) ||
+          (await this.resolveUserByRole('Dean', tenantId));
+        if (admin) return admin;
+        throw new NotFoundException('No admin found for general helpdesk routing');
+      }
       default:
         throw new BadRequestException(
           `Unsupported helpdesk category: ${category}`,

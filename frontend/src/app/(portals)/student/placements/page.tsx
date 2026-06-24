@@ -214,39 +214,37 @@ export default function StudentPlacementsPage() {
                   className="cursor-pointer rounded-2xl border border-border/70 bg-white p-4 text-sm transition hover:border-sgvu-gold/40"
                   onClick={() => void selectDrive(drive)}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sgvu-navy">{drive.job_role}</p>
-                      <p className="text-muted-foreground">
-                        {drive.company_name} · ₹{Number(drive.package_lpa ?? 0).toFixed(1)} LPA · {cgpaLabel(drive.min_cgpa)}
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sgvu-navy">{drive.job_role}</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      {drive.company_name} · ₹{Number(drive.package_lpa ?? 0).toFixed(1)} LPA · {cgpaLabel(drive.min_cgpa)}
+                    </p>
+                    {deadline && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Apply before {new Date(deadline).toLocaleDateString()}
                       </p>
-                      {deadline && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Apply before {new Date(deadline).toLocaleDateString()}
-                        </p>
-                      )}
-                      {elig && elig.eligible === false && elig.reason && (
-                        <p className="mt-2 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700">{elig.reason}</p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {applied ? (
-                        <Badge>Applied</Badge>
-                      ) : (
-                        <Button
-                          size="sm"
-                          className="bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold/90"
-                          disabled={!canApply || checkingEligibility}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void openApply(drive);
-                          }}
-                        >
-                          {checkingEligibility ? 'Checking…' : 'Apply Now'}
-                        </Button>
-                      )}
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                    )}
+                    {elig && elig.eligible === false && elig.reason && (
+                      <p className="mt-2 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700">{elig.reason}</p>
+                    )}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/50 pt-3">
+                    {applied ? (
+                      <Badge>Applied</Badge>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold/90"
+                        disabled={!canApply || checkingEligibility}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openApply(drive);
+                        }}
+                      >
+                        {checkingEligibility ? 'Checking…' : 'Apply Now'}
+                      </Button>
+                    )}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   </div>
                 </div>
               );
