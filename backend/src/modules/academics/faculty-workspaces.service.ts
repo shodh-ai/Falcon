@@ -17,6 +17,13 @@ const EXAM_TYPES = [
   'END_TERM',
   'INTERNAL',
   'ASSIGNMENT',
+  'WT1',
+  'WT2',
+  'GA1',
+  'GA2',
+  'MTE1',
+  'MTE2',
+  'ETE',
 ] as const;
 type ExamType = (typeof EXAM_TYPES)[number];
 
@@ -512,6 +519,82 @@ export class FacultyWorkspacesService {
       status: 'PENDING_COE',
       course_name: courseName,
     };
+  }
+
+  async publishAllCourseMarks(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+  ) {
+    await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
+    
+    // Mark all DRAFT and PENDING_COE marks for this course as PUBLISHED
+    const result = await this.dataSource.query(
+      `UPDATE academic_marks
+       SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW()
+       WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+         AND status IN ('DRAFT', 'PENDING_COE')
+       RETURNING mark_id`,
+      [tenantId, courseId, facultyUserId],
+    );
+
+    const publishedCount =
+      Array.isArray(result) && result.length === 2 && typeof result[1] === 'number'
+        ? result[1]
+        : result.length;
+
+    return {
+      published: publishedCount,
+      status: 'PUBLISHED',
+    };
+  }
+
+  async getUnifiedCourseMarks(facultyUserId: string, tenantId: string, courseId: string) {
+    await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
+
+    const rows = await this.dataSource.query(
+      `SELECT
+         u.user_id AS student_user_id,
+         u.name,
+         ${ROLL_NUMBER_SQL} AS roll_number,
+         m.exam_type,
+         m.marks_obtained,
+         m.status AS mark_status
+       FROM student_course_enrollments e
+       INNER JOIN users u ON u.user_id = e.student_user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       LEFT JOIN academic_marks m
+         ON m.tenant_id = e.tenant_id
+        AND m.student_user_id = e.student_user_id
+        AND m.course_id = e.course_id
+       WHERE e.tenant_id = $1
+         AND e.course_id = $2
+         AND e.status = 'ENROLLED'
+       ORDER BY u.name`,
+      [tenantId, courseId],
+    );
+
+    const studentsMap = new Map<string, any>();
+
+    for (const r of rows) {
+      if (!studentsMap.has(r.student_user_id)) {
+        studentsMap.set(r.student_user_id, {
+          student_user_id: r.student_user_id,
+          name: r.name,
+          roll_number: r.roll_number,
+          marks: {},
+        });
+      }
+      const s = studentsMap.get(r.student_user_id);
+      if (r.exam_type) {
+        s.marks[r.exam_type] = {
+          obtained: r.marks_obtained != null ? Number(r.marks_obtained) : null,
+          status: r.mark_status,
+        };
+      }
+    }
+
+    return Array.from(studentsMap.values());
   }
 
   async listCoPoMappings(tenantId: string, courseId: string) {
