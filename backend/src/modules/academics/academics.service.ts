@@ -24,6 +24,7 @@ import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
+import { StudentMentorSyncService } from './student-mentor-sync.service';
 
 /**
  * NOTE: `markAttendance` writes straight to Postgres for now. When traffic
@@ -59,6 +60,7 @@ export class AcademicsService {
     private studentProfiles: Repository<StudentProfile>,
     private readonly notify: NotificationEmitterService,
     private readonly enrollmentSync: StudentEnrollmentSyncService,
+    private readonly mentorSync: StudentMentorSyncService,
   ) {}
 
   private async notifyCourseStudents(
@@ -217,6 +219,7 @@ export class AcademicsService {
 
   async listMyCourseEnrollments(studentUserId: string, tenantId: string) {
     await this.enrollmentSync.syncStudent(tenantId, studentUserId);
+    await this.mentorSync.syncStudent(tenantId, studentUserId);
 
     const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
       tenantId,
