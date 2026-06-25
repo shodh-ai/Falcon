@@ -161,7 +161,7 @@ export class ExamCellService {
     const semester = dto.semester ?? 4;
     const students = await this.db.query(
       `SELECT DISTINCT u.user_id, u.name, u.official_email,
-              sp.enrollment_number, sp.admission_number
+              sp.enrollment_number, sp.admission_number, sp.profile_photo_url
        FROM users u
        INNER JOIN student_course_enrollments e ON e.student_user_id = u.user_id AND e.tenant_id = $1
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
@@ -216,6 +216,7 @@ export class ExamCellService {
             user_id: student.user_id,
             name: student.name,
             email: student.official_email ?? '',
+            profile_picture_url: student.profile_photo_url ?? null,
           },
           schedules: schedules.map(
             (s: {

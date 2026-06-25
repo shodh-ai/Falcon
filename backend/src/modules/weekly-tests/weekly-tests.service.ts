@@ -74,7 +74,7 @@ export class WeeklyTestsService {
       `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status,
               r.submitted_at
        FROM weekly_tests t
-       -- JOIN student_course_enrollments e ON e.course_id = t.course_id AND e.student_user_id = $2
+       JOIN student_course_enrollments e ON e.course_id = t.course_id AND e.student_user_id = $2
        JOIN academic_courses c ON c.course_id = t.course_id
        LEFT JOIN weekly_test_responses r ON r.test_id = t.test_id AND r.student_user_id = $2
        WHERE t.tenant_id = $1 AND t.status IN ('SCHEDULED', 'ACTIVE', 'COMPLETED')

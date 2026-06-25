@@ -70,7 +70,6 @@ export class StudentPortalService {
               sp.blood_group, sp.abc_id,
               d.dept_name AS department,
               COALESCE(
-                sp.current_semester,
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
                 1
               ) AS current_semester,
