@@ -4,10 +4,14 @@ import { useEffect, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 
 export type FacultyCourse = {
+  allocation_id?: string | null;
   course_id: string;
   course_code: string;
   course_name: string;
   credits: number;
+  program_name?: string | null;
+  semester?: string | null;
+  academic_year?: string | null;
 };
 
 export function useFacultyCourses() {
