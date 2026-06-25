@@ -25,9 +25,18 @@ export class MasterDataController {
   }
 
   @Get('birthdays/today')
-  @Roles('SuperAdmin', 'HOD', 'Dean', 'HR', 'President', 'Faculty')
+  @Roles('SuperAdmin', 'Dean', 'HR', 'President', 'Faculty')
   todayBirthdays(@Req() req: { user: AuthUser }) {
     return this.masterData.getTodayBirthdays(this.tenant(req));
+  }
+
+  @Get('birthdays/faculty/department')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  departmentFacultyBirthdays(@Req() req: { user: AuthUser }) {
+    return this.masterData.getDepartmentFacultyBirthdays(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Get('countries')

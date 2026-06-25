@@ -274,8 +274,6 @@ export function HodCommandCenter() {
         }
       />
 
-      <TodayBirthdaysWidget />
-
       {unassignedLoad > 0 ? (
         <Link
           href="/hod/academics/teaching-load"
@@ -536,6 +534,11 @@ export function HodCommandCenter() {
           </Link>
         </div>
       ) : null}
+
+      <TodayBirthdaysWidget
+        endpoint="/api/master-data/birthdays/faculty/department"
+        title="Faculty Birthdays Today"
+      />
     </HodPageFrame>
   );
 }
