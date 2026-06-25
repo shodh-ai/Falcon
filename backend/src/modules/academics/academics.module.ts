@@ -53,6 +53,7 @@ import { EarlyWarningController } from './early-warning.controller';
 import { InsightsService } from './insights.service';
 import { InsightsController } from './insights.controller';
 import { CourseAllocationBulkService } from './course-allocation-bulk.service';
+import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 
 @Module({
   imports: [
@@ -114,6 +115,7 @@ import { CourseAllocationBulkService } from './course-allocation-bulk.service';
     EarlyWarningService,
     InsightsService,
     CourseAllocationBulkService,
+    StudentEnrollmentSyncService,
   ],
   exports: [
     AcademicsService,
@@ -129,6 +131,7 @@ import { CourseAllocationBulkService } from './course-allocation-bulk.service';
     MarksHistoryService,
     InsightsService,
     CourseAllocationBulkService,
+    StudentEnrollmentSyncService,
   ],
 })
 export class AcademicsModule {}

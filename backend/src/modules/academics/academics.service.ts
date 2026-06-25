@@ -23,6 +23,7 @@ import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
+import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 
 /**
  * NOTE: `markAttendance` writes straight to Postgres for now. When traffic
@@ -57,6 +58,7 @@ export class AcademicsService {
     @InjectRepository(StudentProfile)
     private studentProfiles: Repository<StudentProfile>,
     private readonly notify: NotificationEmitterService,
+    private readonly enrollmentSync: StudentEnrollmentSyncService,
   ) {}
 
   private async notifyCourseStudents(
@@ -213,16 +215,34 @@ export class AcademicsService {
     });
   }
 
-  async listMyCourseEnrollments(studentUserId: string) {
+  async listMyCourseEnrollments(studentUserId: string, tenantId: string) {
+    await this.enrollmentSync.syncStudent(tenantId, studentUserId);
+
+    const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
+      tenantId,
+      studentUserId,
+    );
+
     const rows = await this.courseEnrollments.find({
       where: {
         student_user_id: studentUserId,
+        tenant_id: tenantId,
         status: In(['ENROLLED', 'COMPLETED']),
       },
       relations: ['course'],
       order: { semester: 'ASC' },
     });
-    return rows.map((row) => this.toEnrollmentDto(row));
+
+    const filtered =
+      slot.courseIds.length > 0
+        ? rows.filter(
+            (row) =>
+              Number(row.semester) !== slot.semester ||
+              slot.courseIds.includes(row.course_id),
+          )
+        : rows;
+
+    return filtered.map((row) => this.toEnrollmentDto(row));
   }
 
   async listAvailableElectives(studentUserId: string, tenantId: string) {

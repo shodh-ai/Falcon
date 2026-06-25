@@ -414,7 +414,10 @@ export class AcademicsController {
   @Get('courses/my-enrollments')
   @Roles('Student')
   myCourseEnrollments(@Req() req: { user: AuthUser }) {
-    return this.academics.listMyCourseEnrollments(req.user.user_id);
+    return this.academics.listMyCourseEnrollments(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('hod/dashboard')

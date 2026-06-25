@@ -21,6 +21,7 @@ import { WorkflowNotificationService } from '../../core/workflow/workflow-notifi
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { resolvePlacementSchema } from '../placement/placement-schema';
 import { FinanceReceiptService } from '../finance/finance-receipt.service';
+import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
 
 const EXTRA_CERT_MIME = [
   'application/pdf',
@@ -41,6 +42,7 @@ export class StudentPortalService {
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly objectStorage: ObjectStorageService,
     private readonly financeReceipts: FinanceReceiptService,
+    private readonly enrollmentSync: StudentEnrollmentSyncService,
   ) {}
 
   private isProfileUnlocked(until: Date | string | null): boolean {
@@ -68,6 +70,7 @@ export class StudentPortalService {
               sp.blood_group, sp.abc_id,
               d.dept_name AS department,
               COALESCE(
+                sp.current_semester,
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
                 1
               ) AS current_semester,
@@ -440,12 +443,14 @@ export class StudentPortalService {
   }
 
   async getRegistration(tenantId: string, userId: string) {
-    const currentSemesterRows = await this.dataSource.query(
-      `SELECT COALESCE(MAX(semester), 1) AS semester
-       FROM student_course_enrollments WHERE student_user_id = $1`,
-      [userId],
+    await this.enrollmentSync.syncStudent(tenantId, userId);
+
+    const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
+      tenantId,
+      userId,
     );
-    const currentSemester = Number(currentSemesterRows[0]?.semester ?? 1);
+    const currentSemester = slot.semester;
+    const validCourseIds = new Set(slot.courseIds);
 
     const enrollments = await this.dataSource.query(
       `SELECT e.enrollment_id, e.semester, e.status, e.grade, e.grade_points,
@@ -459,14 +464,21 @@ export class StudentPortalService {
       [userId, tenantId],
     );
 
-    const creditsEarned = enrollments
+    const filteredEnrollments = enrollments.filter(
+      (r: { semester: number; course_id: string }) =>
+        Number(r.semester) !== currentSemester ||
+        validCourseIds.size === 0 ||
+        validCourseIds.has(r.course_id),
+    );
+
+    const creditsEarned = filteredEnrollments
       .filter((r: { status: string }) => r.status === 'COMPLETED')
       .reduce(
         (sum: number, r: { credits: number }) => sum + Number(r.credits),
         0,
       );
 
-    const currentSemEnrollments = enrollments.filter(
+    const currentSemEnrollments = filteredEnrollments.filter(
       (r: { semester: number }) => Number(r.semester) === currentSemester,
     );
     const electiveCount = currentSemEnrollments.filter(
@@ -491,7 +503,7 @@ export class StudentPortalService {
       current_semester: currentSemester,
       credits_earned: creditsEarned,
       credits_required: 160,
-      enrollments,
+      enrollments: filteredEnrollments,
       core_enrollments: currentSemEnrollments.filter(
         (r: { course_type: string }) => r.course_type === 'CORE',
       ),

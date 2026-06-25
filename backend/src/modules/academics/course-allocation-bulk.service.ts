@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, QueryRunner } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 
 export type CourseAllocationRowInput = {
   faculty_username: string;
@@ -73,6 +74,7 @@ export class CourseAllocationBulkService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
+    private readonly enrollmentSync: StudentEnrollmentSyncService,
   ) {}
 
   async buildTemplateBuffer(): Promise<Buffer> {
@@ -324,6 +326,7 @@ export class CourseAllocationBulkService {
       }
 
       await qr.commitTransaction();
+      await this.enrollmentSync.syncTenantStudents(tenantId, academicYear.trim());
       return result;
     } catch (err) {
       await qr.rollbackTransaction();
