@@ -22,6 +22,7 @@ import { ObjectStorageService } from '../../storage/object-storage.service';
 import { resolvePlacementSchema } from '../placement/placement-schema';
 import { FinanceReceiptService } from '../finance/finance-receipt.service';
 import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
+import { StudentMentorSyncService } from '../academics/student-mentor-sync.service';
 
 const EXTRA_CERT_MIME = [
   'application/pdf',
@@ -43,6 +44,7 @@ export class StudentPortalService {
     private readonly objectStorage: ObjectStorageService,
     private readonly financeReceipts: FinanceReceiptService,
     private readonly enrollmentSync: StudentEnrollmentSyncService,
+    private readonly mentorSync: StudentMentorSyncService,
   ) {}
 
   private isProfileUnlocked(until: Date | string | null): boolean {
@@ -444,6 +446,7 @@ export class StudentPortalService {
 
   async getRegistration(tenantId: string, userId: string) {
     await this.enrollmentSync.syncStudent(tenantId, userId);
+    await this.mentorSync.syncStudent(tenantId, userId);
 
     const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
       tenantId,
