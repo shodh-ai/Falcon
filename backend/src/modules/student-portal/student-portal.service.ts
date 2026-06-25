@@ -447,8 +447,6 @@ export class StudentPortalService {
     );
     const currentSemester = Number(currentSemesterRows[0]?.semester ?? 1);
 
-    await this.ensureCoreEnrollments(tenantId, userId, currentSemester);
-
     const enrollments = await this.dataSource.query(
       `SELECT e.enrollment_id, e.semester, e.status, e.grade, e.grade_points,
               c.course_id, c.course_code, c.course_name, c.credits,
@@ -456,6 +454,7 @@ export class StudentPortalService {
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
+         AND e.status IN ('ENROLLED', 'COMPLETED')
        ORDER BY e.semester, c.course_code`,
       [userId, tenantId],
     );
@@ -493,41 +492,16 @@ export class StudentPortalService {
       credits_earned: creditsEarned,
       credits_required: 160,
       enrollments,
-      core_enrollments: enrollments.filter(
+      core_enrollments: currentSemEnrollments.filter(
         (r: { course_type: string }) => r.course_type === 'CORE',
       ),
-      elective_enrollments: enrollments.filter(
+      elective_enrollments: currentSemEnrollments.filter(
         (r: { course_type: string }) => r.course_type === 'ELECTIVE',
       ),
       available_electives: electives,
       electives_needed: electivesNeeded,
       electives_max: 2,
     };
-  }
-
-  private async ensureCoreEnrollments(
-    tenantId: string,
-    userId: string,
-    semester: number,
-  ) {
-    const coreCourses = await this.dataSource.query<
-      Array<{ course_id: string }>
-    >(
-      `SELECT course_id FROM academic_courses
-       WHERE tenant_id = $1
-         AND COALESCE(course_type, CASE WHEN is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'CORE'`,
-      [tenantId],
-    );
-    for (const course of coreCourses) {
-      await this.dataSource.query(
-        `INSERT INTO student_course_enrollments (
-           tenant_id, student_user_id, course_id, semester, status, attendance_percent
-         )
-         VALUES ($1, $2, $3, $4, 'ENROLLED', 0)
-         ON CONFLICT (tenant_id, student_user_id, course_id) DO NOTHING`,
-        [tenantId, userId, course.course_id, semester],
-      );
-    }
   }
 
   async getAttendance(tenantId: string, userId: string) {

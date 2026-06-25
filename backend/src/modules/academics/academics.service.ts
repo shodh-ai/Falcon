@@ -215,7 +215,10 @@ export class AcademicsService {
 
   async listMyCourseEnrollments(studentUserId: string) {
     const rows = await this.courseEnrollments.find({
-      where: { student_user_id: studentUserId },
+      where: {
+        student_user_id: studentUserId,
+        status: In(['ENROLLED', 'COMPLETED']),
+      },
       relations: ['course'],
       order: { semester: 'ASC' },
     });
