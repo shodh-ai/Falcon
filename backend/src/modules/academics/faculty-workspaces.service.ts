@@ -45,6 +45,19 @@ export class FacultyWorkspacesService {
   ) {}
 
   async listFacultyCourses(facultyUserId: string, tenantId: string) {
+    const fromAllocations = await this.dataSource.query(
+      `SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.credits
+       FROM academic_course_allocations a
+       INNER JOIN academic_courses c ON c.course_id = a.course_id AND c.tenant_id = a.tenant_id
+       WHERE a.tenant_id = $1
+         AND a.faculty_user_id = $2
+         AND a.status = 'ACTIVE'
+         AND a.course_id IS NOT NULL
+       ORDER BY c.course_code`,
+      [tenantId, facultyUserId],
+    );
+    if (fromAllocations.length) return fromAllocations;
+
     const fromTimetable = await this.dataSource.query(
       `SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.credits
        FROM academic_courses c
@@ -67,12 +80,35 @@ export class FacultyWorkspacesService {
 
   async getWeeklyTimetable(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
-      `SELECT t.timetable_id, t.day_of_week, t.start_time, t.end_time, t.room,
-              c.course_id, c.course_code, c.course_name
-       FROM academic_timetables t
-       INNER JOIN academic_courses c ON c.course_id = t.course_id
-       WHERE t.tenant_id = $1 AND t.faculty_user_id = $2
-       ORDER BY t.day_of_week, t.start_time`,
+      `WITH faculty_courses AS (
+         SELECT DISTINCT a.course_id
+         FROM academic_course_allocations a
+         WHERE a.tenant_id = $1
+           AND a.faculty_user_id = $2
+           AND a.status = 'ACTIVE'
+           AND a.course_id IS NOT NULL
+       )
+       SELECT
+         COALESCE(t.timetable_id, fc.course_id) AS timetable_id,
+         COALESCE(t.day_of_week, 1) AS day_of_week,
+         COALESCE(t.start_time, '09:00'::time) AS start_time,
+         COALESCE(t.end_time, '10:00'::time) AS end_time,
+         t.room,
+         c.course_id,
+         c.course_code,
+         c.course_name
+       FROM faculty_courses fc
+       INNER JOIN academic_courses c ON c.course_id = fc.course_id
+       LEFT JOIN LATERAL (
+         SELECT t.*
+         FROM academic_timetables t
+         WHERE t.tenant_id = $1
+           AND t.course_id = fc.course_id
+           AND t.deleted_at IS NULL
+         ORDER BY CASE WHEN t.faculty_user_id = $2 THEN 0 ELSE 1 END, t.timetable_id DESC
+         LIMIT 1
+       ) t ON true
+       ORDER BY COALESCE(t.day_of_week, 1), COALESCE(t.start_time, '09:00'::time)`,
       [tenantId, facultyUserId],
     );
   }
@@ -101,10 +137,31 @@ export class FacultyWorkspacesService {
            ELSE make_date((EXTRACT(YEAR FROM CURRENT_DATE) - 1)::int, 7, 1)
          END AS start_date
        ),
+       faculty_courses AS (
+         SELECT DISTINCT a.course_id
+         FROM academic_course_allocations a
+         WHERE a.tenant_id = $1
+           AND a.faculty_user_id = $2
+           AND a.status = 'ACTIVE'
+           AND a.course_id IS NOT NULL
+       ),
        faculty_slots AS (
-         SELECT t.timetable_id, t.course_id, t.day_of_week, t.start_time, t.end_time
-         FROM academic_timetables t
-         WHERE t.tenant_id = $1 AND t.faculty_user_id = $2
+         SELECT
+           COALESCE(t.timetable_id, fc.course_id) AS timetable_id,
+           fc.course_id,
+           COALESCE(t.day_of_week, 1) AS day_of_week,
+           COALESCE(t.start_time, '09:00'::time) AS start_time,
+           COALESCE(t.end_time, '10:00'::time) AS end_time
+         FROM faculty_courses fc
+         LEFT JOIN LATERAL (
+           SELECT t.*
+           FROM academic_timetables t
+           WHERE t.tenant_id = $1
+             AND t.course_id = fc.course_id
+             AND t.deleted_at IS NULL
+           ORDER BY CASE WHEN t.faculty_user_id = $2 THEN 0 ELSE 1 END, t.timetable_id DESC
+           LIMIT 1
+         ) t ON true
        ),
        expected AS (
          SELECT COUNT(*)::int AS expected_so_far
@@ -188,11 +245,31 @@ export class FacultyWorkspacesService {
            ELSE make_date((EXTRACT(YEAR FROM CURRENT_DATE) - 1)::int, 7, 1)
          END AS start_date
        ),
+       faculty_courses AS (
+         SELECT DISTINCT a.course_id
+         FROM academic_course_allocations a
+         WHERE a.tenant_id = $1
+           AND a.faculty_user_id = $2
+           AND a.status = 'ACTIVE'
+           AND a.course_id IS NOT NULL
+       ),
        course_slots AS (
-         SELECT t.course_id, c.course_code, c.course_name, t.day_of_week
-         FROM academic_timetables t
-         INNER JOIN academic_courses c ON c.course_id = t.course_id
-         WHERE t.tenant_id = $1 AND t.faculty_user_id = $2
+         SELECT
+           fc.course_id,
+           c.course_code,
+           c.course_name,
+           COALESCE(t.day_of_week, 1) AS day_of_week
+         FROM faculty_courses fc
+         INNER JOIN academic_courses c ON c.course_id = fc.course_id
+         LEFT JOIN LATERAL (
+           SELECT t.day_of_week
+           FROM academic_timetables t
+           WHERE t.tenant_id = $1
+             AND t.course_id = fc.course_id
+             AND t.deleted_at IS NULL
+           ORDER BY CASE WHEN t.faculty_user_id = $2 THEN 0 ELSE 1 END, t.timetable_id DESC
+           LIMIT 1
+         ) t ON true
        ),
        course_expected AS (
          SELECT
@@ -1746,8 +1823,18 @@ export class FacultyWorkspacesService {
     courseId: string,
   ) {
     const rows = await this.dataSource.query(
-      `SELECT 1 FROM academic_timetables
-       WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3 LIMIT 1`,
+      `SELECT 1
+       FROM academic_course_allocations
+       WHERE tenant_id = $1
+         AND faculty_user_id = $2
+         AND course_id = $3
+         AND status = 'ACTIVE'
+       LIMIT 1
+       UNION ALL
+       SELECT 1
+       FROM academic_timetables
+       WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3
+       LIMIT 1`,
       [tenantId, facultyUserId, courseId],
     );
     if (!rows.length) {

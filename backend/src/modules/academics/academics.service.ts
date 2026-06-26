@@ -1230,6 +1230,30 @@ export class AcademicsService {
       where: { timetable_id: dto.timetable_id, tenant_id: tenantId },
       relations: ['course', 'faculty'],
     });
+    if (slot) {
+      await this.users.manager.query(
+        `DELETE FROM academic_timetables d
+         USING academic_timetables keeper
+         WHERE keeper.timetable_id = $1
+           AND d.tenant_id = keeper.tenant_id
+           AND d.course_id = keeper.course_id
+           AND d.day_of_week = keeper.day_of_week
+           AND d.start_time = keeper.start_time
+           AND d.end_time = keeper.end_time
+           AND d.timetable_id <> keeper.timetable_id
+           AND d.deleted_at IS NULL`,
+        [dto.timetable_id],
+      );
+      await this.users.manager.query(
+        `UPDATE academic_course_allocations
+            SET faculty_user_id = $3, updated_at = NOW()
+          WHERE tenant_id = $1
+            AND course_id = $2
+            AND status = 'ACTIVE'
+            AND faculty_user_id IS DISTINCT FROM $3`,
+        [tenantId, slot.course_id, dto.faculty_user_id],
+      );
+    }
     if (slot?.course_id) {
       await this.notifyCourseStudents(
         tenantId,

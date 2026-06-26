@@ -141,6 +141,10 @@ export class CourseAllocationBulkService {
     }
   }
 
+  private normalizeCourseCode(code: string): string {
+    return code.trim().replace(/\s+/g, '').toUpperCase();
+  }
+
   async buildPreview(
     tenantId: string,
     rows: CourseAllocationRowInput[],
@@ -148,7 +152,7 @@ export class CourseAllocationBulkService {
     const existingSubjects = await this.dataSource.query<
       { subject_id: number; subject_code: string }[]
     >(
-      `SELECT subject_id, UPPER(TRIM(subject_code)) AS subject_code
+      `SELECT subject_id, UPPER(REPLACE(TRIM(subject_code), ' ', '')) AS subject_code
        FROM academic_subjects WHERE deleted_at IS NULL`,
     );
     const subjectByCode = new Map(
@@ -174,7 +178,7 @@ export class CourseAllocationBulkService {
     const facultyByUsername = this.buildFacultyUsernameIndex(facultyRows);
 
     const previewRows: PreviewRow[] = rows.map((row, idx) => {
-      const codeKey = row.subject_code.trim().toUpperCase();
+      const codeKey = this.normalizeCourseCode(row.subject_code);
       const existingId = subjectByCode.get(codeKey) ?? null;
       const isNew = existingId === null;
       const isUnassigned = NF_VALUES.has(row.faculty_username.trim().toLowerCase());
@@ -476,7 +480,7 @@ export class CourseAllocationBulkService {
     defaultProgramId: number,
     result: ExecuteResult,
   ): Promise<number> {
-    const code = row.subject_code.trim().toUpperCase();
+    const code = this.normalizeCourseCode(row.subject_code);
     const shortname =
       row.subject_fullname.trim().split(/\s+/).slice(0, 3).join(' ').slice(0, 50) ||
       code;
@@ -515,7 +519,7 @@ export class CourseAllocationBulkService {
     row: PreviewRow,
     result: ExecuteResult,
   ): Promise<string> {
-    const code = row.subject_code.trim().toUpperCase();
+    const code = this.normalizeCourseCode(row.subject_code);
     const courses = (await qr.query(
       `INSERT INTO academic_courses (tenant_id, course_code, course_name, credits, is_elective)
        VALUES ($1, $2, $3, $4, false)
@@ -535,12 +539,31 @@ export class CourseAllocationBulkService {
     courseId: string,
     facultyUserId: string,
   ) {
+    const updated = await qr.query(
+      `UPDATE academic_timetables
+          SET faculty_user_id = $3
+        WHERE tenant_id = $1
+          AND course_id = $2
+          AND day_of_week = 1
+          AND start_time = '09:00'
+          AND end_time = '10:00'
+          AND deleted_at IS NULL
+        RETURNING timetable_id`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (updated.length > 0) return;
+
     await qr.query(
       `INSERT INTO academic_timetables (tenant_id, course_id, day_of_week, start_time, end_time, faculty_user_id)
        SELECT $1, $2, 1, '09:00', '10:00', $3
        WHERE NOT EXISTS (
          SELECT 1 FROM academic_timetables
-         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+         WHERE tenant_id = $1
+           AND course_id = $2
+           AND day_of_week = 1
+           AND start_time = '09:00'
+           AND end_time = '10:00'
+           AND deleted_at IS NULL
        )`,
       [tenantId, courseId, facultyUserId],
     );
@@ -551,12 +574,31 @@ export class CourseAllocationBulkService {
     courseId: string,
     facultyUserId: string,
   ) {
+    const updated = await this.dataSource.query(
+      `UPDATE academic_timetables
+          SET faculty_user_id = $3
+        WHERE tenant_id = $1
+          AND course_id = $2
+          AND day_of_week = 1
+          AND start_time = '09:00'
+          AND end_time = '10:00'
+          AND deleted_at IS NULL
+        RETURNING timetable_id`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (updated.length > 0) return;
+
     await this.dataSource.query(
       `INSERT INTO academic_timetables (tenant_id, course_id, day_of_week, start_time, end_time, faculty_user_id)
        SELECT $1, $2, 1, '09:00', '10:00', $3
        WHERE NOT EXISTS (
          SELECT 1 FROM academic_timetables
-         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+         WHERE tenant_id = $1
+           AND course_id = $2
+           AND day_of_week = 1
+           AND start_time = '09:00'
+           AND end_time = '10:00'
+           AND deleted_at IS NULL
        )`,
       [tenantId, courseId, facultyUserId],
     );
