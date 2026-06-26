@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Download, Lock, Plus, Search, ChevronUp, ChevronDown } from 'lucide-react';
@@ -310,7 +311,7 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
               {config.filters?.map((filter) => {
                 const options = filter.dynamicOptions ? filter.dynamicOptions(data) : filter.options ?? [];
                 return (
-                  <select
+                  <Select
                     key={filter.key}
                     className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     value={filterValues[filter.key] ?? ''}
@@ -321,7 +322,7 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 );
               })}
               <div className="relative w-full sm:max-w-xs">

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { AlertCircle, Download, PlayCircle, Save, Upload } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -288,9 +289,9 @@ export default function AdminPage() {
             <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-4">
               <label className="block">
                 <span className="text-sm font-bold text-slate-600">Month</span>
-                <select value={schedulerMonth} onChange={(event) => setSchedulerMonth(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-[#d6b65d]">
+                <Select value={schedulerMonth} onChange={(event) => setSchedulerMonth(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-[#d6b65d]">
                   {months.map((month) => <option key={month} value={month}>{month}</option>)}
-                </select>
+                </Select>
               </label>
               <button disabled={!!runningSchedulerAction} onClick={() => runScheduler('distribute')} className="self-end rounded-xl bg-[#d6b65d] px-5 py-3 text-sm font-black text-[#08234a] shadow-sm hover:bg-[#c5a64f] disabled:opacity-60">{runningSchedulerAction === 'distribute' ? 'Running...' : 'Distribute Tasks'}</button>
               <button disabled={!!runningSchedulerAction} onClick={() => runScheduler('reminders')} className="self-end rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:opacity-60">{runningSchedulerAction === 'reminders' ? 'Sending...' : 'Send Reminders'}</button>
@@ -306,9 +307,9 @@ export default function AdminPage() {
               <div className="mt-5 space-y-4">
                 <input value={userForm.name} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} placeholder="Full name" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
                 <input value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} placeholder="Official email" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
-                <select value={userForm.role_id} onChange={(event) => setUserForm({ ...userForm, role_id: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
+                <Select value={userForm.role_id} onChange={(event) => setUserForm({ ...userForm, role_id: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
                   {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
-                </select>
+                </Select>
                 <input value={userForm.dept_id} onChange={(event) => setUserForm({ ...userForm, dept_id: event.target.value })} placeholder="Department ID optional" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
                 <button onClick={handleCreateUser} disabled={savingUser} className="w-full rounded-xl bg-[#08234a] px-5 py-3 text-sm font-black text-white disabled:bg-slate-300">{savingUser ? 'Saving...' : 'Create User'}</button>
               </div>
@@ -325,7 +326,7 @@ export default function AdminPage() {
                     {visibleUsers.map((adminUser) => (
                       <tr key={adminUser.user_id} className="hover:bg-slate-50">
                         <td className="px-5 py-4"><p className="font-bold text-[#08234a]">{adminUser.name}</p><p className="text-xs text-slate-500">{adminUser.email}</p></td>
-                        <td className="px-5 py-4"><select value={adminUser.role_id || ''} onChange={(event) => updateUserRole(adminUser.user_id, Number(event.target.value))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></td>
+                        <td className="px-5 py-4"><Select value={adminUser.role_id || ''} onChange={(event) => updateUserRole(adminUser.user_id, Number(event.target.value))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</Select></td>
                         <td className="px-5 py-4"><button onClick={() => toggleUserActive(adminUser)} className={`rounded-full px-3 py-1 text-xs font-black ${adminUser.is_active ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{adminUser.is_active ? 'Deactivate' : 'Activate'}</button></td>
                       </tr>
                     ))}
@@ -342,8 +343,8 @@ export default function AdminPage() {
               <h2 className="text-2xl font-black text-[#08234a]">{editingTaskId ? 'Edit Master Task' : 'Add Master Task'}</h2>
               <div className="mt-5 space-y-4">
                 <input value={taskForm.task_name} onChange={(event) => setTaskForm({ ...taskForm, task_name: event.target.value })} placeholder="Task name" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
-                <select value={taskForm.role_id} onChange={(event) => setTaskForm({ ...taskForm, role_id: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">{roles.slice(1, 4).map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select>
-                <select value={taskForm.month} onChange={(event) => setTaskForm({ ...taskForm, month: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">{months.map((month) => <option key={month} value={month}>{month}</option>)}</select>
+                <Select value={taskForm.role_id} onChange={(event) => setTaskForm({ ...taskForm, role_id: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">{roles.slice(1, 4).map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</Select>
+                <Select value={taskForm.month} onChange={(event) => setTaskForm({ ...taskForm, month: event.target.value })} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">{months.map((month) => <option key={month} value={month}>{month}</option>)}</Select>
                 <textarea value={taskForm.task_description} onChange={(event) => setTaskForm({ ...taskForm, task_description: event.target.value })} placeholder="Description optional" rows={4} className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" />
                 <button onClick={saveTask} disabled={savingTask} className="w-full rounded-xl bg-[#08234a] px-5 py-3 text-sm font-black text-white disabled:bg-slate-300">{savingTask ? 'Saving...' : editingTaskId ? 'Update Task' : 'Add New Master Task'}</button>
                 {editingTaskId && <button onClick={() => { setEditingTaskId(null); setTaskForm({ task_name: '', role_id: '3', month: 'May', task_description: '' }); }} className="w-full rounded-xl bg-slate-100 px-5 py-3 text-sm font-bold text-slate-700">Cancel Editing</button>}

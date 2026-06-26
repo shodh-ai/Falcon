@@ -27,12 +27,21 @@ type FilterTab = 'all' | 'unread' | 'action_required';
 
 export default function NotificationsPage() {
   const router = useRouter();
-  const { token, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { token, isAuthenticated, isLoading: authLoading, user } = useAuth();
   const { notifications, isLoading, error, refresh } = useNotificationHistory();
   const [filter, setFilter] = useState<FilterTab>('all');
   const [category, setCategory] = useState('ALL');
 
   const items = useMemo(() => notifications.map(toAppNotification), [notifications]);
+
+  const categoryFilters = useMemo(() => {
+    const role = user?.role?.trim().toLowerCase() || user?.primaryRole?.trim().toLowerCase();
+    const isStudent = role === 'student' || role === 'applicant';
+    if (isStudent) {
+      return NOTIFICATION_CATEGORY_FILTERS.filter((opt) => opt.value !== 'HR');
+    }
+    return NOTIFICATION_CATEGORY_FILTERS;
+  }, [user]);
   const filtered = useMemo(
     () => filterNotifications(items, filter, category),
     [items, filter, category],
@@ -134,7 +143,7 @@ export default function NotificationsPage() {
           onChange={setFilter}
         />
         <NotificationFilterBar
-          options={NOTIFICATION_CATEGORY_FILTERS.map((opt) => ({
+          options={categoryFilters.map((opt) => ({
             id: opt.value,
             label: opt.label,
           }))}

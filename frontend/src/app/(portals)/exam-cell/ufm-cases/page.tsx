@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -98,7 +99,7 @@ export default function ExamCellUfmPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Student</label>
-              <select
+              <Select
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={form.student_pick}
                 onChange={(e) => setForm((f) => ({ ...f, student_pick: e.target.value, student_ref: '' }))}
@@ -110,7 +111,7 @@ export default function ExamCellUfmPage() {
                     {s.enrollment_number ? ` · ${s.enrollment_number}` : ''}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Or enrollment / email</label>
@@ -123,7 +124,7 @@ export default function ExamCellUfmPage() {
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Course scope (optional)</label>
-            <select
+            <Select
               className="w-full rounded-md border px-3 py-2 text-sm"
               value={form.course_id}
               onChange={(e) => setForm((f) => ({ ...f, course_id: e.target.value }))}
@@ -134,7 +135,7 @@ export default function ExamCellUfmPage() {
                   {c.course_code} — {c.course_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <textarea
             className="min-h-[80px] w-full rounded-md border px-3 py-2 text-sm"

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { IqacPageHeader } from '@/components/iqac/IqacPageHeader';
@@ -55,14 +56,14 @@ export default function IqacReportsPage() {
           <CardTitle className="text-base">Generate report</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <select className="rounded-md border px-3 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value as 'AQAR' | 'SSR')}>
+          <Select className="rounded-md border px-3 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value as 'AQAR' | 'SSR')}>
             <option value="AQAR">AQAR — Annual Quality Assurance Report</option>
             <option value="SSR">SSR — Self Study Report</option>
-          </select>
-          <select className="rounded-md border px-3 py-2 text-sm" value={year} onChange={(e) => setYear(e.target.value)}>
+          </Select>
+          <Select className="rounded-md border px-3 py-2 text-sm" value={year} onChange={(e) => setYear(e.target.value)}>
             <option>2025-2026</option>
             <option>2024-2025</option>
-          </select>
+          </Select>
           <Button onClick={() => void generate()}>Generate & Download bundle</Button>
         </CardContent>
       </Card>

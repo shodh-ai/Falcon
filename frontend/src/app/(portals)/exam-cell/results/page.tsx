@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ChevronRight, Lock, Eye, Send, type LucideIcon } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -389,22 +390,22 @@ export default function ExamCellResultsPage() {
         {showSetup ? (
           <CardContent className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
-              <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.course_id} onChange={(e) => setCreateForm({ ...createForm, course_id: e.target.value })}>
+              <Select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.course_id} onChange={(e) => setCreateForm({ ...createForm, course_id: e.target.value })}>
                 <option value="">Select course</option>
                 {courses.map((c) => (
                   <option key={c.course_id} value={c.course_id}>{c.course_code} — {c.course_name}</option>
                 ))}
-              </select>
-              <select className="rounded-md border px-3 py-2 text-sm" value={createForm.exam_type} onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}>
+              </Select>
+              <Select className="rounded-md border px-3 py-2 text-sm" value={createForm.exam_type} onChange={(e) => setCreateForm({ ...createForm, exam_type: e.target.value })}>
                 {EXAM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+              </Select>
               <Input placeholder="Semester" value={createForm.semester} onChange={(e) => setCreateForm({ ...createForm, semester: e.target.value })} />
               <Input placeholder="Max marks" value={createForm.max_marks} onChange={(e) => setCreateForm({ ...createForm, max_marks: e.target.value })} />
               <Input placeholder="Pass marks" value={createForm.pass_marks} onChange={(e) => setCreateForm({ ...createForm, pass_marks: e.target.value })} />
-              <select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.grading_policy_id} onChange={(e) => setCreateForm({ ...createForm, grading_policy_id: e.target.value })}>
+              <Select className="rounded-md border px-3 py-2 text-sm md:col-span-2" value={createForm.grading_policy_id} onChange={(e) => setCreateForm({ ...createForm, grading_policy_id: e.target.value })}>
                 <option value="">Default grading policy</option>
                 {policies.map((p) => <option key={p.policy_id} value={p.policy_id}>{p.policy_name}</option>)}
-              </select>
+              </Select>
               <Button disabled={busy} onClick={() => void createSession()}>Create session</Button>
             </div>
 
@@ -530,12 +531,12 @@ export default function ExamCellResultsPage() {
                 <div className="mb-3 grid gap-2 md:grid-cols-3">
                   <Input placeholder="Pass marks" value={rulesForm.pass_marks} onChange={(e) => setRulesForm({ ...rulesForm, pass_marks: e.target.value })} />
                   <Input placeholder="Max marks" value={rulesForm.max_marks} onChange={(e) => setRulesForm({ ...rulesForm, max_marks: e.target.value })} />
-                  <select className="rounded-md border px-3 py-2 text-sm" value={rulesForm.grading_policy_id} onChange={(e) => setRulesForm({ ...rulesForm, grading_policy_id: e.target.value })}>
+                  <Select className="rounded-md border px-3 py-2 text-sm" value={rulesForm.grading_policy_id} onChange={(e) => setRulesForm({ ...rulesForm, grading_policy_id: e.target.value })}>
                     <option value="">Default policy</option>
                     {policies.map((p) => (
                       <option key={p.policy_id} value={p.policy_id}>{p.policy_name}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => void saveRules()}>
                   Save grade rules

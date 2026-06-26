@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -342,7 +343,7 @@ export default function FacultyTimetablePage() {
             </p>
           )}
           <form className="grid gap-3" onSubmit={submitAdjustment}>
-            <select
+            <Select
               className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
               value={form.course_id}
               onChange={(e) => setForm({ ...form, course_id: e.target.value })}
@@ -355,8 +356,8 @@ export default function FacultyTimetablePage() {
                   {c.course_code} — {c.course_name}
                 </option>
               ))}
-            </select>
-            <select
+            </Select>
+            <Select
               className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
               value={form.adjustment_type}
               onChange={(e) => setForm({ ...form, adjustment_type: e.target.value })}
@@ -366,7 +367,7 @@ export default function FacultyTimetablePage() {
               <option value="SUSPENSION">Lecture suspension (day)</option>
               <option value="SUBSTITUTE">Substitute faculty</option>
               <option value="SUBSTITUTE">Substitute</option>
-            </select>
+            </Select>
             <Input
               type="datetime-local"
               value={form.new_date}

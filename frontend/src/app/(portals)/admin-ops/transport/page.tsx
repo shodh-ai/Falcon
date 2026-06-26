@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { io, Socket } from 'socket.io-client';
@@ -186,7 +187,7 @@ export default function TransportAdminPage() {
 
             <hr className="my-2" />
             <p className="text-xs font-semibold uppercase text-muted-foreground">Add stop (click map coords)</p>
-            <select
+            <Select
               className="w-full rounded-md border px-3 py-2 text-sm"
               value={stopForm.route_id}
               onChange={(e) => setStopForm((f) => ({ ...f, route_id: e.target.value }))}
@@ -197,7 +198,7 @@ export default function TransportAdminPage() {
                   {r.route_name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Input placeholder="Stop name" value={stopForm.stop_name} onChange={(e) => setStopForm((f) => ({ ...f, stop_name: e.target.value }))} />
             <div className="grid grid-cols-2 gap-2">
               <Input placeholder="Lat" value={stopForm.latitude} onChange={(e) => setStopForm((f) => ({ ...f, latitude: e.target.value }))} />

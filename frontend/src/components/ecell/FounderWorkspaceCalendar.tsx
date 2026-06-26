@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -91,7 +92,7 @@ export function FounderWorkspaceCalendar() {
       <div className="grid gap-3 sm:grid-cols-3">
         <div>
           <label className="mb-1 block text-xs font-medium uppercase tracking-wide">Room</label>
-          <select
+          <Select
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             value={workspaceId}
             onChange={(e) => setWorkspaceId(e.target.value)}
@@ -101,7 +102,7 @@ export function FounderWorkspaceCalendar() {
                 {w.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium uppercase tracking-wide">Date</label>

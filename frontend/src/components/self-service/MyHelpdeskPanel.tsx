@@ -11,6 +11,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const categories = [
   { label: 'IT / WiFi', value: 'IT' },
@@ -89,17 +96,21 @@ export function MyHelpdeskPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <select
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+          <Select
             value={form.category}
-            onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+            onValueChange={(val) => setForm((prev) => ({ ...prev, category: val }))}
           >
-            {categories.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select category..." />
+            </SelectTrigger>
+            <SelectContent>
+              {categories.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Input
             placeholder="Subject"
             value={form.subject}

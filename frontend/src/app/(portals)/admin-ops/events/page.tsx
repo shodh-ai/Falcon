@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, Loader2, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -101,7 +102,7 @@ export default function AdminOpsEventsPage() {
                 </div>
               ) : null}
               <div className="grid gap-2 md:grid-cols-2">
-                <select
+                <Select
                   className="h-10 rounded-md border bg-background px-3 text-sm"
                   value={approveForm[ev.event_id]?.venue_id ?? ev.venue_id ?? ''}
                   onChange={(e) =>
@@ -117,7 +118,7 @@ export default function AdminOpsEventsPage() {
                       {v.name}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <Input
                   placeholder="Estate notes (e.g. moved to Seminar Hall B)"
                   value={approveForm[ev.event_id]?.notes ?? ''}

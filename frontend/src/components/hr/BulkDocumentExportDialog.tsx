@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { Archive } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -117,7 +118,7 @@ export function BulkDocumentExportDialog() {
             <label className="text-xs font-medium text-muted-foreground">
               Document type <span className="text-destructive">*</span>
             </label>
-            <select
+            <Select
               className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
               value={documentType}
               onChange={(e) => setDocumentType(e.target.value)}
@@ -127,12 +128,12 @@ export function BulkDocumentExportDialog() {
                   {c === 'ALL' ? 'ALL — every document type' : c.replace(/_/g, ' ')}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div>
             <label className="text-xs font-medium text-muted-foreground">Department (optional)</label>
-            <select
+            <Select
               className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
               value={deptId}
               onChange={(e) => setDeptId(e.target.value)}
@@ -143,7 +144,7 @@ export function BulkDocumentExportDialog() {
                   {d.dept_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <Button className="w-full" disabled={submitting} onClick={() => void generateArchive()}>

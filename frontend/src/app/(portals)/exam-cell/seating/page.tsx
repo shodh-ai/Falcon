@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -205,41 +206,41 @@ export default function ExamCellSeatingPage() {
             {strategy === 'by_exam_type' ? (
               <div className="space-y-1">
                 <label className="text-sm font-medium">Exam Type</label>
-                <select className="w-full rounded-md border px-3 py-2 text-sm" value={examType} onChange={(e) => setExamType(e.target.value)}>
+                <Select className="w-full rounded-md border px-3 py-2 text-sm" value={examType} onChange={(e) => setExamType(e.target.value)}>
                   <option value="MID_TERM">Mid Term</option>
                   <option value="END_TERM">End Term</option>
-                </select>
+                </Select>
               </div>
             ) : (
               <div className="space-y-1">
                 <label className="text-sm font-medium">Exam Schedule</label>
-                <select className="w-full rounded-md border px-3 py-2 text-sm" value={examId} onChange={(e) => setExamId(e.target.value)}>
+                <Select className="w-full rounded-md border px-3 py-2 text-sm" value={examId} onChange={(e) => setExamId(e.target.value)}>
                   {schedules.map((s) => (
                     <option key={s.exam_schedule_id} value={s.exam_schedule_id}>
                       {s.subject_name ? `${s.subject_name} (${s.subject_code})` : s.exam_type} · {String(s.exam_date).slice(0, 10)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             )}
             <div className="space-y-1">
               <label className="text-sm font-medium">Semester</label>
-              <select className="w-full rounded-md border px-3 py-2 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
+              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
                 {[1,2,3,4,5,6,7,8].map(s => <option key={s} value={s}>Semester {s}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Branch</label>
-              <select className="w-full rounded-md border px-3 py-2 text-sm" value={branch} onChange={(e) => setBranch(e.target.value)}>
+              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={branch} onChange={(e) => setBranch(e.target.value)}>
                 <option value="All Branches">All Branches</option>
                 {branches.map((b) => <option key={b} value={b}>{b}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Block</label>
-              <select className="w-full rounded-md border px-3 py-2 text-sm" value={selectedBlock} onChange={(e) => { setSelectedBlock(e.target.value); setSelectedHalls([]); }}>
+              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={selectedBlock} onChange={(e) => { setSelectedBlock(e.target.value); setSelectedHalls([]); }}>
                 {blocksData.map((b) => <option key={b.block} value={b.block}>{b.block}</option>)}
-              </select>
+              </Select>
             </div>
           </div>
           

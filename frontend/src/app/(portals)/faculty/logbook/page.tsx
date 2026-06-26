@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { BookOpen, NotebookPen } from 'lucide-react';
@@ -75,7 +76,7 @@ export default function FacultyLogbookPage() {
         <form className="grid gap-3 sm:grid-cols-2" onSubmit={onSubmit}>
           <label className="text-sm sm:col-span-2 lg:col-span-1">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
-            <select
+            <Select
               className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
               value={form.course_id}
               onChange={(e) => setForm({ ...form, course_id: e.target.value })}
@@ -85,7 +86,7 @@ export default function FacultyLogbookPage() {
               {courses.map((c) => (
                 <option key={c.course_id} value={c.course_id}>{c.course_code}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Class date</span>

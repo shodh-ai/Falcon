@@ -24,6 +24,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { BlockedDate, CampusEvent, Venue } from '@/lib/api/api.campus-events';
 
@@ -240,17 +247,21 @@ export function ProposeEventPanel({
       >
         <form className="space-y-5" onSubmit={onSubmit}>
           <Field label="Club">
-            <select
-              className={selectClass}
+            <Select
               value={form.club_id}
-              onChange={(e) => setForm((f) => ({ ...f, club_id: e.target.value }))}
+              onValueChange={(val) => setForm((f) => ({ ...f, club_id: val }))}
             >
-              {clubs.map((c) => (
-                <option key={c.club_id} value={c.club_id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select club..." />
+              </SelectTrigger>
+              <SelectContent>
+                {clubs.map((c) => (
+                  <SelectItem key={c.club_id} value={c.club_id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
 
           <Field label="Event title">
@@ -283,18 +294,22 @@ export function ProposeEventPanel({
 
           <Field label="Venue">
             {venues.length > 0 && !customVenue ? (
-              <select
-                className={selectClass}
-                value={form.venue_id}
-                onChange={(e) => setForm((f) => ({ ...f, venue_id: e.target.value, venue_text: '' }))}
+              <Select
+                value={form.venue_id || "none"}
+                onValueChange={(val) => setForm((f) => ({ ...f, venue_id: val === "none" ? "" : val, venue_text: '' }))}
               >
-                <option value="">Select campus venue…</option>
-                {venues.map((v) => (
-                  <option key={v.venue_id} value={v.venue_id}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select campus venue…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select campus venue…</SelectItem>
+                  {venues.map((v) => (
+                    <SelectItem key={v.venue_id} value={v.venue_id}>
+                      {v.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
               <Input
                 value={form.venue_text}
@@ -538,13 +553,18 @@ export function ClubScannerPanel({
     <StudentSectionCard title="Event day scanner" description="Check in attendees with QR codes" icon={QrCode} tone="gold">
       <div className="space-y-4">
         <Field label="Live event">
-          <select className={selectClass} value={scanEventId} onChange={(e) => setScanEventId(e.target.value)}>
-            {liveEvents.map((e) => (
-              <option key={e.event_id} value={e.event_id}>
-                {e.title}
-              </option>
-            ))}
-          </select>
+          <Select value={scanEventId} onValueChange={(val) => setScanEventId(val)}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select event..." />
+            </SelectTrigger>
+            <SelectContent>
+              {liveEvents.map((e) => (
+                <SelectItem key={e.event_id} value={e.event_id}>
+                  {e.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
 
         {scanStats ? (

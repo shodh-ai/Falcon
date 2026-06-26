@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { AlumniPageHeader } from '@/components/alumni/AlumniPageHeader';
@@ -68,13 +69,13 @@ export default function AlumniDonationsPage() {
           <CardTitle className="text-base">Make a donation</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
-          <select className="rounded-md border px-3 py-2 text-sm" value={fund} onChange={(e) => setFund(e.target.value)}>
+          <Select className="rounded-md border px-3 py-2 text-sm" value={fund} onChange={(e) => setFund(e.target.value)}>
             {funds.map((f) => (
               <option key={f.code} value={f.code}>
                 {f.label}
               </option>
             ))}
-          </select>
+          </Select>
           <Input type="number" className="max-w-[140px]" value={amount} onChange={(e) => setAmount(e.target.value)} />
           <Button onClick={() => void donate()}>Pay via Gateway (demo)</Button>
         </CardContent>

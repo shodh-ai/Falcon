@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -100,7 +101,7 @@ export default function ExamCellResourceAllocationPage() {
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-1 text-sm sm:col-span-2">
             <span className="font-medium">Subject / exam schedule</span>
-            <select
+            <Select
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={examId}
               onChange={(e) => setExamId(e.target.value)}
@@ -110,7 +111,7 @@ export default function ExamCellResourceAllocationPage() {
                   {s.subject_name ?? s.subject_code ?? s.exam_type} — {s.exam_date}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1 text-sm">
             <span className="font-medium">Semester</span>
@@ -122,7 +123,7 @@ export default function ExamCellResourceAllocationPage() {
           </label>
           <label className="space-y-1 text-sm">
             <span className="font-medium">Block</span>
-            <select
+            <Select
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={block}
               onChange={(e) => {
@@ -134,11 +135,11 @@ export default function ExamCellResourceAllocationPage() {
               {blocks.map((b) => (
                 <option key={b.block} value={b.block}>{b.block}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1 text-sm sm:col-span-2">
             <span className="font-medium">Room / resource</span>
-            <select
+            <Select
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={room}
               onChange={(e) => setRoom(e.target.value)}
@@ -148,11 +149,11 @@ export default function ExamCellResourceAllocationPage() {
                   {h.name} — capacity {h.capacity}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1 text-sm sm:col-span-2">
             <span className="font-medium">Exam coordinator / invigilator</span>
-            <select
+            <Select
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={coordinatorId}
               onChange={(e) => setCoordinatorId(e.target.value)}
@@ -161,7 +162,7 @@ export default function ExamCellResourceAllocationPage() {
               {faculty.map((f) => (
                 <option key={f.user_id} value={f.user_id}>{f.name}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <div className="sm:col-span-2">
             <Button disabled={submitting} onClick={() => void assignResource()}>

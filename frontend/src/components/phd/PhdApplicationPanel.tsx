@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, GraduationCap, Loader2, XCircle } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -163,7 +164,7 @@ export function PhdApplicationPanel() {
       {open && !applyDisabled ? (
         <Card>
           <CardContent className="space-y-3 pt-6">
-            <select
+            <Select
               className="w-full rounded-lg border px-3 py-2 text-sm"
               value={form.application_type}
               onChange={(e) => setForm({ ...form, application_type: e.target.value })}
@@ -171,7 +172,7 @@ export function PhdApplicationPanel() {
               {PHD_APPLICATION_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
-            </select>
+            </Select>
             <textarea
               className="w-full rounded-lg border px-3 py-2 text-sm"
               rows={4}
