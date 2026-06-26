@@ -4,7 +4,13 @@ import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { LeadershipMetricCard, LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
+import { LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
+import {
+  ExecutiveDateRangeFilter,
+  ExecutiveExportButton,
+  TrafficLightKpi,
+  type ExecutivePeriod,
+} from '@/components/leadership/executive';
 import { useLeadershipApi } from '@/lib/api/api.leadership';
 
 type IssuesDashboard = {
@@ -15,10 +21,13 @@ type IssuesDashboard = {
 
 export default function LeadershipIssuesPage() {
   const api = useLeadershipApi();
+  const [period, setPeriod] = useState<ExecutivePeriod>('year');
   const [data, setData] = useState<IssuesDashboard | null>(null);
+  const [compliance, setCompliance] = useState<Record<string, unknown> | null>(null);
 
   const reload = () => {
     void api.issues().then((d) => setData(d as IssuesDashboard)).catch(() => setData(null));
+    void api.complianceSummary().then(setCompliance).catch(() => setCompliance(null));
   };
 
   useEffect(() => {
@@ -36,71 +45,101 @@ export default function LeadershipIssuesPage() {
   };
 
   const maxHeat = Math.max(...(data?.department_heatmap.map((d) => d.open_count) ?? [1]), 1);
+  const stale = Number(compliance?.stale_grievances ?? 0);
+  const naac = Number(compliance?.naac_readiness_score ?? 0);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 sm:p-6">
       <LeadershipPageHeader
-        eyebrow="Grievance Command Center"
-        title="Issue Monitoring"
-        description="SLA-tracked helpdesk tickets · 24-hour breach escalations to Vice Chancellor"
+        eyebrow="Compliance, Risk & Grievances"
+        title="Issue Monitoring & Accreditation"
+        description="Unified helpdesk + student grievances · SLA and accreditation readiness"
+        action={
+          <div className="flex flex-col gap-2 sm:items-end">
+            <ExecutiveDateRangeFilter value={period} onChange={setPeriod} />
+            <ExecutiveExportButton targetId="issues-dashboard" filename="compliance-grievances" />
+          </div>
+        }
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <LeadershipMetricCard label="Open Tickets (Live)" value={String(data?.kpis.open_tickets ?? '—')} highlight />
-        <LeadershipMetricCard label="Avg Resolution Time" value={`${data?.kpis.avg_resolution_hours ?? '—'} hrs`} />
-        <LeadershipMetricCard
-          label="SLA Breaches"
-          value={String(data?.kpis.sla_breaches ?? '—')}
-          alert={(data?.kpis.sla_breaches ?? 0) > 0}
-        />
-      </div>
-
-      <LeadershipSectionCard title="Department Health Heatmap">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {(data?.department_heatmap ?? []).map((row) => (
-            <div
-              key={row.department}
-              className="rounded-xl border border-sgvu-navy/10 p-4"
-              style={{ background: `rgba(8, 35, 74, ${0.04 + (row.open_count / maxHeat) * 0.2})` }}
-            >
-              <p className="text-xs font-medium text-muted-foreground">{row.department}</p>
-              <p className="font-mono text-2xl font-black text-sgvu-navy">{row.open_count}</p>
-              <p className="text-xs text-muted-foreground">open tickets</p>
-            </div>
-          ))}
+      <div id="issues-dashboard" className="space-y-6">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <TrafficLightKpi label="Open Grievances" value={String(compliance?.open_grievances ?? data?.kpis.open_tickets ?? '—')} status="yellow" />
+          <TrafficLightKpi label="Resolved" value={String(compliance?.resolved_grievances ?? '—')} status="green" />
+          <TrafficLightKpi
+            label="Pending >7 Days"
+            value={String(stale)}
+            status={stale > 0 ? 'red' : 'green'}
+          />
+          <TrafficLightKpi
+            label="NAAC Readiness"
+            value={`${naac}%`}
+            status={naac >= 70 ? 'green' : 'yellow'}
+          />
         </div>
-      </LeadershipSectionCard>
 
-      <LeadershipSectionCard title="Escalation Inbox" description="Only tickets breaching the 48-hour SLA">
-        <div className="space-y-2">
-          {(data?.escalation_inbox ?? []).map((t) => (
-            <div
-              key={String(t.ticket_id)}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3"
-            >
-              <div className="min-w-0">
-                <p className="flex items-center gap-2 font-semibold text-red-800">
-                  <AlertTriangle className="h-4 w-4" />
-                  {String(t.subject)}
-                </p>
-                <p className="text-xs text-red-700/80">
-                  {String(t.category)} · {String(t.student_name)} · Level {String(t.escalation_level ?? 0)}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                className="bg-sgvu-navy hover:bg-sgvu-navy/90"
-                onClick={() => void escalate(String(t.ticket_id))}
+        {stale > 0 ? (
+          <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {stale} complaint(s) pending for more than 7 days require executive attention
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <TrafficLightKpi label="SLA Breaches" value={String(data?.kpis.sla_breaches ?? '—')} status={(data?.kpis.sla_breaches ?? 0) > 0 ? 'red' : 'green'} />
+          <TrafficLightKpi label="Avg Resolution" value={`${data?.kpis.avg_resolution_hours ?? '—'} hrs`} status="green" />
+          <TrafficLightKpi label="Hostel Occupancy" value={`${compliance?.hostel_occupancy_pct ?? '—'}%`} status="green" />
+        </div>
+
+        <LeadershipSectionCard title="Accreditation Readiness">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TrafficLightKpi label="NAAC Readiness Score" value={`${naac}%`} status={naac >= 70 ? 'green' : 'yellow'} sub="Track upcoming NAAC/NBA inspections in IQAC module" />
+            <TrafficLightKpi
+              label="Transport Utilization"
+              value={`${(compliance?.transport as { capacity_utilization_pct?: number })?.capacity_utilization_pct ?? '—'}%`}
+              status="green"
+              sub={`${(compliance?.transport as { buses_on_route?: number })?.buses_on_route ?? 0} buses on route`}
+            />
+          </div>
+        </LeadershipSectionCard>
+
+        <LeadershipSectionCard title="Department Health Heatmap">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {(data?.department_heatmap ?? []).map((row) => (
+              <div
+                key={row.department}
+                className="rounded-xl border border-sgvu-navy/10 p-4"
+                style={{ background: `rgba(8, 35, 74, ${0.04 + (row.open_count / maxHeat) * 0.2})` }}
               >
-                Escalate to HOD
-              </Button>
-            </div>
-          ))}
-          {(data?.escalation_inbox ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No SLA breaches in the escalation inbox.</p>
-          ) : null}
-        </div>
-      </LeadershipSectionCard>
+                <p className="text-xs font-medium text-muted-foreground">{row.department}</p>
+                <p className="font-mono text-2xl font-black text-sgvu-navy">{row.open_count}</p>
+                <p className="text-xs text-muted-foreground">open tickets</p>
+              </div>
+            ))}
+          </div>
+        </LeadershipSectionCard>
+
+        <LeadershipSectionCard title="Escalation Inbox" description="Tickets breaching SLA">
+          <div className="space-y-2">
+            {(data?.escalation_inbox ?? []).map((t) => (
+              <div
+                key={String(t.ticket_id)}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-sgvu-navy">{String(t.subject ?? 'Ticket')}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {String(t.category ?? '')} · {String(t.student_name ?? '')}
+                  </p>
+                </div>
+                <Button size="sm" variant="destructive" onClick={() => void escalate(String(t.ticket_id))}>
+                  Escalate to HOD
+                </Button>
+              </div>
+            ))}
+          </div>
+        </LeadershipSectionCard>
+      </div>
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { User } from '../../entities/user.entity';
 import { LeadershipController } from './leadership.controller';
 import { LeadershipService } from './leadership.service';
 import { LeadershipIntelligenceService } from './leadership-intelligence.service';
+import { ExecutiveActionService } from './executive-action.service';
+import { FinancialOversightService } from './financial-oversight.service';
 import { LeadershipGateway } from './leadership.gateway';
 import { FinancialFeedEmitter } from './financial-feed.emitter';
 import { FinancialFeedListener } from './financial-feed.listener';
@@ -27,6 +29,8 @@ import { OwnerAccessGuard } from '../../common/guards/owner-access.guard';
   providers: [
     LeadershipService,
     LeadershipIntelligenceService,
+    ExecutiveActionService,
+    FinancialOversightService,
     LeadershipGateway,
     FinancialFeedEmitter,
     FinancialFeedListener,

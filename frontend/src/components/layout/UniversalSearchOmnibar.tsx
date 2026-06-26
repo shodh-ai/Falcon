@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { GraduationCap, Search, Ticket, UserRound } from 'lucide-react';
 import {
   CommandDialog,
@@ -19,6 +19,7 @@ import {
   HEADER_SEARCH_MOBILE_CLASS,
 } from '@/components/layout/header-styles';
 import type { NavGroup, NavItem } from '@/lib/navigation';
+import { isLeadershipRoute, matchLeadershipShortcuts } from '@/lib/leadership-search-index';
 
 type SearchItem = {
   id: string;
@@ -55,7 +56,9 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResponse | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
   const api = useAuthedApi();
+  const onLeadership = isLeadershipRoute(pathname);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -174,7 +177,13 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
     }
   };
 
+  const leadershipShortcuts = useMemo(
+    () => (onLeadership ? matchLeadershipShortcuts(query) : []),
+    [onLeadership, query],
+  );
+
   const hasAnyResults =
+    leadershipShortcuts.length > 0 ||
     hasMatchedNav ||
     (results && (results.students.length > 0 || results.staff.length > 0 || results.tickets.length > 0));
 
@@ -194,7 +203,7 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
         aria-label="Open search (Cmd+K)"
       >
         <Search className="h-4 w-4 shrink-0 text-sgvu-navy/50" />
-        <span className="truncate">Search…</span>
+        <span className="truncate">{onLeadership ? 'Search CS Budget, defaulters…' : 'Search…'}</span>
         <kbd className="ml-auto hidden rounded border border-sgvu-navy/10 bg-sgvu-surface px-1.5 py-0.5 text-[10px] font-medium lg:inline">
           ⌘K
         </kbd>
@@ -211,7 +220,11 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
 
       <CommandDialog open={open} onOpenChange={setOpen}>
         <CommandInput
-          placeholder="Search pages, people, or tickets…"
+          placeholder={
+            onLeadership
+              ? 'Executive shortcuts — CS Budget, defaulters, approve PO…'
+              : 'Search pages, people, or tickets…'
+          }
           value={query}
           onValueChange={setQuery}
           onKeyDown={(e) => {
@@ -220,6 +233,25 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
         />
         <CommandList className="max-h-[min(70vh,540px)] overflow-y-auto">
           {!hasAnyResults && <CommandEmpty>{emptyMessage}</CommandEmpty>}
+
+          {leadershipShortcuts.length > 0 ? (
+            <CommandGroup heading="Executive shortcuts">
+              {leadershipShortcuts.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <CommandItem
+                    key={item.href + item.label}
+                    value={`exec-${item.label} ${item.keywords?.join(' ') ?? ''}`}
+                    onSelect={() => navigate(item.href)}
+                    className="cursor-pointer"
+                  >
+                    <Icon className="h-4 w-4 text-sgvu-gold" />
+                    <span>{item.label}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          ) : null}
 
           {results && results.students.length > 0 ? (
             <CommandGroup heading="Students">
