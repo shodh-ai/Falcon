@@ -1,6 +1,22 @@
 -- Spread faculty timetable slots across Mon–Sat (ISO days 1–6) instead of all on Monday.
 -- When a faculty has more than six courses, additional hours are used (10:00, 11:00, …).
 
+-- One timetable row per course before reshuffling (avoids uq_academic_timetables_course_slot).
+WITH dupes AS (
+  SELECT
+    t.timetable_id,
+    ROW_NUMBER() OVER (
+      PARTITION BY t.tenant_id, t.course_id
+      ORDER BY t.timetable_id DESC
+    ) AS rn
+  FROM academic_timetables t
+  WHERE t.deleted_at IS NULL
+)
+DELETE FROM academic_timetables t
+USING dupes d
+WHERE t.timetable_id = d.timetable_id
+  AND d.rn > 1;
+
 WITH ranked AS (
   SELECT
     t.timetable_id,

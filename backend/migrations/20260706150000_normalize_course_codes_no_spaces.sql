@@ -42,6 +42,15 @@ BEGIN
    WHERE drop_s.rn > 1;
 
   IF EXISTS (SELECT 1 FROM _subject_merge) THEN
+    DELETE FROM academic_course_allocations drop_a
+     USING _subject_merge sm, academic_course_allocations keep_a
+     WHERE drop_a.subject_id = sm.drop_id
+       AND keep_a.subject_id = sm.keep_id
+       AND keep_a.tenant_id = drop_a.tenant_id
+       AND keep_a.program_name IS NOT DISTINCT FROM drop_a.program_name
+       AND keep_a.semester IS NOT DISTINCT FROM drop_a.semester
+       AND keep_a.academic_year = drop_a.academic_year;
+
     FOR m IN SELECT drop_id, keep_id FROM _subject_merge LOOP
       FOR r IN
         SELECT tc.table_schema,
@@ -127,6 +136,24 @@ BEGIN
   GET DIAGNOSTICS v_merged = ROW_COUNT;
 
   IF EXISTS (SELECT 1 FROM _course_merge) THEN
+    UPDATE academic_course_allocations a
+       SET course_id = cm.keep_id
+      FROM _course_merge cm
+     WHERE a.course_id = cm.drop_id
+       AND NOT EXISTS (
+         SELECT 1 FROM academic_course_allocations x
+         WHERE x.tenant_id = a.tenant_id
+           AND x.subject_id = a.subject_id
+           AND x.program_name IS NOT DISTINCT FROM a.program_name
+           AND x.semester IS NOT DISTINCT FROM a.semester
+           AND x.academic_year = a.academic_year
+           AND x.course_id = cm.keep_id
+       );
+
+    DELETE FROM academic_course_allocations a
+     USING _course_merge cm
+     WHERE a.course_id = cm.drop_id;
+
     DELETE FROM student_course_enrollments drop_e
      USING student_course_enrollments keep_e, _course_merge cm
      WHERE drop_e.course_id = cm.drop_id
