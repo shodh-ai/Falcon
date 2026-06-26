@@ -438,21 +438,34 @@ export class DemeritsService {
     identifier: string,
   ): Promise<string> {
     const isUuid = DemeritsService.UUID_RE.test(identifier);
-    const rows = await this.db.query<Array<{ user_id: string }>>(
-      `SELECT u.user_id
-       FROM users u
-       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-       JOIN roles r ON r.role_id = u.role_id
-       WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
-         AND (
-           ($2 = true AND u.user_id = $3::uuid)
-           OR lower(u.official_email) = lower($4)
-           OR lower(COALESCE(sp.enrollment_no, '')) = lower($4)
-           OR lower(COALESCE(sp.enrollment_number, '')) = lower($4)
-         )
-       LIMIT 1`,
-      [tenantId, isUuid, identifier, identifier],
-    );
+    let rows: Array<{ user_id: string }> = [];
+    
+    if (isUuid) {
+      rows = await this.db.query<Array<{ user_id: string }>>(
+        `SELECT u.user_id
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
+           AND u.user_id = $2::uuid
+         LIMIT 1`,
+        [tenantId, identifier],
+      );
+    } else {
+      rows = await this.db.query<Array<{ user_id: string }>>(
+        `SELECT u.user_id
+         FROM users u
+         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
+           AND (
+             lower(u.official_email) = lower($2)
+             OR lower(COALESCE(sp.enrollment_no, '')) = lower($2)
+             OR lower(COALESCE(sp.enrollment_number, '')) = lower($2)
+           )
+         LIMIT 1`,
+        [tenantId, identifier],
+      );
+    }
     if (!rows[0]?.user_id) {
       throw new BadRequestException('Student not found');
     }

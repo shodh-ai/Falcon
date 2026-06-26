@@ -111,7 +111,7 @@ export default function FacultyDisciplineIncidentsPage() {
   async function uploadEvidence(file: File) {
     setUploading(true);
     try {
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem('token');
       const tenant = localStorage.getItem('tenant_subdomain') ?? 'sgvu';
       const formData = new FormData();
       formData.append('file', file);
@@ -293,15 +293,33 @@ export default function FacultyDisciplineIncidentsPage() {
               </label>
             </Button>
             {form.evidence_urls.length > 0 ? (
-              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-                {form.evidence_urls.map((url) => (
-                  <li key={url}>
-                    <a href={url} target="_blank" rel="noreferrer" className="text-sgvu-navy underline">
-                      {url}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {form.evidence_urls.map((url) => {
+                  const isImage = url.match(/\.(jpeg|jpg|gif|png|webp|avif)$/i) != null;
+                  return (
+                    <a
+                      key={url}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group relative block overflow-hidden rounded-md border shadow-sm transition-all hover:shadow-md"
+                    >
+                      {isImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={url}
+                          alt="Evidence"
+                          className="h-16 w-16 object-cover transition-opacity group-hover:opacity-80"
+                        />
+                      ) : (
+                        <div className="flex h-16 w-16 items-center justify-center bg-muted text-xs font-medium text-muted-foreground transition-colors group-hover:bg-muted/80">
+                          {url.split('.').pop()?.toUpperCase() || 'FILE'}
+                        </div>
+                      )}
                     </a>
-                  </li>
-                ))}
-              </ul>
+                  );
+                })}
+              </div>
             ) : null}
           </div>
 
