@@ -7,6 +7,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -255,5 +256,31 @@ export class SuperAdminController {
       dto.academic_year,
       dto.rows,
     );
+  }
+
+  @Get('academics/course-allocations')
+  listAllAllocations(@Req() req: { user: AuthUser }) {
+    return this.courseAllocationBulk.listAllAllocations(this.tenant(req));
+  }
+
+  @Put('academics/course-allocations/:id/faculty')
+  updateAllocationFaculty(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: { faculty_user_id: string | null },
+  ) {
+    return this.courseAllocationBulk.updateAllocationFaculty(
+      this.tenant(req),
+      id,
+      dto.faculty_user_id,
+    );
+  }
+
+  @Delete('academics/course-allocations/:id')
+  deleteAllocation(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+  ) {
+    return this.courseAllocationBulk.deleteAllocation(this.tenant(req), id);
   }
 }
