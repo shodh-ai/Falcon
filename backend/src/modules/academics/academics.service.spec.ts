@@ -17,6 +17,8 @@ import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { GradingPolicy } from '../../entities/grading-policy.entity';
 import { ExamResult } from '../../entities/exam-result.entity';
 import { AttendanceRecord } from '../../entities/attendance-record.entity';
+import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
+import { StudentMentorSyncService } from './student-mentor-sync.service';
 
 describe('AcademicsService', () => {
   let service: AcademicsService;
@@ -51,6 +53,14 @@ describe('AcademicsService', () => {
 
   const mockNotify = {
     emit: jest.fn(),
+  };
+
+  const mockEnrollmentSync = {
+    syncStudentEnrollments: jest.fn(),
+  };
+
+  const mockMentorSync = {
+    syncStudentMentors: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -102,6 +112,11 @@ describe('AcademicsService', () => {
           useValue: mockRepository,
         },
         { provide: NotificationEmitterService, useValue: mockNotify },
+        {
+          provide: StudentEnrollmentSyncService,
+          useValue: mockEnrollmentSync,
+        },
+        { provide: StudentMentorSyncService, useValue: mockMentorSync },
       ],
     }).compile();
 
