@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send } from 'lucide-react';
 import {
@@ -51,7 +51,17 @@ export default function FacultyGradingPage() {
   const [saving, setSaving] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
-  const selectedCourse = courses.find((c) => c.course_id === courseId);
+  const courseOptions = useMemo(() => {
+    const unique = new Map();
+    for (const c of courses) {
+      if (!unique.has(c.course_id)) {
+        unique.set(c.course_id, c);
+      }
+    }
+    return Array.from(unique.values());
+  }, [courses]);
+
+  const selectedCourse = courseOptions.find((c) => c.course_id === courseId);
 
   useEffect(() => {
     if (!courseId) {
@@ -236,7 +246,7 @@ export default function FacultyGradingPage() {
               disabled={coursesLoading}
             >
               <option value="">Select course</option>
-              {courses.map((c) => (
+              {courseOptions.map((c) => (
                 <option key={c.course_id} value={c.course_id}>
                   {c.course_code} — {c.course_name}
                 </option>

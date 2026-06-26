@@ -142,7 +142,15 @@ export default function FacultyTimetablePage() {
     [adjustments],
   );
 
-  const courseOptions = useMemo(() => courses, [courses]);
+  const courseOptions = useMemo(() => {
+    const unique = new Map();
+    for (const c of courses) {
+      if (!unique.has(c.course_id)) {
+        unique.set(c.course_id, c);
+      }
+    }
+    return Array.from(unique.values());
+  }, [courses]);
 
   async function submitAdjustment(e: FormEvent) {
     e.preventDefault();
@@ -366,7 +374,6 @@ export default function FacultyTimetablePage() {
               <option value="CANCEL">Cancel class</option>
               <option value="SUSPENSION">Lecture suspension (day)</option>
               <option value="SUBSTITUTE">Substitute faculty</option>
-              <option value="SUBSTITUTE">Substitute</option>
             </Select>
             <Input
               type="datetime-local"

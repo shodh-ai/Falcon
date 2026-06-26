@@ -28,6 +28,7 @@ export function SuperAdminShell({ children }: { children: ReactNode }) {
           { label: 'Impersonation', href: '/super-admin/impersonation', icon: UserCog },
           { label: 'Override Logs', href: '/super-admin/override-logs', icon: ClipboardList },
           { label: 'Course Mapper', href: '/super-admin/academics/course-mapper', icon: BookOpen },
+          { label: 'Course Allocations', href: '/super-admin/academics/course-allocations', icon: BookOpen },
           { label: 'Master Settings', href: '/super-admin/settings', icon: Settings },
         ],
       },
