@@ -25,11 +25,6 @@ const FINANCE_PATH_PREFIXES = [
   '/parent/finance',
   '/parent/fees',
   '/president/finance',
-  '/leadership/finance',
-  '/leadership/finance-config',
-  '/leadership/budget-allocation',
-  '/leadership/budget-monitor',
-  '/leadership/intelligence',
   '/admin/finance',
   '/hod/funding-approvals',
 ];
