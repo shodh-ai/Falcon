@@ -39,3 +39,16 @@ export {
 export { ScrollArea, ScrollBar } from './scroll-area';
 export { DataTable } from './DataTable';
 export type { DataTableColumn, DataTableProps } from './DataTable';
+export {
+  Select,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectLabel,
+  SelectItem,
+  SelectSeparator,
+  SelectScrollUpButton,
+  SelectScrollDownButton,
+} from './select';
+

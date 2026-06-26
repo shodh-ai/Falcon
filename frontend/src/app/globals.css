@@ -173,3 +173,39 @@ body {
   width: 0;
   height: 0;
 }
+
+/* Global native select styling for consistent fallback appearance */
+select {
+  appearance: none;
+  display: flex;
+  height: 2.75rem; /* h-11 */
+  width: 100%;
+  border-radius: var(--radius-lg); /* rounded-xl (var(--radius) is 0.75rem) */
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--background));
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2308234a' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-position: right 1rem center;
+  background-repeat: no-repeat;
+  background-size: 1.25em 1.25em;
+  padding-left: 1rem;
+  padding-right: 2.5rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-size: 0.875rem; /* text-sm */
+  line-height: 1.25rem;
+  color: hsl(var(--foreground));
+  outline: none;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+select:focus {
+  outline: none;
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 2px hsl(var(--ring));
+}
+
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+

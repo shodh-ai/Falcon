@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { BookMarked, CheckSquare, GraduationCap } from 'lucide-react';
@@ -135,7 +136,7 @@ export default function StudentRegistrationPage() {
           <StudentEmptyState title="No electives available" description="Elective options will appear when registration opens." />
         ) : (
           <div className="space-y-3">
-            <select
+            <Select
               className="w-full rounded-xl border px-4 py-3 text-sm"
               value=""
               onChange={(e) => {
@@ -150,7 +151,7 @@ export default function StudentRegistrationPage() {
                     {c.course_code} — {c.course_name} ({c.credits} cr)
                   </option>
                 ))}
-            </select>
+            </Select>
             {selectedElectives.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {selectedElectives.map((id) => {

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Save, Send } from 'lucide-react';
@@ -184,13 +185,13 @@ export default function FacultyGradingPage() {
       const result = await api.post<{ published: number }>(
         `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/publish-all`,
       );
-      
+
       if ((result.published ?? 0) === 0) {
         toast.warning('No marks were published.');
       } else {
         toast.success(`Published marks for course successfully.`);
       }
-      
+
       // Reload
       const data = await api.get<UnifiedMarkRow[]>(
         `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
@@ -228,7 +229,7 @@ export default function FacultyGradingPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
-            <select
+            <Select
               className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
               value={courseId}
               onChange={(e) => setCourseId(e.target.value)}
@@ -240,7 +241,7 @@ export default function FacultyGradingPage() {
                   {c.course_code} — {c.course_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         </div>
       </FacultyPanel>

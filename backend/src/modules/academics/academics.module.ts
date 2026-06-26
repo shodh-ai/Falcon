@@ -54,6 +54,7 @@ import { InsightsService } from './insights.service';
 import { InsightsController } from './insights.controller';
 import { CourseAllocationBulkService } from './course-allocation-bulk.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
+import { StudentMentorSyncService } from './student-mentor-sync.service';
 
 @Module({
   imports: [
@@ -116,6 +117,7 @@ import { StudentEnrollmentSyncService } from './student-enrollment-sync.service'
     InsightsService,
     CourseAllocationBulkService,
     StudentEnrollmentSyncService,
+    StudentMentorSyncService,
   ],
   exports: [
     AcademicsService,
@@ -132,6 +134,7 @@ import { StudentEnrollmentSyncService } from './student-enrollment-sync.service'
     InsightsService,
     CourseAllocationBulkService,
     StudentEnrollmentSyncService,
+    StudentMentorSyncService,
   ],
 })
 export class AcademicsModule {}

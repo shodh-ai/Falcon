@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
@@ -491,7 +492,7 @@ export default function HrAccessControlPage() {
 
                             <div className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3">
                               <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                              <select
+                              <Select
                                 className="w-full rounded-lg border border-gray-200 bg-gray-50/80 px-2 py-1.5 text-xs font-medium text-sgvu-navy focus:border-sgvu-gold focus:outline-none focus:ring-1 focus:ring-sgvu-gold/30"
                                 value={c.department_scope?.[0]?.toString() ?? ''}
                                 disabled={isSaving}
@@ -503,7 +504,7 @@ export default function HrAccessControlPage() {
                                     {d.dept_name} only
                                   </option>
                                 ))}
-                              </select>
+                              </Select>
                             </div>
                           </article>
                         );

@@ -2,9 +2,9 @@
 
 import * as React from 'react';
 import { Command as CommandPrimitive } from 'cmdk';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogClose } from '@/components/ui/dialog';
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -20,7 +20,7 @@ Command.displayName = CommandPrimitive.displayName;
 
 const CommandDialog = ({ children, ...props }: React.ComponentProps<typeof Dialog>) => (
   <Dialog {...props}>
-    <DialogContent className="overflow-hidden p-0 shadow-2xl sm:max-w-xl">
+    <DialogContent className="overflow-hidden p-0 shadow-2xl sm:max-w-xl" hideCloseButton>
       <DialogTitle className="sr-only">Universal search</DialogTitle>
       <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-3">
         {children}
@@ -38,11 +38,20 @@ const CommandInput = React.forwardRef<
     <CommandPrimitive.Input
       ref={ref}
       className={cn(
-        'flex h-12 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+        'flex h-12 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 pr-8',
         className,
       )}
       {...props}
     />
+    <DialogClose asChild>
+      <button
+        type="button"
+        className="ml-2 flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-all hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0 shrink-0"
+      >
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </button>
+    </DialogClose>
   </div>
 ));
 CommandInput.displayName = CommandPrimitive.Input.displayName;

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -41,7 +42,7 @@ export default function HostelSettingsPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Master Data</h2>
         <div className="flex flex-wrap gap-2">
-          <select
+          <Select
             className="rounded-lg border px-3 py-2 text-sm"
             value={newItem.category}
             onChange={(e) => setNewItem((n) => ({ ...n, category: e.target.value }))}
@@ -49,7 +50,7 @@ export default function HostelSettingsPage() {
             <option value="ROOM_TYPE">Room Types</option>
             <option value="TICKET_TYPE">Ticket Types</option>
             <option value="LEAVE_TYPE">Leave Types</option>
-          </select>
+          </Select>
           <Input
             placeholder="Label"
             value={newItem.label}

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -104,7 +105,7 @@ export function MyLeavesPanel() {
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
           <label className="text-sm sm:col-span-2 lg:col-span-1">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Leave type</span>
-            <select
+            <Select
               className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
               value={form.leave_type}
               onChange={(e) => setForm((f) => ({ ...f, leave_type: e.target.value }))}
@@ -112,7 +113,7 @@ export function MyLeavesPanel() {
               <option value="CL">Casual (CL)</option>
               <option value="SL">Sick (SL)</option>
               <option value="EL">Earned (EL)</option>
-            </select>
+            </Select>
           </label>
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">From</span>

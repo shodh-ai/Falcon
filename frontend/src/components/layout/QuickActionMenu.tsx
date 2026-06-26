@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { CalendarDays, Headphones, Loader2, Plus, Presentation } from 'lucide-react';
@@ -171,7 +172,7 @@ export function QuickActionMenu() {
             </Button>
           </div>
           <form onSubmit={submitLeave} className="grid gap-3">
-            <select
+            <Select
               className="rounded-md border px-2 py-2 text-sm"
               value={leaveForm.leave_type}
               onChange={(e) => setLeaveForm((f) => ({ ...f, leave_type: e.target.value }))}
@@ -179,7 +180,7 @@ export function QuickActionMenu() {
               <option value="CL">Casual (CL)</option>
               <option value="SL">Sick (SL)</option>
               <option value="EL">Earned (EL)</option>
-            </select>
+            </Select>
             <Input
               type="date"
               min={workforceMinDate()}
@@ -246,7 +247,7 @@ export function QuickActionMenu() {
             <DialogTitle>Raise IT Ticket</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitTicket} className="grid gap-3">
-            <select
+            <Select
               className="rounded-md border px-2 py-2 text-sm"
               value={ticketForm.category}
               onChange={(e) => setTicketForm((f) => ({ ...f, category: e.target.value }))}
@@ -254,7 +255,7 @@ export function QuickActionMenu() {
               <option value="IT">IT / WiFi</option>
               <option value="HR">HR / Payroll</option>
               <option value="FACILITIES">Facilities</option>
-            </select>
+            </Select>
             <Input
               placeholder="Subject"
               value={ticketForm.subject}

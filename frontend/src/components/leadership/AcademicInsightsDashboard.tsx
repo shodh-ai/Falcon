@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { 
@@ -67,7 +68,7 @@ export function AcademicInsightsDashboard({ data, showMidTerm = false }: Props) 
             <TrendingUp className="w-4 h-4" /> Global Insight Filters
           </div>
           <div className="flex flex-wrap gap-4">
-            <select 
+            <Select 
               value={filterYear} 
               onChange={(e) => setFilterYear(e.target.value)}
               className="h-10 w-[180px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
@@ -75,8 +76,8 @@ export function AcademicInsightsDashboard({ data, showMidTerm = false }: Props) 
               <option value="All Years">All Years</option>
               <option value="2026-2027">2026-2027</option>
               <option value="2025-2026">2025-2026</option>
-            </select>
-            <select 
+            </Select>
+            <Select 
               value={filterDept} 
               onChange={(e) => setFilterDept(e.target.value)}
               className="h-10 w-[180px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
@@ -85,7 +86,7 @@ export function AcademicInsightsDashboard({ data, showMidTerm = false }: Props) 
               {comparative?.departmentWise?.map(d => (
                 <option key={d.department} value={d.department}>{d.department}</option>
               ))}
-            </select>
+            </Select>
           </div>
         </CardContent>
       </Card>

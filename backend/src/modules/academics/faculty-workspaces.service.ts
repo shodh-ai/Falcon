@@ -45,18 +45,39 @@ export class FacultyWorkspacesService {
   ) {}
 
   async listFacultyCourses(facultyUserId: string, tenantId: string) {
-    const fromTimetable = await this.dataSource.query(
-      `SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.credits
-       FROM academic_courses c
-       INNER JOIN academic_timetables t ON t.course_id = c.course_id AND t.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1 AND t.faculty_user_id = $2
-       ORDER BY c.course_code`,
+    const fromAllocations = await this.dataSource.query(
+      `SELECT
+         a.allocation_id,
+         a.program_name,
+         a.semester,
+         a.academic_year,
+         c.course_id,
+         c.course_code,
+         c.course_name,
+         c.credits
+       FROM academic_course_allocations a
+       INNER JOIN academic_courses c
+         ON c.course_id = a.course_id
+        AND c.tenant_id = a.tenant_id
+       WHERE a.tenant_id = $1
+         AND a.faculty_user_id = $2
+         AND a.status = 'ACTIVE'
+         AND a.course_id IS NOT NULL
+       ORDER BY a.academic_year DESC, a.program_name NULLS LAST, a.semester NULLS LAST, c.course_code`,
       [tenantId, facultyUserId],
     );
-    if (fromTimetable.length) return fromTimetable;
+    if (fromAllocations.length) return fromAllocations;
 
     return this.dataSource.query(
-      `SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.credits
+      `SELECT DISTINCT
+         NULL::uuid AS allocation_id,
+         NULL::text AS program_name,
+         NULL::text AS semester,
+         NULL::text AS academic_year,
+         c.course_id,
+         c.course_code,
+         c.course_name,
+         c.credits
        FROM academic_courses c
        INNER JOIN academic_marks m ON m.course_id = c.course_id AND m.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1 AND m.uploaded_by = $2

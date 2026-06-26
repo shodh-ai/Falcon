@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import useSWR from 'swr';
 import { useAuth } from '@/context/AuthContext';
 import { notificationsApi, type FalconNotification } from '@/lib/api/notifications';
@@ -26,14 +27,25 @@ export function useNotificationUnreadCount() {
 }
 
 export function useRecentNotifications() {
-  const { token, isAuthenticated } = useAuth();
+  const { token, isAuthenticated, user } = useAuth();
   const { data, mutate, isLoading, error } = useSWR(
     isAuthenticated && token ? ['notifications-recent', token] : null,
     () => notificationsApi.recent(token!),
     { refreshInterval: POLL_MS, revalidateOnFocus: true },
   );
+
+  const filteredNotifications = useMemo(() => {
+    if (!data) return [];
+    const role = user?.role?.trim().toLowerCase() || user?.primaryRole?.trim().toLowerCase();
+    const isStudent = role === 'student' || role === 'applicant';
+    if (isStudent) {
+      return data.filter((n) => n.category !== 'HR');
+    }
+    return data;
+  }, [data, user]);
+
   return {
-    notifications: data ?? [],
+    notifications: filteredNotifications,
     isLoading,
     error,
     refresh: mutate,
@@ -41,14 +53,25 @@ export function useRecentNotifications() {
 }
 
 export function useNotificationHistory() {
-  const { token, isAuthenticated } = useAuth();
+  const { token, isAuthenticated, user } = useAuth();
   const { data, mutate, isLoading, error } = useSWR(
     isAuthenticated && token ? ['notifications-all', token] : null,
     () => notificationsApi.list(token!, 100),
     { refreshInterval: POLL_MS, revalidateOnFocus: true },
   );
+
+  const filteredNotifications = useMemo(() => {
+    if (!data) return [];
+    const role = user?.role?.trim().toLowerCase() || user?.primaryRole?.trim().toLowerCase();
+    const isStudent = role === 'student' || role === 'applicant';
+    if (isStudent) {
+      return data.filter((n) => n.category !== 'HR');
+    }
+    return data;
+  }, [data, user]);
+
   return {
-    notifications: data ?? [],
+    notifications: filteredNotifications,
     isLoading,
     error,
     refresh: mutate,

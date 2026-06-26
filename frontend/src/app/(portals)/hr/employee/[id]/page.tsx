@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { Suspense, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -138,7 +139,7 @@ function EmployeeProfileContent() {
                 {profile.org_unit_name ?? '—'}
               </p>
               <div className="flex gap-2 pt-2">
-                <select
+                <Select
                   className="flex-1 rounded-md border px-2 py-1 text-sm"
                   value={orgUnitId}
                   onChange={(e) => setOrgUnitId(e.target.value)}
@@ -149,7 +150,7 @@ function EmployeeProfileContent() {
                       {u.unit_name} ({u.unit_type})
                     </option>
                   ))}
-                </select>
+                </Select>
                 <Button size="sm" variant="outline" onClick={() => void saveOrgUnit()}>
                   Save
                 </Button>

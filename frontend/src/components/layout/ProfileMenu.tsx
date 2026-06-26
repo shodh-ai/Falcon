@@ -66,9 +66,14 @@ export function ProfileMenu({ profileHref }: ProfileMenuProps) {
           <User className="mr-2 h-4 w-4" />
           Profile
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push(resolvedProfileHref)}>
-          <CreditCard className="mr-2 h-4 w-4" />
-          ID Card
+        <DropdownMenuItem disabled title="Coming Soon" className="justify-between">
+          <span className="flex items-center">
+            <CreditCard className="mr-2 h-4 w-4" />
+            <span>ID Card</span>
+          </span>
+          <span className="text-[9px] font-bold tracking-wider text-sgvu-gold bg-sgvu-gold/10 px-1.5 py-0.5 rounded uppercase shrink-0">
+            Coming Soon
+          </span>
         </DropdownMenuItem>
         <DropdownMenuItem disabled>
           <Settings className="mr-2 h-4 w-4" />

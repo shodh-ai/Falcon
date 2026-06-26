@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
@@ -151,7 +152,7 @@ export default function HrOrgStructurePage() {
       <Card>
         <CardContent className="space-y-3 p-4">
           <div className="grid gap-2 sm:grid-cols-3">
-            <select
+            <Select
               className="rounded-md border border-slate-200 px-3 py-2 text-sm bg-white"
               value={form.unit_type}
               onChange={(e) => setForm({ ...form, unit_type: e.target.value })}
@@ -161,9 +162,9 @@ export default function HrOrgStructurePage() {
                   {t}
                 </option>
               ))}
-            </select>
+            </Select>
             <Input placeholder="Unit name" value={form.unit_name} onChange={(e) => setForm({ ...form, unit_name: e.target.value })} />
-            <select
+            <Select
               className="rounded-md border border-slate-200 px-3 py-2 text-sm bg-white"
               value={form.parent_id}
               onChange={(e) => setForm({ ...form, parent_id: e.target.value })}
@@ -175,7 +176,7 @@ export default function HrOrgStructurePage() {
                   <option key={u.unit_id} value={u.unit_id}>{u.unit_name} ({u.unit_type})</option>
                 )
               ))}
-            </select>
+            </Select>
           </div>
           <div className="flex gap-2">
             <Button size="sm" onClick={() => void saveUnit()} disabled={!form.unit_name.trim()}>

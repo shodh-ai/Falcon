@@ -16,6 +16,13 @@ import {
   proofDocHref,
   type SafetyConcern,
 } from '@/lib/student-safety';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const PROOF_ACCEPT = '.pdf,.jpg,.jpeg,.png,.doc,.docx';
 type AccusedOption = { user_id: string; name: string; official_email: string | null; dept_name?: string | null };
@@ -165,39 +172,53 @@ export function SafetyConcernForm() {
       {open && !hasOpen ? (
         <Card>
           <CardContent className="space-y-3 pt-6">
-            <select
-              className="w-full rounded-lg border px-3 py-2 text-sm"
+            <Select
               value={form.concern_type}
-              onChange={(e) => setForm({ ...form, concern_type: e.target.value })}
+              onValueChange={(val) => setForm({ ...form, concern_type: val })}
             >
-              {CONCERN_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-            <select
-              className="w-full rounded-lg border px-3 py-2 text-sm"
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select concern type..." />
+              </SelectTrigger>
+              <SelectContent>
+                {CONCERN_TYPES.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
               value={form.accused_type}
-              onChange={(e) =>
-                setForm({ ...form, accused_type: e.target.value, accused_user_id: '', accused_description: '' })
+              onValueChange={(val) =>
+                setForm({ ...form, accused_type: val, accused_user_id: '', accused_description: '' })
               }
             >
-              {ACCUSED_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-            {form.accused_type !== 'OTHER' ? (
-              <select
-                className="w-full rounded-lg border px-3 py-2 text-sm"
-                value={form.accused_user_id}
-                onChange={(e) => setForm({ ...form, accused_user_id: e.target.value })}
-              >
-                <option value="">Select person (if known)</option>
-                {accusedOptions.map((u) => (
-                  <option key={u.user_id} value={u.user_id}>
-                    {u.name}{u.dept_name ? ` · ${u.dept_name}` : ''}
-                  </option>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select who you are reporting..." />
+              </SelectTrigger>
+              <SelectContent>
+                {ACCUSED_TYPES.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                 ))}
-              </select>
+              </SelectContent>
+            </Select>
+
+            {form.accused_type !== 'OTHER' ? (
+              <Select
+                value={form.accused_user_id || "none"}
+                onValueChange={(val) => setForm({ ...form, accused_user_id: val === "none" ? "" : val })}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select person (if known)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select person (if known)</SelectItem>
+                  {accusedOptions.map((u) => (
+                    <SelectItem key={u.user_id} value={u.user_id}>
+                      {u.name}{u.dept_name ? ` · ${u.dept_name}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : null}
             <input
               className="w-full rounded-lg border px-3 py-2 text-sm"

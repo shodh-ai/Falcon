@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Plus, Scale } from 'lucide-react';
@@ -204,7 +205,7 @@ export default function HrRulesPage() {
               </label>
               <label className="block text-sm">
                 Condition If
-                <select
+                <Select
                   className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                   value={form.condition_type}
                   onChange={(e) =>
@@ -216,12 +217,12 @@ export default function HrRulesPage() {
                       {c.replace(/_/g, ' ')}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <div className="grid grid-cols-3 gap-2">
                 <label className="text-sm">
                   Operator
-                  <select
+                  <Select
                     className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                     value={form.operator}
                     onChange={(e) =>
@@ -233,7 +234,7 @@ export default function HrRulesPage() {
                         {o}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <label className="text-sm">
                   Threshold
@@ -246,7 +247,7 @@ export default function HrRulesPage() {
                 </label>
                 <label className="text-sm">
                   Unit
-                  <select
+                  <Select
                     className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                     value={form.threshold_unit}
                     onChange={(e) =>
@@ -258,12 +259,12 @@ export default function HrRulesPage() {
                         {u}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               </div>
               <label className="block text-sm">
                 Action Then
-                <select
+                <Select
                   className="mt-1 w-full rounded-md border border-gray-200 px-2 py-2 text-sm"
                   value={form.action_type}
                   onChange={(e) =>
@@ -275,7 +276,7 @@ export default function HrRulesPage() {
                       {a.replace(/_/g, ' ')}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="block text-sm">
                 Priority (lower runs first)

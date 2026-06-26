@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -153,7 +154,7 @@ export default function FacultyAnalyticsPage() {
             <div className="space-y-3">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Subject</label>
-                <select
+                <Select
                   className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                   value={effectiveCourseId}
                   onChange={(event) => {
@@ -168,7 +169,7 @@ export default function FacultyAnalyticsPage() {
                       {course.course_code} · {course.course_name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div>

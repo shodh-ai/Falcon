@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Download, Loader2, Search } from 'lucide-react';
@@ -302,7 +303,7 @@ function FilterSelect({
   return (
     <label className="block space-y-1.5 text-sm">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
-      <select
+      <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="h-10 w-full rounded-xl border border-sgvu-navy/12 bg-white px-3 text-sm text-sgvu-navy shadow-sm focus:border-sgvu-gold/60 focus:outline-none focus:ring-2 focus:ring-sgvu-gold/20"
@@ -312,7 +313,7 @@ function FilterSelect({
             {opt.label}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }

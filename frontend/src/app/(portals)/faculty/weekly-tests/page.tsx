@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Plus, Upload, CheckCircle2, Trash2, Clock } from 'lucide-react';
@@ -184,7 +185,7 @@ export default function FacultyWeeklyTestsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm">
                 <span className="mb-1.5 block font-medium text-sgvu-navy">Course</span>
-                <select
+                <Select
                   className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                   value={courseId}
                   onChange={(e) => setCourseId(e.target.value)}
@@ -196,12 +197,12 @@ export default function FacultyWeeklyTestsPage() {
                       {c.course_code} — {c.course_name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
 
               <label className="text-sm">
                 <span className="mb-1.5 block font-medium text-sgvu-navy">Test Type</span>
-                <select
+                <Select
                   className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                   value={testType}
                   onChange={(e) => setTestType(e.target.value as any)}
@@ -209,7 +210,7 @@ export default function FacultyWeeklyTestsPage() {
                   {TEST_TYPES.map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
-                </select>
+                </Select>
               </label>
 
               <label className="text-sm">

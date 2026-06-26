@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
 import { Download, Upload, UserPlus } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -175,7 +176,7 @@ export function AddEmployeeDialog({ onCreated }: Props) {
             <Input placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <Input placeholder="Email" type="email" value={form.official_email} onChange={(e) => setForm({ ...form, official_email: e.target.value })} />
             <Input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            <select
+            <Select
               className="w-full rounded-md border px-3 py-2 text-sm"
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value })}
@@ -186,8 +187,8 @@ export function AddEmployeeDialog({ onCreated }: Props) {
                 </option>
               ))}
               {!roles.length && <option value="Faculty">Faculty</option>}
-            </select>
-            <select
+            </Select>
+            <Select
               className="w-full rounded-md border px-3 py-2 text-sm"
               value={form.department}
               onChange={(e) => setForm({ ...form, department: e.target.value })}
@@ -198,7 +199,7 @@ export function AddEmployeeDialog({ onCreated }: Props) {
                   {d.dept_name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Input placeholder="Employee ID (optional)" value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })} />
             <Input placeholder="Designation" value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} />
             <Input type="date" value={form.joining_date} onChange={(e) => setForm({ ...form, joining_date: e.target.value })} />
