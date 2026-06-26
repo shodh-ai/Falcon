@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { ExamSchedule } from '../../../entities/exam-schedule.entity';
 
 interface AdmitCardInput {
@@ -7,6 +7,7 @@ interface AdmitCardInput {
     user_id: string;
     name: string;
     email: string;
+    profile_picture_url?: string | null;
   };
   schedules: Pick<
     ExamSchedule,
@@ -39,6 +40,81 @@ export class AdmitCardPdfService {
       size: 16,
       font: bold,
     });
+
+    if (input.student.profile_picture_url) {
+      try {
+        let imageBuffer: Buffer | null = null;
+        let isPng = false;
+
+        if (input.student.profile_picture_url.startsWith('data:image/')) {
+          const base64Data = input.student.profile_picture_url.split(',')[1];
+          if (base64Data) {
+            imageBuffer = Buffer.from(base64Data, 'base64');
+            isPng = input.student.profile_picture_url.includes('image/png');
+          }
+        } else {
+          const fs = require('fs');
+          const path = require('path');
+          let filePath = input.student.profile_picture_url;
+          if (filePath.startsWith('./')) {
+            filePath = path.join(process.cwd(), filePath);
+          }
+          if (fs.existsSync(filePath)) {
+            imageBuffer = fs.readFileSync(filePath);
+            isPng = filePath.toLowerCase().endsWith('.png');
+          }
+        }
+
+        if (imageBuffer) {
+          // pdf-lib requires Uint8Array, not Node.js Buffer
+          const imageData = new Uint8Array(imageBuffer);
+          let image;
+          try {
+            if (isPng) {
+              image = await pdfDoc.embedPng(imageData);
+            } else {
+              image = await pdfDoc.embedJpg(imageData);
+            }
+          } catch (firstErr) {
+            // Fallback in case of extension mismatch (e.g. PNG saved as .jpg or vice versa)
+            try {
+              if (isPng) {
+                image = await pdfDoc.embedJpg(imageData);
+              } else {
+                image = await pdfDoc.embedPng(imageData);
+              }
+            } catch (fallbackErr: any) {
+              throw new Error(`Failed both JPG and PNG embedding: ${fallbackErr.message}`);
+            }
+          }
+          
+          const imgWidth = 80;
+          const imgHeight = 100;
+          
+          page.drawImage(image, {
+            x: width - 50 - imgWidth,
+            y: height - 50 - imgHeight,
+            width: imgWidth,
+            height: imgHeight,
+          });
+          
+          page.drawRectangle({
+            x: width - 50 - imgWidth,
+            y: height - 50 - imgHeight,
+            width: imgWidth,
+            height: imgHeight,
+            borderWidth: 1,
+            borderColor: rgb(0, 0, 0),
+            opacity: 0,
+          });
+        } else {
+          require('fs').appendFileSync('admit-card-debug.log', `[DEBUG] imageBuffer is null! isPng=${isPng}, filePath=${input.student.profile_picture_url}\n`);
+        }
+      } catch (err: any) {
+        require('fs').appendFileSync('admit-card-debug.log', `[DEBUG] Failed to embed photo: ${err.message}\n`);
+        console.error('Failed to embed profile picture in admit card:', err);
+      }
+    }
 
     y -= 48;
     page.drawText(`Student: ${input.student.name}`, {
