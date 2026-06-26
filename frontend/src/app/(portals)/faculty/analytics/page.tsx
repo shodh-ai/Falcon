@@ -12,7 +12,7 @@ import {
   FacultyPanel,
   FacultyMetricChip,
 } from '@/components/faculty';
-import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
+import { useFacultyCourses, uniqueFacultyCoursesByCourseId } from '@/components/faculty/useFacultyCourses';
 import {
   FacultyStudentReport,
   type FacultyStudentReportData,
@@ -46,6 +46,7 @@ function scoreLabel(value: string | number) {
 export default function FacultyAnalyticsPage() {
   const api = useAuthedApi();
   const { courses } = useFacultyCourses();
+  const courseOptions = uniqueFacultyCoursesByCourseId(courses);
   const [courseId, setCourseId] = useState('');
   const [query, setQuery] = useState('');
   const [students, setStudents] = useState<StudentSearchResult[]>([]);
@@ -54,7 +55,7 @@ export default function FacultyAnalyticsPage() {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
 
-  const effectiveCourseId = courseId || courses[0]?.course_id || '';
+  const effectiveCourseId = courseId || courseOptions[0]?.course_id || '';
 
   useEffect(() => {
     if (!effectiveCourseId) {
@@ -125,7 +126,7 @@ export default function FacultyAnalyticsPage() {
     };
   }, [api, effectiveCourseId, selectedStudentId]);
 
-  const selectedCourse = courses.find((course) => course.course_id === effectiveCourseId);
+  const selectedCourse = courseOptions.find((course) => course.course_id === effectiveCourseId);
   const visibleReport = effectiveCourseId && selectedStudentId ? report : null;
 
   return (
@@ -163,8 +164,8 @@ export default function FacultyAnalyticsPage() {
                     setReport(null);
                   }}
                 >
-                  {courses.length === 0 ? <option value="">No subjects assigned</option> : null}
-                  {courses.map((course) => (
+                  {courseOptions.length === 0 ? <option value="">No subjects assigned</option> : null}
+                  {courseOptions.map((course) => (
                     <option key={course.course_id} value={course.course_id}>
                       {course.course_code} · {course.course_name}
                     </option>

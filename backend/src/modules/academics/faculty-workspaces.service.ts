@@ -27,6 +27,23 @@ const EXAM_TYPES = [
 ] as const;
 type ExamType = (typeof EXAM_TYPES)[number];
 
+/** Enrollment visible to faculty who hold an active allocation or timetable slot for the course. */
+const FACULTY_COURSE_ACCESS_SQL = `(
+  EXISTS (
+    SELECT 1 FROM academic_course_allocations a
+    WHERE a.tenant_id = e.tenant_id
+      AND a.course_id = e.course_id
+      AND a.faculty_user_id = $2
+      AND a.status = 'ACTIVE'
+  )
+  OR EXISTS (
+    SELECT 1 FROM academic_timetables t
+    WHERE t.course_id = e.course_id
+      AND t.faculty_user_id = $2
+      AND t.tenant_id = e.tenant_id
+  )
+)`;
+
 /** Canonical roll-number expression — semester roll on enrollment, then permanent PRN. */
 const ROLL_NUMBER_SQL = `COALESCE(
   NULLIF(BTRIM(e.roll_number), ''),
@@ -1355,10 +1372,7 @@ export class FacultyWorkspacesService {
        INNER JOIN users u ON u.user_id = e.student_user_id
        INNER JOIN academic_courses c ON c.course_id = e.course_id
        WHERE e.tenant_id = $1 AND e.status = 'ENROLLED'
-         AND EXISTS (
-           SELECT 1 FROM academic_timetables t
-           WHERE t.course_id = c.course_id AND t.faculty_user_id = $2 AND t.tenant_id = e.tenant_id
-         )
+         AND ${FACULTY_COURSE_ACCESS_SQL}
          ${courseFilter}
        ORDER BY e.attendance_percent ASC, internal_avg_percent ASC`,
       params,
@@ -1423,12 +1437,7 @@ export class FacultyWorkspacesService {
        WHERE e.tenant_id = $1
          AND e.status = 'ENROLLED'
          AND e.course_id = $3
-         AND EXISTS (
-           SELECT 1 FROM academic_timetables t
-           WHERE t.course_id = e.course_id
-             AND t.faculty_user_id = $2
-             AND t.tenant_id = e.tenant_id
-         )
+         AND ${FACULTY_COURSE_ACCESS_SQL}
          ${searchFilter}
        ORDER BY u.name ASC
        LIMIT $${params.length}`,
@@ -1849,18 +1858,17 @@ export class FacultyWorkspacesService {
     courseId: string,
   ) {
     const rows = await this.dataSource.query(
-      `SELECT 1
-       FROM academic_course_allocations
-       WHERE tenant_id = $1
-         AND faculty_user_id = $2
-         AND course_id = $3
-         AND status = 'ACTIVE'
-       LIMIT 1
-       UNION ALL
-       SELECT 1
-       FROM academic_timetables
-       WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3
-       LIMIT 1`,
+      `SELECT 1 AS ok
+       WHERE EXISTS (
+         SELECT 1 FROM academic_course_allocations
+         WHERE tenant_id = $1
+           AND faculty_user_id = $2
+           AND course_id = $3
+           AND status = 'ACTIVE'
+       ) OR EXISTS (
+         SELECT 1 FROM academic_timetables
+         WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3
+       )`,
       [tenantId, facultyUserId, courseId],
     );
     if (!rows.length) {

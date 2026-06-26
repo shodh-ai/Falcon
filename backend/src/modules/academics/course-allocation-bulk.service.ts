@@ -536,39 +536,32 @@ export class CourseAllocationBulkService {
     return courses[0].course_id;
   }
 
+  private scheduleSlotForFaculty(slotIndex: number): {
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+  } {
+    const dayOfWeek = (slotIndex % 6) + 1;
+    const hour = 9 + Math.floor(slotIndex / 6);
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return {
+      dayOfWeek,
+      startTime: `${pad(hour)}:00`,
+      endTime: `${pad(hour + 1)}:00`,
+    };
+  }
+
   private async ensureFacultyTimetableSlot(
     qr: QueryRunner,
     tenantId: string,
     courseId: string,
     facultyUserId: string,
   ) {
-    const updated = await qr.query(
-      `UPDATE academic_timetables
-          SET faculty_user_id = $3
-        WHERE tenant_id = $1
-          AND course_id = $2
-          AND day_of_week = 1
-          AND start_time = '09:00'
-          AND end_time = '10:00'
-          AND deleted_at IS NULL
-        RETURNING timetable_id`,
-      [tenantId, courseId, facultyUserId],
-    );
-    if (updated.length > 0) return;
-
-    await qr.query(
-      `INSERT INTO academic_timetables (tenant_id, course_id, day_of_week, start_time, end_time, faculty_user_id)
-       SELECT $1, $2, 1, '09:00', '10:00', $3
-       WHERE NOT EXISTS (
-         SELECT 1 FROM academic_timetables
-         WHERE tenant_id = $1
-           AND course_id = $2
-           AND day_of_week = 1
-           AND start_time = '09:00'
-           AND end_time = '10:00'
-           AND deleted_at IS NULL
-       )`,
-      [tenantId, courseId, facultyUserId],
+    await this.ensureFacultyTimetableSlotWithQuery(
+      (sql, params) => qr.query(sql, params),
+      tenantId,
+      courseId,
+      facultyUserId,
     );
   }
 
@@ -577,33 +570,47 @@ export class CourseAllocationBulkService {
     courseId: string,
     facultyUserId: string,
   ) {
-    const updated = await this.dataSource.query(
+    await this.ensureFacultyTimetableSlotWithQuery(
+      (sql, params) => this.dataSource.query(sql, params),
+      tenantId,
+      courseId,
+      facultyUserId,
+    );
+  }
+
+  private async ensureFacultyTimetableSlotWithQuery(
+    query: (sql: string, params: unknown[]) => Promise<unknown>,
+    tenantId: string,
+    courseId: string,
+    facultyUserId: string,
+  ) {
+    const updated = (await query(
       `UPDATE academic_timetables
           SET faculty_user_id = $3
         WHERE tenant_id = $1
           AND course_id = $2
-          AND day_of_week = 1
-          AND start_time = '09:00'
-          AND end_time = '10:00'
           AND deleted_at IS NULL
         RETURNING timetable_id`,
       [tenantId, courseId, facultyUserId],
-    );
+    )) as Array<{ timetable_id: string }>;
     if (updated.length > 0) return;
 
-    await this.dataSource.query(
+    const counted = (await query(
+      `SELECT COUNT(*)::int AS cnt
+       FROM academic_timetables
+       WHERE tenant_id = $1
+         AND faculty_user_id = $2
+         AND deleted_at IS NULL`,
+      [tenantId, facultyUserId],
+    )) as Array<{ cnt: number }>;
+    const { dayOfWeek, startTime, endTime } = this.scheduleSlotForFaculty(
+      counted[0]?.cnt ?? 0,
+    );
+
+    await query(
       `INSERT INTO academic_timetables (tenant_id, course_id, day_of_week, start_time, end_time, faculty_user_id)
-       SELECT $1, $2, 1, '09:00', '10:00', $3
-       WHERE NOT EXISTS (
-         SELECT 1 FROM academic_timetables
-         WHERE tenant_id = $1
-           AND course_id = $2
-           AND day_of_week = 1
-           AND start_time = '09:00'
-           AND end_time = '10:00'
-           AND deleted_at IS NULL
-       )`,
-      [tenantId, courseId, facultyUserId],
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [tenantId, courseId, dayOfWeek, startTime, endTime, facultyUserId],
     );
   }
 
