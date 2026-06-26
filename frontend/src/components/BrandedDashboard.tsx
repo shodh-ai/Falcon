@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { AppShell, EmptyTaskState } from '@/components/AppShell';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -575,25 +576,25 @@ function HandoverDashboard({
           <div className="mt-5 space-y-4">
             <label className="block">
               <span className="text-sm font-semibold text-slate-600">Outgoing user</span>
-              <select value={fromUserId} onChange={(event) => { setFromUserId(event.target.value); setToUserId(''); }} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
+              <Select value={fromUserId} onChange={(event) => { setFromUserId(event.target.value); setToUserId(''); }} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
                 <option value="">Select outgoing user</option>
                 {users.map((user) => (
                   <option key={user.user_id} value={user.user_id}>
                     {user.name} — {user.role?.role_name || 'No role'} {user.is_active ? '' : '(Inactive)'}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="block">
               <span className="text-sm font-semibold text-slate-600">Replacement user</span>
-              <select value={toUserId} onChange={(event) => setToUserId(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
+              <Select value={toUserId} onChange={(event) => setToUserId(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
                 <option value="">Select replacement user</option>
                 {replacementUsers.map((user) => (
                   <option key={user.user_id} value={user.user_id}>
                     {user.name} — {user.role?.role_name || 'No role'} — {user.email}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="block">
               <span className="text-sm font-semibold text-slate-600">Notes</span>
@@ -854,30 +855,30 @@ function AdminDashboard({
                 className="w-full rounded-xl border border-slate-200 py-3 pl-10 pr-4 text-sm outline-none ring-[#d6b65d]/40 focus:border-[#d6b65d] focus:ring-4"
               />
             </div>
-            <select
+            <Select
               value={roleFilter}
               onChange={(event) => setRoleFilter(event.target.value)}
               className="rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none ring-[#d6b65d]/40 focus:border-[#d6b65d] focus:ring-4"
             >
               <option value="all">All Roles</option>
               {uniqueRoles.map((role) => <option key={role} value={role}>{role}</option>)}
-            </select>
-            <select
+            </Select>
+            <Select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
               className="rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none ring-[#d6b65d]/40 focus:border-[#d6b65d] focus:ring-4"
             >
               <option value="all">All Statuses</option>
               {uniqueStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-            <select
+            </Select>
+            <Select
               value={monthFilter}
               onChange={(event) => setMonthFilter(event.target.value)}
               className="rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none ring-[#d6b65d]/40 focus:border-[#d6b65d] focus:ring-4"
             >
               <option value="all">All Months</option>
               {uniqueMonths.map((month) => <option key={month} value={month}>{month}</option>)}
-            </select>
+            </Select>
           </div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
             Showing {filteredAssignments.length} of {assignments.length} assignments

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -340,14 +341,14 @@ export default function AttendanceHolidaysCalendarPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium leading-none">Type</label>
-                  <select
+                  <Select
                     className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     value={form.type}
                     onChange={(e) => setForm({ ...form, type: e.target.value })}
                   >
                     <option value="MANDATORY">Mandatory</option>
                     <option value="RESTRICTED">Restricted (Optional)</option>
-                  </select>
+                  </Select>
                 </div>
               </div>
               <div className="space-y-1.5">

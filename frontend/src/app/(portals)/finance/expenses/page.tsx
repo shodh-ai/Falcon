@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { FinancePageHeader, formatInr } from '@/components/finance/FinancePageHeader';
@@ -81,33 +82,33 @@ export default function FinanceExpensesPage() {
           <CardTitle className="text-base">Log bill</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-2 sm:grid-cols-2">
-          <select className="rounded-md border px-3 py-2 text-sm" value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}>
+          <Select className="rounded-md border px-3 py-2 text-sm" value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}>
             <option value="">Select vendor</option>
             {vendors.map((v) => (
               <option key={v.vendor_id} value={v.vendor_id}>
                 {v.business_name}
               </option>
             ))}
-          </select>
-          <select className="rounded-md border px-3 py-2 text-sm" value={form.expense_head_id} onChange={(e) => setForm({ ...form, expense_head_id: e.target.value })}>
+          </Select>
+          <Select className="rounded-md border px-3 py-2 text-sm" value={form.expense_head_id} onChange={(e) => setForm({ ...form, expense_head_id: e.target.value })}>
             <option value="">Expense head</option>
             {heads.map((h) => (
               <option key={h.expense_head_id} value={h.expense_head_id}>
                 {h.head_name}
               </option>
             ))}
-          </select>
+          </Select>
           <Input placeholder="Invoice number" value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} />
           <Input type="date" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} />
           <Input placeholder="Taxable amount (₹)" type="number" value={form.taxable_amount} onChange={(e) => setForm({ ...form, taxable_amount: e.target.value })} />
-          <select className="rounded-md border px-3 py-2 text-sm" value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })}>
+          <Select className="rounded-md border px-3 py-2 text-sm" value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })}>
             <option value="">Select Department (for budget allocation)</option>
             {budgets.map((b) => (
               <option key={b.budget_id} value={String(b.department_id)}>
                 {b.department_name} (ID: {b.department_id})
               </option>
             ))}
-          </select>
+          </Select>
           <Input placeholder="PO ID (Optional)" value={form.po_id} onChange={(e) => setForm({ ...form, po_id: e.target.value })} />
           {preview && (
             <p className="text-sm sm:col-span-2">

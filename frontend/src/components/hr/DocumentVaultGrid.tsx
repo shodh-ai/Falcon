@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Download, Eye, Upload } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -153,7 +154,7 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
           <CardTitle className="text-base">Upload Document</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <select
+          <Select
             className="rounded-md border px-3 py-2 text-sm"
             value={uploadType}
             onChange={(e) => setUploadType(e.target.value)}
@@ -163,7 +164,7 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
                 {c.replace(/_/g, ' ')}
               </option>
             ))}
-          </select>
+          </Select>
           <label className="cursor-pointer">
             <Button size="sm" variant="outline" disabled={uploading} asChild>
               <span>

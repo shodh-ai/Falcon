@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
@@ -97,13 +98,13 @@ export default function HrLeavePoliciesPage() {
           <Input placeholder="Leave name" value={form.leave_name} onChange={(e) => setForm({ ...form, leave_name: e.target.value })} />
           <Input placeholder="Code (e.g. ML)" value={form.leave_code} onChange={(e) => setForm({ ...form, leave_code: e.target.value })} />
           <Input type="number" placeholder="Days" value={form.leave_count} onChange={(e) => setForm({ ...form, leave_count: Number(e.target.value) })} />
-          <select className="rounded-md border px-2 py-2 text-sm" value={form.disbursement_cycle} onChange={(e) => setForm({ ...form, disbursement_cycle: e.target.value })}>
+          <Select className="rounded-md border px-2 py-2 text-sm" value={form.disbursement_cycle} onChange={(e) => setForm({ ...form, disbursement_cycle: e.target.value })}>
             {['MONTHLY', 'YEARLY', 'ON_JOIN'].map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
             ))}
-          </select>
+          </Select>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.allow_clubbing} onChange={(e) => setForm({ ...form, allow_clubbing: e.target.checked })} />
             Allow clubbing

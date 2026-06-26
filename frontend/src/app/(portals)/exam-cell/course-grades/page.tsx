@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent } from '@/components/ui/card';
@@ -53,15 +54,15 @@ export default function CourseGradesPage() {
       <div className="mb-6">
         <div className="mb-3 flex items-center justify-end">
           <div className="flex items-center gap-3">
-            <select 
+            <Select 
               className="rounded-md border px-3 py-1.5 text-sm" 
               value={gradesSemester} 
               onChange={(e) => setGradesSemester(e.target.value)}
             >
               <option value="">Select Semester</option>
               {[1, 2, 3, 4, 5, 6, 7, 8].map(s => <option key={s} value={s}>Semester {s}</option>)}
-            </select>
-            <select 
+            </Select>
+            <Select 
               className="rounded-md border px-3 py-1.5 text-sm" 
               value={gradesCourseId} 
               onChange={(e) => setGradesCourseId(e.target.value)}
@@ -69,7 +70,7 @@ export default function CourseGradesPage() {
             >
               <option value="">Select Course</option>
               {gradesCourses.map(c => <option key={c.course_id} value={c.course_id}>{c.course_code} - {c.course_name}</option>)}
-            </select>
+            </Select>
           </div>
         </div>
 

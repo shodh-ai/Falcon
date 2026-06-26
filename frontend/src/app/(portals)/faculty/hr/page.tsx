@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -305,7 +306,7 @@ export default function FacultyHrHubPage() {
                   </>
                 )}
                 {modal === 'LEAVE' && (
-                  <select
+                  <Select
                     className="w-full rounded-md border px-2 py-2 text-sm"
                     value={form.leave_type}
                     onChange={(e) => setForm((f) => ({ ...f, leave_type: e.target.value }))}
@@ -313,7 +314,7 @@ export default function FacultyHrHubPage() {
                     <option value="CL">Casual (CL)</option>
                     <option value="SL">Sick (SL)</option>
                     <option value="EL">Earned (EL)</option>
-                  </select>
+                  </Select>
                 )}
                 {modal === 'REGULARIZATION' ? (
                   <>
@@ -324,7 +325,7 @@ export default function FacultyHrHubPage() {
                       value={form.regularization_date}
                       onChange={(e) => setForm((f) => ({ ...f, regularization_date: e.target.value }))}
                     />
-                    <select
+                    <Select
                       className="w-full rounded-md border px-2 py-2 text-sm"
                       value={form.missed_punch_type}
                       onChange={(e) =>
@@ -334,7 +335,7 @@ export default function FacultyHrHubPage() {
                       <option value="IN">Missed punch IN</option>
                       <option value="OUT">Missed punch OUT</option>
                       <option value="BOTH">Missed both</option>
-                    </select>
+                    </Select>
                   </>
                 ) : modal !== 'GATE_PASS' ? (
                   <>

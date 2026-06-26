@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -790,7 +791,7 @@ export function FacultyProfilePage() {
           <FacultyPanel title="Add qualification" description="Upload degree certificate PDF for verification">
             <form onSubmit={(e) => void addQualification(e)} className="grid gap-4 sm:grid-cols-2">
               <FormField label="Level">
-                <select
+                <Select
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-navy/20"
                   value={qualForm.degree_level}
                   onChange={(e) => setQualForm((q) => ({ ...q, degree_level: e.target.value }))}
@@ -798,7 +799,7 @@ export function FacultyProfilePage() {
                   {DEGREE_LEVELS.map((l) => (
                     <option key={l} value={l}>{l}</option>
                   ))}
-                </select>
+                </Select>
               </FormField>
               <FormField label="Degree name">
                 <Input placeholder="e.g. M.Tech in AI" value={qualForm.degree_name} onChange={(e) => setQualForm((q) => ({ ...q, degree_name: e.target.value }))} />

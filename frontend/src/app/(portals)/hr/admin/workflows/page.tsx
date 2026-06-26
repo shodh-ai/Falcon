@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr';
@@ -129,17 +130,17 @@ export default function HrWorkflowsPage() {
       <Card>
         <CardContent className="space-y-3 p-4">
           <Input placeholder="Workflow name" value={form.workflow_name} onChange={(e) => setForm({ ...form, workflow_name: e.target.value })} />
-          <select className="w-full rounded-md border px-2 py-2 text-sm bg-white" value={form.action_type} onChange={(e) => setForm({ ...form, action_type: e.target.value })}>
+          <Select className="w-full rounded-md border px-2 py-2 text-sm bg-white" value={form.action_type} onChange={(e) => setForm({ ...form, action_type: e.target.value })}>
             {['LEAVE', 'ON_DUTY', 'REGULARIZATION', 'RESIGNATION', 'COMP_OFF', 'CTC_UPDATE'].map((a) => (
               <option key={a} value={a}>
                 {a}
               </option>
             ))}
-          </select>
+          </Select>
           {form.steps.map((s, i) => (
             <div key={i} className="flex gap-2">
               <Input type="number" className="w-16" value={s.step_order} readOnly />
-              <select
+              <Select
                 className="rounded-md border px-2 py-2 text-sm flex-1 bg-white"
                 value={s.approver_type}
                 onChange={(e) => {
@@ -155,11 +156,11 @@ export default function HrWorkflowsPage() {
                     {t}
                   </option>
                 ))}
-              </select>
+              </Select>
               
               <div className="flex-[2]">
                 {s.approver_type === 'ROLE' ? (
-                  <select
+                  <Select
                     className="w-full rounded-md border px-2 py-2 text-sm bg-white"
                     value={s.approver_ref ?? ''}
                     onChange={(e) => {
@@ -172,9 +173,9 @@ export default function HrWorkflowsPage() {
                     {roles.map(r => (
                       <option key={r.role_id} value={r.role_name}>{r.role_name}</option>
                     ))}
-                  </select>
+                  </Select>
                 ) : s.approver_type === 'SPECIFIC_USER' ? (
-                  <select
+                  <Select
                     className="w-full rounded-md border px-2 py-2 text-sm bg-white"
                     value={s.approver_ref ?? ''}
                     onChange={(e) => {
@@ -187,7 +188,7 @@ export default function HrWorkflowsPage() {
                     {users.map(u => (
                       <option key={u.user_id} value={u.user_id}>{u.name} ({u.email})</option>
                     ))}
-                  </select>
+                  </Select>
                 ) : (
                   <Input
                     placeholder="Approver reference (optional)"

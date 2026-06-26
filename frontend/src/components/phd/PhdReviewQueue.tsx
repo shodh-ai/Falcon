@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -121,7 +122,7 @@ export function PhdReviewQueue({
                 {!embedded ? <PhdPipeline candidate={row} /> : null}
                 {needsGuide ? (
                   <div className="space-y-1">
-                    <select
+                    <Select
                       className="w-full rounded-lg border px-3 py-2 text-sm"
                       value={guidePick[row.candidate_id] ?? ''}
                       onChange={(e) => setGuidePick((m) => ({ ...m, [row.candidate_id]: e.target.value }))}
@@ -132,7 +133,7 @@ export function PhdReviewQueue({
                           {g.name}{g.dept_name ? ` · ${g.dept_name}` : ''}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                     {guides.length === 0 ? (
                       <p className="text-xs text-amber-700">No faculty guides loaded. Refresh or check backend.</p>
                     ) : null}

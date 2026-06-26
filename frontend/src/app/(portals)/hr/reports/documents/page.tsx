@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { Archive, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -112,7 +113,7 @@ export default function HrDocumentExportPage() {
         <CardContent className="space-y-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground">Department</label>
-            <select
+            <Select
               className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
               value={deptId}
               onChange={(e) => setDeptId(e.target.value)}
@@ -123,11 +124,11 @@ export default function HrDocumentExportPage() {
                   {d.dept_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Role</label>
-            <select
+            <Select
               className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
               value={roleId}
               onChange={(e) => setRoleId(e.target.value)}
@@ -138,11 +139,11 @@ export default function HrDocumentExportPage() {
                   {r.role_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Document type</label>
-            <select
+            <Select
               className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
               value={documentType}
               onChange={(e) => setDocumentType(e.target.value)}
@@ -152,7 +153,7 @@ export default function HrDocumentExportPage() {
                   {c === 'ALL' ? 'ALL — every document type' : c.replace(/_/g, ' ')}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <Button className="w-full" disabled={isGenerating} onClick={() => void generateArchive()}>

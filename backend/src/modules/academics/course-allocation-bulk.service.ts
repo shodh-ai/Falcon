@@ -9,6 +9,7 @@ import { DataSource, QueryRunner } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
+import { StudentMentorSyncService } from './student-mentor-sync.service';
 
 export type CourseAllocationRowInput = {
   faculty_username: string;
@@ -75,6 +76,7 @@ export class CourseAllocationBulkService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
     private readonly enrollmentSync: StudentEnrollmentSyncService,
+    private readonly mentorSync: StudentMentorSyncService,
   ) {}
 
   async buildTemplateBuffer(): Promise<Buffer> {
@@ -331,6 +333,7 @@ export class CourseAllocationBulkService {
 
       await qr.commitTransaction();
       await this.enrollmentSync.syncTenantStudents(tenantId, academicYear.trim());
+      await this.mentorSync.syncTenantStudents(tenantId, academicYear.trim());
       return result;
     } catch (err) {
       await qr.rollbackTransaction();

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -79,7 +80,7 @@ export default function HostelTicketsFinesPage() {
             value={fineForm.item_description}
             onChange={(e) => setFineForm((f) => ({ ...f, item_description: e.target.value }))}
           />
-          <select
+          <Select
             className="rounded-lg border px-3 py-2 text-sm"
             value={fineForm.damage_severity}
             onChange={(e) => setFineForm((f) => ({ ...f, damage_severity: e.target.value }))}
@@ -87,7 +88,7 @@ export default function HostelTicketsFinesPage() {
             <option value="HIGH">HIGH</option>
             <option value="MEDIUM">MEDIUM</option>
             <option value="LOW">LOW</option>
-          </select>
+          </Select>
           <Input
             placeholder="Amount ₹"
             type="number"

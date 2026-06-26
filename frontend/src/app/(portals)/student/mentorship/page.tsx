@@ -166,7 +166,7 @@ export default function StudentMentorshipPage() {
       {!loading && mentor && mentorProfile && (
         <>
           <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-            <StudentSectionCard title="Your mentor" description="Assigned faculty mentor" icon={UserRound} tone="gold">
+            <StudentSectionCard title="Your mentor" description="Assigned faculty mentor" icon={UserRound} tone="gold" className="h-full">
               <div className="flex items-center gap-4">
                 <Avatar className="h-16 w-16 border-2 border-sgvu-gold/30">
                   <AvatarFallback className="bg-sgvu-navy/5 text-lg font-bold text-sgvu-navy">
@@ -186,7 +186,7 @@ export default function StudentMentorshipPage() {
               </div>
             </StudentSectionCard>
 
-            <StudentSectionCard title="Book a 15-min meeting" description="Pick a date & select an available slot" icon={CalendarClock}>
+            <StudentSectionCard title="Book a 15-min meeting" description="Pick a date & select an available slot" icon={CalendarClock} className="h-full">
               <div className="mb-3 flex items-center gap-3">
                 <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Meeting date</label>
                 <Input
@@ -216,12 +216,8 @@ export default function StudentMentorshipPage() {
                 })}
               </div>
             </StudentSectionCard>
-          </div>
 
-          <StudentMeetingSlots meetings={meetings} />
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <StudentSectionCard title="Permissions / leave requests" description="Request mentor approval for leave" icon={CalendarClock}>
+            <StudentSectionCard title="Permissions / leave requests" description="Request mentor approval for leave" icon={CalendarClock} className="h-full">
               <div className="space-y-3">
                 <Input placeholder="Reason for leave / exemption" value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} />
                 <div className="grid grid-cols-2 gap-2">
@@ -257,6 +253,8 @@ export default function StudentMentorshipPage() {
 
             <MentorshipStudentChat />
           </div>
+
+          <StudentMeetingSlots meetings={meetings} />
         </>
       )}
     </StudentPageShell>

@@ -355,10 +355,12 @@ export class CampusEventsService {
     if (!e) return null;
     const fundsNeeded = Number(e.funds_needed ?? 0);
     const financeOk = fundsNeeded <= 0 || e.finance_approval === 'APPROVED';
+    const estateOk = e.estate_approval === 'APPROVED' || e.estate_approval === 'NOT_REQUIRED';
     if (
       e.advisor_approval === 'APPROVED' &&
       e.hod_approval === 'APPROVED' &&
       e.dean_approval === 'APPROVED' &&
+      estateOk &&
       financeOk &&
       e.status !== 'LIVE' &&
       e.status !== 'REJECTED'
@@ -434,12 +436,13 @@ export class CampusEventsService {
     coordinatorId: string,
     dto: ProposeEventDto,
   ) {
-    const clubRows = await this.dataSource.query(
-      `SELECT club_id, name, faculty_advisor_id FROM campus_clubs
-       WHERE club_id = $1 AND tenant_id = $2 AND student_coordinator_id = $3`,
-      [dto.club_id, tenantId, coordinatorId],
-    );
-    const club = clubRows[0];
+    try {
+      const clubRows = await this.dataSource.query(
+        `SELECT club_id, name, faculty_advisor_id FROM campus_clubs
+         WHERE club_id = $1 AND tenant_id = $2 AND student_coordinator_id = $3`,
+        [dto.club_id, tenantId, coordinatorId],
+      );
+      const club = clubRows[0];
     if (!club)
       throw new ForbiddenException('You are not the coordinator for this club');
 
@@ -482,10 +485,10 @@ export class CampusEventsService {
 
     const inserted = await this.dataSource.query(
       `INSERT INTO campus_events (
-        tenant_id, club_id, title, description, venue, event_date,
+        tenant_id, club_id, title, description, venue, venue_id, guest_speakers, event_date,
         total_slots, available_slots, is_paid, ticket_price, funds_needed, status,
         advisor_approval, hod_approval, dean_approval, estate_approval, finance_approval
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,$10,'PENDING_ADVISOR','PENDING','PENDING','PENDING','NOT_REQUIRED',$11)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12,'PENDING_ADVISOR','PENDING','PENDING','PENDING','NOT_REQUIRED',$13)
       RETURNING *`,
       [
         tenantId,
@@ -493,6 +496,8 @@ export class CampusEventsService {
         dto.title,
         dto.description ?? null,
         venueLabel,
+        dto.venue_id ?? null,
+        dto.guest_speakers ?? null,
         dto.event_date,
         dto.total_slots,
         dto.is_paid,
@@ -519,13 +524,12 @@ export class CampusEventsService {
         actionLink: '/faculty/event-approvals',
       });
     }
-    this.events.emit('event.proposed', {
-      eventId: event.event_id,
-      clubId: dto.club_id,
-      advisorUserId,
-      tenantId,
-    });
+
     return event;
+    } catch (e: any) {
+      require('fs').writeFileSync('d:\\Falcon\\backend\\propose_error.log', e.stack || e.message);
+      throw e;
+    }
   }
 
   async listPendingApprovals(
@@ -832,7 +836,7 @@ export class CampusEventsService {
         eventId,
         tenantId,
         userId,
-        fundsNeeded > 0 ? 'PENDING_FINANCE' : 'PENDING_DEAN',
+        'PENDING_ESTATE',
         fundsNeeded,
       ],
     );
@@ -846,7 +850,6 @@ export class CampusEventsService {
         eventId,
         fundsNeeded,
       );
-      return event;
     }
     return this.tryPublishLive(tenantId, eventId);
   }
@@ -957,17 +960,12 @@ export class CampusEventsService {
         dto.estate_notes ?? null,
         venueId,
         venueName,
-        current[0].is_paid ? 'PENDING_FINANCE' : 'PENDING_ESTATE',
+        current[0].finance_approval === 'PENDING' ? 'PENDING_FINANCE' : 'LIVE',
         userId,
       ],
     );
     const event = rows[0];
-    if (event.is_paid) {
-      await this.dataSource.query(
-        `UPDATE campus_events SET status = 'PENDING_FINANCE' WHERE event_id = $1`,
-        [eventId],
-      );
-      event.status = 'PENDING_FINANCE';
+    if (event.finance_approval === 'PENDING') {
       await this.notifyFinanceHolders(
         tenantId,
         event.title,

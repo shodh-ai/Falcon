@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { AlumniPageHeader } from '@/components/alumni/AlumniPageHeader';
@@ -48,13 +49,13 @@ export default function AlumniServicesPage() {
           <CardTitle className="text-base">New request</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <select className="rounded-md border px-3 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value)}>
+          <Select className="rounded-md border px-3 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value)}>
             {SERVICE_TYPES.map((s) => (
               <option key={s.value} value={s.value}>
                 {s.label}
               </option>
             ))}
-          </select>
+          </Select>
           <Button onClick={() => void submit()}>Submit ticket</Button>
         </CardContent>
       </Card>

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -138,7 +139,7 @@ export default function HodCourseAllocationPage() {
                     </td>
                     <td className="px-4 py-3">{slot.room ?? '—'}</td>
                     <td className="px-4 py-3">
-                      <select
+                      <Select
                         className="w-full min-w-[180px] rounded-md border border-gray-200 px-3 py-2 text-sm text-sgvu-navy"
                         value={selected}
                         onChange={(e) =>
@@ -150,7 +151,7 @@ export default function HodCourseAllocationPage() {
                             {f.name}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                       {changed ? (
                         <p className="mt-1 text-sm text-muted-foreground">Previously: {slot.faculty_name}</p>
                       ) : null}

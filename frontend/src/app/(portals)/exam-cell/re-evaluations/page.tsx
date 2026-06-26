@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -189,7 +190,7 @@ export default function ExamCellReEvaluationsPage() {
               {selected.status === 'PENDING' ? (
                 <div className="space-y-2 rounded-lg border p-3">
                   <p className="font-medium">Assign faculty</p>
-                  <select
+                  <Select
                     className="w-full rounded-md border px-3 py-2"
                     value={facultyId}
                     onChange={(e) => setFacultyId(e.target.value)}
@@ -200,7 +201,7 @@ export default function ExamCellReEvaluationsPage() {
                         {f.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   <Button disabled={busy} onClick={() => void assign()}>
                     Assign for reassessment
                   </Button>

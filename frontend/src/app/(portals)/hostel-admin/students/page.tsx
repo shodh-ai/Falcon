@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Badge } from '@/components/ui/badge';
@@ -70,7 +71,7 @@ export default function HostelStudentsPage() {
             setOffset(0);
           }}
         />
-        <select
+        <Select
           className="rounded-lg border px-3 py-2 text-sm"
           value={status}
           onChange={(e) => {
@@ -81,7 +82,7 @@ export default function HostelStudentsPage() {
           <option value="ACTIVE">Active</option>
           <option value="VACATED">Vacated</option>
           <option value="">All statuses</option>
-        </select>
+        </Select>
       </div>
 
       <DataTable

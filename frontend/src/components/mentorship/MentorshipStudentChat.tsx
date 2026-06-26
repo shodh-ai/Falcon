@@ -66,6 +66,7 @@ export function MentorshipStudentChat() {
       description="Quick messages — auto-deleted after 7 days"
       icon={MessageCircle}
       tone="gold"
+      className="h-full"
       action={
         <Button variant="outline" size="sm" className="w-full sm:w-auto" asChild>
           <Link href="/student/helpdesk">

@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrPageHeader } from '@/components/hr/HrPageHeader';
@@ -84,7 +85,7 @@ export default function HrOffboardingPage() {
               <div className="flex flex-wrap items-center gap-3">
                 <label className="text-sm">
                   Exit status
-                  <select
+                  <Select
                     className="ml-2 rounded border px-2 py-1 text-sm"
                     value={exitStatus[r.resignation_id] ?? r.exit_status ?? 'PENDING_CLEARANCE'}
                     onChange={(e) => setExitStatus((s) => ({ ...s, [r.resignation_id]: e.target.value }))}
@@ -92,7 +93,7 @@ export default function HrOffboardingPage() {
                     <option value="PENDING_CLEARANCE">Pending Clearance</option>
                     <option value="INITIATE_FNF">Initiate FNF</option>
                     <option value="OFFBOARDED">Offboarded</option>
-                  </select>
+                  </Select>
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <input

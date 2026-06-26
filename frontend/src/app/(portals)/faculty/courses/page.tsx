@@ -54,7 +54,7 @@ export default function FacultyCoursesIndexPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {courses.map((c) => (
               <Link
-                key={c.course_id}
+                key={c.allocation_id ?? c.course_id}
                 href={`/faculty/courses/${c.course_id}`}
                 className="group flex items-start gap-3 rounded-xl border border-border/60 bg-background p-4 shadow-sm transition hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5 hover:shadow-md"
               >
@@ -67,8 +67,16 @@ export default function FacultyCoursesIndexPage() {
                     <Badge variant="secondary" className="text-[10px]">
                       {c.credits} credits
                     </Badge>
+                    {c.semester ? (
+                      <Badge variant="outline" className="text-[10px]">
+                        {c.semester}
+                      </Badge>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-sm leading-snug text-muted-foreground">{c.course_name}</p>
+                  {c.program_name ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{c.program_name}</p>
+                  ) : null}
                   <p className="mt-2 flex items-center gap-1 text-xs font-medium text-sgvu-navy/70 group-hover:text-sgvu-navy">
                     Open workspace
                     <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />

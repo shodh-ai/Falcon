@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { FacultyPageHeader, FacultyPageShell, FacultyEmptyState } from '@/components/faculty';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -421,7 +422,7 @@ export default function FacultyProjectsPage() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Program</label>
-              <select 
+              <Select 
                 className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={newProject.program} 
                 onChange={e => setNewProject({...newProject, program: e.target.value})}
@@ -430,7 +431,7 @@ export default function FacultyProjectsPage() {
                 <option value="M.Tech">M.Tech</option>
                 <option value="MBA">MBA</option>
                 <option value="BCA">BCA</option>
-              </select>
+              </Select>
             </div>
             <div className="pt-4 border-t">
               <Button variant="outline" className="w-full justify-between" onClick={() => {
@@ -500,7 +501,7 @@ export default function FacultyProjectsPage() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              <select 
+              <Select 
                 className="flex h-10 w-[140px] items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={filterBatch} 
                 onChange={(e) => setFilterBatch(e.target.value)}
@@ -510,8 +511,8 @@ export default function FacultyProjectsPage() {
                 <option value="2023">2023</option>
                 <option value="2024">2024</option>
                 <option value="2025">2025</option>
-              </select>
-              <select 
+              </Select>
+              <Select 
                 className="flex h-10 w-[180px] items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={filterDept} 
                 onChange={(e) => setFilterDept(e.target.value)}
@@ -521,7 +522,7 @@ export default function FacultyProjectsPage() {
                 <option value="Information Technology">Information Tech</option>
                 <option value="Mechanical Engineering">Mechanical</option>
                 <option value="Electrical Engineering">Electrical</option>
-              </select>
+              </Select>
             </div>
 
             <div className="border rounded-md max-h-60 overflow-y-auto">
@@ -563,7 +564,7 @@ export default function FacultyProjectsPage() {
                       <span className="text-sm font-medium text-slate-700">{s.name}</span>
                       <div className="flex items-center gap-2">
                         {studentModalOpen !== 'new' && (
-                          <select
+                          <Select
                             className="h-8 rounded-md border border-slate-300 px-2 text-xs focus:outline-none focus:ring-1 focus:ring-sgvu-navy bg-white"
                             value={s.grade || ''}
                             onChange={(e) => setSelectedStudents(prev => prev.map(x => x.id === s.id ? { ...x, grade: e.target.value } : x))}
@@ -576,7 +577,7 @@ export default function FacultyProjectsPage() {
                             <option value="C+">C+</option>
                             <option value="C">C</option>
                             <option value="F">F</option>
-                          </select>
+                          </Select>
                         )}
                         <button 
                           onClick={() => setSelectedStudents(prev => prev.filter(x => x.id !== s.id))}

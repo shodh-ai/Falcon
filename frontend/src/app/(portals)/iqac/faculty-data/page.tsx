@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { IqacPageHeader } from '@/components/iqac/IqacPageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -56,10 +57,10 @@ export default function IqacFacultyDataPage() {
             {t.label}
           </Button>
         ))}
-        <select className="ml-auto rounded-md border px-3 py-2 text-sm" value={year} onChange={(e) => setYear(e.target.value)}>
+        <Select className="ml-auto rounded-md border px-3 py-2 text-sm" value={year} onChange={(e) => setYear(e.target.value)}>
           <option>2025-2026</option>
           <option>2024-2025</option>
-        </select>
+        </Select>
         <Button size="sm" variant="outline" onClick={() => void exportExcel()}>
           Export to Excel (CSV)
         </Button>

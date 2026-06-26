@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -418,12 +419,12 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
             <OnboardingSection title="Personal details" icon={UserRound} description="Basic information for your record">
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField id="blood" label="Blood group" required>
-                  <select id="blood" className={onboardingSelectClass} value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} required>
+                  <Select id="blood" className={onboardingSelectClass} value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} required>
                     <option value="">Select</option>
                     {BLOOD_GROUP_OPTIONS.map((bg) => (
                       <option key={bg} value={bg}>{bg}</option>
                     ))}
-                  </select>
+                  </Select>
                 </FormField>
 
                 <FormField id="mobile" label={isStaff ? 'Mobile number' : 'Student mobile'} required>
@@ -437,12 +438,12 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
                 ) : null}
 
                 <FormField id="gender" label="Gender" required>
-                  <select id="gender" className={onboardingSelectClass} value={gender} onChange={(e) => setGender(e.target.value)} required>
+                  <Select id="gender" className={onboardingSelectClass} value={gender} onChange={(e) => setGender(e.target.value)} required>
                     <option value="">Select</option>
                     {GENDER_OPTIONS.map((g) => (
                       <option key={g} value={g}>{g}</option>
                     ))}
-                  </select>
+                  </Select>
                 </FormField>
 
                 <FormField id="dob" label="Date of birth" required>
@@ -478,9 +479,9 @@ export function OnboardingStep2({ config }: { config: PortalOnboardingConfig }) 
                 <OnboardingSection title="Highest qualification">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <FormField id="degree-level" label="Degree level" required>
-                      <select id="degree-level" className={onboardingSelectClass} value={degreeLevel} onChange={(e) => setDegreeLevel(e.target.value)} required>
+                      <Select id="degree-level" className={onboardingSelectClass} value={degreeLevel} onChange={(e) => setDegreeLevel(e.target.value)} required>
                         {STAFF_DEGREE_LEVELS.map((level) => (<option key={level} value={level}>{level}</option>))}
-                      </select>
+                      </Select>
                     </FormField>
                     <FormField id="degree-name" label="Degree name"><Input id="degree-name" className={onboardingInputClass} placeholder="M.Tech in AI" value={degreeName} onChange={(e) => setDegreeName(e.target.value)} /></FormField>
                     <FormField id="university" label="University" required><Input id="university" className={onboardingInputClass} value={university} onChange={(e) => setUniversity(e.target.value)} required /></FormField>
