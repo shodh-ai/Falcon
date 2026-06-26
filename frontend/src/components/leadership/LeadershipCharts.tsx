@@ -13,13 +13,14 @@ import {
   YAxis,
 } from 'recharts';
 
-const NAVY = '#08234a';
-const GOLD = '#d6b65d';
-const CHART_TOOLTIP = {
-  borderRadius: '12px',
-  border: '1px solid #e2e8f0',
-  boxShadow: '0 4px 12px rgba(8,35,74,0.08)',
-};
+import {
+  EXECUTIVE_CHART_COLORS,
+  EXECUTIVE_CHART_TOOLTIP,
+} from '@/components/leadership/executive/design-tokens';
+
+const NAVY = EXECUTIVE_CHART_COLORS.navy;
+const GOLD = EXECUTIVE_CHART_COLORS.gold;
+const CHART_TOOLTIP = EXECUTIVE_CHART_TOOLTIP;
 
 export function LeadershipBarChart({
   data,

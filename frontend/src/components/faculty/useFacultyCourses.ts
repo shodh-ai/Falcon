@@ -14,6 +14,15 @@ export type FacultyCourse = {
   academic_year?: string | null;
 };
 
+export function uniqueFacultyCoursesByCourseId(courses: FacultyCourse[]): FacultyCourse[] {
+  const seen = new Set<string>();
+  return courses.filter((course) => {
+    if (seen.has(course.course_id)) return false;
+    seen.add(course.course_id);
+    return true;
+  });
+}
+
 export function useFacultyCourses() {
   const api = useAuthedApi();
   const [courses, setCourses] = useState<FacultyCourse[]>([]);

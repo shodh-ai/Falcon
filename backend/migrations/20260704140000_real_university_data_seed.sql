@@ -184,7 +184,7 @@ INSERT INTO academic_subjects (subject_code, subject_name, subject_shortname, pr
 SELECT v.subject_code, v.subject_name, v.subject_shortname, p.program_id, v.credits, v.subject_type, true
 FROM prog p
 CROSS JOIN (VALUES
-  ('CP 325', 'Natural Language Processing',        'NLP', 2, 'THEORY'),
+  ('CP325', 'Natural Language Processing',        'NLP', 2, 'THEORY'),
   ('CP302',  'Computer Architectures',             'CA',  3, 'THEORY'),
   ('CP405',  'Operating Systems',                  'OS',  3, 'THEORY'),
   ('CS3001', 'Data Structures and Algorithms',     'DSA', 3, 'THEORY'),
@@ -208,7 +208,7 @@ WITH tenant AS (
 subject_rows AS (
   SELECT subject_id, subject_code, subject_name, credits
   FROM academic_subjects
-  WHERE subject_code IN ('CP 325', 'CP302', 'CP405', 'CS3001', 'CSY001', 'EEPI')
+  WHERE subject_code IN ('CP325', 'CP302', 'CP405', 'CS3001', 'CSY001', 'EEPI')
 ),
 upsert_courses AS (
   INSERT INTO academic_courses (tenant_id, course_code, course_name, credits, is_elective)
@@ -222,7 +222,7 @@ upsert_courses AS (
 ),
 allocations AS (
   SELECT * FROM (VALUES
-    ('CP 325', 'BTECH CSE', 'V-A',   'naman.raj@mygyanvihar.com'),
+    ('CP325', 'BTECH CSE', 'V-A',   'naman.raj@mygyanvihar.com'),
     ('CP302',  'BTECH CSE', 'V-A',   'rahul.kumar1@mygyanvihar.com'),
     ('CP405',  'BTECH CSE', 'VII-A', 'priyanka1.gupta@mygyanvihar.com'),
     ('CS3001', 'BTECH CSE', 'III-B', 'pooja.varshney@mygyanvihar.com')

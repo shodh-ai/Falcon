@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { LeadershipMetricCard, LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
+import { EXECUTIVE_SPACING } from '@/components/leadership/executive/design-tokens';
 import { useLeadershipApi } from '@/lib/api/api.leadership';
 
 type CompareMode = 'MoM' | 'YoY' | 'BUDGET';
@@ -102,7 +103,7 @@ export default function LeadershipVersusPage() {
   }, [scatter]);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className={EXECUTIVE_SPACING.page}>
       <LeadershipPageHeader
         eyebrow="Versus Engine"
         title="Comparative Analytics"
