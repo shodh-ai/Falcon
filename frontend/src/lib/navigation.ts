@@ -646,7 +646,6 @@ export const deanPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/dean/students/monitor', icon: GraduationCap, keywords: ['students', 'risk'] },
-        { label: 'Defaulters', href: '/dean/students/defaulters', icon: LineChart, keywords: ['attendance', 'grades'] },
         { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['escalation', 'ticket'] },
         { label: 'Safety Concerns', href: '/dean/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'posh'] },
         { label: 'Ph.D. Degree Awards', href: '/dean/phd/approvals', icon: GraduationCap, keywords: ['phd', 'bom', 'viva', 'degree'] },
@@ -691,7 +690,6 @@ export const deanPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/dean/students/monitor', icon: GraduationCap, keywords: ['students'] },
-        { label: 'Defaulters', href: '/dean/students/defaulters', icon: LineChart, keywords: ['defaulters'] },
         { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['grievances'] },
       ],
     },

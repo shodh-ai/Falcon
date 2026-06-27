@@ -1,13 +1,14 @@
 'use client';
 
 import { WorkspaceScaffold } from '@/components/workspaces/WorkspaceScaffold';
-import { financePages, hodPages, iqacPages, presidentPages } from '@/lib/workspace-pages';
+import { financePages, hodPages, iqacPages, presidentPages, deanPages } from '@/lib/workspace-pages';
 
 const pageMaps = {
   hod: hodPages,
   finance: financePages,
   iqac: iqacPages,
   president: presidentPages,
+  dean: deanPages,
 };
 
 type PortalKey = keyof typeof pageMaps;

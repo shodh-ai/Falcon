@@ -295,3 +295,34 @@ export const presidentPages = {
     ],
   },
 } satisfies Record<string, WorkspacePageConfig>;
+
+export const deanPages = {
+  studentMonitor: {
+    title: 'Student Monitor',
+    subtitle: 'Students with low-attendance risk visibility before exam season across your school.',
+    endpoint: '/api/academics/dean/students?lowAttendance=true',
+    columns: [
+      { key: 'name', label: 'Student' },
+      { key: 'email', label: 'Email' },
+      { key: 'department', label: 'Department' },
+      { key: 'average_attendance', label: 'Avg Attendance %', sortable: true },
+      { key: 'course_count', label: 'Courses' },
+      { key: 'cgpa', label: 'CGPA', sortable: true },
+    ],
+    filters: [
+      {
+        key: 'enrollment_year',
+        label: 'Enrollment Year',
+        dynamicOptions: (data) => {
+          if (!Array.isArray(data)) return [{ label: 'All Years', value: '' }];
+          const years = Array.from(new Set(data.map((row) => row.enrollment_year))).filter(Boolean).sort().reverse();
+          return [
+            { label: 'All Years', value: '' },
+            ...years.map((y) => ({ label: String(y), value: String(y) })),
+          ];
+        },
+      },
+    ],
+    rowAction: 'student-details' as any,
+  },
+} satisfies Record<string, WorkspacePageConfig>;

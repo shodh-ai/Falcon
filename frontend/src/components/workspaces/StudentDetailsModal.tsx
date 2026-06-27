@@ -10,10 +10,12 @@ export function StudentDetailsModal({
   studentId,
   open,
   onOpenChange,
+  portal,
 }: {
   studentId: string;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  portal?: 'hod' | 'dean';
 }) {
   const api = useAuthedApi();
   const [loading, setLoading] = useState(false);
@@ -22,14 +24,15 @@ export function StudentDetailsModal({
   useEffect(() => {
     if (open && studentId) {
       setLoading(true);
-      api.get(`/api/academics/hod/student-monitor/${studentId}/detail`)
+      const prefix = portal === 'dean' ? 'dean' : 'hod';
+      api.get(`/api/academics/${prefix}/student-monitor/${studentId}/detail`)
         .then(setData)
         .catch(() => {})
         .finally(() => setLoading(false));
     } else {
       setData(null);
     }
-  }, [open, studentId, api]);
+  }, [open, studentId, api, portal]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
