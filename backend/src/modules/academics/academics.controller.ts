@@ -730,6 +730,19 @@ export class AcademicsController {
     );
   }
 
+  @Get('dean/student-monitor/:studentId/detail')
+  @Roles('Dean', 'SuperAdmin')
+  deanStudentMonitorDetail(
+    @Param('studentId') studentId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.academics.getDeanStudentDetail(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      studentId,
+    );
+  }
+
   @Get('dean/slow-learners')
   @Roles('Dean', 'SuperAdmin')
   deanSlowLearners(@Req() req: { user: AuthUser }) {

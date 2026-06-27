@@ -1389,12 +1389,29 @@ export class AcademicsService {
       .filter((student) => !lowAttendance || student.low_attendance);
   }
 
+  async getDeanStudentDetail(
+    tenantId: string,
+    deanUserId: string,
+    studentUserId: string,
+  ) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.fetchStudentDetailForDepartments(tenantId, departmentIds, studentUserId);
+  }
+
   async getHodStudentDetail(
     tenantId: string,
     hodUserId: string,
     studentUserId: string,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.fetchStudentDetailForDepartments(tenantId, deptIds, studentUserId);
+  }
+
+  private async fetchStudentDetailForDepartments(
+    tenantId: string,
+    deptIds: number[],
+    studentUserId: string,
+  ) {
     const student = await this.users.findOne({
       where: { user_id: studentUserId, tenant_id: tenantId },
       relations: ['department', 'role'],
