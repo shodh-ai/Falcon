@@ -177,15 +177,33 @@ export default function DisciplinaryCommitteeQueuePage() {
                 {selected.evidence_urls?.length ? (
                   <div>
                     <p className="mb-2 font-medium">Evidence</p>
-                    <ul className="space-y-1">
-                      {selected.evidence_urls.map((url) => (
-                        <li key={url}>
-                          <a href={url} target="_blank" rel="noreferrer" className="text-sgvu-navy underline">
-                            {url}
+                    <div className="flex flex-wrap gap-2">
+                      {selected.evidence_urls.map((url) => {
+                        const isImage = url.match(/\.(jpeg|jpg|gif|png|webp|avif)$/i) != null;
+                        return (
+                          <a
+                            key={url}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group relative block overflow-hidden rounded-md border shadow-sm transition-all hover:shadow-md"
+                          >
+                            {isImage ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={url}
+                                alt="Evidence"
+                                className="h-16 w-16 object-cover transition-opacity group-hover:opacity-80"
+                              />
+                            ) : (
+                              <div className="flex h-16 w-16 items-center justify-center bg-muted text-xs font-medium text-muted-foreground transition-colors group-hover:bg-muted/80">
+                                {url.split('.').pop()?.toUpperCase() || 'FILE'}
+                              </div>
+                            )}
                           </a>
-                        </li>
-                      ))}
-                    </ul>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-muted-foreground">No evidence files attached.</p>

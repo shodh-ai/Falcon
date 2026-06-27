@@ -1,17 +1,48 @@
 -- Spread faculty timetable slots across Mon–Sat (ISO days 1–6) instead of all on Monday.
 -- When a faculty has more than six courses, additional hours are used (10:00, 11:00, …).
 
+-- One timetable row per course before reshuffling (avoids uq_academic_timetables_course_slot).
+WITH dupes AS (
+  SELECT
+    t.timetable_id,
+    ROW_NUMBER() OVER (
+      PARTITION BY t.tenant_id, t.course_id
+      ORDER BY t.timetable_id DESC
+    ) AS rn
+  FROM academic_timetables t
+  WHERE t.deleted_at IS NULL
+)
+DELETE FROM academic_timetables t
+USING dupes d
+WHERE t.timetable_id = d.timetable_id
+  AND d.rn > 1;
+
+-- Phase 1: scatter to unique staging slots so in-place updates never collide.
+WITH staging AS (
+  SELECT
+    t.timetable_id,
+    ROW_NUMBER() OVER (ORDER BY t.timetable_id) AS rn
+  FROM academic_timetables t
+  WHERE t.deleted_at IS NULL
+)
+UPDATE academic_timetables t
+SET
+  day_of_week = 7,
+  start_time = ('05:00'::time + staging.rn * interval '1 minute'),
+  end_time = ('05:30'::time + staging.rn * interval '1 minute')
+FROM staging
+WHERE t.timetable_id = staging.timetable_id;
+
+-- Phase 2: assign final Mon–Sat spread (one slot per course).
 WITH ranked AS (
   SELECT
     t.timetable_id,
     ROW_NUMBER() OVER (
-      PARTITION BY t.tenant_id, t.faculty_user_id
-      ORDER BY c.course_code, t.timetable_id
+      PARTITION BY t.tenant_id, t.course_id
+      ORDER BY t.timetable_id
     ) - 1 AS slot_idx
   FROM academic_timetables t
-  INNER JOIN academic_courses c ON c.course_id = t.course_id
   WHERE t.deleted_at IS NULL
-    AND t.faculty_user_id IS NOT NULL
 )
 UPDATE academic_timetables t
 SET

@@ -35,8 +35,15 @@ export function useFacultyCourses() {
       try {
         const data = await api.get<FacultyCourse[]>('/api/academics/faculty/workspaces/courses');
         if (!cancelled) {
-          setCourses(data);
-          setError(data.length === 0 ? 'No courses allocated to your timetable yet.' : null);
+          const uniqueMap = new Map<string, FacultyCourse>();
+          for (const c of data) {
+            if (!uniqueMap.has(c.course_id)) {
+              uniqueMap.set(c.course_id, c);
+            }
+          }
+          const uniqueData = Array.from(uniqueMap.values());
+          setCourses(uniqueData);
+          setError(uniqueData.length === 0 ? 'No courses allocated to your timetable yet.' : null);
         }
       } catch (e) {
         if (!cancelled) {

@@ -477,6 +477,117 @@ export class CourseAllocationBulkService {
     return { success: true, allocation_id: allocationId, faculty_user_id: facultyUserId };
   }
 
+  async listAllAllocations(tenantId: string) {
+    const items = await this.dataSource.query(
+      `SELECT a.allocation_id,
+              s.subject_code,
+              s.subject_name,
+              s.subject_type,
+              s.credits,
+              a.program_name,
+              a.semester,
+              a.academic_year,
+              a.faculty_user_id,
+              u.name AS faculty_name,
+              u.official_email AS faculty_email
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       LEFT JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1
+         AND a.status = 'ACTIVE'
+       ORDER BY a.academic_year DESC, a.program_name, a.semester, s.subject_code`,
+      [tenantId],
+    );
+
+    const faculty = await this.dataSource.query(
+      `SELECT u.user_id, u.name, u.official_email
+       FROM users u
+       INNER JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.is_active = true
+         AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+       ORDER BY u.name`,
+      [tenantId]
+    );
+
+    return { items, faculty };
+  }
+
+  async updateAllocationFaculty(tenantId: string, allocationId: string, newFacultyUserId: string | null) {
+    const allocation = await this.dataSource.query(
+      `SELECT a.allocation_id, a.course_id, a.faculty_user_id, s.subject_name, s.subject_code, a.academic_year
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'`,
+      [allocationId, tenantId],
+    );
+    if (!allocation[0]) throw new NotFoundException('Allocation not found');
+
+    const courseId = allocation[0].course_id;
+    const oldFacultyUserId = allocation[0].faculty_user_id;
+
+    await this.dataSource.query(
+      `UPDATE academic_course_allocations
+       SET faculty_user_id = $1, updated_at = NOW()
+       WHERE allocation_id = $2 AND tenant_id = $3`,
+      [newFacultyUserId, allocationId, tenantId],
+    );
+
+    if (courseId) {
+      if (oldFacultyUserId) {
+        await this.dataSource.query(
+          `DELETE FROM academic_timetables
+           WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3`,
+          [tenantId, courseId, oldFacultyUserId]
+        );
+      }
+      
+      if (newFacultyUserId) {
+        await this.ensureFacultyTimetableSlotDirect(
+          tenantId,
+          courseId,
+          newFacultyUserId,
+        );
+
+        this.notify.timetableChanged({
+          tenantId,
+          userId: newFacultyUserId,
+          courseName: allocation[0].subject_name,
+          changeSummary: `You have been assigned to teach ${allocation[0].subject_name} (${allocation[0].subject_code}) for ${allocation[0].academic_year}.`,
+        });
+      }
+    }
+
+    return { success: true, allocation_id: allocationId, faculty_user_id: newFacultyUserId };
+  }
+
+  async deleteAllocation(tenantId: string, allocationId: string) {
+    const allocation = await this.dataSource.query(
+      `SELECT a.allocation_id, a.course_id, a.faculty_user_id
+       FROM academic_course_allocations a
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2`,
+      [allocationId, tenantId],
+    );
+    if (!allocation[0]) throw new NotFoundException('Allocation not found');
+
+    const { course_id, faculty_user_id } = allocation[0];
+
+    if (course_id && faculty_user_id) {
+      await this.dataSource.query(
+        `DELETE FROM academic_timetables
+         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3`,
+        [tenantId, course_id, faculty_user_id]
+      );
+    }
+
+    await this.dataSource.query(
+      `DELETE FROM academic_course_allocations
+       WHERE allocation_id = $1 AND tenant_id = $2`,
+      [allocationId, tenantId]
+    );
+
+    return { success: true };
+  }
+
   private async upsertSubject(
     qr: QueryRunner,
     row: PreviewRow,

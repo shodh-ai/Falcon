@@ -2,6 +2,7 @@
 
 import { Select } from '@/components/ui/select';
 import { FormEvent, useMemo, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { usePathname } from 'next/navigation';
 import { CalendarDays, Headphones, Loader2, Plus, Presentation } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -26,7 +27,6 @@ import { cn } from '@/lib/utils';
 import { useAuthedApi } from '@/lib/api';
 import { workforceMinDate } from '@/lib/workforce-dates';
 import { HEADER_CONTROL_CLASS } from '@/components/layout/header-styles';
-import { useAuth } from '@/context/AuthContext';
 import {
   canRaiseHelpdeskTicket,
   canUseWorkforceQuickActions,
@@ -39,6 +39,13 @@ export function QuickActionMenu() {
   const api = useAuthedApi();
   const pathname = usePathname();
   const { user } = useAuth();
+  const isChairmanOnLeadership =
+    (user?.primaryRole ?? user?.role ?? '').toLowerCase() === 'chairman' && pathname?.startsWith('/leadership');
+
+  if (isChairmanOnLeadership) {
+    return null;
+  }
+
   const canLeave = canUseWorkforceQuickActions(user);
   const canTicket = canRaiseHelpdeskTicket(user);
   const [open, setOpen] = useState<ModalKind>(null);

@@ -391,8 +391,10 @@ export class BudgetFpaService {
 
     if (budgetId) {
       const rows = await this.db.query(
-        `SELECT allocated_amount, encumbered_amount, utilized_amount FROM fin_dept_budgets
-         WHERE budget_id = $1 AND tenant_id = $2`,
+        `SELECT allocated_amount, encumbered_amount, utilized_amount, budget_limit_mode, d.dept_name
+         FROM fin_dept_budgets b
+         LEFT JOIN departments d ON d.dept_id = b.department_id
+         WHERE b.budget_id = $1 AND b.tenant_id = $2`,
         [budgetId, tid],
       );
       if (!rows[0]) return { allowed: true };
@@ -400,18 +402,30 @@ export class BudgetFpaService {
         allocated_amount: string;
         encumbered_amount: string;
         utilized_amount: string;
+        budget_limit_mode: string;
+        dept_name: string;
       };
       const allocated = Number(r.allocated_amount);
       const committed = Number(r.encumbered_amount) + Number(r.utilized_amount);
-      if (committed + amount > allocated) {
+      const remaining = allocated - committed;
+      if (amount > remaining) {
+        if (r.budget_limit_mode === 'SOFT_WARNING') {
+          return {
+            allowed: true,
+            remaining: remaining - amount,
+            soft_warning: true,
+            requires_chairman: true,
+            department: r.dept_name,
+          };
+        }
         throw new ForbiddenException({
           statusCode: 403,
-          message: `Budget Exceeded. PO Rejected. Department has ₹${allocated - committed} remaining.`,
+          message: `Budget Exceeded. PO Rejected. Department has ₹${remaining} remaining.`,
           code: 'BUDGET_EXCEEDED',
           budget_id: budgetId,
         });
       }
-      return { allowed: true, remaining: allocated - committed - amount };
+      return { allowed: true, remaining: remaining - amount };
     }
 
     return { allowed: true };
@@ -428,7 +442,7 @@ export class BudgetFpaService {
       amount: number;
     },
   ) {
-    await this.checkEncumbrance({
+    const encumbrance = await this.checkEncumbrance({
       tenantId,
       programId: dto.program_id,
       budgetId: dto.budget_id,
@@ -436,7 +450,10 @@ export class BudgetFpaService {
     });
 
     const tid = this.tenantId(tenantId);
-    const status = dto.amount >= 100000 ? 'PENDING_BOARD_APPROVAL' : 'APPROVED';
+    const needsBoardApproval =
+      dto.amount >= 100000 ||
+      Boolean((encumbrance as { soft_warning?: boolean }).soft_warning);
+    const status = needsBoardApproval ? 'PENDING_BOARD_APPROVAL' : 'APPROVED';
 
     const rows = await this.db.query(
       `INSERT INTO fin_purchase_orders

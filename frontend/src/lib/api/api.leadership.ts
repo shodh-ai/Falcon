@@ -142,6 +142,15 @@ export type DrillNode = {
 
 export type LeadershipPlacements = {
   placement_pct: number;
+  eligible_students?: number;
+  placed_students?: number;
+  package_stats?: {
+    highest_lpa: number;
+    lowest_lpa: number;
+    avg_lpa: number;
+    median_lpa: number;
+  };
+  internship_pct?: number;
   lpa_trends: Array<{
     year: number;
     avg_lpa: number;
@@ -153,14 +162,80 @@ export type LeadershipPlacements = {
   }>;
 };
 
+export type ExecutivePeriod = 'today' | 'week' | 'semester' | 'year';
+
+export type RedFlagsResponse = {
+  period: ExecutivePeriod;
+  since: string;
+  flags: Array<{
+    severity: 'red' | 'yellow';
+    message: string;
+    pillar: string;
+    href: string;
+  }>;
+};
+
+export type PillarSummaryResponse = {
+  period: ExecutivePeriod;
+  pillars: Array<{
+    id: string;
+    title: string;
+    href: string;
+    status: 'green' | 'yellow' | 'red';
+    kpis: Array<{ label: string; value: string }>;
+  }>;
+};
+
+export type AdmissionsAnalytics = {
+  period: ExecutivePeriod;
+  funnel: Array<{ stage: string; count: number }>;
+  yoy_growth: Array<{ year: number; admissions: number }>;
+  seat_occupancy: Array<{
+    program: string;
+    capacity: number;
+    enrolled: number;
+    fill_pct: number;
+  }>;
+  demographics: {
+    by_state: Array<{ region: string; count: number }>;
+    gender: Array<{ gender: string; count: number }>;
+  };
+  marketing_roi: Array<{
+    source: string;
+    leads: number;
+    converted: number;
+    conversion_rate_pct: number;
+  }>;
+};
+
 export function useLeadershipApi() {
   const api = useAuthedApi();
 
   return useMemo(
     () => ({
       overview: () => api.get<LeadershipOverview>('/api/leadership/overview'),
+      redFlags: (period?: ExecutivePeriod) =>
+        api.get<RedFlagsResponse>(`/api/leadership/red-flags${period ? `?period=${period}` : ''}`),
+      pillarSummary: (period?: ExecutivePeriod) =>
+        api.get<PillarSummaryResponse>(`/api/leadership/pillar-summary${period ? `?period=${period}` : ''}`),
+      financeSummary: () => api.get<Record<string, unknown>>('/api/leadership/finance-summary'),
+      alumniSummary: () => api.get<Record<string, unknown>>('/api/leadership/alumni-summary'),
+      complianceSummary: () => api.get<Record<string, unknown>>('/api/leadership/compliance-summary'),
+      infrastructure: () => api.get<Record<string, unknown>>('/api/leadership/infrastructure'),
+      admissionsAnalytics: (period?: ExecutivePeriod) =>
+        api.get<AdmissionsAnalytics>(
+          `/api/leadership/admissions-analytics${period ? `?period=${period}` : ''}`,
+        ),
+      dropoutAnalytics: () => api.get<Record<string, unknown>>('/api/leadership/dropout-analytics'),
+      academicDrilldown: (level: string, parentKey?: string) =>
+        api.get<DrillNode[]>(
+          `/api/leadership/academic-drilldown?level=${encodeURIComponent(level)}${parentKey ? `&parentKey=${encodeURIComponent(parentKey)}` : ''}`,
+        ),
       finance: () => api.get<Record<string, unknown>>('/api/leadership/finance'),
-      academics: () => api.get<Record<string, unknown>>('/api/leadership/academics'),
+      academics: (semester?: number) =>
+        api.get<Record<string, unknown>>(
+          `/api/leadership/academics${semester != null ? `?semester=${semester}` : ''}`,
+        ),
       placements: () => api.get<LeadershipPlacements>('/api/leadership/placements'),
       admissionsFunnel: () => api.get<AdmissionsFunnel>('/api/leadership/admissions-funnel'),
       hrOps: () => api.get<Record<string, unknown>>('/api/leadership/hr-ops'),
@@ -317,6 +392,74 @@ export function useLeadershipApi() {
         ),
       reviewBudgetExpansion: (requestId: string, approve: boolean) =>
         api.post(`/api/leadership/budget/expansion/${requestId}/review`, { approve }),
+      actionSummary: () => api.get<Record<string, unknown>>('/api/leadership/action/summary'),
+      approvalInbox: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/approvals/inbox'),
+      reviewApproval: (body: { category: string; id: string; approve: boolean; note?: string }) =>
+        api.post('/api/leadership/action/approvals/review', body),
+      approvalThresholds: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/thresholds'),
+      updateApprovalThreshold: (body: { category: string; auto_approve_below: number; chairman_approval_above: number }) =>
+        api.post('/api/leadership/action/thresholds', body),
+      executiveTasks: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/tasks'),
+      createExecutiveTask: (body: {
+        title: string;
+        description?: string;
+        assigned_to: string;
+        due_at: string;
+        priority?: string;
+      }) => api.post('/api/leadership/action/tasks', body),
+      updateExecutiveTaskStatus: (taskId: string, status: string) =>
+        api.patch(`/api/leadership/action/tasks/${taskId}/status`, { status }),
+      executiveMemos: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/memos'),
+      sendExecutiveMemo: (body: {
+        subject: string;
+        body: string;
+        audience_roles: string[];
+        confidential?: boolean;
+      }) => api.post('/api/leadership/action/memos', body),
+      executiveBroadcasts: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/broadcasts'),
+      sendExecutiveBroadcast: (body: {
+        subject: string;
+        body: string;
+        channels: string[];
+        audience_filter: Record<string, unknown>;
+      }) => api.post('/api/leadership/action/broadcasts', body),
+      executiveDocuments: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/documents'),
+      registerExecutiveDocument: (body: {
+        title: string;
+        category: string;
+        storage_key: string;
+        expires_at?: string;
+      }) => api.post('/api/leadership/action/documents', body),
+      documentAccessLogs: (documentId?: string) =>
+        api.get<Array<Record<string, unknown>>>(
+          `/api/leadership/action/documents/access-logs${documentId ? `?document_id=${encodeURIComponent(documentId)}` : ''}`,
+        ),
+      executiveMous: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/mous'),
+      vipContacts: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/vip-contacts'),
+      upsertVipContact: (body: Record<string, unknown>) => api.post('/api/leadership/action/vip-contacts', body),
+      complianceCalendar: () => api.get<Array<Record<string, unknown>>>('/api/leadership/action/compliance-calendar'),
+      createComplianceEvent: (body: { title: string; event_type: string; due_date: string; notes?: string }) =>
+        api.post('/api/leadership/action/compliance-calendar', body),
+      predictiveForecast: () => api.get<Record<string, unknown>>('/api/leadership/action/forecast'),
+      grievanceMatrix: () => api.get<Record<string, unknown>>('/api/leadership/action/grievance-matrix'),
+      financialOverview: () => api.get<Record<string, unknown>>('/api/leadership/financial/overview'),
+      financialMacroBudget: (financialYear?: string) =>
+        api.get<Record<string, unknown>>(
+          `/api/leadership/financial/macro-budget${financialYear ? `?financial_year=${encodeURIComponent(financialYear)}` : ''}`,
+        ),
+      reappropriateBudget: (body: {
+        financial_year?: string;
+        from_budget_id: string;
+        to_budget_id: string;
+        amount: number;
+        reason?: string;
+      }) => api.post('/api/leadership/financial/reappropriate', body),
+      financialRevenue: () => api.get<Record<string, unknown>>('/api/leadership/financial/revenue'),
+      financialExpenses: () => api.get<Record<string, unknown>>('/api/leadership/financial/expenses'),
+      financialWaivers: () => api.get<Record<string, unknown>>('/api/leadership/financial/waivers'),
+      financialGrants: () => api.get<Record<string, unknown>>('/api/leadership/financial/grants'),
+      financialWealth: () => api.get<Record<string, unknown>>('/api/leadership/financial/wealth'),
+      financialAuditShield: () => api.get<Record<string, unknown>>('/api/leadership/financial/audit-shield'),
     }),
     [api],
   );
