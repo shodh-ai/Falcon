@@ -33,7 +33,13 @@ export default function FacultyInvigilationPage() {
   const [reason, setReason] = useState('');
 
   const loadDuties = () => {
-    void api.get<Duty[]>('/api/academics/faculty/workspaces/invigilation').then(setDuties);
+    void api
+      .get<Duty[]>('/api/academics/faculty/workspaces/invigilation')
+      .then(setDuties)
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to load invigilation duties');
+        setDuties([]);
+      });
   };
 
   useEffect(() => {
