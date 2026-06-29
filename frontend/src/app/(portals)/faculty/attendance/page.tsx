@@ -125,8 +125,10 @@ function MarkAttendanceContent() {
       .get<FacultyClass[]>('/api/academics/faculty/timetable/today')
       .then(async (data) => {
         const missing = await api.get<MissingAttendanceAlert[]>('/api/academics/faculty/attendance/missing').catch(() => []);
+        const assignedCourseIds = new Set(data.map((c) => c.course_id));
+        const relevantMissing = missing.filter((alert) => assignedCourseIds.has(alert.course_id));
         setClasses(data);
-        setMissingAlerts(missing);
+        setMissingAlerts(relevantMissing);
         if (data.length === 0) {
           setSelectedCourseId(null);
           return;

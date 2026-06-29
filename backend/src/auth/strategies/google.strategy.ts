@@ -9,6 +9,7 @@ import { User } from '../../entities/user.entity';
 import { Role } from '../../entities/role.entity';
 import { AuthService } from '../auth.service';
 import { TenantService } from '../../tenant/tenant.service';
+import { resolveTenantSubdomain } from '../../tenant/resolve-tenant-subdomain';
 import { resolveAllowedEmailDomains } from '../utils/resolve-allowed-domains';
 import { getInitialOnboardingStatusForRole } from '../../modules/student-onboarding/onboarding-portal.util';
 
@@ -54,13 +55,12 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     const reqWithCookies = req as Request & {
       cookies?: Record<string, string>;
     };
-    const subdomain =
-      reqWithCookies.cookies?.tenant_subdomain ??
-      (typeof req.headers?.['x-tenant-subdomain'] === 'string'
-        ? req.headers['x-tenant-subdomain']
-        : null) ??
-      process.env.DEFAULT_TENANT_SUBDOMAIN ??
-      'sgvu';
+    const subdomain = resolveTenantSubdomain(
+      reqWithCookies.cookies?.falcon_tenant_subdomain ??
+        (typeof req.headers?.['x-tenant-subdomain'] === 'string'
+          ? req.headers['x-tenant-subdomain']
+          : null),
+    );
 
     const tenant = await this.tenantService.findBySubdomain(subdomain);
     const allowedDomains = resolveAllowedEmailDomains(
