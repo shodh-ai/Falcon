@@ -24,6 +24,7 @@ type WeeklyTest = {
   start_time: string;
   end_time: string;
   status: string;
+  is_active: boolean;
 };
 
 export default function StudentWeeklyTestsPage() {
@@ -82,9 +83,10 @@ export default function StudentWeeklyTestsPage() {
                 const isCompleted = test.status === 'COMPLETED' || now > endTime;
                 const isOngoing = !isCompleted && now >= startTime && now <= endTime;
                 const isUpcoming = !isCompleted && now < startTime;
+                const isInactive = test.is_active === false;
                 
                 return (
-                  <div key={test.test_id} className={`rounded-xl border p-4 flex flex-col gap-3 ${isCompleted ? 'opacity-60 bg-muted/20 grayscale' : ''}`}>
+                  <div key={test.test_id} className={`rounded-xl border p-4 flex flex-col gap-3 ${(isCompleted || isInactive) ? 'opacity-60 bg-muted/20 grayscale' : ''}`}>
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
@@ -93,7 +95,9 @@ export default function StudentWeeklyTestsPage() {
                         </div>
                         <p className="text-sm font-medium text-sgvu-navy">{test.course_name}</p>
                       </div>
-                      {isOngoing ? (
+                      {isInactive ? (
+                        <Badge variant="secondary" className="bg-orange-100 text-orange-800 border-orange-200">Inactive</Badge>
+                      ) : isOngoing ? (
                         <Badge variant="destructive" className="animate-pulse">Live Now</Badge>
                       ) : isUpcoming ? (
                         <Badge variant="secondary">Upcoming</Badge>
@@ -111,7 +115,12 @@ export default function StudentWeeklyTestsPage() {
                       </div>
                     
                     <div className="mt-auto pt-2 flex justify-end">
-                      {isCompleted ? (
+                      {isInactive ? (
+                        <Button variant="secondary" onClick={() => toast.error("This test is currently inactive")}>
+                          <PlayCircle className="w-4 h-4 mr-2" />
+                          Inactive
+                        </Button>
+                      ) : isCompleted ? (
                         <Button variant="secondary" onClick={() => toast.error("This test is now unavailable")}>
                           <PlayCircle className="w-4 h-4 mr-2" />
                           Unavailable

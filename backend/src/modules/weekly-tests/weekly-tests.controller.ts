@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards, Delete } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Patch, Req, UseGuards, Delete } from '@nestjs/common';
 import { WeeklyTestsService } from './weekly-tests.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -38,6 +38,16 @@ export class WeeklyTestsController {
   @Roles('Faculty', 'Admin')
   deleteTest(@Req() req: { user: AuthUser }, @Param('testId') testId: string) {
     return this.testsService.deleteTest(this.tenant(req), req.user.user_id, testId);
+  }
+
+  @Patch('faculty/:testId/toggle')
+  @Roles('Faculty', 'Admin')
+  toggleTestStatus(
+    @Req() req: { user: AuthUser },
+    @Param('testId') testId: string,
+    @Body() body: { is_active: boolean }
+  ) {
+    return this.testsService.toggleTestStatus(this.tenant(req), req.user.user_id, testId, body.is_active);
   }
 
   @Get('student/available')

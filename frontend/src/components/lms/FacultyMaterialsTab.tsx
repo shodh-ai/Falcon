@@ -192,7 +192,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
 
   function addUploadFiles(files: FileList | File[]) {
     const accepted = Array.from(files).filter((file) =>
-      /\.(pdf|ppt|pptx)$/i.test(file.name),
+      /\.(pdf|ppt|pptx|doc|docx)$/i.test(file.name),
     );
     setUploadFiles((prev) => [...prev, ...accepted]);
   }
@@ -262,7 +262,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
           <div className="flex flex-col gap-2 rounded-xl border border-dashed border-sgvu-gold/40 bg-background/80 p-3 sm:flex-row sm:items-center">
             <Input
               type="file"
-              accept=".pdf,.ppt,.pptx,application/pdf"
+              accept=".pdf,.ppt,.pptx,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="flex-1 border-0 bg-transparent file:mr-3 file:rounded-md file:border-0 file:bg-sgvu-navy/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-sgvu-navy"
               onChange={(e) => setSyllabusFile(e.target.files?.[0] ?? null)}
             />
@@ -300,7 +300,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
           {workspace.modules.length === 0 ? (
             <FacultyEmptyState
               title="No units yet"
-              description="Add your first unit above, then upload PDF or PPT notes for enrolled students."
+              description="Add your first unit above, then upload PDF, PPT, or Word notes for enrolled students."
             />
           ) : (
             <div className="space-y-3">
@@ -398,13 +398,13 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm transition hover:border-sgvu-gold/60 hover:bg-sgvu-gold/5"
                 >
                   <Upload className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
-                  <p className="font-medium text-sgvu-navy">Drag PDFs/PPTs here, or select below</p>
+                  <p className="font-medium text-sgvu-navy">Drag PDFs, PPTs, or Word docs here, or select below</p>
                   <p className="mt-1 text-xs text-muted-foreground">Multiple files · Max 10MB each</p>
                 </div>
                 <Input
                   type="file"
                   multiple
-                  accept=".pdf,.ppt,.pptx,application/pdf"
+                  accept=".pdf,.ppt,.pptx,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   onChange={(e) => {
                     if (e.target.files) addUploadFiles(e.target.files);
                   }}
@@ -426,7 +426,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   </ul>
                 ) : null}
                 <p className="text-xs text-muted-foreground">
-                  PDF or PPT · Max 10MB · Notifies enrolled students
+                  PDF, PPT, or Word doc · Max 10MB · Notifies enrolled students
                 </p>
               </div>
               {publishTargets?.cross_section_available ? (
