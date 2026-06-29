@@ -6,6 +6,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 
 const REQUIRED_DOCS = [
   '10th Marksheet',
@@ -201,7 +202,7 @@ export default function AdmissionsEnrolledStudentsPage() {
                         <td className="p-4 text-right">
                           {existingDoc ? (
                             <a 
-                              href={existingDoc.file_path.startsWith('http') || existingDoc.file_path === 'pending_refresh' ? existingDoc.file_path : `/api/uploads/download?path=${encodeURIComponent(existingDoc.file_path)}`} 
+                              href={existingDoc.file_path.startsWith('http') || existingDoc.file_path === 'pending_refresh' ? existingDoc.file_path : `${getApiBaseUrl()}/api/uploads/download?path=${encodeURIComponent(existingDoc.file_path)}`}
                               target="_blank" 
                               rel="noreferrer"
                               className="text-sgvu-navy underline hover:text-blue-800 font-medium"
