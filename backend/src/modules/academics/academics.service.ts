@@ -682,20 +682,25 @@ export class AcademicsService {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
-      `SELECT u.user_id, u.name, u.official_email AS email,
+      `SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
+              d.dept_name,
+              hod.name AS hod_name,
+              hod.official_email AS hod_email,
               COALESCE(SUM(
                 EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600
               ), 0)::numeric(6,1) AS hours_per_week,
               COUNT(DISTINCT t.course_id)::int AS course_count
        FROM users u
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN users hod ON hod.user_id = d.hod_user_id
        LEFT JOIN academic_timetables t
          ON t.faculty_user_id = u.user_id AND t.tenant_id = u.tenant_id
        LEFT JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
          AND r.role_name IN ('Faculty', 'HOD', 'Dean')
-       GROUP BY u.user_id, u.name, u.official_email
-       ORDER BY hours_per_week DESC, u.name ASC`,
+       GROUP BY u.user_id, u.name, u.official_email, u.dept_id, d.dept_name, hod.name, hod.official_email
+       ORDER BY d.dept_name ASC, hours_per_week DESC, u.name ASC`,
       [tenantId, deptIds],
     );
 
@@ -703,6 +708,10 @@ export class AcademicsService {
       user_id: row.user_id,
       name: row.name,
       email: row.email,
+      dept_id: row.dept_id,
+      dept_name: row.dept_name,
+      hod_name: row.hod_name,
+      hod_email: row.hod_email,
       hours_per_week: Number(row.hours_per_week ?? 0),
       course_count: Number(row.course_count ?? 0),
       workload_status:
