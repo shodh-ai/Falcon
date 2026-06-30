@@ -293,8 +293,8 @@ export default function StudentMarksPage() {
             const open = expandedSemesters.has(sem.semester_number);
             const card = gradeCardsBySemester.get(sem.semester_number);
             const stage = card?.payload?.result_stage ?? 'DRAFT';
-            const canDownloadProvisional = card && card.status !== 'WITHHELD' && (stage === 'PROVISIONAL' || stage === 'FINAL');
-            const canDownloadFinal = card && card.status !== 'WITHHELD' && stage === 'FINAL';
+            const canDownloadProvisional = !card || (card && card.status !== 'WITHHELD' && stage !== 'DRAFT');
+            const canDownloadFinal = !card || (card && card.status !== 'WITHHELD' && stage !== 'DRAFT');
             return (
               <div key={sem.semester_number} className="overflow-hidden rounded-lg border border-border">
                 <button

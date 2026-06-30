@@ -25,13 +25,14 @@ export class MarksheetPdfService {
     @InjectDataSource() private readonly db: DataSource,
   ) {}
 
-  async validateDownloadAllowed(studentUserId: string) {
+  async validateDownloadAllowed(studentUserId: string, targetSemester: number) {
     const demands = await this.feeDemands.find({
       where: { student_user_id: studentUserId },
     });
     const pending = demands.filter((d) => {
       const status = String(d.status ?? '').toUpperCase();
       if (status === 'PAID' || status === 'WAIVED') return false;
+      if (d.semester != null && d.semester > targetSemester) return false;
       return Number(d.total_amount) - Number(d.paid_amount) > 0;
     });
     const library = pending.filter((d) =>
@@ -56,7 +57,7 @@ export class MarksheetPdfService {
     semester: number,
     type: 'provisional' | 'final' = 'provisional',
   ): Promise<Buffer> {
-    await this.validateDownloadAllowed(studentUserId);
+    await this.validateDownloadAllowed(studentUserId, semester);
 
     const user = await this.users.findOne({
       where: { user_id: studentUserId, tenant_id: tenantId },
@@ -76,16 +77,12 @@ export class MarksheetPdfService {
         String(gradeCard.payload?.withheld_reason ?? 'Marksheet is withheld'),
       );
     }
-    if (type === 'final' && gradeCard?.payload?.result_stage !== 'FINAL') {
-      throw new ForbiddenException('Final marksheet is not published yet');
-    }
     if (
-      type === 'provisional' &&
       gradeCard &&
       gradeCard.payload?.result_stage === 'DRAFT'
     ) {
       throw new ForbiddenException(
-        'Provisional marksheet is not published yet',
+        'Marksheet is not published yet',
       );
     }
 
