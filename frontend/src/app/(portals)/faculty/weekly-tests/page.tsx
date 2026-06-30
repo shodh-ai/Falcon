@@ -3,7 +3,7 @@
 import { Select } from '@/components/ui/select';
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { Loader2, Plus, Upload, CheckCircle2, Trash2, Clock } from 'lucide-react';
+import { Loader2, Plus, Upload, CheckCircle2, Trash2, Clock, Eye, EyeOff } from 'lucide-react';
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -68,6 +68,16 @@ export default function FacultyWeeklyTestsPage() {
       fetchMyTests();
     } catch (e: any) {
       toast.error(e.message || 'Failed to delete test');
+    }
+  };
+
+  const handleToggleTest = async (testId: string, isActive: boolean) => {
+    try {
+      await api.patch(`/api/weekly-tests/faculty/${testId}/toggle`, { is_active: !isActive });
+      toast.success(`Test ${!isActive ? 'activated' : 'deactivated'} successfully`);
+      fetchMyTests();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to toggle test status');
     }
   };
 
@@ -320,14 +330,23 @@ export default function FacultyWeeklyTestsPage() {
                         <span>Starts: {new Date(test.start_time).toLocaleString()}</span>
                       </div>
                     </div>
-                    <div>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant={test.is_active ? "outline" : "secondary"} 
+                        size="sm" 
+                        onClick={() => handleToggleTest(test.test_id, test.is_active)}
+                        className={!test.is_active ? "text-orange-600 bg-orange-50 border-orange-200" : ""}
+                      >
+                        {test.is_active ? <EyeOff className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
+                        {test.is_active ? 'Deactivate' : 'Activate'}
+                      </Button>
                       {isUpcoming ? (
                         <Button variant="destructive" size="sm" onClick={() => handleDeleteTest(test.test_id)}>
                           <Trash2 className="w-4 h-4 mr-2" />
                           Delete Test
                         </Button>
                       ) : (
-                        <span className="text-xs text-muted-foreground italic px-2">Already started/completed</span>
+                        <span className="text-xs text-muted-foreground italic px-2 flex items-center">Started/Completed</span>
                       )}
                     </div>
                   </div>
