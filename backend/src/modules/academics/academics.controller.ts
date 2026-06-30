@@ -465,6 +465,28 @@ export class AcademicsController {
     );
   }
 
+  @Get('hod/course-allocation-timetable-data')
+  @Roles('HOD', 'SuperAdmin')
+  hodCourseAllocationTimetableData(@Req() req: { user: AuthUser }) {
+    return this.academics.getHodCourseAllocationTimetableData(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/course-allocation-timetable-batch-save')
+  @Roles('HOD', 'SuperAdmin')
+  hodCourseAllocationTimetableBatchSave(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { semester: string; slots: Array<{ course_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string }> }
+  ) {
+    return this.academics.saveHodCourseAllocationTimetableBatch(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
+  }
+
   @Get('hod/syllabus-coverage')
   @Roles('HOD', 'SuperAdmin')
   hodSyllabusCoverage(@Req() req: { user: AuthUser }) {
@@ -538,7 +560,7 @@ export class AcademicsController {
   @Roles('HOD', 'SuperAdmin')
   hodCourseAllocation(
     @Req() req: { user: AuthUser },
-    @Body() dto: { timetable_id: string; faculty_user_id: string },
+    @Body() dto: { timetable_id: string; faculty_user_id: string; day_of_week?: number; start_time?: string; end_time?: string },
   ) {
     return this.academics.allocateHodCourse(
       this.resolveTenantId(req.user),
