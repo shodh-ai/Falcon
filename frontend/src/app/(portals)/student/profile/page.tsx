@@ -215,7 +215,7 @@ export default function StudentProfilePage() {
   }, [api]);
 
   useEffect(() => {
-    void loadProfile().catch(() => {}).finally(() => setLoading(false));
+    void loadProfile().catch(() => { }).finally(() => setLoading(false));
   }, [loadProfile]);
 
   useEffect(() => {
@@ -286,9 +286,29 @@ export default function StudentProfilePage() {
   }
 
   async function saveBankDetails() {
+    const { bank_name, account_number, ifsc_code } = bankData;
+
+    if (!bank_name || bank_name.trim().length < 3 || !/^[A-Za-z\s&.-]+$/.test(bank_name)) {
+      toast.error('Invalid Bank Name. Please enter a valid bank name.');
+      return;
+    }
+
+    if (!account_number || !/^\d{9,18}$/.test(account_number)) {
+      toast.error('Invalid Account Number. It must be between 9 to 18 digits.');
+      return;
+    }
+
+    if (!ifsc_code || !/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(ifsc_code)) {
+      toast.error('Invalid IFSC Code. Please ensure it follows the correct format (e.g., SBIN0001234).');
+      return;
+    }
+
+    const uppercaseIfsc = ifsc_code.toUpperCase();
+    const updatedBankData = { ...bankData, ifsc_code: uppercaseIfsc };
+
     try {
-      await api.patch('/api/student/profile', { bank_details: bankData });
-      setProfile((prev) => (prev ? { ...prev, bank_details: bankData } : null));
+      await api.patch('/api/student/profile', { bank_details: updatedBankData });
+      setProfile((prev) => (prev ? { ...prev, bank_details: updatedBankData } : null));
       setEditingBank(false);
       toast.success('Bank details saved!');
     } catch {
@@ -410,185 +430,185 @@ export default function StudentProfilePage() {
       <div className="space-y-6">
         <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
           <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
-          <CardHeader className="border-b border-border/70 bg-white/80 pb-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
-                <CardTitle className="text-base">Parent & address details</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  {isEditable
-                    ? 'Editing enabled — save before the timer expires.'
-                    : 'Submit a correction request below to unlock a 15-minute edit window.'}
-                </p>
-              </div>
-              {!isEditable ? (
-                <Badge variant="outline" className="shrink-0 gap-1 text-muted-foreground">
-                  <LockKeyhole className="h-3 w-3" />
-                  Locked
-                </Badge>
-              ) : null}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-5 pt-5">
-            <ProfileDetailSection title="Parents">
-              {[
-                { key: 'father_name', label: "Father's name" },
-                { key: 'mother_name', label: "Mother's name" },
-                { key: 'parent_occupation', label: "Parent's occupation" },
-                { key: 'annual_income', label: 'Annual income (scholarships)' },
-              ].map(({ key, label }) => (
-                <ProfileFieldRow key={key} label={label}>
-                  {isEditable ? (
-                    <Input
-                      className="h-9 sm:text-right"
-                      value={(parentForm as Record<string, string>)[key] ?? ''}
-                      onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
-                    />
-                  ) : (
-                    <ProfileFieldValue
-                      value={
-                        key === 'annual_income'
-                          ? formatAnnualIncome((parentForm as Record<string, string>)[key])
-                          : (parentForm as Record<string, unknown>)[key]
-                      }
-                    />
-                  )}
-                </ProfileFieldRow>
-              ))}
-            </ProfileDetailSection>
-
-            <ProfileDetailSection title="Emergency contact">
-              {[
-                { key: 'emergency_contact_name', label: 'Contact name' },
-                { key: 'emergency_contact_phone', label: 'Phone' },
-                { key: 'emergency_contact_priority', label: 'Priority' },
-              ].map(({ key, label }) => (
-                <ProfileFieldRow key={key} label={label}>
-                  {isEditable ? (
-                    <Input
-                      className="h-9 sm:text-right"
-                      value={(parentForm as Record<string, string>)[key] ?? ''}
-                      onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
-                    />
-                  ) : (
-                    <ProfileFieldValue value={(parentForm as Record<string, unknown>)[key]} />
-                  )}
-                </ProfileFieldRow>
-              ))}
-            </ProfileDetailSection>
-
-            <ProfileDetailSection title="Addresses">
-              <ProfileFieldRow label="Permanent address" stacked>
-                {isEditable ? (
-                  <textarea
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    rows={2}
-                    value={addressForm.permanent ?? ''}
-                    onChange={(e) => setAddressForm((a) => ({ ...a, permanent: e.target.value }))}
-                  />
-                ) : (
-                  <ProfileFieldValue value={addressForm.permanent} />
-                )}
-              </ProfileFieldRow>
-              <ProfileFieldRow label="Current address" stacked>
-                {isEditable ? (
-                  <textarea
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    rows={2}
-                    value={addressForm.current ?? ''}
-                    onChange={(e) => setAddressForm((a) => ({ ...a, current: e.target.value }))}
-                  />
-                ) : (
-                  <ProfileFieldValue value={addressForm.current} />
-                )}
-              </ProfileFieldRow>
-            </ProfileDetailSection>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-6">
-          <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
-            <CardHeader className="border-b border-border/70 bg-slate-50/50 pb-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base">Bank details</CardTitle>
-                  <p className="mt-1 text-xs text-muted-foreground">Used for refunds and scholarship disbursements</p>
+            <CardHeader className="border-b border-border/70 bg-white/80 pb-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <CardTitle className="text-base">Parent & address details</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    {isEditable
+                      ? 'Editing enabled — save before the timer expires.'
+                      : 'Submit a correction request below to unlock a 15-minute edit window.'}
+                  </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => (editingBank ? void saveBankDetails() : setEditingBank(true))}>
-                  {editingBank ? 'Save' : 'Edit'}
-                </Button>
+                {!isEditable ? (
+                  <Badge variant="outline" className="shrink-0 gap-1 text-muted-foreground">
+                    <LockKeyhole className="h-3 w-3" />
+                    Locked
+                  </Badge>
+                ) : null}
               </div>
             </CardHeader>
-            <CardContent className="pt-5">
-              {editingBank ? (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Bank name</label>
-                    <Input className="mt-2" value={bankData.bank_name} onChange={(e) => setBankData({ ...bankData, bank_name: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Account number</label>
-                    <Input className="mt-2" value={bankData.account_number} onChange={(e) => setBankData({ ...bankData, account_number: e.target.value })} />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">IFSC</label>
-                    <Input className="mt-2" value={bankData.ifsc_code} onChange={(e) => setBankData({ ...bankData, ifsc_code: e.target.value })} />
-                  </div>
-                </div>
-              ) : (
-                <ProfileDetailSection title="Bank account">
-                  <ProfileFieldRow label="Bank name">
-                    <ProfileFieldValue value={profile.bank_details?.bank_name} />
+            <CardContent className="space-y-5 pt-5">
+              <ProfileDetailSection title="Parents">
+                {[
+                  { key: 'father_name', label: "Father's name" },
+                  { key: 'mother_name', label: "Mother's name" },
+                  { key: 'parent_occupation', label: "Parent's occupation" },
+                  { key: 'annual_income', label: 'Annual income (scholarships)' },
+                ].map(({ key, label }) => (
+                  <ProfileFieldRow key={key} label={label}>
+                    {isEditable ? (
+                      <Input
+                        className="h-9 sm:text-right"
+                        value={(parentForm as Record<string, string>)[key] ?? ''}
+                        onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
+                      />
+                    ) : (
+                      <ProfileFieldValue
+                        value={
+                          key === 'annual_income'
+                            ? formatAnnualIncome((parentForm as Record<string, string>)[key])
+                            : (parentForm as Record<string, unknown>)[key]
+                        }
+                      />
+                    )}
                   </ProfileFieldRow>
-                  <ProfileFieldRow label="Account number">
-                    <ProfileFieldValue value={profile.bank_details?.account_number} />
-                  </ProfileFieldRow>
-                  <ProfileFieldRow label="IFSC code">
-                    <ProfileFieldValue value={profile.bank_details?.ifsc_code} />
-                  </ProfileFieldRow>
-                </ProfileDetailSection>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden border-emerald-200/70 bg-emerald-50/40 shadow-sm">
-            <CardHeader className="border-b border-emerald-200/60 pb-4">
-              <CardTitle className="text-base">Identity & documents</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-5">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
-                  <span className="font-medium text-sgvu-navy">Onboarding</span>
-                  <Badge variant={profile.onboarding_status === 'COMPLETED' ? 'success' : 'warning'}>
-                    {profile.onboarding_status ?? 'Not started'}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
-                  <span className="font-medium text-sgvu-navy">Aadhaar</span>
-                  <Badge variant={profile.aadhaar_masked || profile.onboarding_documents?.some((doc) => doc.doc_type === 'AADHAAR') ? 'success' : 'warning'}>
-                    {profile.aadhaar_masked ?? profile.onboarding_documents?.find((doc) => doc.doc_type === 'AADHAAR')?.status ?? 'Not on file'}
-                  </Badge>
-                </div>
-              </div>
-              <ProfileDetailSection title="Onboarding documents">
-                {(profile.onboarding_documents ?? []).length > 0 ? (
-                  profile.onboarding_documents?.map((doc) => (
-                    <ProfileFieldRow key={doc.doc_type} label={ONBOARDING_DOC_LABELS[doc.doc_type] ?? doc.doc_type}>
-                      <Badge variant={doc.status === 'APPROVED' ? 'success' : doc.status === 'REJECTED' ? 'destructive' : 'outline'}>
-                        {doc.status}
-                      </Badge>
-                    </ProfileFieldRow>
-                  ))
-                ) : (
-                  <div className="px-4 py-3 text-sm text-muted-foreground">No onboarding documents uploaded.</div>
-                )}
+                ))}
               </ProfileDetailSection>
-              <p className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-white/70 px-3 py-2.5 text-xs text-muted-foreground">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                Scholarship eligibility uses annual income on file.
-              </p>
+
+              <ProfileDetailSection title="Emergency contact">
+                {[
+                  { key: 'emergency_contact_name', label: 'Contact name' },
+                  { key: 'emergency_contact_phone', label: 'Phone' },
+                  { key: 'emergency_contact_priority', label: 'Priority' },
+                ].map(({ key, label }) => (
+                  <ProfileFieldRow key={key} label={label}>
+                    {isEditable ? (
+                      <Input
+                        className="h-9 sm:text-right"
+                        value={(parentForm as Record<string, string>)[key] ?? ''}
+                        onChange={(e) => setParentForm((p) => ({ ...p, [key]: e.target.value }))}
+                      />
+                    ) : (
+                      <ProfileFieldValue value={(parentForm as Record<string, unknown>)[key]} />
+                    )}
+                  </ProfileFieldRow>
+                ))}
+              </ProfileDetailSection>
+
+              <ProfileDetailSection title="Addresses">
+                <ProfileFieldRow label="Permanent address" stacked>
+                  {isEditable ? (
+                    <textarea
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      rows={2}
+                      value={addressForm.permanent ?? ''}
+                      onChange={(e) => setAddressForm((a) => ({ ...a, permanent: e.target.value }))}
+                    />
+                  ) : (
+                    <ProfileFieldValue value={addressForm.permanent} />
+                  )}
+                </ProfileFieldRow>
+                <ProfileFieldRow label="Current address" stacked>
+                  {isEditable ? (
+                    <textarea
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      rows={2}
+                      value={addressForm.current ?? ''}
+                      onChange={(e) => setAddressForm((a) => ({ ...a, current: e.target.value }))}
+                    />
+                  ) : (
+                    <ProfileFieldValue value={addressForm.current} />
+                  )}
+                </ProfileFieldRow>
+              </ProfileDetailSection>
             </CardContent>
           </Card>
-        </div>
+
+          <div className="space-y-6">
+            <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
+              <CardHeader className="border-b border-border/70 bg-slate-50/50 pb-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base">Bank details</CardTitle>
+                    <p className="mt-1 text-xs text-muted-foreground">Used for refunds and scholarship disbursements</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => (editingBank ? void saveBankDetails() : setEditingBank(true))}>
+                    {editingBank ? 'Save' : 'Edit'}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-5">
+                {editingBank ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Bank name</label>
+                      <Input className="mt-2" value={bankData.bank_name} onChange={(e) => setBankData({ ...bankData, bank_name: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Account number</label>
+                      <Input className="mt-2" value={bankData.account_number} onChange={(e) => setBankData({ ...bankData, account_number: e.target.value })} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">IFSC</label>
+                      <Input className="mt-2" value={bankData.ifsc_code} onChange={(e) => setBankData({ ...bankData, ifsc_code: e.target.value })} />
+                    </div>
+                  </div>
+                ) : (
+                  <ProfileDetailSection title="Bank account">
+                    <ProfileFieldRow label="Bank name">
+                      <ProfileFieldValue value={profile.bank_details?.bank_name} />
+                    </ProfileFieldRow>
+                    <ProfileFieldRow label="Account number">
+                      <ProfileFieldValue value={profile.bank_details?.account_number} />
+                    </ProfileFieldRow>
+                    <ProfileFieldRow label="IFSC code">
+                      <ProfileFieldValue value={profile.bank_details?.ifsc_code} />
+                    </ProfileFieldRow>
+                  </ProfileDetailSection>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="overflow-hidden border-emerald-200/70 bg-emerald-50/40 shadow-sm">
+              <CardHeader className="border-b border-emerald-200/60 pb-4">
+                <CardTitle className="text-base">Identity & documents</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-5">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
+                    <span className="font-medium text-sgvu-navy">Onboarding</span>
+                    <Badge variant={profile.onboarding_status === 'COMPLETED' ? 'success' : 'warning'}>
+                      {profile.onboarding_status ?? 'Not started'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
+                    <span className="font-medium text-sgvu-navy">Aadhaar</span>
+                    <Badge variant={profile.aadhaar_masked || profile.onboarding_documents?.some((doc) => doc.doc_type === 'AADHAAR') ? 'success' : 'warning'}>
+                      {profile.aadhaar_masked ?? profile.onboarding_documents?.find((doc) => doc.doc_type === 'AADHAAR')?.status ?? 'Not on file'}
+                    </Badge>
+                  </div>
+                </div>
+                <ProfileDetailSection title="Onboarding documents">
+                  {(profile.onboarding_documents ?? []).length > 0 ? (
+                    profile.onboarding_documents?.map((doc) => (
+                      <ProfileFieldRow key={doc.doc_type} label={ONBOARDING_DOC_LABELS[doc.doc_type] ?? doc.doc_type}>
+                        <Badge variant={doc.status === 'APPROVED' ? 'success' : doc.status === 'REJECTED' ? 'destructive' : 'outline'}>
+                          {doc.status}
+                        </Badge>
+                      </ProfileFieldRow>
+                    ))
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-muted-foreground">No onboarding documents uploaded.</div>
+                  )}
+                </ProfileDetailSection>
+                <p className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-white/70 px-3 py-2.5 text-xs text-muted-foreground">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  Scholarship eligibility uses annual income on file.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         <Card className="border-sgvu-gold/30 shadow-lg">
