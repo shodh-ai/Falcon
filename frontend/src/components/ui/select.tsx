@@ -14,6 +14,17 @@ interface SelectProps extends Omit<React.ComponentPropsWithoutRef<typeof SelectP
   value?: any;
 }
 
+/** Flatten option label children without Array.toString() comma joins. */
+function getOptionLabel(children: React.ReactNode): string {
+  if (children == null || typeof children === 'boolean') return '';
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(getOptionLabel).join('');
+  if (React.isValidElement(children)) {
+    return getOptionLabel((children.props as { children?: React.ReactNode }).children);
+  }
+  return String(children);
+}
+
 const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
   ({ children, className, onChange, value, placeholder, name, disabled, id, ...props }, ref) => {
     const options: Array<{ value: string; label: string }> = [];
@@ -27,8 +38,8 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           if (el.type === 'option') {
             isNativeReplacement = true;
             options.push({
-              value: String(el.props.value ?? el.props.children ?? ''),
-              label: String(el.props.children ?? ''),
+              value: String(el.props.value ?? getOptionLabel(el.props.children) ?? ''),
+              label: getOptionLabel(el.props.children),
             });
           } else if (el.props && typeof el.props === 'object' && 'children' in el.props) {
             extractOptions(el.props.children);

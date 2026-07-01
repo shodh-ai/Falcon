@@ -1453,7 +1453,7 @@ export class FacultyWorkspacesService {
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
-    const [studentRows, statsRows, assignmentRows, demeritRows, summaryRows, academicRows] =
+    const [studentRows, statsRows, assignmentRows, demeritRows, summaryRows, academicRows, gpaHistory] =
       await Promise.all([
         this.dataSource.query(
           `SELECT u.user_id AS student_user_id, u.name, u.official_email,
@@ -1594,10 +1594,10 @@ export class FacultyWorkspacesService {
           `SELECT academic_year, semester, sgpa, cgpa, backlog_count, progression_status, remarks
            FROM academic_records
            WHERE tenant_id = $1 AND student_user_id = $2
-           ORDER BY academic_year DESC, semester DESC
-           LIMIT 1`,
+           ORDER BY semester ASC`,
           [tenantId, studentUserId],
         ).catch(() => []),
+        this.loadStudentGpaHistory(tenantId, studentUserId),
       ]);
 
     const student = studentRows[0];
@@ -1613,7 +1613,18 @@ export class FacultyWorkspacesService {
       (sum, row) => sum + Number(row.points ?? 0),
       0,
     );
-    const academic = academicRows[0] ?? null;
+    const academic = academicRows.length ? academicRows[academicRows.length - 1] : null;
+    const gpaHistoryFinal =
+      gpaHistory.length > 0
+        ? gpaHistory
+        : academicRows.map((row) => ({
+            semester: Number(row.semester),
+            sgpa: Number(row.sgpa ?? 0),
+            cgpa: Number(row.cgpa ?? 0),
+            status: row.progression_status ?? 'RECORD',
+            academic_year: row.academic_year ?? null,
+            source: 'academic_record',
+          }));
     const academicSummary = summaryRows[0] ?? null;
     const flags: Array<{ label: string; severity: 'LOW' | 'MEDIUM' | 'HIGH'; detail: string }> = [];
 
@@ -1699,7 +1710,118 @@ export class FacultyWorkspacesService {
       assignments: assignmentRows,
       demerits: demeritRows,
       risk_flags: flags,
+      gpa_history: gpaHistoryFinal,
     };
+  }
+
+  private async loadStudentGpaHistory(tenantId: string, studentUserId: string) {
+    const gradeCards = await this.dataSource
+      .query<
+        Array<{
+          semester: number;
+          sgpa: string | number | null;
+          cgpa: string | number | null;
+          status: string | null;
+          academic_year: string | null;
+          source: string;
+        }>
+      >(
+        `SELECT
+           g.semester,
+           COALESCE((g.payload->>'sgpa')::numeric, g.cgpa, 0) AS sgpa,
+           COALESCE((g.payload->>'cgpa')::numeric, g.cgpa, 0) AS cgpa,
+           g.status,
+           g.payload->>'academic_year' AS academic_year,
+           'grade_card' AS source
+         FROM grade_cards g
+         WHERE g.tenant_id = $1 AND g.student_user_id = $2
+         ORDER BY g.semester ASC`,
+        [tenantId, studentUserId],
+      )
+      .catch(() => []);
+
+    if (gradeCards.length) {
+      return gradeCards.map((row) => ({
+        semester: Number(row.semester),
+        sgpa: Number(row.sgpa ?? 0),
+        cgpa: Number(row.cgpa ?? 0),
+        status: row.status ?? 'PUBLISHED',
+        academic_year: row.academic_year,
+        source: row.source,
+      }));
+    }
+
+    const academicRecords = await this.dataSource
+      .query<
+        Array<{
+          semester: number;
+          sgpa: string | number | null;
+          cgpa: string | number | null;
+          academic_year: string | null;
+          progression_status: string | null;
+        }>
+      >(
+        `SELECT semester, sgpa, cgpa, academic_year, progression_status
+         FROM academic_records
+         WHERE tenant_id = $1 AND student_user_id = $2
+         ORDER BY semester ASC`,
+        [tenantId, studentUserId],
+      )
+      .catch(() => []);
+
+    if (academicRecords.length) {
+      return academicRecords.map((row) => ({
+        semester: Number(row.semester),
+        sgpa: Number(row.sgpa ?? 0),
+        cgpa: Number(row.cgpa ?? 0),
+        status: row.progression_status ?? 'RECORD',
+        academic_year: row.academic_year,
+        source: 'academic_record',
+      }));
+    }
+
+    const enrollments = await this.dataSource.query<
+      Array<{ semester: number; grade_points: string | number | null; credits: number }>
+    >(
+      `SELECT e.semester, e.grade_points, c.credits
+       FROM student_course_enrollments e
+       INNER JOIN academic_courses c ON c.course_id = e.course_id
+       WHERE e.tenant_id = $1
+         AND e.student_user_id = $2
+         AND e.status = 'COMPLETED'
+         AND e.grade_points IS NOT NULL
+       ORDER BY e.semester ASC`,
+      [tenantId, studentUserId],
+    );
+
+    const semesterMap = new Map<number, { points: number; credits: number }>();
+    for (const row of enrollments) {
+      const sem = Number(row.semester);
+      const bucket = semesterMap.get(sem) ?? { points: 0, credits: 0 };
+      bucket.points += Number(row.grade_points) * Number(row.credits);
+      bucket.credits += Number(row.credits);
+      semesterMap.set(sem, bucket);
+    }
+
+    let cumulativePoints = 0;
+    let cumulativeCredits = 0;
+    return [...semesterMap.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([semester, { points, credits }]) => {
+        cumulativePoints += points;
+        cumulativeCredits += credits;
+        return {
+          semester,
+          sgpa: credits > 0 ? Number((points / credits).toFixed(2)) : 0,
+          cgpa:
+            cumulativeCredits > 0
+              ? Number((cumulativePoints / cumulativeCredits).toFixed(2))
+              : 0,
+          status: 'COMPUTED',
+          academic_year: null,
+          source: 'enrollment',
+        };
+      });
   }
 
   async listLogbook(
