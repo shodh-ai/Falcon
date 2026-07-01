@@ -4,6 +4,9 @@
   "exclude": ["node_modules", "test", "dist", "**/*spec.ts"],
   "compilerOptions": {
     "rootDir": "src",
-    "noEmit": false
+    "noEmit": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "resolvePackageJsonExports": false
   }
 }

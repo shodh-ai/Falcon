@@ -9,6 +9,7 @@ import {
   type IAuthProvider,
 } from './interfaces/auth-provider.interface';
 import { TenantService } from '../tenant/tenant.service';
+import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
@@ -68,8 +69,7 @@ export class AuthService {
     password: string,
     tenantSubdomain?: string,
   ): Promise<{ token: string; user: Record<string, unknown> }> {
-    const subdomain =
-      tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+    const subdomain = resolveTenantSubdomain(tenantSubdomain);
     const tenant = await this.tenantService.findBySubdomain(subdomain);
 
     const [credential] = await this.dataSource.query<LoginCredentialRow[]>(

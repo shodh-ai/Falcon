@@ -421,33 +421,68 @@ export class AcademicsFacultyService {
   async getMissingAttendanceAlerts(facultyUserId: string, tenantId: string) {
     const isoDay = new Date().getDay() === 0 ? 7 : new Date().getDay();
     return this.dataSource.query(
-      `SELECT
-         t.timetable_id,
-         t.course_id,
+      `WITH faculty_courses AS (
+         SELECT DISTINCT a.course_id
+         FROM academic_course_allocations a
+         WHERE a.tenant_id = $1
+           AND a.faculty_user_id = $2
+           AND a.status = 'ACTIVE'
+           AND a.course_id IS NOT NULL
+       ),
+       proxy_today AS (
+         SELECT p.course_id, p.absent_faculty_id
+         FROM academic_proxy_requests p
+         WHERE p.tenant_id = $1
+           AND p.proxy_faculty_id = $2
+           AND p.date_of_proxy = CURRENT_DATE
+           AND p.status = 'APPROVED'
+       ),
+       eligible_courses AS (
+         SELECT course_id, $2::uuid AS log_faculty_id
+         FROM faculty_courses
+         UNION
+         SELECT course_id, absent_faculty_id AS log_faculty_id
+         FROM proxy_today
+       ),
+       today_slots AS (
+         SELECT
+           t.timetable_id,
+           t.course_id,
+           t.start_time,
+           t.end_time,
+           ec.log_faculty_id
+         FROM eligible_courses ec
+         INNER JOIN academic_timetables t
+           ON t.tenant_id = $1
+          AND t.course_id = ec.course_id
+          AND t.day_of_week = $3
+         WHERE t.end_time < CURRENT_TIME
+       )
+       SELECT
+         ts.timetable_id,
+         ts.course_id,
          c.course_code,
          c.course_name,
-         t.start_time,
-         t.end_time,
+         ts.start_time,
+         ts.end_time,
          COUNT(e.enrollment_id)::int AS student_count
-       FROM academic_timetables t
-       INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       FROM today_slots ts
+       INNER JOIN academic_courses c
+         ON c.course_id = ts.course_id
+        AND c.tenant_id = $1
        LEFT JOIN student_course_enrollments e
-         ON e.tenant_id = t.tenant_id
-        AND e.course_id = t.course_id
+         ON e.tenant_id = $1
+        AND e.course_id = ts.course_id
         AND e.status = 'ENROLLED'
        LEFT JOIN course_attendance_logs cal
-         ON cal.tenant_id = t.tenant_id
-        AND cal.course_id = t.course_id
-        AND cal.faculty_user_id = t.faculty_user_id
+         ON cal.tenant_id = $1
+        AND cal.course_id = ts.course_id
+        AND cal.faculty_user_id = ts.log_faculty_id
         AND cal.date = CURRENT_DATE
-        AND cal.timetable_id = t.timetable_id
-       WHERE t.tenant_id = $1
-         AND t.faculty_user_id = $2
-         AND t.day_of_week = $3
-         AND t.end_time < CURRENT_TIME
-         AND cal.log_id IS NULL
-       GROUP BY t.timetable_id, t.course_id, c.course_code, c.course_name, t.start_time, t.end_time
-       ORDER BY t.start_time ASC`,
+        AND cal.timetable_id = ts.timetable_id
+       WHERE cal.log_id IS NULL
+       GROUP BY ts.timetable_id, ts.course_id, c.course_code, c.course_name, ts.start_time, ts.end_time
+       ORDER BY ts.start_time ASC`,
       [tenantId, facultyUserId, isoDay],
     );
   }
