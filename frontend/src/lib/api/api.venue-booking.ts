@@ -63,8 +63,10 @@ export type PendingVenueBooking = {
 
 export function createVenueBookingApi(api: AuthedApi) {
   return {
-    listVenues: (tag?: string) =>
-      api.get<CampusVenue[]>(`/api/venue-bookings/venues${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`),
+    listVenues: (tags?: string[]) => {
+      const qs = tags?.length ? `?${tags.map(t => `tags=${encodeURIComponent(t)}`).join('&')}` : '';
+      return api.get<CampusVenue[]>(`/api/venue-bookings/venues${qs}`);
+    },
     amenityTags: () => api.get<string[]>('/api/venue-bookings/amenity-tags'),
     availability: (venueId: string, date: string) =>
       api.get<VenueAvailability>(`/api/venue-bookings/venues/${venueId}/availability?date=${encodeURIComponent(date)}`),

@@ -284,6 +284,7 @@ export const studentPortal: PortalConfig = {
     {
       title: 'Academics & Examinations',
       items: [
+        { label: 'Weekly Timetable', href: '/student/timetable', icon: CalendarDays, keywords: ['timetable', 'schedule', 'classes'] },
         { label: 'Subjects & Registration (CBCS)', href: '/student/registration', icon: BookOpen, keywords: ['cbcs', 'electives', 'credits', 'courses'] },
         { label: 'Course Page & DA', href: '/student/courses', icon: NotebookPen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'syllabus', 'lms'] },
         { label: 'Attendance & Progression', href: '/student/attendance', icon: ClipboardCheck, keywords: ['attendance', 'semester', 'progression'] },

@@ -76,7 +76,7 @@ export default function StudentVenuesPage() {
   const [tab, setTab] = useState<Tab>('browse');
   const [venues, setVenues] = useState<CampusVenue[]>([]);
   const [tags, setTags] = useState<string[]>([]);
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [activeTags, setActiveTags] = useState<string[]>([]);
   const [selectedVenue, setSelectedVenue] = useState<CampusVenue | null>(null);
   const [selectedDate, setSelectedDate] = useState(toDateInput());
   const [slots, setSlots] = useState<VenueBookingSlot[]>([]);
@@ -89,14 +89,14 @@ export default function StudentVenuesPage() {
 
   const loadCatalog = useCallback(async () => {
     const [venueRows, tagRows, bookingRows] = await Promise.all([
-      venueApi.listVenues(activeTag ?? undefined),
+      venueApi.listVenues(activeTags),
       venueApi.amenityTags(),
       venueApi.myBookings(),
     ]);
     setVenues(venueRows);
     setTags(tagRows);
     setMyBookings(bookingRows);
-  }, [venueApi, activeTag]);
+  }, [venueApi, activeTags]);
 
   const loadSlots = useCallback(async () => {
     if (!selectedVenue) return;
@@ -184,21 +184,24 @@ export default function StudentVenuesPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setActiveTag(null)}
-                className={`rounded-full px-3 py-1 text-sm ${activeTag === null ? 'bg-sgvu-navy text-white' : 'bg-slate-100 text-slate-700'}`}
+                onClick={() => setActiveTags([])}
+                className={`rounded-full px-3 py-1 text-sm ${activeTags.length === 0 ? 'bg-sgvu-navy text-white' : 'bg-slate-100 text-slate-700'}`}
               >
                 All spaces
               </button>
-              {tags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => setActiveTag(tag)}
-                  className={`rounded-full px-3 py-1 text-sm ${activeTag === tag ? 'bg-sgvu-navy text-white' : 'bg-slate-100 text-slate-700'}`}
-                >
-                  {tag}
-                </button>
-              ))}
+              {tags.map((tag) => {
+                const isActive = activeTags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setActiveTags(prev => isActive ? prev.filter(t => t !== tag) : [...prev, tag])}
+                    className={`rounded-full px-3 py-1 text-sm ${isActive ? 'bg-sgvu-navy text-white' : 'bg-slate-100 text-slate-700'}`}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
             </div>
           </StudentSectionCard>
 

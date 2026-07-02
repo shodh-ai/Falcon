@@ -32,6 +32,12 @@ export async function handleNotificationAction(
     if (path === '/student/fees') {
       path = isLaunchModuleEnabled('finance') ? '/student/finance' : '/student/dashboard';
     }
+    if (path === '/student/timetable') {
+      path = '/student/dashboard';
+    }
+    if (path === '/student/grades') {
+      path = '/student/marks';
+    }
     router.push(path);
     return 'navigate';
   }

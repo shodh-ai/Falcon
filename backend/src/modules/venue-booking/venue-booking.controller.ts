@@ -28,8 +28,8 @@ export class VenueBookingController {
 
   @Get('venues')
   @Roles('Student', 'Faculty', 'SuperAdmin')
-  listVenues(@Req() req: { user: AuthUser }, @Query('tag') tag?: string) {
-    return this.venueBooking.listVenues(this.tenant(req), tag);
+  listVenues(@Req() req: { user: AuthUser }, @Query('tags') tags?: string | string[]) {
+    return this.venueBooking.listVenues(this.tenant(req), tags);
   }
 
   @Get('amenity-tags')
