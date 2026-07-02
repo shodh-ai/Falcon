@@ -102,27 +102,22 @@ BEGIN
   IF to_regclass('public.project_guide_students') IS NOT NULL THEN
     IF v_student1 IS NOT NULL THEN
       INSERT INTO project_guide_students (guide_id, student_user_id, tenant_id)
-      VALUES (v_guide1, v_student1, v_tenant)
-      ON CONFLICT (guide_id, student_user_id) DO NOTHING;
+      VALUES (v_guide1, v_student1, v_tenant);
     END IF;
     IF v_student2 IS NOT NULL THEN
       INSERT INTO project_guide_students (guide_id, student_user_id, tenant_id)
-      VALUES (v_guide1, v_student2, v_tenant)
-      ON CONFLICT (guide_id, student_user_id) DO NOTHING;
+      VALUES (v_guide1, v_student2, v_tenant);
     END IF;
     IF v_student3 IS NOT NULL THEN
       INSERT INTO project_guide_students (guide_id, student_user_id, tenant_id)
-      VALUES (v_guide2, v_student3, v_tenant)
-      ON CONFLICT (guide_id, student_user_id) DO NOTHING;
+      VALUES (v_guide2, v_student3, v_tenant);
 
       INSERT INTO project_guide_students (guide_id, student_user_id, grade, tenant_id)
-      VALUES (v_guide3, v_student3, 'A', v_tenant)
-      ON CONFLICT (guide_id, student_user_id) DO UPDATE SET grade = EXCLUDED.grade;
+      VALUES (v_guide3, v_student3, 'A', v_tenant);
     END IF;
     IF v_student1 IS NOT NULL THEN
       INSERT INTO project_guide_students (guide_id, student_user_id, grade, tenant_id)
-      VALUES (v_guide3, v_student1, 'A+', v_tenant)
-      ON CONFLICT (guide_id, student_user_id) DO UPDATE SET grade = EXCLUDED.grade;
+      VALUES (v_guide3, v_student1, 'A+', v_tenant);
     END IF;
   END IF;
 

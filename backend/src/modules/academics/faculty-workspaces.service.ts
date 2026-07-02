@@ -42,6 +42,12 @@ const FACULTY_COURSE_ACCESS_SQL = `(
       AND t.faculty_user_id = $2
       AND t.tenant_id = e.tenant_id
   )
+  OR EXISTS (
+    SELECT 1 FROM academic_marks m
+    WHERE m.course_id = e.course_id
+      AND m.uploaded_by = $2
+      AND m.tenant_id = e.tenant_id
+  )
 )`;
 
 /** Canonical roll-number expression — semester roll on enrollment, then permanent PRN. */
@@ -1990,6 +1996,9 @@ export class FacultyWorkspacesService {
        ) OR EXISTS (
          SELECT 1 FROM academic_timetables
          WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3
+       ) OR EXISTS (
+         SELECT 1 FROM academic_marks
+         WHERE tenant_id = $1 AND uploaded_by = $2 AND course_id = $3
        )`,
       [tenantId, facultyUserId, courseId],
     );

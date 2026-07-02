@@ -178,7 +178,7 @@ export function marksPublishedMessage(
       category: 'ACADEMICS',
       title: `${payload.examType} marks published`,
       message: `${payload.examType} marks for ${payload.courseName} are now available. Review your score and raise any concerns with your faculty.`,
-      actionLink: '/student/grades',
+      actionLink: '/student/marks',
       actionLabel: 'View marks',
       severity: 'info',
       intent: 'status_update',

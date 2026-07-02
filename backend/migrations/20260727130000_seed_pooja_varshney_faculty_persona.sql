@@ -163,10 +163,10 @@ SELECT
   c.course_id,
   'ACTIVE'
 FROM raw r
+CROSS JOIN tenant t
 JOIN academic_subjects s ON s.subject_code = r.subject_code
 JOIN academic_courses c ON c.course_code = s.subject_code AND c.tenant_id = t.tenant_id
 JOIN faculty f ON true
-CROSS JOIN tenant t
 WHERE f.user_id IS NOT NULL
   AND s.subject_id IS NOT NULL
   AND c.course_id IS NOT NULL

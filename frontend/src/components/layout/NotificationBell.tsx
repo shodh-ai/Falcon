@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { Bell, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -40,8 +41,15 @@ export function NotificationBell({
   const actionRequired = notifications.filter((n) => n.intent === 'action_required' && n.unread);
   const summary = notificationSummary(unread, actionRequired.length);
 
+  const [open, setOpen] = useState(false);
+
+  const handleSelect = (n: AppNotification) => {
+    setOpen(false);
+    onSelect?.(n);
+  };
+
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="icon" className={cn('relative', HEADER_ICON_CONTROL_CLASS)}>
           <Bell className="h-5 w-5" />
@@ -89,7 +97,7 @@ export function NotificationBell({
                   key={n.id}
                   notification={n}
                   compact
-                  onClick={() => onSelect?.(n)}
+                  onClick={() => handleSelect(n)}
                 />
               ))}
             </div>
@@ -100,6 +108,7 @@ export function NotificationBell({
         <DropdownMenuItem asChild className="p-0">
           <Link
             href={viewAllHref}
+            onClick={() => setOpen(false)}
             className="flex w-full justify-center px-4 py-3 text-center text-sm font-semibold text-sgvu-navy hover:bg-muted/50"
           >
             Open notification center
