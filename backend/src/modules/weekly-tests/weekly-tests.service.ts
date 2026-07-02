@@ -208,7 +208,7 @@ export class WeeklyTestsService {
         // Push all scores to academic_marks
         await this.dataSource.query(
           `INSERT INTO academic_marks (tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, status, published_at)
-           SELECT t.tenant_id, r.student_user_id, t.course_id, t.test_type, r.score, 10, 'PUBLISHED', NOW()
+           SELECT t.tenant_id, r.student_user_id, t.course_id, t.test_type, r.score, 5, 'PUBLISHED', NOW()
            FROM weekly_test_responses r
            JOIN weekly_tests t ON t.test_id = r.test_id
            WHERE r.test_id = $1 AND r.submitted_at IS NOT NULL

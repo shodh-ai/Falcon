@@ -84,6 +84,7 @@ export function FacultyPanel({
   children,
   className,
   description,
+  contentClassName,
 }: {
   id?: string;
   title: string;
@@ -92,11 +93,12 @@ export function FacultyPanel({
   children: ReactNode;
   className?: string;
   description?: string;
+  contentClassName?: string;
 }) {
   return (
     <section
       id={id}
-      className={cn('overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm', className)}
+      className={cn('flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm', className)}
     >
       <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-4 py-3 sm:px-5">
         <div className="min-w-0">
@@ -119,7 +121,7 @@ export function FacultyPanel({
           </Link>
         ) : null}
       </div>
-      <div className="p-4 sm:p-5">{children}</div>
+      <div className={cn('p-4 sm:p-5', contentClassName)}>{children}</div>
     </section>
   );
 }

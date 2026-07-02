@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { Loader2, PlayCircle, Clock } from 'lucide-react';
+import { Loader2, PlayCircle, Clock, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import {
   StudentPageHeader,
@@ -25,6 +25,7 @@ type WeeklyTest = {
   end_time: string;
   status: string;
   is_active: boolean;
+  submitted_at?: string | null;
 };
 
 export default function StudentWeeklyTestsPage() {
@@ -84,9 +85,10 @@ export default function StudentWeeklyTestsPage() {
                 const isOngoing = !isCompleted && now >= startTime && now <= endTime;
                 const isUpcoming = !isCompleted && now < startTime;
                 const isInactive = test.is_active === false;
+                const isAttempted = Boolean(test.submitted_at);
                 
                 return (
-                  <div key={test.test_id} className={`rounded-xl border p-4 flex flex-col gap-3 ${(isCompleted || isInactive) ? 'opacity-60 bg-muted/20 grayscale' : ''}`}>
+                  <div key={test.test_id} className={`rounded-xl border p-4 flex flex-col gap-3 ${(isCompleted || isInactive) && !isAttempted ? 'opacity-60 bg-muted/20 grayscale' : ''}`}>
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
@@ -115,7 +117,12 @@ export default function StudentWeeklyTestsPage() {
                       </div>
                     
                     <div className="mt-auto pt-2 flex justify-end">
-                      {isInactive ? (
+                      {isAttempted ? (
+                        <Button variant="secondary" disabled>
+                          <CheckCircle2 className="w-4 h-4 mr-2" />
+                          Attempted
+                        </Button>
+                      ) : isInactive ? (
                         <Button variant="secondary" onClick={() => toast.error("This test is currently inactive")}>
                           <PlayCircle className="w-4 h-4 mr-2" />
                           Inactive

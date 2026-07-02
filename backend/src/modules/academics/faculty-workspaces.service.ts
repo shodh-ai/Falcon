@@ -7,25 +7,34 @@ import {
 import * as crypto from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { assertNoPendingSql } from '../../common/validators/pending-request.util';
+import {
+  GRADING_COMPONENT_CATALOG,
+  GRADING_COMPONENT_IDS,
+  getGradingComponentMax,
+  isAutoSyncedExamType,
+  isFacultyDirectGradingType,
+  isKnownExamType,
+  normalizeExamTypeForSave,
+} from './grading-components';
 
-const EXAM_TYPES = [
+const LEGACY_EXAM_TYPES = [
   'CAT1',
   'CAT2',
   'QUIZ',
   'END_TERM',
   'INTERNAL',
   'ASSIGNMENT',
-  'WT1',
-  'WT2',
-  'GA1',
-  'GA2',
+  'DA1',
+  'DA2',
   'MTE1',
   'MTE2',
-  'ETE',
 ] as const;
-type ExamType = (typeof EXAM_TYPES)[number];
+
+const EXAM_TYPES = [...new Set([...GRADING_COMPONENT_IDS, ...LEGACY_EXAM_TYPES])] as readonly string[];
+type ExamType = string;
 
 /** Enrollment visible to faculty who hold an active allocation or timetable slot for the course. */
 const FACULTY_COURSE_ACCESS_SQL = `(
@@ -496,28 +505,31 @@ export class FacultyWorkspacesService {
   async saveMarksDraft(
     facultyUserId: string,
     tenantId: string,
-    dto: {
-      course_id: string;
-      exam_type: string;
-      max_marks: number;
-      entries: {
-        student_user_id: string;
-        marks_obtained: number;
-        co_mapped?: string;
-      }[];
-    },
+    dto: SaveMarksDraftDto,
   ) {
-    if (!EXAM_TYPES.includes(dto.exam_type as ExamType)) {
-      throw new BadRequestException('Invalid exam_type');
+    const examType = normalizeExamTypeForSave(
+      String(dto.exam_type ?? dto.examType ?? '').trim(),
+    );
+    if (!examType || !isKnownExamType(examType)) {
+      throw new BadRequestException(
+        `Invalid exam_type: ${dto.exam_type ?? dto.examType ?? '(missing)'}`,
+      );
+    }
+    if (isAutoSyncedExamType(examType)) {
+      throw new BadRequestException(
+        `${examType} is auto-synced from exams and cannot be entered manually`,
+      );
     }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, dto.course_id);
-    const isDirectPublish = ['QUIZ', 'GA1', 'GA2'].includes(dto.exam_type);
-    
-    if (!isDirectPublish) {
+    const isDirectPublish = examType === 'QUIZ';
+    const needsExamCellSession =
+      !isDirectPublish && !isFacultyDirectGradingType(examType);
+
+    if (needsExamCellSession) {
       const session = await this.getResultSession(
         tenantId,
         dto.course_id,
-        dto.exam_type,
+        examType,
       );
       this.assertFacultyEntryAllowed(session);
     }
@@ -527,7 +539,7 @@ export class FacultyWorkspacesService {
         `SELECT 1 FROM academic_marks
          WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
            AND status IN ('PENDING_COE', 'PUBLISHED') LIMIT 1`,
-        [tenantId, dto.course_id, dto.exam_type],
+        [tenantId, dto.course_id, examType],
       );
       if (locked[0]) {
         throw new ForbiddenException(
@@ -535,7 +547,7 @@ export class FacultyWorkspacesService {
         );
       }
     }
-    const maxMarks = dto.max_marks;
+    const maxMarks = getGradingComponentMax(examType) ?? dto.max_marks;
     for (const entry of dto.entries) {
       if (entry.marks_obtained > maxMarks) {
         throw new BadRequestException(`Marks cannot exceed ${maxMarks}`);
@@ -550,7 +562,7 @@ export class FacultyWorkspacesService {
       const params: unknown[] = [
         tenantId,
         dto.course_id,
-        dto.exam_type,
+        examType,
         maxMarks,
         facultyUserId,
       ];
@@ -581,7 +593,7 @@ export class FacultyWorkspacesService {
              ELSE EXCLUDED.co_mapped
            END,
            status = CASE
-             WHEN EXCLUDED.exam_type IN ('QUIZ', 'GA1', 'GA2') THEN 'DRAFT'
+             WHEN EXCLUDED.exam_type = 'QUIZ' THEN 'DRAFT'
              WHEN academic_marks.status IN ('PENDING_COE', 'PUBLISHED') THEN academic_marks.status
              ELSE 'DRAFT'
            END,
@@ -597,11 +609,17 @@ export class FacultyWorkspacesService {
     facultyUserId: string,
     tenantId: string,
     courseId: string,
-    examType: string,
+    examTypeInput: string,
   ) {
+    const examType = normalizeExamTypeForSave(String(examTypeInput ?? '').trim());
+    if (!examType || !isKnownExamType(examType)) {
+      throw new BadRequestException(`Invalid exam_type: ${examTypeInput}`);
+    }
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
-    const isDirectPublish = ['QUIZ', 'GA1', 'GA2'].includes(examType);
-    if (!isDirectPublish) {
+    const isDirectPublish = examType === 'QUIZ';
+    const needsExamCellSession =
+      !isDirectPublish && !isFacultyDirectGradingType(examType);
+    if (needsExamCellSession) {
       const session = await this.getResultSession(tenantId, courseId, examType);
       this.assertFacultyEntryAllowed(session);
     }
@@ -672,7 +690,12 @@ export class FacultyWorkspacesService {
     };
   }
 
-  async getUnifiedCourseMarks(facultyUserId: string, tenantId: string, courseId: string) {
+  async getUnifiedCourseMarks(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    _components?: string[],
+  ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
     const rows = await this.dataSource.query(
@@ -710,14 +733,83 @@ export class FacultyWorkspacesService {
       }
       const s = studentsMap.get(r.student_user_id);
       if (r.exam_type) {
-        s.marks[r.exam_type] = {
+        const normalizedType = this.normalizeExamTypeForDisplay(r.exam_type);
+        s.marks[normalizedType] = {
           obtained: r.marks_obtained != null ? Number(r.marks_obtained) : null,
           status: r.mark_status,
+          source: 'academic_marks',
         };
       }
     }
 
+    await this.mergeAutoSyncedMarks(tenantId, courseId, studentsMap);
+
     return Array.from(studentsMap.values());
+  }
+
+  private normalizeExamTypeForDisplay(examType: string) {
+    if (examType === 'MTE1') return 'MT1';
+    if (examType === 'MTE2') return 'MT2';
+    return examType;
+  }
+
+  private applyAutoMark(
+    studentsMap: Map<string, any>,
+    studentUserId: string,
+    examType: string,
+    marksObtained: number | null,
+    status = 'PUBLISHED',
+  ) {
+    const student = studentsMap.get(studentUserId);
+    if (!student || marksObtained == null) return;
+    const normalizedType = this.normalizeExamTypeForDisplay(examType);
+    const existing = student.marks[normalizedType];
+    if (existing?.obtained != null && existing?.source === 'academic_marks') {
+      return;
+    }
+    student.marks[normalizedType] = {
+      obtained: Number(marksObtained),
+      status,
+      source: 'auto_sync',
+    };
+  }
+
+  private async mergeAutoSyncedMarks(
+    tenantId: string,
+    courseId: string,
+    studentsMap: Map<string, any>,
+  ) {
+    const wtRows = await this.dataSource
+      .query<
+        Array<{
+          student_user_id: string;
+          exam_type: string;
+          marks_obtained: string | number;
+        }>
+      >(
+        `SELECT r.student_user_id, t.test_type AS exam_type, r.score AS marks_obtained
+         FROM weekly_tests t
+         INNER JOIN weekly_test_responses r ON r.test_id = t.test_id
+         WHERE t.tenant_id = $1
+           AND t.course_id = $2
+           AND t.test_type IN ('WT1', 'WT2')
+           AND r.submitted_at IS NOT NULL`,
+        [tenantId, courseId],
+      )
+      .catch(() => []);
+
+    for (const row of wtRows) {
+      this.applyAutoMark(
+        studentsMap,
+        row.student_user_id,
+        row.exam_type,
+        row.marks_obtained != null ? Number(row.marks_obtained) : null,
+      );
+    }
+  }
+
+  async listGradingComponents() {
+    return GRADING_COMPONENT_CATALOG;
   }
 
   async listCoPoMappings(tenantId: string, courseId: string) {
