@@ -294,6 +294,91 @@ export const presidentPages = {
       { label: 'Payroll Expense', value: money((data as Record<string, unknown> | null)?.total_payroll_expense) },
     ],
   },
+  financeBudget: {
+    title: 'Finance & Budgetary Control',
+    subtitle: 'High-level overview of university finances, department-wise budget utilization, and pending approvals.',
+    endpoint: '/api/president/finance-budget',
+    dataKey: 'department_budgets',
+    summary: (data) => [
+      { label: 'Total Allocated', value: money((data as Record<string, unknown> | null)?.total_allocated) },
+      { label: 'Total Utilized', value: money((data as Record<string, unknown> | null)?.total_utilized) },
+      { label: 'Pending Approvals', value: count(data, 'pending_approvals') },
+      { label: 'Audit Status', value: String((data as Record<string, unknown> | null)?.audit_status ?? 'N/A') },
+    ],
+    columns: [
+      { key: 'department', label: 'Department' },
+      { key: 'allocated', label: 'Allocated Amount' },
+      { key: 'utilized', label: 'Utilized Amount' },
+    ],
+  },
+  researchHub: {
+    title: 'Research & Extension Hub',
+    subtitle: 'Metrics on active research projects, patent filings, grant statuses, and extension program outreach.',
+    endpoint: '/api/president/research',
+    dataKey: 'projects',
+    summary: (data) => [
+      { label: 'Active Projects', value: count(data, 'active_projects') },
+      { label: 'Patents Filed', value: count(data, 'patents_filed') },
+      { label: 'Grants Received', value: money((data as Record<string, unknown> | null)?.grants_received) },
+      { label: 'Extension Programs', value: count(data, 'extension_programs') },
+    ],
+    columns: [
+      { key: 'title', label: 'Project Name' },
+      { key: 'pi', label: 'Principal Investigator' },
+      { key: 'type', label: 'Type' },
+      { key: 'funding', label: 'Funding' },
+    ],
+  },
+  executiveOrders: {
+    title: 'Disciplinary & Emergency Actions',
+    subtitle: 'Official log of emergency decisions and major disciplinary actions.',
+    endpoint: '/api/president/executive-orders',
+    dataKey: 'orders',
+    summary: (data) => [
+      { label: 'Active Suspensions', value: count(data, 'active_suspensions') },
+      { label: 'Pending Ratification', value: count(data, 'pending_ratifications') },
+      { label: 'Emergency Orders (YTD)', value: count(data, 'emergency_orders_ytd') },
+    ],
+    columns: [
+      { key: 'id', label: 'Order ID' },
+      { key: 'date', label: 'Date' },
+      { key: 'subject', label: 'Subject' },
+      { key: 'type', label: 'Type' },
+    ],
+  },
+  convocation: {
+    title: 'Convocation & Degree Management',
+    subtitle: 'Seasonal module for graduation eligibility and medal approvals.',
+    endpoint: '/api/president/convocation',
+    dataKey: 'graduates',
+    summary: (data) => [
+      { label: 'Eligible Graduates', value: count(data, 'eligible_graduates') },
+      { label: 'Medals Approved', value: count(data, 'medals_approved') },
+      { label: 'Pending Verifications', value: count(data, 'pending_verifications') },
+    ],
+    columns: [
+      { key: 'student_name', label: 'Student Name' },
+      { key: 'program', label: 'Program' },
+      { key: 'honors', label: 'Honors / Medals' },
+    ],
+  },
+  hrApprovals: {
+    title: 'HR Operations & Appointments',
+    subtitle: 'Operational review and sign-off on hiring, tenure, and staff disciplinary measures.',
+    endpoint: '/api/president/hr-approvals',
+    dataKey: 'approvals',
+    summary: (data) => [
+      { label: 'Pending Hires', value: count(data, 'pending_hires') },
+      { label: 'Tenure Reviews', value: count(data, 'tenure_reviews') },
+      { label: 'Disciplinary Cases', value: count(data, 'disciplinary_cases') },
+    ],
+    columns: [
+      { key: 'candidate', label: 'Candidate / Employee' },
+      { key: 'department', label: 'Department' },
+      { key: 'action', label: 'Action Requested' },
+      { key: 'date_submitted', label: 'Date Submitted' },
+    ],
+  },
 } satisfies Record<string, WorkspacePageConfig>;
 
 export const deanPages = {
