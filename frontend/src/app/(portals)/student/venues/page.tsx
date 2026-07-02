@@ -270,11 +270,13 @@ export default function StudentVenuesPage() {
                       className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
                         selectedSlotHour === hour
                           ? 'border-sgvu-gold bg-sgvu-gold/10'
-                          : status === 'available' && !isPast
-                            ? 'border-emerald-200 bg-emerald-50 hover:border-emerald-400'
+                          : status === 'booked'
+                            ? 'border-red-300 bg-red-100 opacity-90'
                             : status === 'pending'
                               ? 'border-amber-200 bg-amber-50 opacity-80'
-                              : 'border-slate-200 bg-slate-100 opacity-60'
+                              : isPast
+                                ? 'border-slate-200 bg-slate-100 opacity-60'
+                                : 'border-emerald-200 bg-emerald-50 hover:border-emerald-400'
                       }`}
                     >
                       <span className="flex items-center gap-1 font-medium">

@@ -5,10 +5,13 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  Legend,
 } from 'recharts';
 import { AlertTriangle, BookOpen, Circle, GraduationCap, ShieldAlert } from 'lucide-react';
 import {
@@ -87,6 +90,14 @@ export type FacultyStudentReportData = {
     severity: 'LOW' | 'MEDIUM' | 'HIGH';
     detail: string;
   }>;
+  gpa_history?: Array<{
+    semester: number;
+    sgpa: number;
+    cgpa: number;
+    status: string;
+    academic_year: string | null;
+    source: string;
+  }>;
 };
 
 function scoreColor(pct: number) {
@@ -124,6 +135,26 @@ function formatScore(value: number | null, max: number) {
 
 export function FacultyStudentReport({ report }: { report: FacultyStudentReportData }) {
   const { student, subject, summary, academic, marks, assignments, demerits, risk_flags } = report;
+  const gpaHistory = report.gpa_history ?? [];
+  const latestGpa = gpaHistory.length ? gpaHistory[gpaHistory.length - 1] : null;
+  const academicSnapshot = academic ?? (latestGpa
+    ? {
+        academic_year: latestGpa.academic_year ?? '—',
+        semester: latestGpa.semester,
+        sgpa: latestGpa.sgpa,
+        cgpa: latestGpa.cgpa,
+        backlog_count: 0,
+        progression_status: latestGpa.status,
+        remarks: null,
+      }
+    : null);
+
+  const gpaChartData = gpaHistory.map((row) => ({
+    semester: row.semester,
+    label: `Sem ${row.semester}`,
+    sgpa: Number(row.sgpa ?? 0),
+    cgpa: Number(row.cgpa ?? 0),
+  }));
 
   const assessmentChart = marks.map((m) => ({
     name: m.exam_type,
@@ -181,7 +212,7 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
             />
             <FacultyMetricChip label="Assignments" value={`${summary.assignments_submitted}/${summary.assignments_total}`} />
             <FacultyMetricChip label="Demerits" value={summary.course_demerit_points} />
-            {academic ? <FacultyMetricChip label="CGPA" value={academic.cgpa || 'N/A'} /> : null}
+            {academicSnapshot ? <FacultyMetricChip label="CGPA" value={academicSnapshot.cgpa || 'N/A'} /> : null}
           </div>
         </div>
       </div>
@@ -270,38 +301,109 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
         </FacultyPanel>
 
         <FacultyPanel title="Academic Record" description="Latest overall academic snapshot, excluding attendance">
-          {academic ? (
+          {academicSnapshot ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">SGPA / CGPA</p>
                 <p className="text-lg font-bold text-sgvu-navy">
-                  {academic.sgpa || 'N/A'} / {academic.cgpa || 'N/A'}
+                  {academicSnapshot.sgpa || 'N/A'} / {academicSnapshot.cgpa || 'N/A'}
                 </p>
               </div>
               <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">Backlogs</p>
-                <p className={cn('text-lg font-bold', academic.backlog_count > 0 ? 'text-red-700' : 'text-sgvu-navy')}>
-                  {academic.backlog_count}
+                <p className={cn('text-lg font-bold', academicSnapshot.backlog_count > 0 ? 'text-red-700' : 'text-sgvu-navy')}>
+                  {academicSnapshot.backlog_count}
                 </p>
               </div>
               <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">Progression</p>
-                <p className="font-semibold text-sgvu-navy">{academic.progression_status || 'N/A'}</p>
+                <p className="font-semibold text-sgvu-navy">{academicSnapshot.progression_status || 'N/A'}</p>
               </div>
               <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">Record</p>
                 <p className="font-semibold text-sgvu-navy">
-                  Sem {academic.semester} · {academic.academic_year}
+                  Sem {academicSnapshot.semester} · {academicSnapshot.academic_year}
                 </p>
               </div>
-              {academic.remarks ? (
+              {academicSnapshot.remarks ? (
                 <p className="sm:col-span-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
-                  {academic.remarks}
+                  {academicSnapshot.remarks}
                 </p>
               ) : null}
             </div>
           ) : (
             <FacultyEmptyState description="No academic record is available for this student yet." className="py-6" />
+          )}
+        </FacultyPanel>
+
+        <FacultyPanel
+          title="Semester-wise SGPA & CGPA"
+          description="Grade point trend for each semester across the student's program"
+          count={gpaHistory.length}
+        >
+          {gpaHistory.length === 0 ? (
+            <FacultyEmptyState description="No semester-wise SGPA or CGPA history is available for this student yet." className="py-6" />
+          ) : (
+            <div className="space-y-4">
+              <div className="h-52 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={gpaChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                    <YAxis domain={[0, 10]} tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      formatter={(value: number, name: string) => [Number(value).toFixed(2), name]}
+                      labelFormatter={(label) => label}
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="sgpa"
+                      name="SGPA"
+                      stroke="#d6b65d"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: '#d6b65d' }}
+                      activeDot={{ r: 5 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="cgpa"
+                      name="CGPA"
+                      stroke="#08234a"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: '#08234a' }}
+                      activeDot={{ r: 5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-border/60">
+                <table className="w-full min-w-[360px] text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Semester</th>
+                      <th className="px-3 py-2 font-medium">SGPA</th>
+                      <th className="px-3 py-2 font-medium">CGPA</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gpaHistory.map((row) => (
+                      <tr key={row.semester} className="border-b last:border-0">
+                        <td className="px-3 py-2 font-medium text-sgvu-navy">Sem {row.semester}</td>
+                        <td className="px-3 py-2">{Number(row.sgpa).toFixed(2)}</td>
+                        <td className="px-3 py-2">{Number(row.cgpa).toFixed(2)}</td>
+                        <td className="px-3 py-2">
+                          <Badge variant="outline" className="text-[10px]">
+                            {row.status.replace(/_/g, ' ')}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </FacultyPanel>
       </div>
