@@ -18,7 +18,18 @@ export {
   DialogTitle,
   DialogDescription,
 } from './dialog';
-export { Sheet, SheetPortal, SheetOverlay, SheetTrigger, SheetClose, SheetContent } from './sheet';
+export {
+  Sheet,
+  SheetPortal,
+  SheetOverlay,
+  SheetTrigger,
+  SheetClose,
+  SheetContent,
+  SheetTitle,
+  SheetDescription,
+  SheetHeader,
+  SheetFooter,
+} from './sheet';
 export {
   DropdownMenu,
   DropdownMenuTrigger,

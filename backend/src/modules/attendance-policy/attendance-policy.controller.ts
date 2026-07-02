@@ -97,6 +97,52 @@ export class AttendancePolicyController {
     );
   }
 
+  @Post('hod/department-threshold')
+  @Roles('HOD', 'SuperAdmin')
+  setDepartmentThresholdDirect(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      requested_min_percent?: number;
+      reason?: string;
+    },
+  ) {
+    return this.policy.setDepartmentThresholdDirect(
+      this.tenant(req),
+      req.user.user_id,
+      {
+        requested_min_percent: Number(dto.requested_min_percent),
+        reason: dto.reason,
+      },
+    );
+  }
+
+  @Get('hod/courses')
+  @Roles('HOD', 'SuperAdmin')
+  listCourses(@Req() req: { user: AuthUser }) {
+    return this.policy.listCourses(this.tenant(req));
+  }
+
+  @Post('hod/courses/:courseId/threshold')
+  @Roles('HOD', 'SuperAdmin')
+  updateCourseThreshold(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+    @Body()
+    dto: {
+      min_attendance?: number | null;
+    },
+  ) {
+    const val = dto.min_attendance !== undefined && dto.min_attendance !== null
+      ? Number(dto.min_attendance)
+      : null;
+    return this.policy.updateCourseThreshold(
+      this.tenant(req),
+      courseId,
+      val,
+    );
+  }
+
   // --- Dean: decide threshold changes ---
 
   @Get('dean/threshold-requests')
