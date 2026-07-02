@@ -68,3 +68,13 @@ export function proofDocHref(url: string): string {
   if (/^https?:\/\//i.test(url)) return url;
   return `/api/uploads/download?path=${encodeURIComponent(url)}`;
 }
+
+export function formatConcernLoggedAt(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}

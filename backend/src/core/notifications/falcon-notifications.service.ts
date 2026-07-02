@@ -107,4 +107,20 @@ export class FalconNotificationsService {
     );
     return { updated: true };
   }
+
+  async dismiss(notificationId: string, tenantId: string, userId: string) {
+    const row = await this.notifications.findOne({
+      where: {
+        notification_id: notificationId,
+        tenant_id: tenantId,
+        user_id: userId,
+      },
+      withDeleted: true,
+    });
+    if (!row) throw new NotFoundException('Notification not found');
+    if (row.deleted_at) return { dismissed: true };
+    row.deleted_at = new Date();
+    await this.notifications.save(row);
+    return { dismissed: true };
+  }
 }

@@ -313,6 +313,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Placements & Internships', href: '/student/placements', icon: Briefcase, keywords: ['placement', 'jobs', 'internship'], shortLabel: 'Placements' },
         { label: 'Grievances & Helpdesk', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'discipline', 'grievance'], shortLabel: 'Helpdesk' },
         { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'sexual harassment', 'bullying', 'posh'] },
+        { label: 'Safety Notices', href: '/student/safety-notices', icon: Shield, keywords: ['ragging', 'harassment', 'notice', 'accused'] },
       ],
     },
   ],
@@ -336,6 +337,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Graduation & Alumni', href: '/student/exit', icon: GraduationCap },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
     { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield },
+    { label: 'Safety Notices', href: '/student/safety-notices', icon: Shield },
   ],
 };
 
@@ -477,7 +479,6 @@ export const hrPortal: PortalConfig = {
       title: 'Grievances & Support',
       items: [
         { label: 'Grievances Escalation', href: '/hr/grievances', icon: AlertTriangle, keywords: ['ticket', 'escalation', 'sla', 'hr', 'payroll', 'grievance'], roles: ['HRAdmin', 'HR', 'SuperAdmin'] },
-        { label: 'Safety Concerns (ICC)', href: '/hr/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'posh', 'sexual harassment'], roles: ['HRAdmin', 'HR', 'SuperAdmin'] },
       ],
     },
     {
@@ -568,7 +569,6 @@ export const hodPortal: PortalConfig = {
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
-        { label: 'Safety Concerns', href: '/hod/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'sexual harassment'] },
       ],
     },
     myHrOperationsNavGroup('hod'),
@@ -607,7 +607,6 @@ export const hodPortal: PortalConfig = {
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
-        { label: 'Safety Concerns', href: '/hod/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment'] },
       ],
     },
     myHrOperationsNavGroup('hod'),
@@ -647,7 +646,6 @@ export const deanPortal: PortalConfig = {
       items: [
         { label: 'Student Monitor', href: '/dean/students/monitor', icon: GraduationCap, keywords: ['students', 'risk'] },
         { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['escalation', 'ticket'] },
-        { label: 'Safety Concerns', href: '/dean/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'posh'] },
         { label: 'Ph.D. Degree Awards', href: '/dean/phd/approvals', icon: GraduationCap, keywords: ['phd', 'bom', 'viva', 'degree'] },
       ],
     },
@@ -733,7 +731,6 @@ export const hostelAdminPortal: PortalConfig = {
         { label: 'Fines & Damages', href: '/hostel-admin/tickets', icon: Ticket, keywords: ['damage', 'maintenance'] },
         { label: 'Mess Management', href: '/hostel-admin/mess', icon: UtensilsCrossed, keywords: ['menu', 'weekly'] },
         { label: 'Grievance Escalations', href: '/hostel-admin/grievances', icon: LifeBuoy, keywords: ['maintenance', 'ticket', 'escalation'] },
-        { label: 'Safety Concerns', href: '/hostel-admin/safety-concerns', icon: Shield, keywords: ['ragging', 'hostel', 'harassment'] },
         { label: 'Notifications', href: '/hostel-admin/notifications', icon: Bell, keywords: ['broadcast', 'sms', 'email'] },
         { label: 'Mess Scanner', href: '/hostel-admin/scanner', icon: QrCode, keywords: ['wallet', 'meal'] },
       ],

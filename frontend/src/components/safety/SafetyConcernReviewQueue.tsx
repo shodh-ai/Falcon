@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Check, Loader2, Shield } from 'lucide-react';
+import { Check, Loader2, Shield } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,7 @@ import {
   accusedTypeLabel,
   concernStatusLabel,
   concernTypeLabel,
+  formatConcernLoggedAt,
   proofDocHref,
   type SafetyConcern,
   type SafetyConcernStatus,
@@ -95,6 +96,7 @@ export function SafetyConcernReviewQueue({
         rows.map((row) => {
           const evidence = Array.isArray(row.evidence_urls) ? row.evidence_urls : [];
           const actionable = ['SUBMITTED', 'UNDER_REVIEW', 'ESCALATED'].includes(row.status);
+          const underReviewLocked = row.status === 'UNDER_REVIEW' || row.status === 'ESCALATED';
           return (
             <Card key={row.concern_id}>
               <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -103,6 +105,9 @@ export function SafetyConcernReviewQueue({
                     <Shield className="h-4 w-4 text-sgvu-gold" />
                     {concernTypeLabel(row.concern_type)}
                   </CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Logged: {formatConcernLoggedAt(row.created_at)}
+                  </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Against {accusedTypeLabel(row.accused_type)}
                     {row.accused_name ? ` · ${row.accused_name}` : ''}
@@ -169,19 +174,10 @@ export function SafetyConcernReviewQueue({
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busyId === row.concern_id}
+                        disabled={busyId === row.concern_id || underReviewLocked}
                         onClick={() => void act(row.concern_id, 'UNDER_REVIEW', 'Marked under review')}
                       >
                         Under review
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busyId === row.concern_id}
-                        onClick={() => void act(row.concern_id, 'ESCALATED', 'Escalated to Dean')}
-                      >
-                        <AlertTriangle className="mr-1 h-3.5 w-3.5" />
-                        Escalate
                       </Button>
                       <Button
                         size="sm"

@@ -48,4 +48,11 @@ export const notificationsApi = {
       method: 'POST',
       headers: jsonHeaders(token),
     }),
+
+  dismiss: (token: string, notificationId: string) =>
+    apiFetch<{ dismissed: boolean }>(token, {
+      url: `${API_URL}/api/notifications/${notificationId}/dismiss`,
+      method: 'PATCH',
+      headers: jsonHeaders(token),
+    }),
 };

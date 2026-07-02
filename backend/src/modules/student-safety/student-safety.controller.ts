@@ -96,14 +96,20 @@ export class StudentSafetyController {
     );
   }
 
+  @Get('accused/notices')
+  @Roles('Student', 'Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  accusedNotices(@Req() req: { user: AuthUser }) {
+    return this.safety.listAccusedNotices(this.tenant(req), req.user.user_id);
+  }
+
   @Get('faculty/notices')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   facultyNotices(@Req() req: { user: AuthUser }) {
-    return this.safety.listFacultyNotices(this.tenant(req), req.user.user_id);
+    return this.safety.listAccusedNotices(this.tenant(req), req.user.user_id);
   }
 
   @Patch('concerns/:id')
-  @Roles('DC_MEMBER', 'HOD', 'Dean', 'HR', 'HRAdmin', 'Warden', 'SuperAdmin')
+  @Roles('DC_MEMBER', 'SuperAdmin')
   updateConcern(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,

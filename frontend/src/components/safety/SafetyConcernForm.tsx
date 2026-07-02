@@ -13,9 +13,11 @@ import {
   accusedTypeLabel,
   concernStatusLabel,
   concernTypeLabel,
+  formatConcernLoggedAt,
   proofDocHref,
   type SafetyConcern,
 } from '@/lib/student-safety';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -25,7 +27,54 @@ import {
 } from '@/components/ui/select';
 
 const PROOF_ACCEPT = '.pdf,.jpg,.jpeg,.png,.doc,.docx';
-type AccusedOption = { user_id: string; name: string; official_email: string | null; dept_name?: string | null };
+type AccusedOption = {
+  user_id: string;
+  name: string;
+  official_email: string | null;
+  dept_name?: string | null;
+  roll_number?: string | null;
+};
+
+function formatPersonOption(u: AccusedOption): string {
+  const parts = [u.name];
+  if (u.roll_number) parts.push(u.roll_number);
+  else if (u.dept_name) parts.push(u.dept_name);
+  return parts.join(' · ');
+}
+
+function nameHintFromQuery(query: string): string {
+  return query.split('·')[0]?.trim() ?? query.trim();
+}
+
+function findAccusedMatch(query: string, options: AccusedOption[]): AccusedOption | undefined {
+  const q = query.trim().toLowerCase();
+  if (!q) return undefined;
+  const hint = nameHintFromQuery(query).toLowerCase();
+  return options.find(
+    (u) =>
+      u.user_id.toLowerCase() === q ||
+      u.name.toLowerCase() === q ||
+      u.name.toLowerCase() === hint ||
+      hint.startsWith(u.name.toLowerCase()) ||
+      u.official_email?.toLowerCase() === q ||
+      u.roll_number?.toLowerCase() === q,
+  );
+}
+
+function filterAccusedOptions(query: string, options: AccusedOption[]): AccusedOption[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return options.slice(0, 10);
+  return options
+    .filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        u.official_email?.toLowerCase().includes(q) ||
+        u.roll_number?.toLowerCase().includes(q) ||
+        u.user_id.toLowerCase().includes(q) ||
+        u.dept_name?.toLowerCase().includes(q),
+    )
+    .slice(0, 10);
+}
 
 export function SafetyConcernForm() {
   const api = useAuthedApi();
@@ -46,6 +95,8 @@ export function SafetyConcernForm() {
     is_hostel_related: false,
   });
   const [proofFiles, setProofFiles] = useState<File[]>([]);
+  const [personQuery, setPersonQuery] = useState('');
+  const [personPickerOpen, setPersonPickerOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +119,8 @@ export function SafetyConcernForm() {
       setAccusedOptions([]);
       return;
     }
+    setPersonQuery('');
+    setForm((prev) => ({ ...prev, accused_user_id: '', accused_description: '' }));
     void api
       .get<AccusedOption[]>(`/api/student-safety/accused-options?type=${form.accused_type}`)
       .then((data) => setAccusedOptions(Array.isArray(data) ? data : []))
@@ -93,8 +146,30 @@ export function SafetyConcernForm() {
       toast.error('Please describe what happened');
       return;
     }
-    if (!form.accused_user_id && !form.accused_description.trim()) {
-      toast.error('Select the person involved or describe them');
+
+    let accusedUserId = form.accused_user_id || null;
+    let accusedDescription = form.accused_description.trim();
+
+    if (form.accused_type === 'OTHER') {
+      if (!accusedDescription) {
+        toast.error('Describe the person involved');
+        return;
+      }
+    } else {
+      const matched = findAccusedMatch(personQuery, accusedOptions);
+      if (matched) {
+        accusedUserId = matched.user_id;
+      } else if (personQuery.trim()) {
+        accusedUserId = null;
+        accusedDescription = personQuery.trim();
+      } else if (!accusedUserId) {
+        toast.error('Select or type the name, roll number, or ID of the person involved');
+        return;
+      }
+    }
+
+    if (!accusedUserId && !accusedDescription) {
+      toast.error('Select or type the person involved');
       return;
     }
 
@@ -104,8 +179,8 @@ export function SafetyConcernForm() {
       await api.post('/api/student-safety/concerns', {
         concern_type: form.concern_type,
         accused_type: form.accused_type,
-        accused_user_id: form.accused_user_id || null,
-        accused_description: form.accused_description.trim() || undefined,
+        accused_user_id: accusedUserId,
+        accused_description: accusedDescription || undefined,
         incident_description: form.incident_description.trim(),
         incident_location: form.incident_location.trim() || undefined,
         incident_date: form.incident_date || undefined,
@@ -115,6 +190,8 @@ export function SafetyConcernForm() {
       toast.success('Your concern has been submitted confidentially');
       setOpen(false);
       setProofFiles([]);
+      setPersonQuery('');
+      setPersonPickerOpen(false);
       if (fileRef.current) fileRef.current.value = '';
       setForm({
         concern_type: 'RAGGING',
@@ -188,9 +265,11 @@ export function SafetyConcernForm() {
 
             <Select
               value={form.accused_type}
-              onValueChange={(val) =>
-                setForm({ ...form, accused_type: val, accused_user_id: '', accused_description: '' })
-              }
+              onValueChange={(val) => {
+                setPersonQuery('');
+                setPersonPickerOpen(false);
+                setForm({ ...form, accused_type: val, accused_user_id: '', accused_description: '' });
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select who you are reporting..." />
@@ -203,29 +282,65 @@ export function SafetyConcernForm() {
             </Select>
 
             {form.accused_type !== 'OTHER' ? (
-              <Select
-                value={form.accused_user_id || "none"}
-                onValueChange={(val) => setForm({ ...form, accused_user_id: val === "none" ? "" : val })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select person (if known)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Select person (if known)</SelectItem>
-                  {accusedOptions.map((u) => (
-                    <SelectItem key={u.user_id} value={u.user_id}>
-                      {u.name}{u.dept_name ? ` · ${u.dept_name}` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-            <input
-              className="w-full rounded-lg border px-3 py-2 text-sm"
-              placeholder="Or describe the person (name, year, hostel block, etc.)"
-              value={form.accused_description}
-              onChange={(e) => setForm({ ...form, accused_description: e.target.value })}
-            />
+              <div className="relative">
+                <label className="mb-1.5 block text-xs font-medium text-sgvu-navy">
+                  Person involved (select from list or type name / roll no. / ID)
+                </label>
+                <Input
+                  className="w-full"
+                  placeholder="Start typing name, roll number, email, or ID…"
+                  value={personQuery}
+                  onFocus={() => setPersonPickerOpen(true)}
+                  onBlur={() => window.setTimeout(() => setPersonPickerOpen(false), 150)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setPersonQuery(value);
+                    setPersonPickerOpen(true);
+                    const matched = findAccusedMatch(value, accusedOptions);
+                    setForm({
+                      ...form,
+                      accused_user_id: matched?.user_id ?? '',
+                      accused_description: matched ? '' : value,
+                    });
+                  }}
+                />
+                {personPickerOpen && filterAccusedOptions(personQuery, accusedOptions).length > 0 ? (
+                  <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border bg-background shadow-md">
+                    {filterAccusedOptions(personQuery, accusedOptions).map((u) => (
+                      <button
+                        key={u.user_id}
+                        type="button"
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setPersonQuery(formatPersonOption(u));
+                          setForm({ ...form, accused_user_id: u.user_id, accused_description: '' });
+                          setPersonPickerOpen(false);
+                        }}
+                      >
+                        <span className="font-medium">{u.name}</span>
+                        {u.roll_number ? (
+                          <span className="text-muted-foreground"> · {u.roll_number}</span>
+                        ) : null}
+                        {u.dept_name ? (
+                          <span className="text-muted-foreground"> · {u.dept_name}</span>
+                        ) : null}
+                        {u.official_email ? (
+                          <span className="block text-xs text-muted-foreground">{u.official_email}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <input
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+                placeholder="Describe the person (name, year, hostel block, etc.)"
+                value={form.accused_description}
+                onChange={(e) => setForm({ ...form, accused_description: e.target.value })}
+              />
+            )}
             <textarea
               className="w-full rounded-lg border px-3 py-2 text-sm"
               rows={4}
@@ -294,6 +409,9 @@ export function SafetyConcernForm() {
                   <Badge>{concernStatusLabel(r.status)}</Badge>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
+                  Logged: {formatConcernLoggedAt(r.created_at)}
+                </p>
+                <p className="text-xs text-muted-foreground">
                   Against {accusedTypeLabel(r.accused_type)}
                   {r.accused_name ? ` · ${r.accused_name}` : ''}
                 </p>
