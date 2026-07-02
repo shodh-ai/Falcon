@@ -58,6 +58,7 @@ import {
   Ticket,
   UtensilsCrossed,
   Bell,
+  History,
   QrCode,
   BedDouble,
   PartyPopper,
@@ -1312,7 +1313,8 @@ export const adminPortal: PortalConfig = {
       title: 'Overview',
       items: [
         { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
-        { label: 'IQAC Admin', href: '/dashboard', icon: ListChecks },
+        { label: 'Governance Tasks', href: '/admin/tasks', icon: ListChecks },
+        { label: 'Upload History', href: '/admin/tasks?section=uploads', icon: History },
       ],
     },
     {

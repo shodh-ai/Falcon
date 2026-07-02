@@ -110,7 +110,7 @@ export function timetableChangedMessage(
       category: 'ACADEMICS',
       title: `Schedule updated — ${payload.courseName}`,
       message: `${payload.changeSummary}. Review your timetable so you do not miss the revised session.`,
-      actionLink: '/student/dashboard',
+      actionLink: '/student/timetable',
       actionLabel: 'Open timetable',
       severity: 'info',
       intent: 'status_update',

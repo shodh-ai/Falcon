@@ -1411,6 +1411,15 @@ export class AcademicsService {
         `Faculty assignment updated for this slot.`,
       );
     }
+    if (dto.faculty_user_id) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: dto.faculty_user_id,
+        courseName: slot?.course?.course_name ?? 'Course',
+        changeSummary: 'You have been assigned to teach this slot.',
+        actionLink: '/faculty/timetable',
+      });
+    }
     return slot;
   }
 
@@ -1447,6 +1456,15 @@ export class AcademicsService {
       slot.course?.course_name ?? 'Course',
       summary,
     );
+    if (saved.faculty_user_id) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: saved.faculty_user_id,
+        courseName: slot.course?.course_name ?? 'Course',
+        changeSummary: summary,
+        actionLink: '/faculty/timetable',
+      });
+    }
     return saved;
   }
 
