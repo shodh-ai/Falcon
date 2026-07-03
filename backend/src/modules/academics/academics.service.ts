@@ -1154,7 +1154,56 @@ export class AcademicsService {
   async listHodFacultyRoster(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const faculty = await this.listDepartmentFacultyRaw(tenantId, deptIds);
+
+    // Fetch HOD's own name so frontend can show "Reports to: <HOD name>"
+    const hod = await this.users.findOne({ where: { user_id: hodUserId } });
+
     const facultyIds = faculty.map((row) => row.user_id);
+    const profileByUser = new Map<
+      string,
+      {
+        employee_id: string | null;
+        designation: string | null;
+        joining_date: string | null;
+        shift_timing: string | null;
+        reports_to_name: string | null;
+      }
+    >();
+    if (facultyIds.length > 0) {
+      const profileRows = await this.users.manager.query<
+        Array<{
+          user_id: string;
+          employee_id: string | null;
+          designation: string | null;
+          joining_date: string | null;
+          start_time: string | null;
+          end_time: string | null;
+          reports_to_name: string | null;
+        }>
+      >(
+        `SELECT ep.user_id, ep.employee_id, ep.designation, ep.joining_date::text,
+                s.start_time::text, s.end_time::text,
+                ro.name AS reports_to_name
+         FROM hr_employee_profiles ep
+         LEFT JOIN hr_shifts s ON s.shift_id = ep.shift_id
+         LEFT JOIN users u ON u.user_id = ep.user_id AND u.tenant_id = ep.tenant_id
+         LEFT JOIN users ro ON ro.user_id = u.reporting_officer_id
+         WHERE ep.tenant_id = $1 AND ep.user_id = ANY($2::uuid[])`,
+        [tenantId, facultyIds],
+      );
+      for (const row of profileRows) {
+        const start = row.start_time?.slice(0, 5) ?? '09:00';
+        const end = row.end_time?.slice(0, 5) ?? '17:00';
+        profileByUser.set(row.user_id, {
+          employee_id: row.employee_id,
+          designation: row.designation,
+          joining_date: row.joining_date,
+          shift_timing: `${start} - ${end}`,
+          reports_to_name: row.reports_to_name,
+        });
+      }
+    }
+
     const allocations =
       facultyIds.length === 0
         ? []
@@ -1164,12 +1213,23 @@ export class AcademicsService {
             order: { day_of_week: 'ASC', start_time: 'ASC' },
           });
 
-    return faculty.map((row) => ({
+    return faculty.map((row) => {
+      const profile = profileByUser.get(row.user_id);
+      return {
       user_id: row.user_id,
       name: row.name,
       email: row.email,
+      phone: row.phone ?? null,
+      entity_id: row.entity_id ?? null,
       department: row.department?.dept_name ?? null,
       role: row.role?.role_name ?? null,
+      designation: profile?.designation ?? row.role?.role_name ?? null,
+      reporting_officer_id: row.reporting_officer_id ?? null,
+      reports_to_name: profile?.reports_to_name ?? hod?.name ?? null,
+      hod_name: hod?.name ?? null,
+      joined_at: profile?.joining_date ?? row.created_at ?? null,
+      shift_timing: profile?.shift_timing ?? null,
+      employee_id: profile?.employee_id ?? null,
       courses: allocations
         .filter((allocation) => allocation.faculty_user_id === row.user_id)
         .map((allocation) => ({
@@ -1182,7 +1242,8 @@ export class AcademicsService {
           end_time: allocation.end_time,
           room: allocation.room,
         })),
-    }));
+      };
+    });
   }
 
   private parseSemester(semStr: string | null, courseCode?: string): number {

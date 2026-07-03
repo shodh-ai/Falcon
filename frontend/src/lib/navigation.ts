@@ -538,8 +538,14 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation', 'leaves'] },
+        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation', 'leaves'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=attendance&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'hrms', 'dashboard', 'reports', 'probation'] },
+        { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: Ticket, keywords: ['exit', 'mid-duty', 'pass'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
+        { label: 'Extra Class Approvals', href: '/hod/approvals/extra-classes', icon: CalendarClock, keywords: ['substitute', 'cancel', 'timetable'] },
+        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
+        { label: 'Venue Booking Approvals', href: '/hod/venue-requests', icon: MapPin, keywords: ['room', 'booking', 'venue'] },
+        { label: 'Project Funding', href: '/hod/funding-approvals', icon: Banknote, keywords: ['research', 'funding', 'budget'] },
       ],
     },
     {
@@ -550,6 +556,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
+        { label: 'Slow Learners', href: '/hod/academics/slow-learners', icon: LineChart, keywords: ['at risk', 'remedial', 'low grade'] },
         { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty', 'dean', 'minutes'] },
       ],
     },
@@ -557,6 +564,7 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
+        { label: 'Attendance Defaulters', href: '/hod/students/defaulters', icon: AlertTriangle, keywords: ['defaulters', 'low attendance', '75'] },
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
@@ -594,8 +602,12 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['approve'] },
+        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['approve'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=attendance&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory'] },
+        { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: Ticket, keywords: ['gate pass'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['proxy'] },
+        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['events'] },
+        { label: 'Venue Approvals', href: '/hod/venue-requests', icon: MapPin, keywords: ['venue'] },
       ],
     },
     {

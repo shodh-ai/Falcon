@@ -116,6 +116,15 @@ function useIstClock() {
   return now;
 }
 
+function SampleDataBanner({ message }: { message: string }) {
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950">
+      <span className="font-bold uppercase tracking-wider text-[10px] text-amber-700 mr-2">Preview</span>
+      {message}
+    </div>
+  );
+}
+
 function ProgressBar({ pct, muted }: { pct: number; muted?: boolean }) {
   return (
     <div className="h-2 overflow-hidden rounded-full bg-slate-200">
@@ -422,71 +431,13 @@ export function HodCommandCenter() {
         setData(payload);
         setUnassignedLoad(unassigned.count);
         setRealFaculty(roster);
-        if (roster && roster.length > 0) {
-          // Sync Attendance Punches with rich status details
-          const statusList = [
-            { punchIn: '08:58 AM', punchOut: null, status: 'PRESENT', totalHours: 'Active' },
-            { punchIn: '09:05 AM', punchOut: '01:30 PM', status: 'HALF_DAY', totalHours: '4h 25m' },
-            { punchIn: null, punchOut: null, status: 'LEAVE', totalHours: 'Leave' },
-            { punchIn: null, punchOut: null, status: 'ABSENT', totalHours: 'Absent' },
-            { punchIn: '09:12 AM', punchOut: '05:02 PM', status: 'PRESENT', totalHours: '7h 50m' },
-          ];
-
-          const mockPunchesList = roster.map((f, index) => {
-            const item = statusList[index % statusList.length];
-            return {
-              id: `p-${f.user_id}`,
-              facultyName: f.name,
-              punchIn: item.punchIn,
-              punchOut: item.punchOut,
-              status: item.status as 'PRESENT' | 'ABSENT' | 'LEAVE' | 'HALF_DAY',
-              totalHours: item.totalHours,
-            };
-          });
-          setPunches(mockPunchesList);
-
-          // Sync Resignation Clearance Notice
-          const targetResigned = roster[roster.length - 1];
-          setResignations([
-            {
-              id: `r-${targetResigned.user_id}`,
-              name: targetResigned.name,
-              department: targetResigned.department || 'Computer Science',
-              resignationDate: '2026-06-15',
-              clearanceStatus: 'PENDING',
-            }
-          ]);
-
-          // Sync Audit Records to match all roster members (with backend real data or fallback)
-          if (audits && audits.length > 0) {
-            setAuditRecords(audits);
-          } else {
-            const syncedAudits = roster.map((fac, index) => {
-              const mockCourses = [
-                { code: 'CSE301', name: 'Database Management Systems', ppts: 12, att: 95, missing: [], marks: { ga: true, wt: true, labs: true, theory: true }, status: 'LOCKED', semester: 3 },
-                { code: 'CSE302', name: 'Computer Networks', ppts: 15, att: 90, missing: ['CSE302 at 11:00 AM (Today)', 'CSE302 at 11:00 AM (Monday, 29th June)'], marks: { ga: true, wt: false, labs: true, theory: true }, status: 'OPEN', semester: 3 },
-                { code: 'CSE305', name: 'Software Engineering', ppts: 8, att: 85, missing: ['CSE305 at 02:00 PM (Yesterday)', 'CSE305 at 02:00 PM (Friday, 26th June)', 'CSE306 at 10:00 AM (Monday, 29th June)'], marks: { ga: true, wt: true, labs: true, theory: true }, status: 'EDIT_REQUESTED', reason: 'I made a typo in the end-semester lab evaluation marks. Requesting unlock.', semester: 5 },
-                { code: 'CSE308', name: 'Compiler Design', ppts: 10, att: 88, missing: [], marks: { ga: true, wt: true, labs: false, theory: false }, status: 'OPEN', semester: 5 },
-              ];
-              const c = mockCourses[index % mockCourses.length];
-              return {
-                id: `a-${fac.user_id}-${index}`,
-                facultyName: fac.name,
-                facultyId: fac.user_id,
-                semester: c.semester,
-                subjectCode: c.code,
-                subjectName: c.name,
-                pptsUploaded: c.ppts,
-                attendanceMarked: c.att,
-                attendanceMissingClasses: c.missing,
-                marksUploaded: c.marks,
-                marksStatus: c.status as 'LOCKED' | 'OPEN' | 'EDIT_REQUESTED',
-                editRequestReason: c.reason,
-              };
-            });
-            setAuditRecords(syncedAudits);
-          }
+        if (audits && audits.length > 0) {
+          setAuditRecords(audits);
+        } else {
+          setAuditRecords([]);
         }
+        setPunches([]);
+        setResignations([]);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load command center');
         if (!silent) setData(null);
@@ -526,10 +477,26 @@ export function HodCommandCenter() {
     }
     try {
       if (row.type === 'LEAVE') {
-        if (action === 'APPROVE') {
-          await api.patch(`/api/hr/leaves/${row.id}/approve`, {});
+        if (action === 'REJECT') {
+          const comment = window.prompt('Reason for rejection (shown to employee)?');
+          if (!comment || comment.length < 3) {
+            if (previous) setData(previous);
+            toast.error('A short reason is required');
+            setActingId(null);
+            return;
+          }
+          await api.patch('/api/hr/ess/team/requests/bulk', {
+            ids: [row.id],
+            action: 'REJECT',
+            comment,
+            tab: 'LEAVE',
+          });
         } else {
-          await api.patch(`/api/hr/leaves/${row.id}/reject`, { remarks: 'Rejected from HOD dashboard' });
+          await api.patch('/api/hr/ess/team/requests/bulk', {
+            ids: [row.id],
+            action: 'APPROVE',
+            tab: 'LEAVE',
+          });
         }
       } else if (row.type === 'GATE_PASS') {
         await api.patch(`/api/hr/gate-passes/${row.id}/action`, {
@@ -909,6 +876,7 @@ export function HodCommandCenter() {
 
 
         <TabsContent value="audit" className="space-y-6 outline-none">
+          <SampleDataBanner message="Faculty audit rows load from LMS allocations when faculty-audit API returns data. Empty state means no syllabus allocations synced yet — not a system error." />
           <div className="grid gap-6 lg:grid-cols-12">
             {/* Faculty progress audit section */}
             <div className="lg:col-span-8 rounded-xl border border-slate-100 bg-white p-6 shadow-sm space-y-6">
@@ -1228,6 +1196,7 @@ export function HodCommandCenter() {
 
         {/* Tab 4: Compiled Results Matrix */}
         <TabsContent value="results" className="space-y-6 outline-none">
+          <SampleDataBanner message="Sample compiled results matrix for UI preview. Use Result Analytics for live pass/fail data from enrollments." />
           <div className="rounded-xl border border-slate-100 bg-white p-6 shadow-sm space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
@@ -1339,6 +1308,7 @@ export function HodCommandCenter() {
 
         {/* Tab 5: Placement Interview Attendance */}
         <TabsContent value="placement" className="space-y-6 outline-none">
+          <SampleDataBanner message="Sample placement attendance tracker for UI preview. Live placement data will connect to the placement cell module." />
           <div className="rounded-xl border border-slate-100 bg-white p-6 shadow-sm space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
