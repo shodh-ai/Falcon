@@ -42,7 +42,6 @@ type HealthMetrics = {
   attendance_trend_label: string;
   pending_leave_count: number;
   pending_gate_pass_count: number;
-  pending_profile_corrections: number;
   pending_inbox_total: number;
 };
 
@@ -376,7 +375,7 @@ export function HodCommandCenter() {
           { href: '/hod/academics/syllabus-tracking', label: 'Syllabus' },
           { href: '/hod/academics/result-analytics', label: 'Results' },
           { href: '/hod/inbox?scope=dept', label: 'HR Inbox' },
-          { href: '/hod/students/defaulters', label: 'Defaulters' },
+          { href: '/hod/student-monitor', label: 'Student Monitor' },
         ].map((link) => (
           <Link
             key={link.href}
@@ -491,7 +490,7 @@ export function HodCommandCenter() {
         <HodPanel
           title="Attendance Red Flags"
           count={data.attendance_deficits.length}
-          href="/hod/students/defaulters"
+          href="/hod/student-monitor"
           className="lg:col-span-3"
         >
           {data.attendance_deficits.length === 0 ? (
@@ -520,20 +519,6 @@ export function HodCommandCenter() {
           )}
         </HodPanel>
       </div>
-
-      {m.pending_profile_corrections > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sgvu-gold/30 bg-sgvu-gold/5 px-5 py-3">
-          <p className="text-sm text-sgvu-navy">
-            <span className="font-bold">{m.pending_profile_corrections}</span> profile correction
-            {m.pending_profile_corrections === 1 ? '' : 's'} pending review
-          </p>
-          <Link href="/hod/approvals/profile-corrections">
-            <Button size="default" variant="outline" className="h-9 border-sgvu-navy/20 text-sm text-sgvu-navy">
-              Review profiles
-            </Button>
-          </Link>
-        </div>
-      ) : null}
 
       <TodayBirthdaysWidget
         endpoint="/api/master-data/birthdays/faculty/department"

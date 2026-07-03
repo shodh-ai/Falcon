@@ -58,7 +58,7 @@ export function FounderMentorConnect() {
   if (loading) return <p className="text-sm text-muted-foreground">Loading mentor directory…</p>;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4 lg:grid-cols-2 items-start">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Mentor Directory</CardTitle>
@@ -90,7 +90,7 @@ export function FounderMentorConnect() {
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
+      <div className="space-y-4 lg:sticky lg:top-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Request Meeting</CardTitle>
