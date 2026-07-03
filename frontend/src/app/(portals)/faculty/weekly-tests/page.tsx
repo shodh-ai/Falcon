@@ -316,9 +316,21 @@ export default function FacultyWeeklyTestsPage() {
           ) : (
             <div className="grid gap-4 mt-4">
               {myTests.map((test) => {
-                const isUpcoming = new Date(test.start_time) > new Date();
+                const now = new Date();
+                const startTime = new Date(test.start_time);
+                const endTime = new Date(test.end_time);
+
+                const isUpcoming = now < startTime;
+                const isCompleted = now > endTime;
+                const isActiveTest = now >= startTime && now <= endTime;
+                
+                let cardStyle = "border";
+                if (isCompleted) cardStyle = "border-2 border-green-500 bg-green-50/50";
+                else if (isActiveTest) cardStyle = "border-2 border-yellow-500 bg-yellow-50/50";
+                else if (isUpcoming) cardStyle = "border-2 border-red-500 bg-red-50/50";
+
                 return (
-                  <div key={test.test_id} className="rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div key={test.test_id} className={`rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${cardStyle}`}>
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-semibold text-sgvu-navy">{test.course_code}</span>
@@ -331,22 +343,26 @@ export default function FacultyWeeklyTestsPage() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button 
-                        variant={test.is_active ? "outline" : "secondary"} 
-                        size="sm" 
-                        onClick={() => handleToggleTest(test.test_id, test.is_active)}
-                        className={!test.is_active ? "text-orange-600 bg-orange-50 border-orange-200" : ""}
-                      >
-                        {test.is_active ? <EyeOff className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
-                        {test.is_active ? 'Deactivate' : 'Activate'}
-                      </Button>
+                      {!isCompleted && (
+                        <Button 
+                          variant={test.is_active ? "outline" : "secondary"} 
+                          size="sm" 
+                          onClick={() => handleToggleTest(test.test_id, test.is_active)}
+                          className={!test.is_active ? "text-orange-600 bg-orange-50 border-orange-200" : ""}
+                        >
+                          {test.is_active ? <EyeOff className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
+                          {test.is_active ? 'Deactivate' : 'Activate'}
+                        </Button>
+                      )}
                       {isUpcoming ? (
                         <Button variant="destructive" size="sm" onClick={() => handleDeleteTest(test.test_id)}>
                           <Trash2 className="w-4 h-4 mr-2" />
                           Delete Test
                         </Button>
+                      ) : isActiveTest ? (
+                        <span className="text-xs text-yellow-700 font-semibold italic px-2 flex items-center border border-yellow-200 bg-yellow-100 rounded-md">Currently Active</span>
                       ) : (
-                        <span className="text-xs text-muted-foreground italic px-2 flex items-center">Started/Completed</span>
+                        <span className="text-xs text-green-700 font-semibold italic px-2 flex items-center border border-green-200 bg-green-100 rounded-md">Completed</span>
                       )}
                     </div>
                   </div>
