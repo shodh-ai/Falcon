@@ -123,12 +123,14 @@ export function HodDataTable<T>({
   rowKey,
   loading,
   empty,
+  onRowClick,
 }: {
   columns: HodColumn<T>[];
   rows: T[];
   rowKey: (row: T) => string;
   loading?: boolean;
   empty?: string;
+  onRowClick?: (row: T) => void;
 }) {
   if (loading) {
     return (
@@ -165,7 +167,12 @@ export function HodDataTable<T>({
           {rows.map((row, i) => (
             <tr
               key={rowKey(row)}
-              className={cn('border-b border-gray-100', i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50')}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              className={cn(
+                'border-b border-gray-100',
+                i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50',
+                onRowClick && 'cursor-pointer hover:bg-slate-50 transition-colors'
+              )}
             >
               {columns.map((col) => (
                 <td key={col.key} className={cn('px-4 py-3 text-sgvu-navy', col.className)}>

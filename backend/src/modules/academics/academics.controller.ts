@@ -494,6 +494,17 @@ export class AcademicsController {
     );
   }
 
+
+  @Get('hod/courses/:courseId/students')
+  @Roles('HOD', 'SuperAdmin')
+  hodCourseStudents(@Req() req: { user: AuthUser }, @Param('courseId') courseId: string) {
+    return this.academics.listHodCourseStudents(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      courseId,
+    );
+  }
+
   @Get('hod/syllabus-coverage')
   @Roles('HOD', 'SuperAdmin')
   hodSyllabusCoverage(@Req() req: { user: AuthUser }) {

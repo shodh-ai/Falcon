@@ -891,7 +891,7 @@ export class AcademicsService {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
-      `SELECT c.course_code, c.course_name,
+      `SELECT c.course_id, c.course_code, c.course_name,
               COUNT(*)::int AS enrolled,
               COUNT(*) FILTER (
                 WHERE e.grade_points >= 4 OR e.status IN ('PASS', 'COMPLETED')
@@ -914,6 +914,7 @@ export class AcademicsService {
       const failed = Number(row.failed ?? 0);
       const graded = passed + failed;
       return {
+        course_id: row.course_id as string,
         course_code: row.course_code,
         course_name: row.course_name,
         enrolled,
@@ -923,6 +924,23 @@ export class AcademicsService {
           graded > 0 ? Number(((passed / graded) * 100).toFixed(1)) : 0,
       };
     });
+  }
+
+
+  async listHodCourseStudents(tenantId: string, hodUserId: string, courseId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return [];
+
+    return this.users.manager.query(
+      `SELECT u.user_id, u.name, u.official_email AS email, sp.enrollment_no,
+              e.attendance_percent, e.grade_points, e.status
+       FROM student_course_enrollments e
+       INNER JOIN users u ON u.user_id = e.student_user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       WHERE e.tenant_id = $1 AND e.course_id = $2 AND u.dept_id = ANY($3::int[])
+       ORDER BY u.name ASC`,
+      [tenantId, courseId, deptIds],
+    );
   }
 
   async listHodGrievances(tenantId: string, hodUserId: string) {
@@ -1171,7 +1189,7 @@ export class AcademicsService {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
-      `SELECT c.course_code, c.course_name, u.name AS faculty_name,
+      `SELECT c.course_id, c.course_code, c.course_name, u.name AS faculty_name,
               COUNT(*)::int AS total_modules,
               COUNT(*) FILTER (WHERE m.status = 'COMPLETED')::int AS completed_modules,
               MAX(
@@ -1200,6 +1218,7 @@ export class AcademicsService {
         total > 0 ? Number(((completed / total) * 100).toFixed(0)) : 0;
       const daysBehind = Number(row.days_behind ?? 0);
       return {
+        course_id: row.course_id as string,
         course_code: row.course_code,
         course_name: row.course_name,
         faculty_name: row.faculty_name,
