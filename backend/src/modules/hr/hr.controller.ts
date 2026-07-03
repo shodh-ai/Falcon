@@ -1366,6 +1366,16 @@ export class HrController {
     );
   }
 
+  @Get('ess/team/scope-counts')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamScopeCounts(@Req() req: { user: AuthUser }) {
+    return this.team.getScopeCounts(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
   @Get('ess/team/dashboard')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
@@ -1420,6 +1430,24 @@ export class HrController {
       'Content-Disposition': `attachment; filename="team-attendance-${monthKey}.xlsx"`,
     });
     return new StreamableFile(buf);
+  }
+
+  @Get('ess/team/member/:userId/summary')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamMemberSummary(
+    @Param('userId') userId: string,
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.team.getMemberSummary(
+      req.user.user_id,
+      userId,
+      this.resolveTenantId(req.user),
+      scope,
+      month,
+    );
   }
 
   // ---------------------------------------------------------

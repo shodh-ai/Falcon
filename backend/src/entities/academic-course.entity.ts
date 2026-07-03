@@ -21,4 +21,7 @@ export class AcademicCourse extends BaseTenantEntity {
 
   @Column({ type: 'int', nullable: true })
   entity_id: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  min_attendance: number | null;
 }

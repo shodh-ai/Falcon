@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as ExcelJS from 'exceljs';
@@ -92,6 +92,10 @@ export class HrTeamService {
     return 'gray';
   }
 
+  async getScopeCounts(managerId: string, tenantId: string) {
+    return this.scope.getScopeCounts(managerId, tenantId);
+  }
+
   async getDashboard(
     managerId: string,
     tenantId: string,
@@ -122,34 +126,38 @@ export class HrTeamService {
       `WITH team AS (
          SELECT u.user_id FROM users u WHERE 1=1 ${clause}
        ),
-       att AS (
-         SELECT a.user_id, a.total_hours, a.calculated_status
-         FROM hr_daily_attendance a
-         JOIN team t ON t.user_id = a.user_id
-         WHERE a.date BETWEEN $3 AND $4
-           AND EXTRACT(DOW FROM a.date) NOT IN (0, 6)
-       ),
-       leave_days AS (
-         SELECT r.staff_user_id, COUNT(*)::int AS days
-         FROM staff_leave_requests r
-         JOIN team t ON t.user_id = r.staff_user_id
-         WHERE r.request_type = 'LEAVE'
-           AND r.status IN ('PENDING', 'HOD_APPROVED', 'HR_APPROVED')
-           AND r.start_date <= $4 AND r.end_date >= $3
-         GROUP BY r.staff_user_id
+       per_user AS (
+         SELECT
+           t.user_id,
+           AVG(a.total_hours) FILTER (WHERE a.total_hours IS NOT NULL) AS avg_hours,
+           AVG(CASE WHEN a.calculated_status = 'EARLY_GOING' THEN 1.0 ELSE 0.0 END) AS early_pct,
+           AVG(CASE WHEN a.calculated_status = 'LATE_COMING' THEN 1.0 ELSE 0.0 END) AS late_pct,
+           AVG(CASE WHEN a.calculated_status IN ('FULL_DAY','LATE_COMING','EARLY_GOING','HALF_DAY') THEN 1.0 ELSE 0.0 END) AS present_pct,
+           COALESCE((
+             SELECT SUM(
+               GREATEST(0, LEAST(r.end_date, $4::date) - GREATEST(r.start_date, $3::date) + 1)
+             )::int
+             FROM staff_leave_requests r
+             WHERE r.staff_user_id = t.user_id
+               AND r.request_type = 'LEAVE'
+               AND r.status IN ('PENDING','HOD_APPROVED','HR_APPROVED')
+               AND r.start_date <= $4 AND r.end_date >= $3
+           ), 0) AS leave_days
+         FROM team t
+         LEFT JOIN hr_daily_attendance a
+           ON a.user_id = t.user_id
+          AND a.date BETWEEN $3 AND $4
+          AND EXTRACT(DOW FROM a.date) NOT IN (0, 6)
+         GROUP BY t.user_id
        )
        SELECT
-         ROUND(AVG(att.total_hours)::numeric, 2) AS avg_hours,
-         ROUND(AVG(COALESCE(ld.days, 0))::numeric, 2) AS avg_leave_days,
-         ROUND(AVG(CASE WHEN att.calculated_status = 'EARLY_GOING' THEN 1 ELSE 0 END)::numeric * 100, 1) AS avg_early,
-         ROUND(AVG(CASE WHEN att.calculated_status = 'LATE_COMING' THEN 1 ELSE 0 END)::numeric * 100, 1) AS avg_late,
-         ROUND(
-           AVG(CASE WHEN att.calculated_status IN ('FULL_DAY','LATE_COMING','EARLY_GOING','HALF_DAY') THEN 1 ELSE 0 END)::numeric * 100,
-           1
-         ) AS attendance_pct,
+         ROUND(AVG(pu.avg_hours)::numeric, 2) AS avg_hours,
+         ROUND(AVG(pu.leave_days)::numeric, 2) AS avg_leave_days,
+         ROUND(AVG(pu.early_pct)::numeric * 100, 1) AS avg_early,
+         ROUND(AVG(pu.late_pct)::numeric * 100, 1) AS avg_late,
+         ROUND(AVG(pu.present_pct)::numeric * 100, 1) AS attendance_pct,
          (SELECT COUNT(*)::text FROM team) AS team_size
-       FROM att
-       LEFT JOIN leave_days ld ON ld.staff_user_id = att.user_id`,
+       FROM per_user pu`,
       [...params, start, end],
     );
 
@@ -213,6 +221,36 @@ export class HrTeamService {
       [...params, start, end],
     );
 
+    const mostLeaves = await this.dataSource.query(
+      `WITH team AS (SELECT u.user_id, u.name FROM users u WHERE 1=1 ${clause}),
+       leave_cnt AS (
+         SELECT t.user_id, t.name,
+                COALESCE(SUM(
+                  GREATEST(0, LEAST(r.end_date, $4::date) - GREATEST(r.start_date, $3::date) + 1)
+                ), 0)::int AS cnt
+         FROM team t
+         LEFT JOIN staff_leave_requests r ON r.staff_user_id = t.user_id
+           AND r.request_type = 'LEAVE'
+           AND r.status IN ('PENDING','HOD_APPROVED','HR_APPROVED')
+           AND r.start_date <= $4 AND r.end_date >= $3
+         GROUP BY t.user_id, t.name
+       )
+       SELECT name, user_id, cnt FROM leave_cnt ORDER BY cnt DESC, name LIMIT 5`,
+      [...params, start, end],
+    );
+
+    const lowestHours = await this.dataSource.query(
+      `WITH team AS (SELECT u.user_id, u.name FROM users u WHERE 1=1 ${clause})
+       SELECT t.name, t.user_id, ROUND(AVG(a.total_hours)::numeric, 2) AS avg_hours
+       FROM team t
+       JOIN hr_daily_attendance a ON a.user_id = t.user_id
+       WHERE a.date BETWEEN $3 AND $4 AND a.total_hours IS NOT NULL
+       GROUP BY t.user_id, t.name
+       ORDER BY avg_hours ASC
+       LIMIT 5`,
+      [...params, start, end],
+    );
+
     const lateEarly = await this.dataSource.query(
       `WITH team AS (SELECT u.user_id, u.name FROM users u WHERE 1=1 ${clause})
        SELECT t.name, t.user_id,
@@ -242,8 +280,10 @@ export class HrTeamService {
         on_time_arrival: onTime,
         least_leaves: leastLeaves,
         top_working_hours: topHours,
+        lowest_working_hours: lowestHours,
       },
       need_attention: {
+        most_leaves: mostLeaves,
         unplanned_leaves: unplannedLeaves,
         late_early_anomalies: lateEarly,
       },
@@ -1005,5 +1045,173 @@ export class HrTeamService {
         adminOverride: true,
       },
     );
+  }
+
+  async getMemberSummary(
+    managerId: string,
+    memberUserId: string,
+    tenantId: string,
+    scopeRaw?: string,
+    month?: string,
+  ) {
+    const scope = parseTeamScope(scopeRaw);
+    const monthKey = month ?? new Date().toISOString().slice(0, 7);
+    const { year, start, end } = this.monthRange(monthKey);
+    const members = await this.scope.listScopedUsers(
+      managerId,
+      tenantId,
+      scope,
+    );
+    if (!members.some((m) => m.user_id === memberUserId)) {
+      throw new ForbiddenException('Employee not in your reporting scope');
+    }
+
+    const entityRows = await this.dataSource.query<Array<{ entity_id: number }>>(
+      `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [memberUserId, tenantId],
+    );
+    const entityId = Number(entityRows[0]?.entity_id ?? 1);
+
+    const [attRows, leaveDaysRows, balanceRows, shiftRows] = await Promise.all([
+      this.dataSource.query<
+        Array<{
+          date: string;
+          calculated_status: string;
+          total_hours: string | null;
+        }>
+      >(
+        `SELECT date::text, calculated_status, total_hours::text
+         FROM hr_daily_attendance
+         WHERE user_id = $1 AND date BETWEEN $2 AND $3`,
+        [memberUserId, start, end],
+      ),
+      this.dataSource.query<Array<{ days: string }>>(
+        `SELECT COALESCE(SUM(
+           GREATEST(0, LEAST(end_date, $4::date) - GREATEST(start_date, $3::date) + 1)
+         ), 0)::text AS days
+         FROM staff_leave_requests
+         WHERE staff_user_id = $1 AND tenant_id = $2
+           AND request_type = 'LEAVE'
+           AND status IN ('PENDING','HOD_APPROVED','HR_APPROVED')
+           AND start_date <= $4 AND end_date >= $3`,
+        [memberUserId, tenantId, start, end],
+      ),
+      this.dataSource.query<
+        Array<{ leave_type: string; entitled: string; used: string }>
+      >(
+        `SELECT leave_type, entitled::text, used::text
+         FROM hr_leave_balances
+         WHERE user_id = $1 AND year = $2 AND leave_type IN ('CL','SL','EL')`,
+        [memberUserId, year],
+      ),
+      this.dataSource.query<
+        Array<{ start_time: string; end_time: string; shift_name: string }>
+      >(
+        `SELECT s.start_time::text, s.end_time::text, s.shift_name
+         FROM hr_employee_profiles ep
+         LEFT JOIN hr_shifts s ON s.shift_id = ep.shift_id
+         WHERE ep.user_id = $1 AND ep.tenant_id = $2 LIMIT 1`,
+        [memberUserId, tenantId],
+      ),
+    ]);
+
+    const presentStatuses = new Set([
+      'FULL_DAY',
+      'LATE_COMING',
+      'EARLY_GOING',
+      'HALF_DAY',
+    ]);
+    let presentDays = 0;
+    let lateArrivals = 0;
+    let onTime = 0;
+    let totalHours = 0;
+    let hoursCount = 0;
+
+    for (const row of attRows) {
+      if (presentStatuses.has(row.calculated_status)) presentDays++;
+      if (row.calculated_status === 'LATE_COMING') lateArrivals++;
+      if (row.calculated_status === 'FULL_DAY') onTime++;
+      const hrs = Number(row.total_hours ?? 0);
+      if (hrs > 0) {
+        totalHours += hrs;
+        hoursCount++;
+      }
+    }
+
+    const avgHours = hoursCount > 0 ? totalHours / hoursCount : 0;
+    const leavesTaken = Number(leaveDaysRows[0]?.days ?? 0);
+
+    let leaveAssigned = 0;
+    let leaveBalance = 0;
+    for (const b of balanceRows) {
+      leaveAssigned += Number(b.entitled ?? 0);
+      leaveBalance += Number(b.entitled ?? 0) - Number(b.used ?? 0);
+    }
+
+    const trend: Array<{ month: string; present_days: number; avg_hours: number }> =
+      [];
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(year, this.monthRange(monthKey).monthNum - 1 - i, 1);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const { start: tStart, end: tEnd } = this.monthRange(mKey);
+      const rows = await this.dataSource.query<
+        Array<{ calculated_status: string; total_hours: string | null }>
+      >(
+        `SELECT calculated_status, total_hours::text
+         FROM hr_daily_attendance
+         WHERE user_id = $1 AND date BETWEEN $2 AND $3`,
+        [memberUserId, tStart, tEnd],
+      );
+      let pDays = 0;
+      let tHours = 0;
+      let tCount = 0;
+      for (const r of rows) {
+        if (presentStatuses.has(r.calculated_status)) pDays++;
+        const h = Number(r.total_hours ?? 0);
+        if (h > 0) {
+          tHours += h;
+          tCount++;
+        }
+      }
+      trend.push({
+        month: mKey,
+        present_days: pDays,
+        avg_hours: tCount > 0 ? Math.round((tHours / tCount) * 100) / 100 : 0,
+      });
+    }
+
+    const shift = shiftRows[0];
+    const shiftTiming = shift
+      ? `${shift.start_time?.slice(0, 5) ?? '09:00'} - ${shift.end_time?.slice(0, 5) ?? '17:00'}`
+      : null;
+
+    const calendars = await this.attendanceCalc.buildMonthCalendarsBatch(
+      [memberUserId],
+      monthKey,
+      tenantId,
+      entityId,
+    );
+    const cal = calendars.get(memberUserId);
+    const workingDays = (cal?.days ?? []).filter(
+      (d) =>
+        d.calculated_status !== 'WEEK_OFF' &&
+        d.calculated_status !== 'HOLIDAY',
+    ).length;
+
+    return {
+      scope,
+      month: monthKey,
+      user_id: memberUserId,
+      shift_timing: shiftTiming,
+      leaves_taken: leavesTaken,
+      leave_assigned: Math.round(leaveAssigned * 100) / 100,
+      leave_balance: Math.round(leaveBalance * 100) / 100,
+      present_days: presentDays,
+      working_days: workingDays,
+      late_arrivals: lateArrivals,
+      on_time: onTime,
+      avg_working_hours: Math.round(avgHours * 100) / 100,
+      trend,
+    };
   }
 }

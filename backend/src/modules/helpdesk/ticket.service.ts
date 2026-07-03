@@ -416,4 +416,14 @@ export class TicketService {
 
     return saved;
   }
+
+  async escalateTicket(ticketId: string, actorUserId: string, tenantId: string) {
+    const ticket = await this.tickets.findOne({
+      where: { ticket_id: ticketId, tenant_id: tenantId },
+    });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    const newLevel = Math.min(Number(ticket.escalation_level ?? 0) + 1, 3);
+    ticket.escalation_level = newLevel;
+    return this.tickets.save(ticket);
+  }
 }

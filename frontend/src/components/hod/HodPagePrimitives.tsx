@@ -123,12 +123,16 @@ export function HodDataTable<T>({
   rowKey,
   loading,
   empty,
+  onRowClick,
+  mobileRender,
 }: {
   columns: HodColumn<T>[];
   rows: T[];
   rowKey: (row: T) => string;
   loading?: boolean;
   empty?: string;
+  onRowClick?: (row: T) => void;
+  mobileRender?: (row: T) => React.ReactNode;
 }) {
   if (loading) {
     return (
@@ -147,35 +151,54 @@ export function HodDataTable<T>({
   }
 
   return (
-    <div className="w-full overflow-x-auto rounded-xl border border-gray-100 shadow-sm">
-      <table className="w-full min-w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-sgvu-navy/20 bg-sgvu-navy text-white">
-            {columns.map((col) => (
-              <th
-                key={col.key}
-                className={cn('px-4 py-3 text-xs font-semibold uppercase tracking-wide', col.className)}
-              >
-                {col.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={rowKey(row)}
-              className={cn('border-b border-gray-100', i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50')}
-            >
+    <div className="w-full space-y-4">
+      {/* Desktop Table View */}
+      <div className={cn("w-full overflow-x-auto rounded-xl border border-gray-100 shadow-sm", mobileRender && "hidden md:block")}>
+        <table className="w-full min-w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-sgvu-navy/20 bg-sgvu-navy text-white">
               {columns.map((col) => (
-                <td key={col.key} className={cn('px-4 py-3 text-sgvu-navy', col.className)}>
-                  {col.render(row)}
-                </td>
+                <th
+                  key={col.key}
+                  className={cn('px-4 py-3 text-xs font-semibold uppercase tracking-wide', col.className)}
+                >
+                  {col.label}
+                </th>
               ))}
             </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr
+                key={rowKey(row)}
+                onClick={() => onRowClick?.(row)}
+                className={cn(
+                  'border-b border-gray-100 transition-colors',
+                  i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50',
+                  onRowClick && 'cursor-pointer hover:bg-slate-50'
+                )}
+              >
+                {columns.map((col) => (
+                  <td key={col.key} className={cn('px-4 py-3 text-sgvu-navy', col.className)}>
+                    {col.render(row)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile Stacked Card View */}
+      {mobileRender && (
+        <div className="md:hidden flex flex-col gap-4">
+          {rows.map((row) => (
+            <div key={rowKey(row)} onClick={() => onRowClick?.(row)}>
+              {mobileRender(row)}
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+      )}
     </div>
   );
 }

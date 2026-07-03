@@ -1,3 +1,5 @@
-import HodDashboardPage from '../dashboard/page';
+import { notFound } from 'next/navigation';
 
-export default HodDashboardPage;
+export default function HodCatchAllPage() {
+  notFound();
+}

@@ -160,4 +160,17 @@ export class TicketController {
       dto.message,
     );
   }
+
+  @Post(':ticketId/escalate')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  escalate(
+    @Param('ticketId') ticketId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.tickets.escalateTicket(
+      ticketId,
+      req.user.user_id,
+      this.tenant(req),
+    );
+  }
 }

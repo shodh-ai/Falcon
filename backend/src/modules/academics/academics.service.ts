@@ -937,7 +937,7 @@ export class AcademicsService {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
-      `SELECT t.ticket_id, t.subject AS title, t.category, t.status, t.created_at,
+      `SELECT t.ticket_id, t.subject AS title, t.category, t.status, t.created_at, t.description,
               u.user_id AS student_user_id, u.name AS student_name, u.official_email AS student_email
        FROM helpdesk_tickets t
        INNER JOIN users u ON u.user_id = t.student_user_id
@@ -1301,7 +1301,56 @@ export class AcademicsService {
   async listHodFacultyRoster(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const faculty = await this.listDepartmentFacultyRaw(tenantId, deptIds);
+
+    // Fetch HOD's own name so frontend can show "Reports to: <HOD name>"
+    const hod = await this.users.findOne({ where: { user_id: hodUserId } });
+
     const facultyIds = faculty.map((row) => row.user_id);
+    const profileByUser = new Map<
+      string,
+      {
+        employee_id: string | null;
+        designation: string | null;
+        joining_date: string | null;
+        shift_timing: string | null;
+        reports_to_name: string | null;
+      }
+    >();
+    if (facultyIds.length > 0) {
+      const profileRows = await this.users.manager.query<
+        Array<{
+          user_id: string;
+          employee_id: string | null;
+          designation: string | null;
+          joining_date: string | null;
+          start_time: string | null;
+          end_time: string | null;
+          reports_to_name: string | null;
+        }>
+      >(
+        `SELECT ep.user_id, ep.employee_id, ep.designation, ep.joining_date::text,
+                s.start_time::text, s.end_time::text,
+                ro.name AS reports_to_name
+         FROM hr_employee_profiles ep
+         LEFT JOIN hr_shifts s ON s.shift_id = ep.shift_id
+         LEFT JOIN users u ON u.user_id = ep.user_id AND u.tenant_id = ep.tenant_id
+         LEFT JOIN users ro ON ro.user_id = u.reporting_officer_id
+         WHERE ep.tenant_id = $1 AND ep.user_id = ANY($2::uuid[])`,
+        [tenantId, facultyIds],
+      );
+      for (const row of profileRows) {
+        const start = row.start_time?.slice(0, 5) ?? '09:00';
+        const end = row.end_time?.slice(0, 5) ?? '17:00';
+        profileByUser.set(row.user_id, {
+          employee_id: row.employee_id,
+          designation: row.designation,
+          joining_date: row.joining_date,
+          shift_timing: `${start} - ${end}`,
+          reports_to_name: row.reports_to_name,
+        });
+      }
+    }
+
     const allocations =
       facultyIds.length === 0
         ? []
@@ -1311,12 +1360,23 @@ export class AcademicsService {
             order: { day_of_week: 'ASC', start_time: 'ASC' },
           });
 
-    return faculty.map((row) => ({
+    return faculty.map((row) => {
+      const profile = profileByUser.get(row.user_id);
+      return {
       user_id: row.user_id,
       name: row.name,
       email: row.email,
+      phone: row.phone ?? null,
+      entity_id: row.entity_id ?? null,
       department: row.department?.dept_name ?? null,
       role: row.role?.role_name ?? null,
+      designation: profile?.designation ?? row.role?.role_name ?? null,
+      reporting_officer_id: row.reporting_officer_id ?? null,
+      reports_to_name: profile?.reports_to_name ?? hod?.name ?? null,
+      hod_name: hod?.name ?? null,
+      joined_at: profile?.joining_date ?? row.created_at ?? null,
+      shift_timing: profile?.shift_timing ?? null,
+      employee_id: profile?.employee_id ?? null,
       courses: allocations
         .filter((allocation) => allocation.faculty_user_id === row.user_id)
         .map((allocation) => ({
@@ -1329,7 +1389,246 @@ export class AcademicsService {
           end_time: allocation.end_time,
           room: allocation.room,
         })),
-    }));
+      };
+    });
+  }
+
+  private parseSemester(semStr: string | null, courseCode?: string): number {
+    if (semStr) {
+      const upper = semStr.toUpperCase();
+      if (upper.startsWith('VIII')) return 8;
+      if (upper.startsWith('VII')) return 7;
+      if (upper.startsWith('VI')) return 6;
+      if (upper.startsWith('V')) return 5;
+      if (upper.startsWith('IV')) return 4;
+      if (upper.startsWith('III')) return 3;
+      if (upper.startsWith('II')) return 2;
+      if (upper.startsWith('I')) return 1;
+    }
+    if (courseCode) {
+      const match = courseCode.match(/\d/);
+      if (match) {
+        const num = parseInt(match[0], 10);
+        if (num >= 1 && num <= 8) return num;
+      }
+    }
+    return 3; // Default fallback
+  }
+
+  async getHodFacultyAudit(tenantId: string, hodUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const faculty = await this.listDepartmentFacultyRaw(tenantId, deptIds);
+    const facultyIds = faculty.map((row) => row.user_id);
+    if (facultyIds.length === 0) return [];
+
+    const allocations = await this.timetables.find({
+      where: { tenant_id: tenantId, faculty_user_id: In(facultyIds) },
+      relations: ['course'],
+      order: { day_of_week: 'ASC', start_time: 'ASC' },
+    });
+
+    const courseAllocations = await this.users.manager.query(
+      `SELECT course_id, faculty_user_id, semester 
+       FROM academic_course_allocations 
+       WHERE tenant_id = $1 AND faculty_user_id = ANY($2::uuid[])`,
+      [tenantId, facultyIds],
+    );
+
+    const semesterMap = new Map<string, string>();
+    for (const row of courseAllocations) {
+      if (row.course_id && row.faculty_user_id) {
+        semesterMap.set(`${row.faculty_user_id}_${row.course_id}`, row.semester || '');
+      }
+    }
+
+    const materialsCounts = await this.users.manager.query(
+      `SELECT course_id, COUNT(*)::int AS count 
+       FROM course_materials 
+       WHERE tenant_id = $1 AND faculty_user_id = ANY($2::uuid[]) 
+       GROUP BY course_id`,
+      [tenantId, facultyIds],
+    );
+    const materialsMap = new Map<string, number>(
+      materialsCounts.map((r: any) => [r.course_id, Number(r.count)])
+    );
+
+    const isoDay = new Date().getDay() === 0 ? 7 : new Date().getDay();
+    const missingAttendanceRows = await this.users.manager.query(
+      `SELECT 
+         t.faculty_user_id,
+         t.course_id,
+         c.course_code,
+         t.start_time,
+         t.end_time
+       FROM academic_timetables t
+       INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       LEFT JOIN course_attendance_logs cal
+         ON cal.tenant_id = t.tenant_id
+        AND cal.course_id = t.course_id
+        AND cal.faculty_user_id = t.faculty_user_id
+        AND cal.date = CURRENT_DATE
+        AND cal.timetable_id = t.timetable_id
+       WHERE t.tenant_id = $1
+         AND t.faculty_user_id = ANY($2::uuid[])
+         AND t.day_of_week = $3
+         AND t.end_time < CURRENT_TIME
+         AND cal.log_id IS NULL`,
+      [tenantId, facultyIds, isoDay],
+    );
+
+    const missingAttendanceMap = new Map<string, string[]>();
+    for (const row of missingAttendanceRows) {
+      if (!missingAttendanceMap.has(row.faculty_user_id)) {
+        missingAttendanceMap.set(row.faculty_user_id, []);
+      }
+      missingAttendanceMap.get(row.faculty_user_id)!.push(
+        `${row.course_code} at ${row.start_time} (Today)`
+      );
+    }
+
+    const courseIds = allocations.map((a) => a.course_id);
+    const marksStatuses = courseIds.length > 0 
+      ? await this.users.manager.query(
+          `SELECT course_id, exam_type, COUNT(*)::int AS count, MIN(status) AS min_status
+           FROM academic_marks 
+           WHERE tenant_id = $1 AND course_id = ANY($2::uuid[]) 
+           GROUP BY course_id, exam_type`,
+          [tenantId, courseIds],
+        )
+      : [];
+      
+    const marksMap = new Map<string, { ga: boolean; wt: boolean; labs: boolean; theory: boolean; status: string }>();
+    for (const r of marksStatuses) {
+      if (!marksMap.has(r.course_id)) {
+        marksMap.set(r.course_id, { ga: false, wt: false, labs: false, theory: false, status: 'OPEN' });
+      }
+      const m = marksMap.get(r.course_id)!;
+      const type = r.exam_type.toUpperCase();
+      if (Number(r.count) > 0) {
+        if (type.startsWith('GA') || type.startsWith('DA') || type === 'INTERNAL' || type === 'QUIZ' || type === 'PROJECT' || type === 'ASSIGNMENT') {
+          m.ga = true;
+        }
+        if (type.startsWith('WT') || type.startsWith('CAT') || type.startsWith('MTE') || type === 'MID_TERM') {
+          m.wt = true;
+        }
+        if (type.includes('LAB') || type.includes('PRACTICAL')) {
+          m.labs = true;
+        }
+        if (type === 'ETE' || type === 'END_TERM' || type === 'THEORY') {
+          m.theory = true;
+        }
+      }
+      // Overall status is only LOCKED when the final ETE (theory/labs) is locked/published
+      if (type === 'ETE' || type === 'END_TERM' || type === 'THEORY') {
+        if (r.min_status === 'LOCKED' || r.min_status === 'PUBLISHED' || r.min_status === 'PENDING_COE') {
+          m.status = 'LOCKED';
+        } else if (r.min_status === 'EDIT_REQUESTED') {
+          m.status = 'EDIT_REQUESTED';
+        }
+      }
+    }
+
+    const auditRecords: any[] = [];
+    for (const fac of faculty) {
+      const facAllocations = allocations.filter((a) => a.faculty_user_id === fac.user_id);
+      const seenCourses = new Set<string>();
+
+      if (facAllocations.length === 0) {
+        auditRecords.push({
+          id: `a-${fac.user_id}-none`,
+          facultyName: fac.name,
+          facultyId: fac.user_id,
+          semester: 3, // default/fallback
+          subjectCode: 'N/A',
+          subjectName: 'No Course Allocated',
+          pptsUploaded: 0,
+          attendanceMarked: 100,
+          attendanceMissingClasses: [],
+          attendanceStatusLabel: 'N/A',
+          marksUploaded: { ga: false, wt: false, labs: false, theory: false },
+          marksStatus: 'N/A',
+          editRequestReason: '',
+        });
+        continue;
+      }
+
+      for (const alloc of facAllocations) {
+        if (seenCourses.has(alloc.course_id)) continue;
+        seenCourses.add(alloc.course_id);
+
+        const courseId = alloc.course_id;
+        const ppts = materialsMap.get(courseId) ?? 0;
+        const missing = missingAttendanceMap.get(fac.user_id) ?? [];
+
+        const semStr = semesterMap.get(`${fac.user_id}_${courseId}`) || '';
+        const semester = this.parseSemester(semStr, alloc.course?.course_code);
+
+        // Find if this specific course has a class scheduled today
+        const todaySlots = facAllocations.filter((a) => a.course_id === courseId && a.day_of_week === isoDay);
+        let attendanceStatusLabel: 'All Marked' | 'Missed Class' | 'No Class Today' | 'Upcoming Class' = 'No Class Today';
+
+        if (todaySlots.length > 0) {
+          const pad = (n: number) => String(n).padStart(2, '0');
+          const now = new Date();
+          const currentTimeString = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+          
+          const endedSlots = todaySlots.filter((a) => a.end_time < currentTimeString);
+          if (endedSlots.length === 0) {
+            attendanceStatusLabel = 'Upcoming Class';
+          } else {
+            const hasMissingForCourse = missing.some((m) => m.startsWith(alloc.course?.course_code || ''));
+            if (hasMissingForCourse) {
+              attendanceStatusLabel = 'Missed Class';
+            } else {
+              attendanceStatusLabel = 'All Marked';
+            }
+          }
+        }
+
+        const marks = marksMap.get(courseId) ?? { ga: false, wt: false, labs: false, theory: false, status: 'OPEN' };
+        
+        auditRecords.push({
+          id: `a-${fac.user_id}-${courseId}`,
+          facultyName: fac.name,
+          facultyId: fac.user_id,
+          semester,
+          subjectCode: alloc.course?.course_code || 'N/A',
+          subjectName: alloc.course?.course_name || 'N/A',
+          pptsUploaded: ppts,
+          attendanceMarked: missing.length === 0 ? 100 : 75,
+          attendanceMissingClasses: missing.filter((m) => m.startsWith(alloc.course?.course_code || '')),
+          attendanceStatusLabel,
+          marksUploaded: {
+            ga: marks.ga,
+            wt: marks.wt,
+            labs: marks.labs,
+            theory: marks.theory,
+          },
+          marksStatus: marks.status,
+          editRequestReason: marks.status === 'EDIT_REQUESTED' ? 'Requesting unlock to submit revised grades.' : '',
+        });
+      }
+    }
+
+    return auditRecords;
+  }
+
+  async handleHodUnlockAction(
+    tenantId: string,
+    hodUserId: string,
+    dto: { course_id: string; action: 'APPROVE' | 'REJECT' },
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const targetStatus = dto.action === 'APPROVE' ? 'DRAFT' : 'PUBLISHED';
+    
+    await this.users.manager.query(
+      `UPDATE academic_marks 
+       SET status = $1 
+       WHERE tenant_id = $2 AND course_id = $3 AND status = 'EDIT_REQUESTED'`,
+      [targetStatus, tenantId, dto.course_id],
+    );
+    
+    return { success: true, message: `Request successfully ${dto.action.toLowerCase()}d.` };
   }
 
   async allocateHodCourse(

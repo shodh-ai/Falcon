@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   CalendarCheck,
@@ -120,7 +120,7 @@ export default function FacultyTimetablePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewAdjustment, setViewAdjustment] = useState<Adjustment | null>(null);
 
-  async function loadPageData() {
+  const loadPageData = useCallback(async () => {
     const [scheduleData, statsData, todayData, adjustmentData] = await Promise.all([
       api.get<TimetableRow[]>('/api/academics/faculty/workspaces/timetable'),
       api.get<TimetableStats>('/api/academics/faculty/workspaces/timetable/stats'),
@@ -131,11 +131,12 @@ export default function FacultyTimetablePage() {
     setStats(statsData);
     setTodayClasses(todayData);
     setAdjustments(adjustmentData);
-  }
+  }, [api]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPageData().catch(() => undefined);
-  }, [api]);
+  }, [loadPageData]);
 
   const pendingAdjustments = useMemo(
     () => adjustments.filter((a) => a.status.includes('PENDING')),
