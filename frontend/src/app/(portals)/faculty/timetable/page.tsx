@@ -20,7 +20,7 @@ import {
   FacultyStatCard,
   FacultyMetricChip,
 } from '@/components/faculty';
-import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
+import { useFacultyCourses, uniqueFacultyCoursesByCourseId } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -143,7 +143,10 @@ export default function FacultyTimetablePage() {
     [adjustments],
   );
 
-  const courseOptions = useMemo(() => courses, [courses]);
+  const courseOptions = useMemo(
+    () => uniqueFacultyCoursesByCourseId(courses),
+    [courses],
+  );
 
   async function submitAdjustment(e: FormEvent) {
     e.preventDefault();

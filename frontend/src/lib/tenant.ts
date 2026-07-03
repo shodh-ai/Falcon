@@ -1,5 +1,10 @@
 export const TENANT_COOKIE = 'falcon_tenant_subdomain';
 
+import {
+  extractSubdomainFromHost,
+  resolveTenantSubdomain,
+} from '@/lib/resolve-tenant-subdomain';
+
 export type TenantBranding = {
   tenantId: string;
   name: string;
@@ -12,30 +17,21 @@ export type TenantBranding = {
 
 export function getSubdomainFromClient(): string {
   if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+    return resolveTenantSubdomain(null);
   }
 
   const fromCookie = document.cookie
     .split('; ')
     .find((row) => row.startsWith(`${TENANT_COOKIE}=`))
     ?.split('=')[1];
-  if (fromCookie) return decodeURIComponent(fromCookie);
-
-  const host = window.location.hostname;
-  const base = process.env.NEXT_PUBLIC_SAAS_BASE_DOMAIN ?? 'localhost';
-
-  if (base === 'localhost') {
-    if (host.endsWith('.localhost')) {
-      return host.replace('.localhost', '');
-    }
-    return process.env.NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+  if (fromCookie?.trim()) {
+    return resolveTenantSubdomain(decodeURIComponent(fromCookie));
   }
 
-  if (host.endsWith(`.${base}`)) {
-    return host.slice(0, -(base.length + 1));
-  }
+  const fromHost = extractSubdomainFromHost(window.location.hostname);
+  if (fromHost) return fromHost;
 
-  return process.env.NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+  return resolveTenantSubdomain(null);
 }
 
 export async function fetchTenantBranding(subdomain: string): Promise<TenantBranding> {

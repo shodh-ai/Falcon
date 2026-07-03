@@ -229,22 +229,55 @@ export class AcademicsFacultyService {
   ) {
     const day = new Date().getDay();
     const isoDay = day === 0 ? 7 : day;
-    const rows = await this.timetableRepo.find({
-      where: {
-        tenant_id: tenantId,
-        faculty_user_id: facultyUserId,
-        day_of_week: isoDay,
-      },
-      relations: ['course'],
-      order: { start_time: 'ASC' },
-    });
+    const rows = await this.dataSource.query<
+      Array<{
+        timetable_id: string;
+        course_id: string;
+        course_code: string;
+        course_name: string;
+        room: string | null;
+        start_time: string;
+        end_time: string;
+      }>
+    >(
+      `WITH faculty_courses AS (
+         SELECT DISTINCT a.course_id
+         FROM academic_course_allocations a
+         WHERE a.tenant_id = $1
+           AND a.faculty_user_id = $2
+           AND a.status = 'ACTIVE'
+           AND a.course_id IS NOT NULL
+       )
+       SELECT
+         COALESCE(t.timetable_id, fc.course_id) AS timetable_id,
+         fc.course_id,
+         c.course_code,
+         c.course_name,
+         t.room,
+         COALESCE(t.start_time, '09:00'::time) AS start_time,
+         COALESCE(t.end_time, '10:00'::time) AS end_time
+       FROM faculty_courses fc
+       INNER JOIN academic_courses c ON c.course_id = fc.course_id
+       LEFT JOIN LATERAL (
+         SELECT t.*
+         FROM academic_timetables t
+         WHERE t.tenant_id = $1
+           AND t.course_id = fc.course_id
+           AND t.deleted_at IS NULL
+         ORDER BY CASE WHEN t.faculty_user_id = $2 THEN 0 ELSE 1 END, t.timetable_id DESC
+         LIMIT 1
+       ) t ON true
+       WHERE COALESCE(t.day_of_week, 1) = $3
+       ORDER BY COALESCE(t.start_time, '09:00'::time)`,
+      [tenantId, facultyUserId, isoDay],
+    );
 
     return Promise.all(
       rows.map(async (row) => ({
         timetable_id: row.timetable_id,
         course_id: row.course_id,
-        course_code: row.course.course_code,
-        course_name: row.course.course_name,
+        course_code: row.course_code,
+        course_name: row.course_name,
         room: row.room,
         start_time: row.start_time,
         end_time: row.end_time,
@@ -388,33 +421,68 @@ export class AcademicsFacultyService {
   async getMissingAttendanceAlerts(facultyUserId: string, tenantId: string) {
     const isoDay = new Date().getDay() === 0 ? 7 : new Date().getDay();
     return this.dataSource.query(
-      `SELECT
-         t.timetable_id,
-         t.course_id,
+      `WITH faculty_courses AS (
+         SELECT DISTINCT a.course_id
+         FROM academic_course_allocations a
+         WHERE a.tenant_id = $1
+           AND a.faculty_user_id = $2
+           AND a.status = 'ACTIVE'
+           AND a.course_id IS NOT NULL
+       ),
+       proxy_today AS (
+         SELECT p.course_id, p.absent_faculty_id
+         FROM academic_proxy_requests p
+         WHERE p.tenant_id = $1
+           AND p.proxy_faculty_id = $2
+           AND p.date_of_proxy = CURRENT_DATE
+           AND p.status = 'APPROVED'
+       ),
+       eligible_courses AS (
+         SELECT course_id, $2::uuid AS log_faculty_id
+         FROM faculty_courses
+         UNION
+         SELECT course_id, absent_faculty_id AS log_faculty_id
+         FROM proxy_today
+       ),
+       today_slots AS (
+         SELECT
+           t.timetable_id,
+           t.course_id,
+           t.start_time,
+           t.end_time,
+           ec.log_faculty_id
+         FROM eligible_courses ec
+         INNER JOIN academic_timetables t
+           ON t.tenant_id = $1
+          AND t.course_id = ec.course_id
+          AND t.day_of_week = $3
+         WHERE t.end_time < CURRENT_TIME
+       )
+       SELECT
+         ts.timetable_id,
+         ts.course_id,
          c.course_code,
          c.course_name,
-         t.start_time,
-         t.end_time,
+         ts.start_time,
+         ts.end_time,
          COUNT(e.enrollment_id)::int AS student_count
-       FROM academic_timetables t
-       INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       FROM today_slots ts
+       INNER JOIN academic_courses c
+         ON c.course_id = ts.course_id
+        AND c.tenant_id = $1
        LEFT JOIN student_course_enrollments e
-         ON e.tenant_id = t.tenant_id
-        AND e.course_id = t.course_id
+         ON e.tenant_id = $1
+        AND e.course_id = ts.course_id
         AND e.status = 'ENROLLED'
        LEFT JOIN course_attendance_logs cal
-         ON cal.tenant_id = t.tenant_id
-        AND cal.course_id = t.course_id
-        AND cal.faculty_user_id = t.faculty_user_id
+         ON cal.tenant_id = $1
+        AND cal.course_id = ts.course_id
+        AND cal.faculty_user_id = ts.log_faculty_id
         AND cal.date = CURRENT_DATE
-        AND cal.timetable_id = t.timetable_id
-       WHERE t.tenant_id = $1
-         AND t.faculty_user_id = $2
-         AND t.day_of_week = $3
-         AND t.end_time < CURRENT_TIME
-         AND cal.log_id IS NULL
-       GROUP BY t.timetable_id, t.course_id, c.course_code, c.course_name, t.start_time, t.end_time
-       ORDER BY t.start_time ASC`,
+        AND cal.timetable_id = ts.timetable_id
+       WHERE cal.log_id IS NULL
+       GROUP BY ts.timetable_id, ts.course_id, c.course_code, c.course_name, ts.start_time, ts.end_time
+       ORDER BY ts.start_time ASC`,
       [tenantId, facultyUserId, isoDay],
     );
   }
@@ -809,6 +877,14 @@ export class AcademicsFacultyService {
     });
     if (row) return;
 
+    const allocation = await this.dataSource.query(
+      `SELECT 1 FROM academic_course_allocations
+       WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND status = 'ACTIVE'
+       LIMIT 1`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (allocation.length) return;
+
     if (date) {
       const proxy = await this.dataSource.query(
         `SELECT 1 FROM academic_proxy_requests
@@ -835,6 +911,14 @@ export class AcademicsFacultyService {
       },
     });
     if (teaches) return facultyUserId;
+
+    const allocation = await this.dataSource.query(
+      `SELECT 1 FROM academic_course_allocations
+       WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND status = 'ACTIVE'
+       LIMIT 1`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (allocation.length) return facultyUserId;
 
     const proxy = await this.dataSource.query<
       Array<{ absent_faculty_id: string }>

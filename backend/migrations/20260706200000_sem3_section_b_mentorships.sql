@@ -1,0 +1,153 @@
+-- Semester III section B was missing from student slots — Pooja (CS3001 III-B) had no auto mentees.
+-- Split two sem-3 students into section B, sync III-B enrollments, then re-run mentor assignment.
+
+UPDATE student_profiles sp
+   SET section_code = 'B',
+       updated_at = NOW()
+  FROM users u
+ WHERE sp.user_id = u.user_id
+   AND lower(u.official_email) IN (
+     'prasoon.2548543@mygyanvihar.com',
+     'sameerchoudhary@mygyanvihar.com'
+   );
+
+WITH tenant AS (
+  SELECT tenant_id FROM public.tenants WHERE subdomain = 'sgvu' LIMIT 1
+),
+sem3_b_students AS (
+  SELECT u.user_id
+  FROM users u
+  JOIN student_profiles sp ON sp.user_id = u.user_id
+  WHERE sp.current_semester = 3
+    AND upper(sp.section_code) = 'B'
+),
+iii_b_courses AS (
+  SELECT DISTINCT a.course_id
+  FROM academic_course_allocations a
+  CROSS JOIN tenant t
+  WHERE a.tenant_id = t.tenant_id
+    AND a.academic_year = '2026-2027'
+    AND a.program_name = 'BTECH CSE'
+    AND a.semester = 'III-B'
+    AND a.course_id IS NOT NULL
+)
+INSERT INTO student_course_enrollments (tenant_id, student_user_id, course_id, semester, section_code, status)
+SELECT t.tenant_id, s.user_id, c.course_id, 3, 'B', 'ENROLLED'
+FROM sem3_b_students s
+CROSS JOIN iii_b_courses c
+CROSS JOIN tenant t
+ON CONFLICT (tenant_id, student_user_id, course_id) DO UPDATE SET
+  semester = 3,
+  section_code = 'B',
+  status = CASE
+    WHEN student_course_enrollments.status = 'COMPLETED' THEN student_course_enrollments.status
+    ELSE 'ENROLLED'
+  END;
+
+WITH tenant AS (
+  SELECT tenant_id FROM public.tenants WHERE subdomain = 'sgvu' LIMIT 1
+),
+sem3_b_students AS (
+  SELECT u.user_id
+  FROM users u
+  JOIN student_profiles sp ON sp.user_id = u.user_id
+  WHERE sp.current_semester = 3
+    AND upper(sp.section_code) = 'B'
+),
+iii_b_courses AS (
+  SELECT DISTINCT a.course_id
+  FROM academic_course_allocations a
+  CROSS JOIN tenant t
+  WHERE a.tenant_id = t.tenant_id
+    AND a.academic_year = '2026-2027'
+    AND a.program_name = 'BTECH CSE'
+    AND a.semester = 'III-B'
+    AND a.course_id IS NOT NULL
+)
+DELETE FROM student_course_enrollments e
+USING sem3_b_students s, tenant t
+WHERE e.tenant_id = t.tenant_id
+  AND e.student_user_id = s.user_id
+  AND e.semester = 3
+  AND e.status = 'ENROLLED'
+  AND e.course_id NOT IN (SELECT course_id FROM iii_b_courses);
+
+-- Mentor sync: sem 3 -> CS3001 teacher in the same section.
+WITH student_slots AS (
+  SELECT
+    u.user_id AS student_user_id,
+    sp.tenant_id,
+    sp.current_semester,
+    sp.section_code,
+    COALESCE(sp.batch, 'BTECH CSE') AS program
+  FROM users u
+  JOIN student_profiles sp ON sp.user_id = u.user_id
+  WHERE sp.current_semester IS NOT NULL
+    AND sp.section_code IS NOT NULL
+),
+anchor_codes AS (
+  SELECT * FROM (VALUES
+    (3, 'CS3001'),
+    (5, 'CP301'),
+    (7, 'CP405')
+  ) AS v(semester_num, subject_code)
+),
+anchor_mentors AS (
+  SELECT DISTINCT ON (ss.student_user_id)
+    ss.student_user_id,
+    a.faculty_user_id AS proctor_user_id
+  FROM student_slots ss
+  JOIN anchor_codes ac ON ac.semester_num = ss.current_semester
+  JOIN academic_subjects s ON s.subject_code = ac.subject_code
+  JOIN academic_course_allocations a
+    ON a.tenant_id = ss.tenant_id
+   AND a.subject_id = s.subject_id
+   AND a.academic_year = '2026-2027'
+   AND a.status = 'ACTIVE'
+   AND a.faculty_user_id IS NOT NULL
+   AND upper(replace(COALESCE(a.program_name, ''), ' ', '')) = upper(replace(ss.program, ' ', ''))
+   AND CASE upper(split_part(COALESCE(a.semester, ''), '-', 1))
+     WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4
+     WHEN 'V' THEN 5 WHEN 'VI' THEN 6 WHEN 'VII' THEN 7 WHEN 'VIII' THEN 8
+     ELSE NULL END = ss.current_semester
+   AND upper(split_part(a.semester, '-', 2)) = upper(ss.section_code)
+  ORDER BY ss.student_user_id, a.updated_at DESC
+),
+load_mentors AS (
+  SELECT DISTINCT ON (ss.student_user_id)
+    ss.student_user_id,
+    a.faculty_user_id AS proctor_user_id
+  FROM student_slots ss
+  JOIN academic_course_allocations a ON a.tenant_id = ss.tenant_id
+  JOIN academic_subjects s ON s.subject_id = a.subject_id
+  WHERE a.academic_year = '2026-2027'
+    AND a.status = 'ACTIVE'
+    AND a.faculty_user_id IS NOT NULL
+    AND upper(replace(COALESCE(a.program_name, ''), ' ', '')) = upper(replace(ss.program, ' ', ''))
+    AND CASE upper(split_part(COALESCE(a.semester, ''), '-', 1))
+      WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4
+      WHEN 'V' THEN 5 WHEN 'VI' THEN 6 WHEN 'VII' THEN 7 WHEN 'VIII' THEN 8
+      ELSE NULL END = ss.current_semester
+    AND upper(split_part(a.semester, '-', 2)) = upper(ss.section_code)
+    AND COALESCE(s.subject_type, 'THEORY') IN ('THEORY', 'SKILL')
+    AND s.subject_code NOT LIKE 'OE%'
+  GROUP BY ss.student_user_id, a.faculty_user_id
+  ORDER BY ss.student_user_id, COUNT(*) DESC, a.faculty_user_id
+),
+resolved AS (
+  SELECT
+    ss.student_user_id,
+    COALESCE(am.proctor_user_id, lm.proctor_user_id) AS proctor_user_id
+  FROM student_slots ss
+  LEFT JOIN anchor_mentors am ON am.student_user_id = ss.student_user_id
+  LEFT JOIN load_mentors lm ON lm.student_user_id = ss.student_user_id
+  WHERE COALESCE(am.proctor_user_id, lm.proctor_user_id) IS NOT NULL
+)
+INSERT INTO academic_mentorships (student_user_id, proctor_user_id, is_active)
+SELECT student_user_id, proctor_user_id, true
+FROM resolved
+ON CONFLICT (student_user_id) DO UPDATE SET
+  proctor_user_id = EXCLUDED.proctor_user_id,
+  is_active = true,
+  updated_at = NOW(),
+  deleted_at = NULL;

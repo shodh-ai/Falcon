@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
 
 export type StudentCourse = {
@@ -12,50 +13,74 @@ export type StudentCourse = {
   course_type: string;
 };
 
-type RegistrationResponse = {
-  current_semester: number;
-  enrollments: Array<{
+type EnrollmentResponse = Array<{
+  enrollment_id: string;
+  semester: number;
+  status: string;
+  course: {
     course_id: string;
     course_code: string;
     course_name: string;
     credits: number;
-    semester: number;
-    course_type?: string;
-    status?: string;
-  }>;
-};
+    is_elective?: boolean;
+  };
+}>;
 
 export function useStudentCourses() {
   const api = useAuthedApi();
+  const { user } = useAuth();
+  const userId = user?.user_id ?? null;
   const [courses, setCourses] = useState<StudentCourse[]>([]);
   const [currentSemester, setCurrentSemester] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!userId) {
+      setCourses([]);
+      setCurrentSemester(null);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
+    setLoading(true);
+    setError(null);
+
     (async () => {
       try {
-        const data = await api.get<RegistrationResponse>('/api/student/registration');
-        const semester = data.current_semester;
-        const enrolled = (data.enrollments ?? []).filter(
-          (row) =>
-            Number(row.semester) === semester &&
-            (!row.status || row.status === 'ENROLLED' || row.status === 'COMPLETED'),
+        const rows = await api.get<EnrollmentResponse>(
+          '/api/academics/courses/my-enrollments',
         );
+        const active = (rows ?? []).filter(
+          (row) => row.status === 'ENROLLED' || row.status === 'COMPLETED',
+        );
+        const semester =
+          active.length > 0
+            ? Math.max(...active.map((row) => Number(row.semester)))
+            : null;
+        const enrolled =
+          semester == null
+            ? []
+            : active.filter((row) => Number(row.semester) === semester);
+
         if (!cancelled) {
           setCurrentSemester(semester);
           setCourses(
             enrolled.map((row) => ({
-              course_id: row.course_id,
-              course_code: row.course_code,
-              course_name: row.course_name,
-              credits: Number(row.credits) || 0,
+              course_id: row.course.course_id,
+              course_code: row.course.course_code,
+              course_name: row.course.course_name,
+              credits: Number(row.course.credits) || 0,
               semester: Number(row.semester),
-              course_type: row.course_type ?? 'CORE',
+              course_type: row.course.is_elective ? 'ELECTIVE' : 'CORE',
             })),
           );
-          setError(enrolled.length === 0 ? 'No subjects enrolled for this semester yet.' : null);
+          setError(
+            enrolled.length === 0
+              ? 'No subjects enrolled for this semester yet.'
+              : null,
+          );
         }
       } catch (e) {
         if (!cancelled) {
@@ -66,10 +91,11 @@ export function useStudentCourses() {
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, userId]);
 
   return { courses, currentSemester, loading, error };
 }

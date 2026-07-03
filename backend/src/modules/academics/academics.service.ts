@@ -23,6 +23,8 @@ import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
+import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
+import { StudentMentorSyncService } from './student-mentor-sync.service';
 
 /**
  * NOTE: `markAttendance` writes straight to Postgres for now. When traffic
@@ -57,6 +59,8 @@ export class AcademicsService {
     @InjectRepository(StudentProfile)
     private studentProfiles: Repository<StudentProfile>,
     private readonly notify: NotificationEmitterService,
+    private readonly enrollmentSync: StudentEnrollmentSyncService,
+    private readonly mentorSync: StudentMentorSyncService,
   ) {}
 
   private async notifyCourseStudents(
@@ -213,13 +217,75 @@ export class AcademicsService {
     });
   }
 
-  async listMyCourseEnrollments(studentUserId: string) {
+  async getWeeklyTimetable(studentUserId: string) {
+    const enrolled = await this.courseEnrollments.find({
+      where: { student_user_id: studentUserId, status: 'ENROLLED' },
+    });
+    const courseIds = enrolled.map((row) => row.course_id);
+    if (courseIds.length === 0) return [];
+
+    const rows = await this.timetables.find({
+      where: {
+        course_id: In(courseIds),
+      },
+      relations: ['course', 'faculty'],
+      order: { day_of_week: 'ASC', start_time: 'ASC' },
+    });
+
+    const liveByCourse = await this.fetchActiveLiveClasses(courseIds);
+
+    return rows.map((row) => {
+      const startTime = this.normalizeTime(row.start_time);
+      const endTime = this.normalizeTime(row.end_time);
+      const liveJoinUrl = liveByCourse.get(row.course_id) ?? null;
+      const isVirtual = Boolean(liveJoinUrl) || this.isVirtualRoom(row.room);
+
+      return {
+        timetable_id: row.timetable_id,
+        course_id: row.course_id,
+        course_code: row.course.course_code,
+        course_name: row.course.course_name,
+        credits: row.course.credits,
+        room: row.room,
+        faculty_name: row.faculty?.name ?? null,
+        day_of_week: row.day_of_week,
+        start_time: startTime,
+        end_time: endTime,
+        is_virtual: isVirtual,
+        live_join_url: liveJoinUrl,
+      };
+    });
+  }
+
+  async listMyCourseEnrollments(studentUserId: string, tenantId: string) {
+    await this.enrollmentSync.syncStudent(tenantId, studentUserId);
+    await this.mentorSync.syncStudent(tenantId, studentUserId);
+
+    const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
+      tenantId,
+      studentUserId,
+    );
+
     const rows = await this.courseEnrollments.find({
-      where: { student_user_id: studentUserId },
+      where: {
+        student_user_id: studentUserId,
+        tenant_id: tenantId,
+        status: In(['ENROLLED', 'COMPLETED']),
+      },
       relations: ['course'],
       order: { semester: 'ASC' },
     });
-    return rows.map((row) => this.toEnrollmentDto(row));
+
+    const filtered =
+      slot.courseIds.length > 0
+        ? rows.filter(
+            (row) =>
+              Number(row.semester) !== slot.semester ||
+              slot.courseIds.includes(row.course_id),
+          )
+        : rows;
+
+    return filtered.map((row) => this.toEnrollmentDto(row));
   }
 
   async listAvailableElectives(studentUserId: string, tenantId: string) {
@@ -656,20 +722,25 @@ export class AcademicsService {
     if (!deptIds.length) return [];
 
     const rows = await this.users.manager.query(
-      `SELECT u.user_id, u.name, u.official_email AS email,
+      `SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
+              d.dept_name,
+              hod.name AS hod_name,
+              hod.official_email AS hod_email,
               COALESCE(SUM(
                 EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600
               ), 0)::numeric(6,1) AS hours_per_week,
               COUNT(DISTINCT t.course_id)::int AS course_count
        FROM users u
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN users hod ON hod.user_id = d.hod_user_id
        LEFT JOIN academic_timetables t
          ON t.faculty_user_id = u.user_id AND t.tenant_id = u.tenant_id
        LEFT JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
          AND r.role_name IN ('Faculty', 'HOD', 'Dean')
-       GROUP BY u.user_id, u.name, u.official_email
-       ORDER BY hours_per_week DESC, u.name ASC`,
+       GROUP BY u.user_id, u.name, u.official_email, u.dept_id, d.dept_name, hod.name, hod.official_email
+       ORDER BY d.dept_name ASC, hours_per_week DESC, u.name ASC`,
       [tenantId, deptIds],
     );
 
@@ -677,6 +748,10 @@ export class AcademicsService {
       user_id: row.user_id,
       name: row.name,
       email: row.email,
+      dept_id: row.dept_id,
+      dept_name: row.dept_name,
+      hod_name: row.hod_name,
+      hod_email: row.hod_email,
       hours_per_week: Number(row.hours_per_week ?? 0),
       course_count: Number(row.course_count ?? 0),
       workload_status:
@@ -706,7 +781,7 @@ export class AcademicsService {
 
     return this.users.manager.query(
       `SELECT t.timetable_id, t.day_of_week, t.start_time, t.end_time, t.room,
-              c.course_code, c.course_name,
+              c.course_id, c.course_code, c.course_name,
               u.user_id AS faculty_user_id, u.name AS faculty_name
        FROM academic_timetables t
        INNER JOIN academic_courses c ON c.course_id = t.course_id
@@ -730,6 +805,78 @@ export class AcademicsService {
       ),
     ]);
     return { slots, faculty };
+  }
+
+  async getHodCourseAllocationTimetableData(tenantId: string, hodUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { allocations: [], timetables: [], faculty: [] };
+
+    const allocations = await this.users.manager.query(
+      `SELECT a.allocation_id, a.semester, c.course_id, c.course_code, c.course_name,
+              u.user_id AS faculty_user_id, u.name AS faculty_name
+       FROM academic_course_allocations a
+       INNER JOIN academic_courses c ON c.course_id = a.course_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1 AND u.dept_id = ANY($2::int[])
+       ORDER BY a.updated_at DESC NULLS LAST, c.course_code ASC`,
+      [tenantId, deptIds],
+    );
+
+    const [timetables, faculty] = await Promise.all([
+      this.listDepartmentTimetableForDepartments(tenantId, deptIds),
+      this.listDepartmentFacultyRaw(tenantId, deptIds).then((rows) =>
+        rows.map((row) => ({
+          user_id: row.user_id,
+          name: row.name,
+          email: row.email,
+        }))
+      ),
+    ]);
+
+    return { allocations, timetables, faculty };
+  }
+
+  async saveHodCourseAllocationTimetableBatch(
+    tenantId: string,
+    hodUserId: string,
+    dto: { semester: string; slots: Array<{ course_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string }> }
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) throw new Error('No departments found for HOD');
+
+    await this.users.manager.transaction(async (manager) => {
+      const allocations = await manager.query(
+        `SELECT c.course_id, u.user_id as faculty_user_id
+         FROM academic_course_allocations a
+         INNER JOIN academic_courses c ON c.course_id = a.course_id
+         INNER JOIN users u ON u.user_id = a.faculty_user_id
+         WHERE a.tenant_id = $1 AND u.dept_id = ANY($2::int[]) AND a.semester = $3`,
+        [tenantId, deptIds, dto.semester],
+      );
+
+      const courseIds = allocations.map((a: any) => a.course_id);
+      if (!courseIds.length) return;
+
+      await manager.query(
+        `DELETE FROM academic_timetables
+         WHERE tenant_id = $1 AND course_id = ANY($2::uuid[])`,
+        [tenantId, courseIds],
+      );
+
+      if (dto.slots && dto.slots.length > 0) {
+        for (const slot of dto.slots) {
+          const valid = allocations.some((a: any) => a.course_id === slot.course_id && a.faculty_user_id === slot.faculty_user_id);
+          if (valid) {
+            await manager.query(
+              `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
+               VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)`,
+              [tenantId, slot.course_id, slot.day_of_week, slot.start_time, slot.end_time, slot.faculty_user_id]
+            );
+          }
+        }
+      }
+    });
+    return { success: true };
   }
 
   async listHodResultAnalytics(tenantId: string, hodUserId: string) {
@@ -1487,7 +1634,7 @@ export class AcademicsService {
   async allocateHodCourse(
     tenantId: string,
     hodUserId: string,
-    dto: { timetable_id: string; faculty_user_id: string },
+    dto: { timetable_id: string; faculty_user_id: string; day_of_week?: number; start_time?: string; end_time?: string; course_id?: string },
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const faculty = await this.users.findOne({
@@ -1498,14 +1645,63 @@ export class AcademicsService {
       throw new Error('Faculty member is outside this HOD department scope');
     }
 
-    await this.timetables.update(
-      { timetable_id: dto.timetable_id, tenant_id: tenantId },
-      { faculty_user_id: dto.faculty_user_id },
-    );
-    const slot = await this.timetables.findOne({
-      where: { timetable_id: dto.timetable_id, tenant_id: tenantId },
-      relations: ['course', 'faculty'],
-    });
+    const updatePayload: any = { faculty_user_id: dto.faculty_user_id };
+    if (dto.day_of_week !== undefined) updatePayload.day_of_week = dto.day_of_week;
+    if (dto.start_time !== undefined) updatePayload.start_time = dto.start_time;
+    if (dto.end_time !== undefined) updatePayload.end_time = dto.end_time;
+
+    let slot;
+    if (dto.timetable_id) {
+      if (dto.timetable_id.startsWith('draft-')) {
+        if (!dto.course_id || dto.day_of_week === undefined || !dto.start_time || !dto.end_time) {
+          throw new Error('Missing required fields for new timetable slot');
+        }
+        const insertResult = await this.users.manager.query(
+          `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)
+           RETURNING *`,
+          [tenantId, dto.course_id, dto.day_of_week, dto.start_time, dto.end_time, dto.faculty_user_id]
+        );
+        slot = insertResult[0];
+      } else {
+        await this.timetables.update(
+          { timetable_id: dto.timetable_id, tenant_id: tenantId },
+          updatePayload,
+        );
+        slot = await this.timetables.findOne({
+          where: { timetable_id: dto.timetable_id, tenant_id: tenantId },
+          relations: ['course', 'faculty'],
+        });
+      }
+    }
+
+    if (slot) {
+      await this.users.manager.query(
+        `DELETE FROM academic_timetables d
+         USING academic_timetables keeper
+         WHERE keeper.timetable_id = $1
+           AND d.tenant_id = keeper.tenant_id
+           AND d.course_id = keeper.course_id
+           AND d.day_of_week = keeper.day_of_week
+           AND d.start_time = keeper.start_time
+           AND d.end_time = keeper.end_time
+           AND d.timetable_id <> keeper.timetable_id
+           AND d.deleted_at IS NULL`,
+        [slot.timetable_id],
+      );
+    }
+    
+    const courseIdToUpdate = slot?.course_id || dto.course_id;
+    if (courseIdToUpdate) {
+      await this.users.manager.query(
+        `UPDATE academic_course_allocations
+            SET faculty_user_id = $3, updated_at = NOW()
+          WHERE tenant_id = $1
+            AND course_id = $2
+            AND status = 'ACTIVE'`,
+        [tenantId, courseIdToUpdate, dto.faculty_user_id],
+      );
+    }
     if (slot?.course_id) {
       await this.notifyCourseStudents(
         tenantId,
@@ -1513,6 +1709,15 @@ export class AcademicsService {
         slot.course?.course_name ?? 'Course',
         `Faculty assignment updated for this slot.`,
       );
+    }
+    if (dto.faculty_user_id) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: dto.faculty_user_id,
+        courseName: slot?.course?.course_name ?? 'Course',
+        changeSummary: 'You have been assigned to teach this slot.',
+        actionLink: '/faculty/timetable',
+      });
     }
     return slot;
   }
@@ -1550,6 +1755,15 @@ export class AcademicsService {
       slot.course?.course_name ?? 'Course',
       summary,
     );
+    if (saved.faculty_user_id) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: saved.faculty_user_id,
+        courseName: slot.course?.course_name ?? 'Course',
+        changeSummary: summary,
+        actionLink: '/faculty/timetable',
+      });
+    }
     return saved;
   }
 
@@ -1638,12 +1852,29 @@ export class AcademicsService {
       .filter((student) => !lowAttendance || student.low_attendance);
   }
 
+  async getDeanStudentDetail(
+    tenantId: string,
+    deanUserId: string,
+    studentUserId: string,
+  ) {
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    return this.fetchStudentDetailForDepartments(tenantId, departmentIds, studentUserId);
+  }
+
   async getHodStudentDetail(
     tenantId: string,
     hodUserId: string,
     studentUserId: string,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    return this.fetchStudentDetailForDepartments(tenantId, deptIds, studentUserId);
+  }
+
+  private async fetchStudentDetailForDepartments(
+    tenantId: string,
+    deptIds: number[],
+    studentUserId: string,
+  ) {
     const student = await this.users.findOne({
       where: { user_id: studentUserId, tenant_id: tenantId },
       relations: ['department', 'role'],

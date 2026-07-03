@@ -8,6 +8,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, QueryRunner } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
+import { StudentMentorSyncService } from './student-mentor-sync.service';
 
 export type CourseAllocationRowInput = {
   faculty_username: string;
@@ -73,6 +75,8 @@ export class CourseAllocationBulkService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
+    private readonly enrollmentSync: StudentEnrollmentSyncService,
+    private readonly mentorSync: StudentMentorSyncService,
   ) {}
 
   async buildTemplateBuffer(): Promise<Buffer> {
@@ -139,6 +143,10 @@ export class CourseAllocationBulkService {
     }
   }
 
+  private normalizeCourseCode(code: string): string {
+    return code.trim().replace(/\s+/g, '').toUpperCase();
+  }
+
   async buildPreview(
     tenantId: string,
     rows: CourseAllocationRowInput[],
@@ -146,7 +154,7 @@ export class CourseAllocationBulkService {
     const existingSubjects = await this.dataSource.query<
       { subject_id: number; subject_code: string }[]
     >(
-      `SELECT subject_id, UPPER(TRIM(subject_code)) AS subject_code
+      `SELECT subject_id, UPPER(REPLACE(TRIM(subject_code), ' ', '')) AS subject_code
        FROM academic_subjects WHERE deleted_at IS NULL`,
     );
     const subjectByCode = new Map(
@@ -172,7 +180,7 @@ export class CourseAllocationBulkService {
     const facultyByUsername = this.buildFacultyUsernameIndex(facultyRows);
 
     const previewRows: PreviewRow[] = rows.map((row, idx) => {
-      const codeKey = row.subject_code.trim().toUpperCase();
+      const codeKey = this.normalizeCourseCode(row.subject_code);
       const existingId = subjectByCode.get(codeKey) ?? null;
       const isNew = existingId === null;
       const isUnassigned = NF_VALUES.has(row.faculty_username.trim().toLowerCase());
@@ -324,6 +332,8 @@ export class CourseAllocationBulkService {
       }
 
       await qr.commitTransaction();
+      await this.enrollmentSync.syncTenantStudents(tenantId, academicYear.trim());
+      await this.mentorSync.syncTenantStudents(tenantId, academicYear.trim());
       return result;
     } catch (err) {
       await qr.rollbackTransaction();
@@ -467,13 +477,124 @@ export class CourseAllocationBulkService {
     return { success: true, allocation_id: allocationId, faculty_user_id: facultyUserId };
   }
 
+  async listAllAllocations(tenantId: string) {
+    const items = await this.dataSource.query(
+      `SELECT a.allocation_id,
+              s.subject_code,
+              s.subject_name,
+              s.subject_type,
+              s.credits,
+              a.program_name,
+              a.semester,
+              a.academic_year,
+              a.faculty_user_id,
+              u.name AS faculty_name,
+              u.official_email AS faculty_email
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       LEFT JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1
+         AND a.status = 'ACTIVE'
+       ORDER BY a.academic_year DESC, a.program_name, a.semester, s.subject_code`,
+      [tenantId],
+    );
+
+    const faculty = await this.dataSource.query(
+      `SELECT u.user_id, u.name, u.official_email
+       FROM users u
+       INNER JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.is_active = true
+         AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+       ORDER BY u.name`,
+      [tenantId]
+    );
+
+    return { items, faculty };
+  }
+
+  async updateAllocationFaculty(tenantId: string, allocationId: string, newFacultyUserId: string | null) {
+    const allocation = await this.dataSource.query(
+      `SELECT a.allocation_id, a.course_id, a.faculty_user_id, s.subject_name, s.subject_code, a.academic_year
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'`,
+      [allocationId, tenantId],
+    );
+    if (!allocation[0]) throw new NotFoundException('Allocation not found');
+
+    const courseId = allocation[0].course_id;
+    const oldFacultyUserId = allocation[0].faculty_user_id;
+
+    await this.dataSource.query(
+      `UPDATE academic_course_allocations
+       SET faculty_user_id = $1, updated_at = NOW()
+       WHERE allocation_id = $2 AND tenant_id = $3`,
+      [newFacultyUserId, allocationId, tenantId],
+    );
+
+    if (courseId) {
+      if (oldFacultyUserId) {
+        await this.dataSource.query(
+          `DELETE FROM academic_timetables
+           WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3`,
+          [tenantId, courseId, oldFacultyUserId]
+        );
+      }
+      
+      if (newFacultyUserId) {
+        await this.ensureFacultyTimetableSlotDirect(
+          tenantId,
+          courseId,
+          newFacultyUserId,
+        );
+
+        this.notify.timetableChanged({
+          tenantId,
+          userId: newFacultyUserId,
+          courseName: allocation[0].subject_name,
+          changeSummary: `You have been assigned to teach ${allocation[0].subject_name} (${allocation[0].subject_code}) for ${allocation[0].academic_year}.`,
+        });
+      }
+    }
+
+    return { success: true, allocation_id: allocationId, faculty_user_id: newFacultyUserId };
+  }
+
+  async deleteAllocation(tenantId: string, allocationId: string) {
+    const allocation = await this.dataSource.query(
+      `SELECT a.allocation_id, a.course_id, a.faculty_user_id
+       FROM academic_course_allocations a
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2`,
+      [allocationId, tenantId],
+    );
+    if (!allocation[0]) throw new NotFoundException('Allocation not found');
+
+    const { course_id, faculty_user_id } = allocation[0];
+
+    if (course_id && faculty_user_id) {
+      await this.dataSource.query(
+        `DELETE FROM academic_timetables
+         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3`,
+        [tenantId, course_id, faculty_user_id]
+      );
+    }
+
+    await this.dataSource.query(
+      `DELETE FROM academic_course_allocations
+       WHERE allocation_id = $1 AND tenant_id = $2`,
+      [allocationId, tenantId]
+    );
+
+    return { success: true };
+  }
+
   private async upsertSubject(
     qr: QueryRunner,
     row: PreviewRow,
     defaultProgramId: number,
     result: ExecuteResult,
   ): Promise<number> {
-    const code = row.subject_code.trim().toUpperCase();
+    const code = this.normalizeCourseCode(row.subject_code);
     const shortname =
       row.subject_fullname.trim().split(/\s+/).slice(0, 3).join(' ').slice(0, 50) ||
       code;
@@ -512,7 +633,7 @@ export class CourseAllocationBulkService {
     row: PreviewRow,
     result: ExecuteResult,
   ): Promise<string> {
-    const code = row.subject_code.trim().toUpperCase();
+    const code = this.normalizeCourseCode(row.subject_code);
     const courses = (await qr.query(
       `INSERT INTO academic_courses (tenant_id, course_code, course_name, credits, is_elective)
        VALUES ($1, $2, $3, $4, false)
@@ -526,20 +647,32 @@ export class CourseAllocationBulkService {
     return courses[0].course_id;
   }
 
+  private scheduleSlotForFaculty(slotIndex: number): {
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+  } {
+    const dayOfWeek = (slotIndex % 6) + 1;
+    const hour = 9 + Math.floor(slotIndex / 6);
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return {
+      dayOfWeek,
+      startTime: `${pad(hour)}:00`,
+      endTime: `${pad(hour + 1)}:00`,
+    };
+  }
+
   private async ensureFacultyTimetableSlot(
     qr: QueryRunner,
     tenantId: string,
     courseId: string,
     facultyUserId: string,
   ) {
-    await qr.query(
-      `INSERT INTO academic_timetables (tenant_id, course_id, day_of_week, start_time, end_time, faculty_user_id)
-       SELECT $1, $2, 1, '09:00', '10:00', $3
-       WHERE NOT EXISTS (
-         SELECT 1 FROM academic_timetables
-         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
-       )`,
-      [tenantId, courseId, facultyUserId],
+    await this.ensureFacultyTimetableSlotWithQuery(
+      (sql, params) => qr.query(sql, params),
+      tenantId,
+      courseId,
+      facultyUserId,
     );
   }
 
@@ -548,14 +681,47 @@ export class CourseAllocationBulkService {
     courseId: string,
     facultyUserId: string,
   ) {
-    await this.dataSource.query(
-      `INSERT INTO academic_timetables (tenant_id, course_id, day_of_week, start_time, end_time, faculty_user_id)
-       SELECT $1, $2, 1, '09:00', '10:00', $3
-       WHERE NOT EXISTS (
-         SELECT 1 FROM academic_timetables
-         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
-       )`,
+    await this.ensureFacultyTimetableSlotWithQuery(
+      (sql, params) => this.dataSource.query(sql, params),
+      tenantId,
+      courseId,
+      facultyUserId,
+    );
+  }
+
+  private async ensureFacultyTimetableSlotWithQuery(
+    query: (sql: string, params: unknown[]) => Promise<unknown>,
+    tenantId: string,
+    courseId: string,
+    facultyUserId: string,
+  ) {
+    const updated = (await query(
+      `UPDATE academic_timetables
+          SET faculty_user_id = $3
+        WHERE tenant_id = $1
+          AND course_id = $2
+          AND deleted_at IS NULL
+        RETURNING timetable_id`,
       [tenantId, courseId, facultyUserId],
+    )) as Array<{ timetable_id: string }>;
+    if (updated.length > 0) return;
+
+    const counted = (await query(
+      `SELECT COUNT(*)::int AS cnt
+       FROM academic_timetables
+       WHERE tenant_id = $1
+         AND faculty_user_id = $2
+         AND deleted_at IS NULL`,
+      [tenantId, facultyUserId],
+    )) as Array<{ cnt: number }>;
+    const { dayOfWeek, startTime, endTime } = this.scheduleSlotForFaculty(
+      counted[0]?.cnt ?? 0,
+    );
+
+    await query(
+      `INSERT INTO academic_timetables (tenant_id, course_id, day_of_week, start_time, end_time, faculty_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [tenantId, courseId, dayOfWeek, startTime, endTime, facultyUserId],
     );
   }
 

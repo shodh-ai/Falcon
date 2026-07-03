@@ -136,6 +136,25 @@ describe('AuthService.localLogin', () => {
     expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
   });
 
+  it('falls back to sgvu when tenant subdomain header is empty', async () => {
+    const user = buildUser({
+      user_id: 'user-1',
+      email: 'library@mygyanvihar.com',
+      name: 'Library',
+      role_id: 11,
+      roleName: 'Librarian',
+    });
+
+    mockDataSource.query.mockResolvedValueOnce([
+      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
+    ]);
+    mockUserRepository.findOne.mockResolvedValue(user);
+
+    await service.localLogin('library@mygyanvihar.com', 'password123', '   ');
+
+    expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
+  });
+
   it('returns token and Registrar role for dev.registrar@ persona', async () => {
     const user = buildUser({
       user_id: 'user-registrar',

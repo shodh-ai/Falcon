@@ -12,6 +12,7 @@ type Payslip = {
   month: string;
   net_pay: string | number;
   status?: string;
+  file_path?: string;
 };
 
 export function MyPayslipsPanel() {
@@ -52,7 +53,18 @@ export function MyPayslipsPanel() {
               <p className="font-semibold text-sgvu-navy">{p.month}</p>
               <p className="text-sm text-muted-foreground">Net pay: ₹{Number(p.net_pay).toLocaleString('en-IN')}</p>
             </div>
-            <Button size="sm" variant="outline" className="gap-2">
+            <Button 
+              size="sm" 
+              variant="outline" 
+              className="gap-2"
+              onClick={() => {
+                if (p.file_path) {
+                  window.open(p.file_path, '_blank');
+                } else {
+                  toast.error('Payslip document is not available');
+                }
+              }}
+            >
               <Download className="h-4 w-4" />
               Download
             </Button>

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { EXECUTIVE_CARD, EXECUTIVE_TYPO } from '@/components/leadership/executive/design-tokens';
 import { formatCr, MOCK_KPI } from './intelligence-mock-data';
 
 type KpiCardProps = {
@@ -9,9 +10,34 @@ type KpiCardProps = {
   value: string;
   delta?: { value: number; positive: boolean };
   accent?: 'green' | 'red' | 'gold' | 'neutral';
+  variant?: 'dark' | 'light';
 };
 
-function KpiCard({ label, value, delta, accent = 'neutral' }: KpiCardProps) {
+function KpiCard({ label, value, delta, accent = 'neutral', variant = 'light' }: KpiCardProps) {
+  if (variant === 'light') {
+    const valueClass =
+      accent === 'red'
+        ? 'text-red-600'
+        : accent === 'green'
+          ? 'text-emerald-700'
+          : accent === 'gold'
+            ? 'text-sgvu-gold'
+            : 'text-sgvu-navy';
+
+    return (
+      <div className={cn(EXECUTIVE_CARD, 'p-6 md:p-8')}>
+        <p className={EXECUTIVE_TYPO.cardTitle}>{label}</p>
+        <p className={cn(EXECUTIVE_TYPO.heroKpi, 'mt-3', valueClass)}>{value}</p>
+        {delta ? (
+          <p className={cn('mt-2 text-sm font-semibold', delta.positive ? 'text-emerald-700' : 'text-red-600')}>
+            {delta.positive ? '+' : ''}
+            {delta.value}% vs last period
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   const accentGlow = {
     green: 'shadow-[0_0_40px_-8px_rgba(34,197,94,0.35)]',
     red: 'shadow-[0_0_40px_-8px_rgba(239,68,68,0.35)]',
@@ -47,23 +73,53 @@ function KpiCard({ label, value, delta, accent = 'neutral' }: KpiCardProps) {
   );
 }
 
-export function PremiumKPICards() {
+export type LiveKpiData = {
+  revenueToday?: number;
+  expenseToday?: number;
+  netProfitToday?: number;
+  cashInBank?: number;
+};
+
+export function PremiumKPICards({
+  data,
+  variant = 'light',
+}: {
+  data?: LiveKpiData | null;
+  variant?: 'dark' | 'light';
+}) {
+  const revenue = data?.revenueToday ?? MOCK_KPI.revenueYtd.value;
+  const expenses = data?.expenseToday ?? MOCK_KPI.expensesYtd.value;
+  const net = data?.netProfitToday ?? MOCK_KPI.netProfit.value;
+  const cash = data?.cashInBank ?? MOCK_KPI.liquidCash.value;
+
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <KpiCard
-        label={MOCK_KPI.revenueYtd.label}
-        value={formatCr(MOCK_KPI.revenueYtd.value)}
-        delta={{ value: MOCK_KPI.revenueYtd.delta, positive: true }}
+        label={data ? 'Revenue Today' : MOCK_KPI.revenueYtd.label}
+        value={formatCr(revenue)}
+        delta={data ? undefined : { value: MOCK_KPI.revenueYtd.delta, positive: true }}
         accent="green"
+        variant={variant}
       />
       <KpiCard
-        label={MOCK_KPI.expensesYtd.label}
-        value={formatCr(MOCK_KPI.expensesYtd.value)}
-        delta={{ value: MOCK_KPI.expensesYtd.delta, positive: false }}
+        label={data ? 'Expenses Today' : MOCK_KPI.expensesYtd.label}
+        value={formatCr(expenses)}
+        delta={data ? undefined : { value: MOCK_KPI.expensesYtd.delta, positive: false }}
         accent="red"
+        variant={variant}
       />
-      <KpiCard label={MOCK_KPI.netProfit.label} value={formatCr(MOCK_KPI.netProfit.value)} accent="gold" />
-      <KpiCard label={MOCK_KPI.liquidCash.label} value={formatCr(MOCK_KPI.liquidCash.value)} accent="neutral" />
+      <KpiCard
+        label={data ? 'Net Today' : MOCK_KPI.netProfit.label}
+        value={formatCr(net)}
+        accent={(data?.netProfitToday ?? net) >= 0 ? 'gold' : 'red'}
+        variant={variant}
+      />
+      <KpiCard
+        label={data ? 'Cash in Bank' : MOCK_KPI.liquidCash.label}
+        value={formatCr(cash)}
+        accent="neutral"
+        variant={variant}
+      />
     </div>
   );
 }
@@ -74,13 +130,30 @@ export function GlassCard({
   action,
   children,
   className,
+  variant = 'dark',
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  variant?: 'dark' | 'light';
 }) {
+  if (variant === 'light') {
+    return (
+      <section className={cn(EXECUTIVE_CARD, 'p-6 md:p-8', className)}>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className={EXECUTIVE_TYPO.sectionTitle}>{title}</h2>
+            {subtitle ? <p className={cn('mt-1', EXECUTIVE_TYPO.bodySecondary)}>{subtitle}</p> : null}
+          </div>
+          {action}
+        </div>
+        {children}
+      </section>
+    );
+  }
+
   return (
     <section
       className={cn(

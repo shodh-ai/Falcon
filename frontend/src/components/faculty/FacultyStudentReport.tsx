@@ -1,16 +1,16 @@
 'use client';
 
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  Legend,
 } from 'recharts';
-import { AlertTriangle, BookOpen, Circle, GraduationCap, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Circle, GraduationCap, ShieldAlert } from 'lucide-react';
 import {
   FacultyMetricChip,
   FacultyPanel,
@@ -87,13 +87,15 @@ export type FacultyStudentReportData = {
     severity: 'LOW' | 'MEDIUM' | 'HIGH';
     detail: string;
   }>;
+  gpa_history?: Array<{
+    semester: number;
+    sgpa: number;
+    cgpa: number;
+    status: string;
+    academic_year: string | null;
+    source: string;
+  }>;
 };
-
-function scoreColor(pct: number) {
-  if (pct < 40) return '#dc2626';
-  if (pct < 60) return '#d97706';
-  return '#08234a';
-}
 
 function flagVariant(severity: 'LOW' | 'MEDIUM' | 'HIGH') {
   if (severity === 'HIGH') return 'destructive';
@@ -101,44 +103,107 @@ function flagVariant(severity: 'LOW' | 'MEDIUM' | 'HIGH') {
   return 'outline';
 }
 
-function assignmentStatusColor(status: string) {
-  if (status === 'PENDING') return '#dc2626';
-  if (status === 'SUBMITTED') return '#d97706';
-  return '#059669';
-}
-
-function assignmentBadge(status: string) {
-  if (status === 'PENDING') return 'destructive';
-  if (status === 'SUBMITTED') return 'secondary';
-  return 'outline';
-}
-
 function formatPercent(value: number) {
   return `${Math.round(Number(value ?? 0))}%`;
 }
 
-function formatScore(value: number | null, max: number) {
-  if (value == null) return 'Not graded';
-  return `${value}/${max}`;
-}
-
 export function FacultyStudentReport({ report }: { report: FacultyStudentReportData }) {
-  const { student, subject, summary, academic, marks, assignments, demerits, risk_flags } = report;
+  const { student, subject, summary, academic, assignments, demerits, risk_flags } = report;
+  const gpaHistory = report.gpa_history ?? [];
+  const latestGpa = gpaHistory.length ? gpaHistory[gpaHistory.length - 1] : null;
+  const academicSnapshot = academic ?? (latestGpa
+    ? {
+        academic_year: latestGpa.academic_year ?? '—',
+        semester: latestGpa.semester,
+        sgpa: latestGpa.sgpa,
+        cgpa: latestGpa.cgpa,
+        backlog_count: 0,
+        progression_status: latestGpa.status,
+        remarks: null,
+      }
+    : null);
 
-  const assessmentChart = marks.map((m) => ({
-    name: m.exam_type,
-    score: Math.round(Number(m.percent ?? 0)),
+  const gpaChartData = gpaHistory.map((row) => ({
+    semester: row.semester,
+    label: `Sem ${row.semester}`,
+    sgpa: Number(row.sgpa ?? 0),
+    cgpa: Number(row.cgpa ?? 0),
   }));
 
-  const standingChart = [
-    { name: 'Student', score: summary.internal_avg_percent },
-    { name: 'Class avg', score: summary.class_average_percent },
-  ];
+  const sortedAssignments = [...assignments].sort(
+    (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime(),
+  );
 
-  const assignmentChart = [
-    { name: 'Submitted', count: summary.assignments_submitted },
-    { name: 'Pending', count: summary.pending_assignments },
-  ];
+  const matchedPanelBodyClass = 'flex h-[24rem] flex-col';
+
+  const gpaHistoryPanel = (
+    <>
+      {gpaHistory.length === 0 ? (
+        <FacultyEmptyState description="No semester-wise SGPA or CGPA history is available for this student yet." className="py-6" />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
+          <div className="h-48 w-full shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={gpaChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                <YAxis domain={[0, 10]} tick={{ fontSize: 10 }} />
+                <Tooltip
+                  formatter={(value: number, name: string) => [Number(value).toFixed(2), name]}
+                  labelFormatter={(label) => label}
+                />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="sgpa"
+                  name="SGPA"
+                  stroke="#d6b65d"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: '#d6b65d' }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="cgpa"
+                  name="CGPA"
+                  stroke="#08234a"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: '#08234a' }}
+                  activeDot={{ r: 5 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-border/60">
+            <table className="w-full min-w-[360px] text-sm">
+              <thead>
+                <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">Semester</th>
+                  <th className="px-3 py-2 font-medium">SGPA</th>
+                  <th className="px-3 py-2 font-medium">CGPA</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gpaHistory.map((row) => (
+                  <tr key={row.semester} className="border-b last:border-0">
+                    <td className="px-3 py-2 font-medium text-sgvu-navy">Sem {row.semester}</td>
+                    <td className="px-3 py-2">{Number(row.sgpa).toFixed(2)}</td>
+                    <td className="px-3 py-2">{Number(row.cgpa).toFixed(2)}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-[10px]">
+                        {row.status.replace(/_/g, ' ')}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   const hasConcerns =
     risk_flags.length > 0 ||
@@ -181,68 +246,114 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
             />
             <FacultyMetricChip label="Assignments" value={`${summary.assignments_submitted}/${summary.assignments_total}`} />
             <FacultyMetricChip label="Demerits" value={summary.course_demerit_points} />
-            {academic ? <FacultyMetricChip label="CGPA" value={academic.cgpa || 'N/A'} /> : null}
+            {academicSnapshot ? <FacultyMetricChip label="CGPA" value={academicSnapshot.cgpa || 'N/A'} /> : null}
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <FacultyPanel title="Subject Standing" description="Student score compared with this class average">
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={standingChart} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10 }} />
-                <Tooltip formatter={(value: number) => [`${value}%`, 'Score']} />
-                <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                  {standingChart.map((entry) => (
-                    <Cell key={entry.name} fill={entry.name === 'Student' ? scoreColor(entry.score) : '#d6b65d'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+      <div className="grid items-stretch gap-4 xl:grid-cols-2">
+        <FacultyPanel
+          title="Semester-wise SGPA & CGPA"
+          description="Grade point trend for each semester across the student's program"
+          count={gpaHistory.length}
+          className="flex h-full flex-col"
+          contentClassName={matchedPanelBodyClass}
+        >
+          {gpaHistoryPanel}
         </FacultyPanel>
 
-        <FacultyPanel title="Assessment Scores" description="Published marks in this subject">
-          {assessmentChart.length === 0 ? (
-            <FacultyEmptyState description="No published marks for this student yet." className="py-6" />
+        <FacultyPanel
+          title="Assignment Status"
+          description="Submitted assignments in green, pending in red"
+          count={sortedAssignments.length}
+          className="flex h-full flex-col"
+          contentClassName={cn(matchedPanelBodyClass, 'min-h-0')}
+        >
+          {sortedAssignments.length === 0 ? (
+            <FacultyEmptyState description="No assignments have been posted in this subject yet." className="py-6" />
           ) : (
-            <div className="h-56 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={assessmentChart} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10 }} />
-                  <Tooltip formatter={(value: number) => [`${value}%`, 'Score']} />
-                  <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                    {assessmentChart.map((entry) => (
-                      <Cell key={entry.name} fill={scoreColor(entry.score)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                {sortedAssignments.map((assignment, index) => {
+                  const done = assignment.status !== 'PENDING';
+                  const assignmentNo = index + 1;
+                  return (
+                    <li
+                      key={assignment.assignment_id}
+                      className="flex items-start gap-3 rounded-xl border border-border/60 bg-background px-3 py-2.5 text-sm"
+                    >
+                      <span className="mt-0.5 shrink-0 text-xs font-bold tabular-nums text-sgvu-navy">
+                        {assignmentNo}
+                      </span>
+                      <Circle
+                        className={cn(
+                          'mt-1.5 h-2.5 w-2.5 shrink-0 fill-current',
+                          done ? 'text-emerald-500' : 'text-red-500',
+                        )}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium leading-snug text-sgvu-navy">
+                          Assignment {assignmentNo} · {assignment.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Due {new Date(assignment.due_date).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right text-xs">
+                        {done ? (
+                          assignment.marks_awarded != null ? (
+                            <div>
+                              <p className="font-semibold text-sgvu-navy">
+                                {assignment.marks_awarded}/{assignment.max_marks}
+                              </p>
+                              <p className="text-muted-foreground">
+                                {Math.round(
+                                  (Number(assignment.marks_awarded) / Number(assignment.max_marks || 1)) * 100,
+                                )}
+                                %
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="font-medium text-emerald-700">Awaiting grade</span>
+                          )
+                        ) : (
+                          <span className="font-medium text-red-600">Not submitted</span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="mt-3 shrink-0 space-y-3 border-t border-border/60 pt-3">
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between text-xs">
+                    <span className="font-medium text-muted-foreground">Completion</span>
+                    <span className="font-bold text-sgvu-navy">{summary.assignment_completion_percent}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all"
+                      style={{ width: `${Math.min(summary.assignment_completion_percent, 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-lg bg-emerald-50 px-3 py-2 text-center">
+                    <p className="text-lg font-bold text-emerald-700">{summary.assignments_submitted}</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-800/80">Submitted</p>
+                  </div>
+                  <div className="rounded-lg bg-red-50 px-3 py-2 text-center">
+                    <p className="text-lg font-bold text-red-700">{summary.pending_assignments}</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-red-800/80">Pending</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 px-3 py-2 text-center">
+                    <p className="text-lg font-bold text-sgvu-navy">{summary.assignments_graded}</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Graded</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
-        </FacultyPanel>
-
-        <FacultyPanel title="Assignment Status" description="Digital assignment completion in this subject">
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={assignmentChart} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-                <Tooltip />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                  {assignmentChart.map((entry) => (
-                    <Cell key={entry.name} fill={entry.name === 'Pending' ? '#dc2626' : '#059669'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
         </FacultyPanel>
       </div>
 
@@ -270,33 +381,27 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
         </FacultyPanel>
 
         <FacultyPanel title="Academic Record" description="Latest overall academic snapshot, excluding attendance">
-          {academic ? (
+          {academicSnapshot ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl bg-muted/40 p-4">
-                <p className="text-xs text-muted-foreground">SGPA / CGPA</p>
-                <p className="text-lg font-bold text-sgvu-navy">
-                  {academic.sgpa || 'N/A'} / {academic.cgpa || 'N/A'}
-                </p>
-              </div>
-              <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">Backlogs</p>
-                <p className={cn('text-lg font-bold', academic.backlog_count > 0 ? 'text-red-700' : 'text-sgvu-navy')}>
-                  {academic.backlog_count}
+                <p className={cn('text-lg font-bold', academicSnapshot.backlog_count > 0 ? 'text-red-700' : 'text-sgvu-navy')}>
+                  {academicSnapshot.backlog_count}
                 </p>
               </div>
               <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">Progression</p>
-                <p className="font-semibold text-sgvu-navy">{academic.progression_status || 'N/A'}</p>
+                <p className="font-semibold text-sgvu-navy">{academicSnapshot.progression_status || 'N/A'}</p>
               </div>
-              <div className="rounded-xl bg-muted/40 p-4">
+              <div className="rounded-xl bg-muted/40 p-4 sm:col-span-2">
                 <p className="text-xs text-muted-foreground">Record</p>
                 <p className="font-semibold text-sgvu-navy">
-                  Sem {academic.semester} · {academic.academic_year}
+                  Sem {academicSnapshot.semester} · {academicSnapshot.academic_year}
                 </p>
               </div>
-              {academic.remarks ? (
+              {academicSnapshot.remarks ? (
                 <p className="sm:col-span-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
-                  {academic.remarks}
+                  {academicSnapshot.remarks}
                 </p>
               ) : null}
             </div>
@@ -338,54 +443,6 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
                 <p className="mt-1 text-xs text-muted-foreground">
                   {new Date(d.created_at).toLocaleDateString()}
                 </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </FacultyPanel>
-
-      <FacultyPanel title="Assignment Details" count={assignments.length}>
-        {assignments.length === 0 ? (
-          <FacultyEmptyState description="No assignments have been posted in this subject yet." className="py-6" />
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {assignments.map((assignment) => (
-              <div key={assignment.assignment_id} className="rounded-xl border border-border/60 bg-background p-4 text-sm shadow-sm">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-bold text-sgvu-navy">{assignment.title}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Due {new Date(assignment.due_date).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <Badge variant={assignmentBadge(assignment.status)} className="text-[10px]">
-                    {assignment.status}
-                  </Badge>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded-lg bg-muted/40 px-2 py-1.5">
-                    <p className="text-muted-foreground">Marks</p>
-                    <p className="font-bold">{formatScore(assignment.marks_awarded, assignment.max_marks)}</p>
-                  </div>
-                  <div className="rounded-lg bg-muted/40 px-2 py-1.5">
-                    <p className="text-muted-foreground">Submitted</p>
-                    <p className="font-bold">
-                      {assignment.submitted_at ? new Date(assignment.submitted_at).toLocaleDateString() : 'No'}
-                    </p>
-                  </div>
-                </div>
-                {assignment.faculty_remarks ? (
-                  <p className="mt-3 text-xs text-muted-foreground">{assignment.faculty_remarks}</p>
-                ) : (
-                  <p className="mt-3 flex items-center gap-1 text-xs text-muted-foreground">
-                    <BookOpen className="h-3 w-3" />
-                    No faculty remarks yet
-                  </p>
-                )}
-                <div
-                  className="mt-3 h-1.5 rounded-full"
-                  style={{ backgroundColor: assignmentStatusColor(assignment.status) }}
-                />
               </div>
             ))}
           </div>

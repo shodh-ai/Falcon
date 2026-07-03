@@ -113,7 +113,10 @@ export default function FacultyDashboardPage() {
         ]);
         if (!cancelled) {
           setClasses(classData);
-          setMissingAttendance(missingAttendanceData);
+          const assignedCourseIds = new Set(classData.map((c) => c.course_id));
+          setMissingAttendance(
+            missingAttendanceData.filter((alert) => assignedCourseIds.has(alert.course_id)),
+          );
           setHrSummary(hrData);
           setPendingApprovals(approvalData);
           setGatePassApprovals(gatePassData);

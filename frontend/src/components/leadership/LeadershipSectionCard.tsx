@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { EXECUTIVE_CARD, EXECUTIVE_SPACING, EXECUTIVE_TYPO } from '@/components/leadership/executive/design-tokens';
 
 export function LeadershipPageHeader({
   eyebrow,
@@ -13,13 +14,13 @@ export function LeadershipPageHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-[1.75rem] border border-sgvu-navy/10 bg-white p-5 shadow-sm md:p-6">
-      <div className="absolute right-0 top-0 h-32 w-32 rounded-full bg-sgvu-gold/15 blur-2xl" />
-      <div className="relative flex flex-wrap items-start justify-between gap-4">
+    <div className={cn(EXECUTIVE_CARD, 'relative overflow-hidden p-6 md:p-8')}>
+      <div className="absolute right-0 top-0 h-32 w-32 rounded-full bg-sgvu-gold/10 blur-2xl" />
+      <div className="relative flex flex-wrap items-start justify-between gap-6">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-sgvu-gold">{eyebrow}</p>
-          <h1 className="mt-1 text-2xl font-black tracking-tight text-sgvu-navy sm:text-3xl">{title}</h1>
-          {description ? <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">{description}</p> : null}
+          <p className={EXECUTIVE_TYPO.eyebrow}>{eyebrow}</p>
+          <h1 className="mt-2 text-2xl font-black tracking-tight text-sgvu-navy sm:text-3xl">{title}</h1>
+          {description ? <p className={cn('mt-3 max-w-3xl leading-relaxed', EXECUTIVE_TYPO.bodySecondary)}>{description}</p> : null}
         </div>
         {action}
       </div>
@@ -43,11 +44,11 @@ export function LeadershipSectionCard({
   id?: string;
 }) {
   return (
-    <section id={id} className={cn('rounded-[1.25rem] border border-sgvu-navy/10 bg-white p-5 shadow-sm', className)}>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+    <section id={id} className={cn(EXECUTIVE_CARD, EXECUTIVE_SPACING.card, className)}>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-sgvu-navy">{title}</h2>
-          {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
+          <h2 className={EXECUTIVE_TYPO.sectionTitle}>{title}</h2>
+          {description ? <p className={cn('mt-2', EXECUTIVE_TYPO.bodySecondary)}>{description}</p> : null}
         </div>
         {action}
       </div>
@@ -72,20 +73,21 @@ export function LeadershipMetricCard({
   return (
     <div
       className={cn(
-        'rounded-[1.25rem] border p-4 shadow-sm',
-        alert ? 'border-red-200 bg-red-50' : 'border-sgvu-navy/10 bg-white',
+        EXECUTIVE_CARD,
+        'p-5 md:p-6',
+        alert ? 'border-red-200 bg-red-50/80' : '',
       )}
     >
-      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={EXECUTIVE_TYPO.cardTitle}>{label}</p>
       <p
         className={cn(
-          'mt-2 font-mono text-2xl font-black tabular-nums',
+          'mt-3 font-mono text-3xl font-black tabular-nums md:text-4xl',
           alert ? 'text-red-600' : highlight ? 'text-sgvu-gold' : 'text-sgvu-navy',
         )}
       >
         {value}
       </p>
-      {sub ? <p className="mt-1 text-xs text-muted-foreground">{sub}</p> : null}
+      {sub ? <p className={cn('mt-2', EXECUTIVE_TYPO.bodySecondary)}>{sub}</p> : null}
     </div>
   );
 }

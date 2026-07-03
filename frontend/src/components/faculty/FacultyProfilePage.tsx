@@ -890,9 +890,9 @@ export function FacultyProfilePage() {
           <FacultyPanel title="Current semester courses" description="Assigned via academic timetabling">
             {profile.workload.courses.length ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                {profile.workload.courses.map((c) => (
+                {profile.workload.courses.map((c, i) => (
                   <div
-                    key={c.course_id}
+                    key={`${c.course_id}-${i}`}
                     className="rounded-xl border border-border/60 bg-gradient-to-br from-card to-muted/25 p-4 shadow-sm transition-shadow hover:shadow-md"
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -912,8 +912,8 @@ export function FacultyProfilePage() {
           {profile.workload.project_guides.length > 0 && (
             <FacultyPanel title="Final-year project guides">
               <SectionList>
-                {profile.workload.project_guides.map((g) => (
-                  <div key={g.guide_id} className="flex items-center justify-between gap-4 px-4 py-3.5">
+                {profile.workload.project_guides.map((g, i) => (
+                  <div key={`${g.guide_id}-${i}`} className="flex items-center justify-between gap-4 px-4 py-3.5">
                     <span className="font-medium text-sgvu-navy">{g.student_name}</span>
                     <span className="text-sm text-muted-foreground">{g.project_title ?? g.project_type ?? 'Project'}</span>
                   </div>
@@ -925,8 +925,8 @@ export function FacultyProfilePage() {
           {profile.workload.phd_scholars.length > 0 && (
             <FacultyPanel title="PhD scholars">
               <SectionList>
-                {profile.workload.phd_scholars.map((s) => (
-                  <div key={s.scholar_id} className="flex items-center justify-between gap-4 px-4 py-3.5">
+                {profile.workload.phd_scholars.map((s, i) => (
+                  <div key={`${s.scholar_id}-${i}`} className="flex items-center justify-between gap-4 px-4 py-3.5">
                     <span className="font-medium text-sgvu-navy">{s.scholar_name}</span>
                     <Badge variant="outline">{s.current_phase}</Badge>
                   </div>

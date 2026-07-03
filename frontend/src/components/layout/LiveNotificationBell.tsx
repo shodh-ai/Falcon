@@ -7,7 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { NotificationBell } from '@/components/layout/NotificationBell';
 import {
   useNotificationUnreadCount,
-  useRecentNotifications,
+  useNotificationHistory,
   toAppNotification,
 } from '@/hooks/useNotifications';
 import { notificationsApi } from '@/lib/api/notifications';
@@ -17,9 +17,9 @@ export function LiveNotificationBell() {
   const router = useRouter();
   const { token } = useAuth();
   const { count, refresh: refreshCount } = useNotificationUnreadCount();
-  const { notifications, isLoading, refresh: refreshList } = useRecentNotifications();
+  const { notifications, isLoading, refresh: refreshList } = useNotificationHistory();
 
-  const items = notifications.map(toAppNotification);
+  const items = notifications.map(toAppNotification).slice(0, 20);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -46,12 +46,42 @@ export function LiveNotificationBell() {
     }
   };
 
+  const handleDismiss = async (n: ReturnType<typeof toAppNotification>) => {
+    if (!token) return;
+
+    await refreshList(
+      (current) => current?.filter((row) => row.notification_id !== n.id) ?? [],
+      { revalidate: false },
+    );
+    if (n.unread) {
+      await refreshCount(
+        (current) => ({ count: Math.max(0, (current?.count ?? 1) - 1) }),
+        { revalidate: false },
+      );
+    }
+
+    try {
+      await notificationsApi.dismiss(token, n.id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      if (!/404|not found/i.test(msg)) {
+        toast.error('Could not remove notification');
+        await Promise.all([refreshCount(), refreshList()]);
+        return;
+      }
+    }
+
+    await Promise.all([refreshCount(), refreshList()]);
+    window.dispatchEvent(new Event('falcon:notifications-refresh'));
+  };
+
   return (
     <NotificationBell
       notifications={items}
       unreadCount={count}
       isLoading={isLoading}
       onSelect={handleSelect}
+      onDismiss={handleDismiss}
       viewAllHref="/notifications"
     />
   );

@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -11,7 +12,7 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { FalconNotificationsService } from './falcon-notifications.service';
 
-type AuthUser = { user_id: string; tenant_id: string };
+type AuthUser = { user_id: string; tenant_id?: string };
 
 @Controller(['notifications', 'api/notifications'])
 @UseGuards(JwtAuthGuard)
@@ -19,7 +20,10 @@ export class FalconNotificationsController {
   constructor(private readonly notifications: FalconNotificationsService) {}
 
   private ctx(req: { user: AuthUser }) {
-    return { tenantId: req.user.tenant_id, userId: req.user.user_id };
+    return {
+      tenantId: req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
+      userId: req.user.user_id,
+    };
   }
 
   @Get()
@@ -56,5 +60,17 @@ export class FalconNotificationsController {
   markAllRead(@Req() req: { user: AuthUser }) {
     const { tenantId, userId } = this.ctx(req);
     return this.notifications.markAllRead(tenantId, userId);
+  }
+
+  @Patch(':id/dismiss')
+  dismissPatch(@Param('id') id: string, @Req() req: { user: AuthUser }) {
+    const { tenantId, userId } = this.ctx(req);
+    return this.notifications.dismiss(id, tenantId, userId);
+  }
+
+  @Delete(':id')
+  dismiss(@Param('id') id: string, @Req() req: { user: AuthUser }) {
+    const { tenantId, userId } = this.ctx(req);
+    return this.notifications.dismiss(id, tenantId, userId);
   }
 }

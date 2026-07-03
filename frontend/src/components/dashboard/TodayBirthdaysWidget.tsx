@@ -7,7 +7,15 @@ import { cn } from '@/lib/utils';
 
 type Birthday = { user_id: string; name: string; role_name: string };
 
-export function TodayBirthdaysWidget({ className }: { className?: string }) {
+export function TodayBirthdaysWidget({
+  className,
+  endpoint = '/api/master-data/birthdays/today',
+  title = "Today's Birthdays",
+}: {
+  className?: string;
+  endpoint?: string;
+  title?: string;
+}) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Birthday[]>([]);
 

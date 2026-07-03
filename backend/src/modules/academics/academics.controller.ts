@@ -39,6 +39,7 @@ import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
+import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 
 type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
@@ -411,10 +412,19 @@ export class AcademicsController {
     return this.academics.getTodayTimetable(req.user.user_id);
   }
 
+  @Get('dashboard/timetable/weekly')
+  @Roles('Student')
+  weeklyTimetable(@Req() req: { user: AuthUser }) {
+    return this.academics.getWeeklyTimetable(req.user.user_id);
+  }
+
   @Get('courses/my-enrollments')
   @Roles('Student')
   myCourseEnrollments(@Req() req: { user: AuthUser }) {
-    return this.academics.listMyCourseEnrollments(req.user.user_id);
+    return this.academics.listMyCourseEnrollments(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
   }
 
   @Get('hod/dashboard')
@@ -459,6 +469,28 @@ export class AcademicsController {
     return this.academics.listHodCourseAllocationSlots(
       this.resolveTenantId(req.user),
       req.user.user_id,
+    );
+  }
+
+  @Get('hod/course-allocation-timetable-data')
+  @Roles('HOD', 'SuperAdmin')
+  hodCourseAllocationTimetableData(@Req() req: { user: AuthUser }) {
+    return this.academics.getHodCourseAllocationTimetableData(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/course-allocation-timetable-batch-save')
+  @Roles('HOD', 'SuperAdmin')
+  hodCourseAllocationTimetableBatchSave(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { semester: string; slots: Array<{ course_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string }> }
+  ) {
+    return this.academics.saveHodCourseAllocationTimetableBatch(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
     );
   }
 
@@ -557,7 +589,7 @@ export class AcademicsController {
   @Roles('HOD', 'SuperAdmin')
   hodCourseAllocation(
     @Req() req: { user: AuthUser },
-    @Body() dto: { timetable_id: string; faculty_user_id: string },
+    @Body() dto: { timetable_id: string; faculty_user_id: string; day_of_week?: number; start_time?: string; end_time?: string },
   ) {
     return this.academics.allocateHodCourse(
       this.resolveTenantId(req.user),
@@ -746,6 +778,19 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       req.user.user_id,
       lowAttendance === 'true',
+    );
+  }
+
+  @Get('dean/student-monitor/:studentId/detail')
+  @Roles('Dean', 'SuperAdmin')
+  deanStudentMonitorDetail(
+    @Param('studentId') studentId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.academics.getDeanStudentDetail(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      studentId,
     );
   }
 
@@ -1078,12 +1123,12 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   saveMarksDraft(
     @Req() req: { user: AuthUser },
-    @Body() body: Record<string, unknown>,
+    @Body() body: SaveMarksDraftDto,
   ) {
     return this.facultyWorkspaces.saveMarksDraft(
       req.user.user_id,
       this.resolveTenantId(req.user),
-      body as Parameters<FacultyWorkspacesService['saveMarksDraft']>[2],
+      body,
     );
   }
 
@@ -1101,16 +1146,27 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/grading-components')
+  @Roles('Faculty')
+  listGradingComponents() {
+    return this.facultyWorkspaces.listGradingComponents();
+  }
+
   @Get('faculty/workspaces/course/:courseId/unified-marks')
   @Roles('Faculty')
   getUnifiedCourseMarks(
     @Req() req: { user: AuthUser },
     @Param('courseId') courseId: string,
+    @Query('components') components?: string,
   ) {
+    const componentList = components
+      ? components.split(',').map((item) => item.trim()).filter(Boolean)
+      : undefined;
     return this.facultyWorkspaces.getUnifiedCourseMarks(
       req.user.user_id,
       this.resolveTenantId(req.user),
       courseId,
+      componentList,
     );
   }
 

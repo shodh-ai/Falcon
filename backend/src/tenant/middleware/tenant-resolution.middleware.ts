@@ -2,6 +2,10 @@ import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { Request, Response, NextFunction } from 'express';
 import { TenantService } from '../tenant.service';
 import { TenantContextService } from '../tenant-context.service';
+import {
+  extractSubdomainFromHost,
+  resolveTenantSubdomain,
+} from '../resolve-tenant-subdomain';
 
 @Injectable()
 export class TenantResolutionMiddleware implements NestMiddleware {
@@ -39,18 +43,16 @@ export class TenantResolutionMiddleware implements NestMiddleware {
 
   private extractSubdomain(req: Request): string | null {
     const header = req.headers['x-tenant-subdomain'];
-    if (typeof header === 'string' && header.length > 0) {
-      return header.toLowerCase();
+    if (typeof header === 'string' && header.trim().length > 0) {
+      return header.trim().toLowerCase();
     }
 
     const host = req.headers.host?.split(':')[0] ?? '';
-    const baseDomain = process.env.SAAS_BASE_DOMAIN ?? 'localhost';
-    if (host.endsWith(`.${baseDomain}`)) {
-      const sub = host.slice(0, -(baseDomain.length + 1));
-      if (sub && !sub.includes('.')) return sub.toLowerCase();
-    }
+    const fromHost = extractSubdomainFromHost(host);
+    if (fromHost) return fromHost;
 
-    return null;
+    const fallback = resolveTenantSubdomain(null);
+    return fallback || null;
   }
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, FormEvent, useEffect, useState } from 'react';
+import { DragEvent, FormEvent, useState } from 'react';
 import { BookOpen, FileText, Plus, Trash2, Upload, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -98,35 +98,33 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   const [selectedAllocations, setSelectedAllocations] = useState<string[]>([]);
   const [loadingTargets, setLoadingTargets] = useState(false);
 
-  useEffect(() => {
-    if (!uploadModuleId) {
-      setPublishTargets(null);
-      setSelectedAllocations([]);
-      return;
-    }
+  function closeUploadModal() {
+    setUploadModuleId(null);
+    setUploadFiles([]);
+    setUploadTitle('');
+    setPublishTargets(null);
+    setSelectedAllocations([]);
+  }
 
-    let cancelled = false;
+  async function openUploadModal(moduleId: string) {
+    setUploadModuleId(moduleId);
+    setUploadFiles([]);
+    setUploadTitle('');
+    setPublishTargets(null);
+    setSelectedAllocations([]);
     setLoadingTargets(true);
-    void api
-      .get<MaterialPublishTargetsResponse>(
+    try {
+      const data = await api.get<MaterialPublishTargetsResponse>(
         `/api/academics/faculty/courses/${courseId}/material-publish-targets`,
-      )
-      .then((data) => {
-        if (cancelled) return;
-        setPublishTargets(data);
-        setSelectedAllocations(data.targets.map((target) => target.allocation_id));
-      })
-      .catch(() => {
-        if (!cancelled) setPublishTargets(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingTargets(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [api, courseId, uploadModuleId]);
+      );
+      setPublishTargets(data);
+      setSelectedAllocations(data.targets.map((target) => target.allocation_id));
+    } catch {
+      setPublishTargets(null);
+    } finally {
+      setLoadingTargets(false);
+    }
+  }
 
   async function addModule(e: FormEvent) {
     e.preventDefault();
@@ -166,10 +164,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
         form,
       );
       toast.success(`${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded — students notified`);
-      setUploadModuleId(null);
-      setUploadFiles([]);
-      setUploadTitle('');
-      setSelectedAllocations([]);
+      closeUploadModal();
       onRefresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
@@ -197,7 +192,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
 
   function addUploadFiles(files: FileList | File[]) {
     const accepted = Array.from(files).filter((file) =>
-      /\.(pdf|ppt|pptx)$/i.test(file.name),
+      /\.(pdf|ppt|pptx|doc|docx)$/i.test(file.name),
     );
     setUploadFiles((prev) => [...prev, ...accepted]);
   }
@@ -267,7 +262,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
           <div className="flex flex-col gap-2 rounded-xl border border-dashed border-sgvu-gold/40 bg-background/80 p-3 sm:flex-row sm:items-center">
             <Input
               type="file"
-              accept=".pdf,.ppt,.pptx,application/pdf"
+              accept=".pdf,.ppt,.pptx,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="flex-1 border-0 bg-transparent file:mr-3 file:rounded-md file:border-0 file:bg-sgvu-navy/10 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-sgvu-navy"
               onChange={(e) => setSyllabusFile(e.target.files?.[0] ?? null)}
             />
@@ -305,7 +300,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
           {workspace.modules.length === 0 ? (
             <FacultyEmptyState
               title="No units yet"
-              description="Add your first unit above, then upload PDF or PPT notes for enrolled students."
+              description="Add your first unit above, then upload PDF, PPT, or Word notes for enrolled students."
             />
           ) : (
             <div className="space-y-3">
@@ -351,7 +346,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                     size="sm"
                     variant="outline"
                     className="mt-3 gap-1.5"
-                    onClick={() => setUploadModuleId(mod.module_id)}
+                    onClick={() => void openUploadModal(mod.module_id)}
                   >
                     <Upload className="h-3.5 w-3.5" />
                     Upload notes
@@ -376,10 +371,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setUploadModuleId(null);
-                  setUploadFiles([]);
-                }}
+                onClick={closeUploadModal}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-sgvu-navy"
                 aria-label="Close"
               >
@@ -406,13 +398,13 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm transition hover:border-sgvu-gold/60 hover:bg-sgvu-gold/5"
                 >
                   <Upload className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
-                  <p className="font-medium text-sgvu-navy">Drag PDFs/PPTs here, or select below</p>
+                  <p className="font-medium text-sgvu-navy">Drag PDFs, PPTs, or Word docs here, or select below</p>
                   <p className="mt-1 text-xs text-muted-foreground">Multiple files · Max 10MB each</p>
                 </div>
                 <Input
                   type="file"
                   multiple
-                  accept=".pdf,.ppt,.pptx,application/pdf"
+                  accept=".pdf,.ppt,.pptx,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   onChange={(e) => {
                     if (e.target.files) addUploadFiles(e.target.files);
                   }}
@@ -434,7 +426,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   </ul>
                 ) : null}
                 <p className="text-xs text-muted-foreground">
-                  PDF or PPT · Max 10MB · Notifies enrolled students
+                  PDF, PPT, or Word doc · Max 10MB · Notifies enrolled students
                 </p>
               </div>
               {publishTargets?.cross_section_available ? (
@@ -492,14 +484,7 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
                   <Upload className="h-4 w-4" />
                   {uploading ? 'Uploading…' : `Upload ${uploadFiles.length || ''}`}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setUploadModuleId(null);
-                    setUploadFiles([]);
-                  }}
-                >
+                <Button type="button" variant="outline" onClick={closeUploadModal}>
                   Cancel
                 </Button>
               </div>

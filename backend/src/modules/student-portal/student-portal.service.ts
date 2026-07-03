@@ -21,6 +21,8 @@ import { WorkflowNotificationService } from '../../core/workflow/workflow-notifi
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { resolvePlacementSchema } from '../placement/placement-schema';
 import { FinanceReceiptService } from '../finance/finance-receipt.service';
+import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
+import { StudentMentorSyncService } from '../academics/student-mentor-sync.service';
 
 const EXTRA_CERT_MIME = [
   'application/pdf',
@@ -41,6 +43,8 @@ export class StudentPortalService {
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly objectStorage: ObjectStorageService,
     private readonly financeReceipts: FinanceReceiptService,
+    private readonly enrollmentSync: StudentEnrollmentSyncService,
+    private readonly mentorSync: StudentMentorSyncService,
   ) {}
 
   private isProfileUnlocked(until: Date | string | null): boolean {
@@ -440,14 +444,15 @@ export class StudentPortalService {
   }
 
   async getRegistration(tenantId: string, userId: string) {
-    const currentSemesterRows = await this.dataSource.query(
-      `SELECT COALESCE(MAX(semester), 1) AS semester
-       FROM student_course_enrollments WHERE student_user_id = $1`,
-      [userId],
-    );
-    const currentSemester = Number(currentSemesterRows[0]?.semester ?? 1);
+    await this.enrollmentSync.syncStudent(tenantId, userId);
+    await this.mentorSync.syncStudent(tenantId, userId);
 
-    await this.ensureCoreEnrollments(tenantId, userId, currentSemester);
+    const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
+      tenantId,
+      userId,
+    );
+    const currentSemester = slot.semester;
+    const validCourseIds = new Set(slot.courseIds);
 
     const enrollments = await this.dataSource.query(
       `SELECT e.enrollment_id, e.semester, e.status, e.grade, e.grade_points,
@@ -456,18 +461,26 @@ export class StudentPortalService {
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
+         AND e.status IN ('ENROLLED', 'COMPLETED')
        ORDER BY e.semester, c.course_code`,
       [userId, tenantId],
     );
 
-    const creditsEarned = enrollments
+    const filteredEnrollments = enrollments.filter(
+      (r: { semester: number; course_id: string }) =>
+        Number(r.semester) !== currentSemester ||
+        validCourseIds.size === 0 ||
+        validCourseIds.has(r.course_id),
+    );
+
+    const creditsEarned = filteredEnrollments
       .filter((r: { status: string }) => r.status === 'COMPLETED')
       .reduce(
         (sum: number, r: { credits: number }) => sum + Number(r.credits),
         0,
       );
 
-    const currentSemEnrollments = enrollments.filter(
+    const currentSemEnrollments = filteredEnrollments.filter(
       (r: { semester: number }) => Number(r.semester) === currentSemester,
     );
     const electiveCount = currentSemEnrollments.filter(
@@ -492,42 +505,17 @@ export class StudentPortalService {
       current_semester: currentSemester,
       credits_earned: creditsEarned,
       credits_required: 160,
-      enrollments,
-      core_enrollments: enrollments.filter(
+      enrollments: filteredEnrollments,
+      core_enrollments: currentSemEnrollments.filter(
         (r: { course_type: string }) => r.course_type === 'CORE',
       ),
-      elective_enrollments: enrollments.filter(
+      elective_enrollments: currentSemEnrollments.filter(
         (r: { course_type: string }) => r.course_type === 'ELECTIVE',
       ),
       available_electives: electives,
       electives_needed: electivesNeeded,
       electives_max: 2,
     };
-  }
-
-  private async ensureCoreEnrollments(
-    tenantId: string,
-    userId: string,
-    semester: number,
-  ) {
-    const coreCourses = await this.dataSource.query<
-      Array<{ course_id: string }>
-    >(
-      `SELECT course_id FROM academic_courses
-       WHERE tenant_id = $1
-         AND COALESCE(course_type, CASE WHEN is_elective THEN 'ELECTIVE' ELSE 'CORE' END) = 'CORE'`,
-      [tenantId],
-    );
-    for (const course of coreCourses) {
-      await this.dataSource.query(
-        `INSERT INTO student_course_enrollments (
-           tenant_id, student_user_id, course_id, semester, status, attendance_percent
-         )
-         VALUES ($1, $2, $3, $4, 'ENROLLED', 0)
-         ON CONFLICT (tenant_id, student_user_id, course_id) DO NOTHING`,
-        [tenantId, userId, course.course_id, semester],
-      );
-    }
   }
 
   async getAttendance(tenantId: string, userId: string) {

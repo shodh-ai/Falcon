@@ -242,7 +242,11 @@ export default function FacultyProjectsPage() {
     <FacultyPageShell>
       <div className="flex justify-between items-center mb-6">
         <FacultyPageHeader description="Final-year B.Tech/MBA project supervision — track progress, students, and funding." />
-        <Button onClick={() => setCreateModalOpen(true)} className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white shadow-lg shadow-sgvu-navy/20">
+        <Button 
+          onClick={() => setCreateModalOpen(true)} 
+          disabled={ongoingProjects.length >= 4}
+          className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white shadow-lg shadow-sgvu-navy/20 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
           <Plus className="w-4 h-4 mr-2" />
           Create Project
         </Button>

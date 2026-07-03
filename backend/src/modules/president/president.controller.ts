@@ -34,4 +34,29 @@ export class PresidentController {
   hrAnalytics() {
     return this.president.getHrAnalytics();
   }
+
+  @Get('finance-budget')
+  financeBudget() {
+    return this.president.getFinanceBudgetaryControl();
+  }
+
+  @Get('research')
+  research() {
+    return this.president.getResearchHub();
+  }
+
+  @Get('executive-orders')
+  executiveOrders() {
+    return this.president.getExecutiveOrders();
+  }
+
+  @Get('convocation')
+  convocation() {
+    return this.president.getConvocation();
+  }
+
+  @Get('hr-approvals')
+  hrApprovals() {
+    return this.president.getHrApprovals();
+  }
 }

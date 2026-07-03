@@ -406,6 +406,7 @@ export function WorkspaceScaffold({ config }: { config: WorkspacePageConfig }) {
           studentId={selectedRowId}
           open={detailsModalOpen}
           onOpenChange={setDetailsModalOpen}
+          portal={config.endpoint.includes('/dean/') ? 'dean' : 'hod'}
         />
       )}
     </div>

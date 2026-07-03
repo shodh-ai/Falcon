@@ -56,7 +56,6 @@ type HealthMetrics = {
   attendance_trend_label: string;
   pending_leave_count: number;
   pending_gate_pass_count: number;
-  pending_profile_corrections: number;
   pending_inbox_total: number;
 };
 
@@ -704,7 +703,7 @@ export function HodCommandCenter() {
           { href: '/hod/academics/syllabus-tracking', label: 'Syllabus' },
           { href: '/hod/academics/result-analytics', label: 'Results' },
           { href: '/hod/inbox?scope=dept', label: 'HR Inbox' },
-          { href: '/hod/students/defaulters', label: 'Defaulters' },
+          { href: '/hod/student-monitor', label: 'Student Monitor' },
         ].map((link) => (
           <Link
             key={link.href}

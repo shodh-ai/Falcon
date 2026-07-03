@@ -14,6 +14,17 @@ interface SelectProps extends Omit<React.ComponentPropsWithoutRef<typeof SelectP
   value?: any;
 }
 
+/** Flatten option label children without Array.toString() comma joins. */
+function getOptionLabel(children: React.ReactNode): string {
+  if (children == null || typeof children === 'boolean') return '';
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(getOptionLabel).join('');
+  if (React.isValidElement(children)) {
+    return getOptionLabel((children.props as { children?: React.ReactNode }).children);
+  }
+  return String(children);
+}
+
 const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
   ({ children, className, onChange, value, placeholder, name, disabled, id, ...props }, ref) => {
     const options: Array<{ value: string; label: string }> = [];
@@ -27,8 +38,8 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           if (el.type === 'option') {
             isNativeReplacement = true;
             options.push({
-              value: String(el.props.value ?? el.props.children ?? ''),
-              label: String(el.props.children ?? ''),
+              value: String(el.props.value ?? getOptionLabel(el.props.children) ?? ''),
+              label: getOptionLabel(el.props.children),
             });
           } else if (el.props && typeof el.props === 'object' && 'children' in el.props) {
             extractOptions(el.props.children);
@@ -40,6 +51,19 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
     extractOptions(children);
 
     if (isNativeReplacement) {
+      const placeholderOption = options.find((o) => o.value === '');
+      const uniqueByValue = new Map<string, string>();
+      for (const opt of options) {
+        if (opt.value === '') continue;
+        if (!uniqueByValue.has(opt.value)) {
+          uniqueByValue.set(opt.value, opt.label);
+        }
+      }
+      const dedupedOptions = [
+        ...(placeholderOption ? [placeholderOption] : []),
+        ...Array.from(uniqueByValue.entries()).map(([value, label]) => ({ value, label })),
+      ];
+
       const activeValue = value !== undefined && value !== null ? String(value) : undefined;
       const activeDefaultValue = props.defaultValue !== undefined && props.defaultValue !== null ? String(props.defaultValue) : undefined;
       return (
@@ -60,11 +84,11 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           {...props}
         >
           <SelectTrigger ref={ref} className={className} id={id}>
-            <SelectValue placeholder={placeholder || options.find((o) => o.value === '')?.label || 'Select...'} />
+            <SelectValue placeholder={placeholderOption?.label ?? placeholder ?? 'Select...'} />
           </SelectTrigger>
           <SelectContent>
-            {options.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
+            {dedupedOptions.map((opt) => (
+              <SelectItem key={opt.value === '' ? '__placeholder__' : opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
             ))}

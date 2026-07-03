@@ -411,7 +411,7 @@ export function ProposeEventPanel({
         </form>
       </StudentSectionCard>
 
-      <aside className="hidden lg:block">
+      <aside className="hidden lg:block lg:sticky lg:top-6">
         <ApprovalGuideCard onOpenCalendar={onOpenCalendar} blockedCount={blocked.length} />
       </aside>
 

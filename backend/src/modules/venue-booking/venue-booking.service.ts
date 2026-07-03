@@ -41,13 +41,19 @@ export class VenueBookingService {
     return '/admin-ops/venue-requests';
   }
 
-  async listVenues(tenantId: string, tag?: string) {
+  async listVenues(tenantId: string, tags?: string | string[]) {
     const params: unknown[] = [tenantId];
     let tagClause = '';
-    if (tag?.trim()) {
-      params.push(tag.trim());
-      tagClause = ` AND amenities @> to_jsonb(ARRAY[$2::text])`;
+
+    if (tags) {
+      const tagsArray = Array.isArray(tags) ? tags : [tags];
+      const validTags = tagsArray.filter(t => t.trim().length > 0).map(t => t.trim());
+      if (validTags.length > 0) {
+        params.push(validTags);
+        tagClause = ` AND amenities @> to_jsonb($2::text[])`;
+      }
     }
+
     return this.db.query(
       `SELECT venue_id, name, capacity, amenities, approver_role, max_duration_mins
        FROM campus_venues

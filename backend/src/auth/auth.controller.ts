@@ -19,6 +19,7 @@ import { User } from '../entities/user.entity';
 import { Public } from '../common/decorators/roles.decorator';
 import { AuthService } from './auth.service';
 import { TenantService } from '../tenant/tenant.service';
+import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { LocalLoginDto } from './dto/local-login.dto';
@@ -149,8 +150,7 @@ export class AuthController {
       throw new UnauthorizedException('Dev login is disabled in production');
     }
 
-    const subdomain =
-      tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+    const subdomain = resolveTenantSubdomain(tenantSubdomain);
     const tenant = await this.tenantService.findBySubdomain(subdomain);
 
     const user = await this.userRepository.findOne({

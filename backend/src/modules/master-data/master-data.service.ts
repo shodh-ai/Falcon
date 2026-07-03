@@ -190,4 +190,26 @@ export class MasterDataService {
       [tenantId],
     );
   }
+
+  /** Faculty (under the requesting HOD's department) whose birthday is today. */
+  async getDepartmentFacultyBirthdays(tenantId: string, hodUserId: string) {
+    return this.dataSource.query(
+      `SELECT u.user_id, u.name, r.role_name,
+              (u.onboarding_profile->>'date_of_birth')::date AS date_of_birth
+       FROM users u
+       INNER JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.is_active = true
+         AND r.role_name = 'Faculty'
+         AND u.dept_id IN (
+           SELECT dept_id FROM departments WHERE tenant_id = $1 AND hod_user_id = $2
+           UNION
+           SELECT dept_id FROM users WHERE tenant_id = $1 AND user_id = $2
+         )
+         AND u.onboarding_profile->>'date_of_birth' ~ '^\\d{4}-\\d{2}-\\d{2}'
+         AND EXTRACT(MONTH FROM (u.onboarding_profile->>'date_of_birth')::date) = EXTRACT(MONTH FROM CURRENT_DATE)
+         AND EXTRACT(DAY FROM (u.onboarding_profile->>'date_of_birth')::date) = EXTRACT(DAY FROM CURRENT_DATE)
+       ORDER BY u.name ASC`,
+      [tenantId, hodUserId],
+    );
+  }
 }

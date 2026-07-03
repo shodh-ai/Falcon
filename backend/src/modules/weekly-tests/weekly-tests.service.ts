@@ -41,7 +41,7 @@ export class WeeklyTestsService {
 
   async getFacultyTests(tenantId: string, facultyId: string) {
     return this.dataSource.query(
-      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status
+      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status, t.is_active
        FROM weekly_tests t
        JOIN academic_courses c ON c.course_id = t.course_id
        WHERE t.tenant_id = $1 AND t.created_by = $2
@@ -68,10 +68,25 @@ export class WeeklyTestsService {
     return { success: true };
   }
 
+  async toggleTestStatus(tenantId: string, facultyId: string, testId: string, isActive: boolean) {
+    const test = await this.dataSource.query(
+      `SELECT test_id FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2 AND created_by = $3`,
+      [testId, tenantId, facultyId]
+    );
+    if (!test.length) {
+      throw new NotFoundException('Test not found or unauthorized');
+    }
+    await this.dataSource.query(
+      `UPDATE weekly_tests SET is_active = $1 WHERE test_id = $2`,
+      [isActive, testId]
+    );
+    return { success: true };
+  }
+
   async getAvailableTests(tenantId: string, studentId: string) {
     // Return ACTIVE and SCHEDULED tests for courses the student is enrolled in
     return this.dataSource.query(
-      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status,
+      `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status, t.is_active,
               r.submitted_at
        FROM weekly_tests t
        JOIN student_course_enrollments e ON e.course_id = t.course_id AND e.student_user_id = $2
@@ -85,7 +100,7 @@ export class WeeklyTestsService {
 
   async getTestForAttempt(tenantId: string, studentId: string, testId: string) {
     const test = await this.dataSource.query(
-      `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url, t.start_time, t.end_time, t.status
+      `SELECT t.test_id, t.course_id, t.test_type, t.question_paper_url, t.start_time, t.end_time, t.status, t.is_active
        FROM weekly_tests t
        JOIN student_course_enrollments e ON e.course_id = t.course_id AND e.student_user_id = $2
        WHERE t.test_id = $3 AND t.tenant_id = $1`,
@@ -97,6 +112,9 @@ export class WeeklyTestsService {
     }
 
     const testData = test[0];
+    if (!testData.is_active) {
+      throw new BadRequestException('Test is currently inactive');
+    }
     const now = new Date();
     if (new Date(testData.start_time) > now) {
       throw new BadRequestException('Test has not started yet');
@@ -190,7 +208,7 @@ export class WeeklyTestsService {
         // Push all scores to academic_marks
         await this.dataSource.query(
           `INSERT INTO academic_marks (tenant_id, student_user_id, course_id, exam_type, marks_obtained, max_marks, status, published_at)
-           SELECT t.tenant_id, r.student_user_id, t.course_id, t.test_type, r.score, 10, 'PUBLISHED', NOW()
+           SELECT t.tenant_id, r.student_user_id, t.course_id, t.test_type, r.score, 5, 'PUBLISHED', NOW()
            FROM weekly_test_responses r
            JOIN weekly_tests t ON t.test_id = r.test_id
            WHERE r.test_id = $1 AND r.submitted_at IS NOT NULL

@@ -96,6 +96,26 @@ export default function NotificationsPage() {
     }
   };
 
+  const dismissNotification = async (id: string) => {
+    if (!token) return;
+    await refresh(
+      (current) => current?.filter((row) => row.notification_id !== id) ?? [],
+      { revalidate: false },
+    );
+    try {
+      await notificationsApi.dismiss(token, id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      if (!/404|not found/i.test(msg)) {
+        toast.error('Could not remove notification');
+        await refresh();
+        return;
+      }
+    }
+    await refresh();
+    window.dispatchEvent(new Event('falcon:notifications-refresh'));
+  };
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8">
       <div className="mb-6">
@@ -183,6 +203,7 @@ export default function NotificationsPage() {
                 key={n.id}
                 notification={n}
                 onClick={() => openNotification(n.id, n.actionLink, n.unread)}
+                onDismiss={() => void dismissNotification(n.id)}
               />
             ))}
         </CardContent>

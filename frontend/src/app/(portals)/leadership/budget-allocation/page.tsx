@@ -6,7 +6,13 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { GlassCard } from '@/components/leadership/intelligence/PremiumKPICards';
+import { ExecutiveCard } from '@/components/leadership/executive';
+import { LeadershipPageHeader } from '@/components/leadership/LeadershipSectionCard';
+import {
+  EXECUTIVE_CHART_SERIES,
+  EXECUTIVE_CHART_TOOLTIP,
+  EXECUTIVE_SPACING,
+} from '@/components/leadership/executive/design-tokens';
 import {
   MOCK_DEPARTMENTS,
   MOCK_FINANCIAL_YEAR,
@@ -22,6 +28,11 @@ type DeptRow = {
   budget_id?: string;
   dept_name: string;
   allocated_amount: number;
+  capex_allocated?: number;
+  opex_allocated?: number;
+  consumed?: number;
+  remaining?: number;
+  limit_mode?: string;
   color: string;
 };
 
@@ -43,33 +54,58 @@ export default function BudgetAllocationPage() {
   const [newProgram, setNewProgram] = useState({ name: '', amount: '' });
   const [programs, setPrograms] = useState<ProgramRow[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [reappropriation, setReappropriation] = useState({
+    from_budget_id: '',
+    to_budget_id: '',
+    amount: '',
+    reason: '',
+  });
+  const [movingFunds, setMovingFunds] = useState(false);
 
   const loadBoard = useCallback(() => {
-    void api
-      .budgetAllocation(financialYear)
-      .then((board) => {
+    void Promise.all([
+      api.budgetAllocation(financialYear),
+      api.financialMacroBudget(financialYear).catch(() => null),
+    ])
+      .then(([board, macro]) => {
         if (board.university?.total_allocated) {
           setTotalBudget(Number(board.university.total_allocated));
           setLocked(board.university.status === 'LOCKED');
         }
+        const macroDepts = (macro?.departments as Array<Record<string, unknown>>) ?? [];
+        const macroByDept = new Map(macroDepts.map((d) => [String(d.budget_id), d]));
         if (board.dept_budgets?.length) {
           setDepartments(
-            board.dept_budgets.map((d, i) => ({
-              dept_id: d.department_id,
-              budget_id: d.budget_id,
-              dept_name: d.dept_name,
-              allocated_amount: Number(d.allocated_amount),
-              color: MOCK_DEPARTMENTS[i % MOCK_DEPARTMENTS.length]?.color ?? '#3b82f6',
-            })),
+            board.dept_budgets.map((d, i) => {
+              const m = macroByDept.get(String(d.budget_id));
+              const allocated = Number(d.allocated_amount);
+              return {
+                dept_id: d.department_id,
+                budget_id: d.budget_id,
+                dept_name: d.dept_name,
+                allocated_amount: allocated,
+                capex_allocated: m ? Number(m.capex_allocated ?? 0) : allocated * 0.35,
+                opex_allocated: m ? Number(m.opex_allocated ?? 0) : allocated * 0.65,
+                consumed: m ? Number(m.consumed ?? 0) : undefined,
+                remaining: m ? Number(m.remaining ?? allocated) : undefined,
+                limit_mode: m ? String(m.limit_mode ?? 'SOFT_WARNING') : undefined,
+                color: MOCK_DEPARTMENTS[i % MOCK_DEPARTMENTS.length]?.color ?? '#3b82f6',
+              };
+            }),
           );
         } else if (board.departments?.length) {
           setDepartments(
-            board.departments.map((d, i) => ({
-              dept_id: d.dept_id,
-              dept_name: d.dept_name,
-              allocated_amount: MOCK_DEPARTMENTS[i]?.allocated_amount ?? 0,
-              color: MOCK_DEPARTMENTS[i % MOCK_DEPARTMENTS.length]?.color ?? '#3b82f6',
-            })),
+            board.departments.map((d, i) => {
+              const allocated = MOCK_DEPARTMENTS[i]?.allocated_amount ?? 0;
+              return {
+                dept_id: d.dept_id,
+                dept_name: d.dept_name,
+                allocated_amount: allocated,
+                capex_allocated: allocated * 0.35,
+                opex_allocated: allocated * 0.65,
+                color: MOCK_DEPARTMENTS[i % MOCK_DEPARTMENTS.length]?.color ?? '#3b82f6',
+              };
+            }),
           );
         }
       })
@@ -87,10 +123,10 @@ export default function BudgetAllocationPage() {
 
   const pieData = useMemo(
     () =>
-      departments.map((d) => ({
+      departments.map((d, i) => ({
         name: d.dept_name,
         value: d.allocated_amount,
-        color: d.color,
+        color: EXECUTIVE_CHART_SERIES[i % EXECUTIVE_CHART_SERIES.length],
       })),
     [departments],
   );
@@ -203,103 +239,148 @@ export default function BudgetAllocationPage() {
     }
   }
 
+  async function moveFunds() {
+    const amount = Number(reappropriation.amount);
+    if (!reappropriation.from_budget_id || !reappropriation.to_budget_id || !amount) {
+      toast.error('Select source, destination, and amount');
+      return;
+    }
+    if (reappropriation.from_budget_id === reappropriation.to_budget_id) {
+      toast.error('Source and destination must differ');
+      return;
+    }
+    setMovingFunds(true);
+    try {
+      await api.reappropriateBudget({
+        financial_year: financialYear,
+        from_budget_id: reappropriation.from_budget_id,
+        to_budget_id: reappropriation.to_budget_id,
+        amount,
+        reason: reappropriation.reason || undefined,
+      });
+      toast.success(`Moved ${formatL(amount)} between departments`);
+      setReappropriation({ from_budget_id: '', to_budget_id: '', amount: '', reason: '' });
+      loadBoard();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reappropriation failed');
+    } finally {
+      setMovingFunds(false);
+    }
+  }
+
   const selectedDeptRow = departments.find((d) => d.dept_id === selectedDept);
 
   return (
-    <div className="min-h-screen bg-[#061528] p-4 text-white lg:p-8">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-[#d6b65d]">FP&A Engine</p>
-            <h1 className="text-3xl font-black">Budget Allocation Board</h1>
-            <p className="mt-1 text-sm text-slate-400">Distribute the master university budget across departments</p>
-          </div>
-          <div className="flex gap-2">
-            <Link href="/leadership/budget-monitor" className="rounded-xl border border-slate-600 px-4 py-2 text-xs font-semibold hover:border-[#d6b65d]">
+    <div className={EXECUTIVE_SPACING.page}>
+      <LeadershipPageHeader
+        eyebrow="FP&A Engine"
+        title="Budget Allocation Board"
+        description="Distribute the master university budget across departments"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Link href="/leadership/budget-monitor" className="rounded-xl border border-sgvu-navy/15 px-4 py-2 text-xs font-semibold text-sgvu-navy hover:border-sgvu-gold">
               Budget Monitor →
             </Link>
-            <Link href="/leadership/intelligence" className="rounded-xl border border-slate-600 px-4 py-2 text-xs font-semibold hover:border-[#d6b65d]">
-              Intelligence Hub
+            <Link href="/leadership/financial-oversight" className="rounded-xl border border-sgvu-navy/15 px-4 py-2 text-xs font-semibold text-sgvu-navy hover:border-sgvu-gold">
+              Financial Oversight →
             </Link>
           </div>
-        </header>
+        }
+      />
 
-        <GlassCard title="Master University Budget" subtitle={`Financial Year ${financialYear}`}>
+        <ExecutiveCard title="Master University Budget" description={`Financial Year ${financialYear}`}>
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-4">
               <div>
-                <label className="text-xs text-slate-400">Total projected budget (₹)</label>
+                <label className="text-xs text-muted-foreground">Total projected budget (₹)</label>
                 <Input
                   type="number"
                   disabled={locked}
-                  className="mt-1 border-slate-600 bg-slate-800/50 text-2xl font-black text-white"
+                  className="mt-1 text-2xl font-black text-sgvu-navy"
                   value={totalBudget}
                   onChange={(e) => {
                     setDirty(true);
                     setTotalBudget(Number(e.target.value));
                   }}
                 />
-                <p className="mt-1 font-mono text-lg text-[#d6b65d]">{formatCr(totalBudget)}</p>
+                <p className="mt-1 font-mono text-lg text-sgvu-gold">{formatCr(totalBudget)}</p>
               </div>
-              <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-3 text-sm">
+              <div className="rounded-xl border border-sgvu-navy/10 bg-sgvu-surface p-4 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Allocated to departments</span>
-                  <span className="font-mono font-bold">{formatCr(deptSum)}</span>
+                  <span className="text-muted-foreground">Allocated to departments</span>
+                  <span className="font-mono font-bold text-sgvu-navy">{formatCr(deptSum)}</span>
                 </div>
                 <div className="mt-1 flex justify-between">
-                  <span className="text-slate-400">Remaining</span>
-                  <span className={`font-mono font-bold ${remaining < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  <span className="text-muted-foreground">Remaining</span>
+                  <span className={`font-mono font-bold ${remaining < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
                     {formatCr(Math.max(0, remaining))}
                   </span>
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button disabled={locked || saving || !dirty} onClick={() => void saveDraft()} className="bg-[#d6b65d] text-[#08234a]">
+                <Button disabled={locked || saving || !dirty} onClick={() => void saveDraft()} className="bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold-hover">
                   {saving ? 'Saving…' : dirty ? 'Save Draft' : 'Draft Saved'}
                 </Button>
-                <Button disabled={locked} variant="outline" className="border-red-500/50 text-red-400" onClick={() => void lockBudget()}>
-                  🔒 Lock Financial Year Budget
+                <Button disabled={locked} variant="outline" className="border-red-300 text-red-600" onClick={() => void lockBudget()}>
+                  Lock Financial Year Budget
                 </Button>
               </div>
-              {locked ? <p className="text-xs text-amber-400">Budget locked — Finance module enforces hard limits.</p> : null}
+              {locked ? <p className="text-xs text-amber-700">Budget locked — Finance module enforces hard limits.</p> : null}
             </div>
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={2}>
                   {pieData.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} stroke="#061528" strokeWidth={2} />
+                    <Cell key={entry.name} fill={entry.color} stroke="#fff" strokeWidth={2} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v: number) => formatCr(v)} contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
+                <Tooltip formatter={(v: number) => formatCr(v)} contentStyle={EXECUTIVE_CHART_TOOLTIP} />
               </PieChart>
             </ResponsiveContainer>
           </div>
-        </GlassCard>
+        </ExecutiveCard>
 
-        <GlassCard title="Department Sliders" subtitle="Drag or type to allocate — pie chart updates live">
+        <ExecutiveCard title="Department Sliders" description="Drag or type to allocate — CAPEX/OPEX split shown per department">
           <div className="space-y-5">
             {departments.map((dept) => {
               const pct = totalBudget > 0 ? Math.round((dept.allocated_amount / totalBudget) * 100) : 0;
+              const utilPct =
+                dept.allocated_amount > 0 && dept.consumed != null
+                  ? Math.round((dept.consumed / dept.allocated_amount) * 100)
+                  : null;
               return (
                 <div key={dept.dept_id} className="space-y-2">
                   <div className="flex items-center justify-between">
                     <button
                       type="button"
                       onClick={() => setSelectedDept(dept.dept_id)}
-                      className={`text-sm font-bold ${selectedDept === dept.dept_id ? 'text-[#d6b65d]' : 'text-white'}`}
+                      className={`text-sm font-bold ${selectedDept === dept.dept_id ? 'text-sgvu-gold' : 'text-sgvu-navy'}`}
                     >
                       {dept.dept_name}
+                      {dept.limit_mode ? (
+                        <span className="ml-2 text-[10px] font-normal uppercase text-muted-foreground">{dept.limit_mode}</span>
+                      ) : null}
                     </button>
                     <div className="flex items-center gap-3">
                       <Input
                         type="number"
                         disabled={locked}
-                        className="w-36 border-slate-600 bg-slate-800/50 text-right font-mono text-sm"
+                        className="w-36 text-right font-mono text-sm"
                         value={dept.allocated_amount}
                         onChange={(e) => updateDeptAmount(dept.dept_id, Number(e.target.value))}
                       />
-                      <span className="w-12 text-right text-xs text-slate-400">{pct}%</span>
+                      <span className="w-12 text-right text-xs text-muted-foreground">{pct}%</span>
                     </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+                    <span>CAPEX {formatL(dept.capex_allocated ?? dept.allocated_amount * 0.35)}</span>
+                    <span>OPEX {formatL(dept.opex_allocated ?? dept.allocated_amount * 0.65)}</span>
+                    {dept.remaining != null ? (
+                      <span className={dept.remaining < 0 ? 'text-red-600' : 'text-emerald-700'}>
+                        Remaining {formatL(dept.remaining)}
+                        {utilPct != null ? ` · ${utilPct}% used` : ''}
+                      </span>
+                    ) : null}
                   </div>
                   <input
                     type="range"
@@ -309,29 +390,95 @@ export default function BudgetAllocationPage() {
                     step={1000000}
                     value={dept.allocated_amount}
                     onChange={(e) => updateDeptAmount(dept.dept_id, Number(e.target.value))}
-                    className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-700 accent-[#d6b65d]"
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full bg-muted accent-sgvu-gold"
                   />
                 </div>
               );
             })}
           </div>
-        </GlassCard>
+        </ExecutiveCard>
+
+        <ExecutiveCard title="Budget Reappropriation" description="Chairman one-click fund transfer between departments (mid-year)">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div>
+              <label className="text-xs text-muted-foreground">From department</label>
+              <select
+                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                value={reappropriation.from_budget_id}
+                onChange={(e) => setReappropriation((s) => ({ ...s, from_budget_id: e.target.value }))}
+              >
+                <option value="">Select source</option>
+                {departments
+                  .filter((d) => d.budget_id)
+                  .map((d) => (
+                    <option key={d.budget_id} value={d.budget_id}>
+                      {d.dept_name} ({formatL(d.remaining ?? d.allocated_amount)} avail.)
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">To department</label>
+              <select
+                className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                value={reappropriation.to_budget_id}
+                onChange={(e) => setReappropriation((s) => ({ ...s, to_budget_id: e.target.value }))}
+              >
+                <option value="">Select destination</option>
+                {departments
+                  .filter((d) => d.budget_id)
+                  .map((d) => (
+                    <option key={d.budget_id} value={d.budget_id}>
+                      {d.dept_name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Amount (₹)</label>
+              <Input
+                type="number"
+                className="mt-1"
+                value={reappropriation.amount}
+                onChange={(e) => setReappropriation((s) => ({ ...s, amount: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Reason</label>
+              <Input
+                className="mt-1"
+                placeholder="Optional note"
+                value={reappropriation.reason}
+                onChange={(e) => setReappropriation((s) => ({ ...s, reason: e.target.value }))}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                disabled={movingFunds}
+                onClick={() => void moveFunds()}
+                className="w-full bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold-hover"
+              >
+                {movingFunds ? 'Moving…' : 'Move Funds'}
+              </Button>
+            </div>
+          </div>
+        </ExecutiveCard>
 
         {selectedDeptRow ? (
-          <GlassCard
+          <ExecutiveCard
             title={`Program Micro-Allocations · ${selectedDeptRow.dept_name}`}
-            subtitle="Carve event/program budgets from department cap"
+            description="Carve event/program budgets from department cap"
           >
             <div className="mb-4 grid gap-2 sm:grid-cols-3">
               {programs.map((p) => (
-                <div key={p.program_id} className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-3">
-                  <p className="text-sm font-semibold">{p.program_name}</p>
-                  <p className="font-mono text-xs text-slate-400">
+                <div key={p.program_id} className="rounded-xl border border-sgvu-navy/10 bg-sgvu-surface p-4">
+                  <p className="text-sm font-semibold text-sgvu-navy">{p.program_name}</p>
+                  <p className="font-mono text-xs text-muted-foreground">
                     {formatL(p.utilized_amount)} / {formatL(p.allocated_amount)}
                   </p>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-700">
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-[#d6b65d]"
+                      className="h-full rounded-full bg-sgvu-gold"
                       style={{ width: `${Math.min(100, (p.utilized_amount / p.allocated_amount) * 100)}%` }}
                     />
                   </div>
@@ -342,25 +489,23 @@ export default function BudgetAllocationPage() {
               <div className="flex flex-wrap gap-2">
                 <Input
                   placeholder="Program name"
-                  className="border-slate-600 bg-slate-800/50"
                   value={newProgram.name}
                   onChange={(e) => setNewProgram((s) => ({ ...s, name: e.target.value }))}
                 />
                 <Input
                   placeholder="Amount ₹"
                   type="number"
-                  className="w-40 border-slate-600 bg-slate-800/50"
+                  className="w-40"
                   value={newProgram.amount}
                   onChange={(e) => setNewProgram((s) => ({ ...s, amount: e.target.value }))}
                 />
-                <Button variant="outline" className="border-slate-600" onClick={() => void addProgram()}>
+                <Button variant="outline" onClick={() => void addProgram()}>
                   Add Program
                 </Button>
               </div>
             ) : null}
-          </GlassCard>
+          </ExecutiveCard>
         ) : null}
-      </div>
     </div>
   );
 }

@@ -27,6 +27,14 @@ export class StudentProfile extends BaseSoftDeleteEntity {
   @Column({ length: 50, nullable: true })
   batch: string;
 
+  /** Active academic semester (1–8). Drives allocation-based enrollment sync. */
+  @Column({ type: 'int', nullable: true })
+  current_semester: number | null;
+
+  /** Section within semester (e.g. A, B). */
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  section_code: string | null;
+
   @Column({ type: 'jsonb', nullable: true })
   parent_info: Record<string, unknown> | null;
 

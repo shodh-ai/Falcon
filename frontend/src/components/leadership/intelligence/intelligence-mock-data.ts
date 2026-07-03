@@ -17,10 +17,10 @@ export const MOCK_CASH_FLOW = [
 ];
 
 export const MOCK_REVENUE_SOURCES = [
-  { name: 'Tuition', value: 82000000, color: '#3b82f6' },
-  { name: 'Hostel', value: 34000000, color: '#a855f7' },
-  { name: 'Transport', value: 18000000, color: '#eab308' },
-  { name: 'Other', value: 8000000, color: '#64748b' },
+  { name: 'Tuition', value: 82000000, color: '#08234a' },
+  { name: 'Hostel', value: 34000000, color: '#64748b' },
+  { name: 'Transport', value: 18000000, color: '#047857' },
+  { name: 'Other', value: 8000000, color: '#d6b65d' },
 ];
 
 export const MOCK_RECEIVABLES = {

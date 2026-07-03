@@ -8,6 +8,8 @@ const MATERIAL_MIMES = new Set([
   PDF_MIME,
   'application/vnd.ms-powerpoint',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ]);
 
 export const LMS_ASSIGNMENT_PDF_LIMIT = 5 * 1024 * 1024;
@@ -34,11 +36,11 @@ function materialFilter(
   cb: (error: Error | null, acceptFile: boolean) => void,
 ) {
   const ext = extname(file.originalname).toLowerCase();
-  const allowedExt = ['.pdf', '.ppt', '.pptx'];
+  const allowedExt = ['.pdf', '.ppt', '.pptx', '.doc', '.docx'];
   if (!allowedExt.includes(ext) || !MATERIAL_MIMES.has(file.mimetype)) {
     return cb(
       new BadRequestException(
-        'Only PDF or PowerPoint files are allowed (max 10MB)',
+        'Only PDF, PowerPoint, or Word files are allowed (max 10MB)',
       ),
       false,
     );

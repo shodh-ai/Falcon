@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { TimetableWidget } from '@/components/student/TimetableWidget';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
@@ -13,11 +12,10 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import Link from 'next/link';
 import { Bell, Briefcase, CalendarClock, ChevronRight, CreditCard, GraduationCap, Sparkles, UserRoundCheck } from 'lucide-react';
-import type { TimetableSlot } from '@/lib/mock/student-dashboard';
 import { useAuthedApi } from '@/lib/api';
 import { AuthenticatedProfilePhoto } from '@/components/profile/AuthenticatedProfilePhoto';
 import { NoticeBoardWidget } from '@/components/dashboard/NoticeBoardWidget';
-import { useRecentNotifications, toAppNotification } from '@/hooks/useNotifications';
+import { useNotificationHistory, toAppNotification } from '@/hooks/useNotifications';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -38,19 +36,6 @@ type OpenDrive = {
   min_cgpa: string | number;
 };
 
-type TimetableResponse = {
-  timetable_id: string;
-  course_id: string;
-  course_name: string;
-  room: string | null;
-  faculty_name: string | null;
-  start_time: string;
-  end_time: string;
-  status: 'upcoming' | 'ongoing' | 'done';
-  is_virtual?: boolean;
-  live_join_url?: string | null;
-};
-
 type Profile = {
   profile_photo_url?: string | null;
 };
@@ -66,19 +51,17 @@ export default function StudentDashboardPage() {
   const router = useRouter();
   const { user, token } = useAuth();
   const api = useAuthedApi();
-  const { notifications, refresh: refreshNotifications } = useRecentNotifications();
+  const { notifications, refresh: refreshNotifications } = useNotificationHistory();
   const firstName = user?.name?.split(' ')[0] ?? 'Student';
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [timetable, setTimetable] = useState<TimetableSlot[]>([]);
   const [openDrives, setOpenDrives] = useState<OpenDrive[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [metricsResult, timetableResult, placementsResult, profileResult] = await Promise.allSettled([
+        const [metricsResult, placementsResult, profileResult] = await Promise.allSettled([
           api.get<Summary>('/api/academics/dashboard/metrics'),
-          api.get<TimetableResponse[]>('/api/academics/dashboard/timetable/today'),
           api.get<{ open_drives?: OpenDrive[]; open_jobs?: OpenDrive[] }>('/api/placement/student/hub'),
           api.get<Profile>('/api/student/profile'),
         ]);
@@ -89,21 +72,6 @@ export default function StudentDashboardPage() {
           setOpenDrives((hub.open_drives ?? hub.open_jobs ?? []).slice(0, 3));
         }
         if (profileResult.status === 'fulfilled') setProfile(profileResult.value);
-
-        const timetableRows = timetableResult.status === 'fulfilled' ? timetableResult.value : [];
-        setTimetable(
-          timetableRows.map((slot) => ({
-            id: slot.timetable_id,
-            courseId: slot.course_id,
-            subject: slot.course_name,
-            room: `${slot.room ?? 'Room TBA'}${slot.faculty_name ? ` · ${slot.faculty_name}` : ''}`,
-            start: slot.start_time.slice(0, 5),
-            end: slot.end_time.slice(0, 5),
-            status: slot.status,
-            liveJoinUrl: slot.live_join_url ?? null,
-            isVirtual: slot.is_virtual ?? false,
-          })),
-        );
       } catch (error) {
         console.error('Failed to load dashboard', error);
       }
@@ -111,7 +79,7 @@ export default function StudentDashboardPage() {
     void loadDashboard();
   }, [api]);
 
-  const alertItems = notifications.map(toAppNotification).filter((n) => n.unread);
+  const alertItems = notifications.map(toAppNotification).filter((n) => n.unread).slice(0, 5);
   const attendance = summary?.attendance_percent ?? 0;
   const attendanceTone = attendance >= 75 ? 'success' : 'warning';
 
@@ -125,6 +93,26 @@ export default function StudentDashboardPage() {
     }
     await notificationsApi.markRead(token, id).catch(() => undefined);
     await refreshNotifications();
+  };
+
+  const dismissAlert = async (id: string) => {
+    if (!token) return;
+    await refreshNotifications(
+      (current) => current?.filter((row) => row.notification_id !== id) ?? [],
+      { revalidate: false },
+    );
+    try {
+      await notificationsApi.dismiss(token, id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      if (!/404|not found/i.test(msg)) {
+        toast.error('Could not remove notification');
+        await refreshNotifications();
+        return;
+      }
+    }
+    await refreshNotifications();
+    window.dispatchEvent(new Event('falcon:notifications-refresh'));
   };
 
   return (
@@ -205,6 +193,7 @@ export default function StudentDashboardPage() {
                   notification={alert}
                   compact
                   onClick={() => void openAlert(alert.id, alert.actionLink)}
+                  onDismiss={() => void dismissAlert(alert.id)}
                 />
               ))}
             </div>
@@ -268,8 +257,6 @@ export default function StudentDashboardPage() {
           </div>
         )}
       </StudentSectionCard>
-
-      <TimetableWidget slots={timetable} />
     </StudentPageShell>
   );
 }

@@ -5,9 +5,11 @@ import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryptio
 import { AlumniModule } from '../alumni/alumni.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 import { FinanceModule } from '../finance/finance.module';
+import { AcademicsModule } from '../academics/academics.module';
+import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
 
 @Module({
-  imports: [AlumniModule, HelpdeskModule, FinanceModule],
+  imports: [AlumniModule, HelpdeskModule, FinanceModule, AcademicsModule],
   controllers: [StudentPortalController],
   providers: [StudentPortalService, HrFieldEncryptionService],
 })
