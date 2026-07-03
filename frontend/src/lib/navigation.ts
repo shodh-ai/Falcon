@@ -537,69 +537,95 @@ export const hodPortal: PortalConfig = {
   homeHref: '/hod/dashboard',
   navGroups: [
     {
-      title: 'Department Health',
+      title: 'Overview',
       items: [
         { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['command center', 'metrics', 'attendance'] },
         { label: 'Department Timetable', href: '/hod/department-timetable', icon: CalendarClock, keywords: ['schedule', 'rooms', 'master'] },
       ],
     },
     {
-      title: 'Academic Management',
+      title: 'HR (Reporting Officer)',
+      items: [
+        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation', 'leaves'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=attendance&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'hrms', 'dashboard', 'reports', 'probation'] },
+        { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: Ticket, keywords: ['exit', 'mid-duty', 'pass'] },
+        { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
+        { label: 'Extra Class Approvals', href: '/hod/approvals/extra-classes', icon: CalendarClock, keywords: ['substitute', 'cancel', 'timetable'] },
+        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
+        { label: 'Venue Booking Approvals', href: '/hod/venue-requests', icon: MapPin, keywords: ['room', 'booking', 'venue'] },
+        { label: 'Project Funding', href: '/hod/funding-approvals', icon: Banknote, keywords: ['research', 'funding', 'budget'] },
+      ],
+    },
+    {
+      title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
-        { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
-      ],
-    },
-    {
-      title: 'Faculty & Staff',
-      items: [
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
-        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation'] },
-        { label: 'Proxy Teaching Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave'] },
-        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events', 'coordinator'] },
-        { label: 'Venue Requests', href: '/hod/venue-requests', icon: Building2, keywords: ['room', 'seminar', 'classroom', 'booking'] },
-        { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty', 'dean', 'minutes'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
+        { label: 'Slow Learners', href: '/hod/academics/slow-learners', icon: LineChart, keywords: ['at risk', 'remedial', 'low grade'] },
+        { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty', 'dean', 'minutes'] },
       ],
     },
     {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
+        { label: 'Attendance Defaulters', href: '/hod/students/defaulters', icon: AlertTriangle, keywords: ['defaulters', 'low attendance', '75'] },
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
+      ],
+    },
+    {
+      title: 'Examination',
+      items: [
+        { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
+      ],
+    },
+    {
+      title: 'IQAC (Quality Assurance)',
+      items: [
+        { label: 'IQAC Submission Portal', href: '/hod/iqac', icon: ClipboardList, keywords: ['iqac', 'naac', 'nirf', 'reports', 'submission'] },
+      ],
+    },
+    {
+      title: 'Reports',
+      items: [
+        { label: 'Department Analytics', href: '/hod/reports', icon: LineChart, keywords: ['analytics', 'reports', 'trends', 'departmental'] },
       ],
     },
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
     {
-      title: 'Department Health',
+      title: 'Overview',
       items: [
         { label: 'Dashboard', href: '/hod/dashboard', icon: LayoutDashboard, keywords: ['command center', 'metrics'] },
         { label: 'Department Timetable', href: '/hod/department-timetable', icon: CalendarClock, keywords: ['schedule'] },
       ],
     },
     {
-      title: 'Academic Management',
+      title: 'HR (Reporting Officer)',
+      items: [
+        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['approve'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=attendance&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory'] },
+        { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: Ticket, keywords: ['gate pass'] },
+        { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['proxy'] },
+        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['events'] },
+        { label: 'Venue Approvals', href: '/hod/venue-requests', icon: MapPin, keywords: ['venue'] },
+      ],
+    },
+    {
+      title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
-        { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
-      ],
-    },
-    {
-      title: 'Faculty & Staff',
-      items: [
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },
-        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox', icon: Inbox, keywords: ['approve'] },
-        { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club events'] },
-        { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['api'] },
+        { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['meetings'] },
       ],
     },
     {
@@ -609,6 +635,24 @@ export const hodPortal: PortalConfig = {
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['grievance'] },
+      ],
+    },
+    {
+      title: 'Examination',
+      items: [
+        { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
+      ],
+    },
+    {
+      title: 'IQAC (Quality Assurance)',
+      items: [
+        { label: 'IQAC Submission Portal', href: '/hod/iqac', icon: ClipboardList, keywords: ['iqac'] },
+      ],
+    },
+    {
+      title: 'Reports',
+      items: [
+        { label: 'Department Analytics', href: '/hod/reports', icon: LineChart, keywords: ['reports', 'analytics'] },
       ],
     },
     myHrOperationsNavGroup('hod'),

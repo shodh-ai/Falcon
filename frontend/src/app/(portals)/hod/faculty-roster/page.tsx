@@ -1,5 +1,5 @@
-import { WorkspaceRoutePage } from '@/components/workspaces/WorkspaceRoutePage';
+import { redirect } from 'next/navigation';
 
-export default function HodFacultyRosterPage() {
-  return <WorkspaceRoutePage portal="hod" page="facultyRoster" />;
+export default function HodFacultyRosterRedirectPage() {
+  redirect('/hod/faculty/workload');
 }

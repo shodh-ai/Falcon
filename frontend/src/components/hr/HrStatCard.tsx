@@ -11,6 +11,7 @@ export function HrStatCard({
   icon: Icon,
   accent = 'gold',
   alert,
+  onClick,
 }: {
   label: string;
   value: string | number;
@@ -20,15 +21,18 @@ export function HrStatCard({
   icon?: LucideIcon;
   accent?: 'gold' | 'navy';
   alert?: boolean;
+  onClick?: () => void;
 }) {
   const trendUp = (trend ?? 0) >= 0;
 
   return (
     <div
+      onClick={onClick}
       className={cn(
-        'rounded-xl border border-gray-100 bg-white p-5 shadow-sm transition-shadow hover:shadow-md',
+        'rounded-xl border border-gray-100 bg-white p-5 shadow-sm transition-all',
         accent === 'gold' ? 'border-l-4 border-l-sgvu-gold' : 'border-l-4 border-l-sgvu-navy',
         alert && 'ring-1 ring-amber-200',
+        onClick && 'cursor-pointer hover:shadow-md hover:bg-slate-50/50',
       )}
     >
       <div className="flex items-start justify-between gap-2">

@@ -574,6 +574,28 @@ export class AcademicsController {
     );
   }
 
+  @Get('hod/faculty-audit')
+  @Roles('HOD', 'SuperAdmin')
+  hodFacultyAudit(@Req() req: { user: AuthUser }) {
+    return this.academics.getHodFacultyAudit(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/faculty-audit/unlock-action')
+  @Roles('HOD', 'SuperAdmin')
+  hodFacultyAuditUnlockAction(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { course_id: string; action: 'APPROVE' | 'REJECT' },
+  ) {
+    return this.academics.handleHodUnlockAction(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
+  }
+
   @Post('hod/course-allocation')
   @Roles('HOD', 'SuperAdmin')
   hodCourseAllocation(

@@ -8,6 +8,9 @@ import { HrEmptyState } from '@/components/hr/HrEmptyState';
 import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { TeamScopeBar, useTeamScope, type TeamScope } from '@/components/self-service/TeamScopeBar';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { getSubdomainFromClient } from '@/lib/tenant';
 
 type MatrixDay = {
   date: string;
@@ -40,6 +43,7 @@ type Props = {
 
 function AttendanceContent({ defaultScope }: Props) {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const scope = useTeamScope(defaultScope);
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [data, setData] = useState<MatrixPayload | null>(null);
@@ -59,16 +63,18 @@ function AttendanceContent({ defaultScope }: Props) {
   }, [api, scope, month]);
 
   async function downloadExcel() {
+    if (!token) {
+      toast.error('Please sign in to download');
+      return;
+    }
     setExporting(true);
     try {
-      const token = localStorage.getItem('falcon_token');
-      const tenant = localStorage.getItem('falcon_tenant');
       const res = await fetch(
-        `/api/hr/ess/team/attendance/export?scope=${scope}&month=${month}`,
+        `${getApiBaseUrl()}/api/hr/ess/team/attendance/export?scope=${scope}&month=${month}`,
         {
           headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...(tenant ? { 'x-tenant-subdomain': tenant } : {}),
+            Authorization: `Bearer ${token}`,
+            'x-tenant-subdomain': getSubdomainFromClient(),
           },
         },
       );

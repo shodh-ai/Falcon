@@ -76,4 +76,36 @@ export class HrTeamScopeService {
       params,
     );
   }
+
+  async getScopeCounts(
+    managerId: string,
+    tenantId: string,
+  ): Promise<{ direct: number; indirect: number; dept: number }> {
+    const rows = await this.dataSource.query<
+      Array<{ direct: string; indirect: string; dept: string }>
+    >(
+      `SELECT
+         (SELECT COUNT(*)::int FROM users u
+          WHERE u.tenant_id = $1 AND u.reporting_officer_id = $2 AND u.is_active = true) AS direct,
+         (SELECT COUNT(*)::int FROM users u
+          WHERE u.tenant_id = $1
+            AND u.reporting_officer_id IN (
+              SELECT dr.user_id FROM users dr
+              WHERE dr.tenant_id = $1 AND dr.reporting_officer_id = $2 AND dr.is_active = true
+            )
+            AND u.is_active = true) AS indirect,
+         (SELECT COUNT(*)::int FROM users u
+          WHERE u.tenant_id = $1
+            AND u.dept_id = (SELECT dept_id FROM users WHERE user_id = $2 LIMIT 1)
+            AND u.user_id != $2
+            AND u.is_active = true) AS dept`,
+      [tenantId, managerId],
+    );
+    const r = rows[0];
+    return {
+      direct: Number(r?.direct ?? 0),
+      indirect: Number(r?.indirect ?? 0),
+      dept: Number(r?.dept ?? 0),
+    };
+  }
 }

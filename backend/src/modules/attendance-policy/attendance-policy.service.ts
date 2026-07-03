@@ -295,6 +295,83 @@ export class AttendancePolicyService {
     return rows[0];
   }
 
+  async setDepartmentThresholdDirect(
+    tenantId: string,
+    hodUserId: string,
+    dto: { requested_min_percent: number; reason?: string },
+  ) {
+    const pct = Number(dto.requested_min_percent);
+    if (!Number.isFinite(pct) || pct < 1 || pct > 100) {
+      throw new BadRequestException(
+        'requested_min_percent must be between 1 and 100.',
+      );
+    }
+
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const deptId = deptIds[0] ?? null;
+
+    // Create an APPROVED request directly so it is immediate
+    const rows = await this.db.query(
+      `INSERT INTO attendance_threshold_requests
+         (tenant_id, dept_id, requested_min_percent, reason, requested_by, status, decided_by, decided_at)
+       VALUES ($1, $2, $3, $4, $5, 'APPROVED', $5, NOW())
+       RETURNING *`,
+      [tenantId, deptId, pct, dto.reason?.trim() || 'Direct HOD Override', hodUserId],
+    );
+    return rows[0];
+  }
+
+  async listCourses(tenantId: string) {
+    return this.db.query(
+      `SELECT 
+         c.course_id, 
+         c.course_code, 
+         c.course_name, 
+         c.credits, 
+         c.is_elective, 
+         c.min_attendance,
+         COALESCE(
+           (SELECT MIN(e.semester) FROM student_course_enrollments e WHERE e.course_id = c.course_id AND e.tenant_id = $1),
+           (SELECT MIN(CAST(NULLIF(regexp_replace(a.semester, '[^0-9]', '', 'g'), '') AS INT)) FROM academic_course_allocations a WHERE a.course_id = c.course_id AND a.tenant_id = $1),
+           1
+         )::int AS semester,
+         (
+           SELECT string_agg(DISTINCT u.name, ', ') 
+           FROM academic_timetables t
+           JOIN users u ON u.user_id = t.faculty_user_id
+           WHERE t.course_id = c.course_id AND t.tenant_id = $1
+         ) AS faculty_name
+       FROM academic_courses c
+       WHERE c.tenant_id = $1
+       ORDER BY c.course_code ASC`,
+      [tenantId],
+    );
+  }
+
+  async updateCourseThreshold(
+    tenantId: string,
+    courseId: string,
+    minPercent: number | null,
+  ) {
+    if (minPercent !== null) {
+      const pct = Number(minPercent);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        throw new BadRequestException('Threshold must be between 0 and 100.');
+      }
+    }
+    const result = await this.db.query(
+      `UPDATE academic_courses
+       SET min_attendance = $1
+       WHERE course_id = $2 AND tenant_id = $3
+       RETURNING *`,
+      [minPercent, courseId, tenantId],
+    );
+    if (result.length === 0) {
+      throw new NotFoundException('Course not found.');
+    }
+    return result[0];
+  }
+
   listMyThresholdRequests(tenantId: string, hodUserId: string) {
     return this.db.query(
       `SELECT r.*, d.dept_name
