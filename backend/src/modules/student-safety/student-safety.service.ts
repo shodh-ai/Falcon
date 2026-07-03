@@ -100,6 +100,15 @@ export class StudentSafetyService {
       );
     }
 
+    let accusedUserId = dto.accused_user_id ?? null;
+    if (!accusedUserId && dto.accused_description?.trim()) {
+      accusedUserId = await this.resolveAccusedUserId(
+        tenantId,
+        accusedType,
+        dto.accused_description.trim(),
+      );
+    }
+
     const routedRoles = this.resolveRouting(
       concernType,
       accusedType,
@@ -121,7 +130,7 @@ export class StudentSafetyService {
         reporterUserId,
         concernType,
         accusedType,
-        dto.accused_user_id ?? null,
+        accusedUserId,
         dto.accused_description?.trim() ?? null,
         dto.incident_description.trim(),
         dto.incident_location?.trim() ?? null,
@@ -139,6 +148,7 @@ export class StudentSafetyService {
     );
 
     await this.notifyRoles(tenantId, routedRoles, {
+      category: 'OPERATIONS',
       title:
         concernType === 'SEXUAL_HARASSMENT'
           ? 'Sexual harassment concern'
@@ -148,19 +158,6 @@ export class StudentSafetyService {
       requesterName: reporter?.name,
       requestType: 'STUDENT_SAFETY_CONCERN',
     });
-
-    if (accusedType === 'FACULTY' && dto.accused_user_id) {
-      await this.notifyAccusedFaculty(
-        tenantId,
-        dto.accused_user_id,
-        concernType,
-      );
-      await this.db.query(
-        `UPDATE student_safety_concerns SET accused_notified_at = NOW(), updated_at = NOW()
-         WHERE concern_id = $1`,
-        [concern.concern_id],
-      );
-    }
 
     return concern;
   }
@@ -196,10 +193,17 @@ export class StudentSafetyService {
     if (!roles.length) return [];
 
     return this.db.query(
-      `SELECT u.user_id, u.name, u.official_email, r.role_name, d.dept_name
+      `SELECT u.user_id, u.name, u.official_email, r.role_name, d.dept_name,
+              COALESCE(
+                NULLIF(BTRIM(sp.prn_number), ''),
+                NULLIF(BTRIM(sp.enrollment_no), ''),
+                NULLIF(BTRIM(sp.enrollment_number), ''),
+                NULLIF(BTRIM(sp.admission_number), '')
+              ) AS roll_number
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = ANY($2::text[])
        ORDER BY u.name
        LIMIT 200`,
@@ -229,14 +233,34 @@ export class StudentSafetyService {
     );
   }
 
-  listFacultyNotices(tenantId: string, facultyUserId: string) {
+  async listAccusedNotices(tenantId: string, accusedUserId: string) {
+    try {
+      await this.repairPendingAccusedNotices(tenantId, accusedUserId);
+    } catch {
+      // Never block notice listing if repair/notify fails.
+    }
     return this.db.query(
-      `SELECT concern_id, concern_type, status, accused_notified_at, created_at, updated_at
+      `SELECT concern_id, concern_type, status, accused_notified_at,
+              resolution_summary, created_at, updated_at
        FROM student_safety_concerns
-       WHERE tenant_id = $1 AND accused_user_id = $2 AND accused_type = 'FACULTY'
-       ORDER BY created_at DESC`,
-      [tenantId, facultyUserId],
+       WHERE tenant_id = $1
+         AND accused_user_id = $2
+         AND status IN ('UNDER_REVIEW', 'ESCALATED', 'RESOLVED', 'CLOSED')
+       ORDER BY
+         CASE status
+           WHEN 'UNDER_REVIEW' THEN 0
+           WHEN 'ESCALATED' THEN 1
+           WHEN 'RESOLVED' THEN 2
+           ELSE 3
+         END,
+         created_at DESC`,
+      [tenantId, accusedUserId],
     );
+  }
+
+  /** @deprecated Use listAccusedNotices */
+  listFacultyNotices(tenantId: string, facultyUserId: string) {
+    return this.listAccusedNotices(tenantId, facultyUserId);
   }
 
   async updateConcern(
@@ -264,6 +288,8 @@ export class StudentSafetyService {
       ? new Date()
       : null;
 
+    const prevStatus = concern.status as ConcernStatus;
+
     await this.db.query(
       `UPDATE student_safety_concerns
        SET status = $2,
@@ -283,39 +309,147 @@ export class StudentSafetyService {
       ],
     );
 
-    if (nextStatus === 'ESCALATED') {
+    const accusedUserId = await this.ensureAccusedUserId(
+      tenantId,
+      concernId,
+      concern.accused_user_id as string | null,
+      concern.accused_type as AccusedType,
+      concern.accused_description as string | null,
+    );
+
+    if (nextStatus === 'UNDER_REVIEW' && !concern.accused_notified_at && accusedUserId) {
+      await this.notifyAccused(
+        tenantId,
+        accusedUserId,
+        concern.concern_type as ConcernType,
+      );
       await this.db.query(
-        `UPDATE student_safety_concerns
-         SET routed_to_roles = (
-           SELECT ARRAY(SELECT DISTINCT unnest(routed_to_roles || ARRAY['Dean']::text[]))
-         ), updated_at = NOW()
+        `UPDATE student_safety_concerns SET accused_notified_at = NOW(), updated_at = NOW()
          WHERE concern_id = $1`,
         [concernId],
       );
-      await this.notifyRoles(tenantId, ['Dean'], {
-        title: 'Safety concern escalated',
-        message: 'A student safety concern has been escalated for your review.',
-        actionLink: '/dean/safety-concerns',
-        requestType: 'STUDENT_SAFETY_CONCERN',
-      });
     }
+
+    const resolutionText =
+      dto.resolution_summary?.trim() ||
+      (concern.resolution_summary as string | null)?.trim() ||
+      '';
+    const isTerminal = nextStatus === 'RESOLVED' || nextStatus === 'CLOSED';
+    const wasTerminal = prevStatus === 'RESOLVED' || prevStatus === 'CLOSED';
+
+    if (isTerminal && !wasTerminal) {
+      await this.notifyResolvedParties(
+        tenantId,
+        concern.reporter_user_id as string,
+        accusedUserId,
+        concern.concern_type as ConcernType,
+        nextStatus,
+        resolutionText,
+      );
+    } else if (!isTerminal) {
+      this.notifyReporterStatusUpdate(
+        concern.reporter_user_id as string,
+        tenantId,
+        concern.concern_type as ConcernType,
+        nextStatus,
+      );
+    }
+
+    return { status: nextStatus };
+  }
+
+  private async ensureAccusedUserId(
+    tenantId: string,
+    concernId: string,
+    accusedUserId: string | null,
+    accusedType: AccusedType,
+    accusedDescription: string | null,
+  ): Promise<string | null> {
+    if (accusedUserId) return accusedUserId;
+    if (!accusedDescription?.trim()) return null;
+
+    const resolved = await this.resolveAccusedUserId(
+      tenantId,
+      accusedType,
+      accusedDescription,
+    );
+    if (resolved) {
+      await this.db.query(
+        `UPDATE student_safety_concerns SET accused_user_id = $2, updated_at = NOW()
+         WHERE concern_id = $1`,
+        [concernId, resolved],
+      );
+    }
+    return resolved;
+  }
+
+  private notifyReporterStatusUpdate(
+    reporterUserId: string,
+    tenantId: string,
+    concernType: ConcernType,
+    nextStatus: ConcernStatus,
+  ) {
+    this.notify.approvalRequired({
+      tenantId,
+      userId: reporterUserId,
+      category: 'OPERATIONS',
+      title: 'Safety concern under review',
+      message: `Your ${this.concernLabel(concernType)} concern is now ${nextStatus.replace('_', ' ').toLowerCase()}.`,
+      actionLink: '/student/safety-concerns',
+      requestType: 'STUDENT_SAFETY_CONCERN',
+    });
+  }
+
+  private async notifyResolvedParties(
+    tenantId: string,
+    reporterUserId: string,
+    accusedUserId: string | null,
+    concernType: ConcernType,
+    status: 'RESOLVED' | 'CLOSED',
+    resolutionSummary: string,
+  ) {
+    const label = this.concernLabel(concernType);
+    const statusLabel = status.toLowerCase();
+    const summarySuffix = resolutionSummary
+      ? ` ${resolutionSummary}`
+      : ' The Disciplinary Committee has completed its review.';
 
     this.notify.approvalRequired({
       tenantId,
-      userId: concern.reporter_user_id,
-      title:
-        nextStatus === 'RESOLVED' || nextStatus === 'CLOSED'
-          ? 'Safety concern update'
-          : 'Safety concern under review',
-      message:
-        nextStatus === 'RESOLVED' || nextStatus === 'CLOSED'
-          ? `Your ${this.concernLabel(concern.concern_type)} concern has been ${nextStatus.toLowerCase()}.${dto.resolution_summary ? ` ${dto.resolution_summary}` : ''}`
-          : `Your ${this.concernLabel(concern.concern_type)} concern is now ${nextStatus.replace('_', ' ').toLowerCase()}.`,
+      userId: reporterUserId,
+      category: 'OPERATIONS',
+      title: 'Safety concern resolved',
+      message: `Your ${label} concern has been ${statusLabel}.${summarySuffix}`,
       actionLink: '/student/safety-concerns',
       requestType: 'STUDENT_SAFETY_CONCERN',
     });
 
-    return { status: nextStatus };
+    if (!accusedUserId) return;
+
+    const [user] = await this.db.query(
+      `SELECT r.role_name
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2`,
+      [accusedUserId, tenantId],
+    );
+    const isStudent = user?.role_name === 'Student';
+    const actionLink = isStudent
+      ? '/student/safety-notices'
+      : '/faculty/safety-notices';
+
+    this.notify.approvalRequired({
+      tenantId,
+      userId: accusedUserId,
+      category: 'OPERATIONS',
+      title: 'Safety concern closed',
+      message:
+        concernType === 'SEXUAL_HARASSMENT'
+          ? `The sexual harassment concern involving you has been ${statusLabel} by the Disciplinary Committee.${summarySuffix} Do not contact any student about this matter.`
+          : `The student safety concern involving you has been ${statusLabel} by the Disciplinary Committee.${summarySuffix} Do not contact any student about this matter.`,
+      actionLink,
+      requestType: 'SAFETY_CONCERN_ACCUSED',
+    });
   }
 
   private async listForHod(tenantId: string, hodUserId: string) {
@@ -341,49 +475,149 @@ export class StudentSafetyService {
   }
 
   private resolveRouting(
-    concernType: ConcernType,
-    accusedType: AccusedType,
-    isHostelRelated: boolean,
+    _concernType: ConcernType,
+    _accusedType: AccusedType,
+    _isHostelRelated: boolean,
   ): string[] {
-    const roles = new Set<string>(['DC_MEMBER']);
-
-    if (concernType === 'SEXUAL_HARASSMENT') {
-      roles.add('HR');
-      roles.add('Dean');
-    }
-
-    if (accusedType === 'FACULTY') {
-      roles.add('HOD');
-    } else if (accusedType === 'STUDENT' || accusedType === 'SENIOR') {
-      roles.add('HOD');
-      if (isHostelRelated || concernType === 'RAGGING') roles.add('Warden');
-    } else if (accusedType === 'STAFF') {
-      roles.add('HR');
-    } else {
-      roles.add('Dean');
-    }
-
-    if (concernType === 'RAGGING' && isHostelRelated) {
-      roles.add('Warden');
-    }
-
-    return [...roles];
+    return ['DC_MEMBER'];
   }
 
-  private async notifyAccusedFaculty(
+  private async repairPendingAccusedNotices(
     tenantId: string,
-    facultyUserId: string,
+    accusedUserId: string,
+  ) {
+    const [user] = await this.db.query(
+      `SELECT name FROM users WHERE user_id = $1 AND tenant_id = $2`,
+      [accusedUserId, tenantId],
+    );
+    if (!user?.name) return;
+
+    const pending = await this.db.query(
+      `SELECT concern_id, accused_user_id, accused_description, concern_type, accused_type
+       FROM student_safety_concerns
+       WHERE tenant_id = $1
+         AND status IN ('UNDER_REVIEW', 'ESCALATED')
+         AND accused_notified_at IS NULL
+         AND (
+           accused_user_id = $2
+           OR (
+             accused_user_id IS NULL
+             AND accused_description IS NOT NULL
+             AND (
+               lower(accused_description) LIKE lower($3) || '%'
+               OR lower(accused_description) LIKE '%' || lower($3) || '%'
+             )
+           )
+         )`,
+      [tenantId, accusedUserId, user.name],
+    );
+
+    for (const row of pending as Array<{
+      concern_id: string;
+      accused_user_id: string | null;
+      accused_description: string | null;
+      concern_type: ConcernType;
+      accused_type: AccusedType;
+    }>) {
+      const linkedId =
+        row.accused_user_id ??
+        (await this.ensureAccusedUserId(
+          tenantId,
+          row.concern_id,
+          row.accused_user_id,
+          row.accused_type,
+          row.accused_description,
+        )) ??
+        accusedUserId;
+
+      if (!row.accused_user_id) {
+        await this.db.query(
+          `UPDATE student_safety_concerns SET accused_user_id = $2, updated_at = NOW()
+           WHERE concern_id = $1`,
+          [row.concern_id, linkedId],
+        );
+      }
+      await this.notifyAccused(tenantId, linkedId, row.concern_type);
+      await this.db.query(
+        `UPDATE student_safety_concerns SET accused_notified_at = NOW(), updated_at = NOW()
+         WHERE concern_id = $1`,
+        [row.concern_id],
+      );
+    }
+  }
+
+  private async resolveAccusedUserId(
+    tenantId: string,
+    accusedType: AccusedType,
+    accusedDescription: string,
+  ): Promise<string | null> {
+    const roleMap: Record<AccusedType, string[]> = {
+      FACULTY: ['Faculty', 'HOD', 'Dean'],
+      STUDENT: ['Student'],
+      SENIOR: ['Student'],
+      STAFF: ['HR', 'Warden', 'Faculty', 'HOD', 'Dean'],
+      OTHER: [],
+    };
+    const roles = roleMap[accusedType];
+    if (!roles.length) return null;
+
+    const nameHint = accusedDescription.split('·')[0]?.trim() ?? accusedDescription.trim();
+    if (!nameHint) return null;
+
+    const [exact] = await this.db.query(
+      `SELECT u.user_id
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = ANY($2::text[])
+         AND lower(u.name) = lower($3)
+       LIMIT 1`,
+      [tenantId, roles, nameHint],
+    );
+    if (exact?.user_id) return exact.user_id as string;
+
+    const [partial] = await this.db.query(
+      `SELECT u.user_id
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = ANY($2::text[])
+         AND (
+           lower($3) LIKE lower(u.name) || '%'
+           OR lower($3) LIKE '%' || lower(u.name) || '%'
+         )
+       ORDER BY length(u.name) DESC
+       LIMIT 1`,
+      [tenantId, roles, nameHint],
+    );
+    return (partial?.user_id as string | undefined) ?? null;
+  }
+
+  private async notifyAccused(
+    tenantId: string,
+    accusedUserId: string,
     concernType: ConcernType,
   ) {
+    const [user] = await this.db.query(
+      `SELECT r.role_name
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2`,
+      [accusedUserId, tenantId],
+    );
+    const isStudent = user?.role_name === 'Student';
+    const actionLink = isStudent
+      ? '/student/safety-notices'
+      : '/faculty/safety-notices';
+
     this.notify.approvalRequired({
       tenantId,
-      userId: facultyUserId,
-      title: 'Official notice: safety concern logged',
+      userId: accusedUserId,
+      category: 'OPERATIONS',
+      title: 'Official notice: safety concern under review',
       message:
         concernType === 'SEXUAL_HARASSMENT'
-          ? 'A sexual harassment concern involving you has been registered and is under confidential review. Do not contact any student about this matter. Await official communication from the committee.'
-          : 'A student safety concern involving you has been registered and is under review. Do not contact any student about this matter. Await official communication from the Disciplinary Committee.',
-      actionLink: '/faculty/safety-notices',
+          ? 'A sexual harassment concern involving you is now under confidential review by the Disciplinary Committee. Do not contact any student about this matter. Await official communication from the committee.'
+          : 'A student safety concern involving you is now under review by the Disciplinary Committee. Do not contact any student about this matter. Await official communication from the committee.',
+      actionLink,
       requestType: 'SAFETY_CONCERN_ACCUSED',
     });
   }
@@ -392,6 +626,7 @@ export class StudentSafetyService {
     tenantId: string,
     roleNames: string[],
     payload: {
+      category?: string;
       title: string;
       message: string;
       actionLink: string;
@@ -414,19 +649,8 @@ export class StudentSafetyService {
     }
   }
 
-  private actionLinkForRole(role: string): string {
-    switch (role) {
-      case 'HOD':
-        return '/hod/safety-concerns';
-      case 'Dean':
-        return '/dean/safety-concerns';
-      case 'HR':
-        return '/hr/safety-concerns';
-      case 'Warden':
-        return '/hostel-admin/safety-concerns';
-      default:
-        return '/disciplinary-committee/safety-concerns';
-    }
+  private actionLinkForRole(_role: string): string {
+    return '/disciplinary-committee/safety-concerns';
   }
 
   private async validateAccusedUser(

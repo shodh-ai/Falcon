@@ -95,6 +95,26 @@ export default function StudentDashboardPage() {
     await refreshNotifications();
   };
 
+  const dismissAlert = async (id: string) => {
+    if (!token) return;
+    await refreshNotifications(
+      (current) => current?.filter((row) => row.notification_id !== id) ?? [],
+      { revalidate: false },
+    );
+    try {
+      await notificationsApi.dismiss(token, id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      if (!/404|not found/i.test(msg)) {
+        toast.error('Could not remove notification');
+        await refreshNotifications();
+        return;
+      }
+    }
+    await refreshNotifications();
+    window.dispatchEvent(new Event('falcon:notifications-refresh'));
+  };
+
   return (
     <StudentPageShell>
       <section className="overflow-hidden rounded-[2rem] border border-sgvu-navy/10 bg-gradient-to-br from-sgvu-navy via-sgvu-navy to-slate-900 p-6 text-white shadow-xl shadow-sgvu-navy/15 md:p-8">
@@ -173,6 +193,7 @@ export default function StudentDashboardPage() {
                   notification={alert}
                   compact
                   onClick={() => void openAlert(alert.id, alert.actionLink)}
+                  onDismiss={() => void dismissAlert(alert.id)}
                 />
               ))}
             </div>

@@ -39,6 +39,7 @@ import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
+import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 
 type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
@@ -1100,12 +1101,12 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   saveMarksDraft(
     @Req() req: { user: AuthUser },
-    @Body() body: Record<string, unknown>,
+    @Body() body: SaveMarksDraftDto,
   ) {
     return this.facultyWorkspaces.saveMarksDraft(
       req.user.user_id,
       this.resolveTenantId(req.user),
-      body as Parameters<FacultyWorkspacesService['saveMarksDraft']>[2],
+      body,
     );
   }
 
@@ -1123,16 +1124,27 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/grading-components')
+  @Roles('Faculty')
+  listGradingComponents() {
+    return this.facultyWorkspaces.listGradingComponents();
+  }
+
   @Get('faculty/workspaces/course/:courseId/unified-marks')
   @Roles('Faculty')
   getUnifiedCourseMarks(
     @Req() req: { user: AuthUser },
     @Param('courseId') courseId: string,
+    @Query('components') components?: string,
   ) {
+    const componentList = components
+      ? components.split(',').map((item) => item.trim()).filter(Boolean)
+      : undefined;
     return this.facultyWorkspaces.getUnifiedCourseMarks(
       req.user.user_id,
       this.resolveTenantId(req.user),
       courseId,
+      componentList,
     );
   }
 

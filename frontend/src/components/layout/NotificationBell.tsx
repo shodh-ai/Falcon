@@ -27,6 +27,7 @@ interface NotificationBellProps {
   unreadCount?: number;
   isLoading?: boolean;
   onSelect?: (notification: AppNotification) => void;
+  onDismiss?: (notification: AppNotification) => void;
   viewAllHref?: string;
 }
 
@@ -35,6 +36,7 @@ export function NotificationBell({
   unreadCount,
   isLoading = false,
   onSelect,
+  onDismiss,
   viewAllHref = '/notifications',
 }: NotificationBellProps) {
   const unread = unreadCount ?? notifications.filter((n) => n.unread).length;
@@ -98,6 +100,7 @@ export function NotificationBell({
                   notification={n}
                   compact
                   onClick={() => handleSelect(n)}
+                  onDismiss={onDismiss ? () => onDismiss(n) : undefined}
                 />
               ))}
             </div>
