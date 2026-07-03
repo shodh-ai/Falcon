@@ -1,6 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 import { AppShell, EmptyTaskState } from '@/components/AppShell';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -60,7 +61,7 @@ type UserRecord = {
   };
 };
 
-export default function BrandedDashboard() {
+export default function BrandedDashboard({ hideShell = false }: { hideShell?: boolean } = {}) {
   const { user, token, isAuthenticated } = useAuth();
   const router = useRouter();
   const [section, setSection] = useState<string | null>(null);
@@ -117,7 +118,7 @@ export default function BrandedDashboard() {
 
     if (canSeeUserStats) {
       adminFetches.push(
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/stats`, { headers }).then(async (r) => {
+        fetch(`${getApiBaseUrl()}/users/stats`, { headers }).then(async (r) => {
           if (r.ok) setStats(await r.json());
           else setStats(null);
         }),
@@ -128,7 +129,7 @@ export default function BrandedDashboard() {
 
     if (canSeeTaskStats) {
       adminFetches.push(
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/stats/${currentMonth}`, { headers }).then(async (r) => {
+        fetch(`${getApiBaseUrl()}/tasks/stats/${currentMonth}`, { headers }).then(async (r) => {
           if (r.ok) setTaskStats(await r.json());
           else setTaskStats(null);
         }),
@@ -139,7 +140,7 @@ export default function BrandedDashboard() {
 
     if (canSeeAllAssignments) {
       adminFetches.push(
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/assignments/all`, { headers }).then(async (r) => {
+        fetch(`${getApiBaseUrl()}/tasks/assignments/all`, { headers }).then(async (r) => {
           if (r.ok) setAssignments(await r.json());
           else setAssignments([]);
         }),
@@ -152,17 +153,17 @@ export default function BrandedDashboard() {
 
     if (user?.role === 'IQAC' || user?.role === 'HR') {
       const [allUsersResponse, handoverHistoryResponse] = await Promise.all([
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/users`, { headers }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/handover/history`, { headers }),
+        fetch(`${getApiBaseUrl()}/users`, { headers }),
+        fetch(`${getApiBaseUrl()}/handover/history`, { headers }),
       ]);
       if (allUsersResponse.ok) setAllUsers(await allUsersResponse.json());
       if (handoverHistoryResponse.ok) setHandoverHistory(await handoverHistoryResponse.json());
     }
 
     if (user?.role !== 'IQAC' && user?.role !== 'HR' && user?.role !== 'President') {
-      const myAssignmentsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/assignments/my`, { headers });
+      const myAssignmentsResponse = await fetch(`${getApiBaseUrl()}/tasks/assignments/my`, { headers });
       if (myAssignmentsResponse.ok) setMyAssignments(await myAssignmentsResponse.json());
-      const mySubmissionsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/submissions/my`, { headers });
+      const mySubmissionsResponse = await fetch(`${getApiBaseUrl()}/tasks/submissions/my`, { headers });
       if (mySubmissionsResponse.ok) setMySubmissions(await mySubmissionsResponse.json());
     }
   };
@@ -174,7 +175,7 @@ export default function BrandedDashboard() {
     setActionMessage(null);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/scheduler/distribute`, {
+      const response = await fetch(`${getApiBaseUrl()}/scheduler/distribute`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -199,58 +200,62 @@ export default function BrandedDashboard() {
 
   if (!user) return null;
 
-  return (
-    <AppShell>
-      <div className="mx-auto max-w-7xl space-y-8">
-        <section className="overflow-hidden rounded-[2rem] bg-[#08234a] shadow-xl shadow-[#08234a]/10">
-          <div className="relative px-6 py-8 sm:px-8 lg:px-10">
-            <div className="absolute right-0 top-0 h-40 w-40 rounded-bl-full bg-[#d6b65d]/20" />
-            <div className="absolute bottom-0 right-28 h-24 w-24 rounded-full bg-white/5" />
-            <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="mb-2 inline-flex rounded-full bg-[#d6b65d] px-4 py-1 text-xs font-bold uppercase tracking-[0.2em] text-[#08234a]">
-                  Suresh Gyan Vihar University
-                </p>
-                <h2 className="text-3xl font-bold text-white sm:text-4xl">Welcome, {user.name}</h2>
-                <p className="mt-3 max-w-2xl text-blue-100">
-                  Track monthly governance duties, upload compliance records, and monitor task completion from one official portal.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/15 bg-white/10 p-5 text-white backdrop-blur">
-                <p className="text-sm text-blue-100">Current Role</p>
-                <p className="text-2xl font-bold text-[#d6b65d]">{user.role}</p>
-              </div>
+  const content = (
+    <div className="mx-auto max-w-7xl space-y-8">
+      <section className="overflow-hidden rounded-[2rem] bg-[#08234a] shadow-xl shadow-[#08234a]/10">
+        <div className="relative px-6 py-8 sm:px-8 lg:px-10">
+          <div className="absolute right-0 top-0 h-40 w-40 rounded-bl-full bg-[#d6b65d]/20" />
+          <div className="absolute bottom-0 right-28 h-24 w-24 rounded-full bg-white/5" />
+          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="mb-2 inline-flex rounded-full bg-[#d6b65d] px-4 py-1 text-xs font-bold uppercase tracking-[0.2em] text-[#08234a]">
+                Suresh Gyan Vihar University
+              </p>
+              <h2 className="text-3xl font-bold text-white sm:text-4xl">Welcome, {user.name}</h2>
+              <p className="mt-3 max-w-2xl text-blue-100">
+                Track monthly governance duties, upload compliance records, and monitor task completion from one official portal.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/15 bg-white/10 p-5 text-white backdrop-blur">
+              <p className="text-sm text-blue-100">Current Role</p>
+              <p className="text-2xl font-bold text-[#d6b65d]">{user.role}</p>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {section === 'handover' && (user.role === 'IQAC' || user.role === 'HR') ? (
-          <HandoverDashboard users={allUsers} history={handoverHistory} token={token} onRefresh={refreshDashboardData} />
-        ) : user.role === 'IQAC' || user.role === 'HR' ? (
-          <AdminDashboard
-            stats={stats}
-            taskStats={taskStats}
-            assignments={assignments}
-            token={token}
-            isDistributing={isDistributing}
-            actionMessage={actionMessage}
-            onForceDistribute={forceDistributeTasks}
-            onRefresh={refreshDashboardData}
-          />
-        ) : user.role === 'President' ? (
-          <PresidentDashboard stats={stats} />
-        ) : (
-          <MyTasksDashboard
-            assignments={myAssignments}
-            submissions={mySubmissions}
-            token={token}
-            section={section}
-            onRefresh={refreshDashboardData}
-          />
-        )}
-      </div>
-    </AppShell>
+      {section === 'handover' && (user.role === 'IQAC' || user.role === 'HR') ? (
+        <HandoverDashboard users={allUsers} history={handoverHistory} token={token} onRefresh={refreshDashboardData} />
+      ) : user.role === 'IQAC' || user.role === 'HR' ? (
+        <AdminDashboard
+          stats={stats}
+          taskStats={taskStats}
+          assignments={assignments}
+          token={token}
+          isDistributing={isDistributing}
+          actionMessage={actionMessage}
+          onForceDistribute={forceDistributeTasks}
+          onRefresh={refreshDashboardData}
+        />
+      ) : user.role === 'President' ? (
+        <PresidentDashboard stats={stats} />
+      ) : (
+        <MyTasksDashboard
+          assignments={myAssignments}
+          submissions={mySubmissions}
+          token={token}
+          section={section}
+          onRefresh={refreshDashboardData}
+        />
+      )}
+    </div>
   );
+
+  if (hideShell) {
+    return content;
+  }
+
+  return <AppShell>{content}</AppShell>;
 }
 
 function MetricCard({ title, value, tone, icon: Icon }: { title: string; value: string | number; tone: string; icon: any }) {
@@ -349,7 +354,7 @@ function MyTasksDashboard({
         const formData = new FormData();
         Array.from(files).forEach((file) => formData.append('files', file));
 
-        const uploadResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/uploads/multiple`, {
+        const uploadResponse = await fetch(`${getApiBaseUrl()}/uploads/multiple`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: formData,
@@ -363,7 +368,7 @@ function MyTasksDashboard({
       }
 
       const primaryFile = uploadedFiles[0];
-      const submissionResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/submissions/${selectedAssignment.assignment_id}`, {
+      const submissionResponse = await fetch(`${getApiBaseUrl()}/tasks/submissions/${selectedAssignment.assignment_id}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -525,7 +530,7 @@ function HandoverDashboard({
     setMessage(null);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/handover`, {
+      const response = await fetch(`${getApiBaseUrl()}/handover`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -723,7 +728,7 @@ function AdminDashboard({
   const downloadFile = async (filePath?: string, fileName?: string) => {
     if (!token || !filePath) return;
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/uploads/download?path=${encodeURIComponent(filePath)}`, {
+    const response = await fetch(`${getApiBaseUrl()}/uploads/download?path=${encodeURIComponent(filePath)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -753,7 +758,7 @@ function AdminDashboard({
     setAiRetryMessage(null);
     setAiRetryError(null);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/submissions/${submissionId}/retry-ai`, {
+      const res = await fetch(`${getApiBaseUrl()}/tasks/submissions/${submissionId}/retry-ai`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });

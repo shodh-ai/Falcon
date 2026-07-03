@@ -7,7 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { NotificationBell } from '@/components/layout/NotificationBell';
 import {
   useNotificationUnreadCount,
-  useRecentNotifications,
+  useNotificationHistory,
   toAppNotification,
 } from '@/hooks/useNotifications';
 import { notificationsApi } from '@/lib/api/notifications';
@@ -17,9 +17,9 @@ export function LiveNotificationBell() {
   const router = useRouter();
   const { token } = useAuth();
   const { count, refresh: refreshCount } = useNotificationUnreadCount();
-  const { notifications, isLoading, refresh: refreshList } = useRecentNotifications();
+  const { notifications, isLoading, refresh: refreshList } = useNotificationHistory();
 
-  const items = notifications.map(toAppNotification);
+  const items = notifications.map(toAppNotification).slice(0, 20);
 
   useEffect(() => {
     const onRefresh = () => {

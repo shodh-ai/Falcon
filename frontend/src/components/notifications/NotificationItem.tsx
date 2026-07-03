@@ -42,7 +42,7 @@ export function NotificationItem({
     <div
       className={cn(
         'group w-full rounded-xl border text-left transition hover:border-sgvu-navy/20 hover:bg-muted/30',
-        n.unread ? 'border-sgvu-gold/50 bg-sgvu-gold/5' : 'border-border/70 bg-background',
+        n.unread ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/20 shadow-sm' : 'border-border/70 bg-background',
         compact ? 'p-3' : 'p-4',
         className,
       )}

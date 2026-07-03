@@ -217,6 +217,46 @@ export class AcademicsService {
     });
   }
 
+  async getWeeklyTimetable(studentUserId: string) {
+    const enrolled = await this.courseEnrollments.find({
+      where: { student_user_id: studentUserId, status: 'ENROLLED' },
+    });
+    const courseIds = enrolled.map((row) => row.course_id);
+    if (courseIds.length === 0) return [];
+
+    const rows = await this.timetables.find({
+      where: {
+        course_id: In(courseIds),
+      },
+      relations: ['course', 'faculty'],
+      order: { day_of_week: 'ASC', start_time: 'ASC' },
+    });
+
+    const liveByCourse = await this.fetchActiveLiveClasses(courseIds);
+
+    return rows.map((row) => {
+      const startTime = this.normalizeTime(row.start_time);
+      const endTime = this.normalizeTime(row.end_time);
+      const liveJoinUrl = liveByCourse.get(row.course_id) ?? null;
+      const isVirtual = Boolean(liveJoinUrl) || this.isVirtualRoom(row.room);
+
+      return {
+        timetable_id: row.timetable_id,
+        course_id: row.course_id,
+        course_code: row.course.course_code,
+        course_name: row.course.course_name,
+        credits: row.course.credits,
+        room: row.room,
+        faculty_name: row.faculty?.name ?? null,
+        day_of_week: row.day_of_week,
+        start_time: startTime,
+        end_time: endTime,
+        is_virtual: isVirtual,
+        live_join_url: liveJoinUrl,
+      };
+    });
+  }
+
   async listMyCourseEnrollments(studentUserId: string, tenantId: string) {
     await this.enrollmentSync.syncStudent(tenantId, studentUserId);
     await this.mentorSync.syncStudent(tenantId, studentUserId);
@@ -1371,6 +1411,15 @@ export class AcademicsService {
         `Faculty assignment updated for this slot.`,
       );
     }
+    if (dto.faculty_user_id) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: dto.faculty_user_id,
+        courseName: slot?.course?.course_name ?? 'Course',
+        changeSummary: 'You have been assigned to teach this slot.',
+        actionLink: '/faculty/timetable',
+      });
+    }
     return slot;
   }
 
@@ -1407,6 +1456,15 @@ export class AcademicsService {
       slot.course?.course_name ?? 'Course',
       summary,
     );
+    if (saved.faculty_user_id) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: saved.faculty_user_id,
+        courseName: slot.course?.course_name ?? 'Course',
+        changeSummary: summary,
+        actionLink: '/faculty/timetable',
+      });
+    }
     return saved;
   }
 

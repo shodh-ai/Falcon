@@ -412,6 +412,12 @@ export class AcademicsController {
     return this.academics.getTodayTimetable(req.user.user_id);
   }
 
+  @Get('dashboard/timetable/weekly')
+  @Roles('Student')
+  weeklyTimetable(@Req() req: { user: AuthUser }) {
+    return this.academics.getWeeklyTimetable(req.user.user_id);
+  }
+
   @Get('courses/my-enrollments')
   @Roles('Student')
   myCourseEnrollments(@Req() req: { user: AuthUser }) {
