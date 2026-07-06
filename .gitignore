@@ -1,4 +1,5 @@
 .DS_Store
+Thumbs.db
 
 # dependencies
 node_modules/
@@ -26,3 +27,14 @@ pnpm-debug.log*
 .turbo/
 .cache/
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local school test-ID source spreadsheets (real emails — do not commit)
+Falcon Test IDs*.xlsx
+
+# One-off xlsx parse / credential migration generators (output lives in backend/migrations/)
+/scripts/
