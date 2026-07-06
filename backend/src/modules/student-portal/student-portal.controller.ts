@@ -10,6 +10,7 @@ import {
   UseGuards,
   UseInterceptors,
   BadRequestException,
+  Param,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -232,6 +233,20 @@ export class StudentPortalController {
     @Body() body: { linkedin_url?: string; placement_organization?: string },
   ) {
     return this.portal.registerAlumni(this.tenant(req), req.user.user_id, body);
+  }
+
+  @Get('policies')
+  getPolicies(@Req() req: { user: AuthUser }) {
+    return this.portal.getPolicies(this.tenant(req), req.user.user_id);
+  }
+
+  @Post('policies/:id/acknowledge')
+  acknowledgePolicy(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() body: { vote?: 'YES' | 'NO' },
+  ) {
+    return this.portal.acknowledgePolicy(this.tenant(req), req.user.user_id, id, body.vote);
   }
 
   private tenant(req: { user: AuthUser }) {

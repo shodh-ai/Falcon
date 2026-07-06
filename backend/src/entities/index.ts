@@ -97,3 +97,5 @@ export { PortalMeetingParticipant } from './portal-meeting-participant.entity';
 export { PortalMeetingMinutes } from './portal-meeting-minutes.entity';
 export { ExamResultSession } from './exam-result-session.entity';
 export { StudentExamReport } from './student-exam-report.entity';
+export { UniversityPolicy } from './university-policy.entity';
+export { StudentPolicyAcknowledgement } from './student-policy-ack.entity';

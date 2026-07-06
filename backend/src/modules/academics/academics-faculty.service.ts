@@ -885,6 +885,14 @@ export class AcademicsFacultyService {
     );
     if (allocation.length) return;
 
+    const marks = await this.dataSource.query(
+      `SELECT 1 FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+       LIMIT 1`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (marks.length) return;
+
     if (date) {
       const proxy = await this.dataSource.query(
         `SELECT 1 FROM academic_proxy_requests

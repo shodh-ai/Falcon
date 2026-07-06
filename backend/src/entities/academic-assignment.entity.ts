@@ -46,10 +46,10 @@ export class AcademicAssignment extends BaseTenantEntity {
   @Column({ type: 'int' })
   max_marks: number;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
   start_date: Date;
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamptz' })
   due_date: Date;
 
   @CreateDateColumn()

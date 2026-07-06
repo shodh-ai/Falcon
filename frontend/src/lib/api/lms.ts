@@ -48,6 +48,7 @@ export type StudentAssignmentRow = {
     due_date: string;
     max_marks: number;
     description?: string | null;
+    has_reference_file?: boolean;
   };
   submission: {
     submission_id: string;
@@ -117,6 +118,18 @@ export async function downloadWithAuth(path: string, token: string, filename: st
   a.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function getBlobUrlWithAuth(path: string, token: string) {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'x-tenant-subdomain': getSubdomainFromClient(),
+    },
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => 'Failed to load file'));
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 export async function postMultipart(path: string, token: string, form: FormData) {

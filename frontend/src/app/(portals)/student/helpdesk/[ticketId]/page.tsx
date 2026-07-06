@@ -4,6 +4,7 @@ import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
+  CheckCircle2,
   Clock,
   Headphones,
   Loader2,
@@ -164,7 +165,7 @@ function StudentHelpdeskTicketDetail({ ticketId }: { ticketId: string }) {
           </div>
           {ticket.resolved_at && (
             <p className="flex items-center gap-2 text-xs text-emerald-700">
-              <Clock className="h-4 w-4" />
+              <CheckCircle2 className="h-4 w-4" />
               Resolved on {new Date(ticket.resolved_at).toLocaleString('en-IN')}
             </p>
           )}

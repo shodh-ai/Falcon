@@ -419,7 +419,16 @@ export class AssignmentsService {
     return assignments.map((assignment) => {
       const submission = submissionByAssignment.get(assignment.assignment_id);
       return {
-        assignment,
+        assignment: {
+          assignment_id: assignment.assignment_id,
+          title: assignment.title,
+          start_date: assignment.start_date.toISOString(),
+          due_date: assignment.due_date.toISOString(),
+          max_marks: assignment.max_marks,
+          description: assignment.description,
+          has_reference_file: !!assignment.reference_file_path,
+          course_id: assignment.course_id,
+        },
         submission: submission ?? null,
         status: this.deriveStudentStatus(assignment, submission),
         can_resubmit: this.canStudentSubmit(assignment, submission),
@@ -546,6 +555,65 @@ export class AssignmentsService {
     };
   }
 
+  async getAssignmentForStudentDownload(
+    studentUserId: string,
+    tenantId: string,
+    assignmentId: string,
+  ) {
+    const assignment = await this.assignments.findOne({
+      where: { tenant_id: tenantId, assignment_id: assignmentId },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+
+    if (new Date() < new Date(assignment.start_date)) {
+      throw new ForbiddenException('This assignment is not visible yet.');
+    }
+
+    const enrollment = await this.enrollments.findOne({
+      where: {
+        tenant_id: tenantId,
+        student_user_id: studentUserId,
+        course_id: assignment.course_id,
+        status: 'ENROLLED',
+      },
+    });
+    if (!enrollment)
+      throw new ForbiddenException('You are not enrolled in this course');
+
+    if (!assignment.reference_file_path) {
+      throw new NotFoundException('No reference file attached');
+    }
+
+    return assignment;
+  }
+
+  async streamAssignmentFile(assignment: AcademicAssignment) {
+    if (assignment.reference_file_key && this.objectStorage.isEnabled()) {
+      const stream = await this.objectStorage.getDownloadStream(
+        assignment.reference_file_key,
+      );
+      return {
+        stream,
+        filename: `${assignment.title.replace(/\s+/g, '_')}_ref.pdf`,
+        mimeType: 'application/pdf',
+      };
+    }
+    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+    const filePath = assignment.reference_file_path!.startsWith('/')
+      ? assignment.reference_file_path!
+      : resolve(process.cwd(), assignment.reference_file_path!);
+    const resolved = filePath.includes(uploadRoot)
+      ? filePath
+      : resolve(uploadRoot, assignment.reference_file_path!);
+    if (!existsSync(resolved))
+      throw new NotFoundException('File not found on server');
+    return {
+      stream: createReadStream(resolved),
+      filename: basename(resolved),
+      mimeType: 'application/pdf',
+    };
+  }
+
   private async assertFacultyTeachesCourse(
     courseId: string,
     facultyUserId: string,
@@ -567,6 +635,14 @@ export class AssignmentsService {
       [tenantId, courseId, facultyUserId],
     );
     if (allocation.length) return;
+
+    const marks = await this.timetable.query(
+      `SELECT 1 FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+       LIMIT 1`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (marks.length) return;
 
     throw new NotFoundException(
       'Course not found in your teaching timetable',
