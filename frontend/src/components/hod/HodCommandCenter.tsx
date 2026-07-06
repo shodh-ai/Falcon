@@ -56,6 +56,7 @@ type HealthMetrics = {
   attendance_trend_label: string;
   pending_leave_count: number;
   pending_gate_pass_count: number;
+  pending_profile_corrections: number;
   pending_inbox_total: number;
 };
 
@@ -227,11 +228,53 @@ const INITIAL_COURSES: HODCourse[] = [
   { id: 'c-5', code: 'CSE102', name: 'Programming in C', semester: 1, credits: 3, facultyId: 'f-3' },
 ];
 
-const INITIAL_PUNCHES: LivePunchRecord[] = [
-  { id: 'p-1', facultyName: 'Prof. Sachin', punchIn: '08:58 AM', punchOut: null, status: 'PRESENT', totalHours: 'Active' },
-  { id: 'p-2', facultyName: 'Prof. Sharma', punchIn: '09:05 AM', punchOut: '01:30 PM', status: 'HALF_DAY', totalHours: '4h 25m' },
-  { id: 'p-3', facultyName: 'Prof. Verma', punchIn: '09:12 AM', punchOut: '05:02 PM', status: 'PRESENT', totalHours: '7h 50m' },
-];
+const INITIAL_PUNCHES: LivePunchRecord[] = [];
+
+type AttendanceMatrixDay = {
+  date: string;
+  bottom_line: string;
+  calculated_status?: string;
+};
+
+function mapMatrixToTodayPunches(
+  employees: Array<{ user_id: string; name: string; days: AttendanceMatrixDay[] }>,
+): LivePunchRecord[] {
+  const today = new Date().toISOString().slice(0, 10);
+  return employees.flatMap((emp) => {
+    const day = emp.days.find((d) => d.date === today);
+    if (!day || day.bottom_line === 'Week Off' || day.bottom_line === 'Holiday') {
+      return [];
+    }
+
+    let status: LivePunchRecord['status'] = 'PRESENT';
+    if (day.bottom_line === 'Absent') status = 'ABSENT';
+    else if (day.bottom_line.startsWith('Leave')) status = 'LEAVE';
+    else if (day.calculated_status === 'HALF_DAY') status = 'HALF_DAY';
+
+    const timeMatch = day.bottom_line.match(/^(\d{2}:\d{2})-(\d{2}:\d{2})$/);
+    const record: LivePunchRecord = {
+      id: emp.user_id,
+      facultyName: emp.name,
+      punchIn: timeMatch?.[1] ?? null,
+      punchOut: timeMatch?.[2] ?? null,
+      status,
+      totalHours: timeMatch ? undefined : status === 'PRESENT' ? 'Active' : undefined,
+    };
+    return [record];
+  });
+}
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]) {
+  const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const lines = [headers.map(escape).join(','), ...rows.map((row) => row.map(escape).join(','))];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const INITIAL_AUDITS: AuditRecord[] = [
   {
@@ -365,6 +408,7 @@ export function HodCommandCenter() {
   const [selectedAuditRequest, setSelectedAuditRequest] = useState<AuditRecord | null>(null);
   const [isAuditSheetOpen, setIsAuditSheetOpen] = useState(false);
   const [selectedMissedAttendance, setSelectedMissedAttendance] = useState<AuditRecord | null>(null);
+  const [sendingAttendanceAlert, setSendingAttendanceAlert] = useState(false);
   const [selectedSemester, setSelectedSemester] = useState<number | 'ALL'>('ALL');
   const [expandedFacultyIds, setExpandedFacultyIds] = useState<Set<string>>(new Set());
 
@@ -421,11 +465,16 @@ export function HodCommandCenter() {
       if (!silent) setLoading(true);
       else setRefreshing(true);
       try {
-        const [payload, unassigned, roster, audits] = await Promise.all([
+        const [payload, unassigned, roster, audits, attendanceMatrix] = await Promise.all([
           api.get<CommandCenterPayload>('/api/academics/hod/command-center'),
           api.get<{ count: number }>('/api/academics/hod/teaching-load/unassigned/count').catch(() => ({ count: 0 })),
           api.get<FacultyRosterItem[]>('/api/academics/hod/faculty-roster').catch(() => []),
           api.get<AuditRecord[]>('/api/academics/hod/faculty-audit').catch(() => []),
+          api
+            .get<{ employees: Array<{ user_id: string; name: string; days: AttendanceMatrixDay[] }> }>(
+              `/api/hr/ess/team/attendance?scope=dept&month=${new Date().toISOString().slice(0, 7)}`,
+            )
+            .catch(() => null),
         ]);
         setData(payload);
         setUnassignedLoad(unassigned.count);
@@ -435,7 +484,11 @@ export function HodCommandCenter() {
         } else {
           setAuditRecords([]);
         }
-        setPunches([]);
+        setPunches(
+          attendanceMatrix?.employees?.length
+            ? mapMatrixToTodayPunches(attendanceMatrix.employees)
+            : [],
+        );
         setResignations([]);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load command center');
@@ -858,9 +911,10 @@ export function HodCommandCenter() {
             </HodPanel>
           </div>
 
+          {(m.pending_profile_corrections ?? 0) > 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-5 py-4 mt-4 shadow-sm">
             <p className="text-sm text-sgvu-navy">
-              <span className="font-bold text-sgvu-navy">{m.pending_profile_corrections > 0 ? m.pending_profile_corrections : 23}</span> profile corrections pending review
+              <span className="font-bold text-sgvu-navy">{m.pending_profile_corrections}</span> profile correction{m.pending_profile_corrections === 1 ? '' : 's'} pending review
             </p>
             <Link href="/hod/approvals/profile-corrections">
               <Button size="default" variant="outline" className="h-9 border-slate-200 bg-white text-sm text-slate-800 hover:bg-slate-50 font-semibold px-4 rounded-xl">
@@ -868,6 +922,7 @@ export function HodCommandCenter() {
               </Button>
             </Link>
           </div>
+          ) : null}
 
           <TodayBirthdaysWidget className="mt-4 shadow-sm" />
         </TabsContent>
@@ -1135,7 +1190,12 @@ export function HodCommandCenter() {
                   <h3 className="font-bold text-sgvu-navy">Live Attendance Feed</h3>
                 </div>
                 <div className="space-y-3">
-                  {punches.map((p) => {
+                  {punches.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-6 text-center">
+                      No biometric punches for today yet. Data syncs from HR attendance every few minutes.
+                    </p>
+                  ) : (
+                  punches.map((p) => {
                     const hasPunchIn = !!p.punchIn;
                     const hasPunchOut = !!p.punchOut;
                     
@@ -1185,7 +1245,8 @@ export function HodCommandCenter() {
                         )}
                       </div>
                     );
-                  })}
+                  })
+                  )}
                 </div>
 
               </div>
@@ -1220,7 +1281,23 @@ export function HodCommandCenter() {
                   variant="outline"
                   className="h-10 text-sm font-semibold border-slate-200 text-sgvu-navy hover:bg-slate-50 rounded-lg gap-2"
                   onClick={() => {
-                    toast.success(`Exporting results spreadsheet for Semester ${resultsSemester}...`);
+                    downloadCsv(
+                      `compiled-results-sem-${resultsSemester}.csv`,
+                      ['Student ID', 'Name', 'WT-1', 'WT-2', 'MT-1', 'MT-2', 'Project', 'Lab', 'End Theory', 'End Practical'],
+                      resultsRows.map((row) => [
+                        row.studentId,
+                        row.name,
+                        String(row.wt1),
+                        String(row.wt2),
+                        String(row.mt1),
+                        String(row.mt2),
+                        String(row.project),
+                        String(row.lab),
+                        String(row.endTheory),
+                        String(row.endPractical),
+                      ]),
+                    );
+                    toast.success(`Sample matrix exported for Semester ${resultsSemester}`);
                   }}
                 >
                   <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
@@ -1690,12 +1767,27 @@ export function HodCommandCenter() {
                 <Button
                   size="default"
                   className="h-10 text-sm font-semibold bg-sgvu-navy text-white hover:bg-sgvu-navy/90"
+                  disabled={sendingAttendanceAlert}
                   onClick={() => {
-                    toast.success(`Action Required alert sent to ${selectedMissedAttendance.facultyName} for pending logs.`);
-                    setSelectedMissedAttendance(null);
+                    if (!selectedMissedAttendance) return;
+                    setSendingAttendanceAlert(true);
+                    void api
+                      .post('/api/academics/hod/faculty-audit/attendance-reminder', {
+                        faculty_user_id: selectedMissedAttendance.facultyId,
+                        subject_code: selectedMissedAttendance.subjectCode,
+                        missing_classes: selectedMissedAttendance.attendanceMissingClasses ?? [],
+                      })
+                      .then(() => {
+                        toast.success(`Notification sent to ${selectedMissedAttendance.facultyName}`);
+                        setSelectedMissedAttendance(null);
+                      })
+                      .catch((e) =>
+                        toast.error(e instanceof Error ? e.message : 'Failed to send alert'),
+                      )
+                      .finally(() => setSendingAttendanceAlert(false));
                   }}
                 >
-                  Send Alert Notification
+                  {sendingAttendanceAlert ? 'Sending…' : 'Send Alert Notification'}
                 </Button>
               </DialogFooter>
             </div>
@@ -1960,10 +2052,27 @@ export function HodCommandCenter() {
                   variant="outline"
                   className="h-10 text-sm font-semibold border-slate-200"
                   onClick={() => {
-                    toast.success(`Proof report printed for parents of ${selectedPlacementReport.studentName}.`);
+                    if (!selectedPlacementReport) return;
+                    const lines = [
+                      `Placement proof — ${selectedPlacementReport.studentName}`,
+                      `Semester ${selectedPlacementReport.semester}`,
+                      '',
+                      ...placementCompanies
+                        .filter((c) => c.semester === selectedPlacementReport.semester)
+                        .map((c) => {
+                          const status = selectedPlacementReport.companyAttendance[c.id] ?? 'Pending';
+                          return `${c.name} (${c.position}) — ${status}`;
+                        }),
+                    ];
+                    downloadCsv(
+                      `placement-proof-${selectedPlacementReport.studentId}.csv`,
+                      ['Field', 'Value'],
+                      lines.map((line, idx) => [idx === 0 ? 'Report' : 'Entry', line]),
+                    );
+                    toast.success('Placement preview exported as CSV');
                   }}
                 >
-                  Print Proof Report
+                  Export Preview CSV
                 </Button>
                 <Button
                   size="default"
