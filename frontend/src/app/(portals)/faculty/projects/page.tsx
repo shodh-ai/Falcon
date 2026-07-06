@@ -156,11 +156,10 @@ export default function FacultyProjectsPage() {
   const ongoingProjects = guides.filter(g => g.status === 'ACTIVE');
   const completedProjects = guides.filter(g => g.status === 'COMPLETED');
 
-  // Filter directory for dropdown
   const filteredDirectory = directory.filter(u => 
     (filterDept === 'ALL' || u.department_name === filterDept) &&
     (filterBatch === 'ALL' || u.batch === filterBatch) &&
-    (u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.official_email.toLowerCase().includes(searchQuery.toLowerCase()))
+    (u.name.toLowerCase().includes(searchQuery.toLowerCase()) || (u.official_email || '').toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const activeModalTitle = studentModalOpen === 'new' ? 'Select Students for Project' : 'Update Project Students';

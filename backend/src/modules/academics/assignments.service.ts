@@ -568,6 +568,14 @@ export class AssignmentsService {
     );
     if (allocation.length) return;
 
+    const marks = await this.timetable.query(
+      `SELECT 1 FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
+       LIMIT 1`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (marks.length) return;
+
     throw new NotFoundException(
       'Course not found in your teaching timetable',
     );
