@@ -56,8 +56,8 @@ export class DemeritsService {
             .query(
               `SELECT DISTINCT c.course_id, c.course_code, c.course_name
              FROM academic_courses c
-             JOIN faculty_course_assignments fca ON fca.course_id = c.course_id
-             WHERE c.tenant_id = $1 AND fca.faculty_user_id = $2
+             JOIN academic_course_allocations fca ON fca.course_id = c.course_id
+             WHERE c.tenant_id = $1 AND fca.faculty_user_id = $2 AND fca.status = 'ACTIVE'
              ORDER BY c.course_code
              LIMIT 200`,
               [tenantId, facultyUserId],
