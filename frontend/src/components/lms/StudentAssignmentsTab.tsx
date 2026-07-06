@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Clock, CheckCircle2, AlertTriangle, Download, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/context/AuthContext';
 import type { StudentAssignmentRow } from '@/lib/api/lms';
-import { formatDeadlineCountdown, postMultipart } from '@/lib/api/lms';
+import { formatDeadlineCountdown, postMultipart, downloadWithAuth, getBlobUrlWithAuth } from '@/lib/api/lms';
 import { PdfDropzone } from './PdfDropzone';
 
 type Props = {
@@ -20,6 +21,19 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
   const { token } = useAuth();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState<string>('');
+
+  async function handlePreview(assignmentId: string, title: string) {
+    if (!token) return;
+    try {
+      const url = await getBlobUrlWithAuth(`/api/academics/student/assignments/${assignmentId}/download`, token);
+      setPreviewTitle(`${title} - Question Paper`);
+      setPreviewUrl(url);
+    } catch (err) {
+      toast.error('Failed to load PDF preview');
+    }
+  }
 
   async function submit(assignmentId: string, file: File) {
     if (!token) return;
@@ -103,19 +117,54 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                       </Badge>
                     </div>
                   </button>
-                  {expanded && canUpload && (
-                    <div className="mt-4">
-                      <p className="mb-2 text-sm font-medium text-sgvu-navy">
-                        {returned ? 'Check and Re-Upload' : 'Upload PDF'}
-                      </p>
-                      <PdfDropzone
-                        disabled={uploading}
-                        onFile={(file) => void submit(row.assignment.assignment_id, file)}
-                      />
+                  {expanded && (
+                    <div className="mt-4 space-y-4">
+                      {row.assignment.has_reference_file && (
+                        <div>
+                          <p className="mb-2 text-sm font-medium text-sgvu-navy">Question Paper</p>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-2"
+                              onClick={() => handlePreview(row.assignment.assignment_id, row.assignment.title)}
+                            >
+                              <Eye className="h-4 w-4" />
+                              View PDF
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-2"
+                              onClick={() =>
+                                downloadWithAuth(
+                                  `/api/academics/student/assignments/${row.assignment.assignment_id}/download`,
+                                  token,
+                                  `${row.assignment.title}_Question_Paper.pdf`
+                                ).catch((err) => toast.error('Failed to download PDF'))
+                              }
+                            >
+                              <Download className="h-4 w-4" />
+                              Download
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {canUpload ? (
+                        <div>
+                          <p className="mb-2 text-sm font-medium text-sgvu-navy">
+                            {returned ? 'Check and Re-Upload' : 'Upload Solution PDF'}
+                          </p>
+                          <PdfDropzone
+                            disabled={uploading}
+                            onFile={(file) => void submit(row.assignment.assignment_id, file)}
+                          />
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm font-medium text-red-600">Deadline has passed for uploading solutions.</p>
+                      )}
                     </div>
-                  )}
-                  {expanded && !canUpload && (
-                    <p className="mt-3 text-sm font-medium text-red-600">Deadline has passed.</p>
                   )}
                 </CardContent>
               </Card>
@@ -129,38 +178,91 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
           <h3 className="text-sm font-semibold text-muted-foreground">Submitted & graded</h3>
           {done.map((row) => (
             <Card key={row.assignment.assignment_id}>
-              <CardContent className="flex items-center justify-between p-4">
-                <div>
-                  <p className="font-medium">{row.assignment.title}</p>
-                  {row.status === 'GRADED' && row.submission?.marks_awarded != null ? (
-                    <p className="mt-1 text-sm font-semibold text-emerald-700">
-                      Marks scored: {row.submission.marks_awarded}/{row.assignment.max_marks}
-                    </p>
-                  ) : row.submission ? (
-                    <p className="mt-1 flex items-center gap-1 text-sm text-emerald-700">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Submitted {new Date(row.submission.submitted_at).toLocaleString()}
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-sm text-red-600">Not submitted (overdue)</p>
-                  )}
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{row.assignment.title}</p>
+                    {row.status === 'GRADED' && row.submission?.marks_awarded != null ? (
+                      <p className="mt-1 text-sm font-semibold text-emerald-700">
+                        Marks scored: {row.submission.marks_awarded}/{row.assignment.max_marks}
+                      </p>
+                    ) : row.submission ? (
+                      <p className="mt-1 flex items-center gap-1 text-sm text-emerald-700">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Submitted {new Date(row.submission.submitted_at).toLocaleString()}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-sm text-red-600">Not submitted (overdue)</p>
+                    )}
+                  </div>
+                  <Badge
+                    variant={
+                      row.status === 'GRADED'
+                        ? 'default'
+                        : row.status === 'SUBMITTED'
+                          ? 'secondary'
+                          : 'outline'
+                    }
+                  >
+                    {row.status}
+                  </Badge>
                 </div>
-                <Badge
-                  variant={
-                    row.status === 'GRADED'
-                      ? 'default'
-                      : row.status === 'SUBMITTED'
-                        ? 'secondary'
-                        : 'outline'
-                  }
-                >
-                  {row.status}
-                </Badge>
+                {row.assignment.has_reference_file && (
+                  <div className="mt-3 flex gap-2 border-t pt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => handlePreview(row.assignment.assignment_id, row.assignment.title)}
+                    >
+                      <Eye className="h-4 w-4" />
+                      View PDF
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() =>
+                        token &&
+                        downloadWithAuth(
+                          `/api/academics/student/assignments/${row.assignment.assignment_id}/download`,
+                          token,
+                          `${row.assignment.title}_Question_Paper.pdf`
+                        ).catch((err) => toast.error('Failed to download PDF'))
+                      }
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}
         </section>
       )}
+
+      <Dialog open={!!previewUrl} onOpenChange={(open) => {
+        if (!open) {
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          setPreviewUrl(null);
+        }
+      }}>
+        <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0">
+          <DialogHeader className="px-6 py-4 border-b">
+            <DialogTitle>{previewTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 bg-muted/50 p-4">
+            {previewUrl && (
+              <iframe
+                src={previewUrl}
+                className="w-full h-full rounded-md border bg-white"
+                title="PDF Preview"
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

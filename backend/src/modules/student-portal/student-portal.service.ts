@@ -1365,4 +1365,32 @@ export class StudentPortalService {
       .catch(() => []);
     return { documents: docs };
   }
+
+  async getPolicies(tenantId: string, userId: string) {
+    const policies = await this.dataSource.query(
+      `SELECT p.policy_id, p.title, p.description, p.file_url, p.is_mandatory, 
+              p.is_voting_enabled, p.authority_role as category,
+              a.ack_id IS NOT NULL as acknowledged,
+              a.vote as user_vote
+       FROM university_policies p
+       LEFT JOIN student_policy_acknowledgements a 
+         ON a.policy_id = p.policy_id AND a.student_user_id = $1 AND a.tenant_id = $2
+       WHERE p.tenant_id = $2 AND p.status = 'ACTIVE'
+       ORDER BY p.created_at DESC`,
+      [userId, tenantId]
+    );
+    return policies;
+  }
+
+  async acknowledgePolicy(tenantId: string, userId: string, policyId: string, vote?: 'YES' | 'NO') {
+    await this.dataSource.query(
+      `INSERT INTO student_policy_acknowledgements (tenant_id, student_user_id, policy_id, vote)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (tenant_id, student_user_id, policy_id) 
+       DO UPDATE SET vote = COALESCE(EXCLUDED.vote, student_policy_acknowledgements.vote),
+                     acknowledged_at = NOW()`,
+      [tenantId, userId, policyId, vote || null]
+    );
+    return { success: true };
+  }
 }

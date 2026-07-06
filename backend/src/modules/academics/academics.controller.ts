@@ -1735,6 +1735,27 @@ export class AcademicsController {
     return file.stream.pipe(res);
   }
 
+  @Get('student/assignments/:assignmentId/download')
+  @Roles('Student')
+  async downloadStudentAssignment(
+    @Param('assignmentId') assignmentId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    const assignment = await this.assignments.getAssignmentForStudentDownload(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+    const file = await this.assignments.streamAssignmentFile(assignment);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.filename}"`,
+    );
+    return file.stream.pipe(res);
+  }
+
   @Get('marks/history')
   @Roles('Student')
   getMarksHistory(@Req() req: { user: AuthUser }) {
