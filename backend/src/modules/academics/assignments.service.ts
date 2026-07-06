@@ -558,10 +558,19 @@ export class AssignmentsService {
         faculty_user_id: facultyUserId,
       },
     });
-    if (!row)
-      throw new NotFoundException(
-        'Course not found in your teaching timetable',
-      );
+    if (row) return;
+
+    const allocation = await this.timetable.query(
+      `SELECT 1 FROM academic_course_allocations
+       WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND status = 'ACTIVE'
+       LIMIT 1`,
+      [tenantId, courseId, facultyUserId],
+    );
+    if (allocation.length) return;
+
+    throw new NotFoundException(
+      'Course not found in your teaching timetable',
+    );
   }
 
   private async persistAssignmentFile(

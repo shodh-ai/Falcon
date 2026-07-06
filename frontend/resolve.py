@@ -1,74 +1,41 @@
-'use client';
+import re
 
-import { useEffect, useState, useMemo } from 'react';
-import { toast } from '@/lib/notifications/falcon-toast';
-import { HodDataTable, HodPageFrame, HodPageHeader } from '@/components/hod/HodPagePrimitives';
-import { useAuthedApi } from '@/lib/api';
-import { CourseEnrolledStudentsModal } from '@/components/hod/CourseEnrolledStudentsModal';
+with open(r'd:\Falcon\frontend\src\components\hod\HodPagePrimitives.tsx', 'r', encoding='utf-8') as f:
+    text = f.read()
+
+# Keep origin/main version of HodPagePrimitives.tsx
+text = re.sub(r'<<<<<<< HEAD\n.*?\n=======\n(.*?)\n>>>>>>> origin/main', r'\1', text, flags=re.DOTALL)
+
+with open(r'd:\Falcon\frontend\src\components\hod\HodPagePrimitives.tsx', 'w', encoding='utf-8') as f:
+    f.write(text)
+
+
+with open(r'd:\Falcon\frontend\src\app\(portals)\hod\academics\result-analytics\page.tsx', 'r', encoding='utf-8') as f:
+    page = f.read()
+
+# Manual merge for result-analytics
+# 1. Imports: keep both
+imports = """import { CourseEnrolledStudentsModal } from '@/components/hod/CourseEnrolledStudentsModal';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';"""
 
-type Row = {
-  course_id: string;
-  course_code: string;
-  course_name: string;
-  enrolled: number;
-  passed: number;
-  failed: number;
-  pass_percent: number;
-};
+page = re.sub(r'<<<<<<< HEAD\n.*?\n=======\n.*?\n>>>>>>> origin/main', imports, page, count=1, flags=re.DOTALL)
 
-export default function HodResultAnalyticsPage() {
+# 2. Row type: we don't have conflict markers there because main didn't touch it. 
+# But wait, did main touch the state?
+state_merge = """  const [selectedCourseCode, setSelectedCourseCode] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);"""
 
-  const api = useAuthedApi();
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedCourseCode, setSelectedCourseCode] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+page = re.sub(r'<<<<<<< HEAD\n.*?\n=======\n.*?\n>>>>>>> origin/main', state_merge, page, count=1, flags=re.DOTALL)
 
-  useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      try {
-        const data = await api.get<Row[]>('/api/academics/hod/result-analytics');
-        setRows(data);
-        if (data.length > 0) {
-          setSelectedCourseCode(data[0].course_code);
-        }
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load result analytics');
-        setRows([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [api]);
 
-  const selectedCourse = useMemo(() => {
-    return rows.find((r) => r.course_code === selectedCourseCode) || null;
-  }, [rows, selectedCourseCode]);
+# 3. Layout merge
+# We need to insert the button in the CardHeader and the modal below the card.
+# The third conflict marker contains the entire table and chart layout from main, vs the table + modal from HEAD.
 
-  const pieData = useMemo(() => {
-    if (!selectedCourse) return [];
-    const graded = selectedCourse.passed + selectedCourse.failed;
-    if (graded === 0) return [];
-    return [
-      { name: 'Passed', value: selectedCourse.passed, color: '#10B981' },
-      { name: 'Failed', value: selectedCourse.failed, color: '#EF4444' },
-    ];
-  }, [selectedCourse]);
-
-  const totalGraded = selectedCourse ? selectedCourse.passed + selectedCourse.failed : 0;
-
-  return (
-    <HodPageFrame>
-      <HodPageHeader
-        title="Result Analytics"
-        description="Pass / fail breakdown across department subjects."
-      />
-
+main_layout = """
       <div className="flex flex-col gap-6 w-full">
         {/* Sticky Analysis Chart at the top on mobile, static on desktop */}
         <div className="sticky top-16 md:relative md:top-0 z-40 bg-background shadow-sm md:shadow-none p-2 -mx-4 sm:-mx-6 md:p-0 md:mx-0">
@@ -249,8 +216,9 @@ export default function HodResultAnalyticsPage() {
           onOpenChange={setIsModalOpen}
         />
       </div>
+"""
 
-    </HodPageFrame>
+page = re.sub(r'<<<<<<< HEAD\n.*?\n=======\n.*?\n>>>>>>> origin/main', main_layout, page, count=1, flags=re.DOTALL)
 
-  );
-}
+with open(r'd:\Falcon\frontend\src\app\(portals)\hod\academics\result-analytics\page.tsx', 'w', encoding='utf-8') as f:
+    f.write(page)

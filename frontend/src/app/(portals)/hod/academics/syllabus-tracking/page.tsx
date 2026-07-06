@@ -9,8 +9,10 @@ import {
 } from '@/components/hod/HodPagePrimitives';
 import { cn } from '@/lib/utils';
 import { useAuthedApi } from '@/lib/api';
+import { CourseEnrolledStudentsModal } from '@/components/hod/CourseEnrolledStudentsModal';
 
 type Row = {
+  course_id: string;
   course_code: string;
   course_name: string;
   faculty_name: string;
@@ -22,9 +24,13 @@ type Row = {
 };
 
 export default function HodSyllabusTrackingPage() {
+
   const api = useAuthedApi();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [selectedCourseName, setSelectedCourseName] = useState<string | null>(null);
+
 
   useEffect(() => {
     void (async () => {
@@ -59,6 +65,10 @@ export default function HodSyllabusTrackingPage() {
         loading={loading}
         rows={rows}
         rowKey={(r) => `${r.course_code}-${r.faculty_name}`}
+        onRowClick={(r) => {
+          setSelectedCourseId(r.course_id);
+          setSelectedCourseName(r.course_name);
+        }}
         empty="No course modules uploaded yet."
         columns={[
           {
@@ -103,6 +113,14 @@ export default function HodSyllabusTrackingPage() {
           },
         ]}
       />
+
+      <CourseEnrolledStudentsModal
+        courseId={selectedCourseId}
+        courseName={selectedCourseName}
+        open={!!selectedCourseId}
+        onOpenChange={(open) => !open && setSelectedCourseId(null)}
+      />
     </HodPageFrame>
+
   );
 }
