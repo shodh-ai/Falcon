@@ -124,6 +124,14 @@ export function HodDataTable<T>({
   loading,
   empty,
   onRowClick,
+  mobileRender,
+}: {
+  columns: HodColumn<T>[];
+  rows: T[];
+  rowKey: (row: T) => string;
+  loading?: boolean;
+  empty?: string;
+  onRowClick?: (row: T) => void;
   mobileRender?: (row: T) => React.ReactNode;
 }) {
   if (loading) {
