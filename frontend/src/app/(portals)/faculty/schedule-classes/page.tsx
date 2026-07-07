@@ -176,7 +176,19 @@ export default function FacultyScheduleClassesPage() {
       const data = await api.get<any[]>(
         `/api/academics/faculty/workspaces/timetable/rooms/availability?day=${slot.day_of_week}&startTime=${slot.start_time}&endTime=${slot.end_time}`
       );
-      setAvailableRooms(data);
+      
+      const localOccupied = new Set(
+        gridSlots
+          .filter(s => s.timetable_id !== slot.timetable_id && s.day_of_week === slot.day_of_week && s.start_time === slot.start_time && s.room)
+          .map(s => s.room)
+      );
+
+      const processedData = data.map(r => ({
+        ...r,
+        available: r.available && !localOccupied.has(r.roomName)
+      }));
+
+      setAvailableRooms(processedData);
     } catch (e) {
       toast.error('Failed to load available rooms');
     } finally {

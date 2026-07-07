@@ -213,23 +213,27 @@ export class FacultyWorkspacesService {
         ];
         
         let conflictQuery = `
-          SELECT 1 FROM academic_timetables
-          WHERE tenant_id = $1
-            AND deleted_at IS NULL
-            AND day_of_week = $2
-            AND start_time < $4
-            AND end_time > $3
+          SELECT 1 FROM academic_timetables t
+          LEFT JOIN academic_course_allocations a ON a.course_id = t.course_id
+          WHERE t.tenant_id = $1
+            AND t.deleted_at IS NULL
+            AND t.day_of_week = $2
+            AND t.start_time < $4
+            AND t.end_time > $3
             AND (
-              faculty_user_id = $5
-              OR (course_id = $6 AND section = $7)
-              OR section = $7
+              t.faculty_user_id = $5
+              OR (
+                a.semester = (SELECT semester FROM academic_course_allocations WHERE course_id = $6 LIMIT 1)
+                AND t.section = $7
+                AND a.semester IS NOT NULL
+              )
         `;
 
         if (slot.room) {
-          conflictQuery += ` OR (room = $8 AND room IS NOT NULL AND room != '')`;
+          conflictQuery += ` OR (t.room = $8 AND t.room IS NOT NULL AND t.room != '')`;
           params.push(slot.room);
         }
-        conflictQuery += ` )`;
+        conflictQuery += ` ) LIMIT 1`;
 
         const conflicts = await runner.query(conflictQuery, params);
         if (conflicts.length > 0) {
