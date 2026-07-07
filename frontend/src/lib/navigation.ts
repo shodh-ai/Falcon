@@ -355,6 +355,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Academics & Teaching',
       items: [
+        { label: 'Schedule Classes', href: '/faculty/schedule-classes', icon: CalendarClock, keywords: ['timetable', 'slots', 'drag and drop'] },
         { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
