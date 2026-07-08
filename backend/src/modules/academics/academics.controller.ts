@@ -418,6 +418,18 @@ export class AcademicsController {
     return this.academics.getWeeklyTimetable(req.user.user_id);
   }
 
+  @Get('dashboard/timetable/week')
+  @Roles('Student')
+  weeklyTimetableCalendar(
+    @Req() req: { user: AuthUser },
+    @Query('weekStart') weekStart?: string,
+  ) {
+    return this.academics.getWeeklyTimetableCalendar(
+      req.user.user_id,
+      weekStart,
+    );
+  }
+
   @Get('courses/my-enrollments')
   @Roles('Student')
   myCourseEnrollments(@Req() req: { user: AuthUser }) {

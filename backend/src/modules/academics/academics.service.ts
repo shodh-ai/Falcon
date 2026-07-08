@@ -221,20 +221,41 @@ export class AcademicsService {
     const enrolled = await this.courseEnrollments.find({
       where: { student_user_id: studentUserId, status: 'ENROLLED' },
     });
-    const courseIds = enrolled.map((row) => row.course_id);
+    if (enrolled.length === 0) return [];
+
+    const tenantId = enrolled[0].tenant_id;
+    await this.enrollmentSync.syncStudent(tenantId, studentUserId);
+    const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
+      tenantId,
+      studentUserId,
+    );
+
+    let courseIds = enrolled.map((row) => row.course_id);
+    if (slot.courseIds.length > 0) {
+      courseIds = enrolled
+        .filter(
+          (row) =>
+            Number(row.semester) !== slot.semester ||
+            slot.courseIds.includes(row.course_id),
+        )
+        .map((row) => row.course_id);
+    }
+    courseIds = [...new Set(courseIds)];
     if (courseIds.length === 0) return [];
 
     const rows = await this.timetables.find({
       where: {
+        tenant_id: tenantId,
         course_id: In(courseIds),
       },
       relations: ['course', 'faculty'],
       order: { day_of_week: 'ASC', start_time: 'ASC' },
     });
 
+    const resolvedRows = this.resolveStudentTimetableSlots(rows);
     const liveByCourse = await this.fetchActiveLiveClasses(courseIds);
 
-    return rows.map((row) => {
+    return resolvedRows.map((row) => {
       const startTime = this.normalizeTime(row.start_time);
       const endTime = this.normalizeTime(row.end_time);
       const liveJoinUrl = liveByCourse.get(row.course_id) ?? null;
@@ -255,6 +276,84 @@ export class AcademicsService {
         live_join_url: liveJoinUrl,
       };
     });
+  }
+
+  async getWeeklyTimetableCalendar(studentUserId: string, weekStartInput?: string) {
+    const enrolled = await this.courseEnrollments.find({
+      where: { student_user_id: studentUserId, status: 'ENROLLED' },
+    });
+    const tenantId = enrolled[0]?.tenant_id;
+    const courseIds = enrolled.map((row) => row.course_id);
+    const weekStart = this.resolveWeekStartMonday(weekStartInput);
+    const weekDates = this.buildWeekDateRange(weekStart);
+    const baseSlots = await this.getWeeklyTimetable(studentUserId);
+
+    if (!tenantId || courseIds.length === 0) {
+      return {
+        week_start: weekStart,
+        week_dates: weekDates,
+        slots: baseSlots.map((slot) => ({
+          ...slot,
+          session_date:
+            weekDates.find((d) => d.day_of_week === slot.day_of_week)?.date ??
+            null,
+          attendance_status: null as 'PRESENT' | 'ABSENT' | 'PENDING' | null,
+        })),
+      };
+    }
+
+    const weekEnd = weekDates[weekDates.length - 1]?.date ?? weekStart;
+    const logs = (await this.courseEnrollments.manager.query(
+      `SELECT cal.date::text AS date, cal.course_id, cal.timetable_id, cal.attendance_data
+       FROM course_attendance_logs cal
+       WHERE cal.tenant_id = $1
+         AND cal.course_id = ANY($2::uuid[])
+         AND cal.date >= $3::date
+         AND cal.date <= $4::date`,
+      [tenantId, courseIds, weekStart, weekEnd],
+    )) as Array<{
+      date: string;
+      course_id: string;
+      timetable_id: string | null;
+      attendance_data: Array<{ student_id: string; status: string }> | null;
+    }>;
+
+    const attendanceMap = new Map<string, string>();
+    for (const log of logs) {
+      const entries = Array.isArray(log.attendance_data) ? log.attendance_data : [];
+      const entry = entries.find((row) => row.student_id === studentUserId);
+      if (!entry) continue;
+      attendanceMap.set(
+        `${log.date}|${log.course_id}|${log.timetable_id ?? ''}`,
+        entry.status,
+      );
+      if (!attendanceMap.has(`${log.date}|${log.course_id}|`)) {
+        attendanceMap.set(`${log.date}|${log.course_id}|`, entry.status);
+      }
+    }
+
+    const slots = baseSlots.map((slot) => {
+      const sessionDate =
+        weekDates.find((d) => d.day_of_week === slot.day_of_week)?.date ?? null;
+      let attendance_status: 'PRESENT' | 'ABSENT' | 'PENDING' | null = null;
+
+      if (sessionDate && this.isSessionDone(sessionDate, slot.end_time)) {
+        const withTimetable = `${sessionDate}|${slot.course_id}|${slot.timetable_id}`;
+        const courseOnly = `${sessionDate}|${slot.course_id}|`;
+        const raw = attendanceMap.get(withTimetable) ?? attendanceMap.get(courseOnly);
+        if (!raw) {
+          attendance_status = 'PENDING';
+        } else if (raw === 'ABSENT') {
+          attendance_status = 'ABSENT';
+        } else {
+          attendance_status = 'PRESENT';
+        }
+      }
+
+      return { ...slot, session_date: sessionDate, attendance_status };
+    });
+
+    return { week_start: weekStart, week_dates: weekDates, slots };
   }
 
   async listMyCourseEnrollments(studentUserId: string, tenantId: string) {
@@ -2048,6 +2147,132 @@ export class AcademicsService {
     const value = String(time);
     if (value.includes('T')) return value.slice(11, 16);
     return value.slice(0, 5);
+  }
+
+  /** One slot per enrolled course; only re-slot courses that share the same day/time. */
+  private resolveStudentTimetableSlots(
+    rows: AcademicTimetable[],
+  ): AcademicTimetable[] {
+    const byCourse = new Map<string, AcademicTimetable>();
+    for (const row of rows) {
+      if (!byCourse.has(row.course_id)) {
+        byCourse.set(row.course_id, row);
+      }
+    }
+
+    const unique = [...byCourse.values()].sort((a, b) =>
+      (a.course?.course_code ?? a.course_id).localeCompare(
+        b.course?.course_code ?? b.course_id,
+      ),
+    );
+    if (unique.length === 0) return [];
+
+    const slotKey = (row: AcademicTimetable) =>
+      `${row.day_of_week}|${this.normalizeTime(row.start_time)}`;
+
+    const buckets = new Map<string, AcademicTimetable[]>();
+    for (const row of unique) {
+      const key = slotKey(row);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(row);
+    }
+
+    const days = [1, 2, 3, 4, 5, 6];
+    const hours = [9, 10, 11, 12, 14, 15, 16];
+    const occupied = new Set<string>();
+    const result: AcademicTimetable[] = [];
+
+    const placeRow = (row: AcademicTimetable, day: number, hour: number) => {
+      const start = `${String(hour).padStart(2, '0')}:00:00`;
+      const end = `${String(Math.min(hour + 1, 17)).padStart(2, '0')}:00:00`;
+      occupied.add(`${day}|${start.slice(0, 5)}`);
+      result.push(
+        Object.assign(Object.create(Object.getPrototypeOf(row)), row, {
+          day_of_week: day,
+          start_time: start,
+          end_time: end,
+        }),
+      );
+    };
+
+    const findOpenSlot = (): { day: number; hour: number } | null => {
+      for (const day of days) {
+        for (const hour of hours) {
+          const key = `${day}|${String(hour).padStart(2, '0')}:00`;
+          if (!occupied.has(key)) return { day, hour };
+        }
+      }
+      return null;
+    };
+
+    for (const group of buckets.values()) {
+      const sorted = [...group].sort((a, b) =>
+        (a.course?.course_code ?? a.course_id).localeCompare(
+          b.course?.course_code ?? b.course_id,
+        ),
+      );
+      const anchor = sorted[0];
+      const anchorKey = slotKey(anchor);
+      if (!occupied.has(anchorKey)) {
+        occupied.add(anchorKey);
+        result.push(anchor);
+      } else {
+        const open = findOpenSlot();
+        if (open) placeRow(anchor, open.day, open.hour);
+        else result.push(anchor);
+      }
+
+      for (const row of sorted.slice(1)) {
+        const open = findOpenSlot();
+        if (open) placeRow(row, open.day, open.hour);
+        else result.push(row);
+      }
+    }
+
+    return result.sort(
+      (a, b) =>
+        a.day_of_week - b.day_of_week ||
+        this.normalizeTime(a.start_time).localeCompare(
+          this.normalizeTime(b.start_time),
+        ),
+    );
+  }
+
+  private resolveWeekStartMonday(input?: string): string {
+    if (input && /^\d{4}-\d{2}-\d{2}$/.test(input)) {
+      return input;
+    }
+    const istDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    }).format(new Date());
+    const anchor = new Date(`${istDate}T12:00:00+05:30`);
+    const day = anchor.getUTCDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    anchor.setUTCDate(anchor.getUTCDate() + diff);
+    return anchor.toISOString().slice(0, 10);
+  }
+
+  private buildWeekDateRange(weekStart: string) {
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const start = new Date(`${weekStart}T12:00:00+05:30`);
+    return labels.map((label, index) => {
+      const d = new Date(start);
+      d.setUTCDate(start.getUTCDate() + index);
+      return {
+        day_of_week: index + 1,
+        label,
+        date: d.toISOString().slice(0, 10),
+      };
+    });
+  }
+
+  private isSessionDone(sessionDate: string, endTime: string): boolean {
+    const normalized = this.normalizeTime(endTime);
+    const [hours, minutes = '0'] = normalized.split(':');
+    const sessionEnd = new Date(
+      `${sessionDate}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00+05:30`,
+    );
+    return Date.now() > sessionEnd.getTime();
   }
 
   private getIstMinutesNow() {
