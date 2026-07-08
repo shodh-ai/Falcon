@@ -7,6 +7,7 @@ import {
   getActiveWorkspaceRoleFromPath,
   getWorkspaceLabelForRole,
   resolveProfileHref,
+  getSettingsHrefFromPath,
 } from '@/lib/auth-routing';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -31,6 +32,7 @@ export function ProfileMenu({ profileHref }: ProfileMenuProps) {
   const pathRole = getActiveWorkspaceRoleFromPath(pathname, roles);
   const workspaceRole = pathRole ?? user?.primaryRole ?? user?.role ?? 'Student';
   const resolvedProfileHref = resolveProfileHref(pathname, workspaceRole, profileHref);
+  const settingsHref = getSettingsHrefFromPath(pathname, workspaceRole);
 
   const handleLogout = () => {
     logout();
@@ -75,7 +77,7 @@ export function ProfileMenu({ profileHref }: ProfileMenuProps) {
             Coming Soon
           </span>
         </DropdownMenuItem>
-        <DropdownMenuItem disabled>
+        <DropdownMenuItem onClick={() => router.push(settingsHref)}>
           <Settings className="mr-2 h-4 w-4" />
           Settings
         </DropdownMenuItem>
