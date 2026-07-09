@@ -44,6 +44,7 @@ Falcon Test IDs*.xlsx
 # Local parse output from source files above (regenerate with backend/scripts/*.py)
 backend/scripts/_pharmacy_tt_pages/
 backend/scripts/pharmacy-workload-parsed.json
+backend/scripts/ee-ids-parsed.json
 
 # One-off xlsx parse / credential migration generators (output lives in backend/migrations/)
 /scripts/
