@@ -1103,6 +1103,47 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/timetable/schedule-data')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  facultyWorkspaceScheduleData(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.getFacultyScheduleData(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Post('faculty/workspaces/timetable/slots')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  facultyWorkspaceTimetableSlotsBatch(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { slots: Array<any> }
+  ) {
+    return this.facultyWorkspaces.scheduleTimetableSlotBatch(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      dto,
+    );
+  }
+
+  @Get('faculty/workspaces/timetable/rooms/availability')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getAvailableRoomsForSlot(
+    @Req() req: { user: AuthUser },
+    @Query('day') day: string,
+    @Query('startTime') startTime: string,
+    @Query('endTime') endTime: string
+  ) {
+    if (!day || !startTime || !endTime) {
+      throw new BadRequestException('day, startTime, and endTime are required');
+    }
+    return this.facultyWorkspaces.getAvailableRoomsForSlot(
+      this.resolveTenantId(req.user),
+      parseInt(day, 10),
+      startTime,
+      endTime
+    );
+  }
+
   @Get('faculty/workspaces/timetable/stats')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   facultyWorkspaceTimetableStats(@Req() req: { user: AuthUser }) {

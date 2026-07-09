@@ -136,6 +136,163 @@ export class FacultyWorkspacesService {
     );
   }
 
+  async getFacultyScheduleData(facultyUserId: string, tenantId: string) {
+    const allocations = await this.dataSource.query(
+      `SELECT
+         a.allocation_id,
+         c.course_id,
+         c.course_code,
+         c.course_name,
+         u.user_id AS faculty_user_id,
+         u.name AS faculty_name
+       FROM academic_course_allocations a
+       INNER JOIN academic_courses c ON c.course_id = a.course_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1 AND a.faculty_user_id = $2 AND a.status = 'ACTIVE'`,
+      [tenantId, facultyUserId]
+    );
+
+    const timetables = await this.dataSource.query(
+      `SELECT
+         t.timetable_id,
+         t.course_id,
+         t.faculty_user_id,
+         c.course_code,
+         c.course_name,
+         u.name AS faculty_name,
+         t.day_of_week,
+         t.start_time,
+         t.end_time,
+         t.room,
+         t.section
+       FROM academic_timetables t
+       INNER JOIN academic_courses c ON c.course_id = t.course_id
+       LEFT JOIN users u ON u.user_id = t.faculty_user_id
+       WHERE t.tenant_id = $1 AND t.faculty_user_id = $2 AND t.deleted_at IS NULL`,
+      [tenantId, facultyUserId]
+    );
+
+    const faculty = await this.dataSource.query(
+      `SELECT user_id, name FROM users WHERE user_id = $1`,
+      [facultyUserId]
+    );
+
+    return { allocations, timetables, faculty };
+  }
+
+  async scheduleTimetableSlotBatch(facultyUserId: string, tenantId: string, dto: { slots: Array<any> }) {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+
+    try {
+      // 1. Delete all existing slots for this faculty
+      await runner.query(
+        `DELETE FROM academic_timetables
+         WHERE tenant_id = $1 AND faculty_user_id = $2`,
+        [tenantId, facultyUserId]
+      );
+
+      // 2. Insert new slots and check for conflicts
+      for (const slot of dto.slots) {
+        if (!slot.course_id || !slot.day_of_week || !slot.start_time || !slot.end_time) {
+          throw new BadRequestException('Invalid slot data');
+        }
+        if (slot.start_time >= slot.end_time) {
+          throw new BadRequestException('Start time must be before end time');
+        }
+
+        const params: any[] = [
+          tenantId,
+          slot.day_of_week,
+          slot.start_time,
+          slot.end_time,
+          facultyUserId,
+          slot.course_id,
+          slot.section || 'A'
+        ];
+        
+        let conflictQuery = `
+          SELECT 1 FROM academic_timetables t
+          LEFT JOIN academic_course_allocations a ON a.course_id = t.course_id
+          WHERE t.tenant_id = $1
+            AND t.deleted_at IS NULL
+            AND t.day_of_week = $2
+            AND t.start_time < $4
+            AND t.end_time > $3
+            AND (
+              t.faculty_user_id = $5
+              OR (
+                a.semester = (SELECT semester FROM academic_course_allocations WHERE course_id = $6 LIMIT 1)
+                AND t.section = $7
+                AND a.semester IS NOT NULL
+              )
+        `;
+
+        if (slot.room) {
+          conflictQuery += ` OR (t.room = $8 AND t.room IS NOT NULL AND t.room != '')`;
+          params.push(slot.room);
+        }
+        conflictQuery += ` ) LIMIT 1`;
+
+        const conflicts = await runner.query(conflictQuery, params);
+        if (conflicts.length > 0) {
+          throw new BadRequestException(`Slot conflict detected for ${slot.start_time} - ${slot.end_time} on day ${slot.day_of_week}`);
+        }
+
+        await runner.query(
+          `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id, section)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)`,
+          [tenantId, slot.course_id, slot.day_of_week, slot.start_time, slot.end_time, slot.room || null, facultyUserId, slot.section || 'A']
+        );
+      }
+
+      await runner.commitTransaction();
+      return { success: true };
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  async getAvailableRoomsForSlot(tenantId: string, dayOfWeek: number, startTime: string, endTime: string) {
+    // 1. Fetch all classroom spaces
+    const spaces = await this.dataSource.query(
+      `SELECT space_id, building_name, room_number, capacity, facilities, status
+       FROM campus_spaces
+       WHERE tenant_id = $1 AND space_type = 'CLASSROOM' AND status = 'AVAILABLE'
+       ORDER BY building_name, room_number`,
+      [tenantId]
+    );
+
+    // 2. Fetch occupied rooms for this specific time slot
+    const occupied = await this.dataSource.query(
+      `SELECT DISTINCT room
+       FROM academic_timetables
+       WHERE tenant_id = $1
+         AND deleted_at IS NULL
+         AND day_of_week = $2
+         AND start_time < $4
+         AND end_time > $3
+         AND room IS NOT NULL AND room != ''`,
+      [tenantId, dayOfWeek, startTime, endTime]
+    );
+
+    const occupiedRoomSet = new Set(occupied.map(o => o.room));
+
+    // 3. Map spaces to availability
+    return spaces.map(space => {
+      const roomName = `${space.building_name} - ${space.room_number}`;
+      return {
+        ...space,
+        roomName,
+        available: !occupiedRoomSet.has(roomName)
+      };
+    });
+  }
+
   async getWeeklyTimetable(facultyUserId: string, tenantId: string) {
     return this.dataSource.query(
       `WITH faculty_courses AS (
