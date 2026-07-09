@@ -33,8 +33,17 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# Local school test-ID source spreadsheets (real emails — do not commit)
+# User-provided source data (timetables, workloads, credential sheets — do not commit)
+pharmacy_TT.pdf
+Pharmacy_Faculty_Workload*.xlsx
+EE_Ids.xlsx
+EE_Faculty*.xlsx
+EE (*sem)*.xlsx
 Falcon Test IDs*.xlsx
+
+# Local parse output from source files above (regenerate with backend/scripts/*.py)
+backend/scripts/_pharmacy_tt_pages/
+backend/scripts/pharmacy-workload-parsed.json
 
 # One-off xlsx parse / credential migration generators (output lives in backend/migrations/)
 /scripts/

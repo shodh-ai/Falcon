@@ -1,4 +1,4 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -199,5 +199,60 @@ export class AuthService {
         user.role?.role_name ??
         roles[0],
     };
+  }
+
+  async changePassword(
+    userId: string,
+    tenantId: string | undefined,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ success: true; onboarding_status?: string }> {
+    if (!newPassword || newPassword.length < 8) {
+      throw new BadRequestException(
+        'New password must be at least 8 characters',
+      );
+    }
+    if (newPassword === currentPassword) {
+      throw new BadRequestException(
+        'New password must be different from your current password',
+      );
+    }
+    if (newPassword === 'password123') {
+      throw new BadRequestException(
+        'Please choose a password different from the default',
+      );
+    }
+
+    const [row] = await this.dataSource.query<
+      Array<{ password_hash: string | null; onboarding_status: string | null }>
+    >(
+      `SELECT password_hash, onboarding_status
+       FROM users
+       WHERE user_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)`,
+      [userId, tenantId ?? null],
+    );
+    if (!row?.password_hash) {
+      throw new UnauthorizedException('Invalid current password');
+    }
+
+    const valid = await bcrypt.compare(currentPassword, row.password_hash);
+    if (!valid) {
+      throw new UnauthorizedException('Invalid current password');
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    let onboardingStatus = row.onboarding_status ?? 'ACTIVE';
+    if (onboardingStatus === 'PENDING_PASSWORD_RESET') {
+      onboardingStatus = 'PENDING_DOCUMENTS';
+    }
+
+    await this.dataSource.query(
+      `UPDATE users
+       SET password_hash = $1, onboarding_status = $2, updated_at = NOW()
+       WHERE user_id = $3`,
+      [hash, onboardingStatus, userId],
+    );
+
+    return { success: true, onboarding_status: onboardingStatus };
   }
 }

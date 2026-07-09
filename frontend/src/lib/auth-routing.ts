@@ -400,6 +400,37 @@ const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
   '/hr': '/hr/me/documents',
 };
 
+const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {
+  '/hr': '/hr/me/settings',
+  '/hostel-admin': '/hostel-admin/account/settings',
+  '/super-admin': '/super-admin/account/settings',
+  '/ecell-admin': '/ecell-admin/account/settings',
+  '/incubation': '/incubation/account/settings',
+  '/admin': '/admin/account/settings',
+};
+
+/** Resolve account settings for the active portal. */
+export function getSettingsHrefFromPath(pathname: string, role?: string | null): string {
+  if (pathname.startsWith('/ess')) {
+    const dash = getDashboardPathForRole(role);
+    return getSettingsHrefFromPath(dash, role);
+  }
+
+  const portal = Object.keys(portalRoles)
+    .sort((a, b) => b.length - a.length)
+    .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+
+  if (portal && EXPLICIT_PORTAL_SETTINGS_PATHS[portal]) {
+    return EXPLICIT_PORTAL_SETTINGS_PATHS[portal];
+  }
+
+  if (portal) {
+    return `${portal}/settings`;
+  }
+
+  return '/faculty/settings';
+}
+
 /** Resolve the user profile page for the active portal (never the dashboard). */
 export function getProfileHrefFromPath(pathname: string, role?: string | null): string {
   if (pathname.startsWith('/ess')) {

@@ -520,9 +520,34 @@ export class StudentPortalService {
 
   async getAttendance(tenantId: string, userId: string) {
     const subjectWise = await this.dataSource.query(
-      `SELECT c.course_code, c.course_name, e.semester, e.attendance_percent, e.status
+      `SELECT c.course_code,
+              c.course_name,
+              e.semester,
+              e.attendance_percent,
+              e.status,
+              COALESCE(stats.present_count, 0)::int AS present_count,
+              COALESCE(stats.absent_count, 0)::int AS absent_count,
+              COALESCE(stats.total_classes, 0)::int AS total_classes
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
+       LEFT JOIN LATERAL (
+         SELECT
+           SUM(
+             CASE
+               WHEN entry->>'status' IN ('PRESENT', 'LATE', 'EXCUSED') THEN 1
+               ELSE 0
+             END
+           )::int AS present_count,
+           SUM(
+             CASE WHEN entry->>'status' = 'ABSENT' THEN 1 ELSE 0 END
+           )::int AS absent_count,
+           COUNT(*)::int AS total_classes
+         FROM course_attendance_logs cal
+         CROSS JOIN LATERAL jsonb_array_elements(cal.attendance_data) AS entry
+         WHERE cal.tenant_id = e.tenant_id
+           AND cal.course_id = e.course_id
+           AND entry->>'student_id' = e.student_user_id::text
+       ) stats ON true
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
        ORDER BY e.semester, c.course_code`,
       [userId, tenantId],
