@@ -244,7 +244,9 @@ export class WorkflowRoutingService {
           (await this.resolveUserByRole('Admin', tenantId)) ||
           (await this.resolveUserByRole('Dean', tenantId));
         if (admin) return admin;
-        throw new NotFoundException('No admin found for general helpdesk routing');
+        throw new NotFoundException(
+          'No admin found for general helpdesk routing',
+        );
       }
       default:
         throw new BadRequestException(

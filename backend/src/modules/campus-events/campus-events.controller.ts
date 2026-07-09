@@ -139,10 +139,7 @@ export class CampusEventsController {
   @Get('clubs')
   @Roles('Student', 'Faculty')
   listClubsAndChapters(@Req() req: { user: AuthUser }) {
-    return this.events.listClubsAndChapters(
-      this.tenant(req),
-      req.user.user_id,
-    );
+    return this.events.listClubsAndChapters(this.tenant(req), req.user.user_id);
   }
 
   @Post('clubs/:clubId/apply')

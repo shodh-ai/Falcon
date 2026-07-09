@@ -16,7 +16,12 @@ import { CreateLiveClassDto } from './dto/create-live-class.dto';
 import { CreateForumThreadDto } from './dto/create-forum-thread.dto';
 import { CreateForumReplyDto } from './dto/create-forum-reply.dto';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller('api/lms')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -82,7 +87,10 @@ export class LmsExtendedController {
 
   @Get('courses/:courseId/live-classes')
   @Roles('Faculty', 'Student', 'SuperAdmin', 'HOD', 'Dean')
-  listLive(@Param('courseId') courseId: string, @Req() req: { user: AuthUser }) {
+  listLive(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
     return this.lms.listLiveClasses(
       courseId,
       this.tenant(req),

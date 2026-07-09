@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as ExcelJS from 'exceljs';
@@ -1066,7 +1070,9 @@ export class HrTeamService {
       throw new ForbiddenException('Employee not in your reporting scope');
     }
 
-    const entityRows = await this.dataSource.query<Array<{ entity_id: number }>>(
+    const entityRows = await this.dataSource.query<
+      Array<{ entity_id: number }>
+    >(
       `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
       [memberUserId, tenantId],
     );
@@ -1148,8 +1154,11 @@ export class HrTeamService {
       leaveBalance += Number(b.entitled ?? 0) - Number(b.used ?? 0);
     }
 
-    const trend: Array<{ month: string; present_days: number; avg_hours: number }> =
-      [];
+    const trend: Array<{
+      month: string;
+      present_days: number;
+      avg_hours: number;
+    }> = [];
     for (let i = 2; i >= 0; i--) {
       const d = new Date(year, this.monthRange(monthKey).monthNum - 1 - i, 1);
       const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -1194,8 +1203,7 @@ export class HrTeamService {
     const cal = calendars.get(memberUserId);
     const workingDays = (cal?.days ?? []).filter(
       (d) =>
-        d.calculated_status !== 'WEEK_OFF' &&
-        d.calculated_status !== 'HOLIDAY',
+        d.calculated_status !== 'WEEK_OFF' && d.calculated_status !== 'HOLIDAY',
     ).length;
 
     return {

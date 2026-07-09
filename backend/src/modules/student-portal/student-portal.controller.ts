@@ -246,7 +246,12 @@ export class StudentPortalController {
     @Param('id') id: string,
     @Body() body: { vote?: 'YES' | 'NO' },
   ) {
-    return this.portal.acknowledgePolicy(this.tenant(req), req.user.user_id, id, body.vote);
+    return this.portal.acknowledgePolicy(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      body.vote,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

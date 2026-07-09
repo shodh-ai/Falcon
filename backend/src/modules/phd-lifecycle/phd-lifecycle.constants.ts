@@ -71,7 +71,12 @@ export const PHD_SUBMISSION_TYPES = [
   'THESIS_FINAL',
 ] as const;
 
-export const COMMITTEE_ROLES = ['DRC_MEMBER', 'RAC_MEMBER', 'RRC_MEMBER', 'PHD_ADJUDICATOR'] as const;
+export const COMMITTEE_ROLES = [
+  'DRC_MEMBER',
+  'RAC_MEMBER',
+  'RRC_MEMBER',
+  'PHD_ADJUDICATOR',
+] as const;
 
 export type PhdAction =
   | 'SCRUTINY_RECOMMEND'
@@ -284,7 +289,12 @@ export const PHD_ACTIONS: Record<PhdAction, ActionDef> = {
     decision: 'APPROVE',
   },
   SUBMIT_PROGRESS_REPORT: {
-    from: ['COURSEWORK_COMPLETED', 'PROGRESS_REPORT_DUE', 'PROGRESS_SATISFACTORY', 'RAC_SYNOPSIS_DECLINED'],
+    from: [
+      'COURSEWORK_COMPLETED',
+      'PROGRESS_REPORT_DUE',
+      'PROGRESS_SATISFACTORY',
+      'RAC_SYNOPSIS_DECLINED',
+    ],
     to: 'PROGRESS_REPORT_DUE',
     stage: 'PROGRESS',
     actorRoles: ['Student', 'SuperAdmin'],
@@ -469,18 +479,63 @@ export const PHD_ACTIONS: Record<PhdAction, ActionDef> = {
 };
 
 export const PHD_PIPELINE_STEPS = [
-  { stage: 'ADMISSION', label: 'Application & Admission', statuses: ['APPLICATION_SUBMITTED', 'PET_QUALIFIED', 'DRC_SHORTLISTED', 'ADMITTED'] },
-  { stage: 'REGISTRATION', label: 'Guide & Eligibility', statuses: ['GUIDE_ALLOCATED', 'GUIDE_ACCEPTANCE_VERIFIED', 'ELIGIBILITY_VERIFIED', 'COURSEWORK_COMPLETED'] },
-  { stage: 'PROGRESS', label: 'Progress Monitoring', statuses: ['PROGRESS_REPORT_DUE', 'PROGRESS_SATISFACTORY', 'RAC_SYNOPSIS_RECOMMENDED'] },
-  { stage: 'SYNOPSIS', label: 'Synopsis & RRC', statuses: ['SYNOPSIS_SUBMITTED', 'SYNOPSIS_APPROVED'] },
-  { stage: 'THESIS', label: 'Thesis Evaluation', statuses: ['THESIS_SUBMITTED', 'THESIS_RECOMMENDED'] },
-  { stage: 'VIVA', label: 'Viva Voce', statuses: ['VIVA_VOCE_SCHEDULED', 'VIVA_RECOMMENDED'] },
-  { stage: 'AWARD', label: 'Degree Award', statuses: ['BOM_APPROVED', 'DEGREE_AWARDED'] },
+  {
+    stage: 'ADMISSION',
+    label: 'Application & Admission',
+    statuses: [
+      'APPLICATION_SUBMITTED',
+      'PET_QUALIFIED',
+      'DRC_SHORTLISTED',
+      'ADMITTED',
+    ],
+  },
+  {
+    stage: 'REGISTRATION',
+    label: 'Guide & Eligibility',
+    statuses: [
+      'GUIDE_ALLOCATED',
+      'GUIDE_ACCEPTANCE_VERIFIED',
+      'ELIGIBILITY_VERIFIED',
+      'COURSEWORK_COMPLETED',
+    ],
+  },
+  {
+    stage: 'PROGRESS',
+    label: 'Progress Monitoring',
+    statuses: [
+      'PROGRESS_REPORT_DUE',
+      'PROGRESS_SATISFACTORY',
+      'RAC_SYNOPSIS_RECOMMENDED',
+    ],
+  },
+  {
+    stage: 'SYNOPSIS',
+    label: 'Synopsis & RRC',
+    statuses: ['SYNOPSIS_SUBMITTED', 'SYNOPSIS_APPROVED'],
+  },
+  {
+    stage: 'THESIS',
+    label: 'Thesis Evaluation',
+    statuses: ['THESIS_SUBMITTED', 'THESIS_RECOMMENDED'],
+  },
+  {
+    stage: 'VIVA',
+    label: 'Viva Voce',
+    statuses: ['VIVA_VOCE_SCHEDULED', 'VIVA_RECOMMENDED'],
+  },
+  {
+    stage: 'AWARD',
+    label: 'Degree Award',
+    statuses: ['BOM_APPROVED', 'DEGREE_AWARDED'],
+  },
 ] as const;
 
 export function actionsForRole(role: string, status: PhdStatus): PhdAction[] {
   const normalized = role === 'HoD' ? 'HOD' : role;
   return (Object.entries(PHD_ACTIONS) as [PhdAction, ActionDef][])
-    .filter(([, def]) => def.from.includes(status) && def.actorRoles.includes(normalized))
+    .filter(
+      ([, def]) =>
+        def.from.includes(status) && def.actorRoles.includes(normalized),
+    )
     .map(([action]) => action);
 }

@@ -355,7 +355,8 @@ export class CampusEventsService {
     if (!e) return null;
     const fundsNeeded = Number(e.funds_needed ?? 0);
     const financeOk = fundsNeeded <= 0 || e.finance_approval === 'APPROVED';
-    const estateOk = e.estate_approval === 'APPROVED' || e.estate_approval === 'NOT_REQUIRED';
+    const estateOk =
+      e.estate_approval === 'APPROVED' || e.estate_approval === 'NOT_REQUIRED';
     if (
       e.advisor_approval === 'APPROVED' &&
       e.hod_approval === 'APPROVED' &&
@@ -443,91 +444,96 @@ export class CampusEventsService {
         [dto.club_id, tenantId, coordinatorId],
       );
       const club = clubRows[0];
-    if (!club)
-      throw new ForbiddenException('You are not the coordinator for this club');
+      if (!club)
+        throw new ForbiddenException(
+          'You are not the coordinator for this club',
+        );
 
-    await this.assertDateNotBlocked(tenantId, dto.event_date);
+      await this.assertDateNotBlocked(tenantId, dto.event_date);
 
-    const price = dto.is_paid ? Number(dto.ticket_price ?? 0) : 0;
-    if (dto.is_paid && price <= 0) {
-      throw new BadRequestException(
-        'Paid events require a ticket price greater than zero',
-      );
-    }
-
-    const fundsNeeded = Number(dto.funds_needed ?? 0);
-    if (fundsNeeded < 0) {
-      throw new BadRequestException('Funds needed cannot be negative');
-    }
-
-    let venueLabel = dto.venue ?? null;
-    if (dto.venue_id) {
-      const venueRows = await this.dataSource.query(
-        `SELECT name FROM university_assets WHERE asset_id = $1 AND tenant_id = $2`,
-        [dto.venue_id, tenantId],
-      );
-      if (!venueRows[0])
-        throw new BadRequestException('Selected venue not found');
-      venueLabel = venueRows[0].name;
-      const clash = await this.checkVenueClash(
-        tenantId,
-        dto.venue_id,
-        dto.event_date,
-      );
-      if (clash.has_clash) {
-        throw new ConflictException(
-          `${venueLabel} may already be booked on this date. Estate will review availability.`,
+      const price = dto.is_paid ? Number(dto.ticket_price ?? 0) : 0;
+      if (dto.is_paid && price <= 0) {
+        throw new BadRequestException(
+          'Paid events require a ticket price greater than zero',
         );
       }
-    }
 
-    const financeApproval = fundsNeeded > 0 ? 'PENDING' : 'NOT_REQUIRED';
+      const fundsNeeded = Number(dto.funds_needed ?? 0);
+      if (fundsNeeded < 0) {
+        throw new BadRequestException('Funds needed cannot be negative');
+      }
 
-    const inserted = await this.dataSource.query(
-      `INSERT INTO campus_events (
+      let venueLabel = dto.venue ?? null;
+      if (dto.venue_id) {
+        const venueRows = await this.dataSource.query(
+          `SELECT name FROM university_assets WHERE asset_id = $1 AND tenant_id = $2`,
+          [dto.venue_id, tenantId],
+        );
+        if (!venueRows[0])
+          throw new BadRequestException('Selected venue not found');
+        venueLabel = venueRows[0].name;
+        const clash = await this.checkVenueClash(
+          tenantId,
+          dto.venue_id,
+          dto.event_date,
+        );
+        if (clash.has_clash) {
+          throw new ConflictException(
+            `${venueLabel} may already be booked on this date. Estate will review availability.`,
+          );
+        }
+      }
+
+      const financeApproval = fundsNeeded > 0 ? 'PENDING' : 'NOT_REQUIRED';
+
+      const inserted = await this.dataSource.query(
+        `INSERT INTO campus_events (
         tenant_id, club_id, title, description, venue, venue_id, guest_speakers, event_date,
         total_slots, available_slots, is_paid, ticket_price, funds_needed, status,
         advisor_approval, hod_approval, dean_approval, estate_approval, finance_approval
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12,'PENDING_ADVISOR','PENDING','PENDING','PENDING','NOT_REQUIRED',$13)
       RETURNING *`,
-      [
+        [
+          tenantId,
+          dto.club_id,
+          dto.title,
+          dto.description ?? null,
+          venueLabel,
+          dto.venue_id ?? null,
+          dto.guest_speakers ?? null,
+          dto.event_date,
+          dto.total_slots,
+          dto.is_paid,
+          price,
+          fundsNeeded,
+          financeApproval,
+        ],
+      );
+      const event = inserted[0];
+      const advisorUserId = await this.resolveAdvisorUserId(
         tenantId,
         dto.club_id,
-        dto.title,
-        dto.description ?? null,
-        venueLabel,
-        dto.venue_id ?? null,
-        dto.guest_speakers ?? null,
-        dto.event_date,
-        dto.total_slots,
-        dto.is_paid,
-        price,
-        fundsNeeded,
-        financeApproval,
-      ],
-    );
-    const event = inserted[0];
-    const advisorUserId = await this.resolveAdvisorUserId(
-      tenantId,
-      dto.club_id,
-    );
-    if (advisorUserId) {
-      this.notify.eventProposed({
-        tenantId,
-        userId: advisorUserId,
-        eventId: event.event_id,
-        clubId: dto.club_id,
-        eventTitle: dto.title,
-        clubName: club.name,
-        title: 'New club event proposal',
-        message: `${club.name} proposed "${dto.title}" for faculty coordinator approval.`,
-        actionLink: '/faculty/event-approvals',
-      });
-    }
+      );
+      if (advisorUserId) {
+        this.notify.eventProposed({
+          tenantId,
+          userId: advisorUserId,
+          eventId: event.event_id,
+          clubId: dto.club_id,
+          eventTitle: dto.title,
+          clubName: club.name,
+          title: 'New club event proposal',
+          message: `${club.name} proposed "${dto.title}" for faculty coordinator approval.`,
+          actionLink: '/faculty/event-approvals',
+        });
+      }
 
-    return event;
+      return event;
     } catch (e: any) {
-      require('fs').writeFileSync('d:\\Falcon\\backend\\propose_error.log', e.stack || e.message);
+      require('fs').writeFileSync(
+        'd:\\Falcon\\backend\\propose_error.log',
+        e.stack || e.message,
+      );
       throw e;
     }
   }
@@ -832,13 +838,7 @@ export class CampusEventsService {
            finance_approval = CASE WHEN $5 > 0 THEN 'PENDING' ELSE finance_approval END
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_DEAN' AND dean_approval = 'PENDING'
        RETURNING *`,
-      [
-        eventId,
-        tenantId,
-        userId,
-        'PENDING_ESTATE',
-        fundsNeeded,
-      ],
+      [eventId, tenantId, userId, 'PENDING_ESTATE', fundsNeeded],
     );
     if (!rows[0])
       throw new BadRequestException('Event not found or already processed');
@@ -1547,7 +1547,9 @@ export class CampusEventsService {
       throw new BadRequestException('You are already a member');
     }
     if (row?.status === 'PENDING') {
-      throw new BadRequestException('Your application is already pending review');
+      throw new BadRequestException(
+        'Your application is already pending review',
+      );
     }
 
     const motivationText = motivation?.trim() || null;

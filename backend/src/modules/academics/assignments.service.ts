@@ -644,9 +644,7 @@ export class AssignmentsService {
     );
     if (marks.length) return;
 
-    throw new NotFoundException(
-      'Course not found in your teaching timetable',
-    );
+    throw new NotFoundException('Course not found in your teaching timetable');
   }
 
   private async persistAssignmentFile(

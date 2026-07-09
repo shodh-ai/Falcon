@@ -439,7 +439,7 @@ export class DemeritsService {
   ): Promise<string> {
     const isUuid = DemeritsService.UUID_RE.test(identifier);
     let rows: Array<{ user_id: string }> = [];
-    
+
     if (isUuid) {
       rows = await this.db.query<Array<{ user_id: string }>>(
         `SELECT u.user_id

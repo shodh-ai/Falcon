@@ -7,7 +7,11 @@ export function resolveTenantSubdomain(
   const trimmed = (value ?? '').trim();
   if (trimmed) return trimmed.toLowerCase();
 
-  const fb = (fallback ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? DEFAULT_SUBDOMAIN).trim();
+  const fb = (
+    fallback ??
+    process.env.DEFAULT_TENANT_SUBDOMAIN ??
+    DEFAULT_SUBDOMAIN
+  ).trim();
   return fb || DEFAULT_SUBDOMAIN;
 }
 
@@ -16,7 +20,11 @@ export function extractSubdomainFromHost(
   baseDomain?: string | null,
 ): string | null {
   const host = hostname.split(':')[0].trim().toLowerCase();
-  const base = (baseDomain ?? process.env.SAAS_BASE_DOMAIN ?? 'localhost').trim();
+  const base = (
+    baseDomain ??
+    process.env.SAAS_BASE_DOMAIN ??
+    'localhost'
+  ).trim();
 
   if (!host || !base) return null;
 

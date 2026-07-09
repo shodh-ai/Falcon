@@ -151,17 +151,25 @@ export class LeadershipService {
   async getPillarSummary(tenantId?: string, period?: string) {
     const tid = this.tenantId(tenantId);
     const p = this.parsePeriod(period);
-    const [overview, admissions, finance, academics, placements, hr, alumni, compliance] =
-      await Promise.all([
-        this.getOverview(tid),
-        this.getAdmissionsAnalytics(tid, p),
-        this.getFinanceSummary(tid),
-        this.getAcademics(tid),
-        this.getPlacements(tid),
-        this.getHrOps(tid),
-        this.getAlumniSummary(tid),
-        this.getComplianceSummary(tid),
-      ]);
+    const [
+      overview,
+      admissions,
+      finance,
+      academics,
+      placements,
+      hr,
+      alumni,
+      compliance,
+    ] = await Promise.all([
+      this.getOverview(tid),
+      this.getAdmissionsAnalytics(tid, p),
+      this.getFinanceSummary(tid),
+      this.getAcademics(tid),
+      this.getPlacements(tid),
+      this.getHrOps(tid),
+      this.getAlumniSummary(tid),
+      this.getComplianceSummary(tid),
+    ]);
 
     const attendance = Number(overview.tickers?.campus_attendance_today ?? 0);
     const defaulters = Number(overview.fee_defaulter_count ?? 0);
@@ -177,7 +185,11 @@ export class LeadershipService {
           title: 'Admissions & Enrollment',
           href: '/leadership/admissions-funnel',
           status:
-            inquiries > 0 && enrolled / inquiries >= 0.05 ? 'green' : inquiries > 0 ? 'yellow' : 'green',
+            inquiries > 0 && enrolled / inquiries >= 0.05
+              ? 'green'
+              : inquiries > 0
+                ? 'yellow'
+                : 'green',
           kpis: [
             { label: 'Inquiries', value: String(inquiries) },
             { label: 'Enrolled', value: String(enrolled) },
@@ -187,9 +199,13 @@ export class LeadershipService {
           id: 'finance',
           title: 'Financial Health',
           href: '/leadership/finance',
-          status: defaulters > 100 ? 'red' : defaulters > 0 ? 'yellow' : 'green',
+          status:
+            defaulters > 100 ? 'red' : defaulters > 0 ? 'yellow' : 'green',
           kpis: [
-            { label: 'Collection Rate', value: `${finance.collection_rate_pct ?? 0}%` },
+            {
+              label: 'Collection Rate',
+              value: `${finance.collection_rate_pct ?? 0}%`,
+            },
             { label: 'Defaulters', value: String(defaulters) },
           ],
         },
@@ -197,10 +213,14 @@ export class LeadershipService {
           id: 'academics',
           title: 'Academic Health',
           href: '/leadership/academics',
-          status: attendance >= 75 ? 'green' : attendance >= 65 ? 'yellow' : 'red',
+          status:
+            attendance >= 75 ? 'green' : attendance >= 65 ? 'yellow' : 'red',
           kpis: [
             { label: 'Attendance', value: `${attendance}%` },
-            { label: 'NAAC Readiness', value: `${(academics.iqac_research as { naac_readiness_score?: number })?.naac_readiness_score ?? '—'}%` },
+            {
+              label: 'NAAC Readiness',
+              value: `${(academics.iqac_research as { naac_readiness_score?: number })?.naac_readiness_score ?? '—'}%`,
+            },
           ],
         },
         {
@@ -214,8 +234,14 @@ export class LeadershipService {
                 ? 'yellow'
                 : 'red',
           kpis: [
-            { label: 'Placement Rate', value: `${placements.placement_pct ?? 0}%` },
-            { label: 'Avg LPA', value: String(placements.package_stats?.avg_lpa ?? '—') },
+            {
+              label: 'Placement Rate',
+              value: `${placements.placement_pct ?? 0}%`,
+            },
+            {
+              label: 'Avg LPA',
+              value: String(placements.package_stats?.avg_lpa ?? '—'),
+            },
           ],
         },
         {
@@ -225,7 +251,10 @@ export class LeadershipService {
           status:
             Number(hr.faculty_to_student_ratio ?? 0) <= 30 ? 'green' : 'yellow',
           kpis: [
-            { label: 'Faculty:Student', value: String(hr.faculty_to_student_ratio ?? '—') },
+            {
+              label: 'Faculty:Student',
+              value: String(hr.faculty_to_student_ratio ?? '—'),
+            },
             { label: 'Attrition', value: `${hr.attrition_rate_pct ?? 0}%` },
           ],
         },
@@ -235,8 +264,14 @@ export class LeadershipService {
           href: '/leadership/alumni',
           status: (alumni.active_alumni ?? 0) > 0 ? 'green' : 'yellow',
           kpis: [
-            { label: 'Active Alumni', value: String(alumni.active_alumni ?? 0) },
-            { label: 'Funds Raised (FY)', value: `₹${((alumni.funds_raised_fy ?? 0) / 100000).toFixed(1)}L` },
+            {
+              label: 'Active Alumni',
+              value: String(alumni.active_alumni ?? 0),
+            },
+            {
+              label: 'Funds Raised (FY)',
+              value: `₹${((alumni.funds_raised_fy ?? 0) / 100000).toFixed(1)}L`,
+            },
           ],
         },
         {
@@ -244,12 +279,19 @@ export class LeadershipService {
           title: 'Compliance & Risk',
           href: '/leadership/issues',
           status:
-            (compliance.stale_grievances ?? 0) > 0 || (compliance.sla_breaches ?? 0) > 0
+            (compliance.stale_grievances ?? 0) > 0 ||
+            (compliance.sla_breaches ?? 0) > 0
               ? 'red'
               : 'green',
           kpis: [
-            { label: 'Open Grievances', value: String(compliance.open_grievances ?? 0) },
-            { label: 'Hostel Occupancy', value: `${compliance.hostel_occupancy_pct ?? 0}%` },
+            {
+              label: 'Open Grievances',
+              value: String(compliance.open_grievances ?? 0),
+            },
+            {
+              label: 'Hostel Occupancy',
+              value: `${compliance.hostel_occupancy_pct ?? 0}%`,
+            },
           ],
         },
       ],
@@ -261,55 +303,69 @@ export class LeadershipService {
     return { funnel: analytics.funnel };
   }
 
-  async getAdmissionsAnalytics(tenantId?: string, period?: ExecutivePeriod | string) {
+  async getAdmissionsAnalytics(
+    tenantId?: string,
+    period?: ExecutivePeriod | string,
+  ) {
     const tid = this.tenantId(tenantId);
-    const p = typeof period === 'string' ? this.parsePeriod(period) : period ?? 'year';
+    const p =
+      typeof period === 'string'
+        ? this.parsePeriod(period)
+        : (period ?? 'year');
     const since = this.periodSince(p);
 
-    const [leads, applications, admitted, enrolled, yoy, seatOccupancy, demographics, marketing] =
-      await Promise.all([
-        this.db
-          .query(
-            `SELECT COUNT(*)::int AS total FROM admissions_leads
+    const [
+      leads,
+      applications,
+      admitted,
+      enrolled,
+      yoy,
+      seatOccupancy,
+      demographics,
+      marketing,
+    ] = await Promise.all([
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM admissions_leads
              WHERE tenant_id = $1 AND deleted_at IS NULL AND created_at >= $2`,
-            [tid, since],
-          )
-          .catch(() => [{ total: 0 }]),
-        this.db
-          .query(
-            `SELECT COUNT(*)::int AS total FROM admissions_applications
+          [tid, since],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM admissions_applications
              WHERE tenant_id = $1 AND deleted_at IS NULL AND created_at >= $2`,
-            [tid, since],
-          )
-          .catch(() => [{ total: 0 }]),
-        this.db
-          .query(
-            `SELECT COUNT(*)::int AS total FROM admissions_leads
+          [tid, since],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM admissions_leads
              WHERE tenant_id = $1 AND deleted_at IS NULL AND stage IN ('OFFERED', 'ENROLLED') AND created_at >= $2`,
-            [tid, since],
-          )
-          .catch(() => [{ total: 0 }]),
-        this.db
-          .query(
-            `SELECT COUNT(*)::int AS total FROM admissions_leads
+          [tid, since],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM admissions_leads
              WHERE tenant_id = $1 AND deleted_at IS NULL AND stage = 'ENROLLED' AND created_at >= $2`,
-            [tid, since],
-          )
-          .catch(() => [{ total: 0 }]),
-        this.db
-          .query(
-            `SELECT EXTRACT(YEAR FROM created_at)::int AS year,
+          [tid, since],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT EXTRACT(YEAR FROM created_at)::int AS year,
                     COUNT(*) FILTER (WHERE stage = 'ENROLLED')::int AS enrolled
              FROM admissions_leads
              WHERE tenant_id = $1 AND deleted_at IS NULL
                AND created_at >= NOW() - INTERVAL '5 years'
              GROUP BY 1 ORDER BY 1`,
-            [tid],
-          )
-          .catch(() => []),
-        this.db
-          .query(
-            `SELECT p.program_name,
+          [tid],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT p.program_name,
                     COALESCE(SUM(s.capacity), 0)::int AS capacity,
                     COUNT(DISTINCT sp.user_id)::int AS enrolled
              FROM academic_programs p
@@ -319,31 +375,31 @@ export class LeadershipService {
              WHERE p.tenant_id = $1
              GROUP BY p.program_id, p.program_name
              ORDER BY p.program_name`,
-            [tid],
-          )
-          .catch(() => []),
-        this.db
-          .query(
-            `SELECT COALESCE(sp.state, 'Unknown') AS region,
+          [tid],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT COALESCE(sp.state, 'Unknown') AS region,
                     COUNT(*)::int AS count
              FROM student_profiles sp
              WHERE sp.tenant_id = $1 AND sp.admission_status = 'ACTIVE'
              GROUP BY 1 ORDER BY count DESC LIMIT 20`,
-            [tid],
-          )
-          .catch(() => []),
-        this.db
-          .query(
-            `SELECT COALESCE(NULLIF(TRIM(source), ''), 'Unknown') AS source,
+          [tid],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT COALESCE(NULLIF(TRIM(source), ''), 'Unknown') AS source,
                     COUNT(*)::int AS leads,
                     COUNT(*) FILTER (WHERE stage = 'ENROLLED')::int AS converted
              FROM admissions_leads
              WHERE tenant_id = $1 AND deleted_at IS NULL AND created_at >= $2
              GROUP BY 1 ORDER BY leads DESC`,
-            [tid, since],
-          )
-          .catch(() => []),
-      ]);
+          [tid, since],
+        )
+        .catch(() => []),
+    ]);
 
     const genderRows = await this.db
       .query(
@@ -365,20 +421,24 @@ export class LeadershipService {
         { stage: 'Admissions', count: Number(admitted[0]?.total ?? 0) },
         { stage: 'Enrolled', count: Number(enrolled[0]?.total ?? 0) },
       ],
-      yoy_growth: (yoy as Array<{ year: number; enrolled: number }>).map((r) => ({
-        year: Number(r.year),
-        admissions: Number(r.enrolled ?? 0),
-      })),
-      seat_occupancy: (seatOccupancy as Array<Record<string, unknown>>).map((r) => {
-        const cap = Number(r.capacity ?? 0);
-        const en = Number(r.enrolled ?? 0);
-        return {
-          program: r.program_name,
-          capacity: cap,
-          enrolled: en,
-          fill_pct: cap ? Math.round((en / cap) * 100) : en > 0 ? 100 : 0,
-        };
-      }),
+      yoy_growth: (yoy as Array<{ year: number; enrolled: number }>).map(
+        (r) => ({
+          year: Number(r.year),
+          admissions: Number(r.enrolled ?? 0),
+        }),
+      ),
+      seat_occupancy: (seatOccupancy as Array<Record<string, unknown>>).map(
+        (r) => {
+          const cap = Number(r.capacity ?? 0);
+          const en = Number(r.enrolled ?? 0);
+          return {
+            program: r.program_name,
+            capacity: cap,
+            enrolled: en,
+            fill_pct: cap ? Math.round((en / cap) * 100) : en > 0 ? 100 : 0,
+          };
+        },
+      ),
       demographics: {
         by_state: demographics.map((r: Record<string, unknown>) => ({
           region: r.region,
@@ -396,7 +456,9 @@ export class LeadershipService {
           source: r.source,
           leads: leadsN,
           converted,
-          conversion_rate_pct: leadsN ? Math.round((converted / leadsN) * 100) : 0,
+          conversion_rate_pct: leadsN
+            ? Math.round((converted / leadsN) * 100)
+            : 0,
         };
       }),
     };
@@ -554,11 +616,15 @@ export class LeadershipService {
       semester: semester ?? null,
       schools: schoolList,
       top_performers: schoolList.slice(0, 3),
-      bottom_performers: [...schoolList].sort((a, b) => a.avg_cgpa - b.avg_cgpa).slice(0, 3),
-      attendance_trend: (attendanceTrend as Array<Record<string, unknown>>).map((r) => ({
-        week: r.week_start,
-        attendance_pct: Number(r.avg_attendance_pct ?? 0),
-      })),
+      bottom_performers: [...schoolList]
+        .sort((a, b) => a.avg_cgpa - b.avg_cgpa)
+        .slice(0, 3),
+      attendance_trend: (attendanceTrend as Array<Record<string, unknown>>).map(
+        (r) => ({
+          week: r.week_start,
+          attendance_pct: Number(r.avg_attendance_pct ?? 0),
+        }),
+      ),
       dropout: dropout.summary,
       iqac_research: {
         scopus_publications_this_month: 14,
@@ -730,56 +796,63 @@ export class LeadershipService {
 
   async getHrOps(tenantId?: string) {
     const tid = this.tenantId(tenantId);
-    const [health, hostel, grievances, attrition, attritionTrend, research, facultyRating] =
-      await Promise.all([
-        this.db.query(
-          `SELECT total_students, total_faculty, avg_attendance FROM exec_daily_university_health WHERE tenant_id = $1`,
-          [tid],
-        ),
-        this.db
-          .query(
-            `SELECT
+    const [
+      health,
+      hostel,
+      grievances,
+      attrition,
+      attritionTrend,
+      research,
+      facultyRating,
+    ] = await Promise.all([
+      this.db.query(
+        `SELECT total_students, total_faculty, avg_attendance FROM exec_daily_university_health WHERE tenant_id = $1`,
+        [tid],
+      ),
+      this.db
+        .query(
+          `SELECT
            COUNT(*) FILTER (WHERE b.status = 'OCCUPIED')::int AS occupied,
            COUNT(*)::int AS total
          FROM operations_hostel_beds b
          JOIN operations_hostel_rooms r ON r.room_id = b.room_id
          WHERE r.tenant_id = $1`,
-            [tid],
-          )
-          .catch(() => [{ occupied: 0, total: 0 }]),
-        this.db
-          .query(
-            `SELECT COUNT(*)::int AS open_count FROM student_grievance_tickets
+          [tid],
+        )
+        .catch(() => [{ occupied: 0, total: 0 }]),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS open_count FROM student_grievance_tickets
          WHERE tenant_id = $1 AND status NOT IN ('RESOLVED', 'CLOSED')`,
-            [tid],
-          )
-          .catch(() => [{ open_count: 0 }]),
-        this.db
-          .query(
-            `SELECT COUNT(*)::int AS resignations FROM hr_resignations
+          [tid],
+        )
+        .catch(() => [{ open_count: 0 }]),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS resignations FROM hr_resignations
          WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '12 months'`,
-            [tid],
-          )
-          .catch(() => [{ resignations: 0 }]),
-        this.db
-          .query(
-            `SELECT date_trunc('month', created_at)::date AS month,
+          [tid],
+        )
+        .catch(() => [{ resignations: 0 }]),
+      this.db
+        .query(
+          `SELECT date_trunc('month', created_at)::date AS month,
                     COUNT(*)::int AS resignations
              FROM hr_resignations
              WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '12 months'
              GROUP BY 1 ORDER BY 1`,
-            [tid],
-          )
-          .catch(() => []),
-        this.getAcademics(tid).then((a) => a.iqac_research),
-        this.db
-          .query(
-            `SELECT ROUND(AVG(sf.score)::numeric, 2) AS avg_rating, COUNT(*)::int AS responses
+          [tid],
+        )
+        .catch(() => []),
+      this.getAcademics(tid).then((a) => a.iqac_research),
+      this.db
+        .query(
+          `SELECT ROUND(AVG(sf.score)::numeric, 2) AS avg_rating, COUNT(*)::int AS responses
              FROM student_feedback_records sf WHERE sf.tenant_id = $1`,
-            [tid],
-          )
-          .catch(() => [{ avg_rating: null, responses: 0 }]),
-      ]);
+          [tid],
+        )
+        .catch(() => [{ avg_rating: null, responses: 0 }]),
+    ]);
     const h = health[0] ?? {};
     const students = Number(h.total_students ?? 0);
     const faculty = Number(h.total_faculty ?? 0);
@@ -793,10 +866,12 @@ export class LeadershipService {
       attrition_rate_pct: faculty
         ? Math.round((Number(attrition[0]?.resignations ?? 0) / faculty) * 100)
         : 0,
-      attrition_trend: (attritionTrend as Array<Record<string, unknown>>).map((r) => ({
-        month: r.month,
-        resignations: Number(r.resignations ?? 0),
-      })),
+      attrition_trend: (attritionTrend as Array<Record<string, unknown>>).map(
+        (r) => ({
+          month: r.month,
+          resignations: Number(r.resignations ?? 0),
+        }),
+      ),
       average_api_score: Number(h.avg_attendance ?? 0),
       faculty_rating: {
         avg_score: Number(facultyRating[0]?.avg_rating ?? 0),
@@ -859,10 +934,12 @@ export class LeadershipService {
         ? Math.round((collected / expected) * 100)
         : 0,
       scholarship_waiver_total: Number(scholarships[0]?.scholarship_total ?? 0),
-      top_defaulter_departments: topDefaulters.map((r: Record<string, unknown>) => ({
-        department: r.department,
-        outstanding: Number(r.outstanding ?? 0),
-      })),
+      top_defaulter_departments: topDefaulters.map(
+        (r: Record<string, unknown>) => ({
+          department: r.department,
+          outstanding: Number(r.outstanding ?? 0),
+        }),
+      ),
     };
   }
 

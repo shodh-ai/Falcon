@@ -497,7 +497,17 @@ export class AcademicsController {
   @Roles('HOD', 'SuperAdmin')
   hodCourseAllocationTimetableBatchSave(
     @Req() req: { user: AuthUser },
-    @Body() dto: { semester: string; slots: Array<{ course_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string }> }
+    @Body()
+    dto: {
+      semester: string;
+      slots: Array<{
+        course_id: string;
+        faculty_user_id: string;
+        day_of_week: number;
+        start_time: string;
+        end_time: string;
+      }>;
+    },
   ) {
     return this.academics.saveHodCourseAllocationTimetableBatch(
       this.resolveTenantId(req.user),
@@ -506,10 +516,12 @@ export class AcademicsController {
     );
   }
 
-
   @Get('hod/courses/:courseId/students')
   @Roles('HOD', 'SuperAdmin')
-  hodCourseStudents(@Req() req: { user: AuthUser }, @Param('courseId') courseId: string) {
+  hodCourseStudents(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+  ) {
     return this.academics.listHodCourseStudents(
       this.resolveTenantId(req.user),
       req.user.user_id,
@@ -612,7 +624,14 @@ export class AcademicsController {
   @Roles('HOD', 'SuperAdmin')
   hodCourseAllocation(
     @Req() req: { user: AuthUser },
-    @Body() dto: { timetable_id: string; faculty_user_id: string; day_of_week?: number; start_time?: string; end_time?: string },
+    @Body()
+    dto: {
+      timetable_id: string;
+      faculty_user_id: string;
+      day_of_week?: number;
+      start_time?: string;
+      end_time?: string;
+    },
   ) {
     return this.academics.allocateHodCourse(
       this.resolveTenantId(req.user),
@@ -1224,7 +1243,10 @@ export class AcademicsController {
     @Query('components') components?: string,
   ) {
     const componentList = components
-      ? components.split(',').map((item) => item.trim()).filter(Boolean)
+      ? components
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
       : undefined;
     return this.facultyWorkspaces.getUnifiedCourseMarks(
       req.user.user_id,
@@ -1725,7 +1747,12 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFiles() files: Express.Multer.File[],
-    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    @Body()
+    body: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     return this.courseLms.uploadModuleMaterials(
       req.user.user_id,
@@ -1743,7 +1770,12 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    @Body()
+    body: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     return this.courseLms.completeModuleWithUpload(
       req.user.user_id,

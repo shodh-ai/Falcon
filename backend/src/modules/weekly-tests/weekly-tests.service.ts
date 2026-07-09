@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -46,39 +51,45 @@ export class WeeklyTestsService {
        JOIN academic_courses c ON c.course_id = t.course_id
        WHERE t.tenant_id = $1 AND t.created_by = $2
        ORDER BY t.created_at DESC`,
-      [tenantId, facultyId]
+      [tenantId, facultyId],
     );
   }
 
   async deleteTest(tenantId: string, facultyId: string, testId: string) {
     const test = await this.dataSource.query(
       `SELECT start_time FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2 AND created_by = $3`,
-      [testId, tenantId, facultyId]
+      [testId, tenantId, facultyId],
     );
     if (!test.length) {
       throw new NotFoundException('Test not found or unauthorized');
     }
     if (new Date(test[0].start_time) <= new Date()) {
-      throw new BadRequestException('Cannot delete a test that has already started');
+      throw new BadRequestException(
+        'Cannot delete a test that has already started',
+      );
     }
-    await this.dataSource.query(
-      `DELETE FROM weekly_tests WHERE test_id = $1`,
-      [testId]
-    );
+    await this.dataSource.query(`DELETE FROM weekly_tests WHERE test_id = $1`, [
+      testId,
+    ]);
     return { success: true };
   }
 
-  async toggleTestStatus(tenantId: string, facultyId: string, testId: string, isActive: boolean) {
+  async toggleTestStatus(
+    tenantId: string,
+    facultyId: string,
+    testId: string,
+    isActive: boolean,
+  ) {
     const test = await this.dataSource.query(
       `SELECT test_id FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2 AND created_by = $3`,
-      [testId, tenantId, facultyId]
+      [testId, tenantId, facultyId],
     );
     if (!test.length) {
       throw new NotFoundException('Test not found or unauthorized');
     }
     await this.dataSource.query(
       `UPDATE weekly_tests SET is_active = $1 WHERE test_id = $2`,
-      [isActive, testId]
+      [isActive, testId],
     );
     return { success: true };
   }
@@ -164,7 +175,13 @@ export class WeeklyTestsService {
          score = EXCLUDED.score,
          submitted_at = NOW(),
          violation_count = EXCLUDED.violation_count`,
-      [testId, studentId, JSON.stringify(data.answers), score, data.violation_count],
+      [
+        testId,
+        studentId,
+        JSON.stringify(data.answers),
+        score,
+        data.violation_count,
+      ],
     );
 
     return { success: true, score };
@@ -180,12 +197,12 @@ export class WeeklyTestsService {
 
       // 1. Update tests whose end_time has passed to COMPLETED
       await this.dataSource.query(
-        `UPDATE weekly_tests SET status = 'COMPLETED' WHERE status IN ('SCHEDULED', 'ACTIVE') AND end_time < NOW()`
+        `UPDATE weekly_tests SET status = 'COMPLETED' WHERE status IN ('SCHEDULED', 'ACTIVE') AND end_time < NOW()`,
       );
 
       // 2. Fetch all COMPLETED tests to auto-submit 0s for missing responses and push marks
       const testsToPublish = await this.dataSource.query(
-        `SELECT test_id, tenant_id, course_id, test_type FROM weekly_tests WHERE status = 'COMPLETED'`
+        `SELECT test_id, tenant_id, course_id, test_type FROM weekly_tests WHERE status = 'COMPLETED'`,
       );
 
       for (const t of testsToPublish) {
@@ -194,14 +211,14 @@ export class WeeklyTestsService {
           `SELECT e.student_user_id FROM student_course_enrollments e
            WHERE e.course_id = $1
              AND NOT EXISTS (SELECT 1 FROM weekly_test_responses r WHERE r.test_id = $2 AND r.student_user_id = e.student_user_id)`,
-          [t.course_id, t.test_id]
+          [t.course_id, t.test_id],
         );
 
         for (const s of missingStudents) {
           await this.dataSource.query(
             `INSERT INTO weekly_test_responses (test_id, student_user_id, answers, score, submitted_at, violation_count)
              VALUES ($1, $2, '[]'::jsonb, 0, NOW(), 0)`,
-            [t.test_id, s.student_user_id]
+            [t.test_id, s.student_user_id],
           );
         }
 
@@ -216,7 +233,7 @@ export class WeeklyTestsService {
              marks_obtained = EXCLUDED.marks_obtained,
              status = 'PUBLISHED',
              published_at = NOW()`,
-          [t.test_id]
+          [t.test_id],
         );
       }
     } catch (e) {

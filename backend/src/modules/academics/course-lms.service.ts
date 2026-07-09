@@ -193,7 +193,11 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     file: Express.Multer.File,
-    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    dto: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -284,7 +288,11 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     file: Express.Multer.File,
-    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    dto: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -335,7 +343,11 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     files: Express.Multer.File[],
-    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    dto: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -555,7 +567,9 @@ export class CourseLmsService {
       enrolled,
     );
     if (!canAccess)
-      throw new ForbiddenException('This material is not published to your section');
+      throw new ForbiddenException(
+        'This material is not published to your section',
+      );
 
     return material;
   }
@@ -660,9 +674,7 @@ export class CourseLmsService {
     );
     if (marks.length) return;
 
-    throw new NotFoundException(
-      'Course not found in your teaching timetable',
-    );
+    throw new NotFoundException('Course not found in your teaching timetable');
   }
 
   private async getModuleForFaculty(
@@ -717,7 +729,10 @@ export class CourseLmsService {
         return [];
       }
     }
-    return trimmed.split(',').map((v) => v.trim()).filter(Boolean);
+    return trimmed
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
   }
 
   private formatAllocationLabel(
@@ -847,10 +862,9 @@ export class CourseLmsService {
 
     const profileRows = await this.dataSource.query<
       Array<{ batch: string | null }>
-    >(
-      `SELECT batch FROM student_profiles WHERE user_id = $1 LIMIT 1`,
-      [studentUserId],
-    );
+    >(`SELECT batch FROM student_profiles WHERE user_id = $1 LIMIT 1`, [
+      studentUserId,
+    ]);
     const studentProgram = this.normalizeProgram(profileRows[0]?.batch);
 
     const allocationIds = [
@@ -872,7 +886,11 @@ export class CourseLmsService {
       return scopedIds.some((allocationId) => {
         const allocation = allocationMap.get(allocationId);
         if (!allocation) return false;
-        return this.enrollmentMatchesAllocation(enrollment, allocation, studentProgram);
+        return this.enrollmentMatchesAllocation(
+          enrollment,
+          allocation,
+          studentProgram,
+        );
       });
     });
   }
@@ -901,7 +919,8 @@ export class CourseLmsService {
     const { semesterNum, sectionCode } = this.parseAllocationSemester(
       allocation.semester,
     );
-    if (semesterNum != null && enrollment.semester !== semesterNum) return false;
+    if (semesterNum != null && enrollment.semester !== semesterNum)
+      return false;
 
     const allocationProgram = this.normalizeProgram(allocation.program_name);
     if (
@@ -912,7 +931,8 @@ export class CourseLmsService {
       return false;
     }
 
-    const enrollmentSection = enrollment.section_code?.trim().toUpperCase() ?? null;
+    const enrollmentSection =
+      enrollment.section_code?.trim().toUpperCase() ?? null;
     if (sectionCode && enrollmentSection && enrollmentSection !== sectionCode) {
       return false;
     }
@@ -938,7 +958,9 @@ export class CourseLmsService {
       return;
     }
 
-    const rows = await this.dataSource.query<Array<{ student_user_id: string }>>(
+    const rows = await this.dataSource.query<
+      Array<{ student_user_id: string }>
+    >(
       `SELECT DISTINCT e.student_user_id
        FROM student_course_enrollments e
        LEFT JOIN student_profiles sp ON sp.user_id = e.student_user_id

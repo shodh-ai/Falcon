@@ -906,9 +906,13 @@ export class AcademicsService {
     return { slots, faculty };
   }
 
-  async getHodCourseAllocationTimetableData(tenantId: string, hodUserId: string) {
+  async getHodCourseAllocationTimetableData(
+    tenantId: string,
+    hodUserId: string,
+  ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    if (!deptIds.length) return { allocations: [], timetables: [], faculty: [] };
+    if (!deptIds.length)
+      return { allocations: [], timetables: [], faculty: [] };
 
     const allocations = await this.users.manager.query(
       `SELECT a.allocation_id, a.semester, c.course_id, c.course_code, c.course_name,
@@ -928,7 +932,7 @@ export class AcademicsService {
           user_id: row.user_id,
           name: row.name,
           email: row.email,
-        }))
+        })),
       ),
     ]);
 
@@ -938,7 +942,16 @@ export class AcademicsService {
   async saveHodCourseAllocationTimetableBatch(
     tenantId: string,
     hodUserId: string,
-    dto: { semester: string; slots: Array<{ course_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string }> }
+    dto: {
+      semester: string;
+      slots: Array<{
+        course_id: string;
+        faculty_user_id: string;
+        day_of_week: number;
+        start_time: string;
+        end_time: string;
+      }>;
+    },
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     if (!deptIds.length) throw new Error('No departments found for HOD');
@@ -964,12 +977,23 @@ export class AcademicsService {
 
       if (dto.slots && dto.slots.length > 0) {
         for (const slot of dto.slots) {
-          const valid = allocations.some((a: any) => a.course_id === slot.course_id && a.faculty_user_id === slot.faculty_user_id);
+          const valid = allocations.some(
+            (a: any) =>
+              a.course_id === slot.course_id &&
+              a.faculty_user_id === slot.faculty_user_id,
+          );
           if (valid) {
             await manager.query(
               `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)`,
-              [tenantId, slot.course_id, slot.day_of_week, slot.start_time, slot.end_time, slot.faculty_user_id]
+              [
+                tenantId,
+                slot.course_id,
+                slot.day_of_week,
+                slot.start_time,
+                slot.end_time,
+                slot.faculty_user_id,
+              ],
             );
           }
         }
@@ -1025,8 +1049,11 @@ export class AcademicsService {
     });
   }
 
-
-  async listHodCourseStudents(tenantId: string, hodUserId: string, courseId: string) {
+  async listHodCourseStudents(
+    tenantId: string,
+    hodUserId: string,
+    courseId: string,
+  ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     if (!deptIds.length) return [];
 
@@ -1481,32 +1508,32 @@ export class AcademicsService {
     return faculty.map((row) => {
       const profile = profileByUser.get(row.user_id);
       return {
-      user_id: row.user_id,
-      name: row.name,
-      email: row.email,
-      phone: row.phone ?? null,
-      entity_id: row.entity_id ?? null,
-      department: row.department?.dept_name ?? null,
-      role: row.role?.role_name ?? null,
-      designation: profile?.designation ?? row.role?.role_name ?? null,
-      reporting_officer_id: row.reporting_officer_id ?? null,
-      reports_to_name: profile?.reports_to_name ?? hod?.name ?? null,
-      hod_name: hod?.name ?? null,
-      joined_at: profile?.joining_date ?? row.created_at ?? null,
-      shift_timing: profile?.shift_timing ?? null,
-      employee_id: profile?.employee_id ?? null,
-      courses: allocations
-        .filter((allocation) => allocation.faculty_user_id === row.user_id)
-        .map((allocation) => ({
-          timetable_id: allocation.timetable_id,
-          course_id: allocation.course_id,
-          course_code: allocation.course?.course_code,
-          course_name: allocation.course?.course_name,
-          day_of_week: allocation.day_of_week,
-          start_time: allocation.start_time,
-          end_time: allocation.end_time,
-          room: allocation.room,
-        })),
+        user_id: row.user_id,
+        name: row.name,
+        email: row.email,
+        phone: row.phone ?? null,
+        entity_id: row.entity_id ?? null,
+        department: row.department?.dept_name ?? null,
+        role: row.role?.role_name ?? null,
+        designation: profile?.designation ?? row.role?.role_name ?? null,
+        reporting_officer_id: row.reporting_officer_id ?? null,
+        reports_to_name: profile?.reports_to_name ?? hod?.name ?? null,
+        hod_name: hod?.name ?? null,
+        joined_at: profile?.joining_date ?? row.created_at ?? null,
+        shift_timing: profile?.shift_timing ?? null,
+        employee_id: profile?.employee_id ?? null,
+        courses: allocations
+          .filter((allocation) => allocation.faculty_user_id === row.user_id)
+          .map((allocation) => ({
+            timetable_id: allocation.timetable_id,
+            course_id: allocation.course_id,
+            course_code: allocation.course?.course_code,
+            course_name: allocation.course?.course_name,
+            day_of_week: allocation.day_of_week,
+            start_time: allocation.start_time,
+            end_time: allocation.end_time,
+            room: allocation.room,
+          })),
       };
     });
   }
@@ -1555,7 +1582,10 @@ export class AcademicsService {
     const semesterMap = new Map<string, string>();
     for (const row of courseAllocations) {
       if (row.course_id && row.faculty_user_id) {
-        semesterMap.set(`${row.faculty_user_id}_${row.course_id}`, row.semester || '');
+        semesterMap.set(
+          `${row.faculty_user_id}_${row.course_id}`,
+          row.semester || '',
+        );
       }
     }
 
@@ -1567,7 +1597,7 @@ export class AcademicsService {
       [tenantId, facultyIds],
     );
     const materialsMap = new Map<string, number>(
-      materialsCounts.map((r: any) => [r.course_id, Number(r.count)])
+      materialsCounts.map((r: any) => [r.course_id, Number(r.count)]),
     );
 
     const isoDay = new Date().getDay() === 0 ? 7 : new Date().getDay();
@@ -1599,34 +1629,62 @@ export class AcademicsService {
       if (!missingAttendanceMap.has(row.faculty_user_id)) {
         missingAttendanceMap.set(row.faculty_user_id, []);
       }
-      missingAttendanceMap.get(row.faculty_user_id)!.push(
-        `${row.course_code} at ${row.start_time} (Today)`
-      );
+      missingAttendanceMap
+        .get(row.faculty_user_id)!
+        .push(`${row.course_code} at ${row.start_time} (Today)`);
     }
 
     const courseIds = allocations.map((a) => a.course_id);
-    const marksStatuses = courseIds.length > 0 
-      ? await this.users.manager.query(
-          `SELECT course_id, exam_type, COUNT(*)::int AS count, MIN(status) AS min_status
+    const marksStatuses =
+      courseIds.length > 0
+        ? await this.users.manager.query(
+            `SELECT course_id, exam_type, COUNT(*)::int AS count, MIN(status) AS min_status
            FROM academic_marks 
            WHERE tenant_id = $1 AND course_id = ANY($2::uuid[]) 
            GROUP BY course_id, exam_type`,
-          [tenantId, courseIds],
-        )
-      : [];
-      
-    const marksMap = new Map<string, { ga: boolean; wt: boolean; labs: boolean; theory: boolean; status: string }>();
+            [tenantId, courseIds],
+          )
+        : [];
+
+    const marksMap = new Map<
+      string,
+      {
+        ga: boolean;
+        wt: boolean;
+        labs: boolean;
+        theory: boolean;
+        status: string;
+      }
+    >();
     for (const r of marksStatuses) {
       if (!marksMap.has(r.course_id)) {
-        marksMap.set(r.course_id, { ga: false, wt: false, labs: false, theory: false, status: 'OPEN' });
+        marksMap.set(r.course_id, {
+          ga: false,
+          wt: false,
+          labs: false,
+          theory: false,
+          status: 'OPEN',
+        });
       }
       const m = marksMap.get(r.course_id)!;
       const type = r.exam_type.toUpperCase();
       if (Number(r.count) > 0) {
-        if (type.startsWith('GA') || type.startsWith('DA') || type === 'INTERNAL' || type === 'QUIZ' || type === 'PROJECT' || type === 'ASSIGNMENT') {
+        if (
+          type.startsWith('GA') ||
+          type.startsWith('DA') ||
+          type === 'INTERNAL' ||
+          type === 'QUIZ' ||
+          type === 'PROJECT' ||
+          type === 'ASSIGNMENT'
+        ) {
           m.ga = true;
         }
-        if (type.startsWith('WT') || type.startsWith('CAT') || type.startsWith('MTE') || type === 'MID_TERM') {
+        if (
+          type.startsWith('WT') ||
+          type.startsWith('CAT') ||
+          type.startsWith('MTE') ||
+          type === 'MID_TERM'
+        ) {
           m.wt = true;
         }
         if (type.includes('LAB') || type.includes('PRACTICAL')) {
@@ -1638,7 +1696,11 @@ export class AcademicsService {
       }
       // Overall status is only LOCKED when the final ETE (theory/labs) is locked/published
       if (type === 'ETE' || type === 'END_TERM' || type === 'THEORY') {
-        if (r.min_status === 'LOCKED' || r.min_status === 'PUBLISHED' || r.min_status === 'PENDING_COE') {
+        if (
+          r.min_status === 'LOCKED' ||
+          r.min_status === 'PUBLISHED' ||
+          r.min_status === 'PENDING_COE'
+        ) {
           m.status = 'LOCKED';
         } else if (r.min_status === 'EDIT_REQUESTED') {
           m.status = 'EDIT_REQUESTED';
@@ -1648,7 +1710,9 @@ export class AcademicsService {
 
     const auditRecords: any[] = [];
     for (const fac of faculty) {
-      const facAllocations = allocations.filter((a) => a.faculty_user_id === fac.user_id);
+      const facAllocations = allocations.filter(
+        (a) => a.faculty_user_id === fac.user_id,
+      );
       const seenCourses = new Set<string>();
 
       if (facAllocations.length === 0) {
@@ -1682,19 +1746,29 @@ export class AcademicsService {
         const semester = this.parseSemester(semStr, alloc.course?.course_code);
 
         // Find if this specific course has a class scheduled today
-        const todaySlots = facAllocations.filter((a) => a.course_id === courseId && a.day_of_week === isoDay);
-        let attendanceStatusLabel: 'All Marked' | 'Missed Class' | 'No Class Today' | 'Upcoming Class' = 'No Class Today';
+        const todaySlots = facAllocations.filter(
+          (a) => a.course_id === courseId && a.day_of_week === isoDay,
+        );
+        let attendanceStatusLabel:
+          | 'All Marked'
+          | 'Missed Class'
+          | 'No Class Today'
+          | 'Upcoming Class' = 'No Class Today';
 
         if (todaySlots.length > 0) {
           const pad = (n: number) => String(n).padStart(2, '0');
           const now = new Date();
           const currentTimeString = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-          
-          const endedSlots = todaySlots.filter((a) => a.end_time < currentTimeString);
+
+          const endedSlots = todaySlots.filter(
+            (a) => a.end_time < currentTimeString,
+          );
           if (endedSlots.length === 0) {
             attendanceStatusLabel = 'Upcoming Class';
           } else {
-            const hasMissingForCourse = missing.some((m) => m.startsWith(alloc.course?.course_code || ''));
+            const hasMissingForCourse = missing.some((m) =>
+              m.startsWith(alloc.course?.course_code || ''),
+            );
             if (hasMissingForCourse) {
               attendanceStatusLabel = 'Missed Class';
             } else {
@@ -1703,8 +1777,14 @@ export class AcademicsService {
           }
         }
 
-        const marks = marksMap.get(courseId) ?? { ga: false, wt: false, labs: false, theory: false, status: 'OPEN' };
-        
+        const marks = marksMap.get(courseId) ?? {
+          ga: false,
+          wt: false,
+          labs: false,
+          theory: false,
+          status: 'OPEN',
+        };
+
         auditRecords.push({
           id: `a-${fac.user_id}-${courseId}`,
           facultyName: fac.name,
@@ -1714,7 +1794,9 @@ export class AcademicsService {
           subjectName: alloc.course?.course_name || 'N/A',
           pptsUploaded: ppts,
           attendanceMarked: missing.length === 0 ? 100 : 75,
-          attendanceMissingClasses: missing.filter((m) => m.startsWith(alloc.course?.course_code || '')),
+          attendanceMissingClasses: missing.filter((m) =>
+            m.startsWith(alloc.course?.course_code || ''),
+          ),
           attendanceStatusLabel,
           marksUploaded: {
             ga: marks.ga,
@@ -1723,7 +1805,10 @@ export class AcademicsService {
             theory: marks.theory,
           },
           marksStatus: marks.status,
-          editRequestReason: marks.status === 'EDIT_REQUESTED' ? 'Requesting unlock to submit revised grades.' : '',
+          editRequestReason:
+            marks.status === 'EDIT_REQUESTED'
+              ? 'Requesting unlock to submit revised grades.'
+              : '',
         });
       }
     }
@@ -1738,21 +1823,31 @@ export class AcademicsService {
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const targetStatus = dto.action === 'APPROVE' ? 'DRAFT' : 'PUBLISHED';
-    
+
     await this.users.manager.query(
       `UPDATE academic_marks 
        SET status = $1 
        WHERE tenant_id = $2 AND course_id = $3 AND status = 'EDIT_REQUESTED'`,
       [targetStatus, tenantId, dto.course_id],
     );
-    
-    return { success: true, message: `Request successfully ${dto.action.toLowerCase()}d.` };
+
+    return {
+      success: true,
+      message: `Request successfully ${dto.action.toLowerCase()}d.`,
+    };
   }
 
   async allocateHodCourse(
     tenantId: string,
     hodUserId: string,
-    dto: { timetable_id: string; faculty_user_id: string; day_of_week?: number; start_time?: string; end_time?: string; course_id?: string },
+    dto: {
+      timetable_id: string;
+      faculty_user_id: string;
+      day_of_week?: number;
+      start_time?: string;
+      end_time?: string;
+      course_id?: string;
+    },
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const faculty = await this.users.findOne({
@@ -1764,21 +1859,34 @@ export class AcademicsService {
     }
 
     const updatePayload: any = { faculty_user_id: dto.faculty_user_id };
-    if (dto.day_of_week !== undefined) updatePayload.day_of_week = dto.day_of_week;
+    if (dto.day_of_week !== undefined)
+      updatePayload.day_of_week = dto.day_of_week;
     if (dto.start_time !== undefined) updatePayload.start_time = dto.start_time;
     if (dto.end_time !== undefined) updatePayload.end_time = dto.end_time;
 
     let slot;
     if (dto.timetable_id) {
       if (dto.timetable_id.startsWith('draft-')) {
-        if (!dto.course_id || dto.day_of_week === undefined || !dto.start_time || !dto.end_time) {
+        if (
+          !dto.course_id ||
+          dto.day_of_week === undefined ||
+          !dto.start_time ||
+          !dto.end_time
+        ) {
           throw new Error('Missing required fields for new timetable slot');
         }
         const insertResult = await this.users.manager.query(
           `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)
            RETURNING *`,
-          [tenantId, dto.course_id, dto.day_of_week, dto.start_time, dto.end_time, dto.faculty_user_id]
+          [
+            tenantId,
+            dto.course_id,
+            dto.day_of_week,
+            dto.start_time,
+            dto.end_time,
+            dto.faculty_user_id,
+          ],
         );
         slot = insertResult[0];
       } else {
@@ -1808,7 +1916,7 @@ export class AcademicsService {
         [slot.timetable_id],
       );
     }
-    
+
     const courseIdToUpdate = slot?.course_id || dto.course_id;
     if (courseIdToUpdate) {
       await this.users.manager.query(
@@ -1976,7 +2084,11 @@ export class AcademicsService {
     studentUserId: string,
   ) {
     const { departmentIds } = await this.resolveDeanScope(deanUserId);
-    return this.fetchStudentDetailForDepartments(tenantId, departmentIds, studentUserId);
+    return this.fetchStudentDetailForDepartments(
+      tenantId,
+      departmentIds,
+      studentUserId,
+    );
   }
 
   async getHodStudentDetail(
@@ -1985,7 +2097,11 @@ export class AcademicsService {
     studentUserId: string,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    return this.fetchStudentDetailForDepartments(tenantId, deptIds, studentUserId);
+    return this.fetchStudentDetailForDepartments(
+      tenantId,
+      deptIds,
+      studentUserId,
+    );
   }
 
   private async fetchStudentDetailForDepartments(

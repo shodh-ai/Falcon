@@ -417,7 +417,11 @@ export class TicketService {
     return saved;
   }
 
-  async escalateTicket(ticketId: string, actorUserId: string, tenantId: string) {
+  async escalateTicket(
+    ticketId: string,
+    actorUserId: string,
+    tenantId: string,
+  ) {
     const ticket = await this.tickets.findOne({
       where: { ticket_id: ticketId, tenant_id: tenantId },
     });

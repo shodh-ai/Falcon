@@ -33,7 +33,9 @@ const LEGACY_EXAM_TYPES = [
   'MTE2',
 ] as const;
 
-const EXAM_TYPES = [...new Set([...GRADING_COMPONENT_IDS, ...LEGACY_EXAM_TYPES])] as readonly string[];
+const EXAM_TYPES = [
+  ...new Set([...GRADING_COMPONENT_IDS, ...LEGACY_EXAM_TYPES]),
+] as readonly string[];
 type ExamType = string;
 
 /** Enrollment visible to faculty who hold an active allocation or timetable slot for the course. */
@@ -774,7 +776,9 @@ export class FacultyWorkspacesService {
     courseId: string,
     examTypeInput: string,
   ) {
-    const examType = normalizeExamTypeForSave(String(examTypeInput ?? '').trim());
+    const examType = normalizeExamTypeForSave(
+      String(examTypeInput ?? '').trim(),
+    );
     if (!examType || !isKnownExamType(examType)) {
       throw new BadRequestException(`Invalid exam_type: ${examTypeInput}`);
     }
@@ -787,10 +791,9 @@ export class FacultyWorkspacesService {
       this.assertFacultyEntryAllowed(session);
     }
     const targetStatus = isDirectPublish ? 'PUBLISHED' : 'PENDING_COE';
-    const statusCondition =
-      isDirectPublish
-        ? `status IN ('DRAFT', 'PENDING_COE', 'PUBLISHED')`
-        : `status = 'DRAFT'`;
+    const statusCondition = isDirectPublish
+      ? `status IN ('DRAFT', 'PENDING_COE', 'PUBLISHED')`
+      : `status = 'DRAFT'`;
     const result = await this.dataSource.query(
       `UPDATE academic_marks
        SET status = $5, updated_at = NOW()
@@ -831,7 +834,7 @@ export class FacultyWorkspacesService {
     courseId: string,
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
-    
+
     // Mark all DRAFT and PENDING_COE marks for this course as PUBLISHED
     const result = await this.dataSource.query(
       `UPDATE academic_marks
@@ -843,7 +846,9 @@ export class FacultyWorkspacesService {
     );
 
     const publishedCount =
-      Array.isArray(result) && result.length === 2 && typeof result[1] === 'number'
+      Array.isArray(result) &&
+      result.length === 2 &&
+      typeof result[1] === 'number'
         ? result[1]
         : result.length;
 
@@ -1708,10 +1713,17 @@ export class FacultyWorkspacesService {
   ) {
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
-    const [studentRows, statsRows, assignmentRows, demeritRows, summaryRows, academicRows, gpaHistory] =
-      await Promise.all([
-        this.dataSource.query(
-          `SELECT u.user_id AS student_user_id, u.name, u.official_email,
+    const [
+      studentRows,
+      statsRows,
+      assignmentRows,
+      demeritRows,
+      summaryRows,
+      academicRows,
+      gpaHistory,
+    ] = await Promise.all([
+      this.dataSource.query(
+        `SELECT u.user_id AS student_user_id, u.name, u.official_email,
                   ${ROLL_NUMBER_SQL} AS roll_number,
                   sp.batch, d.dept_name AS department
            FROM student_course_enrollments e
@@ -1723,10 +1735,10 @@ export class FacultyWorkspacesService {
              AND e.student_user_id = $3
              AND e.status = 'ENROLLED'
            LIMIT 1`,
-          [tenantId, courseId, studentUserId],
-        ),
-        this.dataSource.query(
-          `WITH scores AS (
+        [tenantId, courseId, studentUserId],
+      ),
+      this.dataSource.query(
+        `WITH scores AS (
              SELECT e.student_user_id,
                     COALESCE(
                       ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2),
@@ -1806,10 +1818,10 @@ export class FacultyWorkspacesService {
            INNER JOIN ranked r ON r.student_user_id = $3
            WHERE c.tenant_id = $1 AND c.course_id = $2
            LIMIT 1`,
-          [tenantId, courseId, studentUserId],
-        ),
-        this.dataSource.query(
-          `SELECT aa.assignment_id, aa.title, aa.max_marks, aa.due_date,
+        [tenantId, courseId, studentUserId],
+      ),
+      this.dataSource.query(
+        `SELECT aa.assignment_id, aa.title, aa.max_marks, aa.due_date,
                   sub.submitted_at, sub.marks_awarded, sub.faculty_remarks,
                   CASE
                     WHEN sub.submission_id IS NULL THEN 'PENDING'
@@ -1824,9 +1836,10 @@ export class FacultyWorkspacesService {
            WHERE aa.tenant_id = $1 AND aa.course_id = $2
            ORDER BY aa.due_date DESC
            LIMIT 12`,
-          [tenantId, courseId, studentUserId],
-        ),
-        this.dataSource.query(
+        [tenantId, courseId, studentUserId],
+      ),
+      this.dataSource
+        .query(
           `SELECT di.incident_id, di.category, di.points, di.description, di.status,
                   di.created_at, c.course_code
            FROM demerit_incidents di
@@ -1838,37 +1851,48 @@ export class FacultyWorkspacesService {
            ORDER BY di.created_at DESC
            LIMIT 20`,
           [tenantId, courseId, studentUserId],
-        ).catch(() => []),
-        this.dataSource.query(
+        )
+        .catch(() => []),
+      this.dataSource
+        .query(
           `SELECT cumulative_demerit_points, is_subject_back_triggered, subject_back_triggered_at
            FROM student_academic_summaries
            WHERE tenant_id = $1 AND student_user_id = $2`,
           [tenantId, studentUserId],
-        ).catch(() => []),
-        this.dataSource.query(
+        )
+        .catch(() => []),
+      this.dataSource
+        .query(
           `SELECT academic_year, semester, sgpa, cgpa, backlog_count, progression_status, remarks
            FROM academic_records
            WHERE tenant_id = $1 AND student_user_id = $2
            ORDER BY semester ASC`,
           [tenantId, studentUserId],
-        ).catch(() => []),
-        this.loadStudentGpaHistory(tenantId, studentUserId),
-      ]);
+        )
+        .catch(() => []),
+      this.loadStudentGpaHistory(tenantId, studentUserId),
+    ]);
 
     const student = studentRows[0];
     const stats = statsRows[0];
-    if (!student || !stats) throw new NotFoundException('Student not found in this subject');
+    if (!student || !stats)
+      throw new NotFoundException('Student not found in this subject');
 
     const assignmentsTotal = Number(stats.assignments_total ?? 0);
     const assignmentsSubmitted = Number(stats.assignments_submitted ?? 0);
-    const pendingAssignments = Math.max(assignmentsTotal - assignmentsSubmitted, 0);
+    const pendingAssignments = Math.max(
+      assignmentsTotal - assignmentsSubmitted,
+      0,
+    );
     const internalAvg = Number(stats.internal_avg_percent ?? 0);
     const classAverage = Number(stats.class_average_percent ?? 0);
     const demeritPoints = (demeritRows as Array<{ points: number }>).reduce(
       (sum, row) => sum + Number(row.points ?? 0),
       0,
     );
-    const academic = academicRows.length ? academicRows[academicRows.length - 1] : null;
+    const academic = academicRows.length
+      ? academicRows[academicRows.length - 1]
+      : null;
     const gpaHistoryFinal =
       gpaHistory.length > 0
         ? gpaHistory
@@ -1881,7 +1905,11 @@ export class FacultyWorkspacesService {
             source: 'academic_record',
           }));
     const academicSummary = summaryRows[0] ?? null;
-    const flags: Array<{ label: string; severity: 'LOW' | 'MEDIUM' | 'HIGH'; detail: string }> = [];
+    const flags: Array<{
+      label: string;
+      severity: 'LOW' | 'MEDIUM' | 'HIGH';
+      detail: string;
+    }> = [];
 
     if (internalAvg < 40) {
       flags.push({
@@ -2036,7 +2064,11 @@ export class FacultyWorkspacesService {
     }
 
     const enrollments = await this.dataSource.query<
-      Array<{ semester: number; grade_points: string | number | null; credits: number }>
+      Array<{
+        semester: number;
+        grade_points: string | number | null;
+        credits: number;
+      }>
     >(
       `SELECT e.semester, e.grade_points, c.credits
        FROM student_course_enrollments e
