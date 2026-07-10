@@ -32,10 +32,15 @@ export class MasterDataController {
 
   @Get('birthdays/faculty/department')
   @Roles('HOD', 'Dean', 'SuperAdmin')
-  departmentFacultyBirthdays(@Req() req: { user: AuthUser }) {
+  departmentFacultyBirthdays(
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+  ) {
+    const resolvedScope = scope === 'dean' ? 'dean' : 'hod';
     return this.masterData.getDepartmentFacultyBirthdays(
       this.tenant(req),
       req.user.user_id,
+      resolvedScope,
     );
   }
 

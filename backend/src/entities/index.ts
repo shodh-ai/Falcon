@@ -56,6 +56,7 @@ export { HrDailyAttendance } from './hr-daily-attendance.entity';
 export type { CalculatedAttendanceStatus } from './hr-daily-attendance.entity';
 export { StaffLeaveRequest } from './staff-leave-request.entity';
 export { StaffPayslip } from './staff-payslip.entity';
+export { StaffPayslipDownloadRequest } from './staff-payslip-download-request.entity';
 export { StaffGatePass } from './staff-gate-pass.entity';
 
 export { JobPosting } from './job-posting.entity';

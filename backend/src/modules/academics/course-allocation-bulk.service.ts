@@ -410,6 +410,114 @@ export class CourseAllocationBulkService {
     return { items, faculty };
   }
 
+  async listAssignedForHod(tenantId: string, hodUserId: string) {
+    const tableExists = await this.dataSource.query<{ exists: boolean }[]>(
+      `SELECT EXISTS (
+         SELECT 1 FROM pg_tables
+         WHERE schemaname = 'public' AND tablename = 'academic_course_allocations'
+       ) AS exists`,
+    );
+    if (!tableExists[0]?.exists) return { items: [], faculty: [] };
+
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { items: [], faculty: [] };
+
+    const faculty = await this.listDepartmentFaculty(tenantId, deptIds);
+
+    const items = await this.dataSource.query<
+      {
+        allocation_id: string;
+        course_id: string | null;
+        subject_code: string;
+        subject_name: string;
+        subject_type: string;
+        credits: number;
+        program_name: string;
+        semester: string;
+        academic_year: string;
+        faculty_user_id: string;
+        faculty_name: string;
+      }[]
+    >(
+      `SELECT a.allocation_id,
+              a.course_id,
+              s.subject_code,
+              s.subject_name,
+              s.subject_type,
+              s.credits,
+              a.program_name,
+              a.semester,
+              a.academic_year,
+              a.faculty_user_id,
+              u.name AS faculty_name
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1
+         AND a.faculty_user_id IS NOT NULL
+         AND a.status = 'ACTIVE'
+         AND u.dept_id = ANY($2::int[])
+       ORDER BY a.academic_year DESC, s.subject_code ASC, a.semester ASC`,
+      [tenantId, deptIds],
+    );
+
+    return { items, faculty };
+  }
+
+  async reassignFacultyForHod(
+    tenantId: string,
+    hodUserId: string,
+    allocationId: string,
+    newFacultyUserId: string,
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const allocation = await this.dataSource.query<
+      {
+        allocation_id: string;
+        course_id: string | null;
+        faculty_user_id: string;
+        faculty_dept_id: number;
+        subject_name: string;
+        subject_code: string;
+        academic_year: string;
+      }[]
+    >(
+      `SELECT a.allocation_id, a.course_id, a.faculty_user_id, u.dept_id AS faculty_dept_id,
+              s.subject_name, s.subject_code, a.academic_year
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'`,
+      [allocationId, tenantId],
+    );
+    if (!allocation[0]) throw new NotFoundException('Allocation not found');
+    if (!deptIds.includes(Number(allocation[0].faculty_dept_id))) {
+      throw new BadRequestException('This subject is outside your department scope');
+    }
+    if (allocation[0].faculty_user_id === newFacultyUserId) {
+      throw new BadRequestException('Subject is already assigned to this faculty member');
+    }
+
+    const oldFacultyUserId = allocation[0].faculty_user_id;
+    const result = await this.assignFacultyToAllocation(
+      tenantId,
+      hodUserId,
+      allocationId,
+      newFacultyUserId,
+    );
+
+    if (oldFacultyUserId) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: oldFacultyUserId,
+        courseName: allocation[0].subject_name,
+        changeSummary: `${allocation[0].subject_name} (${allocation[0].subject_code}) has been reassigned to another faculty member for ${allocation[0].academic_year}.`,
+      });
+    }
+
+    return result;
+  }
+
   async assignFacultyToAllocation(
     tenantId: string,
     hodUserId: string,

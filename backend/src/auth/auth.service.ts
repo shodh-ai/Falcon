@@ -119,6 +119,7 @@ export class AuthService {
       tenant.tenant_id,
       tokenUser.user_id,
     );
+    const isDepartmentHod = await this.isDepartmentHod(tokenUser.user_id);
     return {
       token,
       user: {
@@ -141,8 +142,19 @@ export class AuthService {
           roleClaims.primaryRole,
         ),
         has_direct_reports: directReports,
+        is_department_hod: isDepartmentHod,
       },
     };
+  }
+
+  async isDepartmentHod(userId: string): Promise<boolean> {
+    const rows = await this.dataSource.query<Array<{ is_hod: boolean }>>(
+      `SELECT EXISTS (
+         SELECT 1 FROM departments WHERE hod_user_id = $1
+       ) AS is_hod`,
+      [userId],
+    );
+    return Boolean(rows[0]?.is_hod);
   }
 
   async ensurePrimaryRoleMapping(user: User) {

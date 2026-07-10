@@ -38,6 +38,7 @@ export type ApplyWorkforceRequestDto = {
   regularization_date?: string;
   missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
   reason?: string;
+  supporting_doc_urls?: string[];
 };
 
 @Injectable()
@@ -312,6 +313,9 @@ export class HrWorkforceService {
       reason: dto.reason?.trim() ?? null,
       regularization_date: dto.regularization_date ?? null,
       missed_punch_type: dto.missed_punch_type ?? null,
+      supporting_doc_urls: Array.isArray(dto.supporting_doc_urls)
+        ? dto.supporting_doc_urls.filter((u) => typeof u === 'string' && u.trim())
+        : [],
       status: routing.is_final ? 'HR_APPROVED' : 'PENDING',
       entity_id: entityId,
       workflow_id: routing.workflow_id,
@@ -574,6 +578,20 @@ export class HrWorkforceService {
     const entityId =
       row.entity_id ??
       (await this.resolveEmployeeEntityId(tenantId, row.staff_user_id));
+    const stepType = await this.resolveCurrentStepApproverType(tenantId, row);
+    const isHodStep =
+      stepType === 'REPORTING_MANAGER' || stepType === 'DEPT_HEAD';
+
+    if (isHodStep && this.shouldFinalizeAfterHodApproval(row)) {
+      row.status = 'HR_APPROVED';
+      row.current_approver_user_id = null;
+      row.approver_remarks = comment?.trim() ?? row.approver_remarks;
+      const saved = await this.requests.save(row);
+      await this.applyApprovalSideEffects(saved);
+      void this.notifyEmployeeDecision(staff, saved, true, comment);
+      return saved;
+    }
+
     const next = await this.hrWorkflow.advanceAfterApproval(
       tenantId,
       entityId,
@@ -585,6 +603,7 @@ export class HrWorkforceService {
     if (next.is_final) {
       row.status = 'HR_APPROVED';
       row.current_approver_user_id = null;
+      row.approver_remarks = comment?.trim() ?? row.approver_remarks;
       const saved = await this.requests.save(row);
       await this.applyApprovalSideEffects(saved);
       void this.notifyEmployeeDecision(staff, saved, true, comment);
@@ -593,6 +612,7 @@ export class HrWorkforceService {
 
     row.current_step_order = next.step_order;
     row.current_approver_user_id = next.approver_user_id;
+    row.approver_remarks = comment?.trim() ?? row.approver_remarks;
     const saved = await this.requests.save(row);
 
     if (next.approver_user_id) {
@@ -915,6 +935,15 @@ export class HrWorkforceService {
       startDate: row.start_date,
       endDate: row.end_date,
     });
+  }
+
+  private shouldFinalizeAfterHodApproval(row: StaffLeaveRequest): boolean {
+    if (row.request_type === 'ON_DUTY') return true;
+    if (row.request_type === 'LEAVE') {
+      const leaveType = (row.leave_type ?? '').toUpperCase();
+      return ['CL', 'OD', 'RH'].includes(leaveType);
+    }
+    return false;
   }
 
   private async resolveCurrentStepApproverType(

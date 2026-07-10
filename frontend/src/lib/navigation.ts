@@ -49,6 +49,7 @@ import {
   Calendar,
   CheckCircle,
   DollarSign,
+  Download,
   Network,
   Building2,
   Receipt,
@@ -248,6 +249,23 @@ export function filterPortalConfigForHrCapabilities(
   return { ...config, navGroups, commandItems };
 }
 
+/** Hide placement coordinator route unless faculty is assigned by HOD. */
+export function filterFacultyPortalForPlacementCoordinator(
+  config: PortalConfig,
+  isCoordinator: boolean,
+): PortalConfig {
+  const coordHref = '/faculty/placement-coordinator';
+  if (isCoordinator) return config;
+  const navGroups = config.navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => item.href !== coordHref),
+    }))
+    .filter((group) => group.items.length > 0);
+  const commandItems = config.commandItems.filter((item) => item.href !== coordHref);
+  return { ...config, navGroups, commandItems };
+}
+
 /** Hide team-approval routes from faculty unless they manage direct reports. */
 export function filterFacultyPortalForManagerAccess(
   config: PortalConfig,
@@ -390,6 +408,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
+        { label: 'Placement Coordinator', href: '/faculty/placement-coordinator', icon: Briefcase, keywords: ['placement', 'drives', 'coordinator', 'attendance'] },
         { label: 'Meetings', href: '/faculty/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'minutes', 'agenda'] },
       ],
     },
@@ -438,6 +457,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
+        { label: 'Placement Coordinator', href: '/faculty/placement-coordinator', icon: Briefcase, keywords: ['placement', 'drives', 'coordinator'] },
         { label: 'Meetings', href: '/faculty/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'minutes'] },
       ],
     },
@@ -475,6 +495,7 @@ export const hrPortal: PortalConfig = {
       items: [
         { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, keywords: ['basic', 'hra', 'da', 'pf', 'tds'], hrModule: 'payroll' },
         { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, keywords: ['run payroll', 'payslip', 'lwp'], hrModule: 'payroll' },
+        { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: Download, keywords: ['payslip', 'download', 'approval', 'reason'], hrModule: 'payroll' },
       ],
     },
     {
@@ -518,6 +539,7 @@ export const hrPortal: PortalConfig = {
     { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, hrModule: 'leaves' },
     { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, hrModule: 'payroll' },
     { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, hrModule: 'payroll' },
+    { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: Download, hrModule: 'payroll' },
     { label: 'Recruitment ATS', href: '/hr/recruitment', icon: Briefcase, hrModule: 'recruitment' },
     { label: 'Appraisals & API', href: '/hr/appraisals', icon: Award, hrModule: 'directory' },
     { label: 'Promotions', href: '/hr/promotions', icon: ArrowUpCircle, hrModule: 'directory' },
@@ -546,9 +568,9 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['cl', 'sl', 'od', 'approve', 'regularisation', 'leaves'] },
-        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=attendance&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'hrms', 'dashboard', 'reports', 'probation'] },
-        { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: Ticket, keywords: ['exit', 'mid-duty', 'pass'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=requests&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'gate pass', 'hrms', 'dashboard', 'reports', 'probation', 'pending approvals', 'inbox', 'team requests'] },
+        { label: 'Resignations & Offboarding', href: '/hod/approvals/resignations', icon: DoorOpen, keywords: ['resignation', 'exit', 'separation', 'fnf', 'offboarding'] },
+        { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['student profile', 'edit', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
         { label: 'Extra Class Approvals', href: '/hod/approvals/extra-classes', icon: CalendarClock, keywords: ['substitute', 'cancel', 'timetable'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
@@ -561,10 +583,10 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
+        { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'lms', 'marks', 'ppt', 'syllabus'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
-        { label: 'Slow Learners', href: '/hod/academics/slow-learners', icon: LineChart, keywords: ['at risk', 'remedial', 'low grade'] },
         { label: 'Meetings', href: '/hod/meetings', icon: CalendarClock, keywords: ['schedule', 'faculty', 'dean', 'minutes'] },
       ],
     },
@@ -572,7 +594,7 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
-        { label: 'Attendance Defaulters', href: '/hod/students/defaulters', icon: AlertTriangle, keywords: ['defaulters', 'low attendance', '75'] },
+        { label: 'Disciplinary Actions', href: '/hod/students/discipline', icon: Scale, keywords: ['discipline', 'demerit', 'misconduct', 'dc'] },
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
@@ -582,6 +604,7 @@ export const hodPortal: PortalConfig = {
       title: 'Examination',
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
+        { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
       ],
     },
     {
@@ -609,9 +632,8 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Pending Approvals (Inbox)', href: '/hod/inbox?scope=dept', icon: Inbox, keywords: ['approve'] },
-        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=attendance&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory'] },
-        { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: Ticket, keywords: ['gate pass'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=requests&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory', 'gate pass', 'pending approvals', 'team requests'] },
+        { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['profile', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['proxy'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['events'] },
         { label: 'Venue Approvals', href: '/hod/venue-requests', icon: MapPin, keywords: ['venue'] },
@@ -622,6 +644,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
+        { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'marks'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['api'] },
@@ -641,6 +664,7 @@ export const hodPortal: PortalConfig = {
       title: 'Examination',
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
+        { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
       ],
     },
     {

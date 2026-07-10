@@ -113,6 +113,7 @@ export class AuthController {
           },
         })) > 0
       : false;
+    const isDepartmentHod = await this.authService.isDepartmentHod(user.user_id);
     return {
       ...user,
       onboarding_status: normalizeOnboardingStatusForWizard(
@@ -123,6 +124,7 @@ export class AuthController {
       permissions,
       allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
       has_direct_reports: hasDirectReports,
+      is_department_hod: isDepartmentHod,
     };
   }
 

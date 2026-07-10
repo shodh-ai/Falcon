@@ -8,7 +8,6 @@ import {
   MapPin,
   Phone,
   Mail,
-  MoreVertical,
   X,
   Calendar,
   Clock,
@@ -167,8 +166,50 @@ function ReportingDirectoryContent() {
 
         const rosterById = new Map(roster.map((f) => [f.user_id, f]));
         const scopedEmployees = matrix.employees ?? [];
+
+        const mapRosterMember = (f: FacultyRosterItem, idx: number, status: ZimyoMember['status'] = 'ABSENT'): ZimyoMember => {
+          const joinedAt = f.joined_at ?? null;
+          const joinedDate = joinedAt
+            ? new Date(joinedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
+            : '—';
+          const probationDate = joinedAt
+            ? new Date(new Date(joinedAt).setFullYear(new Date(joinedAt).getFullYear() + 1))
+                .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
+            : '—';
+          const shiftRaw = f.shift_timing;
+          const shiftTiming = shiftRaw
+            ? shiftRaw.replace(/(\d{2}:\d{2})(?::\d{2})?/g, (_, t: string) => {
+                const [h, m] = t.split(':').map(Number);
+                const ampm = h >= 12 ? 'PM' : 'AM';
+                const hr = h % 12 || 12;
+                return `${String(hr).padStart(2, '0')}:${String(m).padStart(2, '0')} ${ampm}`;
+              })
+            : '—';
+          return {
+            id: f.user_id,
+            name: f.name,
+            empId: f.employee_id ?? (f.entity_id ? String(f.entity_id) : `EMP${String(idx + 1).padStart(3, '0')}`),
+            designation: f.designation ?? f.role ?? 'Faculty',
+            department: f.department ?? 'Department',
+            phone: f.phone ?? '—',
+            location: f.department ?? 'Campus',
+            email: f.email ?? '—',
+            reportsTo: f.reports_to_name ?? roster[0]?.hod_name ?? 'HOD',
+            joiningDate: joinedDate,
+            probationEnd: probationDate,
+            shiftTiming,
+            status,
+            tag: f.role ?? 'Faculty',
+          };
+        };
+
         if (scopedEmployees.length === 0) {
-          setMembers([]);
+          if (roster.length === 0) {
+            setMembers([]);
+            setLoading(false);
+            return;
+          }
+          setMembers(roster.map((f, idx) => mapRosterMember(f, idx)));
           setLoading(false);
           return;
         }
@@ -347,7 +388,6 @@ return (
                   <div key={m.id} onClick={() => { setSelectedMember(m); setProfileTab('details'); }} className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm hover:shadow-md hover:border-slate-200 transition-all cursor-pointer space-y-4">
                     <div className="flex justify-between items-start">
                       <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold text-[9px] py-0 px-2 hover:bg-emerald-50 rounded-md">{m.tag}</Badge>
-                      <button className="text-slate-400 hover:text-slate-700" onClick={(e) => e.stopPropagation()}><MoreVertical className="h-4 w-4" /></button>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-xl bg-sgvu-navy/5 text-sgvu-navy font-bold flex items-center justify-center text-xs border border-sgvu-navy/10">
@@ -380,15 +420,9 @@ return (
       {activeTab === 'requests' && (
         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 animate-in fade-in duration-200 space-y-4">
           <p className="text-xs text-slate-500 font-medium rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
-            Same approval queue as sidebar{' '}
-            <button
-              type="button"
-              className="font-bold text-sgvu-navy underline underline-offset-2"
-              onClick={() => router.push(`/hod/inbox?scope=${teamScope}`)}
-            >
-              Pending Approvals (Inbox)
-            </button>
-            . Scope and counts stay in sync.
+            Leave, gate pass, regularisation, and other team approvals live here under{' '}
+            <span className="font-bold text-sgvu-navy">Team Requests</span>
+            . Use the tabs above to switch between request types.
           </p>
           <TeamRequestsPanel defaultScope={HOD_DEFAULT_SCOPE} />
         </div>

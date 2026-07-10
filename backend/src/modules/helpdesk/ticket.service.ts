@@ -286,8 +286,22 @@ export class TicketService {
     return rows[0];
   }
 
-  async listProfileCorrectionTickets(tenantId: string, limit = 20) {
-    return this.tickets
+  async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
+    const rows = await this.dataSource.query<{ dept_id: number }[]>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1
+       UNION
+       SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL`,
+      [hodUserId],
+    );
+    return rows.map((r) => Number(r.dept_id)).filter((id) => Number.isFinite(id));
+  }
+
+  async listProfileCorrectionTickets(
+    tenantId: string,
+    limit = 20,
+    deptIds?: number[],
+  ) {
+    const qb = this.tickets
       .createQueryBuilder('t')
       .innerJoin('users', 'u', 'u.user_id = t.student_user_id')
       .where('t.status = :status', { status: 'PENDING' })
@@ -295,10 +309,13 @@ export class TicketService {
       .andWhere(
         `(t.category = 'STUDENT_PROFILE' OR (t.category = 'ACADEMICS' AND t.subject ILIKE :profileHint))`,
         { profileHint: '%profile%' },
-      )
-      .orderBy('t.created_at', 'DESC')
-      .take(limit)
-      .getMany();
+      );
+
+    if (deptIds?.length) {
+      qb.andWhere('u.dept_id IN (:...deptIds)', { deptIds });
+    }
+
+    return qb.orderBy('t.created_at', 'DESC').take(limit).getMany();
   }
 
   async updateStatus(ticketId: string, dto: UpdateTicketStatusDto) {

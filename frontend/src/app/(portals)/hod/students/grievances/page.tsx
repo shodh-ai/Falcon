@@ -53,7 +53,13 @@ export default function HodGrievancesPage() {
     try {
       await api.post(`/api/helpdesk/tickets/${selectedTicket.ticket_id}/escalate`);
       toast.success('Ticket escalated successfully');
+      setRows((prev) =>
+        prev.map((r) =>
+          r.ticket_id === selectedTicket.ticket_id ? { ...r, status: 'ESCALATED' } : r,
+        ),
+      );
       setSelectedTicket(null);
+      setMessage('');
     } catch {
       toast.error('Failed to escalate ticket');
     } finally {

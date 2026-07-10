@@ -33,7 +33,8 @@ type OpenDrive = {
   job_role?: string;
   company_name: string;
   package_lpa?: string | number;
-  min_cgpa: string | number;
+  min_cgpa?: string | number;
+  is_dept_drive?: boolean;
 };
 
 type Profile = {
@@ -60,16 +61,31 @@ export default function StudentDashboardPage() {
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [metricsResult, placementsResult, profileResult] = await Promise.allSettled([
+        const [metricsResult, placementsResult, deptDrivesResult, profileResult] = await Promise.allSettled([
           api.get<Summary>('/api/academics/dashboard/metrics'),
           api.get<{ open_drives?: OpenDrive[]; open_jobs?: OpenDrive[] }>('/api/placement/student/hub'),
+          api.get<Array<{ drive_id: string; company_name: string; job_role: string | null; registered?: boolean }>>(
+            '/api/academics/student/placement/drives',
+          ),
           api.get<Profile>('/api/student/profile'),
         ]);
 
         if (metricsResult.status === 'fulfilled') setSummary(metricsResult.value);
-        if (placementsResult.status === 'fulfilled') {
-          const hub = placementsResult.value;
-          setOpenDrives((hub.open_drives ?? hub.open_jobs ?? []).slice(0, 3));
+        if (placementsResult.status === 'fulfilled' || deptDrivesResult.status === 'fulfilled') {
+          const campus =
+            placementsResult.status === 'fulfilled'
+              ? (placementsResult.value.open_drives ?? placementsResult.value.open_jobs ?? [])
+              : [];
+          const dept =
+            deptDrivesResult.status === 'fulfilled'
+              ? deptDrivesResult.value.map((d) => ({
+                  drive_id: d.drive_id,
+                  job_role: d.job_role ?? undefined,
+                  company_name: d.company_name,
+                  is_dept_drive: true,
+                }))
+              : [];
+          setOpenDrives([...dept, ...campus].slice(0, 5));
         }
         if (profileResult.status === 'fulfilled') setProfile(profileResult.value);
       } catch (error) {
@@ -223,7 +239,7 @@ export default function StudentDashboardPage() {
 
       <StudentSectionCard
         title="Open positions"
-        description="Campus recruitment drives — apply from the Placements Hub"
+        description="Department drives and campus recruitment — apply from the Placements Hub"
         icon={Briefcase}
         action={
           <Link href="/student/placements" className="text-xs font-semibold text-sgvu-navy hover:underline">
@@ -246,9 +262,19 @@ export default function StudentDashboardPage() {
                 className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-gold/40"
               >
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-sgvu-navy">{drive.job_role ?? drive.job_title}</p>
+                  <div className="flex items-center gap-2">
+                    {drive.is_dept_drive ? (
+                      <Badge className="bg-sgvu-navy/10 text-sgvu-navy border border-sgvu-navy/20 text-[10px] shrink-0">
+                        Dept drive
+                      </Badge>
+                    ) : null}
+                    <p className="truncate font-semibold text-sgvu-navy">{drive.job_role ?? drive.job_title}</p>
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    {drive.company_name} · ₹{Number(drive.package_lpa ?? 0).toFixed(1)} LPA · Min CGPA {drive.min_cgpa}
+                    {drive.company_name}
+                    {drive.is_dept_drive
+                      ? ' · Register on Placements Hub'
+                      : ` · ₹${Number(drive.package_lpa ?? 0).toFixed(1)} LPA · Min CGPA ${drive.min_cgpa}`}
                   </p>
                 </div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
