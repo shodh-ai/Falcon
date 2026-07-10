@@ -317,7 +317,11 @@ export class StudentSafetyService {
       concern.accused_description as string | null,
     );
 
-    if (nextStatus === 'UNDER_REVIEW' && !concern.accused_notified_at && accusedUserId) {
+    if (
+      nextStatus === 'UNDER_REVIEW' &&
+      !concern.accused_notified_at &&
+      accusedUserId
+    ) {
       await this.notifyAccused(
         tenantId,
         accusedUserId,
@@ -561,7 +565,8 @@ export class StudentSafetyService {
     const roles = roleMap[accusedType];
     if (!roles.length) return null;
 
-    const nameHint = accusedDescription.split('·')[0]?.trim() ?? accusedDescription.trim();
+    const nameHint =
+      accusedDescription.split('·')[0]?.trim() ?? accusedDescription.trim();
     if (!nameHint) return null;
 
     const [exact] = await this.db.query(

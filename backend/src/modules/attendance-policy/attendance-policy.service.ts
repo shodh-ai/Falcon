@@ -316,7 +316,13 @@ export class AttendancePolicyService {
          (tenant_id, dept_id, requested_min_percent, reason, requested_by, status, decided_by, decided_at)
        VALUES ($1, $2, $3, $4, $5, 'APPROVED', $5, NOW())
        RETURNING *`,
-      [tenantId, deptId, pct, dto.reason?.trim() || 'Direct HOD Override', hodUserId],
+      [
+        tenantId,
+        deptId,
+        pct,
+        dto.reason?.trim() || 'Direct HOD Override',
+        hodUserId,
+      ],
     );
     return rows[0];
   }

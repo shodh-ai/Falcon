@@ -421,6 +421,18 @@ export class AcademicsController {
     return this.academics.getWeeklyTimetable(req.user.user_id);
   }
 
+  @Get('dashboard/timetable/week')
+  @Roles('Student')
+  weeklyTimetableCalendar(
+    @Req() req: { user: AuthUser },
+    @Query('weekStart') weekStart?: string,
+  ) {
+    return this.academics.getWeeklyTimetableCalendar(
+      req.user.user_id,
+      weekStart,
+    );
+  }
+
   @Get('courses/my-enrollments')
   @Roles('Student')
   myCourseEnrollments(@Req() req: { user: AuthUser }) {
@@ -488,7 +500,17 @@ export class AcademicsController {
   @Roles('HOD', 'SuperAdmin')
   hodCourseAllocationTimetableBatchSave(
     @Req() req: { user: AuthUser },
-    @Body() dto: { semester: string; slots: Array<{ course_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string }> }
+    @Body()
+    dto: {
+      semester: string;
+      slots: Array<{
+        course_id: string;
+        faculty_user_id: string;
+        day_of_week: number;
+        start_time: string;
+        end_time: string;
+      }>;
+    },
   ) {
     return this.academics.saveHodCourseAllocationTimetableBatch(
       this.resolveTenantId(req.user),
@@ -497,10 +519,12 @@ export class AcademicsController {
     );
   }
 
-
   @Get('hod/courses/:courseId/students')
   @Roles('HOD', 'SuperAdmin')
-  hodCourseStudents(@Req() req: { user: AuthUser }, @Param('courseId') courseId: string) {
+  hodCourseStudents(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+  ) {
     return this.academics.listHodCourseStudents(
       this.resolveTenantId(req.user),
       req.user.user_id,
@@ -1033,7 +1057,14 @@ export class AcademicsController {
   @Roles('HOD', 'SuperAdmin')
   hodCourseAllocation(
     @Req() req: { user: AuthUser },
-    @Body() dto: { timetable_id: string; faculty_user_id: string; day_of_week?: number; start_time?: string; end_time?: string },
+    @Body()
+    dto: {
+      timetable_id: string;
+      faculty_user_id: string;
+      day_of_week?: number;
+      start_time?: string;
+      end_time?: string;
+    },
   ) {
     return this.academics.allocateHodCourse(
       this.resolveTenantId(req.user),
@@ -1548,6 +1579,47 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/timetable/schedule-data')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  facultyWorkspaceScheduleData(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.getFacultyScheduleData(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Post('faculty/workspaces/timetable/slots')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  facultyWorkspaceTimetableSlotsBatch(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { slots: Array<any> }
+  ) {
+    return this.facultyWorkspaces.scheduleTimetableSlotBatch(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      dto,
+    );
+  }
+
+  @Get('faculty/workspaces/timetable/rooms/availability')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getAvailableRoomsForSlot(
+    @Req() req: { user: AuthUser },
+    @Query('day') day: string,
+    @Query('startTime') startTime: string,
+    @Query('endTime') endTime: string
+  ) {
+    if (!day || !startTime || !endTime) {
+      throw new BadRequestException('day, startTime, and endTime are required');
+    }
+    return this.facultyWorkspaces.getAvailableRoomsForSlot(
+      this.resolveTenantId(req.user),
+      parseInt(day, 10),
+      startTime,
+      endTime
+    );
+  }
+
   @Get('faculty/workspaces/timetable/stats')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   facultyWorkspaceTimetableStats(@Req() req: { user: AuthUser }) {
@@ -1628,7 +1700,10 @@ export class AcademicsController {
     @Query('components') components?: string,
   ) {
     const componentList = components
-      ? components.split(',').map((item) => item.trim()).filter(Boolean)
+      ? components
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
       : undefined;
     return this.facultyWorkspaces.getUnifiedCourseMarks(
       req.user.user_id,
@@ -2129,7 +2204,12 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFiles() files: Express.Multer.File[],
-    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    @Body()
+    body: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     return this.courseLms.uploadModuleMaterials(
       req.user.user_id,
@@ -2147,7 +2227,12 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    @Body()
+    body: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     return this.courseLms.completeModuleWithUpload(
       req.user.user_id,
@@ -2184,6 +2269,27 @@ export class AcademicsController {
       materialId,
     );
     const file = await this.courseLms.streamMaterialDownload(material);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.filename}"`,
+    );
+    return file.stream.pipe(res);
+  }
+
+  @Get('student/assignments/:assignmentId/download')
+  @Roles('Student')
+  async downloadStudentAssignment(
+    @Param('assignmentId') assignmentId: string,
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+  ) {
+    const assignment = await this.assignments.getAssignmentForStudentDownload(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+    const file = await this.assignments.streamAssignmentFile(assignment);
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader(
       'Content-Disposition',

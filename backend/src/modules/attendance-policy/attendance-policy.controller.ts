@@ -133,14 +133,11 @@ export class AttendancePolicyController {
       min_attendance?: number | null;
     },
   ) {
-    const val = dto.min_attendance !== undefined && dto.min_attendance !== null
-      ? Number(dto.min_attendance)
-      : null;
-    return this.policy.updateCourseThreshold(
-      this.tenant(req),
-      courseId,
-      val,
-    );
+    const val =
+      dto.min_attendance !== undefined && dto.min_attendance !== null
+        ? Number(dto.min_attendance)
+        : null;
+    return this.policy.updateCourseThreshold(this.tenant(req), courseId, val);
   }
 
   // --- Dean: decide threshold changes ---

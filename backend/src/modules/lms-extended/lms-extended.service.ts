@@ -218,9 +218,9 @@ export class LmsExtendedService {
     userId: string,
     roles: string[],
   ) {
-    const isStudent = roles.includes('Student') && !roles.some((r) =>
-      ['Faculty', 'SuperAdmin', 'HOD', 'Dean'].includes(r),
-    );
+    const isStudent =
+      roles.includes('Student') &&
+      !roles.some((r) => ['Faculty', 'SuperAdmin', 'HOD', 'Dean'].includes(r));
     if (isStudent) {
       const [enrolled] = await this.dataSource.query<Array<{ ok: number }>>(
         `SELECT 1 AS ok FROM student_course_enrollments

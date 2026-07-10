@@ -332,8 +332,8 @@ export const studentPortal: PortalConfig = {
         { label: 'Mentorship', href: '/student/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'meeting'] },
         { label: 'Placements & Internships', href: '/student/placements', icon: Briefcase, keywords: ['placement', 'jobs', 'internship'], shortLabel: 'Placements' },
         { label: 'Grievances & Helpdesk', href: '/student/helpdesk', icon: LifeBuoy, keywords: ['tickets', 'discipline', 'grievance'], shortLabel: 'Helpdesk' },
+        { label: 'University Policies', href: '/student/policies', icon: Shield, keywords: ['rules', 'policies', 'mandatory', 'vote', 'warden', 'dean'] },
         { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'sexual harassment', 'bullying', 'posh'] },
-        { label: 'Safety Notices', href: '/student/safety-notices', icon: Shield, keywords: ['ragging', 'harassment', 'notice', 'accused'] },
       ],
     },
   ],
@@ -356,8 +356,8 @@ export const studentPortal: PortalConfig = {
     { label: 'Ph.D. Programme', href: '/student/phd', icon: GraduationCap },
     { label: 'Graduation & Alumni', href: '/student/exit', icon: GraduationCap },
     { label: 'Helpdesk', href: '/student/helpdesk', icon: LifeBuoy },
+    { label: 'University Policies', href: '/student/policies', icon: Shield },
     { label: 'Safety Concerns', href: '/student/safety-concerns', icon: Shield },
-    { label: 'Safety Notices', href: '/student/safety-notices', icon: Shield },
   ],
 };
 
@@ -373,6 +373,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Academics & Teaching',
       items: [
+        { label: 'Schedule Classes', href: '/faculty/schedule-classes', icon: CalendarClock, keywords: ['timetable', 'slots', 'drag and drop'] },
         { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },

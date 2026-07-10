@@ -1,5 +1,4 @@
 export type GradingComponent = {
-
   id: string;
 
   label: string;
@@ -7,15 +6,11 @@ export type GradingComponent = {
   max: number;
 
   readOnly: boolean;
-
 };
-
-
 
 /** Canonical order: GA → WT → PE → lab → MTE → ETE */
 
 export const GRADING_COMPONENT_CATALOG: GradingComponent[] = [
-
   { id: 'GA1', label: 'GA1', max: 5, readOnly: false },
 
   { id: 'GA2', label: 'GA2', max: 5, readOnly: false },
@@ -25,7 +20,6 @@ export const GRADING_COMPONENT_CATALOG: GradingComponent[] = [
   { id: 'WT2', label: 'WT2', max: 5, readOnly: true },
 
   ...Array.from({ length: 10 }, (_, index) => ({
-
     id: `PE${index + 1}`,
 
     label: `PE${index + 1}`,
@@ -33,13 +27,11 @@ export const GRADING_COMPONENT_CATALOG: GradingComponent[] = [
     max: 4,
 
     readOnly: false,
-
   })),
 
   { id: 'PROJECT_TITLE', label: 'Project Title', max: 2, readOnly: false },
 
   {
-
     id: 'PROJECT_PRESENTATION_1',
 
     label: 'Project Presentation 1',
@@ -47,11 +39,9 @@ export const GRADING_COMPONENT_CATALOG: GradingComponent[] = [
     max: 9,
 
     readOnly: false,
-
   },
 
   {
-
     id: 'PROJECT_PRESENTATION_2',
 
     label: 'Project Presentation 2',
@@ -59,7 +49,6 @@ export const GRADING_COMPONENT_CATALOG: GradingComponent[] = [
     max: 9,
 
     readOnly: false,
-
   },
 
   { id: 'LAB_VIVA', label: 'Viva', max: 10, readOnly: false },
@@ -79,39 +68,24 @@ export const GRADING_COMPONENT_CATALOG: GradingComponent[] = [
   { id: 'MTE1', label: 'MTE1', max: 15, readOnly: false },
 
   { id: 'MTE2', label: 'MTE2', max: 15, readOnly: false },
-
 ];
-
-
 
 export const GRADING_COMPONENT_IDS = GRADING_COMPONENT_CATALOG.map((c) => c.id);
 
-
-
 const catalogMap = new Map(GRADING_COMPONENT_CATALOG.map((c) => [c.id, c]));
 
-
-
-export function getGradingComponent(examType: string): GradingComponent | undefined {
-
+export function getGradingComponent(
+  examType: string,
+): GradingComponent | undefined {
   return catalogMap.get(examType);
-
 }
-
-
 
 export function getGradingComponentMax(examType: string): number | null {
-
   return catalogMap.get(examType)?.max ?? null;
-
 }
 
-
-
 export function isAutoSyncedExamType(examType: string): boolean {
-
   return examType === 'WT1' || examType === 'WT2';
-
 }
 
 export function normalizeExamTypeForSave(examType: string): string {
@@ -129,10 +103,14 @@ export function isKnownExamType(examType: string): boolean {
   return (
     isFacultyDirectGradingType(normalized) ||
     normalized === 'QUIZ' ||
-    ['CAT1', 'CAT2', 'END_TERM', 'INTERNAL', 'ASSIGNMENT', 'DA1', 'DA2'].includes(
-      normalized,
-    )
+    [
+      'CAT1',
+      'CAT2',
+      'END_TERM',
+      'INTERNAL',
+      'ASSIGNMENT',
+      'DA1',
+      'DA2',
+    ].includes(normalized)
   );
 }
-
-

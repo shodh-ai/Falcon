@@ -124,10 +124,7 @@ export class TasksService {
     return this.taskAssignmentRepository.save(assignment);
   }
 
-  async findUserAssignments(
-    userId: string,
-    status?: string,
-  ): Promise<any[]> {
+  async findUserAssignments(userId: string, status?: string): Promise<any[]> {
     const queryBuilder = this.taskAssignmentRepository
       .createQueryBuilder('assignment')
       .leftJoinAndSelect('assignment.task', 'task')

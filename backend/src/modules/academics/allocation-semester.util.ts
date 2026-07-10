@@ -34,7 +34,8 @@ export function allocationMatchesStudentSlot(
   studentSection: string | null,
   studentProgram: string,
 ): boolean {
-  const { semesterNum, sectionCode } = parseAllocationSemester(allocationSemester);
+  const { semesterNum, sectionCode } =
+    parseAllocationSemester(allocationSemester);
   if (semesterNum != null && semesterNum !== studentSemester) return false;
 
   const allocProgram = normalizeProgram(allocationProgram);

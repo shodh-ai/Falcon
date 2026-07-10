@@ -84,20 +84,22 @@ export class AdmitCardPdfService {
                 image = await pdfDoc.embedPng(imageData);
               }
             } catch (fallbackErr: any) {
-              throw new Error(`Failed both JPG and PNG embedding: ${fallbackErr.message}`);
+              throw new Error(
+                `Failed both JPG and PNG embedding: ${fallbackErr.message}`,
+              );
             }
           }
-          
+
           const imgWidth = 80;
           const imgHeight = 100;
-          
+
           page.drawImage(image, {
             x: width - 50 - imgWidth,
             y: height - 50 - imgHeight,
             width: imgWidth,
             height: imgHeight,
           });
-          
+
           page.drawRectangle({
             x: width - 50 - imgWidth,
             y: height - 50 - imgHeight,
@@ -108,10 +110,16 @@ export class AdmitCardPdfService {
             opacity: 0,
           });
         } else {
-          require('fs').appendFileSync('admit-card-debug.log', `[DEBUG] imageBuffer is null! isPng=${isPng}, filePath=${input.student.profile_picture_url}\n`);
+          require('fs').appendFileSync(
+            'admit-card-debug.log',
+            `[DEBUG] imageBuffer is null! isPng=${isPng}, filePath=${input.student.profile_picture_url}\n`,
+          );
         }
       } catch (err: any) {
-        require('fs').appendFileSync('admit-card-debug.log', `[DEBUG] Failed to embed photo: ${err.message}\n`);
+        require('fs').appendFileSync(
+          'admit-card-debug.log',
+          `[DEBUG] Failed to embed photo: ${err.message}\n`,
+        );
         console.error('Failed to embed profile picture in admit card:', err);
       }
     }

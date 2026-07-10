@@ -48,7 +48,10 @@ export class LeadershipController {
   }
 
   @Get('pillar-summary')
-  pillarSummary(@Req() req: { user: AuthUser }, @Query('period') period?: string) {
+  pillarSummary(
+    @Req() req: { user: AuthUser },
+    @Query('period') period?: string,
+  ) {
     return this.leadership.getPillarSummary(req.user.tenant_id, period);
   }
 
@@ -456,9 +459,17 @@ export class LeadershipController {
   updateThreshold(
     @Req() req: { user: AuthUser },
     @Body()
-    body: { category: string; auto_approve_below: number; chairman_approval_above: number },
+    body: {
+      category: string;
+      auto_approve_below: number;
+      chairman_approval_above: number;
+    },
   ) {
-    return this.executiveAction.updateThreshold(req.user.tenant_id, req.user.user_id, body);
+    return this.executiveAction.updateThreshold(
+      req.user.tenant_id,
+      req.user.user_id,
+      body,
+    );
   }
 
   @Get('action/tasks')
@@ -478,7 +489,11 @@ export class LeadershipController {
       priority?: string;
     },
   ) {
-    return this.executiveAction.createTask(req.user.tenant_id, req.user.user_id, body);
+    return this.executiveAction.createTask(
+      req.user.tenant_id,
+      req.user.user_id,
+      body,
+    );
   }
 
   @Patch('action/tasks/:taskId/status')
@@ -487,7 +502,11 @@ export class LeadershipController {
     @Param('taskId') taskId: string,
     @Body() body: { status: string },
   ) {
-    return this.executiveAction.updateTaskStatus(req.user.tenant_id, taskId, body.status);
+    return this.executiveAction.updateTaskStatus(
+      req.user.tenant_id,
+      taskId,
+      body.status,
+    );
   }
 
   @Get('action/memos')
@@ -499,9 +518,18 @@ export class LeadershipController {
   sendMemo(
     @Req() req: { user: AuthUser },
     @Body()
-    body: { subject: string; body: string; audience_roles: string[]; confidential?: boolean },
+    body: {
+      subject: string;
+      body: string;
+      audience_roles: string[];
+      confidential?: boolean;
+    },
   ) {
-    return this.executiveAction.sendMemo(req.user.tenant_id, req.user.user_id, body);
+    return this.executiveAction.sendMemo(
+      req.user.tenant_id,
+      req.user.user_id,
+      body,
+    );
   }
 
   @Get('action/broadcasts')
@@ -520,7 +548,11 @@ export class LeadershipController {
       audience_filter: Record<string, unknown>;
     },
   ) {
-    return this.executiveAction.sendBroadcast(req.user.tenant_id, req.user.user_id, body);
+    return this.executiveAction.sendBroadcast(
+      req.user.tenant_id,
+      req.user.user_id,
+      body,
+    );
   }
 
   @Get('action/documents')
@@ -532,7 +564,12 @@ export class LeadershipController {
   registerDocument(
     @Req() req: { user: AuthUser & { ip?: string } },
     @Body()
-    body: { title: string; category: string; storage_key: string; expires_at?: string },
+    body: {
+      title: string;
+      category: string;
+      storage_key: string;
+      expires_at?: string;
+    },
   ) {
     return this.executiveAction.registerDocument(
       req.user.tenant_id,
@@ -547,7 +584,10 @@ export class LeadershipController {
     @Req() req: { user: AuthUser },
     @Query('document_id') documentId?: string,
   ) {
-    return this.executiveAction.listDocumentAccessLogs(req.user.tenant_id, documentId);
+    return this.executiveAction.listDocumentAccessLogs(
+      req.user.tenant_id,
+      documentId,
+    );
   }
 
   @Get('action/mous')
@@ -561,7 +601,10 @@ export class LeadershipController {
   }
 
   @Post('action/vip-contacts')
-  upsertVipContact(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  upsertVipContact(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.executiveAction.upsertVipContact(req.user.tenant_id, body);
   }
 
@@ -573,7 +616,13 @@ export class LeadershipController {
   @Post('action/compliance-calendar')
   createComplianceEvent(
     @Req() req: { user: AuthUser },
-    @Body() body: { title: string; event_type: string; due_date: string; notes?: string },
+    @Body()
+    body: {
+      title: string;
+      event_type: string;
+      due_date: string;
+      notes?: string;
+    },
   ) {
     return this.executiveAction.createComplianceEvent(req.user.tenant_id, body);
   }
@@ -585,7 +634,9 @@ export class LeadershipController {
 
   @Get('action/grievance-matrix')
   grievanceMatrix(@Req() req: { user: AuthUser }) {
-    return this.executiveAction.getGrievanceEscalationMatrix(req.user.tenant_id);
+    return this.executiveAction.getGrievanceEscalationMatrix(
+      req.user.tenant_id,
+    );
   }
 
   @Get('financial/overview')

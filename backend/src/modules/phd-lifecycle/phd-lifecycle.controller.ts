@@ -28,7 +28,11 @@ export class PhdLifecycleController {
   @Roles('Student', 'Applicant', 'SuperAdmin')
   applicationEligibility(@Req() req: { user: AuthUser }) {
     const role = req.user.primaryRole ?? req.user.role;
-    return this.phd.getApplicationEligibility(this.tenant(req), req.user.user_id, role);
+    return this.phd.getApplicationEligibility(
+      this.tenant(req),
+      req.user.user_id,
+      role,
+    );
   }
 
   @Post('applications')
@@ -48,7 +52,12 @@ export class PhdLifecycleController {
     },
   ) {
     const role = req.user.primaryRole ?? req.user.role;
-    return this.phd.createApplication(this.tenant(req), req.user.user_id, dto, role);
+    return this.phd.createApplication(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+      role,
+    );
   }
 
   @Get('applications/mine')
@@ -66,31 +75,51 @@ export class PhdLifecycleController {
   @Get('drc/candidates')
   @Roles('DRC_MEMBER', 'SuperAdmin')
   drcQueue(@Req() req: { user: AuthUser }) {
-    return this.phd.listForRole(this.tenant(req), 'DRC_MEMBER', req.user.user_id);
+    return this.phd.listForRole(
+      this.tenant(req),
+      'DRC_MEMBER',
+      req.user.user_id,
+    );
   }
 
   @Get('rac/candidates')
   @Roles('RAC_MEMBER', 'SuperAdmin')
   racQueue(@Req() req: { user: AuthUser }) {
-    return this.phd.listForRole(this.tenant(req), 'RAC_MEMBER', req.user.user_id);
+    return this.phd.listForRole(
+      this.tenant(req),
+      'RAC_MEMBER',
+      req.user.user_id,
+    );
   }
 
   @Get('rrc/candidates')
   @Roles('RRC_MEMBER', 'SuperAdmin')
   rrcQueue(@Req() req: { user: AuthUser }) {
-    return this.phd.listForRole(this.tenant(req), 'RRC_MEMBER', req.user.user_id);
+    return this.phd.listForRole(
+      this.tenant(req),
+      'RRC_MEMBER',
+      req.user.user_id,
+    );
   }
 
   @Get('adjudicator/candidates')
   @Roles('PHD_ADJUDICATOR', 'SuperAdmin')
   adjudicatorQueue(@Req() req: { user: AuthUser }) {
-    return this.phd.listForRole(this.tenant(req), 'PHD_ADJUDICATOR', req.user.user_id);
+    return this.phd.listForRole(
+      this.tenant(req),
+      'PHD_ADJUDICATOR',
+      req.user.user_id,
+    );
   }
 
   @Get('registrar/candidates')
   @Roles('Registrar', 'SuperAdmin')
   registrarQueue(@Req() req: { user: AuthUser }) {
-    return this.phd.listForRole(this.tenant(req), 'Registrar', req.user.user_id);
+    return this.phd.listForRole(
+      this.tenant(req),
+      'Registrar',
+      req.user.user_id,
+    );
   }
 
   @Get('dean/candidates')
@@ -102,7 +131,11 @@ export class PhdLifecycleController {
   @Get('candidates')
   @Roles('IQAC', 'Dean', 'Chairman', 'SuperAdmin')
   allCandidates(@Req() req: { user: AuthUser }) {
-    return this.phd.listForRole(this.tenant(req), 'SuperAdmin', req.user.user_id);
+    return this.phd.listForRole(
+      this.tenant(req),
+      'SuperAdmin',
+      req.user.user_id,
+    );
   }
 
   @Get('guide-options')
@@ -161,7 +194,13 @@ export class PhdLifecycleController {
     },
   ) {
     const role = req.user.primaryRole ?? req.user.role ?? 'SuperAdmin';
-    return this.phd.performAction(this.tenant(req), req.user.user_id, role, id, dto);
+    return this.phd.performAction(
+      this.tenant(req),
+      req.user.user_id,
+      role,
+      id,
+      dto,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

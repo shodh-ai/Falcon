@@ -10,6 +10,7 @@ import {
   Res,
   UnauthorizedException,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -23,6 +24,7 @@ import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { LocalLoginDto } from './dto/local-login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 type AuthProfileUser = {
   user_id: string;
@@ -80,6 +82,23 @@ export class AuthController {
       hr_capabilities: payload.hr_capabilities,
       allowed_entities: payload.allowed_entities,
     };
+  }
+
+  @Post('change-password')
+  @UseGuards(AuthGuard('jwt'))
+  async changePassword(
+    @Req() req: Request & { user: AuthProfileUser },
+    @Body() body: ChangePasswordDto,
+  ) {
+    if (body.new_password !== body.confirm_password) {
+      throw new BadRequestException('Passwords do not match');
+    }
+    return this.authService.changePassword(
+      req.user.user_id,
+      req.user.tenant_id,
+      body.current_password,
+      body.new_password,
+    );
   }
 
   private async buildProfilePayload(user: AuthProfileUser) {
