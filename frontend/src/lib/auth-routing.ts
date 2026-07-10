@@ -474,19 +474,30 @@ export function resolveProfileHref(
 export function getPostLoginPath(user: {
   role?: string;
   primaryRole?: string;
+  roles?: string[];
+  is_department_hod?: boolean;
   onboarding_status?: string;
 }): string {
-  const role = user.primaryRole ?? user.role;
-  const config = getOnboardingConfigForRole(role);
+  const roles = (user.roles ?? [user.primaryRole ?? user.role])
+    .filter((role): role is string => Boolean(role))
+    .map((role) => role.trim().toLowerCase());
+  const hasHodRole = roles.includes('hod');
+  const primaryRole = user.primaryRole ?? user.role;
+
+  // Department heads use the same HOD Command Center as CSE, even when Dean is primary.
+  const landingRole =
+    hasHodRole && user.is_department_hod ? 'HOD' : primaryRole;
+
+  const config = getOnboardingConfigForRole(landingRole);
   if (config) {
     const onboardingPath = getOnboardingStepPath(
       config.portalPrefix,
       user.onboarding_status,
-      role,
+      landingRole,
     );
     if (onboardingPath) return onboardingPath;
   }
-  return getDashboardPathForRole(role);
+  return getDashboardPathForRole(landingRole);
 }
 
 export { needsPortalOnboarding };

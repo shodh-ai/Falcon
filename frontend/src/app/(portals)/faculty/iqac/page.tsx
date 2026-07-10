@@ -1,12 +1,15 @@
 'use client';
 
-import { ChangeEvent, useEffect, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useState } from 'react';
 import { Loader2, Upload } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/context/AuthContext';
+import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { getSubdomainFromClient } from '@/lib/tenant';
 import {
   FacultyPageHeader,
   FacultyPageShell,
@@ -36,33 +39,30 @@ type Assignment = {
 
 export default function FacultyIqacPage() {
   const { token } = useAuth();
+  const api = useAuthedApi();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string>('');
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
 
-  async function loadTasks() {
-    if (!token) return;
+  const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/assignments/my`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Unable to load IQAC tasks');
-      const data = await response.json();
-      setAssignments(data);
+      const data = await api.get<Assignment[]>('/tasks/assignments/my');
+      setAssignments(Array.isArray(data) ? data : []);
       setSelectedAssignmentId((current) => current || data[0]?.assignment_id || '');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load IQAC tasks');
+      setAssignments([]);
     } finally {
       setLoading(false);
     }
-  }
+  }, [api]);
 
   useEffect(() => {
     void loadTasks();
-  }, [token]);
+  }, [loadTasks]);
 
   async function uploadEvidence() {
     if (!token || !file || !selectedAssignmentId) {
@@ -73,27 +73,22 @@ export default function FacultyIqacPage() {
     formData.append('file', file);
     setUploading(true);
     try {
-      const uploadResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/uploads/single`, {
+      const uploadResponse = await fetch(`${getApiBaseUrl()}/uploads/single`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-tenant-subdomain': getSubdomainFromClient(),
+        },
         body: formData,
       });
       if (!uploadResponse.ok) throw new Error('Upload failed');
       const uploaded = await uploadResponse.json();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tasks/submissions/${selectedAssignmentId}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          file_path: uploaded.path ?? uploaded.url,
-          file_name: uploaded.originalname ?? file.name,
-          file_size: uploaded.size ?? file.size,
-          file_type: uploaded.mimetype ?? file.type,
-        }),
+      await api.post(`/tasks/submissions/${selectedAssignmentId}`, {
+        file_path: uploaded.path ?? uploaded.url,
+        file_name: uploaded.originalname ?? file.name,
+        file_size: uploaded.size ?? file.size,
+        file_type: uploaded.mimetype ?? file.type,
       });
-      if (!response.ok) throw new Error('Evidence submission failed');
       toast.success('Evidence uploaded for AI audit');
       setFile(null);
       await loadTasks();
@@ -172,7 +167,7 @@ export default function FacultyIqacPage() {
             </div>
             <Button
               className="mt-4 w-full sm:w-auto gap-1.5"
-              onClick={uploadEvidence}
+              onClick={() => void uploadEvidence()}
               disabled={uploading || !file || !selectedAssignmentId}
             >
               {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}

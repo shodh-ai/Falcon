@@ -74,6 +74,9 @@ export class StaffLeaveRequest extends BaseTenantEntity {
   @Column({ type: 'text', nullable: true })
   approver_remarks: string | null;
 
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  supporting_doc_urls: string[];
+
   @CreateDateColumn()
   applied_at: Date;
 }

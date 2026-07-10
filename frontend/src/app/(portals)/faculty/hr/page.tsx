@@ -1,8 +1,8 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { FormEvent, useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { FormEvent, useEffect, useState, ChangeEvent } from 'react';
+import { Loader2, Paperclip } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { getSubdomainFromClient } from '@/lib/tenant';
 import { HrAttendanceCalendar } from '@/components/hr/HrAttendanceCalendar';
 import { workforceDateInputProps, workforceMinDate } from '@/lib/workforce-dates';
 import {
@@ -41,7 +43,7 @@ type WorkforceRequest = {
 
 export default function FacultyHrHubPage() {
   const api = useAuthedApi();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [loading, setLoading] = useState(true);
   const [today, setToday] = useState<TodayWidget | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
@@ -63,6 +65,24 @@ export default function FacultyHrHubPage() {
     gate_purpose: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [attachment, setAttachment] = useState<File | null>(null);
+
+  async function uploadAttachment(file: File): Promise<string | undefined> {
+    if (!token) return undefined;
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${getApiBaseUrl()}/uploads/single`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-tenant-subdomain': getSubdomainFromClient(),
+      },
+      body: formData,
+    });
+    if (!res.ok) throw new Error('Attachment upload failed');
+    const json = await res.json();
+    return json.path ?? json.url;
+  }
 
   async function load() {
     if (!user?.user_id) return;
@@ -102,6 +122,11 @@ export default function FacultyHrHubPage() {
         });
         toast.success('Gate pass submitted to your HOD');
       } else {
+        let supporting_doc_urls: string[] | undefined;
+        if (attachment && (modal === 'LEAVE' || modal === 'ON_DUTY')) {
+          const path = await uploadAttachment(attachment);
+          if (path) supporting_doc_urls = [path];
+        }
         await api.post('/api/hr/workforce/requests', {
           request_type: modal,
           leave_type: form.leave_type,
@@ -110,10 +135,12 @@ export default function FacultyHrHubPage() {
           regularization_date: modal === 'REGULARIZATION' ? form.regularization_date : undefined,
           missed_punch_type: modal === 'REGULARIZATION' ? form.missed_punch_type : undefined,
           reason: form.reason,
+          supporting_doc_urls,
         });
         toast.success('Request submitted to your reporting officer');
       }
       setModal(null);
+      setAttachment(null);
       setForm({
         leave_type: 'CL',
         start_date: '',
@@ -314,6 +341,7 @@ export default function FacultyHrHubPage() {
                     <option value="CL">Casual (CL)</option>
                     <option value="SL">Sick (SL)</option>
                     <option value="EL">Earned (EL)</option>
+                    <option value="RH">Restricted Holiday (RH)</option>
                   </Select>
                 )}
                 {modal === 'REGULARIZATION' ? (
@@ -364,6 +392,20 @@ export default function FacultyHrHubPage() {
                     value={form.reason}
                     onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
                   />
+                )}
+                {(modal === 'LEAVE' || modal === 'ON_DUTY') && (
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                    <Paperclip className="h-4 w-4" />
+                    <span>{attachment ? attachment.name : 'Attach proof (optional)'}</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                        setAttachment(e.target.files?.[0] ?? null)
+                      }
+                    />
+                  </label>
                 )}
                 <div className="flex gap-2">
                   <Button type="submit" disabled={isSubmitting}>
