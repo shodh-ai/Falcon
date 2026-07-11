@@ -75,18 +75,23 @@ export function useTeamScopeCounts() {
   return counts;
 }
 
+function formatMemberCount(n: number): string {
+  return n === 1 ? '1 member' : `${n} members`;
+}
+
 export function scopeTabLabel(
   scope: TeamScope,
   counts: TeamScopeCounts | null,
 ): string {
   const n = counts?.[scope];
-  const suffix = n === undefined || n === null ? '…' : String(n);
+  const suffix =
+    n === undefined || n === null ? '…' : formatMemberCount(n);
   switch (scope) {
     case 'direct':
-      return `Direct Reporting (${suffix})`;
+      return `Direct Reporting · ${suffix}`;
     case 'indirect':
-      return `Indirect Reporting (${suffix})`;
+      return `Indirect Reporting · ${suffix}`;
     case 'dept':
-      return `Department (${suffix})`;
+      return `Department Faculty · ${suffix}`;
   }
 }

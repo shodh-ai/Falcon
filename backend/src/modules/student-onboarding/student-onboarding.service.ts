@@ -58,7 +58,9 @@ function mapProfileSaveError(err: unknown): never {
     );
   }
   if (code === '22007' || code === '22008') {
-    throw new BadRequestException('Invalid date of birth. Use the date picker format.');
+    throw new BadRequestException(
+      'Invalid date of birth. Use the date picker format.',
+    );
   }
   throw err;
 }

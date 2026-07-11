@@ -137,6 +137,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                               size="sm"
                               className="gap-2"
                               onClick={() =>
+                                token &&
                                 downloadWithAuth(
                                   `/api/academics/student/assignments/${row.assignment.assignment_id}/download`,
                                   token,

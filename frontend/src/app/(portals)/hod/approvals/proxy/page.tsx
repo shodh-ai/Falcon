@@ -41,7 +41,19 @@ export default function HodProxyApprovalsPage() {
 
   return (
     <HodPageFrame>
-      <HodPageHeader title="Proxy / Alternate Teaching" description="Approve substitute faculty for leave days." />
+      <HodPageHeader
+        title="Proxy / Alternate Teaching"
+        description="When faculty apply leave, they nominate a proxy to cover classes. You approve before the substitute can mark attendance."
+      />
+      <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4 text-sm text-slate-700 space-y-2">
+        <p className="font-semibold text-sgvu-navy">Approval pipeline</p>
+        <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+          <li>Faculty submits leave → selects proxy faculty per class slot</li>
+          <li>Request appears here as <strong>PENDING_HOD_APPROVAL</strong></li>
+          <li>HOD approves → both absent and proxy faculty are notified</li>
+          <li>Approved proxy can mark attendance for that course on the leave date</li>
+        </ol>
+      </div>
       <HodDataTable
         loading={loading}
         rows={rows}

@@ -1,7 +1,8 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Plus, Upload, CheckCircle2, Trash2, Clock, Eye, EyeOff } from 'lucide-react';
 import {
@@ -38,8 +39,80 @@ export default function FacultyWeeklyTestsPage() {
   // Answer key array, length 10
   const [answerKey, setAnswerKey] = useState<string[]>(Array(10).fill(''));
   const [isAnswerKeyModalOpen, setIsAnswerKeyModalOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [submitting, setSubmitting] = useState(false);
+
+  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        
+        const newAnswerKey = [...answerKey];
+        let count = 0;
+        
+        for (const row of data) {
+          if (!row || !row.length) continue;
+          
+          let qNum = -1;
+          let opt = '';
+          
+          for (const cell of row) {
+            const strCell = String(cell).trim().toUpperCase();
+            if (/^Q?\s*(\d+)$/.test(strCell)) {
+              const num = parseInt(strCell.replace(/[^0-9]/g, ''), 10);
+              if (num >= 1 && num <= 10) {
+                qNum = num - 1;
+              }
+            } else if (['A', 'B', 'C', 'D'].includes(strCell)) {
+              opt = strCell;
+            }
+          }
+          
+          if (qNum !== -1 && opt) {
+            newAnswerKey[qNum] = opt;
+            count++;
+          }
+        }
+        
+        if (count === 0) {
+          let index = 0;
+          for (const row of data) {
+            for (const cell of row) {
+               const strCell = String(cell).trim().toUpperCase();
+               if (['A', 'B', 'C', 'D'].includes(strCell)) {
+                  if (index < 10) {
+                    newAnswerKey[index] = strCell;
+                    index++;
+                    count++;
+                  }
+               }
+            }
+          }
+        }
+        
+        setAnswerKey(newAnswerKey);
+        if (count > 0) {
+           toast.success(`Successfully parsed answers from Excel sheet`);
+        } else {
+           toast.error('Could not find answers (A, B, C, D) in the uploaded Excel sheet.');
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error('Failed to parse Excel file');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
 
   // My tests state
   const [myTests, setMyTests] = useState<any[]>([]);
@@ -271,9 +344,24 @@ export default function FacultyWeeklyTestsPage() {
                   </DialogTrigger>
                   <DialogContent className="max-w-3xl">
                     <DialogHeader>
-                      <DialogTitle>Provide Answer Key</DialogTitle>
+                      <DialogTitle className="flex justify-between items-center mr-6">
+                        <span>Provide Answer Key</span>
+                        <div className="flex gap-2 items-center">
+                          <input 
+                            type="file" 
+                            accept=".xlsx, .xls, .csv" 
+                            className="hidden" 
+                            ref={fileInputRef} 
+                            onChange={handleExcelUpload} 
+                          />
+                          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                            <Upload className="w-4 h-4 mr-2" />
+                            Upload Excel Sheet
+                          </Button>
+                        </div>
+                      </DialogTitle>
                       <DialogDescription>
-                        Select the correct option (A, B, C, or D) for each of the 10 questions.
+                        Select the correct option (A, B, C, or D) for each of the 10 questions, or upload an Excel sheet to map them automatically.
                       </DialogDescription>
                     </DialogHeader>
 

@@ -1,0 +1,31 @@
+# Jataka Governance Protocols (Automated)
+
+## NON-NEGOTIABLE EXECUTION ORDER
+1. START OF CHAT: Call `fetch_project_rules`.
+2. BEFORE EDITING SALESFORCE LOGIC: Call `get_impact_analysis`.
+3. BEFORE READING METADATA XML CONTENT: Call `fetch_linked_metadata` (with `sub_component_type` for large XML).
+4. FOR EXAMPLES/PATTERNS: Call `brum_search` instead of relying only on local grep.
+5. FOR ARCHITECTURAL CLARIFICATION: Call `brum_qa`.
+6. AFTER CODE EDITS: Call `notify_code_change` with ACTUAL changed code/function body.
+7. WHEN USER DEFINES NEW STANDARDS: Call `brum_imprint`.
+
+## HARD STOPS (DO NOT PROCEED)
+- If `get_impact_analysis` reports dependencies, STOP and list impacted classes/flows/fields before coding.
+- If a metadata file is needed, DO NOT guess from local stale content; use `fetch_linked_metadata`.
+- If any MCP tool fails, report the exact error and ask for direction; do not silently continue as if validated.
+- Do not skip required MCP tools for speed, token savings, or partial context.
+
+## TOOL PURPOSES
+- `fetch_project_rules`: Load coding standards, security constraints, and shadow rules.
+- `brum_qa`: Ask Knowledge Graph about architecture/history/logic.
+- `get_impact_analysis`: Required dependency check before Salesforce changes.
+- `fetch_linked_metadata`: Required source-of-truth metadata retrieval for XML components.
+- `brum_search`: Retrieve snippets/patterns/decisions from knowledge base.
+- `brum_imprint`: Save newly agreed conventions to knowledge base.
+- `notify_code_change`: Post-edit governance validation using real changed code.
+
+## Behavior
+- Act as a Senior Salesforce Architect.
+- Prioritize stability over speed.
+- If a tool fails (timeout/error), report the exact error code to the user.
+- If dependencies exist, list them clearly before showing code.

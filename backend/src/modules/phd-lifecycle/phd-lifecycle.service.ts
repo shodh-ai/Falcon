@@ -93,15 +93,25 @@ export class PhdLifecycleService {
     dto: CreateApplicationDto,
     actorRole?: string,
   ) {
-    const appType = (dto.application_type ?? 'PET').toUpperCase() as PhdApplicationType;
+    const appType = (
+      dto.application_type ?? 'PET'
+    ).toUpperCase() as PhdApplicationType;
     if (!PHD_APPLICATION_TYPES.includes(appType)) {
-      throw new BadRequestException('application_type must be PET or PET_EXEMPTION');
+      throw new BadRequestException(
+        'application_type must be PET or PET_EXEMPTION',
+      );
     }
     if (!dto.proposed_topic?.trim()) {
       throw new BadRequestException('Proposed research topic is required.');
     }
 
-    const eligibility = await this.evaluateEligibility(tenantId, userId, dto, true, actorRole);
+    const eligibility = await this.evaluateEligibility(
+      tenantId,
+      userId,
+      dto,
+      true,
+      actorRole,
+    );
     if (!eligibility.can_apply) {
       throw new BadRequestException(
         eligibility.reasons.length
@@ -119,7 +129,9 @@ export class PhdLifecycleService {
       [tenantId, userId],
     );
     if (open.length > 0) {
-      throw new BadRequestException('You already have an active Ph.D. application or candidature.');
+      throw new BadRequestException(
+        'You already have an active Ph.D. application or candidature.',
+      );
     }
 
     const [user] = await this.db.query(
@@ -134,11 +146,17 @@ export class PhdLifecycleService {
       evaluated_semester: eligibility.academic.latest_semester,
       cleared_second_year: eligibility.academic.cleared_second_year,
       entrance_exam_type:
-        eligibility.route === 'BTECH_DIRECT' ? dto.entrance_exam_type?.trim() ?? null : null,
+        eligibility.route === 'BTECH_DIRECT'
+          ? (dto.entrance_exam_type?.trim() ?? null)
+          : null,
       entrance_score:
-        eligibility.route === 'BTECH_DIRECT' ? dto.entrance_score ?? null : null,
+        eligibility.route === 'BTECH_DIRECT'
+          ? (dto.entrance_score ?? null)
+          : null,
       direct_phd_merit_approved:
-        eligibility.route === 'BTECH_DIRECT' ? Boolean(dto.direct_phd_merit_approved) : false,
+        eligibility.route === 'BTECH_DIRECT'
+          ? Boolean(dto.direct_phd_merit_approved)
+          : false,
     };
 
     const rows = await this.db.query(
@@ -169,16 +187,34 @@ export class PhdLifecycleService {
     return rows[0];
   }
 
-  getApplicationEligibility(tenantId: string, userId: string, actorRole?: string) {
-    return this.evaluateEligibility(tenantId, userId, undefined, false, actorRole);
+  getApplicationEligibility(
+    tenantId: string,
+    userId: string,
+    actorRole?: string,
+  ) {
+    return this.evaluateEligibility(
+      tenantId,
+      userId,
+      undefined,
+      false,
+      actorRole,
+    );
   }
 
   private entranceSatisfied(evidence?: EligibilityEvidence): boolean {
     if (!evidence) return false;
     if (evidence.direct_phd_merit_approved === true) return true;
-    const type = (evidence.entrance_exam_type ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+    const type = (evidence.entrance_exam_type ?? '')
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, '_');
     const score = evidence.entrance_score;
-    if (!type || score === undefined || score === null || Number.isNaN(Number(score))) {
+    if (
+      !type ||
+      score === undefined ||
+      score === null ||
+      Number.isNaN(Number(score))
+    ) {
       return false;
     }
     const cutoff = PHD_ENTRANCE_CUTOFFS[type] ?? 50;
@@ -259,16 +295,21 @@ export class PhdLifecycleService {
          WHERE tenant_id = $1 AND student_user_id = $2`,
         [tenantId, userId],
       )
-      .catch(() => [] as Array<{ qualification_level: string; cgpa: number | null }>);
+      .catch(
+        () => [] as Array<{ qualification_level: string; cgpa: number | null }>,
+      );
 
-    const programLabel: string | null = application?.program_applied?.trim() || null;
+    const programLabel: string | null =
+      application?.program_applied?.trim() || null;
     const programUpper = (programLabel ?? '').toUpperCase();
-    const priorLevels = (priorQuals as Array<{ qualification_level: string }>).map((q) =>
-      (q.qualification_level ?? '').toUpperCase(),
-    );
+    const priorLevels = (
+      priorQuals as Array<{ qualification_level: string }>
+    ).map((q) => (q.qualification_level ?? '').toUpperCase());
 
-    const PG_RE = /\b(M\.?\s?TECH|M\.?\s?E\b|M\.?\s?SC|M\.?\s?A\b|M\.?\s?COM|MBA|MCA|LLM|MASTER|POST.?GRAD|\bPG\b)/;
-    const BTECH_RE = /\b(B\.?\s?TECH|B\.?\s?E\b|BACHELOR OF (TECH|ENGINEER)|BTECH)/;
+    const PG_RE =
+      /\b(M\.?\s?TECH|M\.?\s?E\b|M\.?\s?SC|M\.?\s?A\b|M\.?\s?COM|MBA|MCA|LLM|MASTER|POST.?GRAD|\bPG\b)/;
+    const BTECH_RE =
+      /\b(B\.?\s?TECH|B\.?\s?E\b|BACHELOR OF (TECH|ENGINEER)|BTECH)/;
 
     const isMasters =
       priorLevels.some((l) => PG_RE.test(l)) || PG_RE.test(programUpper);
@@ -279,14 +320,19 @@ export class PhdLifecycleService {
     const latestSemester = Math.max(recordSemester, enrolledSemester);
 
     const recordBacklogs = Number(latestRecord?.backlog_count ?? 0) || 0;
-    const activeBacklogs = Math.max(recordBacklogs, Number(backlogAgg?.active_backlogs ?? 0) || 0);
+    const activeBacklogs = Math.max(
+      recordBacklogs,
+      Number(backlogAgg?.active_backlogs ?? 0) || 0,
+    );
 
     const recordCgpa =
       latestRecord?.cgpa !== undefined && latestRecord?.cgpa !== null
         ? Number(latestRecord.cgpa)
         : null;
     const priorCgpaValues = (priorQuals as Array<{ cgpa: number | null }>)
-      .map((q) => (q.cgpa === null || q.cgpa === undefined ? null : Number(q.cgpa)))
+      .map((q) =>
+        q.cgpa === null || q.cgpa === undefined ? null : Number(q.cgpa),
+      )
       .filter((v): v is number => v !== null);
     const cgpa =
       recordCgpa !== null
@@ -299,13 +345,14 @@ export class PhdLifecycleService {
       enrolledSemester >= PHD_CLEARED_SECOND_YEAR_SEMESTER ||
       recordSemester >= PHD_CLEARED_SECOND_YEAR_RECORD;
 
-    const classification: EligibilityResult['academic']['classification'] = isMasters
-      ? 'PG'
-      : isBtech
-        ? 'BTECH'
-        : programLabel || latestSemester > 0
-          ? 'OTHER_UG'
-          : 'UNKNOWN';
+    const classification: EligibilityResult['academic']['classification'] =
+      isMasters
+        ? 'PG'
+        : isBtech
+          ? 'BTECH'
+          : programLabel || latestSemester > 0
+            ? 'OTHER_UG'
+            : 'UNKNOWN';
 
     const academic = {
       program_label: programLabel,
@@ -326,8 +373,10 @@ export class PhdLifecycleService {
         { label: `Minimum CGPA ${PHD_PG_MIN_CGPA.toFixed(1)}`, met: cgpaOk },
       ];
       const reasons: string[] = [];
-      if (!noBacklog) reasons.push('Clear all active backlogs before applying.');
-      if (!cgpaOk) reasons.push(`CGPA must be at least ${PHD_PG_MIN_CGPA.toFixed(1)}.`);
+      if (!noBacklog)
+        reasons.push('Clear all active backlogs before applying.');
+      if (!cgpaOk)
+        reasons.push(`CGPA must be at least ${PHD_PG_MIN_CGPA.toFixed(1)}.`);
       return {
         can_apply: reasons.length === 0,
         route: 'PG',
@@ -345,11 +394,15 @@ export class PhdLifecycleService {
       const entranceMet = this.entranceSatisfied(evidence);
       const requirements: EligibilityRequirement[] = [
         { label: 'B.Tech / B.E. programme', met: true },
-        { label: 'Cleared second year (semester 5 or higher)', met: clearedSecondYear },
+        {
+          label: 'Cleared second year (semester 5 or higher)',
+          met: clearedSecondYear,
+        },
         { label: 'No active backlogs', met: noBacklog },
         { label: `CGPA ≥ ${PHD_DIRECT_MIN_CGPA.toFixed(1)}`, met: cgpaOk },
         {
-          label: 'Qualifying entrance (PET/GATE/NET) or approved direct-PhD merit',
+          label:
+            'Qualifying entrance (PET/GATE/NET) or approved direct-PhD merit',
           met: entranceMet,
           pending: !enforce && !entranceMet,
         },
@@ -357,9 +410,15 @@ export class PhdLifecycleService {
       const academicMet = clearedSecondYear && noBacklog && cgpaOk;
       const reasons: string[] = [];
       if (!clearedSecondYear)
-        reasons.push('Direct Ph.D. is open only after clearing the second year of B.Tech.');
-      if (!noBacklog) reasons.push('Clear all active backlogs before applying.');
-      if (!cgpaOk) reasons.push(`CGPA must be at least ${PHD_DIRECT_MIN_CGPA.toFixed(1)}.`);
+        reasons.push(
+          'Direct Ph.D. is open only after clearing the second year of B.Tech.',
+        );
+      if (!noBacklog)
+        reasons.push('Clear all active backlogs before applying.');
+      if (!cgpaOk)
+        reasons.push(
+          `CGPA must be at least ${PHD_DIRECT_MIN_CGPA.toFixed(1)}.`,
+        );
       if (enforce && academicMet && !entranceMet)
         reasons.push(
           'Provide a qualifying entrance score (PET/GATE/NET) or approved direct-PhD merit.',
@@ -396,7 +455,10 @@ export class PhdLifecycleService {
   }
 
   listMyApplications(tenantId: string, userId: string) {
-    return this.listCandidatesWhere(tenantId, 'c.user_id = $2', [tenantId, userId]);
+    return this.listCandidatesWhere(tenantId, 'c.user_id = $2', [
+      tenantId,
+      userId,
+    ]);
   }
 
   listForRole(tenantId: string, role: string, actorUserId?: string) {
@@ -440,10 +502,18 @@ export class PhdLifecycleService {
       );
     }
     if (normalized === 'Accountant') {
-      return this.listCandidatesWhere(tenantId, `c.pending_actor_role = 'Accountant'`, [tenantId]);
+      return this.listCandidatesWhere(
+        tenantId,
+        `c.pending_actor_role = 'Accountant'`,
+        [tenantId],
+      );
     }
     if (['Dean', 'Leadership', 'President'].includes(normalized)) {
-      return this.listCandidatesWhere(tenantId, `c.lifecycle_status = 'VIVA_RECOMMENDED'`, [tenantId]);
+      return this.listCandidatesWhere(
+        tenantId,
+        `c.lifecycle_status = 'VIVA_RECOMMENDED'`,
+        [tenantId],
+      );
     }
     return this.listCandidatesWhere(tenantId, 'TRUE', [tenantId]);
   }
@@ -457,7 +527,11 @@ export class PhdLifecycleService {
   }
 
   async getCandidate(tenantId: string, candidateId: string) {
-    const rows = await this.listCandidatesWhere(tenantId, 'c.candidate_id = $2', [tenantId, candidateId]);
+    const rows = await this.listCandidatesWhere(
+      tenantId,
+      'c.candidate_id = $2',
+      [tenantId, candidateId],
+    );
     if (!rows.length) throw new NotFoundException('Ph.D. candidate not found');
     const submissions = await this.db.query(
       `SELECT * FROM phd_submissions WHERE candidate_id = $1 ORDER BY created_at DESC`,
@@ -486,7 +560,9 @@ export class PhdLifecycleService {
 
     const role = this.normalizeRole(actorRole);
     if (!def.actorRoles.includes(role)) {
-      throw new ForbiddenException('You are not allowed to perform this action.');
+      throw new ForbiddenException(
+        'You are not allowed to perform this action.',
+      );
     }
 
     const [candidate] = await this.db.query(
@@ -501,7 +577,9 @@ export class PhdLifecycleService {
     }
 
     if (role === 'Faculty' && candidate.guide_user_id !== actorUserId) {
-      throw new ForbiddenException('You are not the allocated guide for this candidate.');
+      throw new ForbiddenException(
+        'You are not the allocated guide for this candidate.',
+      );
     }
     if (role === 'Student' && candidate.user_id !== actorUserId) {
       throw new ForbiddenException('This is not your Ph.D. record.');
@@ -509,7 +587,9 @@ export class PhdLifecycleService {
 
     if (action === 'ALLOCATE_SUPERVISOR' || action === 'ALLOCATE_GUIDE') {
       if (!dto.guide_user_id) {
-        throw new BadRequestException('guide_user_id is required to allocate a supervisor/guide.');
+        throw new BadRequestException(
+          'guide_user_id is required to allocate a supervisor/guide.',
+        );
       }
       await this.validateGuide(tenantId, dto.guide_user_id);
     }
@@ -527,7 +607,12 @@ export class PhdLifecycleService {
           dto.semester ?? candidate.semester_count + 1,
           JSON.stringify(dto.document_urls ?? []),
           dto.notes?.trim() ?? dto.remarks?.trim() ?? null,
-          ['RAC_PROGRESS_SATISFACTORY', 'VERIFY_ELIGIBILITY', 'APPROVE_COURSEWORK', 'VERIFY_GUIDE_ACCEPTANCE'].includes(action)
+          [
+            'RAC_PROGRESS_SATISFACTORY',
+            'VERIFY_ELIGIBILITY',
+            'APPROVE_COURSEWORK',
+            'VERIFY_GUIDE_ACCEPTANCE',
+          ].includes(action)
             ? actorUserId
             : null,
         ],
@@ -544,7 +629,14 @@ export class PhdLifecycleService {
       await this.db.query(
         `INSERT INTO phd_committee_decisions (candidate_id, tenant_id, committee_type, decision, remarks, decided_by)
          VALUES ($1,$2,$3,$4,$5,$6)`,
-        [candidateId, tenantId, def.committee, def.decision, dto.remarks?.trim() ?? null, actorUserId],
+        [
+          candidateId,
+          tenantId,
+          def.committee,
+          def.decision,
+          dto.remarks?.trim() ?? null,
+          actorUserId,
+        ],
       );
     }
 
@@ -554,16 +646,27 @@ export class PhdLifecycleService {
     if (action === 'RECORD_FEES') extra.fee_paid = true;
     if (action === 'ISSUE_ADMISSION') extra.admission_certificate_issued = true;
     if (action === 'ALLOCATE_GUIDE') extra.guide_certificate_issued = true;
-    if (action === 'RAC_CANCEL_REGISTRATION') extra.registration_cancelled = true;
-    if (action === 'VIVA_REQUIRE_RE_VIVA') extra.re_viva_due_at = new Date(Date.now() + 180 * 86400000);
+    if (action === 'RAC_CANCEL_REGISTRATION')
+      extra.registration_cancelled = true;
+    if (action === 'VIVA_REQUIRE_RE_VIVA')
+      extra.re_viva_due_at = new Date(Date.now() + 180 * 86400000);
 
-    await this.applyStatus(tenantId, candidateId, def.to, def.stage, def.pendingRole, extra);
+    await this.applyStatus(
+      tenantId,
+      candidateId,
+      def.to,
+      def.stage,
+      def.pendingRole,
+      extra,
+    );
 
     if (def.notifyRoles?.length) {
       await this.notifyRoles(tenantId, def.notifyRoles, {
         title: 'Ph.D. workflow update',
         message: `A Ph.D. candidate moved to ${def.to.replace(/_/g, ' ').toLowerCase()}.`,
-        actionLink: this.actionLinkForRole(def.pendingRole ?? def.notifyRoles[0]),
+        actionLink: this.actionLinkForRole(
+          def.pendingRole ?? def.notifyRoles[0],
+        ),
         requestType: 'PHD_LIFECYCLE',
       });
     }
@@ -572,7 +675,8 @@ export class PhdLifecycleService {
         tenantId,
         userId: dto.guide_user_id,
         title: 'Ph.D. guide allocation',
-        message: 'You have been allocated as research guide for a Ph.D. candidate.',
+        message:
+          'You have been allocated as research guide for a Ph.D. candidate.',
         actionLink: '/faculty/phd/scholars',
         requestType: 'PHD_LIFECYCLE',
       });
@@ -617,7 +721,13 @@ export class PhdLifecycleService {
       'pending_actor_role = $5',
       'updated_at = NOW()',
     ];
-    const params: unknown[] = [candidateId, tenantId, status, stage, pendingRole];
+    const params: unknown[] = [
+      candidateId,
+      tenantId,
+      status,
+      stage,
+      pendingRole,
+    ];
     let idx = 6;
     for (const [key, value] of Object.entries(extra)) {
       sets.push(`${key} = $${idx++}`);
@@ -629,7 +739,11 @@ export class PhdLifecycleService {
     );
   }
 
-  private listCandidatesWhere(tenantId: string, where: string, params: unknown[]) {
+  private listCandidatesWhere(
+    tenantId: string,
+    where: string,
+    params: unknown[],
+  ) {
     return this.db.query(
       `SELECT c.*,
               u.name AS candidate_name,
@@ -701,7 +815,10 @@ export class PhdLifecycleService {
        WHERE u.user_id = $1 AND u.tenant_id = $2 AND r.role_name = 'Faculty' AND u.is_active = true`,
       [guideUserId, tenantId],
     );
-    if (!row) throw new BadRequestException('Selected guide is not a valid faculty member.');
+    if (!row)
+      throw new BadRequestException(
+        'Selected guide is not a valid faculty member.',
+      );
   }
 
   private normalizeRole(role: string): string {
@@ -733,7 +850,12 @@ export class PhdLifecycleService {
   private async notifyRoles(
     tenantId: string,
     roleNames: string[],
-    payload: { title: string; message: string; actionLink: string; requestType?: string },
+    payload: {
+      title: string;
+      message: string;
+      actionLink: string;
+      requestType?: string;
+    },
   ) {
     const recipients = await this.db.query(
       `SELECT DISTINCT u.user_id FROM users u JOIN roles r ON r.role_id = u.role_id
@@ -741,7 +863,11 @@ export class PhdLifecycleService {
       [tenantId, roleNames],
     );
     for (const row of recipients as Array<{ user_id: string }>) {
-      this.notify.approvalRequired({ tenantId, userId: row.user_id, ...payload });
+      this.notify.approvalRequired({
+        tenantId,
+        userId: row.user_id,
+        ...payload,
+      });
     }
   }
 }

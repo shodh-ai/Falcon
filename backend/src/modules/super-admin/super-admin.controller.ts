@@ -277,10 +277,7 @@ export class SuperAdminController {
   }
 
   @Delete('academics/course-allocations/:id')
-  deleteAllocation(
-    @Req() req: { user: AuthUser },
-    @Param('id') id: string,
-  ) {
+  deleteAllocation(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     return this.courseAllocationBulk.deleteAllocation(this.tenant(req), id);
   }
 }

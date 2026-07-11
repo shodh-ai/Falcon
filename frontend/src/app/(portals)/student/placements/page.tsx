@@ -9,9 +9,12 @@ import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { PlacementApplicationTracker } from '@/components/placement/PlacementApplicationTracker';
 import { PlacementApplyModal } from '@/components/placement/PlacementApplyModal';
+import { StudentDeptDriveCard, useStudentDeptPlacementDrives, type DeptPlacementDrive } from '@/components/student/StudentDeptPlacementDrives';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
+import { toast } from '@/lib/notifications/falcon-toast';
 import type { PlacementDrive, PlacementEligibility, PlacementHub } from '@/lib/placement';
 
 function isApplyDisabled(eligibility?: PlacementEligibility) {
@@ -25,7 +28,11 @@ function cgpaLabel(minCgpa: string | number | undefined) {
 
 export default function StudentPlacementsPage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
   const searchParams = useSearchParams();
+  const { drives: deptDrives, loading: deptLoading, loadError: deptLoadError, reload: reloadDeptDrives } =
+    useStudentDeptPlacementDrives();
+  const [registeringDeptId, setRegisteringDeptId] = useState<string | null>(null);
   const [hub, setHub] = useState<PlacementHub | null>(null);
   const [hubDegraded, setHubDegraded] = useState(false);
   const [selectedDrive, setSelectedDrive] = useState<PlacementDrive | null>(null);
@@ -141,10 +148,46 @@ export default function StudentPlacementsPage() {
     setApplyOpen(true);
   }
 
+  async function registerDeptDrive(
+    drive: DeptPlacementDrive,
+    afterGoogleForm: boolean,
+    attestation?: { formOpenedAt: number },
+  ) {
+    setRegisteringDeptId(drive.drive_id);
+    try {
+      await api.post(`/api/academics/student/placement/drives/${drive.drive_id}/register`, {
+        student_name: user?.name,
+        student_email: user?.email,
+        response_json: afterGoogleForm
+          ? {
+              source: 'GOOGLE_FORM_CONFIRMED',
+              google_form_attested: true,
+              form_opened_at: attestation?.formOpenedAt ?? null,
+            }
+          : { source: 'PORTAL' },
+      });
+      toast.success(
+        afterGoogleForm
+          ? 'Registration confirmed — your department coordinator can see you in Falcon'
+          : `Registered for ${drive.company_name}`,
+      );
+      await reloadDeptDrives();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Registration failed');
+    } finally {
+      setRegisteringDeptId(null);
+    }
+  }
+
   async function selectDrive(drive: PlacementDrive) {
     const enriched = await ensureDriveEligibility(drive);
     setSelectedDrive(enriched);
   }
+
+  const registeredDeptDrives = deptDrives.filter((d) => d.registered);
+  const hasCampusApplications = (hub?.my_applications ?? []).length > 0;
+  const hasDeptRegistrations = registeredDeptDrives.length > 0;
+  const hasAnyApplications = hasCampusApplications || hasDeptRegistrations;
 
   return (
     <StudentPageShell width="5xl">
@@ -170,37 +213,38 @@ export default function StudentPlacementsPage() {
         </div>
       )}
 
-      <StudentSectionCard title="My applications" description="Swiggy-style pipeline tracker" icon={Briefcase}>
-        {(hub?.my_applications ?? []).length === 0 ? (
-          <StudentEmptyState title="No applications yet" description="Apply to open positions below when campus drives are active." />
-        ) : (
-          <div className="space-y-4">
-            {(hub?.my_applications ?? []).map((a) => (
-              <div
-                key={a.application_id}
-                className="rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-gold/40"
-              >
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="font-semibold text-sgvu-navy">{a.job_role}</p>
-                    <p className="text-sm text-muted-foreground">{a.company_name}</p>
-                  </div>
-                  <Badge variant={a.pipeline_stage === 'OFFERED' ? 'default' : a.pipeline_stage === 'REJECTED' ? 'destructive' : 'secondary'}>
-                    {a.pipeline_stage.replace(/_/g, ' ')}
-                  </Badge>
-                </div>
-                <PlacementApplicationTracker stage={a.pipeline_stage} rejectedAtStage={a.rejected_at_stage} />
-              </div>
-            ))}
-          </div>
-        )}
-      </StudentSectionCard>
+      <StudentSectionCard
+        title="Open positions"
+        description="Campus recruitment drives and department placement drives from your coordinator"
+        icon={Building2}
+      >
+        {deptLoadError ? (
+          <p className="mb-3 text-sm text-amber-700 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            Department drives could not load: {deptLoadError}
+          </p>
+        ) : null}
 
-      <StudentSectionCard title="Open positions" description="Active campus recruitment drives" icon={Building2}>
-        {(hub?.open_drives ?? []).length === 0 ? (
-          <StudentEmptyState title="No open drives" description="New placement opportunities will appear here when announced." />
+        {deptLoading ? (
+          <p className="text-sm text-muted-foreground py-2">Loading department drives…</p>
+        ) : null}
+
+        {!deptLoading && deptDrives.length === 0 && (hub?.open_drives ?? []).length === 0 ? (
+          <StudentEmptyState
+            title="No open drives"
+            description="Department coordinator drives and campus placement opportunities will appear here."
+          />
         ) : (
           <div className="space-y-3">
+            {deptDrives.map((drive) => (
+              <StudentDeptDriveCard
+                key={drive.drive_id}
+                drive={drive}
+                registeringId={registeringDeptId}
+                onRegister={(d, after, att) => void registerDeptDrive(d, after, att)}
+                compact
+              />
+            ))}
+
             {(hub?.open_drives ?? []).map((drive) => {
               const elig = drive.eligibility;
               const applied = elig?.already_applied;
@@ -249,6 +293,73 @@ export default function StudentPlacementsPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </StudentSectionCard>
+
+      <StudentSectionCard
+        title="My applications"
+        description="Campus pipeline and your department drive registrations"
+        icon={Briefcase}
+      >
+        {!hasAnyApplications ? (
+          <StudentEmptyState
+            title="No applications yet"
+            description="Register for department drives or apply to campus positions above — they will show here."
+          />
+        ) : (
+          <div className="space-y-4">
+            {registeredDeptDrives.map((drive) => (
+              <div
+                key={`dept-${drive.drive_id}`}
+                className="rounded-2xl border border-sgvu-navy/20 bg-sgvu-navy/[0.02] p-4"
+              >
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <Badge className="bg-sgvu-navy/10 text-sgvu-navy border border-sgvu-navy/20 text-[10px]">
+                        Dept drive
+                      </Badge>
+                    </div>
+                    <p className="font-semibold text-sgvu-navy">{drive.job_role || drive.company_name}</p>
+                    <p className="text-sm text-muted-foreground">{drive.company_name}</p>
+                    {drive.registered_at ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Registered {new Date(drive.registered_at).toLocaleString('en-IN')}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200">Registered</Badge>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-[10px] font-bold">
+                    ✓
+                  </span>
+                  <span>
+                    Coordinator has your registration
+                    {drive.drive_date ? ` · Drive on ${new Date(drive.drive_date).toLocaleDateString('en-IN')}` : ''}
+                  </span>
+                </div>
+              </div>
+            ))}
+
+            {(hub?.my_applications ?? []).map((a) => (
+              <div
+                key={a.application_id}
+                className="rounded-2xl border border-border/70 bg-white p-4 transition hover:border-sgvu-gold/40"
+              >
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-sgvu-navy">{a.job_role}</p>
+                    <p className="text-sm text-muted-foreground">{a.company_name}</p>
+                  </div>
+                  <Badge variant={a.pipeline_stage === 'OFFERED' ? 'default' : a.pipeline_stage === 'REJECTED' ? 'destructive' : 'secondary'}>
+                    {a.pipeline_stage.replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+                <PlacementApplicationTracker stage={a.pipeline_stage} rejectedAtStage={a.rejected_at_stage} />
+              </div>
+            ))}
           </div>
         )}
       </StudentSectionCard>

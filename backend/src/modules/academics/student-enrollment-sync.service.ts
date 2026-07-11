@@ -1,9 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import {
-  allocationMatchesStudentSlot,
-} from './allocation-semester.util';
+import { allocationMatchesStudentSlot } from './allocation-semester.util';
 
 export type StudentSlot = {
   studentUserId: string;
@@ -129,9 +127,7 @@ export class StudentEnrollmentSyncService {
       };
     }
 
-    const maxSemRows = await this.dataSource.query<
-      Array<{ semester: number }>
-    >(
+    const maxSemRows = await this.dataSource.query<Array<{ semester: number }>>(
       `SELECT COALESCE(MAX(semester), 1) AS semester
        FROM student_course_enrollments
        WHERE tenant_id = $1 AND student_user_id = $2`,
@@ -187,7 +183,9 @@ export class StudentEnrollmentSyncService {
     let kept = 0;
 
     for (const courseId of uniqueCourseIds) {
-      const upserted = await this.dataSource.query<Array<{ inserted: boolean }>>(
+      const upserted = await this.dataSource.query<
+        Array<{ inserted: boolean }>
+      >(
         `INSERT INTO student_course_enrollments
            (tenant_id, student_user_id, course_id, semester, section_code, status)
          VALUES ($1, $2, $3, $4, $5, 'ENROLLED')
@@ -223,12 +221,7 @@ export class StudentEnrollmentSyncService {
            AND status = 'ENROLLED'
            AND course_id <> ALL($4::uuid[])
          RETURNING enrollment_id`,
-        [
-          slot.tenantId,
-          slot.studentUserId,
-          slot.semester,
-          uniqueCourseIds,
-        ],
+        [slot.tenantId, slot.studentUserId, slot.semester, uniqueCourseIds],
       );
       removed = deleteResult.length;
     }
@@ -267,7 +260,11 @@ export class StudentEnrollmentSyncService {
     if (!slot) return { semester: 1, courseIds: [] };
 
     const allocations = await this.dataSource.query<
-      Array<{ course_id: string | null; program_name: string | null; semester: string | null }>
+      Array<{
+        course_id: string | null;
+        program_name: string | null;
+        semester: string | null;
+      }>
     >(
       `SELECT course_id, program_name, semester
        FROM academic_course_allocations

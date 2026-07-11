@@ -156,7 +156,8 @@ export function liveClassScheduledMessage(
       category: 'ACADEMICS',
       title: `Live class — ${payload.courseCode ?? payload.courseName}`,
       message: `${payload.liveClassTitle} is scheduled for ${when}. Join from your course workspace when the session starts.`,
-      actionLink: payload.actionLink ?? `/student/courses/${payload.courseId}?tab=live`,
+      actionLink:
+        payload.actionLink ?? `/student/courses/${payload.courseId}?tab=live`,
       actionLabel: 'Open live session',
       severity: 'info',
       intent: 'info',

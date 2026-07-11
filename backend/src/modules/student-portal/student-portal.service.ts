@@ -1402,19 +1402,24 @@ export class StudentPortalService {
          ON a.policy_id = p.policy_id AND a.student_user_id = $1 AND a.tenant_id = $2
        WHERE p.tenant_id = $2 AND p.status = 'ACTIVE'
        ORDER BY p.created_at DESC`,
-      [userId, tenantId]
+      [userId, tenantId],
     );
     return policies;
   }
 
-  async acknowledgePolicy(tenantId: string, userId: string, policyId: string, vote?: 'YES' | 'NO') {
+  async acknowledgePolicy(
+    tenantId: string,
+    userId: string,
+    policyId: string,
+    vote?: 'YES' | 'NO',
+  ) {
     await this.dataSource.query(
       `INSERT INTO student_policy_acknowledgements (tenant_id, student_user_id, policy_id, vote)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (tenant_id, student_user_id, policy_id) 
        DO UPDATE SET vote = COALESCE(EXCLUDED.vote, student_policy_acknowledgements.vote),
                      acknowledged_at = NOW()`,
-      [tenantId, userId, policyId, vote || null]
+      [tenantId, userId, policyId, vote || null],
     );
     return { success: true };
   }

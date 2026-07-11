@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Patch, Req, UseGuards, Delete } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Patch,
+  Req,
+  UseGuards,
+  Delete,
+} from '@nestjs/common';
 import { WeeklyTestsService } from './weekly-tests.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -25,19 +35,30 @@ export class WeeklyTestsController {
       end_time: string;
     },
   ) {
-    return this.testsService.createTest(this.tenant(req), req.user.user_id, body);
+    return this.testsService.createTest(
+      this.tenant(req),
+      req.user.user_id,
+      body,
+    );
   }
 
   @Get('faculty')
   @Roles('Faculty', 'HOD', 'Dean', 'Admin')
   getFacultyTests(@Req() req: { user: AuthUser }) {
-    return this.testsService.getFacultyTests(this.tenant(req), req.user.user_id);
+    return this.testsService.getFacultyTests(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Delete('faculty/:testId')
   @Roles('Faculty', 'HOD', 'Dean', 'Admin')
   deleteTest(@Req() req: { user: AuthUser }, @Param('testId') testId: string) {
-    return this.testsService.deleteTest(this.tenant(req), req.user.user_id, testId);
+    return this.testsService.deleteTest(
+      this.tenant(req),
+      req.user.user_id,
+      testId,
+    );
   }
 
   @Patch('faculty/:testId/toggle')
@@ -45,21 +66,36 @@ export class WeeklyTestsController {
   toggleTestStatus(
     @Req() req: { user: AuthUser },
     @Param('testId') testId: string,
-    @Body() body: { is_active: boolean }
+    @Body() body: { is_active: boolean },
   ) {
-    return this.testsService.toggleTestStatus(this.tenant(req), req.user.user_id, testId, body.is_active);
+    return this.testsService.toggleTestStatus(
+      this.tenant(req),
+      req.user.user_id,
+      testId,
+      body.is_active,
+    );
   }
 
   @Get('student/available')
   @Roles('Student')
   getAvailableTests(@Req() req: { user: AuthUser }) {
-    return this.testsService.getAvailableTests(this.tenant(req), req.user.user_id);
+    return this.testsService.getAvailableTests(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Get('student/:testId')
   @Roles('Student')
-  getTestForAttempt(@Req() req: { user: AuthUser }, @Param('testId') testId: string) {
-    return this.testsService.getTestForAttempt(this.tenant(req), req.user.user_id, testId);
+  getTestForAttempt(
+    @Req() req: { user: AuthUser },
+    @Param('testId') testId: string,
+  ) {
+    return this.testsService.getTestForAttempt(
+      this.tenant(req),
+      req.user.user_id,
+      testId,
+    );
   }
 
   @Post('student/:testId/submit')
@@ -69,7 +105,12 @@ export class WeeklyTestsController {
     @Param('testId') testId: string,
     @Body() body: { answers: string[]; violation_count: number },
   ) {
-    return this.testsService.submitTest(this.tenant(req), req.user.user_id, testId, body);
+    return this.testsService.submitTest(
+      this.tenant(req),
+      req.user.user_id,
+      testId,
+      body,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {

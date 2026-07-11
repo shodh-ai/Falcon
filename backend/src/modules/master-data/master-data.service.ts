@@ -191,25 +191,68 @@ export class MasterDataService {
     );
   }
 
-  /** Faculty (under the requesting HOD's department) whose birthday is today. */
-  async getDepartmentFacultyBirthdays(tenantId: string, hodUserId: string) {
+  /** Faculty in the requester's department scope whose birthday is today. */
+  async getDepartmentFacultyBirthdays(
+    tenantId: string,
+    userId: string,
+    scope: 'hod' | 'dean' = 'hod',
+  ) {
+    const deptIds = await this.resolveFacultyBirthdayDeptIds(userId, scope);
+    if (!deptIds.length) return [];
+
     return this.dataSource.query(
       `SELECT u.user_id, u.name, r.role_name,
               (u.onboarding_profile->>'date_of_birth')::date AS date_of_birth
        FROM users u
        INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND u.is_active = true
+         AND u.user_id != $3
          AND r.role_name = 'Faculty'
-         AND u.dept_id IN (
-           SELECT dept_id FROM departments WHERE tenant_id = $1 AND hod_user_id = $2
-           UNION
-           SELECT dept_id FROM users WHERE tenant_id = $1 AND user_id = $2
-         )
+         AND u.dept_id = ANY($2::int[])
          AND u.onboarding_profile->>'date_of_birth' ~ '^\\d{4}-\\d{2}-\\d{2}'
          AND EXTRACT(MONTH FROM (u.onboarding_profile->>'date_of_birth')::date) = EXTRACT(MONTH FROM CURRENT_DATE)
          AND EXTRACT(DAY FROM (u.onboarding_profile->>'date_of_birth')::date) = EXTRACT(DAY FROM CURRENT_DATE)
        ORDER BY u.name ASC`,
-      [tenantId, hodUserId],
+      [tenantId, deptIds, userId],
     );
+  }
+
+  private async resolveFacultyBirthdayDeptIds(
+    userId: string,
+    scope: 'hod' | 'dean',
+  ): Promise<number[]> {
+    if (scope === 'hod') {
+      const rows = await this.dataSource.query<Array<{ dept_id: number }>>(
+        `SELECT dept_id FROM departments WHERE hod_user_id = $1
+         UNION
+         SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL`,
+        [userId],
+      );
+      return Array.from(new Set(rows.map((row) => Number(row.dept_id))));
+    }
+
+    const schoolRows = await this.dataSource.query<Array<{ school_id: number }>>(
+      `SELECT school_id FROM schools WHERE dean_user_id = $1 AND deleted_at IS NULL`,
+      [userId],
+    );
+    const schoolIds = schoolRows.map((row) => Number(row.school_id));
+    let deptIds: number[] = [];
+    if (schoolIds.length) {
+      const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
+        `SELECT DISTINCT dept_id
+         FROM iam_programs
+         WHERE school_id = ANY($1::int[]) AND dept_id IS NOT NULL AND deleted_at IS NULL`,
+        [schoolIds],
+      );
+      deptIds = deptRows.map((row) => Number(row.dept_id));
+    }
+    const userRows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL`,
+      [userId],
+    );
+    if (userRows[0]?.dept_id) {
+      deptIds.push(Number(userRows[0].dept_id));
+    }
+    return Array.from(new Set(deptIds));
   }
 }

@@ -56,6 +56,7 @@ import { InsightsController } from './insights.controller';
 import { CourseAllocationBulkService } from './course-allocation-bulk.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
+import { HodPortalExtService } from './hod-portal-ext.service';
 
 @Module({
   imports: [
@@ -120,6 +121,7 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
     CourseAllocationBulkService,
     StudentEnrollmentSyncService,
     StudentMentorSyncService,
+    HodPortalExtService,
   ],
   exports: [
     AcademicsService,

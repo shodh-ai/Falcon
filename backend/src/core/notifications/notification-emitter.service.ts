@@ -98,7 +98,10 @@ export class NotificationEmitterService {
   }
 
   liveClassScheduled(payload: LiveClassScheduledPayload) {
-    this.events.emit(NotificationEvents.ACADEMICS_LIVE_CLASS_SCHEDULED, payload);
+    this.events.emit(
+      NotificationEvents.ACADEMICS_LIVE_CLASS_SCHEDULED,
+      payload,
+    );
   }
 
   gatePassUpdated(payload: GatePassUpdatedPayload) {

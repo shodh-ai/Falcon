@@ -23,6 +23,7 @@ interface User {
   allowed_entities?: AllowedEntity[];
   onboarding_status?: string;
   has_direct_reports?: boolean;
+  is_department_hod?: boolean;
 }
 
 interface AuthContextType {
