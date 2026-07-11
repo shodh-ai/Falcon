@@ -16,6 +16,7 @@ import { useAuthedApi } from '@/lib/api';
 import {
   getProfileHrefFromPath,
   getWorkspaceLabelForRole,
+  getActiveWorkspaceRoleFromPath,
 } from '@/lib/auth-routing';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,7 +55,11 @@ export function AccountSettingsPage() {
   const api = useAuthedApi();
   const { user, refreshUser } = useAuth();
   const pathname = usePathname();
-  const workspaceRole = user?.primaryRole ?? user?.role ?? 'User';
+  const workspaceRole =
+    getActiveWorkspaceRoleFromPath(pathname, user?.roles ?? [user?.role ?? 'User']) ??
+    user?.primaryRole ??
+    user?.role ??
+    'User';
   const profileHref = getProfileHrefFromPath(pathname, workspaceRole);
 
   const [currentPassword, setCurrentPassword] = useState('');
