@@ -181,6 +181,25 @@ export class AuthService {
     }
   }
 
+  /** Secondary Faculty role for HOD users assigned active teaching load. */
+  async ensureTeachingFacultyRoleForHod(userId: string): Promise<void> {
+    if (!userId) return;
+    await this.dataSource.query(
+      `INSERT INTO user_roles (user_id, role_id, is_primary)
+       SELECT $1, rf.role_id, false
+       FROM roles rf
+       WHERE rf.role_name = 'Faculty'
+         AND EXISTS (
+           SELECT 1
+           FROM user_roles ur
+           INNER JOIN roles rh ON rh.role_id = ur.role_id
+           WHERE ur.user_id = $1 AND rh.role_name = 'HOD'
+         )
+       ON CONFLICT (user_id, role_id) DO NOTHING`,
+      [userId],
+    );
+  }
+
   /** Resolve guardian mobile for Parent-role users (password login → parent portal APIs). */
   async resolveParentMobile(
     tenantId: string,

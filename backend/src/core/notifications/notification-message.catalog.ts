@@ -1,6 +1,7 @@
 import type {
   AdmitCardLockedPayload,
   AlumniConversionRequestedPayload,
+  OnboardingVerificationRequestedPayload,
   AttendanceWarningPayload,
   CourseMaterialAddedPayload,
   LiveClassScheduledPayload,
@@ -911,6 +912,27 @@ export function alumniConversionRequestedMessage(
       studentUserId: payload.studentUserId,
       studentName: payload.studentName,
       programName: payload.programName,
+    },
+  };
+}
+
+export function onboardingVerificationRequestedMessage(
+  payload: OnboardingVerificationRequestedPayload,
+): NotificationMessage {
+  const isStaff = payload.portalKind === 'staff';
+  return {
+    category: 'OPERATIONS',
+    title: `Verification request — ${payload.submitterName}`,
+    message: `${payload.submitterName} (${payload.roleName}) submitted first-login documents for review.`,
+    actionLink: isStaff ? '/hr/verifications' : '/admissions-crm/verifications',
+    actionLabel: 'Review submission',
+    severity: 'warning',
+    intent: 'action_required',
+    metadata: {
+      targetUserId: payload.targetUserId,
+      submitterEmail: payload.submitterEmail,
+      roleName: payload.roleName,
+      portalKind: payload.portalKind,
     },
   };
 }

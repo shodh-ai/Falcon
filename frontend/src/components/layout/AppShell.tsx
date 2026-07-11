@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { AppTopBar } from '@/components/layout/AppTopBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
-import type { PortalConfig } from '@/lib/navigation';
+import { withAccountSettingsNav, type PortalConfig } from '@/lib/navigation';
 
 interface AppShellProps {
   config: PortalConfig;
@@ -34,7 +34,10 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const launchConfig = useMemo(() => filterPortalConfigForLaunchModules(config), [config]);
+  const launchConfig = useMemo(
+    () => withAccountSettingsNav(filterPortalConfigForLaunchModules(config)),
+    [config],
+  );
 
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;

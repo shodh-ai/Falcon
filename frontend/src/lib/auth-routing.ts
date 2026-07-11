@@ -324,6 +324,21 @@ const portalRoles: Record<string, string[]> = {
   '/super-admin': ['superadmin'],
   '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
   '/clinic-admin': ['registrar', 'superadmin'],
+  '/directory': [
+    'chairman',
+    'president',
+    'superadmin',
+    'registrar',
+    'hradmin',
+    'hr',
+    'hod',
+    'dean',
+    'warden',
+    'faculty',
+    'student',
+    'applicant',
+  ],
+  '/tickets': ['student', 'faculty', 'hod', 'dean', 'hr', 'hradmin', 'superadmin', 'registrar', 'parent'],
   '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator'],
 };
 
@@ -409,6 +424,12 @@ const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {
   '/admin': '/admin/account/settings',
 };
 
+/** Account settings href for a portal prefix (e.g. `/student`, `/hr`). */
+export function getAccountSettingsHrefForPortal(portal: string): string {
+  const normalized = portal.startsWith('/') ? portal : `/${portal}`;
+  return EXPLICIT_PORTAL_SETTINGS_PATHS[normalized] ?? `${normalized}/settings`;
+}
+
 /** Resolve account settings for the active portal. */
 export function getSettingsHrefFromPath(pathname: string, role?: string | null): string {
   if (pathname.startsWith('/ess')) {
@@ -420,12 +441,8 @@ export function getSettingsHrefFromPath(pathname: string, role?: string | null):
     .sort((a, b) => b.length - a.length)
     .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
-  if (portal && EXPLICIT_PORTAL_SETTINGS_PATHS[portal]) {
-    return EXPLICIT_PORTAL_SETTINGS_PATHS[portal];
-  }
-
   if (portal) {
-    return `${portal}/settings`;
+    return getAccountSettingsHrefForPortal(portal);
   }
 
   return '/faculty/settings';

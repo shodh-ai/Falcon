@@ -43,6 +43,7 @@ export const NotificationEvents = {
   ALUMNI_CONVERSION_APPROVED: 'alumni.conversion_approved',
   ALUMNI_WELCOME_EMAIL: 'alumni.welcome_email',
   STUDENT_ONBOARDING_APPROVED: 'student.onboarding_approved',
+  ONBOARDING_VERIFICATION_REQUESTED: 'onboarding.verification_requested',
   ECELL_STATUS_UPDATED: 'ecell.status_updated',
   ECELL_MENTOR_MEETING_REQUESTED: 'ecell.mentor_meeting_requested',
   ECELL_MENTOR_MEETING_RESPONDED: 'ecell.mentor_meeting_responded',
@@ -264,6 +265,15 @@ export type StudentOnboardingApprovedPayload = {
   studentName: string;
   officialEmail: string;
   dashboardPath?: string;
+};
+
+export type OnboardingVerificationRequestedPayload = {
+  tenantId: string;
+  targetUserId: string;
+  submitterName: string;
+  submitterEmail: string;
+  roleName: string;
+  portalKind: 'student' | 'staff';
 };
 
 export type EcellStatusUpdatedPayload = BaseNotificationPayload;

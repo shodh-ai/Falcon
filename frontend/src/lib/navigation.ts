@@ -75,6 +75,7 @@ import {
   Video,
   Target,
 } from 'lucide-react';
+import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
@@ -116,6 +117,36 @@ export interface PortalConfig {
   commandItems: NavItem[];
   /** Optional override for mobile bottom nav (defaults to first 4 command items) */
   mobileNavItems?: NavItem[];
+}
+
+function portalPathFromHomeHref(homeHref: string): string {
+  const segment = homeHref.split('/').filter(Boolean)[0];
+  return segment ? `/${segment}` : homeHref;
+}
+
+/** Append account settings to sidebar + command palette when not already linked. */
+export function withAccountSettingsNav(config: PortalConfig): PortalConfig {
+  const settingsHref = getAccountSettingsHrefForPortal(portalPathFromHomeHref(config.homeHref));
+  const hasSettings = config.navGroups.some((group) =>
+    group.items.some((item) => item.href === settingsHref),
+  );
+  if (hasSettings) return config;
+
+  const settingsItem: NavItem = {
+    label: 'Account Settings',
+    href: settingsHref,
+    icon: Settings,
+    keywords: ['password', 'security', 'notifications', 'email', 'account'],
+    shortLabel: 'Settings',
+  };
+
+  const commandHasSettings = config.commandItems.some((item) => item.href === settingsHref);
+
+  return {
+    ...config,
+    navGroups: [...config.navGroups, { title: 'Account', items: [settingsItem] }],
+    commandItems: commandHasSettings ? config.commandItems : [...config.commandItems, settingsItem],
+  };
 }
 
 /** Build command palette items from sidebar nav so search keywords stay in sync. */
@@ -166,6 +197,12 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
         href: p.tickets,
         icon: Ticket,
         keywords: ['it', 'ticket', 'support', 'grievance'],
+      },
+      {
+        label: 'Account Settings',
+        href: p.settings,
+        icon: Settings,
+        keywords: ['password', 'security', 'notifications', 'email', 'account'],
       },
     ],
   };

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -16,10 +16,19 @@ import { handleNotificationAction } from '@/lib/notifications/notification-actio
 export function LiveNotificationBell() {
   const router = useRouter();
   const { token } = useAuth();
-  const { count, refresh: refreshCount } = useNotificationUnreadCount();
+  const { refresh: refreshCount } = useNotificationUnreadCount();
   const { notifications, isLoading, refresh: refreshList } = useNotificationHistory();
 
-  const items = notifications.map(toAppNotification).slice(0, 20);
+  const items = useMemo(
+    () => notifications.map(toAppNotification),
+    [notifications],
+  );
+  const previewItems = useMemo(() => items.slice(0, 20), [items]);
+  // Badge must match visible (role-filtered) rows — not the raw API unread-count.
+  const visibleUnread = useMemo(
+    () => items.filter((n) => n.unread).length,
+    [items],
+  );
 
   useEffect(() => {
     const onRefresh = () => {
@@ -53,12 +62,6 @@ export function LiveNotificationBell() {
       (current) => current?.filter((row) => row.notification_id !== n.id) ?? [],
       { revalidate: false },
     );
-    if (n.unread) {
-      await refreshCount(
-        (current) => ({ count: Math.max(0, (current?.count ?? 1) - 1) }),
-        { revalidate: false },
-      );
-    }
 
     try {
       await notificationsApi.dismiss(token, n.id);
@@ -77,8 +80,8 @@ export function LiveNotificationBell() {
 
   return (
     <NotificationBell
-      notifications={items}
-      unreadCount={count}
+      notifications={previewItems}
+      unreadCount={visibleUnread}
       isLoading={isLoading}
       onSelect={handleSelect}
       onDismiss={handleDismiss}

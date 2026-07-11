@@ -382,6 +382,15 @@ export class StudentOnboardingService {
       );
     }
 
+    this.notifications.onboardingVerificationRequested({
+      tenantId,
+      targetUserId: userId,
+      submitterName: user.name,
+      submitterEmail: user.official_email,
+      roleName: user.role_name,
+      portalKind: kind,
+    });
+
     return { onboarding_status: 'PENDING_ADMIN_APPROVAL' };
   }
 
