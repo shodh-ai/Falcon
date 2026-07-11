@@ -47,6 +47,7 @@ import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 import { HrModule } from '../hr/hr.module';
+import { AuthModule } from '../../auth/auth.module';
 
 import { EarlyWarningService } from './early-warning.service';
 import { EarlyWarningController } from './early-warning.controller';
@@ -61,6 +62,7 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
     StorageModule,
     HelpdeskModule,
     HrModule,
+    AuthModule,
     TypeOrmModule.forFeature([
       Subject,
       Batch,

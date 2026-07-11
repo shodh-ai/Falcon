@@ -1170,13 +1170,13 @@ export class AcademicsController {
   }
 
   @Get('faculty/workspaces/grading-components')
-  @Roles('Faculty')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listGradingComponents() {
     return this.facultyWorkspaces.listGradingComponents();
   }
 
   @Get('faculty/workspaces/course/:courseId/unified-marks')
-  @Roles('Faculty')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getUnifiedCourseMarks(
     @Req() req: { user: AuthUser },
     @Param('courseId') courseId: string,
@@ -1194,7 +1194,7 @@ export class AcademicsController {
   }
 
   @Post('faculty/workspaces/course/:courseId/publish-all')
-  @Roles('Faculty')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   publishAllCourseMarks(
     @Req() req: { user: AuthUser },
     @Param('courseId') courseId: string,

@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, QueryRunner } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { AuthService } from '../../auth/auth.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
 
@@ -75,9 +76,15 @@ export class CourseAllocationBulkService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
+    private readonly authService: AuthService,
     private readonly enrollmentSync: StudentEnrollmentSyncService,
     private readonly mentorSync: StudentMentorSyncService,
   ) {}
+
+  private async syncTeachingFacultyRole(facultyUserId: string | null | undefined) {
+    if (!facultyUserId) return;
+    await this.authService.ensureTeachingFacultyRoleForHod(facultyUserId);
+  }
 
   async buildTemplateBuffer(): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
@@ -274,6 +281,7 @@ export class CourseAllocationBulkService {
       workspaces_assigned: 0,
       unassigned_count: 0,
     };
+    const assignedFacultyIds = new Set<string>();
 
     try {
       for (const row of preview.rows) {
@@ -313,6 +321,7 @@ export class CourseAllocationBulkService {
         result.allocations_created += 1;
 
         if (facultyId && courseId) {
+          assignedFacultyIds.add(facultyId);
           await this.ensureFacultyTimetableSlot(
             qr,
             tenantId,
@@ -332,6 +341,9 @@ export class CourseAllocationBulkService {
       }
 
       await qr.commitTransaction();
+      await Promise.all(
+        [...assignedFacultyIds].map((id) => this.syncTeachingFacultyRole(id)),
+      );
       await this.enrollmentSync.syncTenantStudents(tenantId, academicYear.trim());
       await this.mentorSync.syncTenantStudents(tenantId, academicYear.trim());
       return result;
@@ -474,6 +486,8 @@ export class CourseAllocationBulkService {
       changeSummary: `You have been assigned to teach ${allocation[0].subject_name} (${allocation[0].subject_code}) for ${allocation[0].academic_year}.`,
     });
 
+    await this.syncTeachingFacultyRole(facultyUserId);
+
     return { success: true, allocation_id: allocationId, faculty_user_id: facultyUserId };
   }
 
@@ -556,6 +570,8 @@ export class CourseAllocationBulkService {
         });
       }
     }
+
+    await this.syncTeachingFacultyRole(newFacultyUserId);
 
     return { success: true, allocation_id: allocationId, faculty_user_id: newFacultyUserId };
   }

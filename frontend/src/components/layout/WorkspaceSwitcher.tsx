@@ -40,7 +40,7 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          className={cn('hidden h-10 shrink-0 gap-2 md:inline-flex', HEADER_CONTROL_CLASS)}
+          className={cn('inline-flex h-10 shrink-0 gap-2', HEADER_CONTROL_CLASS)}
           title={getWorkspaceLabelForRole(activeRole)}
         >
           <BriefcaseBusiness className="h-4 w-4 shrink-0 text-sgvu-gold" />

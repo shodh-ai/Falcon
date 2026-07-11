@@ -1,0 +1,809 @@
+{
+  "academic_year": "2026-2027",
+  "program_name": "B.Tech CE",
+  "dept_name": "Civil",
+  "faculty": {
+    "ravindra": "ravindra.budania@mygyanvihar.com",
+    "jagriti": "jagriti.gupta@mygyanvihar.com",
+    "pradeep": "pradeepkr.shrivastava@mygyanvihar.com",
+    "nagendra": "nagendra.dhakar@mygyanvihar.com"
+  },
+  "students": [
+    {
+      "email": "roop.2548471@mygyanvihar.com",
+      "semester": 3
+    },
+    {
+      "email": "somya.2547552@mygyanvihar.com",
+      "semester": 3
+    },
+    {
+      "email": "lokesh.2549010@mygyanvihar.com",
+      "semester": 5
+    },
+    {
+      "email": "gaurav.2451540@mygyanvihar.com",
+      "semester": 5
+    },
+    {
+      "email": "naveen.2453524@mygyanvihar.com",
+      "semester": 5
+    },
+    {
+      "email": "ayush.2456444@mygyanvihar.com",
+      "semester": 7
+    },
+    {
+      "email": "tareem.23181429@mygyanvihar.com",
+      "semester": 7
+    }
+  ],
+  "mentorship_by_semester": {
+    "5": "jagriti",
+    "7": "pradeep"
+  },
+  "semesters": {
+    "III": {
+      "room": "LT-2",
+      "courses": [
+        {
+          "code": "CE3001T",
+          "name": "Building Material and Construction",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "ravindra"
+        },
+        {
+          "code": "CE3002T",
+          "name": "Structural Analysis-I",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "nagendra"
+        },
+        {
+          "code": "CE3003T",
+          "name": "Fluid Mechanics",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "CE3004T",
+          "name": "Surveying-I",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "pradeep"
+        },
+        {
+          "code": "CE3005T",
+          "name": "Solid and Hazardous Waste Management",
+          "credits": 3,
+          "type": "THEORY",
+          "faculty": "jagriti"
+        },
+        {
+          "code": "CE3006T",
+          "name": "Soft Skill",
+          "credits": 2,
+          "type": "THEORY",
+          "faculty": "pradeep"
+        },
+        {
+          "code": "CEUC201T",
+          "name": "Economics and Social Sciences",
+          "credits": 2,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "CE3011T",
+          "name": "Election and Electoral Processes in India",
+          "credits": 2,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "CE3009P",
+          "name": "Structural Analysis Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "nagendra"
+        },
+        {
+          "code": "CE3010P",
+          "name": "Building Material Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "ravindra"
+        },
+        {
+          "code": "CE3007P",
+          "name": "Fluid Mechanics Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": null
+        },
+        {
+          "code": "CE3008P",
+          "name": "Surveying Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "pradeep"
+        }
+      ],
+      "slots": [
+        {
+          "course": "CE3002T",
+          "day": 1,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE3001T",
+          "day": 1,
+          "start": "10:50",
+          "end": "11:40",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE3001T",
+          "day": 1,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE3005T",
+          "day": 1,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE3004T",
+          "day": 2,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE3001T",
+          "day": 2,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE3001T",
+          "day": 2,
+          "start": "10:50",
+          "end": "11:40",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE3005T",
+          "day": 2,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE3003T",
+          "day": 3,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": null
+        },
+        {
+          "course": "CE3004T",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE3004T",
+          "day": 3,
+          "start": "10:50",
+          "end": "11:40",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE3004T",
+          "day": 3,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE3003T",
+          "day": 4,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": null
+        },
+        {
+          "course": "CE3003T",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": null
+        },
+        {
+          "course": "CE3001T",
+          "day": 4,
+          "start": "10:50",
+          "end": "11:40",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE3006T",
+          "day": 4,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE3004T",
+          "day": 4,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE3002T",
+          "day": 4,
+          "start": "15:10",
+          "end": "16:00",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE3003T",
+          "day": 5,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": null
+        },
+        {
+          "course": "CE3003T",
+          "day": 5,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": null
+        },
+        {
+          "course": "CE3002T",
+          "day": 5,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE3005T",
+          "day": 6,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE3002T",
+          "day": 6,
+          "start": "15:10",
+          "end": "16:00",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE3003T",
+          "day": 6,
+          "start": "15:10",
+          "end": "16:00",
+          "faculty": null
+        },
+        {
+          "course": "CE3009P",
+          "day": 2,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "nagendra",
+          "room": "RMT Lab"
+        },
+        {
+          "course": "CE3010P",
+          "day": 1,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "ravindra",
+          "room": "RMT Lab"
+        },
+        {
+          "course": "CE3008P",
+          "day": 4,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "pradeep",
+          "room": "Survey Lab"
+        },
+        {
+          "course": "CE3007P",
+          "day": 3,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": null,
+          "room": "FM Lab"
+        }
+      ]
+    },
+    "V": {
+      "room": "Structure Lab",
+      "courses": [
+        {
+          "code": "CE315T",
+          "name": "Soil Mechanics",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "EM301T",
+          "name": "Employability Skills-III",
+          "credits": 2,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "CE302T",
+          "name": "Repair and Rehabilitation of Structures",
+          "credits": 3,
+          "type": "THEORY",
+          "faculty": "jagriti"
+        },
+        {
+          "code": "CE305T",
+          "name": "Transportation Engineering-I",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "CE306T",
+          "name": "Design of Concrete Structure-I",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "nagendra"
+        },
+        {
+          "code": "CE307T",
+          "name": "Environmental Engineering",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "pradeep"
+        },
+        {
+          "code": "CE351P",
+          "name": "Environmental Engineering Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "pradeep"
+        },
+        {
+          "code": "CE355P",
+          "name": "Design of Concrete Structure Lab-I",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "nagendra"
+        },
+        {
+          "code": "CE357P",
+          "name": "Stadd Pro Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "jagriti"
+        },
+        {
+          "code": "CE353P",
+          "name": "Soil Mechanics Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": null
+        },
+        {
+          "code": "PT303P",
+          "name": "Industrial Training Seminar",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "pradeep"
+        }
+      ],
+      "slots": [
+        {
+          "course": "CE315T",
+          "day": 1,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": null
+        },
+        {
+          "course": "CE306T",
+          "day": 1,
+          "start": "10:50",
+          "end": "11:40",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE306T",
+          "day": 1,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE305T",
+          "day": 1,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": null
+        },
+        {
+          "course": "CE315T",
+          "day": 2,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": null
+        },
+        {
+          "course": "CE306T",
+          "day": 2,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE306T",
+          "day": 2,
+          "start": "10:50",
+          "end": "11:40",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE305T",
+          "day": 2,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": null
+        },
+        {
+          "course": "EM301T",
+          "day": 2,
+          "start": "14:20",
+          "end": "15:10",
+          "faculty": null
+        },
+        {
+          "course": "CE307T",
+          "day": 3,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "EM301T",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": null
+        },
+        {
+          "course": "CE302T",
+          "day": 4,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE307T",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE306T",
+          "day": 4,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE307T",
+          "day": 5,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "pradeep"
+        },
+        {
+          "course": "CE315T",
+          "day": 5,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": null
+        },
+        {
+          "course": "CE305T",
+          "day": 5,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": null
+        },
+        {
+          "course": "CE302T",
+          "day": 5,
+          "start": "14:20",
+          "end": "15:10",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE315T",
+          "day": 6,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": null
+        },
+        {
+          "course": "CE302T",
+          "day": 6,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE355P",
+          "day": 1,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "nagendra",
+          "room": "Structure Lab"
+        },
+        {
+          "course": "CE353P",
+          "day": 2,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": null,
+          "room": "Workshop"
+        },
+        {
+          "course": "CE357P",
+          "day": 3,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "jagriti",
+          "room": "Computer Lab"
+        },
+        {
+          "course": "CE351P",
+          "day": 5,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "pradeep",
+          "room": "EE Lab (RB)"
+        },
+        {
+          "course": "PT303P",
+          "day": 4,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "pradeep",
+          "room": "Computer Lab"
+        }
+      ]
+    },
+    "VII": {
+      "room": "Survey Lab",
+      "courses": [
+        {
+          "code": "CE403T",
+          "name": "Foundation Engineering",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "jagriti"
+        },
+        {
+          "code": "CE405T",
+          "name": "Construction Project Management",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "ravindra"
+        },
+        {
+          "code": "CE406T",
+          "name": "Bridge Engineering",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "nagendra"
+        },
+        {
+          "code": "EM401T",
+          "name": "Group Discussion Aptitude and Reasoning",
+          "credits": 2,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "CE401T",
+          "name": "Intellectual Property Rights",
+          "credits": 2,
+          "type": "THEORY",
+          "faculty": null
+        },
+        {
+          "code": "CE451P",
+          "name": "Foundation Engineering Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "jagriti"
+        },
+        {
+          "code": "PE403P",
+          "name": "Major Project",
+          "credits": 6,
+          "type": "LAB",
+          "faculty": "jagriti"
+        },
+        {
+          "code": "SM402P",
+          "name": "Seminar",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "jagriti"
+        },
+        {
+          "code": "CE407T",
+          "name": "Soft Skill",
+          "credits": 2,
+          "type": "THEORY",
+          "faculty": "ravindra"
+        }
+      ],
+      "slots": [
+        {
+          "course": "CE403T",
+          "day": 1,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE401T",
+          "day": 1,
+          "start": "10:50",
+          "end": "11:40",
+          "faculty": null
+        },
+        {
+          "course": "CE405T",
+          "day": 2,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE406T",
+          "day": 2,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "EM401T",
+          "day": 2,
+          "start": "14:20",
+          "end": "15:10",
+          "faculty": null
+        },
+        {
+          "course": "CE403T",
+          "day": 3,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE401T",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": null
+        },
+        {
+          "course": "CE406T",
+          "day": 4,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "EM401T",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": null
+        },
+        {
+          "course": "CE403T",
+          "day": 4,
+          "start": "13:30",
+          "end": "14:20",
+          "faculty": "jagriti"
+        },
+        {
+          "course": "CE407T",
+          "day": 4,
+          "start": "14:20",
+          "end": "15:10",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE406T",
+          "day": 5,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": "nagendra"
+        },
+        {
+          "course": "CE405T",
+          "day": 5,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE401T",
+          "day": 6,
+          "start": "09:00",
+          "end": "10:00",
+          "faculty": null
+        },
+        {
+          "course": "CE405T",
+          "day": 6,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "ravindra"
+        },
+        {
+          "course": "CE451P",
+          "day": 3,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "jagriti",
+          "room": "Workshop"
+        },
+        {
+          "course": "PE403P",
+          "day": 1,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "jagriti",
+          "room": "Project Lab"
+        },
+        {
+          "course": "PE403P",
+          "day": 4,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "jagriti",
+          "room": "Project Lab"
+        },
+        {
+          "course": "SM402P",
+          "day": 5,
+          "start": "12:30",
+          "end": "13:30",
+          "faculty": "jagriti",
+          "room": "Computer lab"
+        }
+      ]
+    }
+  }
+}

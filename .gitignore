@@ -39,6 +39,11 @@ Pharmacy_Faculty_Workload*.xlsx
 EE_Ids.xlsx
 EE_Faculty*.xlsx
 EE (*sem)*.xlsx
+civil_TT.pdf
+jagriti_TT.pdf
+nagendra_TT.pdf
+pradeep_TT.pdf
+ravindra_TT.pdf
 Falcon Test IDs*.xlsx
 
 # Local parse output from source files above (regenerate with backend/scripts/*.py)
