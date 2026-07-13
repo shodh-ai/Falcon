@@ -1,6 +1,9 @@
 -- Leadership Executive smoke seed — Chairman portal demo data (idempotent)
 -- Login: chairman@mygyanvihar.com / password123 (tenant sgvu)
 
+CREATE UNIQUE INDEX IF NOT EXISTS dept_financial_scores_tenant_dept_date
+  ON dept_financial_scores (tenant_id, department_id, score_date);
+
 DO $$
 DECLARE
   v_tenant UUID := 'a0000000-0000-4000-8000-000000000001';

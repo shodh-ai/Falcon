@@ -7,7 +7,12 @@ import { cn } from '@/lib/utils';
 import { AppTopBar } from '@/components/layout/AppTopBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
-import type { PortalConfig } from '@/lib/navigation';
+import {
+  collectNavHrefs,
+  isNavHrefActive,
+  resolveActiveNavHref,
+  type PortalConfig,
+} from '@/lib/navigation';
 
 interface AppShellProps {
   config: PortalConfig;
@@ -20,11 +25,12 @@ interface AppShellProps {
 
 function findActiveNavItem(config: PortalConfig, pathname: string | null) {
   if (!pathname) return null;
+  const hrefs = collectNavHrefs(config.navGroups);
+  const activeHref = resolveActiveNavHref(pathname, hrefs);
+  if (!activeHref) return null;
   for (const group of config.navGroups) {
     for (const item of group.items) {
-      if (pathname === item.href || pathname.startsWith(`${item.href}/`)) {
-        return item;
-      }
+      if (item.href === activeHref) return item;
     }
   }
   return null;
@@ -39,6 +45,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;
   const mobileItems = launchConfig.mobileNavItems ?? launchConfig.commandItems.slice(0, 4);
+  const mobileHrefs = mobileItems.map((item) => item.href);
 
   const sidebar = (
     <AppSidebar
@@ -84,7 +91,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
         <ul className="mx-auto grid max-w-lg grid-cols-4 gap-0.5 px-1 pt-1">
           {mobileItems.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            const active = isNavHrefActive(pathname, item.href, mobileHrefs);
             const label = item.shortLabel ?? item.label;
             return (
               <li key={item.href}>
