@@ -89,6 +89,7 @@ export class FacultyProfileController {
     @Body() body: Record<string, unknown>,
   ) {
     return this.profile.updateProfile(this.tenant(req.user), req.user.user_id, {
+      phone: body.phone as string | null | undefined,
       emergency_contact_name: body.emergency_contact_name as string | undefined,
       emergency_contact_phone: body.emergency_contact_phone as
         | string

@@ -61,6 +61,36 @@ function formatTime(hour: number) {
   return `${h}:00 ${ampm}`;
 }
 
+function normalizeTime(value: string) {
+  const parts = String(value).trim().split(':');
+  if (parts.length < 2) return value;
+  const hour = parts[0]?.padStart(2, '0') ?? '00';
+  const minute = parts[1]?.padStart(2, '0') ?? '00';
+  return `${hour}:${minute}:00`;
+}
+
+function slotHourKey(slot: Pick<TimetableSlot, 'day_of_week' | 'start_time'>) {
+  return `${slot.day_of_week}|${normalizeTime(slot.start_time)}`;
+}
+
+function dedupeSlotsByCourse(slots: TimetableSlot[]) {
+  const byCourse = new Map<string, TimetableSlot>();
+  for (const slot of slots) {
+    byCourse.set(slot.course_id, slot);
+  }
+  return [...byCourse.values()];
+}
+
+function dedupeAllocations(allocs: Allocation[]) {
+  const byCourse = new Map<string, Allocation>();
+  for (const alloc of allocs) {
+    if (!byCourse.has(alloc.course_id)) {
+      byCourse.set(alloc.course_id, alloc);
+    }
+  }
+  return [...byCourse.values()];
+}
+
 export default function FacultyScheduleClassesPage() {
   const api = useAuthedApi();
   const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
@@ -82,19 +112,21 @@ export default function FacultyScheduleClassesPage() {
       );
       setAllocations(data.allocations || []);
 
-      const mappedTimetables: TimetableSlot[] = (data.timetables || []).map((t) => ({
-        timetable_id: t.timetable_id,
-        course_id: t.course_id,
-        faculty_user_id: t.faculty_user_id,
-        course_code: t.course_code,
-        course_name: t.course_name,
-        faculty_name: t.faculty_name,
-        day_of_week: t.day_of_week,
-        start_time: t.start_time,
-        end_time: t.end_time,
-        room: t.room,
-        section: t.section,
-      }));
+      const mappedTimetables: TimetableSlot[] = dedupeSlotsByCourse(
+        (data.timetables || []).map((t) => ({
+          timetable_id: t.timetable_id,
+          course_id: t.course_id,
+          faculty_user_id: t.faculty_user_id,
+          course_code: t.course_code,
+          course_name: t.course_name,
+          faculty_name: t.faculty_name,
+          day_of_week: t.day_of_week,
+          start_time: normalizeTime(t.start_time),
+          end_time: normalizeTime(t.end_time),
+          room: t.room,
+          section: t.section,
+        })),
+      );
       setGridSlots(mappedTimetables);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load schedule data');
@@ -125,6 +157,18 @@ export default function FacultyScheduleClassesPage() {
       const end_time = `${(hour + 1).toString().padStart(2, '0')}:00:00`;
 
       if (data.type === 'NEW') {
+        if (gridSlots.some((s) => s.course_id === data.allocation.course_id)) {
+          toast.warning('Course already scheduled', {
+            description: `${data.allocation.course_code} already has a weekly slot. Move or remove it first.`,
+          });
+          return;
+        }
+        if (gridSlots.some((s) => slotHourKey(s) === `${dayOfWeek}|${start_time}`)) {
+          toast.warning('Time slot taken', {
+            description: 'You already have another class at this time.',
+          });
+          return;
+        }
         const newSlot: TimetableSlot = {
           timetable_id: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           course_id: data.allocation.course_id,
@@ -140,6 +184,18 @@ export default function FacultyScheduleClassesPage() {
         };
         setGridSlots(prev => [...prev, newSlot]);
       } else if (data.type === 'MOVE') {
+        const moving = data.slot as TimetableSlot;
+        const targetKey = `${dayOfWeek}|${start_time}`;
+        if (
+          gridSlots.some(
+            (s) => s !== moving && slotHourKey(s) === targetKey,
+          )
+        ) {
+          toast.warning('Time slot taken', {
+            description: 'You already have another class at this time.',
+          });
+          return;
+        }
         setGridSlots(prev => prev.map(s => {
           if (s === data.slot || (s.day_of_week === data.slot.day_of_week && s.start_time === data.slot.start_time && s.course_id === data.slot.course_id)) {
             return { ...s, day_of_week: dayOfWeek, start_time, end_time };
@@ -206,10 +262,23 @@ export default function FacultyScheduleClassesPage() {
   }
 
   async function handleBatchSave() {
+    const slots = dedupeSlotsByCourse(gridSlots);
+    const seenTimes = new Set<string>();
+    for (const slot of slots) {
+      const key = slotHourKey(slot);
+      if (seenTimes.has(key)) {
+        toast.warning('Conflict detected', {
+          description: `You have more than one class at ${DOW[slot.day_of_week]} ${String(slot.start_time).slice(0, 5)}.`,
+        });
+        return;
+      }
+      seenTimes.add(key);
+    }
+
     setSaving(true);
     try {
       await api.post('/api/academics/faculty/workspaces/timetable/slots', {
-        slots: gridSlots.map(s => ({
+        slots: slots.map(s => ({
           course_id: s.course_id,
           faculty_user_id: s.faculty_user_id,
           day_of_week: s.day_of_week,
@@ -227,6 +296,8 @@ export default function FacultyScheduleClassesPage() {
       setSaving(false);
     }
   }
+
+  const uniqueAllocations = dedupeAllocations(allocations);
 
   if (loading) {
     return (
@@ -248,11 +319,11 @@ export default function FacultyScheduleClassesPage() {
           <div className="flex items-center gap-3">
             <div className="bg-slate-100 px-3 py-1.5 rounded-lg border flex gap-2 items-center text-sm">
               <span className="font-semibold text-sgvu-navy">Courses:</span>
-              <span>{allocations.length}</span>
+              <span>{uniqueAllocations.length}</span>
             </div>
             <div className="bg-slate-100 px-3 py-1.5 rounded-lg border flex gap-2 items-center text-sm">
               <span className="font-semibold text-sgvu-navy">Scheduled Slots:</span>
-              <span>{gridSlots.length}</span>
+              <span>{dedupeSlotsByCourse(gridSlots).length}</span>
             </div>
             <Button
               onClick={handleBatchSave}
@@ -295,7 +366,11 @@ export default function FacultyScheduleClassesPage() {
                       </td>
                     ) : (
                       DAYS.map(day => {
-                        const slotsInCell = gridSlots.filter(s => s.day_of_week === day.val && s.start_time === timeStr);
+                        const slotsInCell = gridSlots.filter(
+                          (s) =>
+                            s.day_of_week === day.val &&
+                            normalizeTime(s.start_time) === timeStr,
+                        );
                         return (
                           <td
                             key={`${day.val}-${hour}`}
@@ -366,10 +441,10 @@ export default function FacultyScheduleClassesPage() {
               <p className="text-[10px] text-muted-foreground mt-0.5">Drag into the timetable slots.</p>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {allocations.length === 0 ? (
+              {uniqueAllocations.length === 0 ? (
                 <div className="text-center text-xs text-muted-foreground mt-4">No allocated courses.</div>
               ) : (
-                allocations.map(alloc => (
+                uniqueAllocations.map(alloc => (
                   <div
                     key={alloc.allocation_id}
                     draggable
