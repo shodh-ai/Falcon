@@ -11,6 +11,7 @@ import {
   collectNavHrefs,
   isNavHrefActive,
   resolveActiveNavHref,
+  withAccountSettingsNav,
   type PortalConfig,
 } from '@/lib/navigation';
 
@@ -40,7 +41,10 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const launchConfig = useMemo(() => filterPortalConfigForLaunchModules(config), [config]);
+  const launchConfig = useMemo(
+    () => withAccountSettingsNav(filterPortalConfigForLaunchModules(config)),
+    [config],
+  );
 
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;

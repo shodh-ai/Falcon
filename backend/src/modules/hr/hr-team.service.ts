@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as ExcelJS from 'exceljs';
@@ -617,6 +621,7 @@ export class HrTeamService {
     const rows = await this.dataSource.query(
       `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
               r.regularization_date, r.reason, r.status, r.applied_at,
+              r.supporting_doc_urls,
               u.name AS employee_name, u.official_email AS employee_email,
               p.employee_id
        FROM staff_leave_requests r
@@ -647,6 +652,7 @@ export class HrTeamService {
         raised_on: r.applied_at,
         reason: r.reason,
         status: r.status,
+        supporting_doc_urls: r.supporting_doc_urls ?? [],
         employee: {
           name: r.employee_name,
           email: r.employee_email,
@@ -1066,7 +1072,9 @@ export class HrTeamService {
       throw new ForbiddenException('Employee not in your reporting scope');
     }
 
-    const entityRows = await this.dataSource.query<Array<{ entity_id: number }>>(
+    const entityRows = await this.dataSource.query<
+      Array<{ entity_id: number }>
+    >(
       `SELECT entity_id FROM hr_employee_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
       [memberUserId, tenantId],
     );
@@ -1148,8 +1156,11 @@ export class HrTeamService {
       leaveBalance += Number(b.entitled ?? 0) - Number(b.used ?? 0);
     }
 
-    const trend: Array<{ month: string; present_days: number; avg_hours: number }> =
-      [];
+    const trend: Array<{
+      month: string;
+      present_days: number;
+      avg_hours: number;
+    }> = [];
     for (let i = 2; i >= 0; i--) {
       const d = new Date(year, this.monthRange(monthKey).monthNum - 1 - i, 1);
       const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -1194,8 +1205,7 @@ export class HrTeamService {
     const cal = calendars.get(memberUserId);
     const workingDays = (cal?.days ?? []).filter(
       (d) =>
-        d.calculated_status !== 'WEEK_OFF' &&
-        d.calculated_status !== 'HOLIDAY',
+        d.calculated_status !== 'WEEK_OFF' && d.calculated_status !== 'HOLIDAY',
     ).length;
 
     return {
@@ -1212,6 +1222,57 @@ export class HrTeamService {
       on_time: onTime,
       avg_working_hours: Math.round(avgHours * 100) / 100,
       trend,
+    };
+  }
+
+  async getTodayAttendance(
+    managerId: string,
+    tenantId: string,
+    scopeRaw?: string,
+  ) {
+    const scope = parseTeamScope(scopeRaw);
+    const today = new Date().toISOString().slice(0, 10);
+    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    if (!members.length) {
+      return { scope, date: today, employees: [], refreshed_at: new Date().toISOString() };
+    }
+    const userIds = members.map((m) => m.user_id);
+    const rows = await this.dataSource.query(
+      `SELECT u.user_id, u.name,
+              COALESCE(d.status, 'ABSENT') AS punch_status,
+              d.check_in_time, d.check_out_time,
+              d.is_regularized,
+              (
+                SELECT r.leave_type FROM staff_leave_requests r
+                WHERE r.staff_user_id = u.user_id
+                  AND r.status IN ('PENDING','HOD_APPROVED','HR_APPROVED')
+                  AND r.start_date <= $2::date AND r.end_date >= $2::date
+                ORDER BY r.applied_at DESC LIMIT 1
+              ) AS leave_marker
+       FROM users u
+       LEFT JOIN hr_daily_attendance d ON d.user_id = u.user_id AND d.date = $2::date
+       WHERE u.user_id = ANY($1::uuid[])
+       ORDER BY u.name ASC`,
+      [userIds, today],
+    );
+    return {
+      scope,
+      date: today,
+      refreshed_at: new Date().toISOString(),
+      employees: rows.map((r: Record<string, unknown>) => ({
+        user_id: r.user_id,
+        name: r.name,
+        status: r.punch_status,
+        check_in: r.check_in_time,
+        check_out: r.check_out_time,
+        is_regularized: r.is_regularized,
+        leave_marker: r.leave_marker,
+        bottom_line: r.check_in_time
+          ? `${String(r.check_in_time).slice(11, 16)}${r.check_out_time ? `-${String(r.check_out_time).slice(11, 16)}` : ''}`
+          : r.leave_marker
+            ? `Leave(${r.leave_marker})`
+            : 'Not punched in',
+      })),
     };
   }
 }

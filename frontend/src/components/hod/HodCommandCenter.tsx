@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   CalendarClock,
@@ -20,19 +21,23 @@ import {
   ShieldCheck,
   Fingerprint,
   ChevronDown,
+  Download,
 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { HrAvatar } from '@/components/hr/HrAvatar';
 import { HrStatCard } from '@/components/hr/HrStatCard';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import {
-  HodActionButton,
   HodPageFrame,
   HodPageHeader,
   HodPanel,
 } from '@/components/hod/HodPagePrimitives';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { downloadAuthedFile } from '@/lib/hod-download';
+import { HodCompiledResultsPanel } from '@/components/hod/HodCompiledResultsPanel';
+import { HodPlacementPanel } from '@/components/hod/HodPlacementPanel';
 import { cn } from '@/lib/utils';
 import { TodayBirthdaysWidget } from '@/components/dashboard/TodayBirthdaysWidget';
 
@@ -136,15 +141,35 @@ function ProgressBar({ pct, muted }: { pct: number; muted?: boolean }) {
   );
 }
 
-// Custom Module Types & Initial Mock Datasets
-interface HODCourse {
-  id: string;
-  code: string;
-  name: string;
-  semester: number;
+// Course handover + drill-down types
+interface AssignedCourse {
+  allocation_id: string;
+  course_id: string | null;
+  subject_code: string;
+  subject_name: string;
+  subject_type: string;
   credits: number;
-  facultyId: string | null;
+  program_name: string;
+  semester: string;
+  academic_year: string;
+  faculty_user_id: string;
+  faculty_name: string;
 }
+
+type HandoverFacultyOption = { user_id: string; name: string; email: string };
+
+type DepartmentTimetableRow = {
+  timetable_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  room: string | null;
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  faculty_user_id: string;
+  faculty_name: string;
+};
 
 interface AuditRecord {
   id: string;
@@ -154,6 +179,8 @@ interface AuditRecord {
   subjectCode: string;
   subjectName: string;
   pptsUploaded: number;
+  totalClasses?: number;
+  classesConducted?: number;
   attendanceMarked: number;
   attendanceMissingClasses?: string[];
   attendanceStatusLabel?: 'All Marked' | 'Missed Class' | 'No Class Today' | 'Upcoming Class' | 'N/A';
@@ -167,40 +194,12 @@ interface AuditRecord {
   editRequestReason?: string;
 }
 
-interface PlacementCompany {
-  id: string;
-  name: string;
-  date: string;
-  position: string;
-  semester: number;
-}
-
-interface PlacementStudentAttendance {
-  studentId: string;
-  studentName: string;
-  semester: number;
-  companyAttendance: { [companyId: string]: 'APPEARED' | 'ABSENT' | 'PENDING' };
-}
-
 interface FacultyRosterItem {
   user_id: string;
   name: string;
   email: string;
   department: string | null;
   role: string | null;
-}
-
-interface StudentResultRow {
-  studentId: string;
-  name: string;
-  wt1: number;
-  wt2: number;
-  mt1: number;
-  mt2: number;
-  project: number;
-  lab: number;
-  endTheory: number;
-  endPractical: number;
 }
 
 interface LivePunchRecord {
@@ -212,29 +211,32 @@ interface LivePunchRecord {
   totalHours?: string;
 }
 
-interface ResigningFaculty {
-  id: string;
-  name: string;
-  department: string;
-  resignationDate: string;
-  clearanceStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
-}
-
-const INITIAL_COURSES: HODCourse[] = [
-  { id: 'c-1', code: 'CSE301', name: 'Database Management Systems', semester: 5, credits: 4, facultyId: 'f-1' },
-  { id: 'c-2', code: 'CSE302', name: 'Computer Networks', semester: 5, credits: 4, facultyId: 'f-2' },
-  { id: 'c-3', code: 'CSE303', name: 'Software Engineering', semester: 5, credits: 3, facultyId: null },
-  { id: 'c-4', code: 'CSE101', name: 'Engineering Mathematics I', semester: 1, credits: 4, facultyId: 'f-1' },
-  { id: 'c-5', code: 'CSE102', name: 'Programming in C', semester: 1, credits: 3, facultyId: 'f-3' },
-];
-
-const INITIAL_PUNCHES: LivePunchRecord[] = [];
-
 type AttendanceMatrixDay = {
   date: string;
   bottom_line: string;
   calculated_status?: string;
 };
+
+function getIstDayOfWeek(): number {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+  }).format(new Date());
+  const map: Record<string, number> = {
+    Sun: 7,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return map[weekday] ?? 1;
+}
+
+function formatTimetableTime(value: string) {
+  return value?.slice(0, 5) ?? value;
+}
 
 function mapMatrixToTodayPunches(
   employees: Array<{ user_id: string; name: string; days: AttendanceMatrixDay[] }>,
@@ -276,121 +278,21 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
-const INITIAL_AUDITS: AuditRecord[] = [
-  {
-    id: 'a-1',
-    facultyName: 'Prof. Sachin',
-    facultyId: 'f-1',
-    semester: 3,
-    subjectCode: 'CSE301',
-    subjectName: 'Database Management Systems',
-    pptsUploaded: 14,
-    attendanceMarked: 92,
-    attendanceMissingClasses: [],
-    attendanceStatusLabel: 'All Marked',
-    marksUploaded: { ga: true, wt: true, labs: true, theory: true },
-    marksStatus: 'LOCKED',
-  },
-  {
-    id: 'a-2',
-    facultyName: 'Prof. Sharma',
-    facultyId: 'f-2',
-    semester: 3,
-    subjectCode: 'CSE302',
-    subjectName: 'Computer Networks',
-    pptsUploaded: 12,
-    attendanceMarked: 89,
-    attendanceMissingClasses: [
-      'CSE302 at 11:00 AM (Today)',
-      'CSE302 at 11:00 AM (Monday, 29th June)'
-    ],
-    attendanceStatusLabel: 'Missed Class',
-    marksUploaded: { ga: true, wt: true, labs: false, theory: false },
-    marksStatus: 'OPEN',
-  },
-  {
-    id: 'a-3',
-    facultyName: 'Prof. Verma',
-    facultyId: 'f-3',
-    semester: 5,
-    subjectCode: 'CSE305',
-    subjectName: 'Software Engineering',
-    pptsUploaded: 8,
-    attendanceMarked: 85,
-    attendanceMissingClasses: [
-      'CSE305 at 02:00 PM (Yesterday)',
-      'CSE305 at 02:00 PM (Friday, 26th June)',
-      'CSE306 at 10:00 AM (Monday, 29th June)'
-    ],
-    attendanceStatusLabel: 'Missed Class',
-    marksUploaded: { ga: true, wt: true, labs: true, theory: true },
-    marksStatus: 'EDIT_REQUESTED',
-    editRequestReason: 'I made a typo in the end-semester lab evaluation marks for Rohit Bala. Requesting unlock to update the record.',
-  },
-];
+const HOD_DASHBOARD_TABS = ['overview', 'audit', 'results', 'placement'] as const;
+type HodDashboardTab = (typeof HOD_DASHBOARD_TABS)[number];
 
-const INITIAL_STUDENTS: StudentResultRow[] = [
-  { studentId: 's-1', name: 'Amit Kumar', wt1: 18, wt2: 19, mt1: 23, mt2: 24, project: 45, lab: 42, endTheory: 52, endPractical: 46 },
-  { studentId: 's-2', name: 'Neha Singh', wt1: 15, wt2: 16, mt1: 20, mt2: 22, project: 40, lab: 38, endTheory: 45, endPractical: 40 },
-  { studentId: 's-3', name: 'Rohan Sharma', wt1: 12, wt2: 14, mt1: 18, mt2: 19, project: 35, lab: 32, endTheory: 38, endPractical: 35 },
-  { studentId: 's-4', name: 'Priya Verma', wt1: 19, wt2: 20, mt1: 24, mt2: 25, project: 48, lab: 45, endTheory: 56, endPractical: 48 },
-];
-
-
-const INITIAL_RESIGNATIONS: ResigningFaculty[] = [
-  { id: 'r-1', name: 'Prof. Gupta', department: 'Computer Science', resignationDate: '2026-06-15', clearanceStatus: 'PENDING' },
-];
-
-const INITIAL_PLACEMENT_COMPANIES: PlacementCompany[] = [
-  { id: 'pc-1', name: 'Google', date: '2026-06-15', position: 'Software Engineer', semester: 7 },
-  { id: 'pc-2', name: 'TCS', date: '2026-06-18', position: 'System Engineer', semester: 7 },
-  { id: 'pc-3', name: 'Infosys', date: '2026-06-20', position: 'Developer', semester: 7 },
-  { id: 'pc-4', name: 'Microsoft', date: '2026-06-22', position: 'Cloud Consultant', semester: 7 },
-  { id: 'pc-5', name: 'Wipro', date: '2026-06-25', position: 'Web Developer', semester: 5 },
-  { id: 'pc-6', name: 'Cognizant', date: '2026-06-28', position: 'Graduate Analyst', semester: 5 },
-];
-
-const INITIAL_PLACEMENT_ATTENDANCE: PlacementStudentAttendance[] = [
-  {
-    studentId: 's-1',
-    studentName: 'Amit Kumar',
-    semester: 7,
-    companyAttendance: { 'pc-1': 'APPEARED', 'pc-2': 'ABSENT', 'pc-3': 'APPEARED', 'pc-4': 'ABSENT' },
-  },
-  {
-    studentId: 's-2',
-    studentName: 'Neha Singh',
-    semester: 7,
-    companyAttendance: { 'pc-1': 'ABSENT', 'pc-2': 'APPEARED', 'pc-3': 'APPEARED', 'pc-4': 'APPEARED' },
-  },
-  {
-    studentId: 's-3',
-    studentName: 'Rohan Sharma',
-    semester: 7,
-    companyAttendance: { 'pc-1': 'ABSENT', 'pc-2': 'ABSENT', 'pc-3': 'APPEARED', 'pc-4': 'APPEARED' },
-  },
-  {
-    studentId: 's-4',
-    studentName: 'Priya Verma',
-    semester: 7,
-    companyAttendance: { 'pc-1': 'APPEARED', 'pc-2': 'APPEARED', 'pc-3': 'APPEARED', 'pc-4': 'APPEARED' },
-  },
-  {
-    studentId: 's-5',
-    studentName: 'Suresh Kumar',
-    semester: 5,
-    companyAttendance: { 'pc-5': 'APPEARED', 'pc-6': 'ABSENT' },
-  },
-  {
-    studentId: 's-6',
-    studentName: 'Anjali Sharma',
-    semester: 5,
-    companyAttendance: { 'pc-5': 'ABSENT', 'pc-6': 'APPEARED' },
-  },
-];
+function isHodDashboardTab(value: string | null): value is HodDashboardTab {
+  return !!value && HOD_DASHBOARD_TABS.includes(value as HodDashboardTab);
+}
 
 export function HodCommandCenter() {
   const api = useAuthedApi();
+  const { token, user } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeTab: HodDashboardTab = isHodDashboardTab(tabParam) ? tabParam : 'overview';
+  const departmentLabel = user?.department ? `Department of ${user.department}` : 'Your department';
   const istNow = useIstClock();
   const [data, setData] = useState<CommandCenterPayload | null>(null);
   const [unassignedLoad, setUnassignedLoad] = useState(0);
@@ -398,17 +300,19 @@ export function HodCommandCenter() {
   const [refreshing, setRefreshing] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
 
-  // Operational Pillars States
-  const [coursesList, setCoursesList] = useState<HODCourse[]>(INITIAL_COURSES);
-
-  const [handoverCourse, setHandoverCourse] = useState<HODCourse | null>(null);
+  const [assignedCourses, setAssignedCourses] = useState<AssignedCourse[]>([]);
+  const [handoverFaculty, setHandoverFaculty] = useState<HandoverFacultyOption[]>([]);
+  const [departmentTimetable, setDepartmentTimetable] = useState<DepartmentTimetableRow[]>([]);
+  const [handoverCourse, setHandoverCourse] = useState<AssignedCourse | null>(null);
   const [handoverTargetFacultyId, setHandoverTargetFacultyId] = useState('');
+  const [handoverSaving, setHandoverSaving] = useState(false);
 
-  const [auditRecords, setAuditRecords] = useState<AuditRecord[]>(INITIAL_AUDITS);
+  const [auditRecords, setAuditRecords] = useState<AuditRecord[]>([]);
   const [selectedAuditRequest, setSelectedAuditRequest] = useState<AuditRecord | null>(null);
   const [isAuditSheetOpen, setIsAuditSheetOpen] = useState(false);
   const [selectedMissedAttendance, setSelectedMissedAttendance] = useState<AuditRecord | null>(null);
   const [sendingAttendanceAlert, setSendingAttendanceAlert] = useState(false);
+  const [auditExporting, setAuditExporting] = useState(false);
   const [selectedSemester, setSelectedSemester] = useState<number | 'ALL'>('ALL');
   const [expandedFacultyIds, setExpandedFacultyIds] = useState<Set<string>>(new Set());
 
@@ -424,48 +328,25 @@ export function HodCommandCenter() {
     });
   };
 
-  const [punches, setPunches] = useState<LivePunchRecord[]>(INITIAL_PUNCHES);
+  const [punches, setPunches] = useState<LivePunchRecord[]>([]);
   const [disputePunchId, setDisputePunchId] = useState<string | null>(null);
   const [isDisputeDialogOpen, setIsDisputeDialogOpen] = useState(false);
 
-  const [resignations, setResignations] = useState<ResigningFaculty[]>(INITIAL_RESIGNATIONS);
-  const [resultsSemester, setResultsSemester] = useState('5');
-  const [resultsRows] = useState<StudentResultRow[]>(INITIAL_STUDENTS);
   const [drillDownType, setDrillDownType] = useState<'faculty' | 'classes' | 'attendance' | 'inbox' | 'redflags' | 'syllabus' | null>(null);
-
-  // Placement Attendance States
-  const [placementCompanies, setPlacementCompanies] = useState<PlacementCompany[]>(INITIAL_PLACEMENT_COMPANIES);
-  const [placementAttendance] = useState<PlacementStudentAttendance[]>(INITIAL_PLACEMENT_ATTENDANCE);
-  const [newPlCompanyName, setNewPlCompanyName] = useState('');
-  const [newPlPosition, setNewPlPosition] = useState('');
-  const [newPlDate, setNewPlDate] = useState('2026-06-30');
-  const [newPlSemester, setNewPlSemester] = useState('7');
-  const [selectedPlacementReport, setSelectedPlacementReport] = useState<PlacementStudentAttendance | null>(null);
   const [realFaculty, setRealFaculty] = useState<FacultyRosterItem[]>([]);
 
-  // Derived Faculty Members for Select List
-  const facultyList = useMemo(() => {
-    if (realFaculty && realFaculty.length > 0) {
-      return [
-        ...realFaculty.map((f) => ({ id: f.user_id, name: f.name })),
-        { id: 'new_hire', name: 'New Hire Placeholder' }
-      ];
-    }
-    return [
-      { id: 'f-1', name: 'Prof. Sachin' },
-      { id: 'f-2', name: 'Prof. Sharma' },
-      { id: 'f-3', name: 'Prof. Verma' },
-      { id: 'f-4', name: 'Prof. Gupta' },
-      { id: 'new_hire', name: 'New Hire Placeholder' }
-    ];
-  }, [realFaculty]);
+  const todayClasses = useMemo(
+    () => departmentTimetable.filter((row) => row.day_of_week === getIstDayOfWeek()),
+    [departmentTimetable],
+  );
 
   const load = useCallback(
     async (silent = false) => {
       if (!silent) setLoading(true);
       else setRefreshing(true);
       try {
-        const [payload, unassigned, roster, audits, attendanceMatrix] = await Promise.all([
+        const [payload, unassigned, roster, audits, attendanceMatrix, assigned, timetable] =
+          await Promise.all([
           api.get<CommandCenterPayload>('/api/academics/hod/command-center'),
           api.get<{ count: number }>('/api/academics/hod/teaching-load/unassigned/count').catch(() => ({ count: 0 })),
           api.get<FacultyRosterItem[]>('/api/academics/hod/faculty-roster').catch(() => []),
@@ -475,10 +356,19 @@ export function HodCommandCenter() {
               `/api/hr/ess/team/attendance?scope=dept&month=${new Date().toISOString().slice(0, 7)}`,
             )
             .catch(() => null),
+          api
+            .get<{ items: AssignedCourse[]; faculty: HandoverFacultyOption[] }>(
+              '/api/academics/hod/teaching-load/assigned',
+            )
+            .catch(() => ({ items: [], faculty: [] })),
+          api.get<DepartmentTimetableRow[]>('/api/academics/hod/department-timetable').catch(() => []),
         ]);
         setData(payload);
         setUnassignedLoad(unassigned.count);
         setRealFaculty(roster);
+        setAssignedCourses(assigned.items);
+        setHandoverFaculty(assigned.faculty);
+        setDepartmentTimetable(timetable);
         if (audits && audits.length > 0) {
           setAuditRecords(audits);
         } else {
@@ -489,7 +379,6 @@ export function HodCommandCenter() {
             ? mapMatrixToTodayPunches(attendanceMatrix.employees)
             : [],
         );
-        setResignations([]);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load command center');
         if (!silent) setData(null);
@@ -505,6 +394,41 @@ export function HodCommandCenter() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshTodayPunches = async () => {
+      try {
+        const today = await api.get<{
+          employees: Array<{ user_id: string; name: string; bottom_line: string; status: string }>;
+        }>('/api/hr/ess/team/attendance/today?scope=dept');
+        if (cancelled || !today?.employees?.length) return;
+        setPunches(
+          today.employees.map((e) => {
+            let status: LivePunchRecord['status'] = 'PRESENT';
+            if (e.bottom_line?.startsWith('Leave')) status = 'LEAVE';
+            else if (e.status === 'ABSENT' || e.bottom_line === 'Not punched in') status = 'ABSENT';
+            const timeMatch = e.bottom_line?.match(/^(\d{2}:\d{2})-(\d{2}:\d{2})$/);
+            return {
+              id: e.user_id,
+              facultyName: e.name,
+              punchIn: timeMatch?.[1] ?? null,
+              punchOut: timeMatch?.[2] ?? null,
+              status,
+            };
+          }),
+        );
+      } catch {
+        /* keep last snapshot */
+      }
+    };
+    void refreshTodayPunches();
+    const timer = window.setInterval(() => void refreshTodayPunches(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [api]);
 
   async function actOnInbox(row: InboxRow, action: 'APPROVE' | 'REJECT') {
     setActingId(row.id);
@@ -570,6 +494,27 @@ export function HodCommandCenter() {
     }
   }
 
+  async function exportAuditReport(facultyUserId?: string) {
+    if (!token) {
+      toast.error('Please sign in to download');
+      return;
+    }
+    setAuditExporting(true);
+    try {
+      const qs = facultyUserId ? `?faculty_user_id=${facultyUserId}` : '';
+      await downloadAuthedFile(
+        `/api/academics/hod/faculty-audit/export${qs}`,
+        token,
+        facultyUserId ? 'faculty-audit-report.xlsx' : 'all-faculty-audit.xlsx',
+      );
+      toast.success('Audit report downloaded');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setAuditExporting(false);
+    }
+  }
+
   const facultyPulse = useMemo(() => {
     if (!data) return null;
     const m = data.health_metrics;
@@ -610,9 +555,13 @@ export function HodCommandCenter() {
     <HodPageFrame>
       <HodPageHeader
         title="Department Command Center"
-        description="Academic health, faculty operations, and pending approvals for your department."
+        description={`Academic health, faculty operations, and pending approvals for ${departmentLabel}.`}
         meta={
           <>
+            <span className="rounded-md border border-sgvu-gold/30 bg-sgvu-gold/10 px-2.5 py-0.5 text-xs font-bold text-sgvu-navy">
+              {departmentLabel}
+            </span>
+            <span>·</span>
             <span className="font-medium text-sgvu-navy tabular-nums">{istNow || '—'} IST</span>
             <span>·</span>
             <span>{m.total_students} students</span>
@@ -632,19 +581,16 @@ export function HodCommandCenter() {
           </>
         }
         actions={
-          <>
-            <Button
-              size="default"
-              variant="outline"
-              className="h-9 gap-2 text-sm text-sgvu-navy"
-              disabled={refreshing}
-              onClick={() => void load(true)}
-            >
-              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-              Refresh
-            </Button>
-            <HodActionButton href="/hod/academics/course-allocation">Allocate Courses</HodActionButton>
-          </>
+          <Button
+            size="default"
+            variant="outline"
+            className="h-9 gap-2 text-sm text-sgvu-navy"
+            disabled={refreshing}
+            onClick={() => void load(true)}
+          >
+            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+            Refresh
+          </Button>
         }
       />
 
@@ -749,26 +695,11 @@ export function HodCommandCenter() {
         />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {[
-          { href: '/hod/department-timetable', label: 'Timetable' },
-          { href: '/hod/faculty/workload', label: 'Workload' },
-          { href: '/hod/academics/syllabus-tracking', label: 'Syllabus' },
-          { href: '/hod/academics/result-analytics', label: 'Results' },
-          { href: '/hod/inbox?scope=dept', label: 'HR Inbox' },
-          { href: '/hod/student-monitor', label: 'Student Monitor' },
-        ].map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-sgvu-navy shadow-sm transition-colors hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5"
-          >
-            {link.label}
-          </Link>
-        ))}
-      </div>
-
-      <Tabs defaultValue="overview" className="w-full mt-6 space-y-6">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => router.replace(`/hod/dashboard?tab=${value}`, { scroll: false })}
+        className="w-full mt-6 space-y-6"
+      >
         <TabsList className="grid w-full grid-cols-4 bg-slate-100 p-1 rounded-xl">
           <TabsTrigger value="overview" className="rounded-lg font-semibold py-2">Dashboard Overview</TabsTrigger>
           <TabsTrigger value="audit" className="rounded-lg font-semibold py-2">Faculty Progress Audit</TabsTrigger>
@@ -782,7 +713,6 @@ export function HodCommandCenter() {
             <HodPanel
               title="Syllabus Coverage"
               count={data.syllabus_coverage.length}
-              href="/hod/academics/syllabus-tracking"
               className="lg:col-span-4"
             >
               {data.syllabus_coverage.length === 0 ? (
@@ -822,7 +752,6 @@ export function HodCommandCenter() {
             <HodPanel
               title="Pending Approvals"
               count={data.pending_inbox.length}
-              href="/hod/inbox?scope=dept"
               className="lg:col-span-5"
             >
               {data.pending_inbox.length === 0 ? (
@@ -881,7 +810,6 @@ export function HodCommandCenter() {
             <HodPanel
               title="Attendance Red Flags"
               count={data.attendance_deficits.length}
-              href="/hod/students/defaulters"
               className="lg:col-span-3"
             >
               {data.attendance_deficits.length === 0 ? (
@@ -912,19 +840,18 @@ export function HodCommandCenter() {
           </div>
 
           {(m.pending_profile_corrections ?? 0) > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 px-5 py-4 mt-4 shadow-sm">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 px-5 py-4 mt-4 shadow-sm">
             <p className="text-sm text-sgvu-navy">
-              <span className="font-bold text-sgvu-navy">{m.pending_profile_corrections}</span> profile correction{m.pending_profile_corrections === 1 ? '' : 's'} pending review
+              <span className="font-bold text-sgvu-navy">{m.pending_profile_corrections}</span> profile correction{m.pending_profile_corrections === 1 ? '' : 's'} pending review — open <span className="font-semibold">Profile Corrections</span> from the sidebar.
             </p>
-            <Link href="/hod/approvals/profile-corrections">
-              <Button size="default" variant="outline" className="h-9 border-slate-200 bg-white text-sm text-slate-800 hover:bg-slate-50 font-semibold px-4 rounded-xl">
-                Review profiles
-              </Button>
-            </Link>
           </div>
           ) : null}
 
-          <TodayBirthdaysWidget className="mt-4 shadow-sm" />
+          <TodayBirthdaysWidget
+            className="mt-4 shadow-sm"
+            endpoint="/api/master-data/birthdays/faculty/department?scope=hod"
+            title="Faculty Birthdays Today"
+          />
         </TabsContent>
 
 
@@ -941,7 +868,7 @@ export function HodCommandCenter() {
                 </div>
                 
                 {/* Semester Choice Dropdown Selector */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <label htmlFor="sem-select" className="text-xs font-bold text-sgvu-navy whitespace-nowrap uppercase tracking-wider">Choose Sem:</label>
                   <select
                     id="sem-select"
@@ -962,6 +889,16 @@ export function HodCommandCenter() {
                     <option value="7">Semester 7 (VII)</option>
                     <option value="8">Semester 8 (VIII)</option>
                   </select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={auditExporting}
+                    className="gap-1.5"
+                    onClick={() => void exportAuditReport()}
+                  >
+                    {auditExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    Export all faculty
+                  </Button>
                 </div>
               </div>
 
@@ -1017,10 +954,18 @@ export function HodCommandCenter() {
                               : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/20 shadow-sm"
                           )}
                         >
-                          {/* Faculty Header Card */}
-                          <button
-                            className="w-full flex items-center justify-between px-5 py-4 text-left transition-colors bg-white hover:bg-slate-50/20"
+                          {/* Faculty Header Card — div (not button) so Report download can stay a real Button */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            className="w-full flex items-center justify-between px-5 py-4 text-left transition-colors bg-white hover:bg-slate-50/20 cursor-pointer"
                             onClick={() => toggleFacultyExpansion(group.facultyId)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleFacultyExpansion(group.facultyId);
+                              }
+                            }}
                           >
                             <div className="flex items-center gap-3">
                               <div className="h-9 w-9 rounded-full bg-sgvu-navy/5 flex items-center justify-center font-bold text-sgvu-navy text-xs border border-sgvu-navy/10">
@@ -1028,11 +973,25 @@ export function HodCommandCenter() {
                               </div>
                               <div>
                                 <h4 className="font-bold text-slate-800 hover:text-sgvu-navy transition-colors">{group.facultyName}</h4>
-                                <p className="text-xs text-slate-500 font-medium">Department of Computer Science</p>
+                                <p className="text-xs text-slate-500 font-medium">{departmentLabel}</p>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs gap-1"
+                                disabled={auditExporting || !group.records[0]?.facultyId}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const fid = group.records.find((r) => r.facultyId)?.facultyId;
+                                  if (fid) void exportAuditReport(fid);
+                                }}
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                                Report
+                              </Button>
                               <span className={cn(
                                 "text-[11px] font-bold px-2.5 py-1 rounded-full border transition-all",
                                 subjectsCount > 0 
@@ -1048,7 +1007,7 @@ export function HodCommandCenter() {
                                 )} 
                               />
                             </div>
-                          </button>
+                          </div>
 
                           {/* Accordion Content */}
                           {isExpanded && (
@@ -1087,43 +1046,23 @@ export function HodCommandCenter() {
                                             <span className="text-[10px] text-muted-foreground block font-medium">Uploaded</span>
                                           </td>
                                           <td className="px-4 py-3">
-                                            <div className="flex flex-col items-center justify-center text-center">
-                                              {rec.attendanceStatusLabel === 'No Class Today' && (
-                                                <>
-                                                  <Badge className="bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-100 font-bold text-[10px] py-0.5 px-1.5">No Class Today</Badge>
-                                                  <span className="text-[10px] text-slate-400 font-medium block mt-0.5">Not Scheduled</span>
-                                                </>
-                                              )}
-                                              {rec.attendanceStatusLabel === 'Upcoming Class' && (
-                                                <>
-                                                  <Badge className="bg-blue-50 text-blue-700 border border-blue-200/50 hover:bg-blue-50 font-bold text-[10px] py-0.5 px-1.5">Upcoming</Badge>
-                                                  <span className="text-[10px] text-blue-500 font-semibold block mt-0.5">Scheduled Later</span>
-                                                </>
-                                              )}
-                                              {rec.attendanceStatusLabel === 'N/A' && (
-                                                <>
-                                                  <Badge className="bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-100 font-bold text-[10px] py-0.5 px-1.5">N/A</Badge>
-                                                  <span className="text-[10px] text-slate-400 font-medium block mt-0.5">No Subject</span>
-                                                </>
-                                              )}
-                                              {rec.attendanceStatusLabel === 'All Marked' && (
-                                                <>
-                                                  <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200/50 hover:bg-emerald-50 font-bold text-[10px] py-0.5 px-1.5">All Marked</Badge>
-                                                  <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">On Schedule</span>
-                                                </>
-                                              )}
+                                            <div className="flex flex-col items-center justify-center text-center gap-1">
+                                              <span className="font-bold text-slate-800 text-xs tabular-nums">
+                                                {rec.classesConducted ?? 0} / {rec.totalClasses ?? '—'} classes
+                                              </span>
+                                              <span className="text-[10px] text-muted-foreground font-medium">
+                                                {rec.attendanceMarked}% logged
+                                              </span>
                                               {rec.attendanceStatusLabel === 'Missed Class' && (
-                                                <>
-                                                  <Badge className="bg-rose-50 text-rose-700 border border-rose-200/50 hover:bg-rose-50 font-bold text-[10px] py-0.5 px-1.5">
-                                                    {rec.attendanceMissingClasses?.length || 0} Missed
-                                                  </Badge>
-                                                  <button
-                                                    className="text-[11px] text-rose-600 font-bold hover:underline block mt-0.5"
-                                                    onClick={() => setSelectedMissedAttendance(rec)}
-                                                  >
-                                                    View Details
-                                                  </button>
-                                                </>
+                                                <button
+                                                  className="text-[11px] text-rose-600 font-bold hover:underline"
+                                                  onClick={() => setSelectedMissedAttendance(rec)}
+                                                >
+                                                  {rec.attendanceMissingClasses?.length || 0} missed today
+                                                </button>
+                                              )}
+                                              {rec.attendanceStatusLabel === 'No Class Today' && (
+                                                <span className="text-[10px] text-slate-400">No class today</span>
                                               )}
                                             </div>
                                           </td>
@@ -1250,278 +1189,63 @@ export function HodCommandCenter() {
                 </div>
 
               </div>
+
+              <div className="rounded-xl border border-slate-100 bg-white p-6 shadow-sm space-y-4">
+                <div className="flex items-center gap-2">
+                  <ArrowRightLeft className="h-5 w-5 text-sgvu-navy" />
+                  <h3 className="font-bold text-sgvu-navy">Subject Handover</h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Reassign active department subjects to another faculty member. Timetable and LMS access update
+                  automatically.
+                </p>
+                {assignedCourses.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    No assigned subjects found. Allocate courses from the Course Allocation Matrix first.
+                  </p>
+                ) : (
+                  <ul className="space-y-2 max-h-72 overflow-y-auto">
+                    {assignedCourses.slice(0, 12).map((course) => (
+                      <li
+                        key={course.allocation_id}
+                        className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50/60 p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-sgvu-navy truncate">
+                            {course.subject_code} · {course.subject_name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {course.faculty_name} · Sem {course.semester} · {course.academic_year}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0 h-8 text-xs"
+                          onClick={() => {
+                            setHandoverCourse(course);
+                            setHandoverTargetFacultyId('');
+                          }}
+                        >
+                          Reassign
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
         </TabsContent>
 
         {/* Tab 4: Compiled Results Matrix */}
         <TabsContent value="results" className="space-y-6 outline-none">
-          <SampleDataBanner message="Sample compiled results matrix for UI preview. Use Result Analytics for live pass/fail data from enrollments." />
-          <div className="rounded-xl border border-slate-100 bg-white p-6 shadow-sm space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-sgvu-navy">Compiled End-Semester Result Matrix</h3>
-                <p className="text-sm text-muted-foreground">Comprehensive academic grade report aggregates continuous assessments and end-semester reviews.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <Select value={resultsSemester} onValueChange={setResultsSemester}>
-                  <SelectTrigger className="w-[180px] bg-white border-slate-200">
-                    <SelectValue placeholder="Semester" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
-                      <SelectItem key={sem} value={sem.toString()}>
-                        Semester {sem}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  size="default"
-                  variant="outline"
-                  className="h-10 text-sm font-semibold border-slate-200 text-sgvu-navy hover:bg-slate-50 rounded-lg gap-2"
-                  onClick={() => {
-                    downloadCsv(
-                      `compiled-results-sem-${resultsSemester}.csv`,
-                      ['Student ID', 'Name', 'WT-1', 'WT-2', 'MT-1', 'MT-2', 'Project', 'Lab', 'End Theory', 'End Practical'],
-                      resultsRows.map((row) => [
-                        row.studentId,
-                        row.name,
-                        String(row.wt1),
-                        String(row.wt2),
-                        String(row.mt1),
-                        String(row.mt2),
-                        String(row.project),
-                        String(row.lab),
-                        String(row.endTheory),
-                        String(row.endPractical),
-                      ]),
-                    );
-                    toast.success(`Sample matrix exported for Semester ${resultsSemester}`);
-                  }}
-                >
-                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                  Export to Excel
-                </Button>
-              </div>
-            </div>
-
-            {/* Warning Banner for Missing Uploads */}
-            {resultsSemester === '5' ? (
-              <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
-                <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-bold text-amber-800 text-sm">Incomplete Marks Uploads</h4>
-                  <p className="text-xs text-amber-700/90 mt-0.5">
-                    Warning: <strong>Prof. Verma</strong> has NOT uploaded MT-2 and Lab marks for CSE305 (Software Engineering) for Semester {resultsSemester}. Grade locking deadline is approaching.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-                <ShieldCheck className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-bold text-emerald-800 text-sm">All Marks Synced</h4>
-                  <p className="text-xs text-emerald-700/90 mt-0.5">
-                    Success: All courses marks uploads are locked and complete for Semester {resultsSemester}.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Matrix Data Table */}
-            <div className="overflow-x-auto rounded-xl border border-slate-100">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-600 border-b border-slate-100">
-                  <tr>
-                    <th className="px-4 py-3">Student ID</th>
-                    <th className="px-4 py-3">Student Name</th>
-                    <th className="px-4 py-3 text-center">WT-1 (20)</th>
-                    <th className="px-4 py-3 text-center">WT-2 (20)</th>
-                    <th className="px-4 py-3 text-center">MT-1 (25)</th>
-                    <th className="px-4 py-3 text-center">MT-2 (25)</th>
-                    <th className="px-4 py-3 text-center">Project (50)</th>
-                    <th className="px-4 py-3 text-center">Lab (50)</th>
-                    <th className="px-4 py-3 text-center">End Theory (60)</th>
-                    <th className="px-4 py-3 text-center">End Practical (40)</th>
-                    <th className="px-4 py-3 text-center">Total (100)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white font-medium">
-                  {resultsRows.map((row) => {
-                    const calculatedTotal = Math.round(
-                      (row.wt1 + row.wt2 + row.mt1 + row.mt2) * 0.2 +
-                      row.project * 0.1 +
-                      row.lab * 0.1 +
-                      row.endTheory * 0.4 +
-                      row.endPractical * 0.2
-                    );
-                    return (
-                      <tr key={row.studentId} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-3 font-semibold text-slate-600 text-xs">{row.studentId}</td>
-                        <td className="px-4 py-3 font-bold text-sgvu-navy">{row.name}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.wt1}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.wt2}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.mt1}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.mt2}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.project}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.lab}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.endTheory}</td>
-                        <td className="px-4 py-3 text-center tabular-nums">{row.endPractical}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="inline-block px-2.5 py-1 text-sm font-bold bg-slate-100 text-sgvu-navy rounded-md">
-                            {calculatedTotal}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <HodCompiledResultsPanel />
         </TabsContent>
 
         {/* Tab 5: Placement Interview Attendance */}
         <TabsContent value="placement" className="space-y-6 outline-none">
-          <SampleDataBanner message="Sample placement attendance tracker for UI preview. Live placement data will connect to the placement cell module." />
-          <div className="rounded-xl border border-slate-100 bg-white p-6 shadow-sm space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-sgvu-navy">Placement Interview Attendance Tracker</h3>
-                <p className="text-sm text-muted-foreground">Pre-populate placement drive details, dispatch confirmation forms to 3rd & 4th year eligible students, and track appearance records.</p>
-              </div>
-            </div>
-
-            {/* Form to Dispatch Attendance Form */}
-            <div className="grid gap-4 md:grid-cols-4 items-end bg-slate-50 p-4 rounded-xl border border-slate-200/60">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-sgvu-navy">Company Name</label>
-                <Input
-                  value={newPlCompanyName}
-                  onChange={(e) => setNewPlCompanyName(e.target.value)}
-                  placeholder="e.g. Google / TCS"
-                  className="bg-white border-slate-200"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-sgvu-navy">Job Position</label>
-                <Input
-                  value={newPlPosition}
-                  onChange={(e) => setNewPlPosition(e.target.value)}
-                  placeholder="e.g. Software Engineer"
-                  className="bg-white border-slate-200"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-sgvu-navy">Interview Date</label>
-                <Input
-                  type="date"
-                  value={newPlDate}
-                  onChange={(e) => setNewPlDate(e.target.value)}
-                  className="bg-white border-slate-200"
-                />
-              </div>
-              <div className="flex gap-2">
-                <div className="space-y-1.5 flex-1">
-                  <label className="text-xs font-semibold text-sgvu-navy">Eligible Batch (Sem)</label>
-                  <Select value={newPlSemester} onValueChange={setNewPlSemester}>
-                    <SelectTrigger className="bg-white border-slate-200">
-                      <SelectValue placeholder="Semester" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="5">Sem 5 (3rd Year)</SelectItem>
-                      <SelectItem value="7">Sem 7 (4th Year)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button
-                  className="bg-sgvu-navy text-white hover:bg-sgvu-navy/90 flex items-center gap-1.5 rounded-lg px-4 h-10"
-                  onClick={() => {
-                    if (!newPlCompanyName || !newPlPosition || !newPlDate) {
-                      toast.error('All form fields must be completed to dispatch drives.');
-                      return;
-                    }
-                    const newCompany: PlacementCompany = {
-                      id: `pc-${Date.now()}`,
-                      name: newPlCompanyName.trim(),
-                      date: newPlDate,
-                      position: newPlPosition.trim(),
-                      semester: parseInt(newPlSemester, 10),
-                    };
-                    setPlacementCompanies([...placementCompanies, newCompany]);
-                    setNewPlCompanyName('');
-                    setNewPlPosition('');
-                    toast.success(`Verification Form dispatched to Semester ${newPlSemester} eligible students for ${newCompany.name}!`);
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                  Dispatch Form
-                </Button>
-              </div>
-            </div>
-
-            {/* Placement Attendance Matrix Logs */}
-            <div className="overflow-x-auto rounded-xl border border-slate-100">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-600 border-b border-slate-100">
-                  <tr>
-                    <th className="px-6 py-4">Student Name</th>
-                    <th className="px-6 py-4">Semester</th>
-                    {placementCompanies.map((c) => (
-                      <th key={c.id} className="px-6 py-4 text-center">
-                        <span className="block font-bold text-sgvu-navy">{c.name}</span>
-                        <span className="block text-[9px] text-slate-500 font-medium normal-case">{c.date}</span>
-                      </th>
-                    ))}
-                    <th className="px-6 py-4 text-right">Proof Report</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {placementAttendance.map((att) => (
-                    <tr key={att.studentId} className="hover:bg-slate-50/50">
-                      <td className="px-6 py-4 font-bold text-slate-800">{att.studentName}</td>
-                      <td className="px-6 py-4 text-slate-600">Sem {att.semester}</td>
-                      {placementCompanies.map((c) => {
-                        const status = att.companyAttendance[c.id];
-                        if (c.semester !== att.semester) {
-                          return (
-                            <td key={c.id} className="px-6 py-4 text-center text-xs text-slate-300 font-medium">
-                              N/A (Ineligible)
-                            </td>
-                          );
-                        }
-                        return (
-                          <td key={c.id} className="px-6 py-4 text-center">
-                            {status === 'APPEARED' && (
-                              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200/50 hover:bg-emerald-50 font-bold">Appeared</Badge>
-                            )}
-                            {status === 'ABSENT' && (
-                              <Badge className="bg-red-50 text-red-700 border border-red-200/50 hover:bg-red-50 font-bold">Absent / Skipped</Badge>
-                            )}
-                            {(!status || status === 'PENDING') && (
-                              <Badge className="bg-slate-50 text-slate-400 border border-slate-200 hover:bg-slate-50 font-semibold">Pending Verify</Badge>
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td className="px-6 py-4 text-right">
-                        <Button
-                          size="default"
-                          variant="outline"
-                          className="h-8 gap-1.5 text-xs text-sgvu-navy border-slate-200 hover:bg-slate-50 font-bold rounded-lg"
-                          onClick={() => setSelectedPlacementReport(att)}
-                        >
-                          <ClipboardList className="h-3.5 w-3.5" />
-                          View Proof
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <HodPlacementPanel />
         </TabsContent>
       </Tabs>
 
@@ -1568,7 +1292,7 @@ export function HodCommandCenter() {
                         course_id: courseId,
                         action: 'REJECT',
                       });
-                      toast.error(`Marks unlock request from ${selectedAuditRequest.facultyName} has been rejected.`);
+                      toast.success(`Marks unlock request from ${selectedAuditRequest.facultyName} has been rejected.`);
                       setIsAuditSheetOpen(false);
                       load(true);
                     } catch (e) {
@@ -1615,36 +1339,38 @@ export function HodCommandCenter() {
               Initiate Subject Handover
             </DialogTitle>
             <DialogDescription>
-              Reassign course syllabus, students list, and evaluation control directly to another teacher or allocate to a new recruit placeholder.
+              Reassign syllabus, student roster, and evaluation access to another faculty member in your department.
             </DialogDescription>
           </DialogHeader>
           {handoverCourse && (
             <div className="py-4 space-y-4">
               <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <div className="flex justify-between">
-                  <span className="text-xs font-semibold text-slate-500">SUBJECT DETAILS</span>
-                  <span className="text-xs font-bold text-sgvu-navy">{handoverCourse.code} - {handoverCourse.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-xs font-semibold text-slate-500">CURRENT TEACHER</span>
-                  <span className="text-xs font-bold text-red-600">
-                    {facultyList.find((f) => f.id === handoverCourse.facultyId)?.name || 'Unassigned'}
+                <div className="flex justify-between gap-3">
+                  <span className="text-xs font-semibold text-slate-500">SUBJECT</span>
+                  <span className="text-xs font-bold text-sgvu-navy text-right">
+                    {handoverCourse.subject_code} — {handoverCourse.subject_name}
                   </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-xs font-semibold text-slate-500">CURRENT TEACHER</span>
+                  <span className="text-xs font-bold text-red-600 text-right">{handoverCourse.faculty_name}</span>
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-sgvu-navy">Select Target Faculty</label>
+                <label className="text-xs font-semibold text-sgvu-navy">Select new faculty</label>
                 <Select value={handoverTargetFacultyId} onValueChange={setHandoverTargetFacultyId}>
                   <SelectTrigger className="bg-white border-slate-200">
                     <SelectValue placeholder="Select target faculty" />
                   </SelectTrigger>
                   <SelectContent>
-                    {facultyList.filter(f => f.id !== handoverCourse.facultyId).map((f) => (
-                      <SelectItem key={f.id} value={f.id}>
-                        {f.name}
-                      </SelectItem>
-                    ))}
+                    {handoverFaculty
+                      .filter((f) => f.user_id !== handoverCourse.faculty_user_id)
+                      .map((f) => (
+                        <SelectItem key={f.user_id} value={f.user_id}>
+                          {f.name}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1654,24 +1380,40 @@ export function HodCommandCenter() {
                   size="default"
                   variant="outline"
                   className="h-10 text-sm font-semibold border-slate-200"
+                  disabled={handoverSaving}
                   onClick={() => setHandoverCourse(null)}
                 >
                   Cancel
                 </Button>
                 <Button
                   size="default"
-                  className="h-10 text-sm font-semibold bg-sgvu-navy hover:bg-sgvu-navy/90 text-white"
-                  disabled={!handoverTargetFacultyId}
+                  className="h-10 text-sm font-semibold bg-sgvu-navy hover:bg-sgvu-navy/90 text-white gap-1.5"
+                  disabled={!handoverTargetFacultyId || handoverSaving}
                   onClick={() => {
-                    const targetFac = facultyList.find((f) => f.id === handoverTargetFacultyId);
-                    setCoursesList(
-                      coursesList.map((c) => (c.id === handoverCourse.id ? { ...c, facultyId: handoverTargetFacultyId === 'new_hire' ? null : handoverTargetFacultyId } : c))
-                    );
-                    setHandoverCourse(null);
-                    toast.success(`Handover complete. ${handoverCourse.code} is now reassigned to ${targetFac?.name}.`);
+                    if (!handoverTargetFacultyId) return;
+                    const targetFac = handoverFaculty.find((f) => f.user_id === handoverTargetFacultyId);
+                    setHandoverSaving(true);
+                    void api
+                      .patch(
+                        `/api/academics/hod/teaching-load/${handoverCourse.allocation_id}/reassign`,
+                        { faculty_user_id: handoverTargetFacultyId },
+                      )
+                      .then(() => {
+                        toast.success(
+                          `${handoverCourse.subject_code} reassigned to ${targetFac?.name ?? 'faculty'}`,
+                        );
+                        setHandoverCourse(null);
+                        setHandoverTargetFacultyId('');
+                        void load(true);
+                      })
+                      .catch((e) =>
+                        toast.error(e instanceof Error ? e.message : 'Handover failed'),
+                      )
+                      .finally(() => setHandoverSaving(false));
                   }}
                 >
-                  Confirm Reassignment
+                  {handoverSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Confirm reassignment
                 </Button>
               </DialogFooter>
             </div>
@@ -1821,6 +1563,9 @@ export function HodCommandCenter() {
           <div className="py-4">
             {drillDownType === 'faculty' && (
               <div className="overflow-x-auto rounded-lg border border-slate-100">
+                {realFaculty.length === 0 ? (
+                  <p className="p-6 text-sm text-muted-foreground text-center">No faculty roster data loaded.</p>
+                ) : (
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-bold uppercase text-slate-600 border-b border-slate-100">
                     <tr>
@@ -1836,16 +1581,11 @@ export function HodCommandCenter() {
                           id: f.user_id,
                           name: f.name,
                           desig: f.role || 'Faculty',
-                          dept: f.department || 'CSE',
+                          dept: f.department || '—',
                           email: f.email,
-                          status: f.name.includes('Gupta') ? 'On Resignation Notice' : 'Active',
+                          status: 'Active',
                         }))
-                      : [
-                          { id: 'f-1', name: 'Prof. Sachin', desig: 'Professor', dept: 'CSE', email: 'sachin@sgvu.edu', status: 'Active' },
-                          { id: 'f-2', name: 'Prof. Sharma', desig: 'Associate Professor', dept: 'CSE', email: 'sharma@sgvu.edu', status: 'Active' },
-                          { id: 'f-3', name: 'Prof. Verma', desig: 'Assistant Professor', dept: 'CSE', email: 'verma@sgvu.edu', status: 'Active' },
-                          { id: 'f-4', name: 'Prof. Gupta', desig: 'Assistant Professor', dept: 'CSE', email: 'gupta@sgvu.edu', status: 'On Resignation Notice' },
-                        ]
+                      : []
                     ).map((f, i) => (
                       <tr key={f.id || i} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3 text-sgvu-navy font-bold">{f.name}</td>
@@ -1861,11 +1601,17 @@ export function HodCommandCenter() {
                     ))}
                   </tbody>
                 </table>
+                )}
               </div>
             )}
 
             {drillDownType === 'classes' && (
               <div className="overflow-x-auto rounded-lg border border-slate-100">
+                {todayClasses.length === 0 ? (
+                  <p className="p-6 text-sm text-muted-foreground text-center">
+                    No classes scheduled for today in the department timetable.
+                  </p>
+                ) : (
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-bold uppercase text-slate-600 border-b border-slate-100">
                     <tr>
@@ -1876,63 +1622,106 @@ export function HodCommandCenter() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white font-medium">
-                    {[{ time: '09:00 AM - 10:00 AM', code: 'CSE301', faculty: 'Prof. Sachin', room: 'LH-101' },
-                      { time: '11:00 AM - 12:00 PM', code: 'CSE302', faculty: 'Prof. Sharma', room: 'LH-102' }].map((c, i) => (
-                      <tr key={i} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-3 font-semibold text-slate-700">{c.time}</td>
-                        <td className="px-4 py-3 text-sgvu-navy font-bold">{c.code}</td>
-                        <td className="px-4 py-3 text-slate-600">{c.faculty}</td>
-                        <td className="px-4 py-3"><Badge className="bg-slate-100 text-slate-700">{c.room}</Badge></td>
+                    {todayClasses.map((c) => (
+                      <tr key={c.timetable_id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-semibold text-slate-700">
+                          {formatTimetableTime(c.start_time)} – {formatTimetableTime(c.end_time)}
+                        </td>
+                        <td className="px-4 py-3 text-sgvu-navy font-bold">{c.course_code}</td>
+                        <td className="px-4 py-3 text-slate-600">{c.faculty_name}</td>
+                        <td className="px-4 py-3">
+                          <Badge className="bg-slate-100 text-slate-700">{c.room || 'TBD'}</Badge>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                )}
               </div>
             )}
 
             {drillDownType === 'attendance' && (
               <div className="overflow-x-auto rounded-lg border border-slate-100">
+                {auditRecords.length === 0 ? (
+                  <p className="p-6 text-sm text-muted-foreground text-center">
+                    No faculty audit data available yet.
+                  </p>
+                ) : (
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-bold uppercase text-slate-600 border-b border-slate-100">
                     <tr>
                       <th className="px-4 py-3">Subject</th>
                       <th className="px-4 py-3">Faculty</th>
-                      <th className="px-4 py-3 text-right">Avg Attendance</th>
+                      <th className="px-4 py-3 text-right">Attendance logged</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white font-medium">
-                    {[{ code: 'CSE301', name: 'Database Management Systems', fac: 'Prof. Sachin', att: '92%' },
-                      { code: 'CSE302', name: 'Computer Networks', fac: 'Prof. Sharma', att: '89%' },
-                      { code: 'CSE303', name: 'Software Engineering', fac: 'Prof. Verma', att: '85%' }].map((item, i) => (
-                      <tr key={i} className="hover:bg-slate-50/50">
+                    {auditRecords
+                      .filter((rec) => rec.subjectCode !== 'N/A')
+                      .map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50/50">
                         <td className="px-4 py-3">
-                          <p className="font-bold text-sgvu-navy">{item.code}</p>
-                          <p className="text-xs text-slate-500">{item.name}</p>
+                          <p className="font-bold text-sgvu-navy">{item.subjectCode}</p>
+                          <p className="text-xs text-slate-500">{item.subjectName}</p>
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{item.fac}</td>
-                        <td className="px-4 py-3 text-right text-lg font-bold text-sgvu-navy">{item.att}</td>
+                        <td className="px-4 py-3 text-slate-600">{item.facultyName}</td>
+                        <td className="px-4 py-3 text-right text-lg font-bold text-sgvu-navy">
+                          {item.attendanceMarked}%
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                )}
               </div>
             )}
 
             {drillDownType === 'inbox' && (
               <div className="space-y-3">
-                {data.pending_inbox.map((row) => (
-                  <div key={row.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 text-sm">
-                    <span className="mt-1 h-auto w-1 shrink-0 self-stretch rounded-full bg-sgvu-gold" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-bold text-sgvu-navy">{row.employee_name}</p>
-                        <Badge className="bg-slate-100 text-slate-600 text-xs font-semibold">{row.title}</Badge>
+                {data.pending_inbox.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">No pending approvals right now.</p>
+                ) : (
+                  data.pending_inbox.map((row) => (
+                    <div key={row.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 text-sm">
+                      <span className="mt-1 h-auto w-1 shrink-0 self-stretch rounded-full bg-sgvu-gold" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-bold text-sgvu-navy">{row.employee_name}</p>
+                          <Badge className="bg-slate-100 text-slate-600 text-xs font-semibold">{row.title}</Badge>
+                        </div>
+                        <p className="text-slate-600 text-xs mt-0.5">{row.detail}</p>
+                        <p className="text-slate-400 text-[11px] mt-1">{row.date_label}</p>
                       </div>
-                      <p className="text-slate-600 text-xs mt-0.5">{row.detail}</p>
-                      <p className="text-slate-400 text-[11px] mt-1">{row.date_label}</p>
+                      <div className="flex shrink-0 gap-2">
+                        <Button
+                          size="sm"
+                          className="h-8 bg-sgvu-navy hover:bg-sgvu-navy/90"
+                          disabled={actingId === row.id}
+                          onClick={() => void actOnInbox(row, 'APPROVE')}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8"
+                          disabled={actingId === row.id}
+                          onClick={() => void actOnInbox(row, 'REJECT')}
+                        >
+                          Reject
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
+                <div className="pt-2 text-center">
+                  <Link
+                    href="/hod/reporting-directory?tab=requests&scope=dept"
+                    className="text-xs font-bold text-sgvu-navy underline underline-offset-2"
+                  >
+                    Open full Team Requests in Zimyo →
+                  </Link>
+                </div>
               </div>
             )}
 
@@ -1992,98 +1781,6 @@ export function HodCommandCenter() {
               Close
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Placement Proof Report Dialog */}
-      <Dialog open={!!selectedPlacementReport} onOpenChange={(open) => { if (!open) setSelectedPlacementReport(null); }}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold text-sgvu-navy flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-sgvu-gold" />
-              Interview Attendance Proof Report
-            </DialogTitle>
-            <DialogDescription>
-              Consolidated placement drives appearance log. This document is verifiable proof for parent consultation.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedPlacementReport && (
-            <div className="py-4 space-y-4">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2">
-                <div className="flex justify-between border-b border-slate-200/50 pb-2">
-                  <span className="text-xs font-semibold text-slate-500">STUDENT NAME</span>
-                  <span className="text-xs font-bold text-sgvu-navy">{selectedPlacementReport.studentName}</span>
-                </div>
-                <div className="flex justify-between border-b border-slate-200/50 pb-2">
-                  <span className="text-xs font-semibold text-slate-500">CURRENT BATCH</span>
-                  <span className="text-xs font-bold text-sgvu-navy">Semester {selectedPlacementReport.semester}</span>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider">Placement Drives Log</h4>
-                <div className="space-y-2 max-h-[220px] overflow-y-auto">
-                  {placementCompanies.filter(c => c.semester === selectedPlacementReport.semester).map((c) => {
-                    const status = selectedPlacementReport.companyAttendance[c.id];
-                    return (
-                      <div key={c.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-white">
-                        <div>
-                          <p className="font-bold text-sgvu-navy">{c.name}</p>
-                          <p className="text-[11px] text-slate-500 font-medium">{c.position} · {c.date}</p>
-                        </div>
-                        <div>
-                          {status === 'APPEARED' ? (
-                            <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold hover:bg-emerald-50">Appeared</Badge>
-                          ) : status === 'ABSENT' ? (
-                            <Badge className="bg-red-50 text-red-700 border border-red-200 font-bold hover:bg-red-50">Absent / Skipped</Badge>
-                          ) : (
-                            <Badge className="bg-slate-50 text-slate-400 border border-slate-200 font-semibold hover:bg-slate-50">Pending Verify</Badge>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <DialogFooter className="pt-4 gap-2">
-                <Button
-                  size="default"
-                  variant="outline"
-                  className="h-10 text-sm font-semibold border-slate-200"
-                  onClick={() => {
-                    if (!selectedPlacementReport) return;
-                    const lines = [
-                      `Placement proof — ${selectedPlacementReport.studentName}`,
-                      `Semester ${selectedPlacementReport.semester}`,
-                      '',
-                      ...placementCompanies
-                        .filter((c) => c.semester === selectedPlacementReport.semester)
-                        .map((c) => {
-                          const status = selectedPlacementReport.companyAttendance[c.id] ?? 'Pending';
-                          return `${c.name} (${c.position}) — ${status}`;
-                        }),
-                    ];
-                    downloadCsv(
-                      `placement-proof-${selectedPlacementReport.studentId}.csv`,
-                      ['Field', 'Value'],
-                      lines.map((line, idx) => [idx === 0 ? 'Report' : 'Entry', line]),
-                    );
-                    toast.success('Placement preview exported as CSV');
-                  }}
-                >
-                  Export Preview CSV
-                </Button>
-                <Button
-                  size="default"
-                  className="h-10 text-sm font-semibold bg-sgvu-navy hover:bg-sgvu-navy/90 text-white"
-                  onClick={() => setSelectedPlacementReport(null)}
-                >
-                  Close
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
     </HodPageFrame>

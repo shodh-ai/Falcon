@@ -89,7 +89,9 @@ export class SuperAdminService {
       [userId, tenantId],
     );
     if (!user[0]) {
-      throw new BadRequestException('User not found or inactive in this tenant');
+      throw new BadRequestException(
+        'User not found or inactive in this tenant',
+      );
     }
 
     if (dto.assignment_type === 'DEAN' && dto.entity_type === 'SCHOOL') {
@@ -108,10 +110,15 @@ export class SuperAdminService {
         `UPDATE schools SET dean_user_id = $1 WHERE school_id = $2`,
         [userId, schoolId],
       );
-    } else if (dto.assignment_type === 'HOD' && dto.entity_type === 'DEPARTMENT') {
+    } else if (
+      dto.assignment_type === 'HOD' &&
+      dto.entity_type === 'DEPARTMENT'
+    ) {
       const deptId = Number(entityId);
       if (!Number.isInteger(deptId) || deptId <= 0) {
-        throw new BadRequestException('Department ID must be a positive number');
+        throw new BadRequestException(
+          'Department ID must be a positive number',
+        );
       }
       const dept = await this.dataSource.query<{ dept_id: number }[]>(
         `SELECT dept_id FROM departments WHERE dept_id = $1`,

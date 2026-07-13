@@ -191,6 +191,50 @@ export class HrEssService {
     return this.dataSource.query(sql, params);
   }
 
+  async listPendingHodResignations(
+    tenantId: string,
+    hodUserId: string,
+    scope: 'dept' | 'direct' = 'dept',
+  ) {
+    const deptRows = await this.dataSource.query(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+      [hodUserId],
+    );
+    const deptIds = deptRows.map((r: { dept_id: number }) => r.dept_id);
+
+    if (scope === 'direct') {
+      return this.dataSource.query(
+        `SELECT r.*, u.name AS employee_name, u.official_email AS employee_email,
+                d.dept_name, p.employee_id, r.exit_status
+         FROM hr_resignation_requests r
+         JOIN users u ON u.user_id = r.user_id
+         LEFT JOIN departments d ON d.dept_id = u.dept_id
+         LEFT JOIN hr_employee_profiles p ON p.user_id = r.user_id AND p.tenant_id = r.tenant_id
+         WHERE r.tenant_id = $1
+           AND r.status = 'PENDING_HOD'
+           AND u.reporting_officer_id = $2
+         ORDER BY r.created_at ASC`,
+        [tenantId, hodUserId],
+      );
+    }
+
+    if (!deptIds.length) return [];
+
+    return this.dataSource.query(
+      `SELECT r.*, u.name AS employee_name, u.official_email AS employee_email,
+              d.dept_name, p.employee_id, r.exit_status
+       FROM hr_resignation_requests r
+       JOIN users u ON u.user_id = r.user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN hr_employee_profiles p ON p.user_id = r.user_id AND p.tenant_id = r.tenant_id
+       WHERE r.tenant_id = $1
+         AND r.status IN ('PENDING_HOD', 'PENDING_HR', 'FNF_PENDING')
+         AND u.dept_id = ANY($2::int[])
+       ORDER BY r.created_at DESC`,
+      [tenantId, deptIds],
+    );
+  }
+
   async hodClearResignation(
     resignationId: string,
     hodUserId: string,

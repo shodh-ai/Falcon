@@ -28,13 +28,48 @@ pnpm-debug.log*
 .cache/
 *.tsbuildinfo
 
+# Runtime user uploads (local dev / server storage — do not commit)
+backend/uploads/
+
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
 
-# Local school test-ID source spreadsheets (real emails — do not commit)
+# User-provided source data (timetables, workloads, credential sheets — do not commit)
+pharmacy_TT.pdf
+Pharmacy_Faculty_Workload*.xlsx
+EE_Ids.xlsx
+EE_Faculty*.xlsx
+EE (*sem)*.xlsx
+civil_TT.pdf
+jagriti_TT.pdf
+nagendra_TT.pdf
+pradeep_TT.pdf
+ravindra_TT.pdf
 Falcon Test IDs*.xlsx
+PHYSIOTHERAPY DEPT DATA*.xlsx
+~$*.xlsx
+~$*.docx
+
+# B.Tech ME + cross-dept faculty timetable sources (repo root / imports)
+B.Tech (ME)*.pdf
+B.Tech*ME*.pdf
+*INDIVIDUAL TIME TABLE*.xlsx
+*INDIVIDUAL TIME TABLE*.xls
+*Time Table*.docx
+*Time table*.docx
+*Time Table*.doc
+*Time table*.doc
+Dr.*Time Table*
+Dr.*Time table*
+Time Table *Tiwari*
+Time Table *July*
+
+# Local parse output from source files above (regenerate with backend/scripts/*.py)
+backend/scripts/_pharmacy_tt_pages/
+backend/scripts/pharmacy-workload-parsed.json
+backend/scripts/ee-ids-parsed.json
 
 # One-off xlsx parse / credential migration generators (output lives in backend/migrations/)
 /scripts/

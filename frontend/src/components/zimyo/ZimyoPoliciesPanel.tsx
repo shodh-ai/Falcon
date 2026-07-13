@@ -11,6 +11,9 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { getSubdomainFromClient } from '@/lib/tenant';
 import { Button } from '@/components/ui/button';
 
 type Policy = {
@@ -74,6 +77,19 @@ function formatCategory(cat: string) {
   return CATEGORY_LABELS[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function resolvePolicyUrl(url: string) {
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/api/')) return `${getApiBaseUrl()}${url}`;
+  if (url.startsWith('/uploads/')) {
+    return `${getApiBaseUrl()}/api/uploads/download?path=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
+
+function isLocalDemoPolicy(url: string | null) {
+  return !!url && url.startsWith('/policies/');
+}
+
 function isDemoPolicy(id: string) {
   return id.startsWith('demo-');
 }
@@ -104,6 +120,7 @@ function groupByCategory(items: Policy[]) {
 
 export function ZimyoPoliciesPanel() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
   const [usingDemoData, setUsingDemoData] = useState(false);
@@ -177,17 +194,71 @@ export function ZimyoPoliciesPanel() {
     }
   }
 
-  function openPolicy(url: string | null) {
+  async function openPolicy(url: string | null) {
     if (!url) {
       toast.info('PDF not available for this policy');
+      return;
+    }
+    if (isLocalDemoPolicy(url)) {
+      toast.info('Sample holiday calendar PDF is not uploaded on this environment');
+      return;
+    }
+    if (url.startsWith('/api/') || url.startsWith('/uploads/')) {
+      if (!token) {
+        toast.error('Please sign in to view this policy');
+        return;
+      }
+      try {
+        const res = await fetch(resolvePolicyUrl(url), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'x-tenant-subdomain': getSubdomainFromClient(),
+          },
+        });
+        if (!res.ok) throw new Error('Could not open policy');
+        const blob = await res.blob();
+        window.open(URL.createObjectURL(blob), '_blank', 'noopener,noreferrer');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not open policy');
+      }
       return;
     }
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
-  function downloadPolicy(url: string | null, title: string) {
+  async function downloadPolicy(url: string | null, title: string) {
     if (!url) {
       toast.info('Download not available for this policy');
+      return;
+    }
+    if (isLocalDemoPolicy(url)) {
+      toast.info('Sample holiday calendar PDF is not uploaded on this environment');
+      return;
+    }
+    if (url.startsWith('/api/') || url.startsWith('/uploads/')) {
+      if (!token) {
+        toast.error('Please sign in to download');
+        return;
+      }
+      try {
+        const res = await fetch(resolvePolicyUrl(url), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'x-tenant-subdomain': getSubdomainFromClient(),
+          },
+        });
+        if (!res.ok) throw new Error('Download failed');
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = `${title.replace(/\s+/g, '-').toLowerCase()}.pdf`;
+        a.click();
+        URL.revokeObjectURL(objectUrl);
+        toast.success('Policy downloaded');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Download failed');
+      }
       return;
     }
     const a = document.createElement('a');
@@ -261,7 +332,7 @@ export function ZimyoPoliciesPanel() {
                     <td className="px-5 py-4 text-slate-800 font-bold">{p.title}</td>
                     <td className="px-5 py-4 text-center">
                       <button
-                        onClick={() => openPolicy(p.file_url)}
+                        onClick={() => void openPolicy(p.file_url)}
                         className="inline-flex items-center justify-center p-1 rounded hover:bg-rose-50 transition-all"
                         title="View PDF"
                       >
@@ -301,7 +372,7 @@ export function ZimyoPoliciesPanel() {
                     </td>
                     <td className="px-5 py-4 text-center">
                       <button
-                        onClick={() => downloadPolicy(p.file_url, p.title)}
+                        onClick={() => void downloadPolicy(p.file_url, p.title)}
                         className="p-1.5 rounded-lg text-slate-400 hover:text-sgvu-navy hover:bg-slate-50 transition-all"
                         title="Download"
                       >

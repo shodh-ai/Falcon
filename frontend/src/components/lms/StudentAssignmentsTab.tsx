@@ -21,6 +21,8 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
   const { token } = useAuth();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({});
+  const [dropzoneKeys, setDropzoneKeys] = useState<Record<string, number>>({});
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewTitle, setPreviewTitle] = useState<string>('');
 
@@ -35,14 +37,35 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
     }
   }
 
-  async function submit(assignmentId: string, file: File) {
-    if (!token) return;
+  function clearSelectedFile(assignmentId: string) {
+    setSelectedFiles((prev) => {
+      const next = { ...prev };
+      delete next[assignmentId];
+      return next;
+    });
+    setDropzoneKeys((prev) => ({
+      ...prev,
+      [assignmentId]: (prev[assignmentId] ?? 0) + 1,
+    }));
+  }
+
+  function toggleAssignment(assignmentId: string, expanded: boolean) {
+    if (expanded) {
+      clearSelectedFile(assignmentId);
+    }
+    setActiveId(expanded ? null : assignmentId);
+  }
+
+  async function submit(assignmentId: string) {
+    const file = selectedFiles[assignmentId];
+    if (!token || !file) return;
     setUploading(true);
     const form = new FormData();
     form.append('file', file);
     try {
       await postMultipart(`/api/academics/assignments/${assignmentId}/submit`, token, form);
       toast.success('Assignment submitted');
+      clearSelectedFile(assignmentId);
       setActiveId(null);
       onSubmitted();
     } catch (err) {
@@ -85,9 +108,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                   <button
                     type="button"
                     className="w-full text-left"
-                    onClick={() =>
-                      setActiveId(expanded ? null : row.assignment.assignment_id)
-                    }
+                    onClick={() => toggleAssignment(row.assignment.assignment_id, expanded)}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -137,6 +158,7 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                               size="sm"
                               className="gap-2"
                               onClick={() =>
+                                token &&
                                 downloadWithAuth(
                                   `/api/academics/student/assignments/${row.assignment.assignment_id}/download`,
                                   token,
@@ -157,9 +179,36 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                             {returned ? 'Check and Re-Upload' : 'Upload Solution PDF'}
                           </p>
                           <PdfDropzone
+                            key={dropzoneKeys[row.assignment.assignment_id] ?? 0}
                             disabled={uploading}
-                            onFile={(file) => void submit(row.assignment.assignment_id, file)}
+                            onFile={(file) =>
+                              setSelectedFiles((prev) => ({
+                                ...prev,
+                                [row.assignment.assignment_id]: file,
+                              }))
+                            }
                           />
+                          {selectedFiles[row.assignment.assignment_id] && (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <Button
+                                disabled={uploading}
+                                onClick={() => void submit(row.assignment.assignment_id)}
+                              >
+                                {uploading ? 'Submitting…' : 'Submit assignment'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={uploading}
+                                onClick={() => clearSelectedFile(row.assignment.assignment_id)}
+                              >
+                                Clear file
+                              </Button>
+                              <p className="text-xs text-muted-foreground">
+                                Review your PDF, then click Submit.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <p className="mt-3 text-sm font-medium text-red-600">Deadline has passed for uploading solutions.</p>

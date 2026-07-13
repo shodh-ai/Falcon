@@ -39,8 +39,15 @@ export function NotificationBell({
   onDismiss,
   viewAllHref = '/notifications',
 }: NotificationBellProps) {
-  const unread = unreadCount ?? notifications.filter((n) => n.unread).length;
-  const actionRequired = notifications.filter((n) => n.intent === 'action_required' && n.unread);
+  const listUnread = notifications.filter((n) => n.unread).length;
+  // Empty dropdown ⇒ no badge. Otherwise prefer the caller count, falling back to visible rows.
+  const unread =
+    !isLoading && notifications.length === 0
+      ? 0
+      : Math.max(0, unreadCount ?? listUnread);
+  const actionRequired = notifications.filter(
+    (n) => n.intent === 'action_required' && n.unread,
+  );
   const summary = notificationSummary(unread, actionRequired.length);
 
   const [open, setOpen] = useState(false);
@@ -55,11 +62,11 @@ export function NotificationBell({
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="icon" className={cn('relative', HEADER_ICON_CONTROL_CLASS)}>
           <Bell className="h-5 w-5" />
-          {unread > 0 && (
+          {unread > 0 ? (
             <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold leading-none text-white">
               {unread > 9 ? '9+' : unread}
             </span>
-          )}
+          ) : null}
           <span className="sr-only">Notifications</span>
         </Button>
       </DropdownMenuTrigger>
@@ -72,16 +79,16 @@ export function NotificationBell({
         <div className="border-b px-4 py-3">
           <div className="flex items-center justify-between gap-2">
             <p className="text-base font-bold text-sgvu-navy">Notifications</p>
-            {unread > 0 && (
+            {unread > 0 ? (
               <span
                 className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-bold leading-none text-white"
                 aria-label={`${unread} unread`}
               >
                 {unread > 9 ? '9+' : unread}
               </span>
-            )}
+            ) : null}
           </div>
-          {summary && <p className="mt-1 text-xs text-muted-foreground">{summary}</p>}
+          {summary ? <p className="mt-1 text-xs text-muted-foreground">{summary}</p> : null}
         </div>
 
         <div className="max-h-[min(60vh,24rem)] overflow-y-auto p-2">

@@ -8,6 +8,7 @@ import { DataSource, QueryRunner } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { OnboardingVerificationNotifyService } from '../../core/notifications/onboarding-verification-notify.service';
 import {
   getDashboardPathForRoleName,
   getRequiredDocTypes,
@@ -58,7 +59,9 @@ function mapProfileSaveError(err: unknown): never {
     );
   }
   if (code === '22007' || code === '22008') {
-    throw new BadRequestException('Invalid date of birth. Use the date picker format.');
+    throw new BadRequestException(
+      'Invalid date of birth. Use the date picker format.',
+    );
   }
   throw err;
 }
@@ -103,6 +106,7 @@ export class StudentOnboardingService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly notifications: NotificationEmitterService,
+    private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
     private readonly crypto: HrFieldEncryptionService,
   ) {}
 
@@ -380,6 +384,15 @@ export class StudentOnboardingService {
       );
     }
 
+    this.notifications.onboardingVerificationRequested({
+      tenantId,
+      targetUserId: userId,
+      submitterName: user.name,
+      submitterEmail: user.official_email,
+      roleName: user.role_name,
+      portalKind: kind,
+    });
+
     return { onboarding_status: 'PENDING_ADMIN_APPROVAL' };
   }
 
@@ -388,6 +401,10 @@ export class StudentOnboardingService {
     portalKind?: OnboardingPortalKind | 'all',
   ) {
     const tenant = this.resolveTenantId(tenantId);
+    await this.onboardingVerificationNotify
+      .syncPendingVerificationNotifications(tenant)
+      .catch(() => undefined);
+
     const rows = await this.dataSource.query<
       Array<{
         user_id: string;

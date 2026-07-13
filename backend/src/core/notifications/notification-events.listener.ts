@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationDispatchService } from './notification-dispatch.service';
+import { OnboardingVerificationNotifyService } from './onboarding-verification-notify.service';
 import {
   admitCardLockedMessage,
   alumniConversionRequestedMessage,
@@ -86,6 +87,7 @@ import {
   type HrExportReadyPayload,
   type HrExportFailedPayload,
   type AlumniConversionRequestedPayload,
+  type OnboardingVerificationRequestedPayload,
   type EcellStatusUpdatedPayload,
   type EcellMentorMeetingRequestedPayload,
   type EcellMentorMeetingRespondedPayload,
@@ -99,6 +101,7 @@ import {
 export class NotificationEventsListener {
   constructor(
     private readonly dispatch: NotificationDispatchService,
+    private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -640,5 +643,12 @@ export class NotificationEventsListener {
       msg,
       { queueDelivery: false },
     );
+  }
+
+  @OnEvent(NotificationEvents.ONBOARDING_VERIFICATION_REQUESTED)
+  async onOnboardingVerificationRequested(
+    payload: OnboardingVerificationRequestedPayload,
+  ) {
+    await this.onboardingVerificationNotify.notifyVerificationRequested(payload);
   }
 }

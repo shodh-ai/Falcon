@@ -11,6 +11,7 @@ import { NotificationCronService } from './notification-cron.service';
 import { FalconNotificationsController } from './falcon-notifications.controller';
 import { NotificationEmitterService } from './notification-emitter.service';
 import { NotificationDispatchService } from './notification-dispatch.service';
+import { OnboardingVerificationNotifyService } from './onboarding-verification-notify.service';
 
 @Global()
 @Module({
@@ -27,12 +28,14 @@ import { NotificationDispatchService } from './notification-dispatch.service';
     NotificationCronService,
     NotificationEmitterService,
     NotificationDispatchService,
+    OnboardingVerificationNotifyService,
   ],
   exports: [
     NotificationsService,
     FalconNotificationsService,
     NotificationEmitterService,
     NotificationDispatchService,
+    OnboardingVerificationNotifyService,
   ],
 })
 export class NotificationsModule {}

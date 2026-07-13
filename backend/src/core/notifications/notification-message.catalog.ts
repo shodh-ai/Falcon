@@ -1,6 +1,7 @@
 import type {
   AdmitCardLockedPayload,
   AlumniConversionRequestedPayload,
+  OnboardingVerificationRequestedPayload,
   AttendanceWarningPayload,
   CourseMaterialAddedPayload,
   LiveClassScheduledPayload,
@@ -155,7 +156,8 @@ export function liveClassScheduledMessage(
       category: 'ACADEMICS',
       title: `Live class — ${payload.courseCode ?? payload.courseName}`,
       message: `${payload.liveClassTitle} is scheduled for ${when}. Join from your course workspace when the session starts.`,
-      actionLink: payload.actionLink ?? `/student/courses/${payload.courseId}?tab=live`,
+      actionLink:
+        payload.actionLink ?? `/student/courses/${payload.courseId}?tab=live`,
       actionLabel: 'Open live session',
       severity: 'info',
       intent: 'info',
@@ -912,6 +914,33 @@ export function alumniConversionRequestedMessage(
       programName: payload.programName,
     },
   };
+}
+
+export function onboardingVerificationRequestedMessage(
+  payload: OnboardingVerificationRequestedPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const isStaff = payload.portalKind === 'staff';
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: `Verification request — ${payload.submitterName}`,
+      message: `${payload.submitterName} (${payload.roleName}) submitted first-login documents for review.`,
+      actionLink: isStaff
+        ? '/hr/verifications'
+        : '/admissions-crm/verifications',
+      actionLabel: 'Review submission',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: {
+        targetUserId: payload.targetUserId,
+        submitterEmail: payload.submitterEmail,
+        roleName: payload.roleName,
+        portalKind: payload.portalKind,
+      },
+    },
+    overrides,
+  );
 }
 
 export function hostelBroadcastMessage(input: {

@@ -2,7 +2,6 @@
 
 import { Select } from '@/components/ui/select';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import {
   CalendarCheck,
   CheckCircle2,
@@ -31,9 +30,30 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuthedApi } from '@/lib/api';
-import { getTimetableSlotStatus } from '@/lib/timetable-ist';
+import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
+import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 
-const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEK_DAYS = [
+  { val: 1, label: 'Mon' },
+  { val: 2, label: 'Tue' },
+  { val: 3, label: 'Wed' },
+  { val: 4, label: 'Thu' },
+  { val: 5, label: 'Fri' },
+  { val: 6, label: 'Sat' },
+] as const;
+
+const GRID_HOURS = [9, 10, 11, 12, 13, 14, 15, 16];
+const LUNCH_HOUR = 13;
+
+function formatGridTime(hour: number) {
+  const h = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  return `${h}:00 ${ampm}`;
+}
+
+function slotStartHour(start: string) {
+  return Number.parseInt(String(start).slice(0, 2), 10);
+}
 
 type TimetableRow = {
   timetable_id: string;
@@ -84,17 +104,6 @@ type TimetableStats = {
   }[];
 };
 
-type TodayClass = {
-  timetable_id: string;
-  course_id: string;
-  course_code: string;
-  course_name: string;
-  room: string | null;
-  start_time: string;
-  end_time: string;
-  student_count: number;
-};
-
 function formatTermStart(value: string | null) {
   if (!value) return 'this term';
   return new Date(value).toLocaleDateString('en-IN', {
@@ -106,10 +115,10 @@ function formatTermStart(value: string | null) {
 
 export default function FacultyTimetablePage() {
   const api = useAuthedApi();
+  const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
   const [stats, setStats] = useState<TimetableStats | null>(null);
-  const [todayClasses, setTodayClasses] = useState<TodayClass[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [form, setForm] = useState({
     course_id: '',
@@ -121,22 +130,21 @@ export default function FacultyTimetablePage() {
   const [viewAdjustment, setViewAdjustment] = useState<Adjustment | null>(null);
 
   const loadPageData = useCallback(async () => {
-    const [scheduleData, statsData, todayData, adjustmentData] = await Promise.all([
-      api.get<TimetableRow[]>('/api/academics/faculty/workspaces/timetable'),
-      api.get<TimetableStats>('/api/academics/faculty/workspaces/timetable/stats'),
-      api.get<TodayClass[]>('/api/academics/faculty/timetable/today').catch(() => []),
+    const [scheduleData, statsData, adjustmentData] = await Promise.all([
+      api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
+      api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
       api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
     ]);
     setSchedule(scheduleData);
     setStats(statsData);
-    setTodayClasses(todayData);
     setAdjustments(adjustmentData);
-  }, [api]);
+  }, [api, activeDeptId]);
 
   useEffect(() => {
+    if (deptLoading) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPageData().catch(() => undefined);
-  }, [loadPageData]);
+  }, [loadPageData, deptLoading]);
 
   const pendingAdjustments = useMemo(
     () => adjustments.filter((a) => a.status.includes('PENDING')),
@@ -147,6 +155,19 @@ export default function FacultyTimetablePage() {
     () => uniqueFacultyCoursesByCourseId(courses),
     [courses],
   );
+
+  const slotsByDayHour = useMemo(() => {
+    const map = new Map<string, TimetableRow[]>();
+    for (const row of schedule) {
+      const hour = slotStartHour(row.start_time);
+      if (!Number.isFinite(hour)) continue;
+      const key = `${row.day_of_week}|${hour}`;
+      const existing = map.get(key) ?? [];
+      existing.push(row);
+      map.set(key, existing);
+    }
+    return map;
+  }, [schedule]);
 
   async function submitAdjustment(e: FormEvent) {
     e.preventDefault();
@@ -234,112 +255,83 @@ export default function FacultyTimetablePage() {
         </>
       ) : null}
 
-      <FacultyPanel title="Teaching progress by course" count={stats?.courses.length ?? 0}>
-        {!stats || stats.courses.length === 0 ? (
-          <FacultyEmptyState description="No course progress data yet." />
+      <FacultyPanel title="Weekly schedule" count={schedule.length}>
+        {schedule.length === 0 ? (
+          <FacultyEmptyState description="No timetable rows assigned yet." />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border/50">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[780px] border-collapse text-sm">
               <thead>
-                <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <th className="px-3 py-2">Course</th>
-                  <th className="px-3 py-2">Weekly slots</th>
-                  <th className="px-3 py-2">Expected</th>
-                  <th className="px-3 py-2">Conducted</th>
-                  <th className="px-3 py-2">Remaining</th>
-                  <th className="px-3 py-2">Progress</th>
+                <tr className="border-b bg-muted/40">
+                  <th className="sticky left-0 z-10 w-24 border-r bg-muted/40 px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Time
+                  </th>
+                  {WEEK_DAYS.map((day) => (
+                    <th
+                      key={day.val}
+                      className="min-w-[110px] px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-sgvu-navy"
+                    >
+                      {day.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {stats.courses.map((course) => (
-                  <tr key={course.course_id} className="border-b border-border/40">
-                    <td className="px-3 py-2.5">
-                      <p className="font-medium">{course.course_code}</p>
-                      <p className="text-xs text-muted-foreground">{course.course_name}</p>
-                    </td>
-                    <td className="px-3 py-2.5">{course.weekly_slots}</td>
-                    <td className="px-3 py-2.5">{course.expected_so_far}</td>
-                    <td className="px-3 py-2.5">{course.conducted_classes}</td>
-                    <td className="px-3 py-2.5">{course.remaining_classes}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex min-w-[120px] items-center gap-2">
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-sgvu-navy transition-all"
-                            style={{ width: `${course.completion_percent}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-medium tabular-nums">{course.completion_percent}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {GRID_HOURS.map((hour) => {
+                  if (hour === LUNCH_HOUR) {
+                    return (
+                      <tr key={`lunch-${hour}`} className="border-b border-border/40">
+                        <td className="sticky left-0 z-10 border-r bg-muted/20 px-2 py-1 text-center text-[10px] font-semibold text-muted-foreground">
+                          {formatGridTime(hour)}
+                        </td>
+                        <td
+                          colSpan={WEEK_DAYS.length}
+                          className="bg-muted/30 px-2 py-1 text-center text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground"
+                        >
+                          Lunch
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr key={hour} className="border-b border-border/40">
+                      <td className="sticky left-0 z-10 border-r bg-muted/20 px-2 py-2 text-center text-[10px] font-semibold tabular-nums text-sgvu-navy">
+                        {formatGridTime(hour)}
+                      </td>
+                      {WEEK_DAYS.map((day) => {
+                        const entries = slotsByDayHour.get(`${day.val}|${hour}`) ?? [];
+                        return (
+                          <td key={day.val} className="h-20 min-w-[110px] align-top p-1">
+                            {entries.length === 0 ? null : (
+                              <div className="flex h-full flex-col gap-1">
+                                {entries.map((entry) => (
+                                  <div
+                                    key={entry.timetable_id}
+                                    className="rounded border border-sgvu-navy/20 bg-sgvu-navy px-1.5 py-1 text-[10px] leading-tight text-white"
+                                  >
+                                    <p className="truncate font-bold">{entry.course_code}</p>
+                                    <p className="mt-0.5 truncate text-white/80">{entry.course_name}</p>
+                                    <p className="mt-1 truncate text-[9px] text-white/70">
+                                      {entry.room ?? 'TBA'}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </FacultyPanel>
 
-      <FacultyPanel title="Today's schedule" count={todayClasses.length}>
-        {todayClasses.length === 0 ? (
-          <FacultyEmptyState description="No classes scheduled for today." />
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {todayClasses.map((slot) => {
-              const status = getTimetableSlotStatus(slot.start_time, slot.end_time);
-              return (
-                <div
-                  key={slot.timetable_id}
-                  className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-semibold text-sgvu-navy">
-                      {String(slot.start_time).slice(0, 5)}–{String(slot.end_time).slice(0, 5)}
-                    </p>
-                    <Badge variant={status === 'done' ? 'secondary' : status === 'ongoing' ? 'default' : 'outline'}>
-                      {status === 'done' ? 'Done' : status === 'ongoing' ? 'Now' : 'Upcoming'}
-                    </Badge>
-                  </div>
-                  <p className="mt-0.5 font-medium">{slot.course_code}</p>
-                  <p className="text-muted-foreground">{slot.course_name}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Room {slot.room ?? 'TBA'} · {slot.student_count} students
-                  </p>
-                  <Button asChild size="sm" className="mt-3">
-                    <Link href={`/faculty/attendance?courseId=${slot.course_id}`}>
-                      Mark attendance
-                    </Link>
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </FacultyPanel>
-
       <div className="grid gap-4 lg:grid-cols-2">
-        <FacultyPanel title="Weekly schedule" count={schedule.length}>
-          {schedule.length === 0 ? (
-            <FacultyEmptyState description="No timetable rows assigned yet." />
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {schedule.map((s) => (
-                <div
-                  key={s.timetable_id}
-                  className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
-                >
-                  <p className="font-semibold text-sgvu-navy">
-                    {DAYS[s.day_of_week]} · {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)}
-                  </p>
-                  <p className="mt-0.5 font-medium">{s.course_code}</p>
-                  <p className="text-muted-foreground">{s.course_name}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Room {s.room ?? 'TBA'}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </FacultyPanel>
-
         <FacultyPanel title="Schedule change request" description="Extra class, cancel, or substitute">
           {coursesError && (
             <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -386,38 +378,84 @@ export default function FacultyTimetablePage() {
             </Button>
           </form>
         </FacultyPanel>
+
+        <FacultyPanel id="falcon-pending-requests" title="My pending requests" count={pendingAdjustments.length}>
+          {pendingAdjustments.length === 0 ? (
+            <FacultyEmptyState description="No pending adjustment requests." />
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border/50">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <th className="px-3 py-2">Requested date</th>
+                    <th className="px-3 py-2">Course</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">View</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingAdjustments.map((a) => (
+                    <tr key={a.adjustment_id} className="border-b border-border/40">
+                      <td className="px-3 py-2.5">
+                        {a.new_date ? new Date(a.new_date).toLocaleString() : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 font-medium">{a.course_code}</td>
+                      <td className="px-3 py-2.5">{a.adjustment_type.replace('_', ' ')}</td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="outline">{a.status}</Badge>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Button size="sm" variant="ghost" onClick={() => setViewAdjustment(a)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </FacultyPanel>
       </div>
 
-      <FacultyPanel id="falcon-pending-requests" title="My pending requests" count={pendingAdjustments.length}>
-        {pendingAdjustments.length === 0 ? (
-          <FacultyEmptyState description="No pending adjustment requests." />
+      <FacultyPanel title="Teaching progress by course" count={stats?.courses.length ?? 0}>
+        {!stats || stats.courses.length === 0 ? (
+          <FacultyEmptyState description="No course progress data yet." />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border/50">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <th className="px-3 py-2">Requested date</th>
                   <th className="px-3 py-2">Course</th>
-                  <th className="px-3 py-2">Type</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">View</th>
+                  <th className="px-3 py-2">Weekly slots</th>
+                  <th className="px-3 py-2">Expected</th>
+                  <th className="px-3 py-2">Conducted</th>
+                  <th className="px-3 py-2">Remaining</th>
+                  <th className="px-3 py-2">Progress</th>
                 </tr>
               </thead>
               <tbody>
-                {pendingAdjustments.map((a) => (
-                  <tr key={a.adjustment_id} className="border-b border-border/40">
+                {stats.courses.map((course) => (
+                  <tr key={course.course_id} className="border-b border-border/40">
                     <td className="px-3 py-2.5">
-                      {a.new_date ? new Date(a.new_date).toLocaleString() : '—'}
+                      <p className="font-medium">{course.course_code}</p>
+                      <p className="text-xs text-muted-foreground">{course.course_name}</p>
                     </td>
-                    <td className="px-3 py-2.5 font-medium">{a.course_code}</td>
-                    <td className="px-3 py-2.5">{a.adjustment_type.replace('_', ' ')}</td>
+                    <td className="px-3 py-2.5">{course.weekly_slots}</td>
+                    <td className="px-3 py-2.5">{course.expected_so_far}</td>
+                    <td className="px-3 py-2.5">{course.conducted_classes}</td>
+                    <td className="px-3 py-2.5">{course.remaining_classes}</td>
                     <td className="px-3 py-2.5">
-                      <Badge variant="outline">{a.status}</Badge>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Button size="sm" variant="ghost" onClick={() => setViewAdjustment(a)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      <div className="flex min-w-[120px] items-center gap-2">
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-sgvu-navy transition-all"
+                            style={{ width: `${course.completion_percent}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium tabular-nums">{course.completion_percent}%</span>
+                      </div>
                     </td>
                   </tr>
                 ))}

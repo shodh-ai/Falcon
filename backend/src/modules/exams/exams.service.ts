@@ -159,15 +159,18 @@ export class ExamsService {
     const user = await this.users.findOne({
       where: { user_id: studentUserId },
     });
-    
+
     const profileRows = await this.db.query(
       `SELECT profile_photo_url FROM student_profiles WHERE user_id = $1 LIMIT 1`,
-      [studentUserId]
+      [studentUserId],
     );
     const profile_picture_url = profileRows[0]?.profile_photo_url ?? null;
 
     const fs = require('fs');
-    fs.appendFileSync('admit-card-debug.log', `[DEBUG] generateAdmitCardOrThrow called for user ${studentUserId}. Photo URL length: ${profile_picture_url?.length || 0}. URL start: ${profile_picture_url?.substring(0, 30)}\n`);
+    fs.appendFileSync(
+      'admit-card-debug.log',
+      `[DEBUG] generateAdmitCardOrThrow called for user ${studentUserId}. Photo URL length: ${profile_picture_url?.length || 0}. URL start: ${profile_picture_url?.substring(0, 30)}\n`,
+    );
 
     const schedules = await this.listUpcomingSchedulesForStudent(studentUserId);
 

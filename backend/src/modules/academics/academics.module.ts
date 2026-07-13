@@ -47,6 +47,7 @@ import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 import { HrModule } from '../hr/hr.module';
+import { AuthModule } from '../../auth/auth.module';
 
 import { EarlyWarningService } from './early-warning.service';
 import { EarlyWarningController } from './early-warning.controller';
@@ -55,12 +56,15 @@ import { InsightsController } from './insights.controller';
 import { CourseAllocationBulkService } from './course-allocation-bulk.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
+import { HodPortalExtService } from './hod-portal-ext.service';
+import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
 
 @Module({
   imports: [
     StorageModule,
     HelpdeskModule,
     HrModule,
+    AuthModule,
     TypeOrmModule.forFeature([
       Subject,
       Batch,
@@ -118,6 +122,8 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
     CourseAllocationBulkService,
     StudentEnrollmentSyncService,
     StudentMentorSyncService,
+    HodPortalExtService,
+    FacultyTeachingDepartmentsService,
   ],
   exports: [
     AcademicsService,

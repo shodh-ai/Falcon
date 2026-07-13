@@ -77,13 +77,8 @@ export class MarksheetPdfService {
         String(gradeCard.payload?.withheld_reason ?? 'Marksheet is withheld'),
       );
     }
-    if (
-      gradeCard &&
-      gradeCard.payload?.result_stage === 'DRAFT'
-    ) {
-      throw new ForbiddenException(
-        'Marksheet is not published yet',
-      );
+    if (gradeCard && gradeCard.payload?.result_stage === 'DRAFT') {
+      throw new ForbiddenException('Marksheet is not published yet');
     }
 
     const rows = await this.enrollments.find({

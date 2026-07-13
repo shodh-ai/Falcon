@@ -15,7 +15,11 @@ type GatePassRow = {
   staff: { name: string; email?: string | null };
 };
 
-export function HodGatePassApprovalsPanel() {
+type Props = {
+  onUpdated?: () => void;
+};
+
+export function HodGatePassApprovalsPanel({ onUpdated }: Props) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<GatePassRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +48,7 @@ export function HodGatePassApprovalsPanel() {
       await api.patch(`/api/hr/gate-passes/${passId}/action`, { status });
       toast.success(status === 'APPROVED' ? 'Gate pass approved' : 'Gate pass rejected');
       await load();
+      onUpdated?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {

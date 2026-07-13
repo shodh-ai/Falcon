@@ -17,6 +17,7 @@ import { CourseMaterial } from '../../entities/course-material.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
+import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
 
 export interface FacultyTodayClassDto {
   classId: number;
@@ -78,6 +79,7 @@ export class AcademicsFacultyService {
     private readonly courseMaterials: Repository<CourseMaterial>,
     private readonly objectStorage: ObjectStorageService,
     private readonly notificationEmitter: NotificationEmitterService,
+    private readonly teachingDepartments: FacultyTeachingDepartmentsService,
   ) {}
 
   async getFacultyTodayClasses(
@@ -226,6 +228,7 @@ export class AcademicsFacultyService {
   async getFacultyAcademicTimetableToday(
     facultyUserId: string,
     tenantId: string,
+    deptId?: number | null,
   ) {
     const day = new Date().getDay();
     const isoDay = day === 0 ? 7 : day;
@@ -240,36 +243,24 @@ export class AcademicsFacultyService {
         end_time: string;
       }>
     >(
-      `WITH faculty_courses AS (
-         SELECT DISTINCT a.course_id
-         FROM academic_course_allocations a
-         WHERE a.tenant_id = $1
-           AND a.faculty_user_id = $2
-           AND a.status = 'ACTIVE'
-           AND a.course_id IS NOT NULL
-       )
+      `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
-         COALESCE(t.timetable_id, fc.course_id) AS timetable_id,
-         fc.course_id,
+         t.timetable_id,
+         t.course_id,
          c.course_code,
          c.course_name,
          t.room,
-         COALESCE(t.start_time, '09:00'::time) AS start_time,
-         COALESCE(t.end_time, '10:00'::time) AS end_time
-       FROM faculty_courses fc
-       INNER JOIN academic_courses c ON c.course_id = fc.course_id
-       LEFT JOIN LATERAL (
-         SELECT t.*
-         FROM academic_timetables t
-         WHERE t.tenant_id = $1
-           AND t.course_id = fc.course_id
-           AND t.deleted_at IS NULL
-         ORDER BY CASE WHEN t.faculty_user_id = $2 THEN 0 ELSE 1 END, t.timetable_id DESC
-         LIMIT 1
-       ) t ON true
-       WHERE COALESCE(t.day_of_week, 1) = $3
-       ORDER BY COALESCE(t.start_time, '09:00'::time)`,
-      [tenantId, facultyUserId, isoDay],
+         t.start_time,
+         t.end_time
+       FROM academic_timetables t
+       INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
+       INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE t.tenant_id = $1
+         AND t.faculty_user_id = $2
+         AND t.deleted_at IS NULL
+         AND t.day_of_week = $4
+       ORDER BY t.start_time`,
+      [tenantId, facultyUserId, deptId ?? null, isoDay],
     );
 
     return Promise.all(
@@ -418,17 +409,14 @@ export class AcademicsFacultyService {
     };
   }
 
-  async getMissingAttendanceAlerts(facultyUserId: string, tenantId: string) {
+  async getMissingAttendanceAlerts(
+    facultyUserId: string,
+    tenantId: string,
+    deptId?: number | null,
+  ) {
     const isoDay = new Date().getDay() === 0 ? 7 : new Date().getDay();
     return this.dataSource.query(
-      `WITH faculty_courses AS (
-         SELECT DISTINCT a.course_id
-         FROM academic_course_allocations a
-         WHERE a.tenant_id = $1
-           AND a.faculty_user_id = $2
-           AND a.status = 'ACTIVE'
-           AND a.course_id IS NOT NULL
-       ),
+      `WITH ${this.teachingDepartments.facultyCoursesCte(3)},
        proxy_today AS (
          SELECT p.course_id, p.absent_faculty_id
          FROM academic_proxy_requests p
@@ -455,7 +443,7 @@ export class AcademicsFacultyService {
          INNER JOIN academic_timetables t
            ON t.tenant_id = $1
           AND t.course_id = ec.course_id
-          AND t.day_of_week = $3
+          AND t.day_of_week = $4
          WHERE t.end_time < CURRENT_TIME
        )
        SELECT
@@ -483,7 +471,7 @@ export class AcademicsFacultyService {
        WHERE cal.log_id IS NULL
        GROUP BY ts.timetable_id, ts.course_id, c.course_code, c.course_name, ts.start_time, ts.end_time
        ORDER BY ts.start_time ASC`,
-      [tenantId, facultyUserId, isoDay],
+      [tenantId, facultyUserId, deptId ?? null, isoDay],
     );
   }
 

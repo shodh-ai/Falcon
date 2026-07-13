@@ -324,6 +324,21 @@ const portalRoles: Record<string, string[]> = {
   '/super-admin': ['superadmin'],
   '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
   '/clinic-admin': ['registrar', 'superadmin'],
+  '/directory': [
+    'chairman',
+    'president',
+    'superadmin',
+    'registrar',
+    'hradmin',
+    'hr',
+    'hod',
+    'dean',
+    'warden',
+    'faculty',
+    'student',
+    'applicant',
+  ],
+  '/tickets': ['student', 'faculty', 'hod', 'dean', 'hr', 'hradmin', 'superadmin', 'registrar', 'parent'],
   '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator'],
 };
 
@@ -400,6 +415,39 @@ const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
   '/hr': '/hr/me/documents',
 };
 
+const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {
+  '/hr': '/hr/me/settings',
+  '/hostel-admin': '/hostel-admin/account/settings',
+  '/super-admin': '/super-admin/account/settings',
+  '/ecell-admin': '/ecell-admin/account/settings',
+  '/incubation': '/incubation/account/settings',
+  '/admin': '/admin/account/settings',
+};
+
+/** Account settings href for a portal prefix (e.g. `/student`, `/hr`). */
+export function getAccountSettingsHrefForPortal(portal: string): string {
+  const normalized = portal.startsWith('/') ? portal : `/${portal}`;
+  return EXPLICIT_PORTAL_SETTINGS_PATHS[normalized] ?? `${normalized}/settings`;
+}
+
+/** Resolve account settings for the active portal. */
+export function getSettingsHrefFromPath(pathname: string, role?: string | null): string {
+  if (pathname.startsWith('/ess')) {
+    const dash = getDashboardPathForRole(role);
+    return getSettingsHrefFromPath(dash, role);
+  }
+
+  const portal = Object.keys(portalRoles)
+    .sort((a, b) => b.length - a.length)
+    .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+
+  if (portal) {
+    return getAccountSettingsHrefForPortal(portal);
+  }
+
+  return '/faculty/settings';
+}
+
 /** Resolve the user profile page for the active portal (never the dashboard). */
 export function getProfileHrefFromPath(pathname: string, role?: string | null): string {
   if (pathname.startsWith('/ess')) {
@@ -443,19 +491,30 @@ export function resolveProfileHref(
 export function getPostLoginPath(user: {
   role?: string;
   primaryRole?: string;
+  roles?: string[];
+  is_department_hod?: boolean;
   onboarding_status?: string;
 }): string {
-  const role = user.primaryRole ?? user.role;
-  const config = getOnboardingConfigForRole(role);
+  const roles = (user.roles ?? [user.primaryRole ?? user.role])
+    .filter((role): role is string => Boolean(role))
+    .map((role) => role.trim().toLowerCase());
+  const hasHodRole = roles.includes('hod');
+  const primaryRole = user.primaryRole ?? user.role;
+
+  // Department heads use the same HOD Command Center as CSE, even when Dean is primary.
+  const landingRole =
+    hasHodRole && user.is_department_hod ? 'HOD' : primaryRole;
+
+  const config = getOnboardingConfigForRole(landingRole);
   if (config) {
     const onboardingPath = getOnboardingStepPath(
       config.portalPrefix,
       user.onboarding_status,
-      role,
+      landingRole,
     );
     if (onboardingPath) return onboardingPath;
   }
-  return getDashboardPathForRole(role);
+  return getDashboardPathForRole(landingRole);
 }
 
 export { needsPortalOnboarding };
