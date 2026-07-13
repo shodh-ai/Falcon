@@ -3,10 +3,10 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationDispatchService } from './notification-dispatch.service';
+import { OnboardingVerificationNotifyService } from './onboarding-verification-notify.service';
 import {
   admitCardLockedMessage,
   alumniConversionRequestedMessage,
-  onboardingVerificationRequestedMessage,
   attendanceWarningMessage,
   courseMaterialAddedMessage,
   liveClassScheduledMessage,
@@ -101,6 +101,7 @@ import {
 export class NotificationEventsListener {
   constructor(
     private readonly dispatch: NotificationDispatchService,
+    private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -648,26 +649,6 @@ export class NotificationEventsListener {
   async onOnboardingVerificationRequested(
     payload: OnboardingVerificationRequestedPayload,
   ) {
-    const roles =
-      payload.portalKind === 'staff'
-        ? ['HR', 'HRAdmin', 'SuperAdmin']
-        : ['AdmissionsOfficer', 'Registrar', 'SuperAdmin'];
-
-    const officers = await this.dataSource.query<Array<{ user_id: string }>>(
-      `SELECT u.user_id
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       WHERE u.tenant_id = $1 AND u.is_active = true
-         AND r.role_name = ANY($2::text[])`,
-      [payload.tenantId, roles],
-    );
-
-    const msg = onboardingVerificationRequestedMessage(payload);
-    await this.dispatch.dispatchToMany(
-      payload.tenantId,
-      officers.map((o) => o.user_id),
-      msg,
-      { queueDelivery: false },
-    );
+    await this.onboardingVerificationNotify.notifyVerificationRequested(payload);
   }
 }

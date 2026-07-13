@@ -918,23 +918,29 @@ export function alumniConversionRequestedMessage(
 
 export function onboardingVerificationRequestedMessage(
   payload: OnboardingVerificationRequestedPayload,
+  overrides?: NotificationMessageOverrides,
 ): NotificationMessage {
   const isStaff = payload.portalKind === 'staff';
-  return {
-    category: 'OPERATIONS',
-    title: `Verification request — ${payload.submitterName}`,
-    message: `${payload.submitterName} (${payload.roleName}) submitted first-login documents for review.`,
-    actionLink: isStaff ? '/hr/verifications' : '/admissions-crm/verifications',
-    actionLabel: 'Review submission',
-    severity: 'warning',
-    intent: 'action_required',
-    metadata: {
-      targetUserId: payload.targetUserId,
-      submitterEmail: payload.submitterEmail,
-      roleName: payload.roleName,
-      portalKind: payload.portalKind,
+  return applyNotificationOverrides(
+    {
+      category: 'OPERATIONS',
+      title: `Verification request — ${payload.submitterName}`,
+      message: `${payload.submitterName} (${payload.roleName}) submitted first-login documents for review.`,
+      actionLink: isStaff
+        ? '/hr/verifications'
+        : '/admissions-crm/verifications',
+      actionLabel: 'Review submission',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: {
+        targetUserId: payload.targetUserId,
+        submitterEmail: payload.submitterEmail,
+        roleName: payload.roleName,
+        portalKind: payload.portalKind,
+      },
     },
-  };
+    overrides,
+  );
 }
 
 export function hostelBroadcastMessage(input: {

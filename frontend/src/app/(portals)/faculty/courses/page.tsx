@@ -13,9 +13,11 @@ import {
 } from '@/components/faculty';
 import { Badge } from '@/components/ui/badge';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
+import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 
 export default function FacultyCoursesIndexPage() {
   const { courses, loading, error } = useFacultyCourses();
+  const { activeDepartment, isMultiDepartment } = useTeachingDepartment();
 
   const totalCredits = courses.reduce((sum, c) => sum + (Number(c.credits) || 0), 0);
   const isFetchError = error && error !== 'No courses allocated to your timetable yet.';
@@ -23,7 +25,11 @@ export default function FacultyCoursesIndexPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Open a subject to plan syllabus modules, track coverage, upload materials, and manage digital assignments."
+        description={
+          isMultiDepartment && activeDepartment
+            ? `Courses in ${activeDepartment.dept_name}. Open a subject to plan syllabus modules, track coverage, upload materials, and manage digital assignments.`
+            : 'Open a subject to plan syllabus modules, track coverage, upload materials, and manage digital assignments.'
+        }
         meta={
           !loading && courses.length > 0 ? (
             <>
