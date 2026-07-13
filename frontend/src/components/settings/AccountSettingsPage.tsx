@@ -21,6 +21,19 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { FacultyDetailsSettingsSection } from '@/components/settings/FacultyDetailsSettingsSection';
+
+function canEditFacultyProfile(pathname: string, workspaceRole: string): boolean {
+  if (
+    pathname.startsWith('/faculty') ||
+    pathname.startsWith('/hod') ||
+    pathname.startsWith('/dean')
+  ) {
+    return true;
+  }
+  const role = workspaceRole.toLowerCase();
+  return role === 'faculty' || role === 'hod' || role === 'dean';
+}
 
 function SettingsSection({
   title,
@@ -61,6 +74,7 @@ export function AccountSettingsPage() {
     user?.role ??
     'User';
   const profileHref = getProfileHrefFromPath(pathname, workspaceRole);
+  const showFacultyProfileEditor = canEditFacultyProfile(pathname, workspaceRole);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -104,9 +118,13 @@ export function AccountSettingsPage() {
           Settings
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage your account, security, and workspace preferences.
+          Manage your account, contact details, security, and workspace preferences.
         </p>
       </div>
+
+      {showFacultyProfileEditor ? (
+        <FacultyDetailsSettingsSection profileHref={profileHref} />
+      ) : null}
 
       <SettingsSection
         title="Account"

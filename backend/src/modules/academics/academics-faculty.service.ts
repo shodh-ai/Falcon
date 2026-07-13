@@ -245,26 +245,21 @@ export class AcademicsFacultyService {
     >(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
-         COALESCE(t.timetable_id, fc.course_id) AS timetable_id,
-         fc.course_id,
+         t.timetable_id,
+         t.course_id,
          c.course_code,
          c.course_name,
          t.room,
-         COALESCE(t.start_time, '09:00'::time) AS start_time,
-         COALESCE(t.end_time, '10:00'::time) AS end_time
-       FROM faculty_courses fc
-       INNER JOIN academic_courses c ON c.course_id = fc.course_id
-       LEFT JOIN LATERAL (
-         SELECT t.*
-         FROM academic_timetables t
-         WHERE t.tenant_id = $1
-           AND t.course_id = fc.course_id
-           AND t.deleted_at IS NULL
-         ORDER BY CASE WHEN t.faculty_user_id = $2 THEN 0 ELSE 1 END, t.timetable_id DESC
-         LIMIT 1
-       ) t ON true
-       WHERE COALESCE(t.day_of_week, 1) = $4
-       ORDER BY COALESCE(t.start_time, '09:00'::time)`,
+         t.start_time,
+         t.end_time
+       FROM academic_timetables t
+       INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
+       INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+       WHERE t.tenant_id = $1
+         AND t.faculty_user_id = $2
+         AND t.deleted_at IS NULL
+         AND t.day_of_week = $4
+       ORDER BY t.start_time`,
       [tenantId, facultyUserId, deptId ?? null, isoDay],
     );
 

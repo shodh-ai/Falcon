@@ -405,9 +405,13 @@ export class AssignmentsService {
       .leftJoinAndSelect('assignment.course', 'course')
       .where('assignment.tenant_id = :tenantId', { tenantId })
       .andWhere('assignment.course_id IN (:...courseIds)', { courseIds })
-      .andWhere('assignment.start_date <= NOW()')
       .orderBy('assignment.due_date', 'ASC')
       .getMany();
+
+    const nowMs = Date.now();
+    const visibleAssignments = assignments.filter(
+      (assignment) => new Date(assignment.start_date).getTime() <= nowMs,
+    );
 
     const submissions = await this.submissions.find({
       where: { tenant_id: tenantId, student_user_id: studentUserId },
@@ -416,7 +420,7 @@ export class AssignmentsService {
       submissions.map((row) => [row.assignment_id, row]),
     );
 
-    return assignments.map((assignment) => {
+    return visibleAssignments.map((assignment) => {
       const submission = submissionByAssignment.get(assignment.assignment_id);
       return {
         assignment: {

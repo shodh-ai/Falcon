@@ -136,7 +136,7 @@ export function withAccountSettingsNav(config: PortalConfig): PortalConfig {
     label: 'Account Settings',
     href: settingsHref,
     icon: Settings,
-    keywords: ['password', 'security', 'notifications', 'email', 'account'],
+    keywords: ['password', 'security', 'notifications', 'email', 'account', 'phone', 'contact', 'address', 'profile'],
     shortLabel: 'Settings',
   };
 
@@ -202,7 +202,7 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
         label: 'Account Settings',
         href: p.settings,
         icon: Settings,
-        keywords: ['password', 'security', 'notifications', 'email', 'account'],
+        keywords: ['password', 'security', 'notifications', 'email', 'account', 'phone', 'contact', 'address', 'profile'],
       },
     ],
   };
