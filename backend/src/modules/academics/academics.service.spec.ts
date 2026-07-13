@@ -242,7 +242,12 @@ describe('AcademicsService', () => {
         ticket_id: 't1',
         student_user_id: 's1',
         status: 'PENDING',
-        conversation: [],
+        conversation: [] as Array<{
+          sender_user_id: string;
+          sender_role: string;
+          message: string;
+          sent_at: string;
+        }>,
       };
       const profile = { user_id: 's1', parent_info: { mobile: 'old' } };
 
@@ -275,7 +280,12 @@ describe('AcademicsService', () => {
         ticket_id: 't1',
         student_user_id: 's1',
         status: 'PENDING',
-        conversation: [],
+        conversation: [] as Array<{
+          sender_user_id: string;
+          sender_role: string;
+          message: string;
+          sent_at: string;
+        }>,
       };
 
       mockHelpdeskTickets.findOne.mockResolvedValue(ticket);

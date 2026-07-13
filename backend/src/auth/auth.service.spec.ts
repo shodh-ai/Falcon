@@ -40,7 +40,7 @@ function buildUser(overrides: Partial<User> & { roleName: string }): User {
     ],
     department: undefined,
     dept_id: null,
-  } as User;
+  } as unknown as User;
 }
 
 describe('AuthService.localLogin', () => {
