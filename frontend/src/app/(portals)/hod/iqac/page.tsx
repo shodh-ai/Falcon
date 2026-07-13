@@ -472,11 +472,21 @@ export default function HodIqacPage() {
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-muted-foreground uppercase">Upload Final Department SSR / Compiled Evidence (PDF/ZIP)</label>
-                <button
-                  type="button"
-                  onClick={() => masterInputRef.current?.click()}
-                  disabled={submitted || uploadingMaster}
-                  className="border-2 border-dashed border-slate-200 hover:border-sgvu-navy/40 rounded-xl p-4 w-full flex flex-col items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer transition-all duration-200 bg-slate-50/20 disabled:opacity-60"
+                <div
+                  role="button"
+                  tabIndex={submitted || uploadingMaster ? -1 : 0}
+                  onClick={() => {
+                    if (!submitted && !uploadingMaster) masterInputRef.current?.click();
+                  }}
+                  onKeyDown={(e) => {
+                    if (submitted || uploadingMaster) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      masterInputRef.current?.click();
+                    }
+                  }}
+                  aria-disabled={submitted || uploadingMaster}
+                  className="border-2 border-dashed border-slate-200 hover:border-sgvu-navy/40 rounded-xl p-4 w-full flex flex-col items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer transition-all duration-200 bg-slate-50/20 disabled:opacity-60 aria-disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-slate-50/20"
                 >
                   <UploadCloud className="h-6 w-6 text-slate-400 mb-1" />
                   {uploadingMaster ? (
@@ -506,7 +516,7 @@ export default function HodIqacPage() {
                       <p className="text-[9px] text-muted-foreground">PDF or ZIP up to 20MB</p>
                     </div>
                   )}
-                </button>
+                </div>
               </div>
 
               <div className="space-y-2">
