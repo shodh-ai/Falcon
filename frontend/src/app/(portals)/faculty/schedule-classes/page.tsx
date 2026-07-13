@@ -11,6 +11,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { Input } from '@/components/ui/input';
+import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
+import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import {
   Dialog,
   DialogContent,
@@ -61,6 +63,7 @@ function formatTime(hour: number) {
 
 export default function FacultyScheduleClassesPage() {
   const api = useAuthedApi();
+  const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [gridSlots, setGridSlots] = useState<TimetableSlot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +78,7 @@ export default function FacultyScheduleClassesPage() {
     setLoading(true);
     try {
       const data = await api.get<{ allocations: Allocation[]; timetables: any[]; faculty: any[] }>(
-        '/api/academics/faculty/workspaces/timetable/schedule-data',
+        withTeachingDeptId('/api/academics/faculty/workspaces/timetable/schedule-data', activeDeptId),
       );
       setAllocations(data.allocations || []);
 
@@ -103,8 +106,9 @@ export default function FacultyScheduleClassesPage() {
   }
 
   useEffect(() => {
+    if (deptLoading) return;
     void load();
-  }, [api]);
+  }, [api, activeDeptId, deptLoading]);
 
   function handleDragStart(e: React.DragEvent, sourceData: any) {
     e.dataTransfer.setData('application/json', JSON.stringify(sourceData));

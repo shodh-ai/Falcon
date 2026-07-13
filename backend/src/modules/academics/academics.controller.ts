@@ -42,6 +42,7 @@ import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { HodPortalExtService } from './hod-portal-ext.service';
+import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
 
 type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
@@ -59,6 +60,7 @@ export class AcademicsController {
     private readonly marksHistoryService: MarksHistoryService,
     private readonly courseAllocationBulk: CourseAllocationBulkService,
     private readonly hodPortalExt: HodPortalExtService,
+    private readonly teachingDepartments: FacultyTeachingDepartmentsService,
   ) {}
 
   @Get('subjects')
@@ -90,6 +92,15 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/teaching-departments')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getFacultyTeachingDepartments(@Req() req: { user: AuthUser }) {
+    return this.teachingDepartments.getTeachingDepartments(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
   @Get('faculty/today-classes')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getFacultyTodayClasses(@Req() req: { user: AuthUser }) {
@@ -98,19 +109,29 @@ export class AcademicsController {
 
   @Get('faculty/timetable/today')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  getFacultyAcademicTimetableToday(@Req() req: { user: AuthUser }) {
+  async getFacultyAcademicTimetableToday(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyAcademics.getFacultyAcademicTimetableToday(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
   @Get('faculty/attendance/missing')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  getMissingAttendanceAlerts(@Req() req: { user: AuthUser }) {
+  async getMissingAttendanceAlerts(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyAcademics.getMissingAttendanceAlerts(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
@@ -1563,28 +1584,43 @@ export class AcademicsController {
 
   @Get('faculty/workspaces/courses')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultyWorkspaceCourses(@Req() req: { user: AuthUser }) {
+  async facultyWorkspaceCourses(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.listFacultyCourses(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
   @Get('faculty/workspaces/timetable')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultyWorkspaceTimetable(@Req() req: { user: AuthUser }) {
+  async facultyWorkspaceTimetable(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.getWeeklyTimetable(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
   @Get('faculty/workspaces/timetable/schedule-data')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultyWorkspaceScheduleData(@Req() req: { user: AuthUser }) {
+  async facultyWorkspaceScheduleData(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.getFacultyScheduleData(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
@@ -1622,10 +1658,15 @@ export class AcademicsController {
 
   @Get('faculty/workspaces/timetable/stats')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultyWorkspaceTimetableStats(@Req() req: { user: AuthUser }) {
+  async facultyWorkspaceTimetableStats(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.getTimetableStats(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
@@ -2343,5 +2384,20 @@ export class AcademicsController {
 
   private resolveTenantId(user: AuthUser) {
     return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private async resolveFacultyDeptId(
+    req: { user: AuthUser },
+    deptIdRaw?: string,
+  ): Promise<number | null> {
+    const deptId = this.teachingDepartments.resolveOptionalDeptId(deptIdRaw);
+    if (deptId != null) {
+      await this.teachingDepartments.assertTeachesInDepartment(
+        req.user.user_id,
+        this.resolveTenantId(req.user),
+        deptId,
+      );
+    }
+    return deptId;
   }
 }

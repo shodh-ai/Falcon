@@ -57,6 +57,7 @@ import { CourseAllocationBulkService } from './course-allocation-bulk.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
 import { HodPortalExtService } from './hod-portal-ext.service';
+import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
 
 @Module({
   imports: [
@@ -122,6 +123,7 @@ import { HodPortalExtService } from './hod-portal-ext.service';
     StudentEnrollmentSyncService,
     StudentMentorSyncService,
     HodPortalExtService,
+    FacultyTeachingDepartmentsService,
   ],
   exports: [
     AcademicsService,

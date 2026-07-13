@@ -8,6 +8,7 @@ import { DataSource, QueryRunner } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { OnboardingVerificationNotifyService } from '../../core/notifications/onboarding-verification-notify.service';
 import {
   getDashboardPathForRoleName,
   getRequiredDocTypes,
@@ -105,6 +106,7 @@ export class StudentOnboardingService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly notifications: NotificationEmitterService,
+    private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
     private readonly crypto: HrFieldEncryptionService,
   ) {}
 
@@ -399,6 +401,10 @@ export class StudentOnboardingService {
     portalKind?: OnboardingPortalKind | 'all',
   ) {
     const tenant = this.resolveTenantId(tenantId);
+    await this.onboardingVerificationNotify
+      .syncPendingVerificationNotifications(tenant)
+      .catch(() => undefined);
+
     const rows = await this.dataSource.query<
       Array<{
         user_id: string;

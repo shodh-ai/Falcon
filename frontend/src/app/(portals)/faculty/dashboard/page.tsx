@@ -24,6 +24,9 @@ import {
   FacultyInlineLoading,
   FacultyErrorBanner,
 } from '@/components/faculty';
+import { MultiDepartmentTeachingSummary } from '@/components/faculty/MultiDepartmentTeachingSummary';
+import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
+import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 
 type FacultyClass = {
   timetable_id: string;
@@ -72,6 +75,7 @@ const PROFILE_COMPLIANCE_KEY = 'faculty-profile-compliance-dismissed';
 export default function FacultyDashboardPage() {
   const api = useAuthedApi();
   const { user } = useAuth();
+  const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const canManageTeam = canSeeFacultyTeamApprovals(user);
   const [classes, setClasses] = useState<FacultyClass[]>([]);
   const [missingAttendance, setMissingAttendance] = useState<MissingAttendanceAlert[]>([]);
@@ -91,14 +95,15 @@ export default function FacultyDashboardPage() {
   }, []);
 
   useEffect(() => {
+    if (deptLoading) return;
     let cancelled = false;
     (async () => {
       try {
         setLoading(true);
         setError(null);
         const [classData, missingAttendanceData, hrData, approvalData, gatePassData, balanceData, complianceData] = await Promise.all([
-          api.get<FacultyClass[]>('/api/academics/faculty/timetable/today').catch(() => []),
-          api.get<MissingAttendanceAlert[]>('/api/academics/faculty/attendance/missing').catch(() => []),
+          api.get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId)).catch(() => []),
+          api.get<MissingAttendanceAlert[]>(withTeachingDeptId('/api/academics/faculty/attendance/missing', activeDeptId)).catch(() => []),
           api.get<HrSummary>('/api/hr/workforce/today').catch(() =>
             api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null),
           ),
@@ -136,7 +141,7 @@ export default function FacultyDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [api, canManageTeam]);
+  }, [api, canManageTeam, activeDeptId, deptLoading]);
 
   const attendanceHref = (c: FacultyClass) =>
     `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
@@ -167,6 +172,8 @@ export default function FacultyDashboardPage() {
         title="Good morning — here is your day"
         description="Classes, attendance, approvals, and HR at a glance."
       />
+
+      <MultiDepartmentTeachingSummary />
 
       {missingAttendance.length > 0 ? (
         <div className="sticky top-3 z-20 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-red-950 shadow-lg">

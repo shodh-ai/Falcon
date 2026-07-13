@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
+import { useOptionalTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
+import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 
 export type FacultyCourse = {
   allocation_id?: string | null;
@@ -25,15 +27,22 @@ export function uniqueFacultyCoursesByCourseId(courses: FacultyCourse[]): Facult
 
 export function useFacultyCourses() {
   const api = useAuthedApi();
+  const teachingDept = useOptionalTeachingDepartment();
+  const activeDeptId = teachingDept?.activeDeptId ?? null;
+  const deptLoading = teachingDept?.loading ?? false;
   const [courses, setCourses] = useState<FacultyCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (deptLoading) return;
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.get<FacultyCourse[]>('/api/academics/faculty/workspaces/courses');
+        setLoading(true);
+        const data = await api.get<FacultyCourse[]>(
+          withTeachingDeptId('/api/academics/faculty/workspaces/courses', activeDeptId),
+        );
         if (!cancelled) {
           const uniqueMap = new Map<string, FacultyCourse>();
           for (const c of data) {
@@ -57,7 +66,7 @@ export function useFacultyCourses() {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, activeDeptId, deptLoading]);
 
   return { courses, loading, error };
 }

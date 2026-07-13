@@ -32,6 +32,8 @@ import {
 } from '@/components/ui/dialog';
 import { useAuthedApi } from '@/lib/api';
 import { getTimetableSlotStatus } from '@/lib/timetable-ist';
+import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
+import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 
 const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -106,6 +108,7 @@ function formatTermStart(value: string | null) {
 
 export default function FacultyTimetablePage() {
   const api = useAuthedApi();
+  const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const { courses, loading: coursesLoading, error: coursesError } = useFacultyCourses();
   const [schedule, setSchedule] = useState<TimetableRow[]>([]);
   const [stats, setStats] = useState<TimetableStats | null>(null);
@@ -122,21 +125,22 @@ export default function FacultyTimetablePage() {
 
   const loadPageData = useCallback(async () => {
     const [scheduleData, statsData, todayData, adjustmentData] = await Promise.all([
-      api.get<TimetableRow[]>('/api/academics/faculty/workspaces/timetable'),
-      api.get<TimetableStats>('/api/academics/faculty/workspaces/timetable/stats'),
-      api.get<TodayClass[]>('/api/academics/faculty/timetable/today').catch(() => []),
+      api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
+      api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
+      api.get<TodayClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId)).catch(() => []),
       api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
     ]);
     setSchedule(scheduleData);
     setStats(statsData);
     setTodayClasses(todayData);
     setAdjustments(adjustmentData);
-  }, [api]);
+  }, [api, activeDeptId]);
 
   useEffect(() => {
+    if (deptLoading) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPageData().catch(() => undefined);
-  }, [loadPageData]);
+  }, [loadPageData, deptLoading]);
 
   const pendingAdjustments = useMemo(
     () => adjustments.filter((a) => a.status.includes('PENDING')),

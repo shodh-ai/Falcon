@@ -19,6 +19,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
+import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 
 type FacultyClass = {
   timetable_id: string;
@@ -79,6 +81,7 @@ function todayIso() {
 
 function MarkAttendanceContent() {
   const api = useAuthedApi();
+  const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
   const [classes, setClasses] = useState<FacultyClass[]>([]);
@@ -121,10 +124,15 @@ function MarkAttendanceContent() {
   );
 
   useEffect(() => {
+    if (deptLoading) return;
     void api
-      .get<FacultyClass[]>('/api/academics/faculty/timetable/today')
+      .get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId))
       .then(async (data) => {
-        const missing = await api.get<MissingAttendanceAlert[]>('/api/academics/faculty/attendance/missing').catch(() => []);
+        const missing = await api
+          .get<MissingAttendanceAlert[]>(
+            withTeachingDeptId('/api/academics/faculty/attendance/missing', activeDeptId),
+          )
+          .catch(() => []);
         const assignedCourseIds = new Set(data.map((c) => c.course_id));
         const relevantMissing = missing.filter((alert) => assignedCourseIds.has(alert.course_id));
         setClasses(data);
@@ -141,7 +149,7 @@ function MarkAttendanceContent() {
         setSelectedTimetableId(pick.timetable_id);
       })
       .finally(() => setLoading(false));
-  }, [api, initialCourseId]);
+  }, [api, initialCourseId, activeDeptId, deptLoading]);
 
   useEffect(() => {
     if (!selectedCourseId) return;
