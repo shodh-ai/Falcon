@@ -77,12 +77,25 @@ export default function HodIqacPage() {
   const api = useAuthedApi();
   const criterionInputRef = useRef<HTMLInputElement>(null);
   const masterInputRef = useRef<HTMLInputElement>(null);
+  const additionalInputRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingCriterionId, setUploadingCriterionId] = useState<number | null>(null);
   const [uploadingMaster, setUploadingMaster] = useState(false);
+  const [uploadingAdditional, setUploadingAdditional] = useState(false);
   const [compiler, setCompiler] = useState<CompilerPayload | null>(null);
+  const [additionalActivities, setAdditionalActivities] = useState<
+    Array<{
+      activity_id: string;
+      activity_name: string;
+      activity_date?: string | null;
+      file_name?: string | null;
+      created_at?: string;
+    }>
+  >([]);
+  const [additionalActivityName, setAdditionalActivityName] = useState('');
+  const [additionalActivityDate, setAdditionalActivityDate] = useState('');
   const [comment, setComment] = useState('');
   const [masterFile, setMasterFile] = useState<{ name: string; path: string } | null>(null);
   const [expandedCriterionId, setExpandedCriterionId] = useState<number | null>(null);
@@ -93,8 +106,19 @@ export default function HodIqacPage() {
   const loadCompiler = useCallback(async () => {
     setLoading(true);
     try {
-      const payload = await api.get<CompilerPayload>('/api/academics/hod/iqac/compiler');
+      const [payload, additional] = await Promise.all([
+        api.get<CompilerPayload>('/api/academics/hod/iqac/compiler'),
+        api.get<{
+          items: Array<{
+            activity_id: string;
+            activity_name: string;
+            activity_date?: string | null;
+            file_name?: string | null;
+          }>;
+        }>('/api/academics/hod/iqac/additional-activities').catch(() => ({ items: [] })),
+      ]);
       setCompiler(payload);
+      setAdditionalActivities(additional.items ?? []);
       if (payload.submission_comments) {
         setComment(payload.submission_comments);
       }
@@ -186,6 +210,32 @@ export default function HodIqacPage() {
       toast.error(e instanceof Error ? e.message : 'Upload failed');
     } finally {
       setUploadingMaster(false);
+    }
+  }
+
+  async function handleAdditionalFileSelected(file: File | undefined) {
+    if (!file || !token) return;
+    if (!additionalActivityName.trim()) {
+      toast.error('Enter the activity name before uploading');
+      return;
+    }
+    setUploadingAdditional(true);
+    try {
+      const uploaded = await uploadSingleFile(token, file);
+      await api.post('/api/academics/hod/iqac/additional-activities', {
+        activity_name: additionalActivityName.trim(),
+        activity_date: additionalActivityDate || undefined,
+        file_path: uploaded.path ?? uploaded.url,
+        file_name: uploaded.originalname ?? file.name,
+      });
+      toast.success('Additional activity report submitted to IQAC');
+      setAdditionalActivityName('');
+      setAdditionalActivityDate('');
+      await loadCompiler();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setUploadingAdditional(false);
     }
   }
 
@@ -563,6 +613,81 @@ export default function HodIqacPage() {
                   </p>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-100 shadow-sm bg-white overflow-hidden relative">
+            <div className="absolute left-0 top-0 h-full w-1 bg-blue-500" />
+            <CardHeader className="bg-slate-50/50 pb-4 border-b border-gray-100">
+              <CardTitle className="text-base font-bold text-sgvu-navy flex items-center gap-2">
+                <Paperclip className="h-5 w-5 text-sgvu-navy" />
+                Additional Department Activities
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Upload reports for extra department activities beyond the 7 NAAC criteria (workshops, seminars, outreach, etc.).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-5 space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Activity name</label>
+                <input
+                  type="text"
+                  className="flex h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
+                  placeholder="e.g. Science outreach camp, faculty FDP"
+                  value={additionalActivityName}
+                  onChange={(e) => setAdditionalActivityName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Activity date (optional)</label>
+                <input
+                  type="date"
+                  className="flex h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
+                  value={additionalActivityDate}
+                  onChange={(e) => setAdditionalActivityDate(e.target.value)}
+                />
+              </div>
+              <input
+                ref={additionalInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.zip,.doc,.docx"
+                onChange={(e) => void handleAdditionalFileSelected(e.target.files?.[0])}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={uploadingAdditional || !additionalActivityName.trim()}
+                onClick={() => additionalInputRef.current?.click()}
+              >
+                {uploadingAdditional ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <UploadCloud className="h-4 w-4 mr-2" />
+                )}
+                Upload Activity Report
+              </Button>
+              {additionalActivities.length > 0 ? (
+                <ul className="space-y-2 pt-2 border-t border-slate-100">
+                  {additionalActivities.map((a) => (
+                    <li
+                      key={a.activity_id}
+                      className="rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2 text-xs"
+                    >
+                      <p className="font-semibold text-sgvu-navy">{a.activity_name}</p>
+                      {a.activity_date ? (
+                        <p className="text-muted-foreground mt-0.5">
+                          {new Date(`${a.activity_date}T12:00:00`).toLocaleDateString('en-IN')}
+                        </p>
+                      ) : null}
+                      {a.file_name ? (
+                        <p className="text-[10px] text-muted-foreground truncate mt-0.5">{a.file_name}</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </CardContent>
           </Card>
 

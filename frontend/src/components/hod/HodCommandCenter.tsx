@@ -38,6 +38,8 @@ import { useAuth } from '@/context/AuthContext';
 import { downloadAuthedFile } from '@/lib/hod-download';
 import { HodCompiledResultsPanel } from '@/components/hod/HodCompiledResultsPanel';
 import { HodPlacementPanel } from '@/components/hod/HodPlacementPanel';
+import { HodStaffRolesPanel } from '@/components/hod/HodStaffRolesPanel';
+import { HodAcademicCalendarPanel } from '@/components/hod/HodAcademicCalendarPanel';
 import { cn } from '@/lib/utils';
 import { TodayBirthdaysWidget } from '@/components/dashboard/TodayBirthdaysWidget';
 
@@ -839,6 +841,11 @@ export function HodCommandCenter() {
             endpoint="/api/master-data/birthdays/faculty/department?scope=hod"
             title="Faculty Birthdays Today"
           />
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <HodAcademicCalendarPanel />
+            <HodStaffRolesPanel />
+          </div>
         </TabsContent>
 
 
@@ -851,7 +858,7 @@ export function HodCommandCenter() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
                 <div>
                   <h3 className="text-lg font-bold text-sgvu-navy">Faculty Progress & Marks Audit</h3>
-                  <p className="text-sm text-muted-foreground">Monitor syllabus, PPT uploads, and grade lock statuses under the 7-day rule.</p>
+                  <p className="text-sm text-muted-foreground">Monitor syllabus, PPT uploads, and grade lock statuses.</p>
                 </div>
                 
                 {/* Semester Choice Dropdown Selector */}
@@ -1063,7 +1070,7 @@ export function HodCommandCenter() {
                                           </td>
                                           <td className="px-4 py-3">
                                             {rec.marksStatus === 'OPEN' && (
-                                              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200/50 font-semibold hover:bg-emerald-50">Open (&lt;7d)</Badge>
+                                              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200/50 font-semibold hover:bg-emerald-50">Open</Badge>
                                             )}
                                             {rec.marksStatus === 'LOCKED' && (
                                               <Badge className="bg-slate-50 text-slate-500 border border-slate-200 font-semibold hover:bg-slate-50">Locked</Badge>
@@ -1236,7 +1243,7 @@ export function HodCommandCenter() {
         </TabsContent>
       </Tabs>
 
-      {/* Sheet for Marks Edit Request (7-Day Rule) */}
+      {/* Sheet for Marks Edit Request */}
       <Sheet open={isAuditSheetOpen} onOpenChange={setIsAuditSheetOpen}>
         <SheetContent className="sm:max-w-[480px]">
           <SheetHeader>
@@ -1245,7 +1252,7 @@ export function HodCommandCenter() {
               Review Marks Unlock Request
             </SheetTitle>
             <SheetDescription>
-              A faculty member is requesting temporary unlock access to overwrite evaluation entries after the standard 7-day post-evaluation cutoff.
+              A faculty member is requesting temporary unlock access to update evaluation entries after the marks lock.
             </SheetDescription>
           </SheetHeader>
           {selectedAuditRequest && (

@@ -2090,6 +2090,20 @@ export class AcademicsService {
       .getMany();
 
     const studentIds = students.map((row) => row.user_id);
+    const profileRows =
+      studentIds.length === 0
+        ? []
+        : await this.users.manager.query<
+            Array<{ user_id: string; branch_name: string | null; batch: string | null }>
+          >(
+            `SELECT user_id, branch_name, batch
+             FROM student_profiles
+             WHERE user_id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+            [studentIds],
+          );
+    const profileByUser = new Map(
+      profileRows.map((row) => [row.user_id, row]),
+    );
     const enrollments =
       studentIds.length === 0
         ? []
@@ -2135,6 +2149,10 @@ export class AcademicsService {
           user_id: student.user_id,
           name: student.name,
           email: student.email,
+          branch:
+            profileByUser.get(student.user_id)?.branch_name?.trim() ||
+            profileByUser.get(student.user_id)?.batch?.trim() ||
+            null,
           department: student.department?.dept_name ?? null,
           average_attendance: attendance,
           course_count: rows.length,
@@ -3240,5 +3258,67 @@ export class AcademicsService {
     }
 
     return this.getHodIqacCompiler(tenantId, hodUserId);
+  }
+
+  async listHodIqacAdditionalActivities(tenantId: string, hodUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { items: [] };
+    const academicYear = this.currentAcademicYear();
+    const rows = await this.users.manager
+      .query(
+        `SELECT a.activity_id, a.activity_name, a.activity_date, a.description,
+                a.file_path, a.file_name, a.academic_year, a.created_at,
+                u.name AS uploaded_by_name
+         FROM hod_iqac_additional_activities a
+         LEFT JOIN users u ON u.user_id = a.uploaded_by
+         WHERE a.tenant_id = $1 AND a.dept_id = ANY($2::int[])
+           AND ($3::text IS NULL OR a.academic_year = $3)
+         ORDER BY a.created_at DESC`,
+        [tenantId, deptIds, academicYear],
+      )
+      .catch(() => []);
+    return { items: rows, academic_year: academicYear };
+  }
+
+  async uploadHodIqacAdditionalActivity(
+    tenantId: string,
+    hodUserId: string,
+    dto: {
+      activity_name: string;
+      activity_date?: string;
+      description?: string;
+      file_path: string;
+      file_name: string;
+    },
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) {
+      throw new ForbiddenException('No department scope for this HOD');
+    }
+    if (!dto.activity_name?.trim() || !dto.file_path?.trim() || !dto.file_name?.trim()) {
+      throw new BadRequestException(
+        'activity_name, file_path, and file_name are required',
+      );
+    }
+    const academicYear = this.currentAcademicYear();
+    const rows = await this.users.manager.query(
+      `INSERT INTO hod_iqac_additional_activities (
+         tenant_id, dept_id, activity_name, activity_date, description,
+         file_path, file_name, uploaded_by, academic_year
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        tenantId,
+        deptIds[0],
+        dto.activity_name.trim(),
+        dto.activity_date ?? null,
+        dto.description?.trim() ?? null,
+        dto.file_path.trim(),
+        dto.file_name.trim(),
+        hodUserId,
+        academicYear,
+      ],
+    );
+    return rows[0];
   }
 }

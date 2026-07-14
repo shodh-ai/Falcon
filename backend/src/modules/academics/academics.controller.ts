@@ -581,7 +581,7 @@ export class AcademicsController {
   }
 
   @Get('hod/iqac/compiler')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
   hodIqacCompiler(@Req() req: { user: AuthUser }) {
     return this.academics.getHodIqacCompiler(
       this.resolveTenantId(req.user),
@@ -590,7 +590,7 @@ export class AcademicsController {
   }
 
   @Post('hod/iqac/evidence')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
   hodIqacEvidence(
     @Req() req: { user: AuthUser },
     @Body()
@@ -609,7 +609,7 @@ export class AcademicsController {
   }
 
   @Post('hod/iqac/submit')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
   hodIqacSubmit(
     @Req() req: { user: AuthUser },
     @Body()
@@ -623,6 +623,67 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       req.user.user_id,
       dto,
+    );
+  }
+
+  @Get('hod/iqac/additional-activities')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodIqacAdditionalActivities(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodIqacAdditionalActivities(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/iqac/additional-activities')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodUploadIqacAdditionalActivity(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      activity_name: string;
+      activity_date?: string;
+      description?: string;
+      file_path: string;
+      file_name: string;
+    },
+  ) {
+    return this.academics.uploadHodIqacAdditionalActivity(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
+  }
+
+  @Get('hod/staff-roles')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodStaffRoles(@Req() req: { user: AuthUser }) {
+    return this.hodPortalExt.getStaffRoles(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/staff-roles')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodSetStaffRole(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { role_type: string; faculty_user_id: string },
+  ) {
+    return this.hodPortalExt.setStaffRole(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto.role_type,
+      dto.faculty_user_id,
+    );
+  }
+
+  @Get('hod/academic-calendar')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodAcademicCalendar(@Req() req: { user: AuthUser }) {
+    return this.hodPortalExt.listDepartmentAcademicCalendar(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
     );
   }
 
