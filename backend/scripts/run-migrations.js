@@ -2,13 +2,16 @@
  * Apply SQL migrations from backend/migrations/ (sorted by filename).
  *
  * Uses DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE from the environment
- * (same vars as the NestJS app). Safe to run in Coolify backend terminal:
+ * (same vars as the NestJS app). On a fresh database, base tables are bootstrapped from
+ * TypeORM entities before SQL migrations run. Safe to run in Coolify backend terminal:
  *   npm run db:migrate
+ *   npm run db:migrate:repair
  *   npm run db:seed
  */
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { run: syncSchema, coreTablesExist } = require('./sync-schema');
 
 /** Load backend/.env so local `npm run db:migrate` uses DB_USERNAME=apple (not postgres). */
 function loadEnvFile() {
@@ -89,9 +92,14 @@ async function markApplied(client, filename) {
   );
 }
 
+async function resetMigrationLedger(client) {
+  await client.query('TRUNCATE schema_migrations');
+}
+
 async function run() {
   const seedOnly = process.argv.includes('--seed');
   const forceAll = process.argv.includes('--force');
+  const repair = process.argv.includes('--repair');
   const files = listSqlFiles(seedOnly);
 
   const cfg = dbConfig();
@@ -100,6 +108,66 @@ async function run() {
       ? `Running ${files.length} seed file(s) as ${cfg.user}@${cfg.host}/${cfg.database}...`
       : `Running ${files.length} migration(s) as ${cfg.user}@${cfg.host}/${cfg.database}...`,
   );
+
+  if (!seedOnly) {
+    const hadCoreTables = await coreTablesExist();
+    if (!hadCoreTables) {
+      await syncSchema({ quiet: false });
+    }
+
+    const client = new Client(dbConfig());
+    await client.connect();
+    await ensureMigrationTable(client);
+
+    const ledger = await client.query('SELECT COUNT(*)::int AS n FROM schema_migrations');
+    if (repair || (!hadCoreTables && ledger.rows[0].n > 0)) {
+      console.log('Repair: clearing schema_migrations ledger before re-applying SQL files...');
+      await resetMigrationLedger(client);
+    }
+
+    let ok = 0;
+    let skipped = 0;
+    let failed = 0;
+    const failures = [];
+
+    try {
+      for (const file of files) {
+        const sql = fs.readFileSync(file, 'utf8');
+        const base = path.basename(file);
+
+        if (!forceAll && (await isApplied(client, base))) {
+          skipped += 1;
+          console.log(`--- ${base} (skipped)`);
+          continue;
+        }
+
+        console.log(`>>> ${base}`);
+        try {
+          await client.query(sql);
+          await markApplied(client, base);
+          ok += 1;
+        } catch (err) {
+          failed += 1;
+          failures.push({ file: base, message: err.message });
+          console.error(`!!! ${base} failed: ${err.message}`);
+        }
+      }
+      console.log(`Migrations complete (${ok} ok, ${skipped} skipped, ${failed} failed).`);
+      if (failures.length) {
+        console.error('Failures:', JSON.stringify(failures.slice(0, 15), null, 2));
+        if (failures.length > 15) {
+          console.error(`... and ${failures.length - 15} more`);
+        }
+      }
+    } finally {
+      await client.end();
+    }
+
+    if (failed > 0) {
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   const client = new Client(dbConfig());
   await client.connect();

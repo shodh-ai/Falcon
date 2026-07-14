@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { ArrowRight } from 'lucide-react';
 import type { LeadershipHubRoute } from '@/lib/leadership-hub-routes';
 import { isLaunchModuleEnabled } from '@/lib/launch-modules';
+import { isNavHrefActive } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
 import { EXECUTIVE_CARD, EXECUTIVE_TYPO } from './design-tokens';
 
@@ -16,13 +17,9 @@ type Props = {
   className?: string;
 };
 
-function isActiveRoute(pathname: string, href: string): boolean {
-  if (href === '/directory') return pathname === '/directory' || pathname.startsWith('/directory/');
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
 export function ExecutiveFeatureGrid({ title, description, routes, compact = false, className }: Props) {
   const pathname = usePathname() ?? '';
+  const routeHrefs = routes.map((route) => route.href);
 
   return (
     <section className={className}>
@@ -39,7 +36,7 @@ export function ExecutiveFeatureGrid({ title, description, routes, compact = fal
         )}
       >
         {routes.map((route) => {
-          const active = isActiveRoute(pathname, route.href);
+          const active = isNavHrefActive(pathname, route.href, routeHrefs);
           const gated = route.requiresFinanceModule && !isLaunchModuleEnabled('finance');
           const Icon = route.icon;
 

@@ -119,6 +119,38 @@ export interface PortalConfig {
   mobileNavItems?: NavItem[];
 }
 
+/**
+ * Resolve which nav href should be active for the current path.
+ * Prefers the longest matching href so nested routes (e.g. /hr/reports/documents)
+ * do not also highlight their parent (/hr/reports).
+ */
+export function resolveActiveNavHref(
+  pathname: string | null | undefined,
+  hrefs: Iterable<string>,
+): string | null {
+  if (!pathname) return null;
+  let best: string | null = null;
+  for (const href of hrefs) {
+    if (!href) continue;
+    const matches = pathname === href || pathname.startsWith(`${href}/`);
+    if (!matches) continue;
+    if (!best || href.length > best.length) best = href;
+  }
+  return best;
+}
+
+export function isNavHrefActive(
+  pathname: string | null | undefined,
+  href: string,
+  allHrefs: Iterable<string>,
+): boolean {
+  return resolveActiveNavHref(pathname, allHrefs) === href;
+}
+
+export function collectNavHrefs(navGroups: NavGroup[]): string[] {
+  return navGroups.flatMap((group) => group.items.map((item) => item.href));
+}
+
 function portalPathFromHomeHref(homeHref: string): string {
   const segment = homeHref.split('/').filter(Boolean)[0];
   return segment ? `/${segment}` : homeHref;
