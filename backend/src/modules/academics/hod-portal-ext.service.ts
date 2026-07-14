@@ -1336,4 +1336,148 @@ export class HodPortalExtService {
       throw new ForbiddenException('Not authorized to manage this drive');
     }
   }
+
+  static readonly STAFF_ROLE_TYPES = [
+    { role_type: 'MIDTERM_COORDINATOR', label: 'Midterm Coordinator' },
+    { role_type: 'TIMETABLE_COORDINATOR', label: 'Timetable Coordinator' },
+    { role_type: 'PLACEMENT_COORDINATOR', label: 'Placement Coordinator' },
+    { role_type: 'LAB_INCHARGE', label: 'Lab In-charge' },
+    { role_type: 'EXAM_COORDINATOR', label: 'Exam Coordinator' },
+    { role_type: 'INTERNAL_MARKS_COORDINATOR', label: 'Internal Marks Coordinator' },
+  ] as const;
+
+  async getStaffRoles(tenantId: string, hodUserId: string) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) {
+      return { dept_id: null, roles: [], faculty_options: [] };
+    }
+    const deptId = deptIds[0];
+    const faculty = await this.academics.listHodFacultyRoster(tenantId, hodUserId);
+    const facultyOptions = faculty.map(
+      (f: { user_id: string; name: string; email: string }) => ({
+        user_id: f.user_id,
+        name: f.name,
+        email: f.email,
+      }),
+    );
+
+    const assigned = await this.db.query<
+      Array<{ role_type: string; faculty_user_id: string | null; faculty_name: string | null }>
+    >(
+      `SELECT r.role_type, r.faculty_user_id, u.name AS faculty_name
+       FROM hod_dept_staff_roles r
+       LEFT JOIN users u ON u.user_id = r.faculty_user_id
+       WHERE r.tenant_id = $1 AND r.dept_id = $2`,
+      [tenantId, deptId],
+    );
+    const byType = new Map(assigned.map((row) => [row.role_type, row]));
+
+    let placementCoord: { user_id: string; name: string } | null = null;
+    if (await this.tableExists('hod_dept_placement_settings')) {
+      const placement = await this.db.query<
+        Array<{ coordinator_user_id: string; coordinator_name: string }>
+      >(
+        `SELECT s.coordinator_user_id, u.name AS coordinator_name
+         FROM hod_dept_placement_settings s
+         LEFT JOIN users u ON u.user_id = s.coordinator_user_id
+         WHERE s.tenant_id = $1 AND s.dept_id = $2`,
+        [tenantId, deptId],
+      );
+      if (placement[0]?.coordinator_user_id) {
+        placementCoord = {
+          user_id: placement[0].coordinator_user_id,
+          name: placement[0].coordinator_name ?? 'Faculty',
+        };
+      }
+    }
+
+    const roles = HodPortalExtService.STAFF_ROLE_TYPES.map((def) => {
+      if (def.role_type === 'PLACEMENT_COORDINATOR') {
+        return {
+          role_type: def.role_type,
+          label: def.label,
+          faculty_user_id: placementCoord?.user_id ?? null,
+          faculty_name: placementCoord?.name ?? null,
+        };
+      }
+      const row = byType.get(def.role_type);
+      return {
+        role_type: def.role_type,
+        label: def.label,
+        faculty_user_id: row?.faculty_user_id ?? null,
+        faculty_name: row?.faculty_name ?? null,
+      };
+    });
+
+    return { dept_id: deptId, roles, faculty_options: facultyOptions };
+  }
+
+  async setStaffRole(
+    tenantId: string,
+    hodUserId: string,
+    roleType: string,
+    facultyUserId: string,
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) throw new BadRequestException('No department assigned');
+    const deptId = deptIds[0];
+    const valid = HodPortalExtService.STAFF_ROLE_TYPES.some(
+      (r) => r.role_type === roleType,
+    );
+    if (!valid) throw new BadRequestException('Invalid staff role type');
+
+    const faculty = await this.db.query(
+      `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND dept_id = $3`,
+      [facultyUserId, tenantId, deptId],
+    );
+    if (!faculty[0]) {
+      throw new BadRequestException('Faculty must belong to your department');
+    }
+
+    if (roleType === 'PLACEMENT_COORDINATOR') {
+      await this.setPlacementCoordinator(tenantId, hodUserId, facultyUserId);
+      return this.getStaffRoles(tenantId, hodUserId);
+    }
+
+    await this.db.query(
+      `INSERT INTO hod_dept_staff_roles (tenant_id, dept_id, role_type, faculty_user_id, updated_by, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (tenant_id, dept_id, role_type)
+       DO UPDATE SET faculty_user_id = EXCLUDED.faculty_user_id,
+                     updated_by = EXCLUDED.updated_by,
+                     updated_at = NOW()`,
+      [tenantId, deptId, roleType, facultyUserId, hodUserId],
+    );
+    return this.getStaffRoles(tenantId, hodUserId);
+  }
+
+  async listDepartmentAcademicCalendar(
+    tenantId: string,
+    hodUserId: string,
+    daysAhead = 60,
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { items: [] };
+    if (!(await this.tableExists('hod_dept_academic_calendar'))) {
+      return { items: [] };
+    }
+    const rows = await this.db.query(
+      `SELECT activity_id, activity_date, activity_name, description, academic_year
+       FROM hod_dept_academic_calendar
+       WHERE tenant_id = $1 AND dept_id = ANY($2::int[])
+         AND activity_date >= CURRENT_DATE - INTERVAL '7 days'
+         AND activity_date <= CURRENT_DATE + ($3::int * INTERVAL '1 day')
+       ORDER BY activity_date ASC, activity_name ASC`,
+      [tenantId, deptIds, daysAhead],
+    );
+    return { items: rows };
+  }
+
+  private async tableExists(tableName: string): Promise<boolean> {
+    const rows = await this.db.query<{ exists: boolean }[]>(
+      `SELECT to_regclass('public.' || $1) IS NOT NULL AS exists`,
+      [tableName],
+    );
+    return !!rows[0]?.exists;
+  }
 }

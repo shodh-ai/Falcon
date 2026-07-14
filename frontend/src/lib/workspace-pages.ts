@@ -37,7 +37,7 @@ export const hodPages = {
     columns: [
       { key: 'name', label: 'Student' },
       { key: 'email', label: 'Email' },
-      { key: 'department', label: 'Department' },
+      { key: 'branch', label: 'Branch' },
       { key: 'average_attendance', label: 'Avg Attendance %', sortable: true },
       { key: 'course_count', label: 'Courses' },
       { key: 'cgpa', label: 'CGPA', sortable: true },
