@@ -10,7 +10,7 @@ export default function HodProfileCorrectionsPage() {
         title="Student Profile Corrections"
         description="Approve or reject student requests to edit their profile. Approved requests unlock a 15-minute edit window."
       />
-      <ProfileCorrectionWidget limit={100} />
+      <ProfileCorrectionWidget limit={100} showBulkActions />
     </HodPageFrame>
   );
 }

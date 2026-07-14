@@ -501,9 +501,9 @@ export function getPostLoginPath(user: {
   const hasHodRole = roles.includes('hod');
   const primaryRole = user.primaryRole ?? user.role;
 
-  // Department heads use the same HOD Command Center as CSE, even when Dean is primary.
+  // Department heads (including Deans mapped as hod_user_id) use the HOD Command Center.
   const landingRole =
-    hasHodRole && user.is_department_hod ? 'HOD' : primaryRole;
+    user.is_department_hod || hasHodRole ? 'HOD' : primaryRole;
 
   const config = getOnboardingConfigForRole(landingRole);
   if (config) {

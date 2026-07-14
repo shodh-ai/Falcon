@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { FalconLogo } from '@/components/brand/FalconLogo';
 import type { NavGroup } from '@/lib/navigation';
+import { collectNavHrefs, isNavHrefActive } from '@/lib/navigation';
 
 interface AppSidebarProps {
   personaLabel: string;
@@ -26,6 +27,7 @@ export function AppSidebar({
   className,
 }: AppSidebarProps) {
   const pathname = usePathname();
+  const allHrefs = collectNavHrefs(navGroups);
 
   return (
     <aside
@@ -79,7 +81,7 @@ export function AppSidebar({
               <ul className="space-y-1">
                 {group.items.map((item) => {
                   const Icon = item.icon;
-                  const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+                  const active = isNavHrefActive(pathname, item.href, allHrefs);
                   return (
                     <li key={item.href}>
                       <Link
@@ -94,7 +96,11 @@ export function AppSidebar({
                         )}
                       >
                         <Icon className="h-5 w-5 shrink-0" />
-                        {!collapsed && <span className="truncate">{item.label}</span>}
+                        {!collapsed && (
+                          <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">
+                            {item.label}
+                          </span>
+                        )}
                       </Link>
                     </li>
                   );

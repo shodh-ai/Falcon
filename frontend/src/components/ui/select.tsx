@@ -65,11 +65,17 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
       ];
 
       const activeValue = value !== undefined && value !== null ? String(value) : undefined;
-      const activeDefaultValue = props.defaultValue !== undefined && props.defaultValue !== null ? String(props.defaultValue) : undefined;
+      const activeDefaultValue =
+        props.defaultValue !== undefined && props.defaultValue !== null
+          ? String(props.defaultValue)
+          : undefined;
+      const { defaultValue: _ignoredDefaultValue, ...rootProps } = props;
+      const isControlled = activeValue !== undefined;
+
       return (
         <SelectPrimitive.Root
-          value={activeValue}
-          defaultValue={activeDefaultValue}
+          value={isControlled ? activeValue : undefined}
+          defaultValue={isControlled ? undefined : activeDefaultValue}
           disabled={disabled}
           onValueChange={(val) => {
             if (onChange) {
@@ -81,7 +87,7 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
               });
             }
           }}
-          {...props}
+          {...rootProps}
         >
           <SelectTrigger ref={ref} className={className} id={id}>
             <SelectValue placeholder={placeholderOption?.label ?? placeholder ?? 'Select...'} />
@@ -208,7 +214,9 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex w-full cursor-default select-none items-center rounded-lg py-2.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 touch-target',
+      'relative flex w-full cursor-default select-none items-center rounded-lg py-2.5 pl-8 pr-2 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 touch-target',
+      'data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground',
+      'data-[state=checked]:bg-accent/60 data-[state=checked]:font-semibold',
       className
     )}
     {...props}

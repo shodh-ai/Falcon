@@ -747,12 +747,16 @@ export class AcademicsController {
   @Roles('HOD', 'SuperAdmin')
   hodCompiledResultsCourses(
     @Req() req: { user: AuthUser },
-    @Query('semester', ParseIntPipe) semester: number,
+    @Query('semester') semesterRaw?: string,
   ) {
+    const semester =
+      !semesterRaw || semesterRaw === 'all'
+        ? null
+        : Number.parseInt(semesterRaw, 10);
     return this.hodPortalExt.listCompiledResultsCourses(
       this.resolveTenantId(req.user),
       req.user.user_id,
-      semester,
+      Number.isFinite(semester) ? semester : null,
     );
   }
 
@@ -776,14 +780,16 @@ export class AcademicsController {
   async hodCompiledResultsExport(
     @Req() req: { user: AuthUser },
     @Res({ passthrough: true }) res: Response,
-    @Query('semester', ParseIntPipe) semester: number,
+    @Query('semester') semesterRaw: string,
     @Query('course_id') courseId: string,
     @Query('student_user_id') studentUserId?: string,
   ) {
+    const semester =
+      semesterRaw === 'all' ? null : Number.parseInt(semesterRaw, 10);
     const buf = await this.hodPortalExt.exportCompiledResultsExcel(
       this.resolveTenantId(req.user),
       req.user.user_id,
-      semester,
+      Number.isFinite(semester) ? semester : null,
       courseId,
       studentUserId,
     );
@@ -791,10 +797,11 @@ export class AcademicsController {
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="compiled-results-sem${semester}.xlsx"`,
-    );
+    const filename =
+      semesterRaw === 'all' || courseId === 'all'
+        ? 'compiled-results-all.xlsx'
+        : `compiled-results-sem${semesterRaw}.xlsx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return new StreamableFile(buf);
   }
 

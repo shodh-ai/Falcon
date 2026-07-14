@@ -121,6 +121,38 @@ export interface PortalConfig {
   includeAccountSettingsNav?: boolean;
 }
 
+/**
+ * Resolve which nav href should be active for the current path.
+ * Prefers the longest matching href so nested routes (e.g. /hr/reports/documents)
+ * do not also highlight their parent (/hr/reports).
+ */
+export function resolveActiveNavHref(
+  pathname: string | null | undefined,
+  hrefs: Iterable<string>,
+): string | null {
+  if (!pathname) return null;
+  let best: string | null = null;
+  for (const href of hrefs) {
+    if (!href) continue;
+    const matches = pathname === href || pathname.startsWith(`${href}/`);
+    if (!matches) continue;
+    if (!best || href.length > best.length) best = href;
+  }
+  return best;
+}
+
+export function isNavHrefActive(
+  pathname: string | null | undefined,
+  href: string,
+  allHrefs: Iterable<string>,
+): boolean {
+  return resolveActiveNavHref(pathname, allHrefs) === href;
+}
+
+export function collectNavHrefs(navGroups: NavGroup[]): string[] {
+  return navGroups.flatMap((group) => group.items.map((item) => item.href));
+}
+
 function portalPathFromHomeHref(homeHref: string): string {
   const segment = homeHref.split('/').filter(Boolean)[0];
   return segment ? `/${segment}` : homeHref;
@@ -610,7 +642,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=requests&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'gate pass', 'hrms', 'dashboard', 'reports', 'probation', 'pending approvals', 'inbox', 'team requests'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=dashboard&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'gate pass', 'hrms', 'dashboard', 'reports', 'probation', 'pending approvals', 'inbox', 'team requests'] },
         { label: 'Resignations & Offboarding', href: '/hod/approvals/resignations', icon: DoorOpen, keywords: ['resignation', 'exit', 'separation', 'fnf', 'offboarding'] },
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['student profile', 'edit', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
@@ -626,7 +658,6 @@ export const hodPortal: PortalConfig = {
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix', 'teaching load', 'import'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
-        { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'lms', 'marks', 'ppt', 'syllabus'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
@@ -675,7 +706,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=requests&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory', 'gate pass', 'pending approvals', 'team requests'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=dashboard&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory', 'gate pass', 'pending approvals', 'team requests'] },
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['profile', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['proxy'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['events'] },
@@ -688,7 +719,6 @@ export const hodPortal: PortalConfig = {
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
-        { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'marks'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['api'] },

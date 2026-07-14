@@ -96,7 +96,7 @@ const VALID_TABS: TabId[] = ['dashboard', 'summary', 'reports', 'policy', 'reque
 
 function parseTab(raw: string | null): TabId {
   if (raw && VALID_TABS.includes(raw as TabId)) return raw as TabId;
-  return 'attendance';
+  return 'dashboard';
 }
 
 function ReportingDirectoryContent() {
@@ -119,7 +119,7 @@ function ReportingDirectoryContent() {
     const params = new URLSearchParams(searchParams.toString());
     let changed = false;
     if (!params.get('tab')) {
-      params.set('tab', 'attendance');
+      params.set('tab', 'dashboard');
       changed = true;
     }
     if (!params.get('scope')) {
