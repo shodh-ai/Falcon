@@ -706,7 +706,7 @@ export class AcademicsController {
   }
 
   @Get('hod/appraisals')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
   hodAppraisals(@Req() req: { user: AuthUser }) {
     return this.academics.listHodAppraisals(
       this.resolveTenantId(req.user),
@@ -715,17 +715,25 @@ export class AcademicsController {
   }
 
   @Patch('hod/appraisals/:appraisalId/rating')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
   hodAppraisalRating(
     @Req() req: { user: AuthUser },
     @Param('appraisalId') appraisalId: string,
-    @Body() body: { hod_rating: number },
+    @Body()
+    body: {
+      hod_rating?: number;
+      research?: number;
+      academics?: number;
+      extension?: number;
+      administration?: number;
+      notes?: string;
+    },
   ) {
     return this.academics.submitHodAppraisalRating(
       this.resolveTenantId(req.user),
       req.user.user_id,
       appraisalId,
-      body.hod_rating,
+      body,
     );
   }
 
