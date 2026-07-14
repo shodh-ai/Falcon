@@ -59,10 +59,20 @@ export default function SuperAdminImpersonationPage() {
         <CardHeader>
           <CardTitle className="text-base">Start impersonation</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3 md:flex-row">
-          <Input placeholder="Target user UUID" value={targetUserId} onChange={(e) => setTargetUserId(e.target.value)} />
-          <Input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
-          <Button onClick={() => void impersonate()}>Log in as user</Button>
+        <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+          <Input
+            placeholder="Target user UUID"
+            value={targetUserId}
+            onChange={(e) => setTargetUserId(e.target.value)}
+          />
+          <Input
+            placeholder="Reason (optional)"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <Button className="w-full shrink-0 whitespace-nowrap md:w-auto" onClick={() => void impersonate()}>
+            Log in as user
+          </Button>
         </CardContent>
       </Card>
       <Card>

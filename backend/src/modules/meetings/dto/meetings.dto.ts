@@ -28,7 +28,7 @@ export class ScheduleMeetingDto {
   agenda?: string;
 
   @IsArray()
-  @IsUUID('4', { each: true })
+  @IsUUID('all', { each: true })
   invitee_user_ids: string[];
 }
 
@@ -50,7 +50,7 @@ export class RequestMeetingDto {
   @IsString()
   agenda?: string;
 
-  @IsUUID()
+  @IsUUID('all')
   recipient_user_id: string;
 }
 

@@ -157,6 +157,7 @@ export class CourseAllocationBulkService {
   async buildPreview(
     tenantId: string,
     rows: CourseAllocationRowInput[],
+    hodUserId?: string,
   ): Promise<{ rows: PreviewRow[]; summary: Record<string, number> }> {
     const existingSubjects = await this.dataSource.query<
       { subject_id: number; subject_code: string }[]
@@ -185,6 +186,17 @@ export class CourseAllocationBulkService {
       [tenantId],
     );
     const facultyByUsername = this.buildFacultyUsernameIndex(facultyRows);
+
+    let allowedPrograms: Set<string> | null = null;
+    if (hodUserId) {
+      const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+      if (!deptIds.length) {
+        throw new BadRequestException(
+          'Your HOD account is not linked to a department yet',
+        );
+      }
+      allowedPrograms = await this.resolveAllowedProgramNames(deptIds);
+    }
 
     const previewRows: PreviewRow[] = rows.map((row, idx) => {
       const codeKey = this.normalizeCourseCode(row.subject_code);
@@ -221,6 +233,15 @@ export class CourseAllocationBulkService {
         warnings.push('Subject fullname is empty');
       }
 
+      if (allowedPrograms) {
+        const programKey = row.program_name?.trim().toLowerCase() ?? '';
+        if (!programKey || !allowedPrograms.has(programKey)) {
+          warnings.push(
+            `Program "${row.program_name || '(empty)'}" is outside your department scope`,
+          );
+        }
+      }
+
       return {
         ...row,
         row_number: idx + 2,
@@ -253,6 +274,7 @@ export class CourseAllocationBulkService {
     tenantId: string,
     academicYear: string,
     rows: CourseAllocationRowInput[],
+    hodUserId?: string,
   ): Promise<ExecuteResult> {
     if (!academicYear?.trim()) {
       throw new BadRequestException('Academic year is required');
@@ -261,7 +283,15 @@ export class CourseAllocationBulkService {
       throw new BadRequestException('No rows to import');
     }
 
-    const preview = await this.buildPreview(tenantId, rows);
+    const preview = await this.buildPreview(tenantId, rows, hodUserId);
+    const outOfScope = preview.rows.filter((r) =>
+      r.warnings.some((w) => w.includes('outside your department scope')),
+    );
+    if (outOfScope.length) {
+      throw new BadRequestException(
+        `Row ${outOfScope[0].row_number}: program is outside your department scope`,
+      );
+    }
     const blocking = preview.rows.filter(
       (r) => !r.subject_code.trim() || !r.subject_fullname.trim(),
     );
@@ -365,17 +395,12 @@ export class CourseAllocationBulkService {
       `SELECT COUNT(*)::text AS count
        FROM academic_course_allocations a
        INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
-       LEFT JOIN users u ON u.user_id = a.faculty_user_id
        WHERE a.tenant_id = $1
          AND a.faculty_user_id IS NULL
          AND a.status = 'ACTIVE'
-         AND EXISTS (
-           SELECT 1 FROM pg_tables
-           WHERE schemaname = 'public' AND tablename = 'academic_course_allocations'
-         )`,
-      [tenantId],
+         AND ${this.allocationScopedToDepartmentsSql('a', 's', '$2')}`,
+      [tenantId, deptIds],
     );
-    void deptIds;
     return Number(rows[0]?.count ?? 0);
   }
 
@@ -389,6 +414,8 @@ export class CourseAllocationBulkService {
     if (!tableExists[0]?.exists) return { items: [], faculty: [] };
 
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { items: [], faculty: [] };
+
     const faculty = await this.listDepartmentFaculty(tenantId, deptIds);
 
     const items = await this.dataSource.query<
@@ -416,11 +443,11 @@ export class CourseAllocationBulkService {
        WHERE a.tenant_id = $1
          AND a.faculty_user_id IS NULL
          AND a.status = 'ACTIVE'
+         AND ${this.allocationScopedToDepartmentsSql('a', 's', '$2')}
        ORDER BY a.academic_year DESC, a.program_name, a.semester, s.subject_code`,
-      [tenantId],
+      [tenantId, deptIds],
     );
 
-    void deptIds;
     return { items, faculty };
   }
 
@@ -539,6 +566,10 @@ export class CourseAllocationBulkService {
     facultyUserId: string,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) {
+      throw new BadRequestException('Your HOD account is not linked to a department');
+    }
+
     const faculty = await this.dataSource.query<
       { user_id: string; name: string; dept_id: number }[]
     >(
@@ -568,8 +599,9 @@ export class CourseAllocationBulkService {
       `SELECT a.allocation_id, a.course_id, s.subject_name, s.subject_code, a.academic_year
        FROM academic_course_allocations a
        INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
-       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'`,
-      [allocationId, tenantId],
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'
+         AND ${this.allocationScopedToDepartmentsSql('a', 's', '$3')}`,
+      [allocationId, tenantId, deptIds],
     );
     if (!allocation[0]) throw new NotFoundException('Allocation not found');
     if (!allocation[0].course_id) {
@@ -874,6 +906,43 @@ export class CourseAllocationBulkService {
       `SELECT program_id FROM iam_programs WHERE deleted_at IS NULL ORDER BY program_id LIMIT 1`,
     );
     return rows[0]?.program_id ?? 1;
+  }
+
+  private async resolveAllowedProgramNames(
+    deptIds: number[],
+  ): Promise<Set<string>> {
+    if (!deptIds.length) return new Set();
+    const rows = await this.dataSource.query<{ program_name: string }[]>(
+      `SELECT DISTINCT program_name
+       FROM iam_programs
+       WHERE deleted_at IS NULL
+         AND dept_id = ANY($1::int[])`,
+      [deptIds],
+    );
+    return new Set(rows.map((row) => row.program_name.trim().toLowerCase()));
+  }
+
+  private allocationScopedToDepartmentsSql(
+    aliasA: string,
+    aliasS: string,
+    deptParam: string,
+  ): string {
+    return `EXISTS (
+      SELECT 1 FROM iam_programs p
+      WHERE p.deleted_at IS NULL
+        AND p.dept_id = ANY(${deptParam}::int[])
+        AND (
+          (
+            COALESCE(trim(${aliasA}.program_name), '') <> ''
+            AND lower(trim(p.program_name)) = lower(trim(${aliasA}.program_name))
+          )
+          OR EXISTS (
+            SELECT 1 FROM academic_subjects sub
+            WHERE sub.subject_id = ${aliasS}.subject_id
+              AND sub.program_id = p.program_id
+          )
+        )
+    )`;
   }
 
   private async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {

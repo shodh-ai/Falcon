@@ -1,24 +1,16 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
-  Put,
   Query,
   Req,
-  Res,
-  StreamableFile,
-  UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
-import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
@@ -30,10 +22,6 @@ import { ImpersonationService } from './impersonation.service';
 import { OrgEntityService } from './org-entity.service';
 import { CreateOrgEntityDto } from './dto/create-org-entity.dto';
 import { GrantEntityAccessDto } from './dto/grant-entity-access.dto';
-import {
-  CourseAllocationBulkService,
-  type CourseAllocationRowInput,
-} from '../academics/course-allocation-bulk.service';
 
 type AuthUser = {
   user_id: string;
@@ -51,7 +39,6 @@ export class SuperAdminController {
     private readonly superAdmin: SuperAdminService,
     private readonly impersonation: ImpersonationService,
     private readonly orgEntities: OrgEntityService,
-    private readonly courseAllocationBulk: CourseAllocationBulkService,
   ) {}
 
   @Get('entities')
@@ -118,20 +105,6 @@ export class SuperAdminController {
     return this.superAdmin.getHierarchyTree(this.tenant(req));
   }
 
-  @Post('sections')
-  createSection(
-    @Req() req: { user: AuthUser },
-    @Body()
-    dto: {
-      section_name: string;
-      batch_id?: string;
-      program_id?: number;
-      capacity?: number;
-    },
-  ) {
-    return this.superAdmin.createSection(this.tenant(req), dto);
-  }
-
   @Get('hierarchy/assignable-users')
   hierarchyAssignableUsers(
     @Req() req: { user: AuthUser },
@@ -158,22 +131,35 @@ export class SuperAdminController {
     );
   }
 
-  @Post('sections/bulk-assign')
-  bulkAssign(
-    @Req() req: { user: AuthUser },
-    @Body() dto: { section_id: string; student_user_ids: string[] },
-  ) {
-    return this.superAdmin.bulkAssignSection(
-      this.tenant(req),
-      req.user.user_id,
-      dto.section_id,
-      dto.student_user_ids,
-    );
-  }
-
   @Get('assignments')
   listAssignments(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listAssignments(this.tenant(req));
+  }
+
+  @Delete('assignments/:assignmentId')
+  revokeAssignment(
+    @Req() req: { user: AuthUser },
+    @Param('assignmentId') assignmentId: string,
+  ) {
+    return this.superAdmin.revokeAssignment(
+      this.tenant(req),
+      req.user.user_id,
+      assignmentId,
+    );
+  }
+
+  @Patch('departments/:deptId/school')
+  linkDepartmentToSchool(
+    @Req() req: { user: AuthUser },
+    @Param('deptId', ParseIntPipe) deptId: number,
+    @Body() dto: { school_id: number },
+  ) {
+    return this.superAdmin.linkDepartmentToSchool(
+      this.tenant(req),
+      req.user.user_id,
+      deptId,
+      dto.school_id,
+    );
   }
 
   @Get('impersonation/logs')
@@ -212,72 +198,5 @@ export class SuperAdminController {
   @Get('override-logs')
   listOverrideLogs(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listHrOverrideLogs(this.tenant(req));
-  }
-
-  @Get('academics/course-mapper/template')
-  async courseMapperTemplate(@Res({ passthrough: true }) res: Response) {
-    const buffer = await this.courseAllocationBulk.buildTemplateBuffer();
-    res.set({
-      'Content-Type':
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition':
-        'attachment; filename="course-allocation-matrix-template.xlsx"',
-    });
-    return new StreamableFile(buffer);
-  }
-
-  @Post('academics/course-mapper/preview')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
-    }),
-  )
-  async courseMapperPreview(
-    @UploadedFile() file: Express.Multer.File,
-    @Req() req: { user: AuthUser },
-  ) {
-    if (!file) throw new BadRequestException('No file uploaded');
-    const rows = await this.courseAllocationBulk.parseUploadFile(
-      file.buffer,
-      file.originalname,
-    );
-    return this.courseAllocationBulk.buildPreview(this.tenant(req), rows);
-  }
-
-  @Post('academics/course-mapper/execute')
-  executeCourseMapper(
-    @Req() req: { user: AuthUser },
-    @Body()
-    dto: { academic_year: string; rows: CourseAllocationRowInput[] },
-  ) {
-    return this.courseAllocationBulk.executeBulkMap(
-      this.tenant(req),
-      dto.academic_year,
-      dto.rows,
-    );
-  }
-
-  @Get('academics/course-allocations')
-  listAllAllocations(@Req() req: { user: AuthUser }) {
-    return this.courseAllocationBulk.listAllAllocations(this.tenant(req));
-  }
-
-  @Put('academics/course-allocations/:id/faculty')
-  updateAllocationFaculty(
-    @Req() req: { user: AuthUser },
-    @Param('id') id: string,
-    @Body() dto: { faculty_user_id: string | null },
-  ) {
-    return this.courseAllocationBulk.updateAllocationFaculty(
-      this.tenant(req),
-      id,
-      dto.faculty_user_id,
-    );
-  }
-
-  @Delete('academics/course-allocations/:id')
-  deleteAllocation(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.courseAllocationBulk.deleteAllocation(this.tenant(req), id);
   }
 }

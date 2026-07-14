@@ -117,6 +117,8 @@ export interface PortalConfig {
   commandItems: NavItem[];
   /** Optional override for mobile bottom nav (defaults to first 4 command items) */
   mobileNavItems?: NavItem[];
+  /** When false, skip auto-injected sidebar Account Settings (e.g. if profile menu already links there). */
+  includeAccountSettingsNav?: boolean;
 }
 
 function portalPathFromHomeHref(homeHref: string): string {
@@ -126,6 +128,8 @@ function portalPathFromHomeHref(homeHref: string): string {
 
 /** Append account settings to sidebar + command palette when not already linked. */
 export function withAccountSettingsNav(config: PortalConfig): PortalConfig {
+  if (config.includeAccountSettingsNav === false) return config;
+
   const settingsHref = getAccountSettingsHrefForPortal(portalPathFromHomeHref(config.homeHref));
   const hasSettings = config.navGroups.some((group) =>
     group.items.some((item) => item.href === settingsHref),
@@ -620,6 +624,7 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
+        { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix', 'teaching load', 'import'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
         { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'lms', 'marks', 'ppt', 'syllabus'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
@@ -681,6 +686,7 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
+        { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
         { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'marks'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
