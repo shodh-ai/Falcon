@@ -695,7 +695,11 @@ export class AcademicsService {
 
   async listDeanAppraisals(tenantId: string, deanUserId: string) {
     const { departmentIds } = await this.resolveDeanScope(deanUserId);
-    return this.listAppraisalsForDepartments(tenantId, departmentIds);
+    return this.listAppraisalsForDepartments(
+      tenantId,
+      departmentIds,
+      new Date().getFullYear(),
+    );
   }
 
   async listDeanStudents(
@@ -1141,25 +1145,106 @@ export class AcademicsService {
 
   async listHodAppraisals(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    return this.listAppraisalsForDepartments(tenantId, deptIds);
+    const appraisalYear = new Date().getFullYear();
+    const items = await this.listAppraisalsForDepartments(
+      tenantId,
+      deptIds,
+      appraisalYear,
+    );
+    return {
+      appraisal_year: appraisalYear,
+      criteria: AcademicsService.HOD_APPRAISAL_CRITERIA,
+      items,
+    };
+  }
+
+  static readonly HOD_APPRAISAL_CRITERIA = [
+    {
+      key: 'research',
+      label: 'Research & Publications',
+      weight: 0.3,
+      description: 'Journal papers, conferences, patents, and API score',
+    },
+    {
+      key: 'academics',
+      label: 'Academics & Teaching',
+      weight: 0.4,
+      description: 'Syllabus coverage, attendance, student outcomes, LMS usage',
+    },
+    {
+      key: 'extension',
+      label: 'Extension & Outreach',
+      weight: 0.15,
+      description: 'Workshops, community labs, industry connect, student mentoring',
+    },
+    {
+      key: 'administration',
+      label: 'Administration & Duties',
+      weight: 0.15,
+      description: 'Department coordination, exam duty, timetable, committee work',
+    },
+  ] as const;
+
+  private static computeWeightedHodRating(
+    breakdown: Record<string, number | undefined>,
+  ): number | null {
+    let total = 0;
+    let weightSum = 0;
+    for (const criterion of AcademicsService.HOD_APPRAISAL_CRITERIA) {
+      const score = breakdown[criterion.key];
+      if (score === undefined || score === null || Number.isNaN(score)) {
+        continue;
+      }
+      total += Number(score) * criterion.weight;
+      weightSum += criterion.weight;
+    }
+    if (weightSum <= 0) return null;
+    return Number((total / weightSum).toFixed(2));
   }
 
   private async listAppraisalsForDepartments(
     tenantId: string,
     deptIds: number[],
+    appraisalYear: number,
   ) {
     if (!deptIds.length) return [];
 
-    return this.users.manager.query(
-      `SELECT a.appraisal_record_id, a.appraisal_year, a.auto_api_score, a.hod_rating, a.hr_final_status,
-              u.user_id, u.name, u.official_email AS email
+    const rows = await this.users.manager.query(
+      `SELECT a.appraisal_record_id, a.appraisal_year, a.auto_api_score, a.api_breakdown,
+              a.hod_rating, a.hod_evaluation_breakdown, a.hod_evaluation_notes,
+              a.hr_final_status, u.user_id, u.name, u.official_email AS email
        FROM hr_employee_appraisals a
        INNER JOIN users u ON u.user_id = a.user_id
+       INNER JOIN roles r ON r.role_id = u.role_id
        WHERE a.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
-         AND a.hr_final_status IN ('HOD_REVIEW', 'PENDING')
-       ORDER BY a.appraisal_year DESC, u.name ASC`,
-      [tenantId, deptIds],
+         AND a.appraisal_year = $3
+         AND r.role_name = 'Faculty'
+       ORDER BY
+         CASE WHEN a.hr_final_status IN ('HOD_REVIEW', 'PENDING') THEN 0 ELSE 1 END,
+         u.name ASC`,
+      [tenantId, deptIds, appraisalYear],
+    );
+
+    if (rows.length) return rows;
+
+    return this.users.manager.query(
+      `SELECT gen_random_uuid() AS appraisal_record_id,
+              $3::int AS appraisal_year,
+              0::numeric AS auto_api_score,
+              '{}'::jsonb AS api_breakdown,
+              NULL::numeric AS hod_rating,
+              '{}'::jsonb AS hod_evaluation_breakdown,
+              NULL::text AS hod_evaluation_notes,
+              'HOD_REVIEW' AS hr_final_status,
+              u.user_id, u.name, u.official_email AS email
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1
+         AND u.dept_id = ANY($2::int[])
+         AND r.role_name = 'Faculty'
+       ORDER BY u.name ASC`,
+      [tenantId, deptIds, appraisalYear],
     );
   }
 
@@ -1167,34 +1252,109 @@ export class AcademicsService {
     tenantId: string,
     hodUserId: string,
     appraisalId: string,
-    hodRating: number,
+    payload: {
+      hod_rating?: number;
+      research?: number;
+      academics?: number;
+      extension?: number;
+      administration?: number;
+      notes?: string;
+    },
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     const [row] = await this.users.manager.query(
-      `SELECT a.appraisal_record_id, u.dept_id
+      `SELECT a.appraisal_record_id, a.user_id, u.dept_id, a.appraisal_year
        FROM hr_employee_appraisals a
        INNER JOIN users u ON u.user_id = a.user_id
        WHERE a.appraisal_record_id = $1 AND a.tenant_id = $2`,
       [appraisalId, tenantId],
     );
-    if (!row || !deptIds.includes(Number(row.dept_id))) {
-      throw new NotFoundException(
-        'Appraisal not found in your department scope',
+
+    let targetUserId: string;
+    let targetYear: number;
+    let deptId: number;
+
+    if (row && deptIds.includes(Number(row.dept_id))) {
+      targetUserId = row.user_id;
+      targetYear = Number(row.appraisal_year);
+      deptId = Number(row.dept_id);
+    } else {
+      const [faculty] = await this.users.manager.query(
+        `SELECT u.user_id, u.dept_id
+         FROM users u
+         WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.dept_id = ANY($3::int[])`,
+        [appraisalId, tenantId, deptIds],
       );
+      if (!faculty) {
+        throw new NotFoundException(
+          'Appraisal not found in your department scope',
+        );
+      }
+      targetUserId = faculty.user_id;
+      targetYear = new Date().getFullYear();
+      deptId = Number(faculty.dept_id);
+      await this.users.manager.query(
+        `INSERT INTO hr_employee_appraisals (tenant_id, user_id, appraisal_year, hr_final_status)
+         VALUES ($1, $2, $3, 'HOD_REVIEW')
+         ON CONFLICT (tenant_id, user_id, appraisal_year) DO NOTHING`,
+        [tenantId, targetUserId, targetYear],
+      );
+      const [created] = await this.users.manager.query(
+        `SELECT appraisal_record_id FROM hr_employee_appraisals
+         WHERE tenant_id = $1 AND user_id = $2 AND appraisal_year = $3`,
+        [tenantId, targetUserId, targetYear],
+      );
+      if (!created) {
+        throw new NotFoundException('Could not create appraisal record');
+      }
+      return this.submitHodAppraisalRating(tenantId, hodUserId, created.appraisal_record_id, payload);
     }
-    if (hodRating < 0 || hodRating > 5) {
-      throw new Error('HOD rating must be between 0 and 5');
+
+    void deptId;
+
+    const breakdown: Record<string, number> = {};
+    for (const key of ['research', 'academics', 'extension', 'administration'] as const) {
+      const val = payload[key];
+      if (val === undefined || val === null) continue;
+      if (val < 0 || val > 5) {
+        throw new BadRequestException(`${key} score must be between 0 and 5`);
+      }
+      breakdown[key] = val;
+    }
+
+    if (!Object.keys(breakdown).length && payload.hod_rating === undefined) {
+      throw new BadRequestException('Provide at least one criterion score or overall rating');
+    }
+
+    const hodRating =
+      payload.hod_rating !== undefined
+        ? payload.hod_rating
+        : AcademicsService.computeWeightedHodRating(breakdown);
+
+    if (hodRating === null || hodRating < 0 || hodRating > 5) {
+      throw new BadRequestException('Overall HOD rating must be between 0 and 5');
     }
 
     await this.users.manager.query(
       `UPDATE hr_employee_appraisals
-       SET hod_rating = $1, hr_final_status = 'HR_APPROVED'
-       WHERE appraisal_record_id = $2 AND tenant_id = $3`,
-      [hodRating, appraisalId, tenantId],
+       SET hod_rating = $1,
+           hod_evaluation_breakdown = hod_evaluation_breakdown || $2::jsonb,
+           hod_evaluation_notes = COALESCE($3, hod_evaluation_notes),
+           hr_final_status = 'HR_APPROVED',
+           calculated_at = COALESCE(calculated_at, NOW())
+       WHERE appraisal_record_id = $4 AND tenant_id = $5`,
+      [
+        hodRating,
+        JSON.stringify(breakdown),
+        payload.notes?.trim() || null,
+        appraisalId,
+        tenantId,
+      ],
     );
     return {
       appraisal_record_id: appraisalId,
       hod_rating: hodRating,
+      hod_evaluation_breakdown: breakdown,
       hr_final_status: 'HR_APPROVED',
     };
   }

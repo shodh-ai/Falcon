@@ -604,27 +604,45 @@ export function HodCommandCenter() {
         }
       />
 
-      {unassignedLoad > 0 ? (
-        <Link
-          href="/hod/academics/teaching-load"
-          className="block rounded-xl border border-red-200 bg-red-50 px-5 py-4 shadow-sm transition-colors hover:bg-red-100/80"
-        >
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-8 w-8 text-red-600" />
-              <div>
-                <p className="font-semibold text-red-800">
-                  {unassignedLoad} Subject{unassignedLoad === 1 ? '' : 's'} Unassigned
-                </p>
-                <p className="text-sm text-red-700/90">
-                  NF rows from the Course Allocation Matrix need faculty assignment.
-                </p>
-              </div>
-            </div>
-            <span className="text-sm font-medium text-red-800">Assign →</span>
+      <div className="space-y-4">
+        {(m.pending_profile_corrections ?? 0) > 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/50 px-5 py-4 shadow-sm">
+            <p className="text-sm text-sgvu-navy">
+              <span className="font-bold text-sgvu-navy">{m.pending_profile_corrections}</span>{' '}
+              profile correction{m.pending_profile_corrections === 1 ? '' : 's'} pending review — open{' '}
+              <span className="font-semibold">Profile Corrections</span> from the sidebar.
+            </p>
           </div>
-        </Link>
-      ) : null}
+        ) : null}
+
+        <TodayBirthdaysWidget
+          className="shadow-sm"
+          endpoint="/api/master-data/birthdays/faculty/department?scope=hod"
+          title="Faculty Birthdays Today"
+        />
+
+        {unassignedLoad > 0 ? (
+          <Link
+            href="/hod/academics/teaching-load"
+            className="block rounded-xl border border-red-200 bg-red-50 px-5 py-4 shadow-sm transition-colors hover:bg-red-100/80"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-8 w-8 text-red-600" />
+                <div>
+                  <p className="font-semibold text-red-800">
+                    {unassignedLoad} Subject{unassignedLoad === 1 ? '' : 's'} Unassigned
+                  </p>
+                  <p className="text-sm text-red-700/90">
+                    NF rows from the Course Allocation Matrix need faculty assignment.
+                  </p>
+                </div>
+              </div>
+              <span className="text-sm font-medium text-red-800">Assign →</span>
+            </div>
+          </Link>
+        ) : null}
+      </div>
 
       {facultyPulse ? (
         <div className="rounded-xl border border-gray-100 bg-white px-5 py-4 shadow-sm">
@@ -828,21 +846,7 @@ export function HodCommandCenter() {
             </HodPanel>
           </div>
 
-          {(m.pending_profile_corrections ?? 0) > 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-slate-50/50 px-5 py-4 mt-4 shadow-sm">
-            <p className="text-sm text-sgvu-navy">
-              <span className="font-bold text-sgvu-navy">{m.pending_profile_corrections}</span> profile correction{m.pending_profile_corrections === 1 ? '' : 's'} pending review — open <span className="font-semibold">Profile Corrections</span> from the sidebar.
-            </p>
-          </div>
-          ) : null}
-
-          <TodayBirthdaysWidget
-            className="mt-4 shadow-sm"
-            endpoint="/api/master-data/birthdays/faculty/department?scope=hod"
-            title="Faculty Birthdays Today"
-          />
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-2">
             <HodAcademicCalendarPanel />
             <HodStaffRolesPanel />
           </div>
