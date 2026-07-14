@@ -17,6 +17,8 @@ import {
   BadRequestException,
   StreamableFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import {
   assignmentPdfInterceptor,
@@ -35,7 +37,7 @@ import { CourseLmsService } from './course-lms.service';
 import { AcademicProxyService } from './academic-proxy.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
-import { CourseAllocationBulkService } from './course-allocation-bulk.service';
+import { CourseAllocationBulkService, type CourseAllocationRowInput } from './course-allocation-bulk.service';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
@@ -500,7 +502,7 @@ export class AcademicsController {
   }
 
   @Get('hod/course-allocation-slots')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodCourseAllocationSlots(@Req() req: { user: AuthUser }) {
     return this.academics.listHodCourseAllocationSlots(
       this.resolveTenantId(req.user),
@@ -509,7 +511,7 @@ export class AcademicsController {
   }
 
   @Get('hod/course-allocation-timetable-data')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodCourseAllocationTimetableData(@Req() req: { user: AuthUser }) {
     return this.academics.getHodCourseAllocationTimetableData(
       this.resolveTenantId(req.user),
@@ -518,7 +520,7 @@ export class AcademicsController {
   }
 
   @Post('hod/course-allocation-timetable-batch-save')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodCourseAllocationTimetableBatchSave(
     @Req() req: { user: AuthUser },
     @Body()
@@ -1151,7 +1153,7 @@ export class AcademicsController {
   }
 
   @Post('hod/course-allocation')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodCourseAllocation(
     @Req() req: { user: AuthUser },
     @Body()
@@ -1171,7 +1173,7 @@ export class AcademicsController {
   }
 
   @Get('hod/teaching-load/unassigned')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodUnassignedTeachingLoad(@Req() req: { user: AuthUser }) {
     return this.courseAllocationBulk.listUnassignedForHod(
       this.resolveTenantId(req.user),
@@ -1180,7 +1182,7 @@ export class AcademicsController {
   }
 
   @Get('hod/teaching-load/assigned')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodAssignedTeachingLoad(@Req() req: { user: AuthUser }) {
     return this.courseAllocationBulk.listAssignedForHod(
       this.resolveTenantId(req.user),
@@ -1189,7 +1191,7 @@ export class AcademicsController {
   }
 
   @Get('hod/teaching-load/unassigned/count')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   async hodUnassignedTeachingLoadCount(@Req() req: { user: AuthUser }) {
     const count = await this.courseAllocationBulk.countUnassigned(
       this.resolveTenantId(req.user),
@@ -1199,7 +1201,7 @@ export class AcademicsController {
   }
 
   @Patch('hod/teaching-load/:allocationId/assign')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodAssignTeachingLoad(
     @Req() req: { user: AuthUser },
     @Param('allocationId') allocationId: string,
@@ -1214,7 +1216,7 @@ export class AcademicsController {
   }
 
   @Patch('hod/teaching-load/:allocationId/reassign')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodReassignTeachingLoad(
     @Req() req: { user: AuthUser },
     @Param('allocationId') allocationId: string,
@@ -1225,6 +1227,58 @@ export class AcademicsController {
       req.user.user_id,
       allocationId,
       dto.faculty_user_id,
+    );
+  }
+
+  @Get('hod/course-mapper/template')
+  @Roles('HOD')
+  async hodCourseMapperTemplate(@Res({ passthrough: true }) res: Response) {
+    const buffer = await this.courseAllocationBulk.buildTemplateBuffer();
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition':
+        'attachment; filename="course-allocation-matrix-template.xlsx"',
+    });
+    return new StreamableFile(buffer);
+  }
+
+  @Post('hod/course-mapper/preview')
+  @Roles('HOD')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async hodCourseMapperPreview(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: { user: AuthUser },
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const rows = await this.courseAllocationBulk.parseUploadFile(
+      file.buffer,
+      file.originalname,
+    );
+    return this.courseAllocationBulk.buildPreview(
+      this.resolveTenantId(req.user),
+      rows,
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/course-mapper/execute')
+  @Roles('HOD')
+  hodCourseMapperExecute(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: { academic_year: string; rows: CourseAllocationRowInput[] },
+  ) {
+    return this.courseAllocationBulk.executeBulkMap(
+      this.resolveTenantId(req.user),
+      dto.academic_year,
+      dto.rows,
+      req.user.user_id,
     );
   }
 

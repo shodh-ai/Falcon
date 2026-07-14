@@ -117,6 +117,40 @@ export interface PortalConfig {
   commandItems: NavItem[];
   /** Optional override for mobile bottom nav (defaults to first 4 command items) */
   mobileNavItems?: NavItem[];
+  /** When false, skip auto-injected sidebar Account Settings (e.g. if profile menu already links there). */
+  includeAccountSettingsNav?: boolean;
+}
+
+/**
+ * Resolve which nav href should be active for the current path.
+ * Prefers the longest matching href so nested routes (e.g. /hr/reports/documents)
+ * do not also highlight their parent (/hr/reports).
+ */
+export function resolveActiveNavHref(
+  pathname: string | null | undefined,
+  hrefs: Iterable<string>,
+): string | null {
+  if (!pathname) return null;
+  let best: string | null = null;
+  for (const href of hrefs) {
+    if (!href) continue;
+    const matches = pathname === href || pathname.startsWith(`${href}/`);
+    if (!matches) continue;
+    if (!best || href.length > best.length) best = href;
+  }
+  return best;
+}
+
+export function isNavHrefActive(
+  pathname: string | null | undefined,
+  href: string,
+  allHrefs: Iterable<string>,
+): boolean {
+  return resolveActiveNavHref(pathname, allHrefs) === href;
+}
+
+export function collectNavHrefs(navGroups: NavGroup[]): string[] {
+  return navGroups.flatMap((group) => group.items.map((item) => item.href));
 }
 
 function portalPathFromHomeHref(homeHref: string): string {
@@ -126,6 +160,8 @@ function portalPathFromHomeHref(homeHref: string): string {
 
 /** Append account settings to sidebar + command palette when not already linked. */
 export function withAccountSettingsNav(config: PortalConfig): PortalConfig {
+  if (config.includeAccountSettingsNav === false) return config;
+
   const settingsHref = getAccountSettingsHrefForPortal(portalPathFromHomeHref(config.homeHref));
   const hasSettings = config.navGroups.some((group) =>
     group.items.some((item) => item.href === settingsHref),
@@ -620,6 +656,7 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
+        { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix', 'teaching load', 'import'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
@@ -680,6 +717,7 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
+        { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },

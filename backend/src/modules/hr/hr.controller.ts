@@ -1006,12 +1006,15 @@ export class HrController {
 
   @Patch('employees/:userId')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  updateEmployee(
+  async updateEmployee(
     @Param('userId') userId: string,
     @Req() req: { user: AuthUser },
     @Body() dto: UpdateEmployeeDto,
   ) {
-    return this.hr.updateEmployee(this.resolveTenantId(req.user), userId, dto);
+    const tenantId = this.resolveTenantId(req.user);
+    const result = await this.hr.updateEmployee(tenantId, userId, dto);
+    await this.hrAdmin.invalidateDirectoryCache(tenantId);
+    return result;
   }
 
   @Get('attendance/matrix')

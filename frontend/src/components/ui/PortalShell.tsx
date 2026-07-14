@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { LogOut } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { isNavHrefActive } from '@/lib/navigation';
 import type { ReactNode } from 'react';
 
 export interface PortalNavItem {
@@ -22,6 +23,7 @@ export function PortalShell({ personaLabel, personaTitle, navItems, children }: 
   const { user, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const navHrefs = navItems.map((nav) => nav.href);
 
   const handleLogout = () => {
     logout();
@@ -38,7 +40,7 @@ export function PortalShell({ personaLabel, personaTitle, navItems, children }: 
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-6">
           {navItems.map((item) => {
-            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            const active = isNavHrefActive(pathname, item.href, navHrefs);
             return (
               <Link
                 key={item.href}

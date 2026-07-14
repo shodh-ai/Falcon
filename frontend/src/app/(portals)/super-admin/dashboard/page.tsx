@@ -16,7 +16,7 @@ export default function SuperAdminDashboardPage() {
     <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold text-sgvu-navy">Master Admin Portal</h1>
       <p className="text-sm text-muted-foreground">
-        Govern campus hierarchy, assign deans/HODs, bulk-map students to sections, and impersonate users for support.
+        Govern campus hierarchy, assign deans and HODs, and impersonate users for support.
       </p>
       <div className="grid gap-4 md:grid-cols-2">
         {isEntityCreator && (
@@ -39,22 +39,9 @@ export default function SuperAdminDashboardPage() {
             <CardTitle className="text-base">Hierarchy Mapper</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">Campus → School → Department → Program → Batch → Section</p>
+            <p className="mb-3 text-sm text-muted-foreground">Campus → School → Department → Program → Batch</p>
             <Button asChild>
               <Link href="/super-admin/hierarchy">Open mapper</Link>
-            </Button>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Course Allocation Matrix</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">
-              Bulk-import teaching load from HOD Excel — auto-creates subjects, maps faculty, and provisions LMS workspaces.
-            </p>
-            <Button asChild>
-              <Link href="/super-admin/academics/course-mapper">Open bulk mapper</Link>
             </Button>
           </CardContent>
         </Card>
