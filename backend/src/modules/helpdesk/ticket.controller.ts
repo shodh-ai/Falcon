@@ -109,11 +109,8 @@ export class TicketController {
   @Roles('SuperAdmin', 'Registrar', 'HOD', 'Dean', 'Admin')
   async listProfileCorrections(@Req() req: { user: AuthUser }) {
     const tenantId = this.tenant(req);
-    const role = (req.user.role ?? '').trim();
-    const deptIds =
-      role === 'HOD'
-        ? await this.tickets.resolveHodDepartmentIds(req.user.user_id)
-        : undefined;
+    const hodDeptIds = await this.tickets.resolveHodDepartmentIds(req.user.user_id);
+    const deptIds = hodDeptIds.length ? hodDeptIds : undefined;
     return this.tickets.listProfileCorrectionTickets(tenantId, 100, deptIds);
   }
 

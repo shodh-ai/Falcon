@@ -409,19 +409,8 @@ export class HodPortalExtService {
     return this.getPlacementSettings(tenantId, hodUserId);
   }
 
-  async listPlacementDrives(tenantId: string, actorUserId: string, role: string) {
-    let deptIds: number[];
-    if (role === 'HOD' || role === 'SuperAdmin') {
-      deptIds = await this.resolveHodDepartmentIds(actorUserId);
-    } else {
-      const coord = await this.db.query(
-        `SELECT dept_id FROM hod_dept_placement_settings
-         WHERE tenant_id = $1 AND coordinator_user_id = $2`,
-        [tenantId, actorUserId],
-      );
-      if (!coord[0]) return [];
-      deptIds = [Number(coord[0].dept_id)];
-    }
+  async listPlacementDrives(tenantId: string, actorUserId: string, _role: string) {
+    const deptIds = await this.resolvePlacementScopeDeptIds(tenantId, actorUserId);
     if (!deptIds.length) return [];
 
     const drives = await this.db.query(
@@ -450,20 +439,11 @@ export class HodPortalExtService {
       description?: string;
     },
   ) {
-    let deptId: number;
-    if (role === 'HOD' || role === 'SuperAdmin') {
-      const deptIds = await this.resolveHodDepartmentIds(actorUserId);
-      if (!deptIds.length) throw new BadRequestException('No department');
-      deptId = deptIds[0];
-    } else {
-      const coord = await this.db.query(
-        `SELECT dept_id FROM hod_dept_placement_settings
-         WHERE tenant_id = $1 AND coordinator_user_id = $2`,
-        [tenantId, actorUserId],
-      );
-      if (!coord[0]) throw new ForbiddenException('You are not the placement coordinator');
-      deptId = Number(coord[0].dept_id);
+    const deptIds = await this.resolvePlacementScopeDeptIds(tenantId, actorUserId);
+    if (!deptIds.length) {
+      throw new ForbiddenException('No department assigned for placement');
     }
+    const deptId = deptIds[0];
 
     const rows = await this.db.query(
       `INSERT INTO hod_dept_placement_drives
@@ -1094,19 +1074,29 @@ export class HodPortalExtService {
     return { is_coordinator: !!rows[0], dept_id: rows[0]?.dept_id ?? null };
   }
 
+  private async resolvePlacementScopeDeptIds(
+    tenantId: string,
+    actorUserId: string,
+  ): Promise<number[]> {
+    const hodDeptIds = await this.resolveHodDepartmentIds(actorUserId);
+    if (hodDeptIds.length) return hodDeptIds;
+    const coord = await this.isPlacementCoordinator(tenantId, actorUserId);
+    if (coord.is_coordinator && coord.dept_id != null) {
+      return [Number(coord.dept_id)];
+    }
+    return [];
+  }
+
   private async resolvePlacementDeptIds(
     tenantId: string,
     actorUserId: string,
-    role: string,
+    _role: string,
   ): Promise<number[]> {
-    if (role === 'HOD' || role === 'SuperAdmin') {
-      return this.resolveHodDepartmentIds(actorUserId);
-    }
-    const coord = await this.isPlacementCoordinator(tenantId, actorUserId);
-    if (!coord.is_coordinator || coord.dept_id == null) {
+    const deptIds = await this.resolvePlacementScopeDeptIds(tenantId, actorUserId);
+    if (!deptIds.length) {
       throw new ForbiddenException('Not authorized for placement exports');
     }
-    return [Number(coord.dept_id)];
+    return deptIds;
   }
 
   private formatRegistrationSource(responseJson: unknown): string {
@@ -1337,8 +1327,8 @@ export class HodPortalExtService {
     role: string,
     drive: { dept_id: number; created_by: string },
   ) {
-    if (role === 'HOD' || role === 'SuperAdmin') {
-      await this.assertHodDeptAccess(actorUserId, drive.dept_id);
+    const hodDeptIds = await this.resolveHodDepartmentIds(actorUserId);
+    if (role === 'SuperAdmin' || hodDeptIds.includes(Number(drive.dept_id))) {
       return;
     }
     const coord = await this.isPlacementCoordinator(tenantId, actorUserId);

@@ -1240,7 +1240,7 @@ export class HrTeamService {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name,
               COALESCE(d.status, 'ABSENT') AS punch_status,
-              d.check_in_time, d.check_out_time,
+              d.first_in_time AS check_in_time, d.last_out_time AS check_out_time,
               d.is_regularized,
               (
                 SELECT r.leave_type FROM staff_leave_requests r

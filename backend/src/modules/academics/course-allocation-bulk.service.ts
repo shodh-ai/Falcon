@@ -365,17 +365,12 @@ export class CourseAllocationBulkService {
       `SELECT COUNT(*)::text AS count
        FROM academic_course_allocations a
        INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
-       LEFT JOIN users u ON u.user_id = a.faculty_user_id
+       INNER JOIN iam_programs p ON p.program_id = s.program_id AND p.dept_id = ANY($2::int[])
        WHERE a.tenant_id = $1
          AND a.faculty_user_id IS NULL
-         AND a.status = 'ACTIVE'
-         AND EXISTS (
-           SELECT 1 FROM pg_tables
-           WHERE schemaname = 'public' AND tablename = 'academic_course_allocations'
-         )`,
-      [tenantId],
+         AND a.status = 'ACTIVE'`,
+      [tenantId, deptIds],
     );
-    void deptIds;
     return Number(rows[0]?.count ?? 0);
   }
 
@@ -389,6 +384,7 @@ export class CourseAllocationBulkService {
     if (!tableExists[0]?.exists) return { items: [], faculty: [] };
 
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { items: [], faculty: [] };
     const faculty = await this.listDepartmentFaculty(tenantId, deptIds);
 
     const items = await this.dataSource.query<
@@ -413,14 +409,14 @@ export class CourseAllocationBulkService {
               a.academic_year
        FROM academic_course_allocations a
        INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       INNER JOIN iam_programs p ON p.program_id = s.program_id AND p.dept_id = ANY($2::int[])
        WHERE a.tenant_id = $1
          AND a.faculty_user_id IS NULL
          AND a.status = 'ACTIVE'
        ORDER BY a.academic_year DESC, a.program_name, a.semester, s.subject_code`,
-      [tenantId],
+      [tenantId, deptIds],
     );
 
-    void deptIds;
     return { items, faculty };
   }
 
