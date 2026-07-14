@@ -291,7 +291,15 @@ export function HodCommandCenter() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const activeTab: HodDashboardTab = isHodDashboardTab(tabParam) ? tabParam : 'overview';
+  const [activeTab, setActiveTab] = useState<HodDashboardTab>(
+    isHodDashboardTab(tabParam) ? tabParam : 'overview',
+  );
+
+  useEffect(() => {
+    if (isHodDashboardTab(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
   const departmentLabel = user?.department ? `Department of ${user.department}` : 'Your department';
   const istNow = useIstClock();
   const [data, setData] = useState<CommandCenterPayload | null>(null);
@@ -641,7 +649,7 @@ export function HodCommandCenter() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <HrStatCard
           label="Total Faculty"
           value={m.total_faculty}
@@ -668,36 +676,15 @@ export function HodCommandCenter() {
           alert={m.average_attendance < 75}
           onClick={() => setDrillDownType('attendance')}
         />
-        <HrStatCard
-          label="Pending Inbox"
-          value={m.pending_inbox_total}
-          sub={`${m.pending_leave_count} leaves · ${m.pending_gate_pass_count} gate passes`}
-          icon={Inbox}
-          accent="gold"
-          alert={m.pending_inbox_total > 0}
-          onClick={() => setDrillDownType('inbox')}
-        />
-        <HrStatCard
-          label="Red Flags"
-          value={data.attendance_deficits.length}
-          sub="Students below 75%"
-          icon={AlertTriangle}
-          alert={data.attendance_deficits.length > 0}
-          onClick={() => setDrillDownType('redflags')}
-        />
-        <HrStatCard
-          label="Syllabus Risk"
-          value={behindSyllabus.length}
-          sub={behindSyllabus.length ? 'Courses behind schedule' : 'LMS on track'}
-          icon={ClipboardList}
-          alert={behindSyllabus.length > 0}
-          onClick={() => setDrillDownType('syllabus')}
-        />
       </div>
 
       <Tabs
         value={activeTab}
-        onValueChange={(value) => router.replace(`/hod/dashboard?tab=${value}`, { scroll: false })}
+        onValueChange={(value) => {
+          const next = value as HodDashboardTab;
+          setActiveTab(next);
+          router.replace(`/hod/dashboard?tab=${next}`, { scroll: false });
+        }}
         className="w-full mt-6 space-y-6"
       >
         <TabsList className="grid w-full grid-cols-4 bg-slate-100 p-1 rounded-xl">
@@ -1716,7 +1703,7 @@ export function HodCommandCenter() {
                 )}
                 <div className="pt-2 text-center">
                   <Link
-                    href="/hod/reporting-directory?tab=requests&scope=dept"
+                    href="/hod/reporting-directory?tab=dashboard&scope=dept"
                     className="text-xs font-bold text-sgvu-navy underline underline-offset-2"
                   >
                     Open full Team Requests in Zimyo →

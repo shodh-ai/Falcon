@@ -113,7 +113,7 @@ export class HodPortalExtService {
   async listCompiledResultsCourses(
     tenantId: string,
     hodUserId: string,
-    semester: number,
+    semester: number | null,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     if (!deptIds.length) return [];
@@ -124,9 +124,9 @@ export class HodPortalExtService {
        JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
        JOIN users u ON u.user_id = e.student_user_id
        WHERE e.tenant_id = $1
-         AND e.semester = $2
+         AND ($2::int IS NULL OR e.semester = $2)
          AND u.dept_id = ANY($3::int[])
-       ORDER BY c.course_code`,
+       ORDER BY e.semester, c.course_code`,
       [tenantId, semester, deptIds],
     );
   }
@@ -206,10 +206,20 @@ export class HodPortalExtService {
   async exportCompiledResultsExcel(
     tenantId: string,
     hodUserId: string,
-    semester: number,
+    semester: number | null,
     courseId: string,
     studentUserId?: string,
   ): Promise<Buffer> {
+    if (courseId === 'all' || semester === null) {
+      return this.exportCompiledResultsBulkExcel(
+        tenantId,
+        hodUserId,
+        semester,
+        courseId === 'all' ? null : courseId,
+        studentUserId,
+      );
+    }
+
     const table = await this.getCompiledResultsTable(
       tenantId,
       hodUserId,
@@ -244,6 +254,94 @@ export class HodPortalExtService {
           (t: string) => (s.marks as Record<string, number | string>)[t] ?? '—',
         ),
         s.total_marks ?? '—',
+      ]);
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
+  }
+
+  private async exportCompiledResultsBulkExcel(
+    tenantId: string,
+    hodUserId: string,
+    semester: number | null,
+    courseId: string | null,
+    studentUserId?: string,
+  ): Promise<Buffer> {
+    const courses = (await this.listCompiledResultsCourses(
+      tenantId,
+      hodUserId,
+      semester,
+    )) as Array<{
+      course_id: string;
+      course_code: string;
+      course_name: string;
+      semester: number;
+    }>;
+
+    const selected = courseId
+      ? courses.filter((c) => c.course_id === courseId)
+      : courses;
+
+    const wb = new ExcelJS.Workbook();
+    const sheet = wb.addWorksheet('All Compiled Results');
+    const headerRow = [
+      'Semester',
+      'Course Code',
+      'Course Name',
+      'Student Name',
+      'Enrollment No',
+      'Email',
+    ];
+    const examTypeSet = new Set<string>();
+    const rowData: Array<{
+      semester: number;
+      course_code: string;
+      course_name: string;
+      student: Record<string, unknown>;
+      exam_types: string[];
+    }> = [];
+
+    for (const course of selected) {
+      const table = await this.getCompiledResultsTable(
+        tenantId,
+        hodUserId,
+        Number(course.semester),
+        course.course_id,
+      );
+      let students = table.students as Array<Record<string, unknown>>;
+      if (studentUserId) {
+        students = students.filter(
+          (s) => s.student_user_id === studentUserId,
+        );
+      }
+      for (const t of table.exam_types as string[]) examTypeSet.add(t);
+      for (const student of students) {
+        rowData.push({
+          semester: Number(course.semester),
+          course_code: course.course_code,
+          course_name: course.course_name,
+          student,
+          exam_types: table.exam_types as string[],
+        });
+      }
+    }
+
+    const examTypes = [...examTypeSet].sort();
+    sheet.addRow([...headerRow, ...examTypes, 'Total']);
+    sheet.getRow(1).font = { bold: true };
+
+    for (const row of rowData) {
+      const marks = (row.student.marks ?? {}) as Record<string, number | string>;
+      sheet.addRow([
+        row.semester,
+        row.course_code,
+        row.course_name,
+        row.student.student_name,
+        row.student.enrollment_no,
+        row.student.email,
+        ...examTypes.map((t) => marks[t] ?? '—'),
+        row.student.total_marks ?? '—',
       ]);
     }
 

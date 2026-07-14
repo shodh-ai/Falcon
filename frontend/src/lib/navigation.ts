@@ -606,7 +606,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=requests&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'gate pass', 'hrms', 'dashboard', 'reports', 'probation', 'pending approvals', 'inbox', 'team requests'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=dashboard&scope=dept', icon: Users, keywords: ['zimyo', 'reporting', 'directory', 'attendance', 'leave', 'gate pass', 'hrms', 'dashboard', 'reports', 'probation', 'pending approvals', 'inbox', 'team requests'] },
         { label: 'Resignations & Offboarding', href: '/hod/approvals/resignations', icon: DoorOpen, keywords: ['resignation', 'exit', 'separation', 'fnf', 'offboarding'] },
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['student profile', 'edit', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
@@ -621,7 +621,6 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
-        { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'lms', 'marks', 'ppt', 'syllabus'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['hours', 'burnout', 'teaching load'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['research', 'hod rating', 'api', 'pms'] },
@@ -670,7 +669,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'HR (Reporting Officer)',
       items: [
-        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=requests&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory', 'gate pass', 'pending approvals', 'team requests'] },
+        { label: 'Team Directory (Zimyo)', href: '/hod/reporting-directory?tab=dashboard&scope=dept', icon: Users, keywords: ['zimyo', 'hrms', 'directory', 'gate pass', 'pending approvals', 'team requests'] },
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['profile', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['proxy'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['events'] },
@@ -682,7 +681,6 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
-        { label: 'Faculty Progress Audit', href: '/hod/dashboard?tab=audit', icon: ClipboardCheck, keywords: ['audit', 'marks'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
         { label: 'Faculty Roster & Workload', href: '/hod/faculty/workload', icon: Users, keywords: ['workload'] },
         { label: 'Appraisals & API Scores', href: '/hod/faculty/appraisals', icon: Award, keywords: ['api'] },
