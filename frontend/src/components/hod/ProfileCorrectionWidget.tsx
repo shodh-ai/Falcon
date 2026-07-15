@@ -38,7 +38,15 @@ export function ProfileCorrectionWidget({
       const data = await api.get<Ticket[]>('/api/helpdesk/tickets/profile-corrections');
       setTickets(data);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load profile corrections');
+      const message = e instanceof Error ? e.message : '';
+      const forbidden =
+        /^Forbidden resource$/i.test(message) ||
+        /API 403|status 403|forbidden/i.test(message);
+      if (!forbidden) {
+        toast.error(message || 'Failed to load profile corrections');
+      } else {
+        setTickets([]);
+      }
     } finally {
       setLoading(false);
     }

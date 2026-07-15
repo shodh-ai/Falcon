@@ -9,6 +9,7 @@ import {
   resolveProfileHref,
   getSettingsHrefFromPath,
 } from '@/lib/auth-routing';
+import { isCampusAdminFamilyRole } from '@/lib/campus-admin.roles';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,6 +35,19 @@ export function ProfileMenu({ profileHref }: ProfileMenuProps) {
   const resolvedProfileHref = resolveProfileHref(pathname, workspaceRole, profileHref);
   const settingsHref = getSettingsHrefFromPath(pathname, workspaceRole);
 
+  const headerDisplayName = (() => {
+    const roleCandidates = [
+      workspaceRole,
+      user?.primaryRole,
+      user?.role,
+      ...(user?.roles ?? []),
+    ].filter(Boolean) as string[];
+    if (roleCandidates.some(isCampusAdminFamilyRole)) {
+      return 'Campus Admin';
+    }
+    return user?.name ?? 'Guest';
+  })();
+
   const handleLogout = () => {
     logout();
     router.push('/');
@@ -47,17 +61,17 @@ export function ProfileMenu({ profileHref }: ProfileMenuProps) {
             <AvatarFallback>{user?.name?.charAt(0) ?? 'U'}</AvatarFallback>
           </Avatar>
           <span className="hidden max-w-[9rem] truncate text-sm font-semibold text-sgvu-navy lg:inline xl:max-w-[12rem]">
-            {user?.name ?? 'Guest'}
+            {headerDisplayName}
           </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
-          <p className="font-semibold">{user?.name ?? 'Guest'}</p>
+          <p className="font-semibold">{headerDisplayName}</p>
           <p className="text-xs font-normal text-muted-foreground">
             {getWorkspaceLabelForRole(workspaceRole)}
           </p>
-          {user?.roles && user.roles.length > 1 && (
+          {user?.roles && user.roles.length > 1 && !user.roles.every(isCampusAdminFamilyRole) && (
             <p className="mt-1 text-[11px] font-normal text-muted-foreground">
               Roles: {user.roles.join(', ')}
             </p>

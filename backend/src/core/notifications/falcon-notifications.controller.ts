@@ -11,13 +11,17 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { FalconNotificationsService } from './falcon-notifications.service';
+import { OnboardingVerificationNotifyService } from './onboarding-verification-notify.service';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
 @Controller(['notifications', 'api/notifications'])
 @UseGuards(JwtAuthGuard)
 export class FalconNotificationsController {
-  constructor(private readonly notifications: FalconNotificationsService) {}
+  constructor(
+    private readonly notifications: FalconNotificationsService,
+    private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
+  ) {}
 
   private ctx(req: { user: AuthUser }) {
     return {
@@ -27,8 +31,11 @@ export class FalconNotificationsController {
   }
 
   @Get()
-  list(@Req() req: { user: AuthUser }, @Query('limit') limit?: string) {
+  async list(@Req() req: { user: AuthUser }, @Query('limit') limit?: string) {
     const { tenantId, userId } = this.ctx(req);
+    await this.onboardingVerificationNotify
+      .dismissStaleVerificationNotifications(tenantId)
+      .catch(() => undefined);
     return this.notifications.listForUser(
       tenantId,
       userId,
@@ -37,17 +44,22 @@ export class FalconNotificationsController {
   }
 
   @Get('recent')
-  recent(@Req() req: { user: AuthUser }) {
+  async recent(@Req() req: { user: AuthUser }) {
     const { tenantId, userId } = this.ctx(req);
+    await this.onboardingVerificationNotify
+      .dismissStaleVerificationNotifications(tenantId)
+      .catch(() => undefined);
     return this.notifications.listRecent(tenantId, userId, 8);
   }
 
   @Get('unread-count')
-  unreadCount(@Req() req: { user: AuthUser }) {
+  async unreadCount(@Req() req: { user: AuthUser }) {
     const { tenantId, userId } = this.ctx(req);
-    return this.notifications
-      .unreadCount(tenantId, userId)
-      .then((count) => ({ count }));
+    await this.onboardingVerificationNotify
+      .dismissStaleVerificationNotifications(tenantId)
+      .catch(() => undefined);
+    const count = await this.notifications.unreadCount(tenantId, userId);
+    return { count };
   }
 
   @Patch(':id/read')
