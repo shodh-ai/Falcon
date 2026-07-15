@@ -21,26 +21,49 @@ const TENANT = {
   subdomain: 'sgvu',
 };
 
-function buildUser(overrides: Partial<User> & { roleName: string }): User {
-  const { roleName, ...rest } = overrides;
+function buildLoginFixture(overrides: {
+  user_id?: string;
+  email?: string;
+  name?: string;
+  role_id?: number;
+  roleName: string;
+  dept_id?: number | null;
+  dept_name?: string | null;
+  onboarding_status?: string | null;
+}) {
+  const user_id = overrides.user_id ?? 'user-1';
+  const email = overrides.email ?? 'library@mygyanvihar.com';
+  const name = overrides.name ?? 'Chief Librarian';
+  const role_id = overrides.role_id ?? 9;
+  const roleName = overrides.roleName;
+  const dept_id = overrides.dept_id ?? null;
+  const dept_name = overrides.dept_name ?? null;
+  const onboarding_status = overrides.onboarding_status ?? 'ACTIVE';
+
   return {
-    user_id: rest.user_id ?? 'user-1',
-    tenant_id: rest.tenant_id ?? TENANT.tenant_id,
-    email: rest.email ?? 'library@mygyanvihar.com',
-    name: rest.name ?? 'Chief Librarian',
-    role_id: rest.role_id ?? 9,
-    is_active: rest.is_active ?? true,
-    onboarding_status: rest.onboarding_status ?? 'ACTIVE',
-    role: { role_id: rest.role_id ?? 9, role_name: roleName } as User['role'],
-    userRoles: [
+    credential: {
+      user_id,
+      password_hash: PASSWORD_HASH,
+      is_active: true,
+    },
+    userRow: {
+      user_id,
+      name,
+      email,
+      role_id,
+      dept_id,
+      onboarding_status,
+      role_name: roleName,
+      dept_name,
+    },
+    roleRows: [
       {
+        role_id,
         is_primary: true,
-        role: { role_name: roleName },
-      } as UserRole,
+        role_name: roleName,
+      },
     ],
-    department: undefined,
-    dept_id: null,
-  } as unknown as User;
+  };
 }
 
 describe('AuthService.localLogin', () => {
@@ -75,6 +98,28 @@ describe('AuthService.localLogin', () => {
     providerId: 'local',
     signToken: jest.fn(),
   };
+
+  function mockSuccessfulLoginQueries(fixture: ReturnType<typeof buildLoginFixture>) {
+    mockDataSource.query.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      if (text.includes('password_hash')) {
+        return [fixture.credential];
+      }
+      if (text.includes('official_email AS email')) {
+        return [fixture.userRow];
+      }
+      if (text.includes('FROM user_roles ur')) {
+        return fixture.roleRows;
+      }
+      if (text.includes('COUNT(*)')) {
+        return [{ count: '0' }];
+      }
+      if (text.includes('EXISTS')) {
+        return [{ is_hod: false }];
+      }
+      return [];
+    });
+  }
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -114,15 +159,11 @@ describe('AuthService.localLogin', () => {
   });
 
   it('returns token and Librarian role for library@ master persona', async () => {
-    const user = buildUser({
+    const fixture = buildLoginFixture({
       email: 'library@mygyanvihar.com',
       roleName: 'Librarian',
     });
-
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    mockUserRepository.findOne.mockResolvedValue(user);
+    mockSuccessfulLoginQueries(fixture);
 
     const result = await service.localLogin(
       'library@mygyanvihar.com',
@@ -134,21 +175,17 @@ describe('AuthService.localLogin', () => {
     expect(result.user.role).toBe('Librarian');
     expect(result.user.roles).toContain('Librarian');
     expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
+    expect(mockUserRepository.findOne).not.toHaveBeenCalled();
   });
 
   it('falls back to sgvu when tenant subdomain header is empty', async () => {
-    const user = buildUser({
-      user_id: 'user-1',
+    const fixture = buildLoginFixture({
       email: 'library@mygyanvihar.com',
       name: 'Library',
       role_id: 11,
       roleName: 'Librarian',
     });
-
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    mockUserRepository.findOne.mockResolvedValue(user);
+    mockSuccessfulLoginQueries(fixture);
 
     await service.localLogin('library@mygyanvihar.com', 'password123', '   ');
 
@@ -156,18 +193,14 @@ describe('AuthService.localLogin', () => {
   });
 
   it('returns token and Registrar role for dev.registrar@ persona', async () => {
-    const user = buildUser({
+    const fixture = buildLoginFixture({
       user_id: 'user-registrar',
       email: 'dev.registrar@mygyanvihar.com',
       name: 'Dev Registrar',
       role_id: 12,
       roleName: 'Registrar',
     });
-
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    mockUserRepository.findOne.mockResolvedValue(user);
+    mockSuccessfulLoginQueries(fixture);
 
     const result = await service.localLogin(
       'dev.registrar@mygyanvihar.com',
@@ -206,5 +239,26 @@ describe('AuthService.localLogin', () => {
     await expect(
       service.localLogin('library@mygyanvihar.com', 'wrong-password'),
     ).rejects.toThrow('Invalid email or password');
+  });
+
+  it('still returns token when HR enrichment fails', async () => {
+    const fixture = buildLoginFixture({
+      email: 'library@mygyanvihar.com',
+      roleName: 'Librarian',
+    });
+    mockSuccessfulLoginQueries(fixture);
+    mockHrEntityCtx.getPermissions.mockRejectedValueOnce(
+      new Error('Redis connection refused'),
+    );
+
+    const result = await service.localLogin(
+      'library@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    expect(result.token).toBe('signed-jwt');
+    expect(result.user.role).toBe('Librarian');
+    expect(result.user.permissions).toEqual([]);
   });
 });

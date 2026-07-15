@@ -26,6 +26,23 @@ type LoginCredentialRow = {
   is_active: boolean;
 };
 
+type LoginUserRow = {
+  user_id: string;
+  name: string;
+  email: string;
+  role_id: number | null;
+  dept_id: number | null;
+  onboarding_status: string | null;
+  role_name: string | null;
+  dept_name: string | null;
+};
+
+type LoginRoleRow = {
+  role_id: number;
+  is_primary: boolean;
+  role_name: string;
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -72,6 +89,74 @@ export class AuthService {
     });
   }
 
+  /**
+   * Minimal user payload for password login. Avoids TypeORM soft-delete
+   * columns (deleted_at on roles/departments/user_roles) that break prod
+   * when those migrations have not been applied.
+   */
+  private async loadUserForLogin(
+    userId: string,
+    tenantId: string,
+  ): Promise<User | null> {
+    const [row] = await this.dataSource.query<LoginUserRow[]>(
+      `SELECT u.user_id,
+              u.name,
+              u.official_email AS email,
+              u.role_id,
+              u.dept_id,
+              u.onboarding_status,
+              r.role_name,
+              d.dept_name
+       FROM users u
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE u.user_id = $1
+         AND u.tenant_id = $2
+       LIMIT 1`,
+      [userId, tenantId],
+    );
+    if (!row) return null;
+
+    const roleRows = await this.dataSource.query<LoginRoleRow[]>(
+      `SELECT ur.role_id, ur.is_primary, r.role_name
+       FROM user_roles ur
+       INNER JOIN roles r ON r.role_id = ur.role_id
+       WHERE ur.user_id = $1`,
+      [userId],
+    );
+
+    return {
+      user_id: row.user_id,
+      tenant_id: tenantId,
+      name: row.name,
+      email: row.email,
+      role_id: row.role_id,
+      dept_id: row.dept_id,
+      onboarding_status: row.onboarding_status,
+      role: row.role_name
+        ? ({
+            role_id: row.role_id ?? undefined,
+            role_name: row.role_name,
+          } as User['role'])
+        : undefined,
+      department: row.dept_name
+        ? ({
+            dept_id: row.dept_id ?? undefined,
+            dept_name: row.dept_name,
+          } as User['department'])
+        : undefined,
+      userRoles: roleRows.map(
+        (rr) =>
+          ({
+            user_id: row.user_id,
+            role_id: rr.role_id,
+            is_primary: Boolean(rr.is_primary),
+            role: { role_id: rr.role_id, role_name: rr.role_name },
+          }) as UserRole,
+      ),
+    } as User;
+  }
+
   async localLogin(
     email: string,
     password: string,
@@ -102,28 +187,24 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    let user: User | null;
-    try {
-      user = await this.findById(credential.user_id, tenant.tenant_id);
-    } catch (err) {
-      this.logger.error(
-        `localLogin user load failed for ${credential.user_id}: ${err instanceof Error ? err.message : err}`,
-      );
-      throw err;
-    }
-    if (!user) {
+    // Raw SQL only — TypeORM findById joins soft-delete columns on roles /
+    // departments / user_roles and 500s when those migrations are missing in prod.
+    const tokenUser = await this.loadUserForLogin(
+      credential.user_id,
+      tenant.tenant_id,
+    );
+    if (!tokenUser) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
     try {
-      await this.ensurePrimaryRoleMapping(user);
+      await this.ensurePrimaryRoleMapping(tokenUser);
     } catch (err) {
       this.logger.warn(
-        `ensurePrimaryRoleMapping failed for ${user.user_id}: ${err instanceof Error ? err.message : err}`,
+        `ensurePrimaryRoleMapping failed for ${tokenUser.user_id}: ${err instanceof Error ? err.message : err}`,
       );
     }
-    const freshUser = await this.findById(user.user_id, tenant.tenant_id);
-    const tokenUser = freshUser ?? user;
+
     const roleClaims = this.getRoleClaims(tokenUser);
     // Issue token before optional enrichment so Redis/HR schema faults cannot block login.
     const token = this.signToken(tokenUser, tenant.tenant_id, tenant.pg_schema);
