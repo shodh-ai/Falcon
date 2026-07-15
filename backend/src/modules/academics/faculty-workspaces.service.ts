@@ -150,6 +150,8 @@ export class FacultyWorkspacesService {
     tenantId: string,
     deptId?: number | null,
   ) {
+    // ALLOCATION_WITH_DEPT_FROM already LEFT JOINs academic_courses AS c —
+    // do not join `c` again (Postgres: table name "c" specified more than once).
     const allocations = await this.dataSource.query(
       `SELECT
          a.allocation_id,
@@ -159,10 +161,11 @@ export class FacultyWorkspacesService {
          u.user_id AS faculty_user_id,
          u.name AS faculty_name
        ${ALLOCATION_WITH_DEPT_FROM}
-       INNER JOIN academic_courses c ON c.course_id = a.course_id
        WHERE a.tenant_id = $1
          AND a.faculty_user_id = $2
          AND a.status = 'ACTIVE'
+         AND a.course_id IS NOT NULL
+         AND c.course_id IS NOT NULL
          AND ($3::int IS NULL OR COALESCE(p.dept_id, code_dept.dept_id, u.dept_id) = $3)`,
       [tenantId, facultyUserId, deptId ?? null],
     );
