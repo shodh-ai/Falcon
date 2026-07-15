@@ -172,13 +172,23 @@ export class AdmissionsService {
     }
 
     if (branch) {
-      whereClause += ` AND d.dept_id = $${queryIdx}`;
-      params.push(Number(branch));
+      if (branch.startsWith('name:')) {
+        const branchName = branch.slice(5);
+        whereClause += ` AND (
+          lower(trim(d.dept_name)) = lower($${queryIdx})
+          OR lower(trim(sp.batch)) = lower($${queryIdx})
+        )`;
+        params.push(branchName);
+      } else {
+        whereClause += ` AND d.dept_id = $${queryIdx}`;
+        params.push(Number(branch));
+      }
       queryIdx++;
     }
 
     const students = await this.dataSource.query(
-      `SELECT u.user_id, u.name, u.official_email as email, sp.enrollment_no, sp.batch, d.dept_name,
+      `SELECT u.user_id, u.name, u.official_email as email, sp.enrollment_no, sp.batch,
+              d.dept_id, d.dept_name,
               COALESCE(
                 (
                   SELECT json_agg(
@@ -230,6 +240,30 @@ export class AdmissionsService {
     );
 
     return students;
+  }
+
+  async getEnrolledStudentBranches(tenantId: string) {
+    return this.dataSource.query<
+      { branch_key: string; dept_id: number | null; dept_name: string }[]
+    >(
+      `SELECT DISTINCT
+         COALESCE(d.dept_id::text, 'name:' || COALESCE(NULLIF(trim(d.dept_name), ''), trim(sp.batch))) AS branch_key,
+         d.dept_id,
+         COALESCE(NULLIF(trim(d.dept_name), ''), NULLIF(trim(sp.batch), ''), 'Unassigned') AS dept_name
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE u.tenant_id = $1
+         AND r.role_name = 'Student'
+         AND (
+           d.dept_id IS NOT NULL
+           OR NULLIF(trim(sp.batch), '') IS NOT NULL
+           OR NULLIF(trim(d.dept_name), '') IS NOT NULL
+         )
+       ORDER BY dept_name ASC`,
+      [tenantId],
+    );
   }
 
   async uploadTransactionReceipt(transactionId: string, receiptUrl: string) {

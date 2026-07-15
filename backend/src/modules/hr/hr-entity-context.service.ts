@@ -31,10 +31,17 @@ export type HrAccessLevel = 'none' | 'read' | 'write';
 
 export type HrCapabilities = Partial<Record<HrModuleKey, HrAccessLevel>>;
 
-const MASTER_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'HR', 'President']);
+const MASTER_ROLES = new Set([
+  'HRAdmin',
+  'SuperAdmin',
+  'CampusAdmin',
+  'HR',
+  'President',
+]);
 /** Roles that may list and scope all tenant entities without per-user access rows. */
 const UNIVERSAL_ENTITY_ROLES = new Set([
   'SuperAdmin',
+  'CampusAdmin',
   'HRAdmin',
   'HR',
   'President',

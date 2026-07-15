@@ -21,14 +21,20 @@ export default function SuperAdminSettingsPage() {
 
   useEffect(() => {
     void (async () => {
-      const [c, ca, r] = await Promise.all([
-        api.get<Row[]>('/api/master-data/countries'),
-        api.get<Row[]>('/api/master-data/castes'),
-        api.get<{ rule_id: string; rule_name: string; template: string }[]>('/api/master-data/enrollment-rules'),
-      ]);
-      setCountries(c);
-      setCastes(ca);
-      setRules(r);
+      try {
+        const [c, ca, r] = await Promise.all([
+          api.get<Row[]>('/api/master-data/countries'),
+          api.get<Row[]>('/api/master-data/castes'),
+          api.get<{ rule_id: string; rule_name: string; template: string }[]>(
+            '/api/master-data/enrollment-rules',
+          ),
+        ]);
+        setCountries(c);
+        setCastes(ca);
+        setRules(r);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to load master settings');
+      }
     })();
   }, [api]);
 

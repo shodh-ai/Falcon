@@ -195,6 +195,7 @@ export default function AdminStudentVerificationsPage() {
       setSelectedId(null);
       setDetail(null);
       await loadQueue();
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
     } catch (err) {
       toast.error(parseApiError(err));
     } finally {
@@ -216,6 +217,7 @@ export default function AdminStudentVerificationsPage() {
       setSelectedId(null);
       setDetail(null);
       await loadQueue();
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
     } catch (err) {
       toast.error(parseApiError(err));
     } finally {
