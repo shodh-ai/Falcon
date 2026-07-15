@@ -1,4 +1,10 @@
-import { Inject, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -22,6 +28,8 @@ type LoginCredentialRow = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
@@ -94,32 +102,65 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const user = await this.findById(credential.user_id, tenant.tenant_id);
+    let user: User | null;
+    try {
+      user = await this.findById(credential.user_id, tenant.tenant_id);
+    } catch (err) {
+      this.logger.error(
+        `localLogin user load failed for ${credential.user_id}: ${err instanceof Error ? err.message : err}`,
+      );
+      throw err;
+    }
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    await this.ensurePrimaryRoleMapping(user);
+    try {
+      await this.ensurePrimaryRoleMapping(user);
+    } catch (err) {
+      this.logger.warn(
+        `ensurePrimaryRoleMapping failed for ${user.user_id}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
     const freshUser = await this.findById(user.user_id, tenant.tenant_id);
     const tokenUser = freshUser ?? user;
     const roleClaims = this.getRoleClaims(tokenUser);
+    // Issue token before optional enrichment so Redis/HR schema faults cannot block login.
     const token = this.signToken(tokenUser, tenant.tenant_id, tenant.pg_schema);
-    const caps = await this.hrEntityCtx.getPermissions(
-      tenant.tenant_id,
-      tokenUser.user_id,
-    );
-    const permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
-    const allowedRows = await this.hrEntityCtx.listAllowedEntities(
-      tenant.tenant_id,
-      tokenUser.user_id,
-      roleClaims.roles,
-    );
-    const directReports = await hasDirectReports(
-      (sql, params) => this.dataSource.query(sql, params),
-      tenant.tenant_id,
-      tokenUser.user_id,
-    );
-    const isDepartmentHod = await this.isDepartmentHod(tokenUser.user_id);
+
+    let caps: Awaited<
+      ReturnType<HrEntityContextService['getPermissions']>
+    > = null;
+    let permissions: string[] = [];
+    let allowedEntities: ReturnType<
+      HrEntityContextService['formatAllowedEntities']
+    > = [];
+    let directReports = false;
+    let isDepartmentHod = false;
+    try {
+      caps = await this.hrEntityCtx.getPermissions(
+        tenant.tenant_id,
+        tokenUser.user_id,
+      );
+      permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
+      const allowedRows = await this.hrEntityCtx.listAllowedEntities(
+        tenant.tenant_id,
+        tokenUser.user_id,
+        roleClaims.roles,
+      );
+      allowedEntities = this.hrEntityCtx.formatAllowedEntities(allowedRows);
+      directReports = await hasDirectReports(
+        (sql, params) => this.dataSource.query(sql, params),
+        tenant.tenant_id,
+        tokenUser.user_id,
+      );
+      isDepartmentHod = await this.isDepartmentHod(tokenUser.user_id);
+    } catch (err) {
+      this.logger.error(
+        `localLogin enrichment failed for ${tokenUser.user_id}; returning token without HR context: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
     return {
       token,
       user: {
@@ -136,7 +177,7 @@ export class AuthService {
         tenant_schema: tenant.pg_schema,
         hr_capabilities: caps ?? {},
         permissions,
-        allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
+        allowed_entities: allowedEntities,
         onboarding_status: normalizeOnboardingStatusForWizard(
           tokenUser.onboarding_status,
           roleClaims.primaryRole,
