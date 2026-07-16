@@ -25,12 +25,51 @@ import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { TodayBirthdaysWidget } from '@/components/dashboard/TodayBirthdaysWidget';
+import { DeanIntelligencePanels } from '@/components/dean/DeanIntelligencePanels';
+
+type IntelligencePayload = {
+  filters?: { available_departments?: DeptRow[] };
+  school_health: {
+    score: number;
+    color: 'green' | 'yellow' | 'red';
+    trend_delta: number;
+    trend_label: string;
+    trend_direction: 'up' | 'down' | 'flat';
+  };
+  department_rankings: Array<{
+    rank: number;
+    dept_id: number;
+    department: string;
+    health_score: number;
+    trend: 'up' | 'down' | 'flat';
+  }>;
+  alerts: Array<{
+    id: string;
+    priority: 'critical' | 'warning' | 'information';
+    title: string;
+    detail: string;
+    href?: string;
+  }>;
+  recommendations: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    href?: string;
+  }>;
+  analytics_preview?: {
+    attendance_trend: Array<{ week: string; attendance: number; target: number }>;
+  };
+};
 
 type HealthMetrics = {
   total_faculty: number;
   faculty_present_today: number;
   faculty_on_leave_today: number;
   total_students: number;
+  total_departments?: number;
+  total_courses?: number;
+  departments_at_risk?: number;
+  pending_dean_approvals?: number;
   classes_scheduled_today: number;
   classes_cancelled_today: number;
   classes_rescheduled_today: number;
@@ -41,6 +80,9 @@ type HealthMetrics = {
   pending_gate_pass_count: number;
   pending_profile_corrections: number;
   pending_inbox_total: number;
+  pending_events_count?: number;
+  faculty_overloaded?: number;
+  faculty_underloaded?: number;
 };
 
 type SyllabusRow = {
@@ -58,6 +100,7 @@ type InboxRow = {
   employee_name: string;
   date_label: string;
   detail: string;
+  action_href?: string;
 };
 
 type DeficitRow = {
@@ -77,6 +120,11 @@ type CommandCenterPayload = {
   department_count?: number;
   hod_count?: number;
   pending_events_count?: number;
+  faculty_workload_summary?: {
+    overloaded: number;
+    underloaded: number;
+    balanced: number;
+  };
 };
 
 type DeptRow = {
@@ -91,10 +139,26 @@ type DeptRow = {
   attendance_risk_count: number;
 };
 
+type DashboardPayload = IntelligencePayload & {
+  command_center: CommandCenterPayload;
+  departments?: DeptRow[];
+  recent_activity?: ActivityRow[];
+};
+
+type ActivityRow = {
+  id: string;
+  user: string;
+  department: string;
+  action: string;
+  module: string;
+  timestamp: string;
+  priority: string;
+  detail?: string;
+};
+
 export function DeanCommandCenter() {
   const api = useAuthedApi();
-  const [data, setData] = useState<CommandCenterPayload | null>(null);
-  const [departments, setDepartments] = useState<DeptRow[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -103,18 +167,13 @@ export function DeanCommandCenter() {
       if (!silent) setLoading(true);
       else setRefreshing(true);
       try {
-        const [center, depts] = await Promise.all([
-          api.get<CommandCenterPayload>('/api/academics/dean/command-center'),
-          api.get<DeptRow[]>('/api/academics/dean/departments').catch(() => []),
-        ]);
-        setData(center);
-        setDepartments(depts);
+        const payload = await api.get<DashboardPayload>(
+          '/api/academics/dean/intelligence/dashboard',
+        );
+        setDashboard(payload);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load school command center');
-        if (!silent) {
-          setData(null);
-          setDepartments([]);
-        }
+        if (!silent) setDashboard(null);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -126,6 +185,11 @@ export function DeanCommandCenter() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const data = dashboard?.command_center ?? null;
+  const departments = dashboard?.departments ?? dashboard?.filters?.available_departments ?? [];
+  const intelligence = dashboard;
+  const recentActivity = dashboard?.recent_activity ?? [];
 
   const behindSyllabus = useMemo(
     () => (data?.syllabus_coverage ?? []).filter((r) => r.behind_schedule),
@@ -196,6 +260,13 @@ export function DeanCommandCenter() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <HrStatCard
+          label="Departments"
+          value={m.total_departments ?? data.department_count ?? departments.length}
+          sub={`${data.hod_count ?? 0} HOD(s) mapped`}
+          icon={Users}
+          accent="navy"
+        />
+        <HrStatCard
           label="Total Faculty"
           value={m.total_faculty}
           sub={`${m.faculty_on_leave_today} on leave today`}
@@ -209,12 +280,11 @@ export function DeanCommandCenter() {
           accent="gold"
         />
         <HrStatCard
-          label="Classes Today"
-          value={m.classes_scheduled_today}
-          sub={`${m.classes_cancelled_today} cancelled`}
-          icon={CalendarClock}
+          label="Courses"
+          value={m.total_courses ?? 0}
+          sub={`${m.classes_scheduled_today} classes today`}
+          icon={ClipboardList}
           accent="gold"
-          alert={m.classes_cancelled_today > 0}
         />
         <HrStatCard
           label="School Attendance"
@@ -225,12 +295,22 @@ export function DeanCommandCenter() {
           alert={m.average_attendance < 75}
         />
         <HrStatCard
-          label="Pending Inbox"
-          value={m.pending_inbox_total}
-          sub={`${m.pending_leave_count} leaves`}
+          label="Dean Approvals"
+          value={m.pending_dean_approvals ?? m.pending_inbox_total}
+          sub={`${data.pending_events_count ?? 0} events pending`}
           icon={Inbox}
           accent="gold"
-          alert={m.pending_inbox_total > 0}
+          alert={(m.pending_dean_approvals ?? m.pending_inbox_total) > 0}
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <HrStatCard
+          label="Departments At Risk"
+          value={m.departments_at_risk ?? 0}
+          sub="Attendance or syllabus lag"
+          icon={AlertTriangle}
+          alert={(m.departments_at_risk ?? 0) > 0}
         />
         <HrStatCard
           label="Syllabus Risk"
@@ -239,7 +319,52 @@ export function DeanCommandCenter() {
           icon={ClipboardList}
           alert={behindSyllabus.length > 0}
         />
+        <HrStatCard
+          label="Faculty Overloaded"
+          value={data.faculty_workload_summary?.overloaded ?? m.faculty_overloaded ?? 0}
+          sub={`${data.faculty_workload_summary?.underloaded ?? m.faculty_underloaded ?? 0} underloaded`}
+          icon={Users}
+          alert={(data.faculty_workload_summary?.overloaded ?? 0) > 0}
+        />
+        <HrStatCard
+          label="Classes Today"
+          value={m.classes_scheduled_today}
+          sub={`${m.classes_cancelled_today} cancelled`}
+          icon={CalendarClock}
+          accent="gold"
+          alert={m.classes_cancelled_today > 0}
+        />
       </div>
+
+      {intelligence ? (
+        <DeanIntelligencePanels
+          schoolHealth={intelligence.school_health}
+          departmentRankings={intelligence.department_rankings}
+          alerts={intelligence.alerts}
+          recommendations={intelligence.recommendations}
+          attendanceTrend={intelligence.analytics_preview?.attendance_trend ?? []}
+        />
+      ) : null}
+
+      {recentActivity.length > 0 ? (
+        <HodPanel title="Recent Activity" count={recentActivity.length} href="/dean/audit-log">
+          <ul className="divide-y divide-slate-100" aria-label="Recent school activity">
+            {recentActivity.slice(0, 8).map((item) => (
+              <li key={item.id} className="flex items-start justify-between gap-3 py-3 text-sm">
+                <div>
+                  <p className="font-medium text-sgvu-navy">{item.action}</p>
+                  <p className="text-muted-foreground">
+                    {item.user} · {item.department}
+                  </p>
+                </div>
+                <time className="shrink-0 text-xs text-muted-foreground">
+                  {new Date(item.timestamp).toLocaleString('en-IN')}
+                </time>
+              </li>
+            ))}
+          </ul>
+        </HodPanel>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {[
@@ -250,7 +375,7 @@ export function DeanCommandCenter() {
           { href: '/dean/academics/result-analytics', label: 'Results' },
           { href: '/dean/students/monitor', label: 'Student Monitor' },
           { href: '/dean/meetings', label: 'Meetings' },
-          { href: '/dean/inbox?scope=dept', label: 'HR Inbox' },
+          { href: '/dean/inbox', label: 'Dean Inbox' },
         ].map((link) => (
           <Link
             key={link.href}
@@ -288,8 +413,16 @@ export function DeanCommandCenter() {
                     </div>
                   ),
                 },
-                { key: 'fac', label: 'Faculty', render: (r) => String(r.faculty_count) },
-                { key: 'stu', label: 'Students', render: (r) => String(r.student_count) },
+                {
+                  key: 'fac',
+                  label: 'Faculty',
+                  render: (r) => String(r.faculty_count),
+                },
+                {
+                  key: 'stu',
+                  label: 'Students',
+                  render: (r) => String(r.student_count),
+                },
                 {
                   key: 'risk',
                   label: 'Risk',
@@ -299,6 +432,19 @@ export function DeanCommandCenter() {
                     ) : (
                       <span className="text-emerald-700">OK</span>
                     ),
+                },
+                {
+                  key: 'view',
+                  label: '',
+                  className: 'text-right',
+                  render: (r) => (
+                    <Link
+                      href={`/dean/departments/${r.dept_id}`}
+                      className="text-sm font-semibold text-sgvu-navy hover:underline"
+                    >
+                      View →
+                    </Link>
+                  ),
                 },
               ]}
               rows={departments}
@@ -321,13 +467,13 @@ export function DeanCommandCenter() {
                     </p>
                   </div>
                   <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {row.type}
+                    {row.type.replace(/_/g, ' ')}
                   </span>
                 </li>
               ))}
             </ul>
           )}
-          <Link href="/dean/inbox?scope=dept" className="mt-3 inline-block text-sm font-semibold text-sgvu-navy hover:underline">
+          <Link href="/dean/inbox" className="mt-3 inline-block text-sm font-semibold text-sgvu-navy hover:underline">
             Open full inbox →
           </Link>
         </HodPanel>

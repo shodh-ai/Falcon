@@ -125,7 +125,9 @@ export class PhdLifecycleController {
   @Get('dean/candidates')
   @Roles('Dean', 'Leadership', 'President', 'SuperAdmin')
   deanQueue(@Req() req: { user: AuthUser }) {
-    return this.phd.listForRole(this.tenant(req), 'Dean', req.user.user_id);
+    const actorRole = req.user.primaryRole ?? req.user.role ?? 'Dean';
+    const queueRole = actorRole === 'SuperAdmin' ? 'Leadership' : 'Dean';
+    return this.phd.listForRole(this.tenant(req), queueRole, req.user.user_id);
   }
 
   @Get('candidates')

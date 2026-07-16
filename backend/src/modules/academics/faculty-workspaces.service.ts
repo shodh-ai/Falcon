@@ -9,6 +9,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { DeanAuditService } from './dean-audit.service';
 import { assertNoPendingSql } from '../../common/validators/pending-request.util';
 import {
   GRADING_COMPONENT_CATALOG,
@@ -81,6 +82,7 @@ export class FacultyWorkspacesService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
     private readonly teachingDepartments: FacultyTeachingDepartmentsService,
+    private readonly deanAudit: DeanAuditService,
   ) {}
 
   async listFacultyCourses(
@@ -1485,16 +1487,43 @@ export class FacultyWorkspacesService {
     );
   }
 
-  async listDeanFundingRequests(tenantId: string) {
+  async listDeanFundingRequests(tenantId: string, deanUserId: string) {
+    const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT DISTINCT dept_id
+       FROM (
+         SELECT ip.dept_id
+         FROM iam_programs ip
+         INNER JOIN schools s ON s.school_id = ip.school_id
+         WHERE s.deleted_at IS NULL
+           AND (
+             s.dean_user_id = $1
+             OR EXISTS (
+               SELECT 1 FROM departments hd
+               WHERE hd.hod_user_id = $1 AND hd.school_id = s.school_id
+             )
+           )
+         UNION
+         SELECT dept_id FROM departments WHERE hod_user_id = $1
+         UNION
+         SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL
+       ) scoped
+       WHERE dept_id IS NOT NULL`,
+      [deanUserId],
+    );
+    const deptIds = deptRows.map((row) => Number(row.dept_id));
+    if (!deptIds.length) return [];
+
     return this.dataSource.query(
       `SELECT fr.*, g.project_title, u.name AS faculty_name, d.dept_name
        FROM project_funding_requests fr
        INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
        INNER JOIN users u ON u.user_id = fr.requested_by
        INNER JOIN departments d ON d.dept_id = u.dept_id
-       WHERE fr.tenant_id = $1 AND fr.status IN ('APPROVED_HOD', 'APPROVED_DEAN', 'REJECTED_DEAN')
+       WHERE fr.tenant_id = $1
+         AND u.dept_id = ANY($2::int[])
+         AND fr.status IN ('APPROVED_HOD', 'APPROVED_DEAN', 'REJECTED_DEAN')
        ORDER BY fr.created_at DESC`,
-      [tenantId],
+      [tenantId, deptIds],
     );
   }
 
@@ -1550,12 +1579,47 @@ export class FacultyWorkspacesService {
     deanUserId: string,
     tenantId: string,
   ) {
+    const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT DISTINCT dept_id
+       FROM (
+         SELECT p.dept_id
+         FROM iam_programs p
+         INNER JOIN schools s ON s.school_id = p.school_id
+         WHERE p.deleted_at IS NULL
+           AND p.dept_id IS NOT NULL
+           AND (
+             s.dean_user_id = $1
+             OR EXISTS (
+               SELECT 1 FROM departments hd
+               WHERE hd.hod_user_id = $1 AND hd.school_id = s.school_id
+             )
+           )
+         UNION
+         SELECT dept_id FROM departments WHERE hod_user_id = $1
+         UNION
+         SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL
+       ) scoped
+       WHERE dept_id IS NOT NULL`,
+      [deanUserId],
+    );
+    const deptIds = deptRows.map((row) => Number(row.dept_id));
+    if (!deptIds.length) {
+      throw new NotFoundException(
+        'Pending funding request not found or unauthorized',
+      );
+    }
+
     const rows = await this.dataSource.query(
-      `UPDATE project_funding_requests
+      `UPDATE project_funding_requests fr
        SET status = $1, dean_commit_message = $2, dean_user_id = $3, updated_at = NOW()
-       WHERE request_id = $4 AND tenant_id = $5 AND status = 'APPROVED_HOD'
-       RETURNING *`,
-      [status, commitMessage, deanUserId, requestId, tenantId],
+       FROM users u
+       WHERE fr.request_id = $4
+         AND fr.tenant_id = $5
+         AND fr.status = 'APPROVED_HOD'
+         AND fr.requested_by = u.user_id
+         AND u.dept_id = ANY($6::int[])
+       RETURNING fr.*`,
+      [status, commitMessage, deanUserId, requestId, tenantId, deptIds],
     );
     if (!rows.length) {
       throw new NotFoundException(
@@ -1564,6 +1628,21 @@ export class FacultyWorkspacesService {
     }
 
     const updatedRequest = rows[0];
+
+    await this.deanAudit.logAction({
+      tenantId,
+      userId: deanUserId,
+      role: 'Dean',
+      module: 'project_funding_requests',
+      action: status === 'APPROVED_DEAN' ? 'FUNDING_APPROVED' : 'FUNDING_REJECTED',
+      recordId: requestId,
+      previousValue: { status: 'APPROVED_HOD' },
+      newValue: {
+        status,
+        commit_message: commitMessage,
+        amount: updatedRequest.amount,
+      },
+    });
 
     if (status === 'APPROVED_DEAN') {
       const financeUsers = await this.dataSource.query(

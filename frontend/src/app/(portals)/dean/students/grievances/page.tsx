@@ -29,10 +29,9 @@ export default function DeanGrievancesPage() {
     if (!selectedTicket) return;
     setResolving(true);
     try {
-      if (message.trim()) {
-        await api.post(`/api/helpdesk/tickets/${selectedTicket.ticket_id}/messages`, { message });
-      }
-      await api.patch(`/api/helpdesk/tickets/${selectedTicket.ticket_id}/status`, { status: 'RESOLVED' });
+      await api.post(`/api/academics/dean/grievances/${selectedTicket.ticket_id}/resolve`, {
+        message: message.trim() || undefined,
+      });
       toast.success('Ticket resolved successfully');
       setRows(rows.map(r => r.ticket_id === selectedTicket.ticket_id ? { ...r, status: 'RESOLVED' } : r));
       setSelectedTicket(null);
@@ -63,7 +62,7 @@ export default function DeanGrievancesPage() {
     <HodPageFrame>
       <HodPageHeader
         title="Grievance Escalations"
-        description="Academic helpdesk tickets escalated to Dean."
+        description="Academic helpdesk tickets escalated by HODs within your school."
         workspaceLabel="Dean Workspace"
         meta={<span>{rows.length} open ticket{rows.length === 1 ? '' : 's'}</span>}
       />
@@ -98,12 +97,18 @@ export default function DeanGrievancesPage() {
             label: 'Status',
             className: 'w-28',
             render: (r) => (
-              <span 
-                onClick={() => r.status === 'PENDING' ? setSelectedTicket(r) : undefined}
+              <span
+                onClick={() =>
+                  ['PENDING', 'IN_PROGRESS'].includes(r.status)
+                    ? setSelectedTicket(r)
+                    : undefined
+                }
                 className={`rounded-md border px-2 py-1 text-xs font-medium uppercase ${
-                  r.status === 'PENDING' ? 'bg-red-50 text-red-600 border-red-200 cursor-pointer hover:bg-red-100' : 
-                  r.status === 'RESOLVED' ? 'bg-green-50 text-green-600 border-green-200' :
-                  'bg-slate-50 border-gray-200'
+                  ['PENDING', 'IN_PROGRESS'].includes(r.status)
+                    ? 'cursor-pointer border-red-200 bg-red-50 text-red-600 hover:bg-red-100'
+                    : r.status === 'RESOLVED'
+                      ? 'border-green-200 bg-green-50 text-green-600'
+                      : 'border-gray-200 bg-slate-50'
                 }`}
               >
                 {r.status}

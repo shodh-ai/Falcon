@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/componen
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
-import { toast } from 'sonner';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { DollarSign, CheckCircle, XCircle, Clock, BookOpen, User } from 'lucide-react';
 
 type FundingRequest = {

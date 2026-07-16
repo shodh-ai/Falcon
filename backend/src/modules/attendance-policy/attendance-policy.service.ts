@@ -8,6 +8,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { AttendanceEligibilityService } from './attendance-eligibility.service';
+import {
+  isDepartmentInDeanScope,
+  resolveDeanDepartmentIds,
+} from '../academics/dean-scope.util';
 
 const EXEMPTION_REASONS = [
   'MEDICAL',
@@ -401,11 +405,36 @@ export class AttendancePolicyService {
     );
   }
 
+  async listDeanPendingThresholdRequests(
+    tenantId: string,
+    deanUserId: string,
+    actorRole?: string,
+  ) {
+    if (actorRole === 'SuperAdmin') {
+      return this.listPendingThresholdRequests(tenantId);
+    }
+
+    const deptIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+    if (!deptIds.length) return [];
+
+    return this.db.query(
+      `SELECT r.*, d.dept_name, u.name AS requested_by_name
+       FROM attendance_threshold_requests r
+       LEFT JOIN departments d ON d.dept_id = r.dept_id
+       LEFT JOIN users u ON u.user_id = r.requested_by
+       WHERE r.tenant_id = $1
+         AND r.dept_id = ANY($2::int[])
+       ORDER BY (r.status = 'PENDING_DEAN') DESC, r.created_at DESC`,
+      [tenantId, deptIds],
+    );
+  }
+
   async decideThresholdRequest(
     tenantId: string,
     deanUserId: string,
     requestId: string,
     dto: DecisionDto,
+    actorRole?: string,
   ) {
     const [request] = await this.db.query(
       `SELECT * FROM attendance_threshold_requests WHERE request_id = $1 AND tenant_id = $2`,
@@ -414,6 +443,17 @@ export class AttendancePolicyService {
     if (!request) throw new NotFoundException('Threshold request not found');
     if (request.status !== 'PENDING_DEAN') {
       throw new BadRequestException('This request has already been decided.');
+    }
+
+    if (actorRole !== 'SuperAdmin') {
+      const deptIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+      if (
+        !isDepartmentInDeanScope(request.dept_id, deptIds)
+      ) {
+        throw new ForbiddenException(
+          'This threshold request is outside your school scope.',
+        );
+      }
     }
 
     const newStatus = dto.decision === 'REJECT' ? 'REJECTED' : 'APPROVED';

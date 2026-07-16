@@ -318,7 +318,11 @@ export class TicketService {
     return qb.orderBy('t.created_at', 'DESC').take(limit).getMany();
   }
 
-  async updateStatus(ticketId: string, dto: UpdateTicketStatusDto) {
+  async updateStatus(
+    ticketId: string,
+    dto: UpdateTicketStatusDto,
+    actor?: { userId: string; role: string; tenantId: string },
+  ) {
     if (dto.status === 'REJECTED' && !dto.rejection_reason?.trim()) {
       throw new BadRequestException(
         'rejection_reason is required when rejecting a ticket',
@@ -329,6 +333,10 @@ export class TicketService {
       where: { ticket_id: ticketId },
     });
     if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (actor) {
+      await this.assertTicketActorScope(ticket, actor);
+    }
 
     ticket.status = dto.status;
     if (dto.assigned_to_user_id !== undefined) {
@@ -374,6 +382,72 @@ export class TicketService {
     }
 
     return saved;
+  }
+
+  private async assertTicketActorScope(
+    ticket: HelpdeskTicket,
+    actor: { userId: string; role: string; tenantId: string },
+  ) {
+    const role = actor.role.trim().toLowerCase();
+    if (!['dean', 'hod'].includes(role)) return;
+
+    const [student] = await this.dataSource.query<
+      Array<{ dept_id: number | null; tenant_id: string }>
+    >(
+      `SELECT dept_id, tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
+      [ticket.student_user_id],
+    );
+    if (!student || student.tenant_id !== actor.tenantId) {
+      throw new ForbiddenException('Ticket is outside your tenant scope');
+    }
+
+    if (role === 'dean') {
+      if (
+        ticket.category === 'ACADEMICS' &&
+        (ticket.escalation_level ?? 0) < 1
+      ) {
+        throw new ForbiddenException(
+          'Only escalated academic grievances can be updated by Dean',
+        );
+      }
+      const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
+        `SELECT DISTINCT dept_id
+         FROM (
+           SELECT p.dept_id
+           FROM iam_programs p
+           INNER JOIN schools s ON s.school_id = p.school_id
+           WHERE p.deleted_at IS NULL AND p.dept_id IS NOT NULL
+             AND (s.dean_user_id = $1 OR EXISTS (
+               SELECT 1 FROM departments hd WHERE hd.hod_user_id = $1 AND hd.school_id = s.school_id
+             ))
+           UNION SELECT dept_id FROM departments WHERE hod_user_id = $1
+           UNION SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL
+         ) scoped WHERE dept_id IS NOT NULL`,
+        [actor.userId],
+      );
+      const deptIds = deptRows.map((row) => Number(row.dept_id));
+      if (
+        student.dept_id == null ||
+        !deptIds.includes(Number(student.dept_id))
+      ) {
+        throw new ForbiddenException('Ticket is outside your school scope');
+      }
+      return;
+    }
+
+    if (role === 'hod') {
+      const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
+        `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+        [actor.userId],
+      );
+      const deptIds = deptRows.map((row) => Number(row.dept_id));
+      if (
+        student.dept_id == null ||
+        !deptIds.includes(Number(student.dept_id))
+      ) {
+        throw new ForbiddenException('Ticket is outside your department scope');
+      }
+    }
   }
 
   async addMessage(

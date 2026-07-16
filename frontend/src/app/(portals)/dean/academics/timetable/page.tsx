@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   HodActionButton,
@@ -22,6 +23,8 @@ type Row = {
   course_code: string;
   course_name: string;
   faculty_name: string;
+  dept_id?: number;
+  dept_name?: string | null;
 };
 
 const DAYS = [
@@ -41,9 +44,14 @@ function formatTime(t: string) {
 
 export default function DeanSchoolTimetablePage() {
   const api = useAuthedApi();
+  const searchParams = useSearchParams();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [dayFilter, setDayFilter] = useState<number | 'all'>('all');
+  const [deptFilter, setDeptFilter] = useState<string>(
+    searchParams.get('dept') ?? 'all',
+  );
+  const [facultyFilter, setFacultyFilter] = useState<string>('all');
 
   useEffect(() => {
     void (async () => {
@@ -66,10 +74,26 @@ export default function DeanSchoolTimetablePage() {
     return c;
   }, [rows]);
 
-  const filtered = useMemo(
-    () => (dayFilter === 'all' ? rows : rows.filter((r) => r.day_of_week === dayFilter)),
-    [rows, dayFilter],
-  );
+  const departments = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      if (row.dept_id != null && row.dept_name) map.set(String(row.dept_id), row.dept_name);
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [rows]);
+
+  const facultyOptions = useMemo(() => {
+    return Array.from(new Set(rows.map((r) => r.faculty_name))).sort();
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    return rows.filter((r) => {
+      if (dayFilter !== 'all' && r.day_of_week !== dayFilter) return false;
+      if (deptFilter !== 'all' && String(r.dept_id ?? '') !== deptFilter) return false;
+      if (facultyFilter !== 'all' && r.faculty_name !== facultyFilter) return false;
+      return true;
+    });
+  }, [rows, dayFilter, deptFilter, facultyFilter]);
 
   const stats = useMemo(() => {
     const courses = new Set(rows.map((r) => r.course_code));
@@ -117,18 +141,49 @@ export default function DeanSchoolTimetablePage() {
       {!loading && rows.length > 0 ? (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <select
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                value={deptFilter}
+                onChange={(e) => setDeptFilter(e.target.value)}
+              >
+                <option value="all">All departments</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                value={facultyFilter}
+                onChange={(e) => setFacultyFilter(e.target.value)}
+              >
+                <option value="all">All faculty</option>
+                {facultyOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <HodDayTabs days={DAYS} active={dayFilter} onChange={setDayFilter} counts={dayCounts} />
             <HodDataTable
               loading={loading}
               rows={filtered}
               rowKey={(r) => r.timetable_id}
-              empty="No slots for this day."
+              empty="No slots for this filter."
               columns={[
                 {
                   key: 'day',
                   label: 'Day',
                   className: 'w-14',
                   render: (r) => <span className="font-semibold">{DOW[r.day_of_week]}</span>,
+                },
+                {
+                  key: 'dept',
+                  label: 'Department',
+                  render: (r) => r.dept_name ?? '—',
                 },
                 {
                   key: 'time',

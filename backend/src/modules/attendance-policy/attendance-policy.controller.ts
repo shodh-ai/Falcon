@@ -12,7 +12,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AttendancePolicyService } from './attendance-policy.service';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = { user_id: string; tenant_id?: string; role?: string };
 
 interface DecisionBody {
   decision?: 'APPROVE' | 'REJECT';
@@ -145,7 +145,11 @@ export class AttendancePolicyController {
   @Get('dean/threshold-requests')
   @Roles('Dean', 'SuperAdmin')
   pendingThresholdRequests(@Req() req: { user: AuthUser }) {
-    return this.policy.listPendingThresholdRequests(this.tenant(req));
+    return this.policy.listDeanPendingThresholdRequests(
+      this.tenant(req),
+      req.user.user_id,
+      req.user.role,
+    );
   }
 
   @Post('dean/threshold-requests/:id/decision')
@@ -160,6 +164,7 @@ export class AttendancePolicyController {
       req.user.user_id,
       id,
       dto,
+      req.user.role,
     );
   }
 
