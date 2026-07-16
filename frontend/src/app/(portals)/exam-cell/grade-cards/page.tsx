@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 
 type GradeCardPayload = {
   result_stage?: 'DRAFT' | 'PROVISIONAL' | 'FINAL';
@@ -113,28 +114,24 @@ export default function ExamCellGradeCardsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-          <h1 className="text-2xl font-bold text-sgvu-navy">Grade Cards & Merit List</h1>
-          <p className="text-sm text-muted-foreground">
-            Generate provisional semester results, publish student marksheets, finalize official grade cards, and review toppers.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Input
-            className="w-28"
-            type="number"
-            min={1}
-            value={semester}
-            onChange={(e) => setSemester(e.target.value)}
-            placeholder="Semester"
-          />
-          <Button variant="outline" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className="size-4" /> Refresh
-          </Button>
-        </div>
-      </div>
+      <ExamCellPageHeader
+        pageId="grade-cards"
+        actions={
+          <>
+            <Input
+              className="w-28"
+              type="number"
+              min={1}
+              value={semester}
+              onChange={(e) => setSemester(e.target.value)}
+              placeholder="Semester"
+            />
+            <Button variant="outline" onClick={() => void load()} disabled={loading}>
+              <RefreshCw className="size-4" /> Refresh
+            </Button>
+          </>
+        }
+      />
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard icon={<FileCheck2 className="size-5" />} label="Grade cards" value={summary.total} />

@@ -102,6 +102,25 @@ export class AuthController {
   }
 
   private async buildProfilePayload(user: AuthProfileUser) {
+    const syncedUser =
+      user.user_id && user.tenant_id
+        ? await this.authService.loadUserWithSyncedWorkspaceRoles(
+            user.user_id,
+            user.tenant_id,
+          )
+        : null;
+    const roleClaims = syncedUser
+      ? this.authService.getRoleClaims(syncedUser)
+      : {
+          roles: user.roles?.length
+            ? user.roles
+            : user.role
+              ? [user.role]
+              : [],
+          primaryRole: user.primaryRole ?? user.role,
+        };
+    const roles = roleClaims.roles;
+    const primaryRole = roleClaims.primaryRole ?? roles[0];
     const dbUser = await this.userRepository.findOne({
       where: { user_id: user.user_id },
       select: ['onboarding_status'],
@@ -110,11 +129,6 @@ export class AuthController {
       ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
       : null;
     const permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
-    const roles = user.roles?.length
-      ? user.roles
-      : user.role
-        ? [user.role]
-        : [];
     const allowedRows = user.tenant_id
       ? await this.hrEntityCtx.listAllowedEntities(
           user.tenant_id,
@@ -122,7 +136,6 @@ export class AuthController {
           roles,
         )
       : [];
-    const primaryRole = user.role ?? roles[0];
     const hasDirectReports = user.tenant_id
       ? (await this.userRepository.count({
           where: {
@@ -135,6 +148,9 @@ export class AuthController {
     const isDepartmentHod = await this.authService.isDepartmentHod(user.user_id);
     return {
       ...user,
+      role: primaryRole,
+      roles,
+      primaryRole,
       onboarding_status: normalizeOnboardingStatusForWizard(
         dbUser?.onboarding_status,
         primaryRole,
@@ -190,7 +206,8 @@ export class AuthController {
     }
 
     await this.authService.ensurePrimaryRoleMapping(user);
-    const refreshed = await this.authService.findById(
+    await this.authService.syncMultiHatWorkspaceRoles(user.user_id);
+    const refreshed = await this.authService.loadUserWithSyncedWorkspaceRoles(
       user.user_id,
       tenant.tenant_id,
     );

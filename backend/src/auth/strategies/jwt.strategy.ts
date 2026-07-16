@@ -51,22 +51,29 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    const roleClaims = this.authService.getRoleClaims(user);
+    await this.authService.syncMultiHatWorkspaceRoles(user.user_id);
+    const refreshedUser =
+      (await this.authService.loadUserWithSyncedWorkspaceRoles(
+        user.user_id,
+        payload.tenantId,
+      )) ?? user;
+
+    const roleClaims = this.authService.getRoleClaims(refreshedUser);
 
     const baseUser = {
-      user_id: user.user_id,
-      email: user.email,
-      name: user.name,
+      user_id: refreshedUser.user_id,
+      email: refreshedUser.email,
+      name: refreshedUser.name,
       role: roleClaims.primaryRole,
       roles: roleClaims.roles,
       primaryRole: roleClaims.primaryRole,
-      role_id: user.role_id,
-      department: user.department?.dept_name,
-      dept_id: user.dept_id,
+      role_id: refreshedUser.role_id,
+      department: refreshedUser.department?.dept_name,
+      dept_id: refreshedUser.dept_id,
       tenant_id: payload.tenantId,
       tenant_schema: payload.tenantSchema ?? 'public',
       onboarding_status: normalizeOnboardingStatusForWizard(
-        user.onboarding_status,
+        refreshedUser.onboarding_status,
         roleClaims.primaryRole,
       ),
     };

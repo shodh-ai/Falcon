@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuthedApi } from '@/lib/api';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, AlertTriangle, UserRoundCog } from 'lucide-react';
 
 type Duty = {
   duty_id: string;
@@ -56,6 +56,8 @@ export default function ExamCellInvigilationPage() {
 
   const [resolvingRequest, setResolvingRequest] = useState<{ req: Request, action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [resolveComment, setResolveComment] = useState('');
+  const [reassignDuty, setReassignDuty] = useState<Duty | null>(null);
+  const [reassignFacultyId, setReassignFacultyId] = useState('');
 
   const load = useCallback(() => {
     void api.get<Duty[]>('/api/exam-cell/invigilation').then(setDuties);
@@ -112,6 +114,22 @@ export default function ExamCellInvigilationPage() {
     }
   }
 
+  async function autoAssign() {
+    if (!examId) {
+      toast.error('Select an exam schedule first');
+      return;
+    }
+    try {
+      const res = await api.post<{ assigned: number; rooms: number }>('/api/exam-cell/invigilation/auto-assign', {
+        exam_schedule_id: examId,
+      });
+      toast.success(`Auto-assigned ${res.assigned} invigilators across ${res.rooms} rooms (leave & workload checked)`);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Auto-assign failed');
+    }
+  }
+
   async function submitResolution() {
     if (!resolvingRequest) return;
     if (!resolveComment.trim()) {
@@ -152,6 +170,48 @@ export default function ExamCellInvigilationPage() {
       .sort((a, b) => a.blockName.localeCompare(b.blockName));
   }, [duties, blocksHalls]);
 
+  const leaveConflicts = useMemo(() => {
+    const approvedLeaves = requests.filter((r) => r.status === 'APPROVED');
+    const conflicts = duties.filter((d) =>
+      approvedLeaves.some(
+        (r) =>
+          r.faculty_name === d.faculty_name &&
+          String(r.exam_date).slice(0, 10) === String(d.exam_date).slice(0, 10),
+      ),
+    );
+    return conflicts;
+  }, [duties, requests]);
+
+  const conflictDutyIds = useMemo(
+    () => new Set(leaveConflicts.map((d) => d.duty_id)),
+    [leaveConflicts],
+  );
+
+  async function quickReassign() {
+    if (!reassignDuty || !reassignFacultyId) return;
+    const replacement = faculty.find((f) => f.user_id === reassignFacultyId);
+    try {
+      await api.post('/api/exam-cell/invigilation/assign', {
+        exam_schedule_id: examId,
+        room: reassignDuty.room,
+        faculty_user_id: reassignFacultyId,
+      });
+      setDuties((prev) =>
+        prev.map((d) =>
+          d.duty_id === reassignDuty.duty_id
+            ? { ...d, faculty_name: replacement?.name ?? d.faculty_name, faculty_user_id: reassignFacultyId }
+            : d,
+        ),
+      );
+      toast.success(`Re-assigned ${reassignDuty.room} to ${replacement?.name ?? 'faculty'}`);
+      setReassignDuty(null);
+      setReassignFacultyId('');
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Re-assign failed');
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <div>
@@ -174,6 +234,24 @@ export default function ExamCellInvigilationPage() {
         </TabsList>
 
         <TabsContent value="roster" className="space-y-6">
+          {leaveConflicts.length > 0 && (
+            <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+              <p className="flex items-center gap-2 font-semibold">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                Alert: {leaveConflicts.length} assigned invigilator
+                {leaveConflicts.length === 1 ? '' : 's'} had leave approved by HOD for upcoming exam dates.
+                Immediate re-assignment required.
+              </p>
+              <ul className="mt-2 list-inside list-disc text-xs">
+                {leaveConflicts.map((d) => (
+                  <li key={d.duty_id}>
+                    {d.faculty_name} — Room {d.room} · {String(d.exam_date).slice(0, 10)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <Card>
             <CardHeader><CardTitle className="text-base">Assign faculty to room</CardTitle></CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -201,14 +279,20 @@ export default function ExamCellInvigilationPage() {
               </Select>
               <div className="sm:col-span-2 lg:col-span-4">
                 <Select className="w-full rounded-md border px-3 py-2 text-sm" value={facultyId} onChange={(e) => setFacultyId(e.target.value)}>
-                  <option value="">Select available faculty</option>
+                  <option value="">Select available faculty (not on approved leave)</option>
                   {faculty.map((f) => (
                     <option key={f.user_id} value={f.user_id}>{f.name}</option>
                   ))}
                 </Select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Only faculty without HOD-approved leave on the selected exam date are listed.
+                </p>
               </div>
-              <div className="sm:col-span-2 lg:col-span-4 flex justify-between items-center mt-2">
-                <Button onClick={() => void assign()} disabled={!room || !facultyId || !examId}>Assign</Button>
+              <div className="sm:col-span-2 lg:col-span-4 flex flex-wrap justify-between items-center gap-2 mt-2">
+                <div className="flex gap-2">
+                  <Button onClick={() => void assign()} disabled={!room || !facultyId || !examId}>Assign</Button>
+                  <Button variant="outline" onClick={() => void autoAssign()} disabled={!examId}>Auto-assign (availability check)</Button>
+                </div>
                 <Button variant="secondary" onClick={() => void publish()}>Publish roster to faculty</Button>
               </div>
             </CardContent>
@@ -245,20 +329,41 @@ export default function ExamCellInvigilationPage() {
                               <th className="px-4 py-3 text-left font-semibold">Faculty Name</th>
                               <th className="px-4 py-3 text-left font-semibold">Faculty ID</th>
                               <th className="px-4 py-3 text-left font-semibold">Exam Date</th>
-                              <th className="px-4 py-3 text-right font-semibold">Status</th>
+                              <th className="px-4 py-3 text-right font-semibold">Actions</th>
                             </tr>
                           </thead>
                           <tbody>
                             {items.map((d) => (
-                              <tr key={d.duty_id} className="border-t hover:bg-slate-50/50">
+                              <tr key={d.duty_id} className={`border-t hover:bg-slate-50/50 ${conflictDutyIds.has(d.duty_id) ? 'bg-red-50/40' : ''}`}>
                                 <td className="px-4 py-3 font-medium">{d.room}</td>
-                                <td className="px-4 py-3">{d.faculty_name}</td>
+                                <td className="px-4 py-3">
+                                  {d.faculty_name}
+                                  {conflictDutyIds.has(d.duty_id) && (
+                                    <Badge variant="destructive" className="ml-2 text-[10px]">On leave</Badge>
+                                  )}
+                                </td>
                                 <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{d.faculty_user_id.split('-')[0]}</td>
                                 <td className="px-4 py-3 text-muted-foreground">{String(d.exam_date).slice(0, 10)}</td>
                                 <td className="px-4 py-3 text-right">
-                                  <Badge variant={d.published ? 'default' : 'outline'}>
-                                    {d.published ? 'Published' : d.status}
-                                  </Badge>
+                                  <div className="flex items-center justify-end gap-2">
+                                    {conflictDutyIds.has(d.duty_id) && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 gap-1 border-red-200 text-red-700"
+                                        onClick={() => {
+                                          setReassignDuty(d);
+                                          setReassignFacultyId('');
+                                        }}
+                                      >
+                                        <UserRoundCog className="h-3.5 w-3.5" />
+                                        Quick Re-assign
+                                      </Button>
+                                    )}
+                                    <Badge variant={d.published ? 'default' : 'outline'}>
+                                      {d.published ? 'Published' : d.status}
+                                    </Badge>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -358,6 +463,39 @@ export default function ExamCellInvigilationPage() {
               disabled={!resolveComment.trim()}
             >
               Confirm {resolvingRequest?.action === 'APPROVED' ? 'Approval' : 'Rejection'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!reassignDuty} onOpenChange={(open) => !open && setReassignDuty(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Quick Re-assign — Room {reassignDuty?.room}</DialogTitle>
+            <DialogDescription>
+              Replace {reassignDuty?.faculty_name} with an available faculty member (no approved leave on exam date).
+            </DialogDescription>
+          </DialogHeader>
+          <Select
+            className="w-full rounded-md border px-3 py-2 text-sm"
+            value={reassignFacultyId}
+            onChange={(e) => setReassignFacultyId(e.target.value)}
+          >
+            <option value="">Select replacement faculty</option>
+            {faculty
+              .filter((f) => f.user_id !== reassignDuty?.faculty_user_id)
+              .map((f) => (
+                <option key={f.user_id} value={f.user_id}>
+                  {f.name}
+                </option>
+              ))}
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignDuty(null)}>
+              Cancel
+            </Button>
+            <Button disabled={!reassignFacultyId} onClick={() => void quickReassign()}>
+              Confirm re-assignment
             </Button>
           </DialogFooter>
         </DialogContent>

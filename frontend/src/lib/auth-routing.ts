@@ -72,7 +72,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/alumni/dashboard';
   }
 
-  if (r === 'examcell' || r === 'exam cell') {
+  if (r === 'examcell' || r === 'exam cell' || r === 'deputycoe' || r === 'examadmin' || r === 'examoperator') {
     return '/exam-cell/dashboard';
   }
 
@@ -310,18 +310,18 @@ const portalRoles: Record<string, string[]> = {
   '/faculty': ['faculty'],
   '/dean': ['dean'],
   '/hod': ['hod'],
-  '/hr': ['hr', 'hradmin', 'superadmin', 'campusadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
-  '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin', 'campusadmin'],
-  '/hostel-admin': ['warden', 'superadmin', 'campusadmin'],
-  '/finance': ['accountant', 'superadmin', 'campusadmin'],
-  '/iqac': ['iqac', 'superadmin', 'campusadmin', 'registrar', 'president'],
-  '/library': ['librarian', 'superadmin', 'campusadmin'],
-  '/library-admin': ['librarian', 'superadmin', 'campusadmin'],
-  '/president': ['president', 'superadmin', 'campusadmin'],
-  '/leadership': ['chairman', 'president', 'superadmin', 'campusadmin', 'registrar'],
-  '/parent': ['parent', 'superadmin', 'campusadmin'],
-  '/exam-cell': ['examcell', 'superadmin', 'campusadmin'],
-  '/disciplinary-committee': ['dc_member', 'superadmin', 'campusadmin'],
+  '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
+  '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
+  '/hostel-admin': ['warden', 'superadmin'],
+  '/finance': ['accountant', 'superadmin'],
+  '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
+  '/library': ['librarian', 'superadmin'],
+  '/library-admin': ['librarian', 'superadmin'],
+  '/president': ['president', 'superadmin'],
+  '/leadership': ['chairman', 'president', 'superadmin', 'registrar'],
+  '/parent': ['parent', 'superadmin'],
+  '/exam-cell': ['examcell', 'superadmin', 'deputycoe', 'examadmin', 'examoperator'],
+  '/disciplinary-committee': ['dc_member', 'superadmin'],
   '/alumni': ['alumni'],
   '/alumni-admin': ['iqac', 'superadmin', 'campusadmin', 'registrar', 'president'],
   '/admin-ops': ['registrar', 'superadmin', 'campusadmin', 'transportofficer'],
@@ -432,6 +432,7 @@ const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
   '/hod': '/hod/profile',
   '/alumni': '/alumni/profile',
   '/hr': '/hr/me/documents',
+  '/exam-cell': '/exam-cell/profile',
 };
 
 const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {

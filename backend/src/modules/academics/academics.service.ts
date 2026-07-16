@@ -4,6 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  ListQueryParams,
+  parseListQuery,
+  toPaginatedResponse,
+  type PaginatedResponse,
+} from '../../common/utils/pagination';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { HelpdeskTicket } from '../../entities/helpdesk-ticket.entity';
@@ -26,6 +32,8 @@ import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
+import { resolveDeanScope as resolveDeanScopeUtil } from './dean-scope.util';
+import { DeanAuditService } from './dean-audit.service';
 
 /**
  * NOTE: `markAttendance` writes straight to Postgres for now. When traffic
@@ -62,6 +70,7 @@ export class AcademicsService {
     private readonly notify: NotificationEmitterService,
     private readonly enrollmentSync: StudentEnrollmentSyncService,
     private readonly mentorSync: StudentMentorSyncService,
+    private readonly deanAudit: DeanAuditService,
   ) {}
 
   private async notifyCourseStudents(
@@ -513,8 +522,15 @@ export class AcademicsService {
       deanUserId,
       scope.departmentIds,
     );
-    const [pendingEvents, hodCount] = await Promise.all([
-      this.countPendingAdvisorEvents(tenantId),
+    const [
+      pendingEvents,
+      hodCount,
+      deanInbox,
+      workloadRows,
+      departmentRows,
+      totalCoursesRows,
+    ] = await Promise.all([
+      this.countPendingDeanEventsForDepartments(tenantId, scope.departmentIds),
       scope.departmentIds.length
         ? this.users.manager.query(
             `SELECT COUNT(DISTINCT hod_user_id)::int AS count
@@ -523,10 +539,53 @@ export class AcademicsService {
             [scope.departmentIds],
           )
         : Promise.resolve([{ count: 0 }]),
+      this.buildDeanPendingInbox(tenantId, deanUserId, scope.departmentIds),
+      this.listFacultyWorkloadForDepartments(tenantId, scope.departmentIds),
+      scope.departmentIds.length
+        ? this.listDeanDepartments(tenantId, deanUserId)
+        : Promise.resolve([]),
+      scope.departmentIds.length
+        ? this.users.manager.query(
+            `SELECT COUNT(DISTINCT t.course_id)::int AS count
+             FROM academic_timetables t
+             INNER JOIN users u ON u.user_id = t.faculty_user_id
+             WHERE t.tenant_id = $1 AND u.dept_id = ANY($2::int[])`,
+            [tenantId, scope.departmentIds],
+          )
+        : Promise.resolve([{ count: 0 }]),
     ]);
+
+    const departmentsAtRisk = departmentRows.filter(
+      (row: { attendance_risk_count: number; syllabus_behind_count: number }) =>
+        row.attendance_risk_count > 0 || row.syllabus_behind_count > 0,
+    ).length;
+    const facultyWorkloadSummary = {
+      overloaded: workloadRows.filter((row) => row.workload_status === 'OVERLOADED')
+        .length,
+      underloaded: workloadRows.filter(
+        (row) => row.workload_status === 'UNDERUTILIZED',
+      ).length,
+      balanced: workloadRows.filter((row) => row.workload_status === 'BALANCED')
+        .length,
+    };
 
     return {
       ...center,
+      pending_inbox: deanInbox,
+      department_rows: departmentRows,
+      workload_rows: workloadRows,
+      health_metrics: {
+        ...center.health_metrics,
+        total_departments: scope.departmentIds.length,
+        total_courses: Number(totalCoursesRows[0]?.count ?? 0),
+        departments_at_risk: departmentsAtRisk,
+        pending_dean_approvals: deanInbox.length,
+        pending_inbox_total: deanInbox.length,
+        pending_events_count: pendingEvents,
+        faculty_overloaded: facultyWorkloadSummary.overloaded,
+        faculty_underloaded: facultyWorkloadSummary.underloaded,
+      },
+      faculty_workload_summary: facultyWorkloadSummary,
       schools: scope.schools,
       department_count: scope.departmentIds.length,
       hod_count: hodCount[0]?.count ?? 0,
@@ -658,8 +717,9 @@ export class AcademicsService {
   }
 
   async listDeanCourseAllocationSlots(tenantId: string, deanUserId: string) {
-    const { departmentIds } = await this.resolveDeanScope(deanUserId);
-    const [slots, faculty] = await Promise.all([
+    const scope = await this.resolveDeanScope(deanUserId);
+    const { departmentIds } = scope;
+    const [slots, faculty, workload, unassignedAllocations] = await Promise.all([
       this.listDepartmentTimetableForDepartments(tenantId, departmentIds),
       this.listDepartmentFacultyRaw(tenantId, departmentIds).then((rows) =>
         rows.map((row) => ({
@@ -669,8 +729,51 @@ export class AcademicsService {
           department: row.department?.dept_name ?? null,
         })),
       ),
+      this.listFacultyWorkloadForDepartments(tenantId, departmentIds),
+      this.listUnassignedAllocationsForDepartments(tenantId, departmentIds),
     ]);
-    return { slots, faculty };
+
+    const overloadedFaculty = workload.filter(
+      (row) => row.workload_status === 'OVERLOADED',
+    );
+    const underutilizedFaculty = workload.filter(
+      (row) => row.workload_status === 'UNDERUTILIZED',
+    );
+    const overloadedIds = new Set(
+      overloadedFaculty.map((row) => String(row.user_id)),
+    );
+    const schedulingConflicts = this.detectTimetableConflicts(slots);
+    const conflictSlotIds = new Set(
+      schedulingConflicts.flatMap((row) => row.slot_ids),
+    );
+
+    const annotatedSlots = slots.map((slot) => ({
+      ...slot,
+      flags: {
+        faculty_overloaded: overloadedIds.has(String(slot.faculty_user_id)),
+        scheduling_conflict: conflictSlotIds.has(String(slot.timetable_id)),
+      },
+    }));
+
+    return {
+      schools: scope.schools,
+      slots: annotatedSlots,
+      faculty,
+      highlights: {
+        unassigned_allocations: unassignedAllocations,
+        unassigned_count: unassignedAllocations.length,
+        overloaded_faculty: overloadedFaculty,
+        underutilized_faculty: underutilizedFaculty,
+        scheduling_conflicts: schedulingConflicts,
+        summary: {
+          total_slots: slots.length,
+          unassigned_count: unassignedAllocations.length,
+          overloaded_count: overloadedFaculty.length,
+          underutilized_count: underutilizedFaculty.length,
+          conflict_count: schedulingConflicts.length,
+        },
+      },
+    };
   }
 
   async listDeanSyllabusCoverage(tenantId: string, deanUserId: string) {
@@ -685,7 +788,84 @@ export class AcademicsService {
 
   async listDeanGrievances(tenantId: string, deanUserId: string) {
     const { departmentIds } = await this.resolveDeanScope(deanUserId);
-    return this.listGrievancesForDepartments(tenantId, departmentIds);
+    return this.listEscalatedGrievancesForDepartments(tenantId, departmentIds);
+  }
+
+  async resolveDeanGrievance(
+    tenantId: string,
+    deanUserId: string,
+    ticketId: string,
+    message?: string,
+    auditMeta?: { role?: string; ip?: string; userAgent?: string },
+  ) {
+    const scope = await this.resolveDeanScope(deanUserId);
+    const { departmentIds } = scope;
+    if (!departmentIds.length) {
+      throw new NotFoundException('Grievance not found or unauthorized');
+    }
+
+    const [ticket] = await this.users.manager.query<
+      Array<{ ticket_id: string; status: string }>
+    >(
+      `SELECT t.ticket_id, t.status
+       FROM helpdesk_tickets t
+       INNER JOIN users u ON u.user_id = t.student_user_id
+       WHERE t.ticket_id = $1
+         AND u.tenant_id = $2
+         AND t.category = 'ACADEMICS'
+         AND COALESCE(t.escalation_level, 0) >= 1
+         AND u.dept_id = ANY($3::int[])
+       LIMIT 1`,
+      [ticketId, tenantId, departmentIds],
+    );
+
+    if (!ticket) {
+      throw new NotFoundException('Grievance not found or unauthorized');
+    }
+    if (!['PENDING', 'IN_PROGRESS'].includes(ticket.status)) {
+      throw new BadRequestException('Only open escalated grievances can be resolved');
+    }
+
+    if (message?.trim()) {
+      const entry = JSON.stringify({
+        sender_user_id: deanUserId,
+        sender_role: 'Dean',
+        message: message.trim(),
+        sent_at: new Date().toISOString(),
+      });
+      await this.users.manager.query(
+        `UPDATE helpdesk_tickets
+         SET conversation = COALESCE(conversation, '[]'::jsonb) || $2::jsonb
+         WHERE ticket_id = $1`,
+        [ticketId, `[${entry}]`],
+      );
+    }
+
+    await this.users.manager.query(
+      `UPDATE helpdesk_tickets
+       SET status = 'RESOLVED',
+           resolved_at = NOW(),
+           resolved_by = $2,
+           updated_at = NOW()
+       WHERE ticket_id = $1`,
+      [ticketId, deanUserId],
+    );
+
+    await this.deanAudit.logAction({
+      tenantId,
+      userId: deanUserId,
+      role: auditMeta?.role ?? 'Dean',
+      module: 'helpdesk_tickets',
+      action: 'GRIEVANCE_RESOLVED',
+      recordId: ticketId,
+      schoolId: scope.schools[0]?.school_id,
+      previousValue: { status: ticket.status },
+      newValue: { status: 'RESOLVED', message: message?.trim() ?? null },
+      ip: auditMeta?.ip,
+      userAgent: auditMeta?.userAgent,
+    });
+
+    return { ticket_id: ticketId, status: 'RESOLVED' };
   }
 
   async listDeanSlowLearners(tenantId: string, deanUserId: string) {
@@ -695,11 +875,17 @@ export class AcademicsService {
 
   async listDeanAppraisals(tenantId: string, deanUserId: string) {
     const { departmentIds } = await this.resolveDeanScope(deanUserId);
-    return this.listAppraisalsForDepartments(
+    const appraisalYear = new Date().getFullYear();
+    const items = await this.listAppraisalsForDepartments(
       tenantId,
       departmentIds,
-      new Date().getFullYear(),
+      appraisalYear,
     );
+    return {
+      appraisal_year: appraisalYear,
+      criteria: AcademicsService.HOD_APPRAISAL_CRITERIA,
+      items,
+    };
   }
 
   async listDeanStudents(
@@ -717,7 +903,136 @@ export class AcademicsService {
 
   async listDeanInbox(tenantId: string, deanUserId: string) {
     const { departmentIds } = await this.resolveDeanScope(deanUserId);
-    return this.buildHodPendingInbox(tenantId, deanUserId, departmentIds);
+    return this.buildDeanPendingInbox(tenantId, deanUserId, departmentIds);
+  }
+
+  async listDeanDepartmentsPaged(
+    tenantId: string,
+    deanUserId: string,
+    query: ListQueryParams = {},
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    const all = await this.listDeanDepartments(tenantId, deanUserId);
+    const { limit, offset, search } = parseListQuery(query);
+    const needle = search.toLowerCase();
+    const filtered = needle
+      ? all.filter(
+          (row) =>
+            row.dept_name.toLowerCase().includes(needle) ||
+            (row.hod_name ?? '').toLowerCase().includes(needle),
+        )
+      : all;
+    return toPaginatedResponse(
+      filtered.slice(offset, offset + limit),
+      filtered.length,
+      limit,
+      offset,
+    );
+  }
+
+  async listDeanFacultyWorkloadPaged(
+    tenantId: string,
+    deanUserId: string,
+    query: ListQueryParams = {},
+  ) {
+    const all = await this.listDeanFacultyWorkload(tenantId, deanUserId);
+    const { limit, offset, search } = parseListQuery(query);
+    const needle = search.toLowerCase();
+    const filtered = needle
+      ? all.filter(
+          (row) =>
+            row.name.toLowerCase().includes(needle) ||
+            (row.dept_name ?? '').toLowerCase().includes(needle),
+        )
+      : all;
+    return toPaginatedResponse(
+      filtered.slice(offset, offset + limit),
+      filtered.length,
+      limit,
+      offset,
+    );
+  }
+
+  async listDeanGrievancesPaged(
+    tenantId: string,
+    deanUserId: string,
+    query: ListQueryParams = {},
+  ) {
+    const all = await this.listDeanGrievances(tenantId, deanUserId);
+    const { limit, offset, search } = parseListQuery(query);
+    const needle = search.toLowerCase();
+    const filtered = needle
+      ? all.filter(
+          (row) =>
+            String(row.title ?? '').toLowerCase().includes(needle) ||
+            String(row.student_name ?? '').toLowerCase().includes(needle),
+        )
+      : all;
+    return toPaginatedResponse(
+      filtered.slice(offset, offset + limit),
+      filtered.length,
+      limit,
+      offset,
+    );
+  }
+
+  async listDeanInboxPaged(
+    tenantId: string,
+    deanUserId: string,
+    query: ListQueryParams = {},
+  ) {
+    const all = await this.listDeanInbox(tenantId, deanUserId);
+    const { limit, offset, search } = parseListQuery(query);
+    const needle = search.toLowerCase();
+    const filtered = needle
+      ? all.filter(
+          (row) =>
+            String(row.title ?? '').toLowerCase().includes(needle) ||
+            String(row.type ?? '').toLowerCase().includes(needle) ||
+            String(row.employee_name ?? '').toLowerCase().includes(needle),
+        )
+      : all;
+    return toPaginatedResponse(
+      filtered.slice(offset, offset + limit),
+      filtered.length,
+      limit,
+      offset,
+    );
+  }
+
+  async listDeanStudentsPaged(
+    tenantId: string,
+    deanUserId: string,
+    lowAttendance = false,
+    query: ListQueryParams = {},
+  ) {
+    const all = await this.listDeanStudents(tenantId, deanUserId, lowAttendance);
+    const { limit, offset, search, sort, order } = parseListQuery(query);
+    const needle = search.toLowerCase();
+    let filtered = needle
+      ? all.filter(
+          (row) =>
+            String(row.name ?? '').toLowerCase().includes(needle) ||
+            String(row.email ?? '').toLowerCase().includes(needle) ||
+            String(row.department ?? '').toLowerCase().includes(needle),
+        )
+      : all;
+    if (sort) {
+      filtered = [...filtered].sort((a, b) => {
+        const av = (a as Record<string, unknown>)[sort];
+        const bv = (b as Record<string, unknown>)[sort];
+        const cmp =
+          typeof av === 'number' && typeof bv === 'number'
+            ? av - bv
+            : String(av ?? '').localeCompare(String(bv ?? ''));
+        return order === 'asc' ? cmp : -cmp;
+      });
+    }
+    return toPaginatedResponse(
+      filtered.slice(offset, offset + limit),
+      filtered.length,
+      limit,
+      offset,
+    );
   }
 
   private async buildCommandCenterForDepartments(
@@ -886,13 +1201,15 @@ export class AcademicsService {
     return this.users.manager.query(
       `SELECT t.timetable_id, t.day_of_week, t.start_time, t.end_time, t.room,
               c.course_id, c.course_code, c.course_name,
-              u.user_id AS faculty_user_id, u.name AS faculty_name
+              u.user_id AS faculty_user_id, u.name AS faculty_name,
+              u.dept_id, d.dept_name
        FROM academic_timetables t
        INNER JOIN academic_courses c ON c.course_id = t.course_id
        INNER JOIN users u ON u.user_id = t.faculty_user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE t.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
-       ORDER BY t.day_of_week ASC, t.start_time ASC, c.course_code ASC`,
+       ORDER BY d.dept_name ASC, t.day_of_week ASC, t.start_time ASC, c.course_code ASC`,
       [tenantId, deptIds],
     );
   }
@@ -1094,6 +1411,31 @@ export class AcademicsService {
        WHERE u.tenant_id = $1
          AND t.category = 'ACADEMICS'
          AND t.status IN ('PENDING', 'IN_PROGRESS')
+         AND u.dept_id = ANY($2::int[])
+       ORDER BY t.created_at ASC`,
+      [tenantId, deptIds],
+    );
+  }
+
+  /** Dean queue — only tickets escalated beyond the department (HOD) level. */
+  private async listEscalatedGrievancesForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
+    if (!deptIds.length) return [];
+
+    return this.users.manager.query(
+      `SELECT t.ticket_id, t.subject AS title, t.category, t.status, t.created_at, t.description,
+              COALESCE(t.escalation_level, 0) AS escalation_level,
+              u.user_id AS student_user_id, u.name AS student_name, u.official_email AS student_email,
+              d.dept_name
+       FROM helpdesk_tickets t
+       INNER JOIN users u ON u.user_id = t.student_user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE u.tenant_id = $1
+         AND t.category = 'ACADEMICS'
+         AND t.status IN ('PENDING', 'IN_PROGRESS')
+         AND COALESCE(t.escalation_level, 0) >= 1
          AND u.dept_id = ANY($2::int[])
        ORDER BY t.created_at ASC`,
       [tenantId, deptIds],
@@ -1603,6 +1945,192 @@ export class AcademicsService {
       (a, b) =>
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
+  }
+
+  private async buildDeanPendingInbox(
+    tenantId: string,
+    _deanUserId: string,
+    deptIds: number[],
+  ) {
+    if (!deptIds.length) return [];
+
+    const [fundingRows, attendanceRows, eventRows, grievanceRows, adjustmentRows] =
+      await Promise.all([
+        this.users.manager.query(
+          `SELECT fr.request_id, g.project_title, u.name AS faculty_name, d.dept_name,
+                  fr.amount, fr.purpose, fr.created_at
+           FROM project_funding_requests fr
+           INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
+           INNER JOIN users u ON u.user_id = fr.requested_by
+           INNER JOIN departments d ON d.dept_id = u.dept_id
+           WHERE fr.tenant_id = $1
+             AND fr.status = 'APPROVED_HOD'
+             AND u.dept_id = ANY($2::int[])
+           ORDER BY fr.created_at ASC`,
+          [tenantId, deptIds],
+        ),
+        this.users.manager.query(
+          `SELECT r.request_id, r.status, r.requested_min_percent, r.reason, r.created_at,
+                  d.dept_name, hod.name AS hod_name
+           FROM attendance_threshold_requests r
+           INNER JOIN departments d ON d.dept_id = r.dept_id
+           LEFT JOIN users hod ON hod.user_id = d.hod_user_id
+           WHERE r.tenant_id = $1
+             AND r.status = 'PENDING_DEAN'
+             AND r.dept_id = ANY($2::int[])
+           ORDER BY r.created_at ASC`,
+          [tenantId, deptIds],
+        ),
+        this.users.manager.query(
+          `SELECT e.event_id, e.title, c.name AS club_name, e.event_date, e.created_at, d.dept_name
+           FROM campus_events e
+           LEFT JOIN campus_clubs c ON c.club_id = e.club_id
+           LEFT JOIN users advisor ON advisor.user_id = c.faculty_advisor_id
+           LEFT JOIN departments d ON d.dept_id = advisor.dept_id
+           WHERE e.tenant_id = $1
+             AND e.status = 'PENDING_DEAN'
+             AND e.dean_approval = 'PENDING'
+             AND e.hod_approval = 'APPROVED'
+             AND advisor.dept_id = ANY($2::int[])
+           ORDER BY e.created_at ASC`,
+          [tenantId, deptIds],
+        ),
+        this.users.manager.query(
+          `SELECT t.ticket_id, t.subject, t.created_at, u.name AS student_name, d.dept_name
+           FROM helpdesk_tickets t
+           INNER JOIN users u ON u.user_id = t.student_user_id
+           LEFT JOIN departments d ON d.dept_id = u.dept_id
+           WHERE u.tenant_id = $1
+             AND t.category = 'ACADEMICS'
+             AND t.status IN ('PENDING', 'IN_PROGRESS')
+             AND COALESCE(t.escalation_level, 0) >= 1
+             AND u.dept_id = ANY($2::int[])
+           ORDER BY t.created_at ASC`,
+          [tenantId, deptIds],
+        ),
+        this.users.manager.query(
+          `SELECT a.adjustment_id, a.adjustment_type, a.original_date, a.new_date, a.reason, a.created_at,
+                  c.course_code, u.name AS faculty_name, d.dept_name
+           FROM class_adjustments a
+           INNER JOIN academic_courses c ON c.course_id = a.course_id
+           INNER JOIN users u ON u.user_id = a.faculty_user_id
+           LEFT JOIN departments d ON d.dept_id = u.dept_id
+           WHERE a.tenant_id = $1
+             AND a.status = 'PENDING_HOD_APPROVAL'
+             AND u.dept_id = ANY($2::int[])
+           ORDER BY a.created_at ASC`,
+          [tenantId, deptIds],
+        ),
+      ]);
+
+    const inbox: Array<{
+      id: string;
+      type: string;
+      title: string;
+      employee_name: string;
+      date_label: string;
+      detail: string;
+      created_at: string;
+      action_href?: string;
+    }> = [];
+
+    for (const row of fundingRows as Array<Record<string, unknown>>) {
+      inbox.push({
+        id: String(row.request_id),
+        type: 'FUNDING',
+        title: String(row.project_title ?? 'Funding Request'),
+        employee_name: String(row.faculty_name ?? 'Faculty'),
+        date_label: `₹${Number(row.amount ?? 0).toLocaleString('en-IN')}`,
+        detail: `${row.dept_name ?? 'Department'} · ${row.purpose ?? '—'}`,
+        created_at: String(row.created_at ?? new Date().toISOString()),
+        action_href: '/dean/inbox',
+      });
+    }
+
+    for (const row of attendanceRows as Array<Record<string, unknown>>) {
+      inbox.push({
+        id: String(row.request_id),
+        type: 'ATTENDANCE_POLICY',
+        title: 'Attendance Threshold Relaxation',
+        employee_name: String(row.hod_name ?? 'HOD'),
+        date_label: `${row.requested_min_percent ?? '—'}% threshold`,
+        detail: String(row.dept_name ?? 'Department'),
+        created_at: String(row.created_at ?? new Date().toISOString()),
+        action_href: '/dean/attendance-policy',
+      });
+    }
+
+    for (const row of eventRows as Array<Record<string, unknown>>) {
+      inbox.push({
+        id: String(row.event_id),
+        type: 'EVENT',
+        title: String(row.title ?? 'Campus Event'),
+        employee_name: String(row.dept_name ?? 'School Event'),
+        date_label: row.event_date
+          ? new Date(String(row.event_date)).toLocaleDateString('en-IN')
+          : '—',
+        detail: String(row.club_name ?? 'Campus event'),
+        created_at: String(row.created_at ?? new Date().toISOString()),
+        action_href: '/dean/events',
+      });
+    }
+
+    for (const row of grievanceRows as Array<Record<string, unknown>>) {
+      inbox.push({
+        id: String(row.ticket_id),
+        type: 'GRIEVANCE',
+        title: String(row.subject ?? 'Grievance'),
+        employee_name: String(row.student_name ?? 'Student'),
+        date_label: String(row.dept_name ?? 'Department'),
+        detail: 'Escalated by HOD',
+        created_at: String(row.created_at ?? new Date().toISOString()),
+        action_href: '/dean/students/grievances',
+      });
+    }
+
+    for (const row of adjustmentRows as Array<Record<string, unknown>>) {
+      const adjType = String(row.adjustment_type ?? 'EXTRA_CLASS');
+      inbox.push({
+        id: String(row.adjustment_id),
+        type: adjType === 'CANCEL' ? 'CANCEL' : 'EXTRA_CLASS',
+        title:
+          adjType === 'CANCEL' ? 'Class Cancellation' : 'Extra / Substitute Class',
+        employee_name: String(row.faculty_name ?? 'Faculty'),
+        date_label: row.new_date
+          ? new Date(String(row.new_date)).toLocaleDateString('en-IN')
+          : row.original_date
+            ? new Date(String(row.original_date)).toLocaleDateString('en-IN')
+            : '—',
+        detail: `${row.course_code}: ${row.reason ?? '—'}`,
+        created_at: String(row.created_at ?? new Date().toISOString()),
+        action_href: '/dean/academics/timetable',
+      });
+    }
+
+    return inbox.sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+  }
+
+  private async countPendingDeanEventsForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ): Promise<number> {
+    if (!deptIds.length) return 0;
+    const rows = await this.users.manager.query<Array<{ count: number }>>(
+      `SELECT COUNT(*)::int AS count
+       FROM campus_events e
+       LEFT JOIN campus_clubs c ON c.club_id = e.club_id
+       LEFT JOIN users advisor ON advisor.user_id = c.faculty_advisor_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'PENDING_DEAN'
+         AND e.dean_approval = 'PENDING'
+         AND e.hod_approval = 'APPROVED'
+         AND advisor.dept_id = ANY($2::int[])`,
+      [tenantId, deptIds],
+    );
+    return Number(rows[0]?.count ?? 0);
   }
 
   async listHodFacultyRoster(tenantId: string, hodUserId: string) {
@@ -2717,40 +3245,144 @@ export class AcademicsService {
   }
 
   private async resolveDeanScope(deanUserId: string) {
-    const schoolRows = await this.users.manager.query(
-      `SELECT school_id, school_name, school_code
-       FROM schools
-       WHERE dean_user_id = $1 AND deleted_at IS NULL`,
-      [deanUserId],
+    return resolveDeanScopeUtil(this.users.manager, deanUserId);
+  }
+
+  private async listUnassignedAllocationsForDepartments(
+    tenantId: string,
+    deptIds: number[],
+  ) {
+    if (!deptIds.length) return [];
+
+    const tableExists = await this.users.manager.query<
+      Array<{ exists: boolean }>
+    >(
+      `SELECT EXISTS (
+         SELECT 1 FROM pg_tables
+         WHERE schemaname = 'public' AND tablename = 'academic_course_allocations'
+       ) AS exists`,
     );
-    const schoolIds = schoolRows.map((row: { school_id: number }) =>
-      Number(row.school_id),
+    if (!tableExists[0]?.exists) return [];
+
+    return this.users.manager.query<
+      Array<{
+        allocation_id: string;
+        subject_code: string;
+        subject_name: string;
+        subject_type: string;
+        credits: number;
+        program_name: string;
+        semester: string;
+        academic_year: string;
+      }>
+    >(
+      `SELECT a.allocation_id,
+              s.subject_code,
+              s.subject_name,
+              s.subject_type,
+              s.credits,
+              a.program_name,
+              a.semester,
+              a.academic_year
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       WHERE a.tenant_id = $1
+         AND a.faculty_user_id IS NULL
+         AND a.status = 'ACTIVE'
+         AND EXISTS (
+           SELECT 1 FROM iam_programs p
+           WHERE p.deleted_at IS NULL
+             AND p.dept_id = ANY($2::int[])
+             AND (
+               (
+                 COALESCE(trim(a.program_name), '') <> ''
+                 AND lower(trim(p.program_name)) = lower(trim(a.program_name))
+               )
+               OR EXISTS (
+                 SELECT 1 FROM academic_subjects sub
+                 WHERE sub.subject_id = s.subject_id
+                   AND sub.program_id = p.program_id
+               )
+             )
+         )
+       ORDER BY a.academic_year DESC, a.program_name, a.semester, s.subject_code`,
+      [tenantId, deptIds],
     );
-    let departmentIds: number[] = [];
-    if (schoolIds.length) {
-      const deptRows = await this.users.manager.query(
-        `SELECT DISTINCT dept_id
-         FROM iam_programs
-         WHERE school_id = ANY($1::int[]) AND dept_id IS NOT NULL AND deleted_at IS NULL`,
-        [schoolIds],
-      );
-      departmentIds = deptRows.map((row: { dept_id: number }) =>
-        Number(row.dept_id),
-      );
-    }
-    const dean = await this.users.findOne({ where: { user_id: deanUserId } });
-    if (dean?.dept_id) {
-      departmentIds = Array.from(new Set([...departmentIds, dean.dept_id]));
-    }
-    return {
-      schoolIds,
-      departmentIds,
-      schools: schoolRows.map((row: Record<string, unknown>) => ({
-        school_id: Number(row.school_id),
-        school_name: String(row.school_name),
-        school_code: row.school_code ? String(row.school_code) : null,
-      })),
+  }
+
+  private detectTimetableConflicts(
+    slots: Array<{
+      timetable_id: string;
+      day_of_week: number;
+      start_time: string;
+      end_time: string;
+      room: string | null;
+      faculty_user_id: string;
+      faculty_name: string;
+      course_code: string;
+      dept_name: string | null;
+    }>,
+  ) {
+    const toMinutes = (time: string) => {
+      const [hours, minutes] = String(time).slice(0, 5).split(':').map(Number);
+      return hours * 60 + minutes;
     };
+    const overlaps = (
+      aStart: number,
+      aEnd: number,
+      bStart: number,
+      bEnd: number,
+    ) => aStart < bEnd && bStart < aEnd;
+
+    const conflicts: Array<{
+      conflict_type: 'FACULTY' | 'ROOM';
+      day_of_week: number;
+      slot_ids: string[];
+      label: string;
+      details: string;
+    }> = [];
+
+    for (let i = 0; i < slots.length; i += 1) {
+      for (let j = i + 1; j < slots.length; j += 1) {
+        const left = slots[i];
+        const right = slots[j];
+        if (left.day_of_week !== right.day_of_week) continue;
+
+        const leftStart = toMinutes(left.start_time);
+        const leftEnd = toMinutes(left.end_time);
+        const rightStart = toMinutes(right.start_time);
+        const rightEnd = toMinutes(right.end_time);
+        if (!overlaps(leftStart, leftEnd, rightStart, rightEnd)) continue;
+
+        if (
+          left.faculty_user_id &&
+          right.faculty_user_id &&
+          left.faculty_user_id === right.faculty_user_id
+        ) {
+          conflicts.push({
+            conflict_type: 'FACULTY',
+            day_of_week: left.day_of_week,
+            slot_ids: [String(left.timetable_id), String(right.timetable_id)],
+            label: left.faculty_name,
+            details: `${left.course_code} overlaps with ${right.course_code}`,
+          });
+        }
+
+        const leftRoom = left.room?.trim();
+        const rightRoom = right.room?.trim();
+        if (leftRoom && rightRoom && leftRoom === rightRoom) {
+          conflicts.push({
+            conflict_type: 'ROOM',
+            day_of_week: left.day_of_week,
+            slot_ids: [String(left.timetable_id), String(right.timetable_id)],
+            label: leftRoom,
+            details: `${left.course_code} overlaps with ${right.course_code}`,
+          });
+        }
+      }
+    }
+
+    return conflicts;
   }
 
   private async resolveHodDepartmentIds(hodUserId: string) {

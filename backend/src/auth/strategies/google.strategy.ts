@@ -128,10 +128,13 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     await this.authService.ensurePrimaryRoleMapping(user);
-    const refreshed = await this.authService.findById(
-      user.user_id,
-      tenant.tenant_id,
-    );
+    await this.authService.syncMultiHatWorkspaceRoles(user.user_id);
+    const refreshed =
+      (await this.authService.loadUserWithSyncedWorkspaceRoles(
+        user.user_id,
+        tenant.tenant_id,
+      )) ??
+      (await this.authService.findById(user.user_id, tenant.tenant_id));
     const token = this.authService.signToken(
       refreshed ?? user,
       tenant.tenant_id,

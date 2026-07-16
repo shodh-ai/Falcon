@@ -6,6 +6,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 
 type Schedule = {
   exam_schedule_id: string;
@@ -86,13 +87,7 @@ export default function ExamCellResourceAllocationPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-sgvu-navy">Exam resource allocation</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pick a subject exam, assign a room, auto-seat students by roll order up to room capacity,
-          and designate an exam coordinator / invigilator.
-        </p>
-      </div>
+      <ExamCellPageHeader pageId="resource-allocation" />
 
       <Card>
         <CardHeader>

@@ -156,8 +156,13 @@ export class TicketController {
   updateStatus(
     @Param('ticketId') ticketId: string,
     @Body() dto: UpdateTicketStatusDto,
+    @Req() req: { user: AuthUser },
   ) {
-    return this.tickets.updateStatus(ticketId, dto);
+    return this.tickets.updateStatus(ticketId, dto, {
+      userId: req.user.user_id,
+      role: req.user.role ?? 'UNKNOWN',
+      tenantId: this.tenant(req),
+    });
   }
 
   @Post(':ticketId/messages')

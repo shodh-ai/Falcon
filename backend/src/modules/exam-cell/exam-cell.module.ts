@@ -9,6 +9,11 @@ import { ExamCellService } from './exam-cell.service';
 import { ResultControlService } from './result-control.service';
 import { SemesterResultsService } from './semester-results.service';
 import { ExamCellFinanceListener } from './exam-cell-finance.listener';
+import { ExamCellAuditService } from './exam-cell-audit.service';
+import { ExamCellSessionsService } from './exam-cell-sessions.service';
+import { ExamCellOperationsService } from './exam-cell-operations.service';
+import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
+import { ExamCellDevService } from './exam-cell-dev.service';
 
 @Module({
   imports: [
@@ -23,7 +28,20 @@ import { ExamCellFinanceListener } from './exam-cell-finance.listener';
     ResultControlService,
     SemesterResultsService,
     ExamCellFinanceListener,
+    ExamCellAuditService,
+    ExamCellSessionsService,
+    ExamCellOperationsService,
+    ExamCellEnterpriseService,
+    ExamCellDevService,
   ],
-  exports: [ExamCellService, ResultControlService, SemesterResultsService],
+  exports: [
+    ExamCellService,
+    ResultControlService,
+    SemesterResultsService,
+    ExamCellAuditService,
+    ExamCellOperationsService,
+    ExamCellEnterpriseService,
+    ExamCellDevService,
+  ],
 })
 export class ExamCellModule {}

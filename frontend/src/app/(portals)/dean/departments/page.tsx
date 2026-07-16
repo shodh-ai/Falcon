@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuthedApi } from '@/lib/api';
 import {
@@ -9,6 +9,9 @@ import {
   HodPageFrame,
   HodPageHeader,
 } from '@/components/hod/HodPagePrimitives';
+import { PaginationBar } from '@/components/ui/PaginationBar';
+import { Input } from '@/components/ui/input';
+import { buildDeanPageQuery, type PaginatedApiResponse } from '@/lib/dean-pagination';
 import Link from 'next/link';
 
 type DeptRow = {
@@ -29,22 +32,33 @@ type DeptRow = {
 export default function DeanDepartmentsPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<DeptRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const limit = 20;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const qs = buildDeanPageQuery({ page: Math.floor(offset / limit) + 1, limit, search });
+      const data = await api.get<PaginatedApiResponse<DeptRow>>(
+        `/api/academics/dean/departments?${qs}`,
+      );
+      setRows(data.data ?? []);
+      setTotal(data.total ?? 0);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load departments');
+      setRows([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [api, offset, search]);
 
   useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      try {
-        const data = await api.get<DeptRow[]>('/api/academics/dean/departments');
-        setRows(data);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load departments');
-        setRows([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [api]);
+    void load();
+  }, [load]);
 
   return (
     <HodPageFrame>
@@ -52,11 +66,23 @@ export default function DeanDepartmentsPage() {
         title="Departments"
         description="Overview of all departments under your school."
         workspaceLabel="Dean Workspace"
+        meta={<span>{total} department{total === 1 ? '' : 's'}</span>}
         actions={
           <HodActionButton href="/dean/dashboard" variant="outline">
             Command Center
           </HodActionButton>
         }
+      />
+
+      <Input
+        aria-label="Search departments"
+        placeholder="Search departments or HOD…"
+        value={search}
+        onChange={(e) => {
+          setOffset(0);
+          setSearch(e.target.value);
+        }}
+        className="max-w-sm"
       />
 
       <HodDataTable
@@ -131,8 +157,22 @@ export default function DeanDepartmentsPage() {
               </div>
             ),
           },
+          {
+            key: 'view',
+            label: '',
+            className: 'text-right',
+            render: (r) => (
+              <Link
+                href={`/dean/departments/${r.dept_id}`}
+                className="text-sm font-semibold text-sgvu-navy hover:underline"
+              >
+                Quick View →
+              </Link>
+            ),
+          },
         ]}
       />
+      <PaginationBar total={total} limit={limit} offset={offset} onPageChange={setOffset} />
     </HodPageFrame>
   );
 }

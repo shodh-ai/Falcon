@@ -33,6 +33,7 @@ import { AcademicsService } from './academics.service';
 import { AcademicsFacultyService } from './academics-faculty.service';
 import { AssignmentsService } from './assignments.service';
 import { FacultyWorkspacesService } from './faculty-workspaces.service';
+import type { ListQueryParams } from '../../common/utils/pagination';
 import { CourseLmsService } from './course-lms.service';
 import { AcademicProxyService } from './academic-proxy.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
@@ -1366,20 +1367,36 @@ export class AcademicsController {
 
   @Get('dean/departments')
   @Roles('Dean', 'SuperAdmin')
-  deanDepartments(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanDepartments(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-    );
+  deanDepartments(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanDepartmentsPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanDepartments(tenantId, req.user.user_id);
   }
 
   @Get('dean/faculty-workload')
   @Roles('Dean', 'SuperAdmin')
-  deanFacultyWorkload(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanFacultyWorkload(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-    );
+  deanFacultyWorkload(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanFacultyWorkloadPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanFacultyWorkload(tenantId, req.user.user_id);
   }
 
   @Get('dean/timetable')
@@ -1423,12 +1440,19 @@ export class AcademicsController {
   deanStudents(
     @Req() req: { user: AuthUser },
     @Query('lowAttendance') lowAttendance?: string,
+    @Query() query?: ListQueryParams,
   ) {
-    return this.academics.listDeanStudents(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-      lowAttendance === 'true',
-    );
+    const tenantId = this.resolveTenantId(req.user);
+    const low = lowAttendance === 'true';
+    if (query?.page || query?.limit) {
+      return this.academics.listDeanStudentsPaged(
+        tenantId,
+        req.user.user_id,
+        low,
+        query,
+      );
+    }
+    return this.academics.listDeanStudents(tenantId, req.user.user_id, low);
   }
 
   @Get('dean/student-monitor/:studentId/detail')
@@ -1455,10 +1479,34 @@ export class AcademicsController {
 
   @Get('dean/grievances')
   @Roles('Dean', 'SuperAdmin')
-  deanGrievances(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanGrievances(
+  deanGrievances(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanGrievancesPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanGrievances(tenantId, req.user.user_id);
+  }
+
+  @Post('dean/grievances/:ticketId/resolve')
+  @Roles('Dean', 'SuperAdmin')
+  resolveDeanGrievance(
+    @Req() req: { user: AuthUser & { ip?: string } },
+    @Param('ticketId') ticketId: string,
+    @Body() body: { message?: string },
+  ) {
+    return this.academics.resolveDeanGrievance(
       this.resolveTenantId(req.user),
       req.user.user_id,
+      ticketId,
+      body.message,
+      this.auditMetaFromReq(req),
     );
   }
 
@@ -1473,11 +1521,19 @@ export class AcademicsController {
 
   @Get('dean/inbox')
   @Roles('Dean', 'SuperAdmin')
-  deanInbox(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanInbox(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-    );
+  deanInbox(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanInboxPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanInbox(tenantId, req.user.user_id);
   }
 
   @Patch('hod/approvals/extra-classes/:adjustmentId')
@@ -2111,6 +2167,7 @@ export class AcademicsController {
   listDeanFundingRequests(@Req() req: { user: AuthUser }) {
     return this.facultyWorkspaces.listDeanFundingRequests(
       this.resolveTenantId(req.user),
+      req.user.user_id,
     );
   }
 
@@ -2514,6 +2571,24 @@ export class AcademicsController {
 
   private resolveTenantId(user: AuthUser) {
     return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private auditMetaFromReq(req: {
+    user: AuthUser;
+    headers?: Record<string, string | string[] | undefined>;
+    ip?: string;
+  }) {
+    const forwarded = req.headers?.['x-forwarded-for'];
+    const ip =
+      (typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined) ??
+      req.ip ??
+      undefined;
+    const userAgent = req.headers?.['user-agent'];
+    return {
+      role: req.user.role ?? 'Dean',
+      ip,
+      userAgent: typeof userAgent === 'string' ? userAgent : undefined,
+    };
   }
 
   private async resolveFacultyDeptId(

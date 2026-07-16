@@ -8,4 +8,5 @@ export type NotificationDeliveryJob = {
   message: string;
   email?: string | null;
   phone?: string | null;
+  channel?: string;
 };

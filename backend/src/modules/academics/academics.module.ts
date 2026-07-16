@@ -58,6 +58,9 @@ import { StudentEnrollmentSyncService } from './student-enrollment-sync.service'
 import { StudentMentorSyncService } from './student-mentor-sync.service';
 import { HodPortalExtService } from './hod-portal-ext.service';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
+import { DeanIntelligenceService } from './dean-intelligence.service';
+import { DeanIntelligenceController } from './dean-intelligence.controller';
+import { DeanAuditService } from './dean-audit.service';
 
 @Module({
   imports: [
@@ -102,6 +105,7 @@ import { FacultyTeachingDepartmentsService } from './faculty-teaching-department
     EarlyWarningController,
     FacultyProfileController,
     InsightsController,
+    DeanIntelligenceController,
   ],
   providers: [
     AcademicsService,
@@ -124,6 +128,8 @@ import { FacultyTeachingDepartmentsService } from './faculty-teaching-department
     StudentMentorSyncService,
     HodPortalExtService,
     FacultyTeachingDepartmentsService,
+    DeanIntelligenceService,
+    DeanAuditService,
   ],
   exports: [
     AcademicsService,
@@ -141,6 +147,7 @@ import { FacultyTeachingDepartmentsService } from './faculty-teaching-department
     CourseAllocationBulkService,
     StudentEnrollmentSyncService,
     StudentMentorSyncService,
+    DeanAuditService,
   ],
 })
 export class AcademicsModule {}

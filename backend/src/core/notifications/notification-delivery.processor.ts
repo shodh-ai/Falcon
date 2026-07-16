@@ -16,15 +16,18 @@ export class NotificationDeliveryProcessor extends WorkerHost {
   }
 
   async process(job: Job<NotificationDeliveryJob>) {
-    const { email, title, message, userId } = job.data;
-    if (email) {
+    const { email, phone, title, message, userId, channel } = job.data;
+    const deliveryChannel = (channel ?? 'EMAIL').toUpperCase();
+
+    if (deliveryChannel === 'EMAIL' && email) {
+      await this.channels.sendEmail(email, title, message);
+    } else if (deliveryChannel === 'SMS' && phone) {
+      await this.channels.sendSms(phone, `${title}: ${message}`);
+    } else if (deliveryChannel === 'WHATSAPP' && phone) {
+      await this.channels.sendSms(phone, `[WhatsApp] ${title}: ${message}`);
+    } else if (email && deliveryChannel !== 'IN_APP') {
       await this.channels.sendEmail(email, title, message);
     }
-    await this.channels.sendInApp(userId, {
-      title,
-      message,
-      category: job.data.category,
-    });
-    this.logger.debug(`Delivered notification channels for user ${userId}`);
+    this.logger.debug(`Delivered ${deliveryChannel} notification for user ${userId}`);
   }
 }

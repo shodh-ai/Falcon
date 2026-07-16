@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuthedApi } from '@/lib/api';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Users, BookOpen, Clock, Building2, ChevronDown } from 'lucide-react';
 
 interface WorkloadRecord {
@@ -57,7 +58,9 @@ export default function DeanFacultyWorkloadPage() {
 
         setDepartments(Object.values(grouped).sort((a, b) => a.dept_name.localeCompare(b.dept_name)));
       })
-      .catch((err) => console.error('Failed to load workload data:', err))
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : 'Failed to load workload data');
+      })
       .finally(() => setLoading(false));
   }, []);
 

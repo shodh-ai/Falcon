@@ -205,9 +205,14 @@ export class AuthService {
       );
     }
 
-    const roleClaims = this.getRoleClaims(tokenUser);
+    const syncedUser = await this.loadUserWithSyncedWorkspaceRoles(
+      credential.user_id,
+      tenant.tenant_id,
+    );
+    const tokenUserForClaims = syncedUser ?? tokenUser;
+    const roleClaims = this.getRoleClaims(tokenUserForClaims);
     // Issue token before optional enrichment so Redis/HR schema faults cannot block login.
-    const token = this.signToken(tokenUser, tenant.tenant_id, tenant.pg_schema);
+    const token = this.signToken(tokenUserForClaims, tenant.tenant_id, tenant.pg_schema);
 
     let caps: Awaited<
       ReturnType<HrEntityContextService['getPermissions']>
@@ -303,7 +308,7 @@ export class AuthService {
     }
   }
 
-  /** Secondary Faculty role for HOD users assigned active teaching load. */
+  /** Secondary Faculty role for HOD users — enables HOD ↔ Faculty workspace switcher. */
   async ensureTeachingFacultyRoleForHod(userId: string): Promise<void> {
     if (!userId) return;
     await this.dataSource.query(
@@ -320,6 +325,40 @@ export class AuthService {
        ON CONFLICT (user_id, role_id) DO NOTHING`,
       [userId],
     );
+  }
+
+  /** Secondary Dean role for HOD users — HODs also act as school/department Deans here. */
+  async ensureDeanRoleForHod(userId: string): Promise<void> {
+    if (!userId) return;
+    await this.dataSource.query(
+      `INSERT INTO user_roles (user_id, role_id, is_primary)
+       SELECT $1, rd.role_id, false
+       FROM roles rd
+       WHERE rd.role_name = 'Dean'
+         AND EXISTS (
+           SELECT 1
+           FROM user_roles ur
+           INNER JOIN roles rh ON rh.role_id = ur.role_id
+           WHERE ur.user_id = $1 AND rh.role_name = 'HOD'
+         )
+       ON CONFLICT (user_id, role_id) DO NOTHING`,
+      [userId],
+    );
+  }
+
+  /** Keep multi-hat workspace roles in sync before resolving JWT/login role claims. */
+  async syncMultiHatWorkspaceRoles(userId: string): Promise<void> {
+    if (!userId) return;
+    await this.ensureTeachingFacultyRoleForHod(userId);
+    await this.ensureDeanRoleForHod(userId);
+  }
+
+  async loadUserWithSyncedWorkspaceRoles(
+    userId: string,
+    tenantId: string,
+  ): Promise<User | null> {
+    await this.syncMultiHatWorkspaceRoles(userId);
+    return this.loadUserForLogin(userId, tenantId);
   }
 
   /** Resolve guardian mobile for Parent-role users (password login → parent portal APIs). */

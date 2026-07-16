@@ -13,6 +13,10 @@ import {
   type PhdAction,
   type PhdApplicationType,
 } from './phd-lifecycle.constants';
+import {
+  isDepartmentInDeanScope,
+  resolveDeanDepartmentIds,
+} from '../academics/dean-scope.util';
 
 interface EligibilityEvidence {
   entrance_exam_type?: string;
@@ -461,7 +465,7 @@ export class PhdLifecycleService {
     ]);
   }
 
-  listForRole(tenantId: string, role: string, actorUserId?: string) {
+  async listForRole(tenantId: string, role: string, actorUserId?: string) {
     const normalized = this.normalizeRole(role);
     if (normalized === 'Faculty' && actorUserId) {
       return this.listGuideScholars(tenantId, actorUserId);
@@ -506,6 +510,19 @@ export class PhdLifecycleService {
         tenantId,
         `c.pending_actor_role = 'Accountant'`,
         [tenantId],
+      );
+    }
+    if (normalized === 'Dean' && actorUserId) {
+      const deptIds = await resolveDeanDepartmentIds(this.db, actorUserId);
+      if (!deptIds.length) return [];
+      return this.listCandidatesWhere(
+        tenantId,
+        `c.lifecycle_status = 'VIVA_RECOMMENDED'
+         AND (
+           c.dept_id = ANY($2::int[])
+           OR u.dept_id = ANY($2::int[])
+         )`,
+        [tenantId, deptIds],
       );
     }
     if (['Dean', 'Leadership', 'President'].includes(normalized)) {
@@ -583,6 +600,28 @@ export class PhdLifecycleService {
     }
     if (role === 'Student' && candidate.user_id !== actorUserId) {
       throw new ForbiddenException('This is not your Ph.D. record.');
+    }
+
+    if (role === 'Dean') {
+      const deptIds = await resolveDeanDepartmentIds(this.db, actorUserId);
+      let candidateDeptId =
+        candidate.dept_id != null ? Number(candidate.dept_id) : null;
+      if (
+        !isDepartmentInDeanScope(candidateDeptId, deptIds) &&
+        candidate.user_id
+      ) {
+        const [student] = await this.db.query<Array<{ dept_id: number | null }>>(
+          `SELECT dept_id FROM users WHERE user_id = $1 LIMIT 1`,
+          [candidate.user_id],
+        );
+        candidateDeptId =
+          student?.dept_id != null ? Number(student.dept_id) : null;
+      }
+      if (!isDepartmentInDeanScope(candidateDeptId, deptIds)) {
+        throw new ForbiddenException(
+          'This Ph.D. candidate is outside your school scope.',
+        );
+      }
     }
 
     if (action === 'ALLOCATE_SUPERVISOR' || action === 'ALLOCATE_GUIDE') {
