@@ -43,8 +43,10 @@ export class NotificationDispatchService {
     if (input.queueDelivery === false) return row;
 
     const contact = await this.dataSource.query<
-      Array<{ official_email: string | null }>
-    >(`SELECT official_email FROM users WHERE user_id = $1 LIMIT 1`, [
+      Array<{ official_email: string | null; phone: string | null }>
+    >(`SELECT u.official_email, sp.phone FROM users u
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       WHERE u.user_id = $1 LIMIT 1`, [
       input.userId,
     ]);
 
@@ -55,6 +57,8 @@ export class NotificationDispatchService {
       title: input.title,
       message: input.message,
       email: contact[0]?.official_email ?? null,
+      phone: contact[0]?.phone ?? null,
+      channel: (input.metadata?.channel as string | undefined) ?? 'EMAIL',
     };
 
     await this.deliveryQueue.add('send-email-whatsapp', job, {

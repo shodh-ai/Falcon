@@ -6,6 +6,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { ExamCellAuditService } from './exam-cell-audit.service';
 import {
   computeGradeFromPercent,
   computePassFail,
@@ -24,6 +25,7 @@ export class ResultControlService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly notify: NotificationEmitterService,
+    private readonly audit: ExamCellAuditService,
   ) {}
 
   listSessions(tenantId: string) {
@@ -55,7 +57,27 @@ export class ResultControlService {
       [tenantId, sessionId],
     );
     if (!rows[0]) throw new NotFoundException('Result session not found');
-    return rows[0];
+    const workflow = await this.sessionWorkflowState(tenantId, sessionId);
+    return { ...rows[0], ...workflow };
+  }
+
+  private async sessionWorkflowState(tenantId: string, sessionId: string) {
+    const auditAction = await this.audit.latestAction(tenantId, sessionId, [
+      'RESULT_COE_AUDIT_PASSED',
+      'RESULT_COE_AUDIT_ANOMALY',
+    ]);
+    const coe_audit_status =
+      auditAction === 'RESULT_COE_AUDIT_PASSED'
+        ? 'passed'
+        : auditAction === 'RESULT_COE_AUDIT_ANOMALY'
+          ? 'anomaly'
+          : 'idle';
+    const dean_approved = await this.audit.hasAction(
+      tenantId,
+      sessionId,
+      'RESULT_DEAN_APPROVED',
+    );
+    return { coe_audit_status, dean_approved };
   }
 
   async createSession(tenantId: string, dto: CreateResultSessionDto) {
@@ -291,7 +313,119 @@ export class ResultControlService {
       exam_type: session.exam_type,
       processed_count: preview.length,
       preview,
+      ...(await this.sessionWorkflowState(tenantId, sessionId)),
     };
+  }
+
+  async runFormulaAudit(tenantId: string, sessionId: string, actorUserId: string) {
+    const session = await this.getSession(tenantId, sessionId);
+    const passMarks =
+      session.pass_marks != null ? Number(session.pass_marks) : null;
+
+    const marks = await this.db.query<
+      Array<{ marks_obtained: string; max_marks: string }>
+    >(
+      `SELECT marks_obtained, max_marks FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3
+         AND status IN ('PENDING_COE', 'PUBLISHED')`,
+      [tenantId, session.course_id, session.exam_type],
+    );
+    if (!marks.length) throw new BadRequestException('No marks to audit');
+
+    const failing = marks.filter((row) => {
+      const obtained = Number(row.marks_obtained);
+      const max = Number(row.max_marks ?? session.max_marks);
+      if (passMarks != null) return obtained < passMarks;
+      return max > 0 && (obtained / max) * 100 < 40;
+    }).length;
+    const rate = failing / marks.length;
+    const passed = rate < 0.5;
+    const action = passed ? 'RESULT_COE_AUDIT_PASSED' : 'RESULT_COE_AUDIT_ANOMALY';
+
+    await this.audit.log(tenantId, actorUserId, {
+      action,
+      resource_type: 'exam_result_session',
+      resource_id: sessionId,
+      new_value: { failure_rate: Math.round(rate * 100), failing, total: marks.length },
+    });
+
+    return {
+      status: passed ? 'passed' : 'anomaly',
+      failure_rate: Math.round(rate * 100),
+      anomaly_subjects: passed
+        ? []
+        : [{ course_code: session.course_code, failure_rate: Math.round(rate * 100) }],
+    };
+  }
+
+  async recordDeanApproval(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+  ) {
+    const session = await this.getSession(tenantId, sessionId);
+    const coePassed = await this.audit.hasAction(
+      tenantId,
+      sessionId,
+      'RESULT_COE_AUDIT_PASSED',
+    );
+    if (!coePassed) {
+      throw new BadRequestException('COE formula audit must pass before dean approval');
+    }
+    if (session.declared_at) {
+      throw new BadRequestException('Results already declared');
+    }
+    await this.audit.log(tenantId, actorUserId, {
+      action: 'RESULT_DEAN_APPROVED',
+      resource_type: 'exam_result_session',
+      resource_id: sessionId,
+    });
+    return { dean_approved: true };
+  }
+
+  async applySessionGraceMarks(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+    graceMarks: number,
+  ) {
+    if (!Number.isFinite(graceMarks) || graceMarks <= 0) {
+      throw new BadRequestException('Grace marks must be a positive number');
+    }
+    const session = await this.getSession(tenantId, sessionId);
+    if (session.declared_at) {
+      throw new BadRequestException('Results already declared');
+    }
+
+    const marks = await this.db.query<
+      Array<{ mark_id: string; student_user_id: string; marks_obtained: string; max_marks: string }>
+    >(
+      `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
+      [tenantId, session.course_id, session.exam_type],
+    );
+    if (!marks.length) throw new BadRequestException('No pending marks to adjust');
+
+    let updated = 0;
+    for (const row of marks) {
+      const max = Number(row.max_marks ?? session.max_marks);
+      const boosted = Math.min(max, Number(row.marks_obtained) + graceMarks);
+      await this.db.query(
+        `UPDATE academic_marks SET marks_obtained = $2, updated_at = NOW() WHERE mark_id = $1`,
+        [row.mark_id, boosted],
+      );
+      updated += 1;
+    }
+
+    await this.audit.log(tenantId, actorUserId, {
+      action: 'RESULT_GRACE_MARKS_APPLIED',
+      resource_type: 'exam_result_session',
+      resource_id: sessionId,
+      new_value: { grace_marks: graceMarks, students_updated: updated },
+    });
+
+    const processed = await this.processSession(tenantId, sessionId, actorUserId);
+    return { updated, preview: processed.preview };
   }
 
   async declareSession(
@@ -303,6 +437,15 @@ export class ResultControlService {
     const session = await this.getSession(tenantId, sessionId);
     if (session.declared_at)
       throw new BadRequestException('Results already declared');
+
+    const deanApproved = await this.audit.hasAction(
+      tenantId,
+      sessionId,
+      'RESULT_DEAN_APPROVED',
+    );
+    if (!deanApproved) {
+      throw new BadRequestException('Dean/VC approval is required before publishing');
+    }
 
     const bands = await this.loadGradeBands(session);
     const passMarks =

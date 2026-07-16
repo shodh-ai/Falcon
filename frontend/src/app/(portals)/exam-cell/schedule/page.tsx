@@ -1,6 +1,8 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,12 +24,16 @@ type Schedule = {
   batch_label?: string;
 };
 
+type Subject = { subject_id: number; subject_code: string; subject_name: string; semester: number };
+
 export default function ExamCellSchedulePage() {
   const api = useAuthedApi();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     exam_type: 'END_TERM',
-    subject_id: '1',
+    subject_id: '',
     exam_date: '',
     start_time: '09:00',
     end_time: '12:00',
@@ -36,23 +42,45 @@ export default function ExamCellSchedulePage() {
     batch_label: 'B.Tech Sem 4',
   });
 
-  const load = useCallback(() => {
-    void api.get<Schedule[]>('/api/exam-cell/schedules').then(setSchedules);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [scheduleRows, subjectRows] = await Promise.all([
+        api.get<Schedule[]>('/api/exam-cell/schedules'),
+        api.get<Subject[]>('/api/exam-cell/subjects'),
+      ]);
+      setSchedules(scheduleRows);
+      setSubjects(subjectRows);
+      setForm((f) =>
+        f.subject_id || subjectRows.length === 0
+          ? f
+          : { ...f, subject_id: String(subjectRows[0].subject_id) },
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not load schedules');
+      setSchedules([]);
+    } finally {
+      setLoading(false);
+    }
   }, [api]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   async function create() {
+    if (!form.exam_date || !form.subject_id) {
+      toast.error('Select a subject and exam date');
+      return;
+    }
     try {
       await api.post('/api/exam-cell/schedules', {
         ...form,
         subject_id: Number(form.subject_id),
         max_marks: Number(form.max_marks),
       });
-      toast.success('Exam scheduled');
-      load();
+      toast.success('Exam scheduled — enrolled students notified via in-app alert');
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
     }
@@ -63,36 +91,78 @@ export default function ExamCellSchedulePage() {
       <div>
         <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
         <h1 className="text-2xl font-bold text-sgvu-navy">Master Exam Schedule</h1>
+        <p className="text-sm text-muted-foreground">Central timetable for admit cards, seating, and invigilation. Students receive an in-app notification when a new slot is added.</p>
       </div>
+
+      <Card className="border-sgvu-gold/20 bg-amber-50/30">
+        <CardContent className="py-3 text-sm">
+          When you add an exam slot, Falcon notifies all students enrolled in that subject&apos;s semester on their Student Portal (Notifications → Exams).
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Add exam slot</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
-          {(['exam_type', 'subject_id', 'exam_date', 'start_time', 'end_time', 'venue', 'max_marks', 'batch_label'] as const).map((k) => (
-            <Input
-              key={k}
-              placeholder={k.replace(/_/g, ' ')}
-              value={form[k]}
-              onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
-            />
-          ))}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Exam type</label>
+            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={form.exam_type} onChange={(e) => setForm((f) => ({ ...f, exam_type: e.target.value }))}>
+              <option value="MID_TERM">Mid Term</option>
+              <option value="END_TERM">End Term</option>
+              <option value="PRACTICAL">Practical</option>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Subject</label>
+            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={form.subject_id} onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}>
+              <option value="">Select subject</option>
+              {subjects.map((s) => (
+                <option key={s.subject_id} value={s.subject_id}>
+                  {s.subject_code} — {s.subject_name} (Sem {s.semester})
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Exam date</label>
+            <Input type="date" value={form.exam_date} onChange={(e) => setForm((f) => ({ ...f, exam_date: e.target.value }))} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Batch label</label>
+            <Input value={form.batch_label} onChange={(e) => setForm((f) => ({ ...f, batch_label: e.target.value }))} />
+          </div>
+          <Input type="time" value={form.start_time} onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))} />
+          <Input type="time" value={form.end_time} onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))} />
+          <Input placeholder="Venue" value={form.venue} onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))} />
+          <Input placeholder="Max marks" value={form.max_marks} onChange={(e) => setForm((f) => ({ ...f, max_marks: e.target.value }))} />
           <Button className="sm:col-span-2" onClick={() => void create()}>Add to schedule</Button>
         </CardContent>
       </Card>
 
-      <div className="space-y-2">
-        {schedules.map((s) => (
-          <div key={s.exam_schedule_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 text-sm">
-            <div>
-              <p className="font-semibold text-sgvu-navy">{s.subject_name ?? s.subject_code ?? 'Subject'} · {s.exam_type}</p>
-              <p className="text-muted-foreground">
-                {String(s.exam_date).slice(0, 10)} · {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)} · {s.venue}
-              </p>
+      <Card>
+        <CardHeader><CardTitle className="text-base">{schedules.length} scheduled exams</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {loading ? (
+            <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading schedule…
             </div>
-            <Badge>{s.status}</Badge>
-          </div>
-        ))}
-      </div>
+          ) : schedules.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No exams scheduled yet. Add a slot above or run database smoke seeds.</p>
+          ) : (
+            schedules.map((s) => (
+              <div key={s.exam_schedule_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 text-sm">
+                <div>
+                  <p className="font-semibold text-sgvu-navy">{s.subject_name ?? s.subject_code ?? 'Subject'} · {s.exam_type}</p>
+                  <p className="text-muted-foreground">
+                    {String(s.exam_date).slice(0, 10)} · {String(s.start_time).slice(0, 5)}–{String(s.end_time).slice(0, 5)} · {s.venue}
+                    {s.batch_label ? ` · ${s.batch_label}` : ''}
+                  </p>
+                </div>
+                <Badge>{s.status}</Badge>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

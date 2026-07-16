@@ -15,9 +15,24 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
     approve: ['student_expulsion'],
   },
   ExamCell: {
+    view: ['academics', 'timetables', 'exam_sessions', 'audit_logs'],
+    edit: ['marks', 'seating', 'admit_cards', 'exam_sessions', 'schedules'],
+    approve: ['ufm_cases', 'revaluation', 'results', 'question_papers'],
+  },
+  DeputyCOE: {
+    view: ['academics', 'timetables', 'exam_sessions'],
+    edit: ['marks', 'seating', 'admit_cards', 'exam_sessions', 'schedules'],
+    approve: ['ufm_cases', 'revaluation', 'results'],
+  },
+  ExamAdmin: {
+    view: ['academics', 'timetables', 'exam_sessions'],
+    edit: ['seating', 'admit_cards', 'exam_sessions', 'schedules'],
+    approve: ['revaluation'],
+  },
+  ExamOperator: {
     view: ['academics', 'timetables'],
-    edit: ['marks', 'seating', 'admit_cards'],
-    approve: ['ufm_cases', 'revaluation'],
+    edit: ['seating', 'admit_cards'],
+    approve: [],
   },
   DC_MEMBER: {
     view: ['discipline', 'students'],

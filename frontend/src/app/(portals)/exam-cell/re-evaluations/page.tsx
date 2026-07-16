@@ -2,6 +2,7 @@
 
 import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
+import { Loader2, CheckCircle2, UserPlus, Send, XCircle } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,22 +42,48 @@ export default function ExamCellReEvaluationsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [facultyId, setFacultyId] = useState('');
   const [rejectReason, setRejectReason] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const selected = items.find((item) => item.exam_application_id === selectedId) ?? null;
+  const filteredItems = statusFilter ? items.filter((i) => i.status === statusFilter) : items;
+  const selected = filteredItems.find((item) => item.exam_application_id === selectedId)
+    ?? items.find((item) => item.exam_application_id === selectedId)
+    ?? null;
 
-  const load = useCallback(() => {
-    void api.get<ReEval[]>('/api/exam-cell/re-evaluations').then((rows) => {
+  const steps = [
+    { key: 'PENDING', label: 'Fee paid', icon: CheckCircle2 },
+    { key: 'ASSIGNED', label: 'Faculty assigned', icon: UserPlus },
+    { key: 'UNDER_REVIEW', label: 'Report ready', icon: Send },
+    { key: 'COMPLETED', label: 'Published', icon: CheckCircle2 },
+  ];
+
+  function stepIndex(status: string) {
+    if (status === 'REJECTED') return -1;
+    const order = ['PENDING', 'ASSIGNED', 'UNDER_REVIEW', 'COMPLETED'];
+    return order.indexOf(status);
+  }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const rows = await api.get<ReEval[]>('/api/exam-cell/re-evaluations');
       setItems(rows);
-      if (selectedId && !rows.some((r) => r.exam_application_id === selectedId)) {
-        setSelectedId(rows[0]?.exam_application_id ?? null);
-      }
-    });
-  }, [api, selectedId]);
+      setSelectedId((prev) => {
+        if (prev && rows.some((r) => r.exam_application_id === prev)) return prev;
+        return rows[0]?.exam_application_id ?? null;
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not load re-evaluations');
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
 
   useEffect(() => {
-    load();
-    void api.get<Faculty[]>('/api/exam-cell/faculty-roster').then(setFaculty);
+    void load();
+    void api.get<Faculty[]>('/api/exam-cell/faculty-roster').then(setFaculty).catch(() => setFaculty([]));
   }, [api, load]);
 
   async function assign() {
@@ -71,7 +98,7 @@ export default function ExamCellReEvaluationsPage() {
       });
       toast.success('Faculty assigned for reassessment');
       setFacultyId('');
-      load();
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Assign failed');
     } finally {
@@ -85,7 +112,7 @@ export default function ExamCellReEvaluationsPage() {
     try {
       await api.post(`/api/exam-cell/re-evaluations/${selected.exam_application_id}/publish`, {});
       toast.success('Report published to student and parent');
-      load();
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Publish failed');
     } finally {
@@ -102,7 +129,7 @@ export default function ExamCellReEvaluationsPage() {
       });
       toast.success('Application rejected');
       setRejectReason('');
-      load();
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Reject failed');
     } finally {
@@ -116,20 +143,40 @@ export default function ExamCellReEvaluationsPage() {
         <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
         <h1 className="text-2xl font-bold text-sgvu-navy">Re-evaluations</h1>
         <p className="text-sm text-muted-foreground">
-          Assign faculty after fee payment, review reassessment reports, then publish to students and parents.
+          Workflow: Student pays fee → Assign faculty → Faculty submits report → Publish to student & parent.
         </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {steps.map((step, i) => (
+          <div key={step.key} className="rounded-lg border bg-white px-3 py-2 text-center text-xs">
+            <step.icon className="mx-auto mb-1 h-4 w-4 text-sgvu-gold" />
+            <span className="font-medium text-sgvu-navy">{i + 1}. {step.label}</span>
+          </div>
+        ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{items.length} applications</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle className="text-base">{loading ? 'Loading…' : `${filteredItems.length} applications`}</CardTitle>
+            <select className="rounded-md border px-2 py-1 text-xs" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">All</option>
+              <option value="PENDING">Pending</option>
+              <option value="UNDER_REVIEW">Under review</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
           </CardHeader>
           <CardContent className="space-y-2">
-            {items.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No paid re-evaluation requests yet.</p>
+            {loading ? (
+              <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading queue…
+              </div>
+            ) : filteredItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No re-evaluation requests in this filter.</p>
             ) : (
-              items.map((r) => (
+              filteredItems.map((r) => (
                 <button
                   key={r.exam_application_id}
                   type="button"
@@ -157,6 +204,17 @@ export default function ExamCellReEvaluationsPage() {
               <CardTitle>{selected.student_name}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
+              <div className="flex flex-wrap gap-1">
+                {steps.map((step, i) => {
+                  const active = stepIndex(selected.status) >= i;
+                  const rejected = selected.status === 'REJECTED';
+                  return (
+                    <Badge key={step.key} variant={rejected ? 'destructive' : active ? 'default' : 'outline'}>
+                      {step.label}
+                    </Badge>
+                  );
+                })}
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">{selected.subject_code}</Badge>
                 <Badge variant={statusVariant(selected.status)}>{selected.status.replace('_', ' ')}</Badge>
@@ -218,7 +276,7 @@ export default function ExamCellReEvaluationsPage() {
 
               {['PENDING', 'ASSIGNED', 'UNDER_REVIEW'].includes(selected.status) ? (
                 <div className="space-y-2 rounded-lg border border-destructive/30 p-3">
-                  <p className="font-medium text-destructive">Reject application</p>
+                  <p className="flex items-center gap-1 font-medium text-destructive"><XCircle className="h-4 w-4" /> Reject application</p>
                   <textarea
                     className="min-h-16 w-full rounded-md border px-3 py-2"
                     placeholder="Reason (optional)"
@@ -241,7 +299,7 @@ export default function ExamCellReEvaluationsPage() {
         ) : (
           <Card>
             <CardContent className="py-16 text-center text-sm text-muted-foreground">
-              Select an application to assign faculty or publish a report.
+              {loading ? 'Loading applications…' : 'Select an application to assign faculty or publish a report.'}
             </CardContent>
           </Card>
         )}

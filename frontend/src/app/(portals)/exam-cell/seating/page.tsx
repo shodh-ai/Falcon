@@ -1,13 +1,15 @@
 'use client';
 
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { useAuthedApi } from '@/lib/api';
-import { Download, Trash2, Eye } from 'lucide-react';
+import { Download, Trash2, Eye, ArrowLeftRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -41,6 +43,32 @@ function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value : [];
 }
 
+const BRANCH_BADGE_STYLES = [
+  'bg-blue-100 text-blue-800 border-blue-200',
+  'bg-orange-100 text-orange-800 border-orange-200',
+  'bg-emerald-100 text-emerald-800 border-emerald-200',
+  'bg-purple-100 text-purple-800 border-purple-200',
+  'bg-pink-100 text-pink-800 border-pink-200',
+  'bg-amber-100 text-amber-800 border-amber-200',
+];
+
+const BRANCH_BAR_STYLES = [
+  'bg-blue-500',
+  'bg-orange-500',
+  'bg-emerald-500',
+  'bg-purple-500',
+  'bg-pink-500',
+  'bg-amber-500',
+];
+
+function branchStyle(branch: string, indexMap: Map<string, number>) {
+  if (!indexMap.has(branch)) {
+    indexMap.set(branch, indexMap.size % BRANCH_BADGE_STYLES.length);
+  }
+  const idx = indexMap.get(branch)!;
+  return { badge: BRANCH_BADGE_STYLES[idx], bar: BRANCH_BAR_STYLES[idx] };
+}
+
 export default function ExamCellSeatingPage() {
   const api = useAuthedApi();
   const [strategy, setStrategy] = useState<'by_exam_type' | 'by_schedule'>('by_exam_type');
@@ -59,7 +87,32 @@ export default function ExamCellSeatingPage() {
   
   const [runs, setRuns] = useState<SeatingRun[]>([]);
   const [viewingRun, setViewingRun] = useState<SeatingRun | null>(null);
+  const [visualAllocations, setVisualAllocations] = useState<SeatingAllocation[]>([]);
+  const [showVisualRooms, setShowVisualRooms] = useState(false);
+  const [swapRoom, setSwapRoom] = useState<string | null>(null);
+  const [swapA, setSwapA] = useState('');
+  const [swapB, setSwapB] = useState('');
   const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+
+  async function publishPlans() {
+    const scheduleId = strategy === 'by_schedule' ? examId : schedules.find((s) => s.exam_type === examType)?.exam_schedule_id;
+    if (!scheduleId) {
+      toast.error('Select an exam schedule to publish seating plans');
+      return;
+    }
+    setPublishing(true);
+    try {
+      const res = await api.post<{ published_rooms: number }>('/api/exam-cell/seating/publish-plans', {
+        exam_schedule_id: scheduleId,
+      });
+      toast.success(`Published ${res.published_rooms} room plan(s) to student portal`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Publish failed');
+    } finally {
+      setPublishing(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -145,12 +198,90 @@ export default function ExamCellSeatingPage() {
         branch: branch,
         rooms: selectedHalls,
       });
-      toast.success(`Allocated ${res.allocated} seats across rooms`);
+      toast.success(`Allocated ${res.allocated} seats — published to student portal`);
       await loadRuns();
+      const allRuns = await api.get<SeatingRun[]>('/api/exam-cell/seating-runs');
+      const latest = asArray<SeatingRun>(allRuns)[0];
+      if (latest) {
+        const allocations = asArray<SeatingAllocation>(latest.allocations);
+        setVisualAllocations(allocations);
+        setShowVisualRooms(allocations.length > 0);
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Allocation failed');
     }
   }
+
+  function hallCapacity(roomName: string): number {
+    for (const block of blocksData) {
+      const hall = block.halls.find((h) => h.name === roomName);
+      if (hall) return hall.capacity ?? hall.rows * hall.cols;
+    }
+    return 60;
+  }
+
+  async function applyManualSwap() {
+    if (!swapRoom || !swapA || !swapB || swapA === swapB) {
+      toast.error('Select two different students in the same room');
+      return;
+    }
+    const scheduleId =
+      strategy === 'by_schedule'
+        ? examId
+        : schedules.find((s) => s.exam_type === examType)?.exam_schedule_id;
+    if (!scheduleId) {
+      toast.error('Select an exam schedule before swapping seats');
+      return;
+    }
+    try {
+      await api.post('/api/exam-cell/seating/swap', {
+        exam_schedule_id: scheduleId,
+        room: swapRoom,
+        student_user_id_a: swapA,
+        student_user_id_b: swapB,
+      });
+      const refreshed = await api.get<SeatingAllocation[]>(
+        `/api/exam-cell/seating-allocations?exam_schedule_id=${scheduleId}`,
+      );
+      setVisualAllocations(asArray(refreshed));
+      toast.success('Seats swapped and saved');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Swap failed');
+      return;
+    }
+    setSwapRoom(null);
+    setSwapA('');
+    setSwapB('');
+  }
+
+  const roomsVisual = useMemo(() => {
+    const branchIndex = new Map<string, number>();
+    const byRoom = new Map<string, SeatingAllocation[]>();
+    for (const a of visualAllocations) {
+      if (!byRoom.has(a.room)) byRoom.set(a.room, []);
+      byRoom.get(a.room)!.push(a);
+    }
+    return [...byRoom.entries()].map(([room, items]) => {
+      const branchCounts = new Map<string, number>();
+      for (const item of items) {
+        branchCounts.set(item.branch_code, (branchCounts.get(item.branch_code) ?? 0) + 1);
+      }
+      const capacity = hallCapacity(room);
+      const blockName = blocksData.find((b) => b.halls.some((h) => h.name === room))?.block ?? 'Block';
+      return {
+        room,
+        label: `${blockName} — ${room}`,
+        capacity,
+        assigned: items.length,
+        branches: [...branchCounts.entries()].map(([code, count]) => ({
+          code,
+          count,
+          ...branchStyle(code, branchIndex),
+        })),
+        students: items,
+      };
+    });
+  }, [visualAllocations, blocksData]);
 
   async function deleteRun(runId: string) {
     if (!confirm('Are you sure you want to delete this run?')) return;
@@ -259,11 +390,72 @@ export default function ExamCellSeatingPage() {
             </div>
           </div>
 
-          <Button className="w-full" onClick={() => void allocate()} disabled={selectedHalls.length === 0}>
-            Auto-allocate seats
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button className="flex-1" onClick={() => void allocate()} disabled={selectedHalls.length === 0}>
+              Auto-allocate seats
+            </Button>
+            <Button variant="outline" onClick={() => void publishPlans()} disabled={publishing}>
+              {publishing ? 'Publishing…' : 'Publish to student portal'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      {showVisualRooms && roomsVisual.length > 0 && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-sgvu-navy">Visual Room Allocation</h2>
+            <p className="text-sm text-muted-foreground">
+              Verify capacity and branch mixing — adjacent seats should alternate branches to reduce malpractice risk.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {roomsVisual.map((room) => (
+              <Card key={room.room} className="border-slate-200">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">{room.label}</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Capacity {room.capacity} · Assigned {room.assigned}
+                  </p>
+                  <Progress value={Math.min(100, (room.assigned / room.capacity) * 100)} className="mt-2 h-2" />
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-xs font-semibold text-sgvu-navy">Anti-cheating branch mix</p>
+                  {room.branches.map((b) => (
+                    <div key={b.code} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <Badge variant="outline" className={b.badge}>
+                          {b.count} {b.code}
+                        </Badge>
+                        <span className="text-muted-foreground">{Math.round((b.count / room.assigned) * 100)}%</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={`h-full ${b.bar}`}
+                          style={{ width: `${(b.count / room.assigned) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={() => {
+                      setSwapRoom(room.room);
+                      setSwapA('');
+                      setSwapB('');
+                    }}
+                  >
+                    <ArrowLeftRight className="h-4 w-4" />
+                    Manually swap student
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         <h2 className="text-lg font-semibold text-sgvu-navy">Seating Plan History</h2>
@@ -352,6 +544,42 @@ export default function ExamCellSeatingPage() {
               </table>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!swapRoom} onOpenChange={(open) => !open && setSwapRoom(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Manually swap students — {swapRoom}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={swapA} onChange={(e) => setSwapA(e.target.value)}>
+              <option value="">Student A</option>
+              {visualAllocations
+                .filter((a) => a.room === swapRoom)
+                .map((a) => (
+                  <option key={a.student_user_id} value={a.student_user_id}>
+                    {a.student_name} · Seat {a.seat_number} ({a.branch_code})
+                  </option>
+                ))}
+            </Select>
+            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={swapB} onChange={(e) => setSwapB(e.target.value)}>
+              <option value="">Student B</option>
+              {visualAllocations
+                .filter((a) => a.room === swapRoom)
+                .map((a) => (
+                  <option key={`b-${a.student_user_id}`} value={a.student_user_id}>
+                    {a.student_name} · Seat {a.seat_number} ({a.branch_code})
+                  </option>
+                ))}
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSwapRoom(null)}>
+              Cancel
+            </Button>
+            <Button onClick={applyManualSwap}>Swap seats</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

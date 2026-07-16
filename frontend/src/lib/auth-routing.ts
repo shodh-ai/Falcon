@@ -67,7 +67,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/alumni/dashboard';
   }
 
-  if (r === 'examcell' || r === 'exam cell') {
+  if (r === 'examcell' || r === 'exam cell' || r === 'deputycoe' || r === 'examadmin' || r === 'examoperator') {
     return '/exam-cell/dashboard';
   }
 
@@ -310,7 +310,7 @@ const portalRoles: Record<string, string[]> = {
   '/president': ['president', 'superadmin'],
   '/leadership': ['chairman', 'president', 'superadmin', 'registrar'],
   '/parent': ['parent', 'superadmin'],
-  '/exam-cell': ['examcell', 'superadmin'],
+  '/exam-cell': ['examcell', 'superadmin', 'deputycoe', 'examadmin', 'examoperator'],
   '/disciplinary-committee': ['dc_member', 'superadmin'],
   '/alumni': ['alumni'],
   '/alumni-admin': ['iqac', 'superadmin', 'registrar', 'president'],
@@ -413,6 +413,7 @@ const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
   '/hod': '/hod/profile',
   '/alumni': '/alumni/profile',
   '/hr': '/hr/me/documents',
+  '/exam-cell': '/exam-cell/profile',
 };
 
 const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {
