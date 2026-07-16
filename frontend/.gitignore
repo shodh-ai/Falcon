@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+Thumbs.db
+__pycache__
+*.py[cod]
+Falcon test IDs*.xlsx
+/scripts/

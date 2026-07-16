@@ -1,6 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { rolesIntersect } from '../config/campus-admin.roles';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -28,12 +29,7 @@ export class RolesGuard implements CanActivate {
         ...(user.role ? [user.role] : []),
       ]),
     ).filter(Boolean);
-    const normalizedUserRoles = userRoles.map((role) =>
-      String(role).trim().toLowerCase(),
-    );
 
-    return requiredRoles.some((role) =>
-      normalizedUserRoles.includes(String(role).trim().toLowerCase()),
-    );
+    return rolesIntersect(userRoles, requiredRoles);
   }
 }

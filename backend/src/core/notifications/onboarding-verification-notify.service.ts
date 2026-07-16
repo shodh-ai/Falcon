@@ -6,7 +6,7 @@ import { onboardingVerificationRequestedMessage } from './notification-message.c
 import type { OnboardingVerificationRequestedPayload } from './notification.events';
 import { resolveOnboardingPortalKind } from '../../modules/student-onboarding/onboarding-portal.util';
 
-const ADMISSIONS_ROLES = ['AdmissionsOfficer', 'Registrar', 'SuperAdmin'] as const;
+const ADMISSIONS_ROLES = ['CampusAdmin', 'AdmissionsOfficer', 'Registrar', 'SuperAdmin'] as const;
 const HR_ROLES = ['HR', 'HRAdmin'] as const;
 
 @Injectable()
@@ -131,7 +131,43 @@ export class OnboardingVerificationNotifyService {
     }
   }
 
+  async dismissVerificationNotifications(
+    tenantId: string,
+    targetUserId: string,
+  ): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE falcon_notifications
+       SET deleted_at = NOW()
+       WHERE tenant_id = $1
+         AND deleted_at IS NULL
+         AND metadata->>'targetUserId' = $2
+         AND title LIKE 'Verification request —%'`,
+      [tenantId, targetUserId],
+    );
+  }
+
+  async dismissStaleVerificationNotifications(tenantId: string): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE falcon_notifications n
+       SET deleted_at = NOW()
+       WHERE n.tenant_id = $1
+         AND n.deleted_at IS NULL
+         AND n.title LIKE 'Verification request —%'
+         AND n.metadata->>'targetUserId' IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM users u
+           WHERE u.tenant_id = n.tenant_id
+             AND u.user_id = (n.metadata->>'targetUserId')::uuid
+             AND u.onboarding_status = 'PENDING_ADMIN_APPROVAL'
+         )`,
+      [tenantId],
+    );
+  }
+
   async syncPendingVerificationNotifications(tenantId: string): Promise<void> {
+    await this.dismissStaleVerificationNotifications(tenantId);
+
     const pending = await this.dataSource.query<
       Array<{
         user_id: string;

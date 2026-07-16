@@ -25,13 +25,13 @@ export class MasterDataController {
   }
 
   @Get('birthdays/today')
-  @Roles('SuperAdmin', 'Dean', 'HR', 'President', 'Faculty')
+  @Roles('CampusAdmin', 'SuperAdmin', 'Dean', 'HR', 'President', 'Faculty')
   todayBirthdays(@Req() req: { user: AuthUser }) {
     return this.masterData.getTodayBirthdays(this.tenant(req));
   }
 
   @Get('birthdays/faculty/department')
-  @Roles('HOD', 'Dean', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'CampusAdmin', 'SuperAdmin')
   departmentFacultyBirthdays(
     @Req() req: { user: AuthUser },
     @Query('scope') scope?: string,
@@ -45,13 +45,13 @@ export class MasterDataController {
   }
 
   @Get('countries')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   countries(@Req() req: { user: AuthUser }) {
     return this.masterData.listCountries(this.tenant(req));
   }
 
   @Post('countries')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   createCountry(
     @Req() req: { user: AuthUser },
     @Body() body: { name: string; code?: string },
@@ -64,7 +64,7 @@ export class MasterDataController {
   }
 
   @Get('states')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   states(
     @Req() req: { user: AuthUser },
     @Query('countryId') countryId?: string,
@@ -76,7 +76,7 @@ export class MasterDataController {
   }
 
   @Post('states')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   createState(
     @Req() req: { user: AuthUser },
     @Body() body: { country_id: number; name: string; code?: string },
@@ -90,7 +90,7 @@ export class MasterDataController {
   }
 
   @Get('cities')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   cities(@Req() req: { user: AuthUser }, @Query('stateId') stateId?: string) {
     return this.masterData.listCities(
       this.tenant(req),
@@ -99,7 +99,7 @@ export class MasterDataController {
   }
 
   @Post('cities')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   createCity(
     @Req() req: { user: AuthUser },
     @Body() body: { state_id: number; name: string },
@@ -112,25 +112,25 @@ export class MasterDataController {
   }
 
   @Get('castes')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   castes(@Req() req: { user: AuthUser }) {
     return this.masterData.listCastes(this.tenant(req));
   }
 
   @Post('castes')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   createCaste(@Req() req: { user: AuthUser }, @Body() body: { name: string }) {
     return this.masterData.createCaste(this.tenant(req), body.name);
   }
 
   @Get('categories')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   categories(@Req() req: { user: AuthUser }) {
     return this.masterData.listCategories(this.tenant(req));
   }
 
   @Post('categories')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   createCategory(
     @Req() req: { user: AuthUser },
     @Body() body: { name: string },
@@ -139,13 +139,13 @@ export class MasterDataController {
   }
 
   @Get('religions')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   religions(@Req() req: { user: AuthUser }) {
     return this.masterData.listReligions(this.tenant(req));
   }
 
   @Post('religions')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   createReligion(
     @Req() req: { user: AuthUser },
     @Body() body: { name: string },
@@ -154,13 +154,13 @@ export class MasterDataController {
   }
 
   @Get('enrollment-rules')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   enrollmentRules(@Req() req: { user: AuthUser }) {
     return this.masterData.listEnrollmentRules(this.tenant(req));
   }
 
   @Post('enrollment-rules')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   createEnrollmentRule(
     @Req() req: { user: AuthUser },
     @Body() body: { rule_name: string; template: string; seq_padding?: number },
@@ -169,7 +169,7 @@ export class MasterDataController {
   }
 
   @Post('enrollment-rules/:ruleId/generate')
-  @Roles('SuperAdmin')
+  @Roles('CampusAdmin', 'SuperAdmin')
   generateEnrollmentId(
     @Req() req: { user: AuthUser },
     @Param('ruleId') ruleId: string,

@@ -70,6 +70,11 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
     edit: ['*'],
     approve: ['*'],
   },
+  CampusAdmin: {
+    view: ['*'],
+    edit: ['*'],
+    approve: ['*'],
+  },
 };
 
 export function roleCanEdit(role: string, resource: string): boolean {

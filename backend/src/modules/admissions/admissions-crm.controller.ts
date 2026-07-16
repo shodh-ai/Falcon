@@ -28,7 +28,7 @@ type AuthUser = {
 
 @Controller('api/admissions-crm')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar')
+@Roles('CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar')
 export class AdmissionsCrmController {
   constructor(
     private readonly admissions: AdmissionsService,
@@ -41,8 +41,22 @@ export class AdmissionsCrmController {
     return this.admissions.kanbanBoard(this.tenant(req));
   }
 
+  @Get('enrolled-students/branches')
+  @Roles(
+    'CampusAdmin',
+    'SuperAdmin',
+    'AdmissionsOfficer',
+    'Registrar',
+    'Accountant',
+    'FinanceManager',
+  )
+  getEnrolledStudentBranches(@Req() req: { user: AuthUser }) {
+    return this.admissions.getEnrolledStudentBranches(this.tenant(req));
+  }
+
   @Get('enrolled-students')
   @Roles(
+    'CampusAdmin',
     'SuperAdmin',
     'AdmissionsOfficer',
     'Registrar',

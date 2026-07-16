@@ -82,7 +82,7 @@ export function AppTopBar({
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {headerExtra}
-          <WorkspaceSwitcher />
+          {!config.hideWorkspaceSwitcher && <WorkspaceSwitcher />}
           <UniversalSearchOmnibar navGroups={config.navGroups} />
           <QuickActionMenu />
           <LiveNotificationBell />

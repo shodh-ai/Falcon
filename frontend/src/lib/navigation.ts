@@ -79,6 +79,7 @@ import {
   Target,
 } from 'lucide-react';
 import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
+import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
@@ -122,6 +123,8 @@ export interface PortalConfig {
   mobileNavItems?: NavItem[];
   /** When false, skip auto-injected sidebar Account Settings (e.g. if profile menu already links there). */
   includeAccountSettingsNav?: boolean;
+  /** Hide multi-role workspace switcher in the header (single-workspace portals). */
+  hideWorkspaceSwitcher?: boolean;
 }
 
 /**
@@ -265,17 +268,21 @@ export function filterPortalConfigForRole(config: PortalConfig, role: string | u
   const navGroups = config.navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => !item.roles || item.roles.includes(normalizedRole)),
+      items: group.items.filter(
+        (item) => !item.roles || rolesMatchForAccess(normalizedRole, item.roles),
+      ),
     }))
     .filter((group) => group.items.length > 0);
-  const commandItems = config.commandItems.filter((item) => !item.roles || item.roles.includes(normalizedRole));
+  const commandItems = config.commandItems.filter(
+    (item) => !item.roles || rolesMatchForAccess(normalizedRole, item.roles),
+  );
 
   return { ...config, navGroups, commandItems };
 }
 
 export type HrCapabilities = Partial<Record<HrModuleKey, 'none' | 'read' | 'write'>>;
 
-const HR_FULL_ACCESS_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'HR']);
+const HR_FULL_ACCESS_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'CampusAdmin', 'HR']);
 
 function hasHrPermission(
   permissions: string[] | undefined,
@@ -296,7 +303,7 @@ function canSeeHrNavItem(
   caps?: HrCapabilities | null,
   permissions?: string[],
 ): boolean {
-  if (item.roles && !item.roles.includes(role)) return false;
+  if (item.roles && !rolesMatchForAccess(role, item.roles)) return false;
   if (HR_FULL_ACCESS_ROLES.has(role)) return true;
   if (!item.hrModule) return true;
   if (permissions?.length) {
@@ -1521,25 +1528,25 @@ export const adminPortal: PortalConfig = {
     {
       title: 'Modules',
       items: [
-        { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield, roles: ['SuperAdmin', 'Registrar'] },
-        { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
-        { label: 'Student Verifications', href: '/admin/verifications', icon: FileCheck2, roles: ['SuperAdmin', 'AdmissionsOfficer', 'Registrar'] },
-        { label: 'Academics', href: '/admin/academics', icon: GraduationCap, roles: ['SuperAdmin', 'Registrar'] },
-        { label: 'Student Excel Upload', href: '/admin/students/bulk-upload', icon: Upload, roles: ['SuperAdmin', 'Registrar', 'AdmissionsOfficer'] },
-        { label: 'Finance', href: '/admin/finance', icon: Wallet, roles: ['SuperAdmin', 'Accountant', 'President'] },
-        { label: 'HR & Payroll', href: '/admin/hr', icon: Users, roles: ['SuperAdmin', 'HR', 'President'] },
-        { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },
-        { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
-        { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['SuperAdmin'] },
-        { label: 'University Directory', href: '/directory', icon: Contact, roles: ['SuperAdmin', 'Registrar', 'President'] },
-        { label: 'Ph.D. Admissions & Awards', href: '/admin/phd/admissions', icon: GraduationCap, roles: ['SuperAdmin', 'Registrar'] },
+        { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
+        { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer'] },
+        { label: 'Student Verifications', href: '/admin/verifications', icon: FileCheck2, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar'] },
+        { label: 'Academics', href: '/admin/academics', icon: GraduationCap, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
+        { label: 'Student Excel Upload', href: '/admin/students/bulk-upload', icon: Upload, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'AdmissionsOfficer'] },
+        { label: 'Finance', href: '/admin/finance', icon: Wallet, roles: ['CampusAdmin', 'SuperAdmin', 'Accountant', 'President'] },
+        { label: 'HR & Payroll', href: '/admin/hr', icon: Users, roles: ['CampusAdmin', 'SuperAdmin', 'HR', 'President'] },
+        { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },
+        { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['CampusAdmin', 'SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
+        { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['CampusAdmin', 'SuperAdmin'] },
+        { label: 'University Directory', href: '/directory', icon: Contact, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'President'] },
+        { label: 'Ph.D. Admissions & Awards', href: '/admin/phd/admissions', icon: GraduationCap, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
       ],
     },
   ],
   commandItems: [
-    { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['SuperAdmin', 'AdmissionsOfficer'] },
+    { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer'] },
     { label: 'Pending Approvals', href: '/admin/inbox', icon: ListChecks },
     { label: 'University Directory', href: '/directory', icon: Contact },
-    { label: 'Export Reports', href: '/admin/reports', icon: BarChart3, roles: ['SuperAdmin', 'President', 'IQAC'] },
+    { label: 'Export Reports', href: '/admin/reports', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'President', 'IQAC'] },
   ],
 };

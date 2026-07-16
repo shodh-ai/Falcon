@@ -6,10 +6,16 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import {
+  deriveEnrolledStudentBranches,
+  mergeEnrolledStudentBranches,
+  type EnrolledStudentBranch,
+} from '@/lib/enrolled-student-filters';
 
 export default function FinanceEnrolledStudentsPage() {
   const api = useAuthedApi();
   const [students, setStudents] = useState<any[]>([]);
+  const [branches, setBranches] = useState<EnrolledStudentBranch[]>([]);
   const [q, setQ] = useState('');
   const [year, setYear] = useState('');
   const [branch, setBranch] = useState('');
@@ -22,8 +28,28 @@ export default function FinanceEnrolledStudentsPage() {
     if (year) params.set('year', year);
     if (branch) params.set('branch', branch);
     
-    api.get<any[]>(`/api/admissions-crm/enrolled-students?${params.toString()}`).then(setStudents);
+    void api
+      .get<any[]>(`/api/admissions-crm/enrolled-students?${params.toString()}`)
+      .then((rows) => {
+        setStudents(rows);
+        if (!branch) {
+          setBranches((prev) =>
+            mergeEnrolledStudentBranches(prev, deriveEnrolledStudentBranches(rows)),
+          );
+        }
+      });
   };
+
+  useEffect(() => {
+    void api
+      .get<EnrolledStudentBranch[]>('/api/admissions-crm/enrolled-students/branches')
+      .then((rows) => {
+        if (rows?.length) setBranches(rows);
+      })
+      .catch(() => {
+        /* fallback: branches derived from loaded students */
+      });
+  }, [api]);
 
   useEffect(() => {
     loadStudents();
@@ -84,10 +110,11 @@ export default function FinanceEnrolledStudentsPage() {
                 onChange={(e) => setBranch(e.target.value)}
               >
                 <option value="">All Branches</option>
-                <option value="1">Computer Science</option>
-                <option value="2">Mechanical Engineering</option>
-                <option value="3">Civil Engineering</option>
-                <option value="4">Electrical Engineering</option>
+                {branches.map((b) => (
+                  <option key={b.branch_key} value={b.branch_key}>
+                    {b.dept_name}
+                  </option>
+                ))}
               </Select>
             </div>
 

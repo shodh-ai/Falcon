@@ -106,7 +106,15 @@ export class TicketController {
   }
 
   @Get('profile-corrections')
-  @Roles('SuperAdmin', 'Registrar', 'HOD', 'Dean', 'Admin')
+  @Roles(
+    'CampusAdmin',
+    'SuperAdmin',
+    'AdmissionsOfficer',
+    'Registrar',
+    'HOD',
+    'Dean',
+    'Admin',
+  )
   async listProfileCorrections(@Req() req: { user: AuthUser }) {
     const tenantId = this.tenant(req);
     const hodDeptIds = await this.tickets.resolveHodDepartmentIds(req.user.user_id);
@@ -134,7 +142,9 @@ export class TicketController {
 
   @Patch(':ticketId/status')
   @Roles(
+    'CampusAdmin',
     'SuperAdmin',
+    'AdmissionsOfficer',
     'Registrar',
     'Accountant',
     'Warden',

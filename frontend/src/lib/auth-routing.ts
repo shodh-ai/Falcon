@@ -7,6 +7,11 @@ import {
   needsPortalOnboarding,
 } from '@/lib/onboarding/portal-onboarding';
 import { isPathHiddenForLaunch, isRoleWorkspaceEnabled } from '@/lib/launch-modules';
+import {
+  campusAdminRoutes,
+  expandCampusAdminRoles,
+} from '@/lib/campus-admin.roles';
+import { CAMPUS_ADMIN_LOGIN_EMAIL } from '@/lib/campus-admin.roles';
 
 export function getDashboardPathForRole(role: string | undefined | null): string {
   const r = (role ?? '').trim().toLowerCase();
@@ -103,15 +108,16 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/admin-ops/fleet';
   }
 
-  if (r === 'superadmin') {
-    return '/super-admin/dashboard';
+  if (r === 'campusadmin' || r === 'superadmin') {
+    return campusAdminRoutes.dashboard;
   }
 
-  if (
-    r === 'registrar' ||
-    r.includes('admission')
-  ) {
-    return r.includes('admission') ? '/admissions-crm/pipeline' : '/admin/dashboard';
+  if (r === 'registrar') {
+    return '/admin/dashboard';
+  }
+
+  if (r.includes('admission')) {
+    return campusAdminRoutes.admissionsPipeline;
   }
 
   return '/dashboard';
@@ -134,7 +140,9 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'alumni') return 'Alumni Network';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell Workspace';
   if (r === 'dc_member' || r === 'dc member') return 'Disciplinary Committee';
-  if (r === 'incubation_admin' || r === 'ecelladmin') return 'Incubation Workspace';
+  if (r === 'incubation_admin' || r === 'ecelladmin') return 'Incubation';
+  if (r === 'campusadmin' || r === 'superadmin') return 'Campus Admin Workspace';
+  if (r.includes('admission')) return 'Campus Admin Workspace';
   return `${role} Workspace`;
 }
 
@@ -157,6 +165,8 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell';
   if (r === 'dc_member' || r === 'dc member') return 'DC';
   if (r === 'incubation_admin' || r === 'ecelladmin') return 'Incubation';
+  if (r === 'campusadmin' || r === 'superadmin') return 'Campus Admin';
+  if (r.includes('admission')) return 'Campus Admin';
   return role;
 }
 
@@ -275,10 +285,10 @@ function canAccessHrPath(
   caps?: HrCapabilities | null,
   permissions?: string[],
 ): boolean {
-  if (roles.some((r) => ['hradmin', 'superadmin', 'hr', 'president'].includes(r))) return true;
+  if (roles.some((r) => ['hradmin', 'superadmin', 'campusadmin', 'hr', 'president'].includes(r))) return true;
 
   if (pathname.startsWith('/hr/admin')) {
-    return roles.some((r) => ['hradmin', 'superadmin'].includes(r));
+    return roles.some((r) => ['hradmin', 'superadmin', 'campusadmin'].includes(r));
   }
 
   if (pathname.startsWith('/hr/me/') || pathname.startsWith('/hr/inbox')) {
@@ -313,21 +323,23 @@ const portalRoles: Record<string, string[]> = {
   '/exam-cell': ['examcell', 'superadmin', 'deputycoe', 'examadmin', 'examoperator'],
   '/disciplinary-committee': ['dc_member', 'superadmin'],
   '/alumni': ['alumni'],
-  '/alumni-admin': ['iqac', 'superadmin', 'registrar', 'president'],
-  '/admin-ops': ['registrar', 'superadmin', 'transportofficer'],
-  '/placements': ['placementcell', 'superadmin', 'registrar'],
-  '/incubation': ['incubation_admin', 'ecelladmin', 'superadmin', 'hod', 'dean', 'president'],
-  '/ecell-admin': ['incubation_admin', 'ecelladmin', 'superadmin'],
-  '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'parent'],
-  '/reports': ['registrar', 'superadmin', 'president', 'accountant'],
-  '/admin': ['superadmin', 'registrar'],
-  '/super-admin': ['superadmin'],
-  '/admissions-crm': ['superadmin', 'admissionsofficer', 'registrar'],
-  '/clinic-admin': ['registrar', 'superadmin'],
+  '/alumni-admin': ['iqac', 'superadmin', 'campusadmin', 'registrar', 'president'],
+  '/admin-ops': ['registrar', 'superadmin', 'campusadmin', 'transportofficer'],
+  '/placements': ['placementcell', 'superadmin', 'campusadmin', 'registrar'],
+  '/incubation': ['incubation_admin', 'ecelladmin', 'superadmin', 'campusadmin', 'hod', 'dean', 'president'],
+  '/ecell-admin': ['incubation_admin', 'ecelladmin', 'superadmin', 'campusadmin'],
+  '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'campusadmin', 'parent'],
+  '/reports': ['registrar', 'superadmin', 'campusadmin', 'president', 'accountant'],
+  '/admin': ['superadmin', 'campusadmin', 'registrar'],
+  '/campus-admin': ['campusadmin', 'superadmin', 'admissionsofficer'],
+  '/super-admin': ['campusadmin', 'superadmin', 'admissionsofficer'],
+  '/admissions-crm': ['campusadmin', 'superadmin', 'admissionsofficer', 'registrar'],
+  '/clinic-admin': ['registrar', 'superadmin', 'campusadmin'],
   '/directory': [
     'chairman',
     'president',
     'superadmin',
+    'campusadmin',
     'registrar',
     'hradmin',
     'hr',
@@ -338,8 +350,8 @@ const portalRoles: Record<string, string[]> = {
     'student',
     'applicant',
   ],
-  '/tickets': ['student', 'faculty', 'hod', 'dean', 'hr', 'hradmin', 'superadmin', 'registrar', 'parent'],
-  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator'],
+  '/tickets': ['student', 'faculty', 'hod', 'dean', 'hr', 'hradmin', 'superadmin', 'campusadmin', 'registrar', 'parent'],
+  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'campusadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator'],
 };
 
 /** Derive the active workspace role from the current pathname (for multi-role users). */
@@ -357,7 +369,7 @@ export function getActiveWorkspaceRoleFromPath(
   return match ? userRoles[normalized.indexOf(match)] ?? match : null;
 }
 
-const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
+const ENTITY_CREATOR_EMAIL = CAMPUS_ADMIN_LOGIN_EMAIL;
 
 export function canRoleAccessPath(
   roleOrRoles: string | string[] | undefined | null,
@@ -366,11 +378,18 @@ export function canRoleAccessPath(
   permissions?: string[],
   email?: string,
 ): boolean {
-  const roles = (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles])
-    .filter((role): role is string => Boolean(role))
-    .map((role) => role.trim().toLowerCase());
+  const roles = expandCampusAdminRoles(
+    (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles])
+      .filter((role): role is string => Boolean(role))
+      .map((role) => role.trim().toLowerCase()),
+  );
 
-  if (pathname === '/super-admin/entities' || pathname.startsWith('/super-admin/entities/')) {
+  if (
+    pathname === '/campus-admin/entities' ||
+    pathname.startsWith('/campus-admin/entities/') ||
+    pathname === '/super-admin/entities' ||
+    pathname.startsWith('/super-admin/entities/')
+  ) {
     return (
       roles.includes('superadmin') &&
       (email ?? '').trim().toLowerCase() === ENTITY_CREATOR_EMAIL
@@ -379,7 +398,7 @@ export function canRoleAccessPath(
 
   if (pathname === '/directory' || pathname === '/directory/') {
     return roles.some((role) =>
-      ['chairman', 'president', 'superadmin', 'registrar', 'hradmin', 'hr', 'hod', 'dean', 'warden', 'faculty'].includes(role),
+      ['chairman', 'president', 'superadmin', 'campusadmin', 'registrar', 'hradmin', 'hr', 'hod', 'dean', 'warden', 'faculty'].includes(role),
     );
   }
 
@@ -389,7 +408,7 @@ export function canRoleAccessPath(
 
   if (pathname.startsWith('/admin-ops/directory') || pathname.startsWith('/directory/')) {
     return roles.some((role) =>
-      ['chairman', 'president', 'superadmin', 'registrar', 'hod', 'dean', 'warden', 'faculty', 'hr', 'hradmin', 'student', 'applicant'].includes(role),
+      ['chairman', 'president', 'superadmin', 'campusadmin', 'registrar', 'hod', 'dean', 'warden', 'faculty', 'hr', 'hradmin', 'student', 'applicant'].includes(role),
     );
   }
 
@@ -419,7 +438,8 @@ const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
 const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {
   '/hr': '/hr/me/settings',
   '/hostel-admin': '/hostel-admin/account/settings',
-  '/super-admin': '/super-admin/account/settings',
+  '/campus-admin': campusAdminRoutes.accountSettings,
+  '/super-admin': campusAdminRoutes.accountSettings,
   '/ecell-admin': '/ecell-admin/account/settings',
   '/incubation': '/incubation/account/settings',
   '/admin': '/admin/account/settings',

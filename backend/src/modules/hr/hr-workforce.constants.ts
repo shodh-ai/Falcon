@@ -5,6 +5,7 @@ export const WORKFORCE_SELF_SERVICE_ROLES = [
   'Dean',
   'HR',
   'HRAdmin',
+  'CampusAdmin',
   'SuperAdmin',
   'AdmissionsOfficer',
   'Registrar',

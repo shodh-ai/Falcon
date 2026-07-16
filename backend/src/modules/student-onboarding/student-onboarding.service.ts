@@ -540,6 +540,10 @@ export class StudentOnboardingService {
 
       await qr.commitTransaction();
 
+      await this.onboardingVerificationNotify
+        .dismissVerificationNotifications(tenant, targetUserId)
+        .catch(() => undefined);
+
       this.notifications.studentOnboardingApproved({
         tenantId: tenant,
         userId: targetUserId,
@@ -621,6 +625,11 @@ export class StudentOnboardingService {
       }
 
       await qr.commitTransaction();
+
+      await this.onboardingVerificationNotify
+        .dismissVerificationNotifications(tenant, targetUserId)
+        .catch(() => undefined);
+
       return { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason };
     } catch (error) {
       await qr.rollbackTransaction();

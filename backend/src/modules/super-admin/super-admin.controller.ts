@@ -33,7 +33,7 @@ type AuthUser = {
 
 @Controller('api/super-admin')
 @UseGuards(JwtAuthGuard, RolesGuard, EntityCreatorGuard)
-@Roles('SuperAdmin')
+@Roles('CampusAdmin', 'SuperAdmin')
 export class SuperAdminController {
   constructor(
     private readonly superAdmin: SuperAdminService,
