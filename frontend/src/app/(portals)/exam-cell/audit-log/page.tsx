@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
+import { PaginationBar } from '@/components/ui/PaginationBar';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
 
@@ -21,24 +22,40 @@ type AuditRow = {
   new_value?: unknown;
 };
 
+type AuditResponse = {
+  data: AuditRow[];
+  total: number;
+  limit: number;
+  offset: number;
+  page: number;
+};
+
 export default function ExamCellAuditLogPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<AuditRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const pageSize = 50;
   const [loading, setLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const qs = new URLSearchParams({ limit: '100' });
-      if (actionFilter.trim()) qs.set('action', actionFilter.trim());
-      setRows(await api.get<AuditRow[]>(`/api/exam-cell/audit-log?${qs}`));
+      const page = Math.floor(offset / pageSize) + 1;
+      const qs = new URLSearchParams({ limit: String(pageSize), page: String(page) });
+      if (actionFilter.trim()) qs.set('search', actionFilter.trim());
+      const payload = await api.get<AuditResponse>(`/api/exam-cell/audit-log?${qs}`);
+      setRows(payload.data ?? []);
+      setTotal(payload.total ?? 0);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load audit log');
+      setRows([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [api, actionFilter]);
+  }, [api, actionFilter, offset]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -66,14 +83,26 @@ export default function ExamCellAuditLogPage() {
           <CardTitle className="text-base">Examination audit trail</CardTitle>
           <Input
             placeholder="Filter by action…"
+            aria-label="Filter audit log by action"
             value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value)}
+            onChange={(e) => {
+              setActionFilter(e.target.value);
+              setOffset(0);
+            }}
             className="max-w-xs"
           />
         </CardHeader>
         <CardContent>
-          {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : (
-            <DataTable columns={columns} rows={rows} rowKey={(r) => r.audit_id} emptyMessage="No audit events recorded yet." />
+          {loading ? <Loader2 className="h-6 w-6 animate-spin" aria-label="Loading audit log" /> : (
+            <>
+              <DataTable columns={columns} rows={rows} rowKey={(r) => r.audit_id} emptyMessage="No audit events recorded yet." />
+              <PaginationBar
+                total={total}
+                limit={pageSize}
+                offset={offset}
+                onPageChange={setOffset}
+              />
+            </>
           )}
         </CardContent>
       </Card>

@@ -117,7 +117,9 @@ export class TicketController {
   )
   async listProfileCorrections(@Req() req: { user: AuthUser }) {
     const tenantId = this.tenant(req);
-    const hodDeptIds = await this.tickets.resolveHodDepartmentIds(req.user.user_id);
+    const hodDeptIds = await this.tickets.resolveHodDepartmentIds(
+      req.user.user_id,
+    );
     const deptIds = hodDeptIds.length ? hodDeptIds : undefined;
     return this.tickets.listProfileCorrectionTickets(tenantId, 100, deptIds);
   }
@@ -188,6 +190,7 @@ export class TicketController {
     return this.tickets.escalateTicket(
       ticketId,
       req.user.user_id,
+      req.user.role ?? 'UNKNOWN',
       this.tenant(req),
     );
   }

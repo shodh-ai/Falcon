@@ -2,6 +2,8 @@
 
 > **Maintenance:** Update this document when adding roles (migrations), portal nav items ([`frontend/src/lib/navigation.ts`](../frontend/src/lib/navigation.ts)), notification events ([`backend/src/core/notifications/notification.events.ts`](../backend/src/core/notifications/notification.events.ts)), or new approval workflows.
 
+**Production launch:** Follow [`MECHANICAL_PILOT_LAUNCH_CHECKLIST.md`](./MECHANICAL_PILOT_LAUNCH_CHECKLIST.md) before enabling HOD / Dean / Exam Cell (or student portal) for the Mechanical Engineering pilot.
+
 This reference maps **every role → portal features**, **cross-role approval pipelines**, **async job queues**, and **notification connections** across Falcon.
 
 **Source of truth in code:**

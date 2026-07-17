@@ -6,7 +6,12 @@ import { onboardingVerificationRequestedMessage } from './notification-message.c
 import type { OnboardingVerificationRequestedPayload } from './notification.events';
 import { resolveOnboardingPortalKind } from '../../modules/student-onboarding/onboarding-portal.util';
 
-const ADMISSIONS_ROLES = ['CampusAdmin', 'AdmissionsOfficer', 'Registrar', 'SuperAdmin'] as const;
+const ADMISSIONS_ROLES = [
+  'CampusAdmin',
+  'AdmissionsOfficer',
+  'Registrar',
+  'SuperAdmin',
+] as const;
 const HR_ROLES = ['HR', 'HRAdmin'] as const;
 
 @Injectable()

@@ -166,6 +166,7 @@ export default function HodCourseAllocationPage() {
       }
     } catch (err) {
       console.error('Drop error', err);
+      toast.error('Failed to move timetable slot');
     }
   }
 

@@ -231,7 +231,9 @@ export class MasterDataService {
       return Array.from(new Set(rows.map((row) => Number(row.dept_id))));
     }
 
-    const schoolRows = await this.dataSource.query<Array<{ school_id: number }>>(
+    const schoolRows = await this.dataSource.query<
+      Array<{ school_id: number }>
+    >(
       `SELECT school_id FROM schools WHERE dean_user_id = $1 AND deleted_at IS NULL`,
       [userId],
     );

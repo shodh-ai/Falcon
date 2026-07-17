@@ -415,7 +415,9 @@ export class HrService {
     parseYearMonthKey(periodFrom);
     parseYearMonthKey(periodTo);
     if (compareYearMonthKeys(periodFrom, periodTo) > 0) {
-      throw new BadRequestException('Start month must be before or equal to end month.');
+      throw new BadRequestException(
+        'Start month must be before or equal to end month.',
+      );
     }
 
     const monthsInRange = enumerateYearMonthKeys(periodFrom, periodTo);
@@ -429,10 +431,16 @@ export class HrService {
     }
 
     const pending = await this.payslipDownloadRequests.findOne({
-      where: { staff_user_id: staffUserId, tenant_id: tenantId, status: 'PENDING' },
+      where: {
+        staff_user_id: staffUserId,
+        tenant_id: tenantId,
+        status: 'PENDING',
+      },
     });
     if (pending) {
-      throw new BadRequestException('You already have a payslip download request pending HR approval.');
+      throw new BadRequestException(
+        'You already have a payslip download request pending HR approval.',
+      );
     }
 
     const row = this.payslipDownloadRequests.create({
@@ -486,11 +494,17 @@ export class HrService {
     tenantId: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
     const request = await this.payslipDownloadRequests.findOne({
-      where: { request_id: requestId, staff_user_id: staffUserId, tenant_id: tenantId },
+      where: {
+        request_id: requestId,
+        staff_user_id: staffUserId,
+        tenant_id: tenantId,
+      },
     });
     if (!request) throw new NotFoundException('Download request not found');
     if (request.status !== 'APPROVED') {
-      throw new ForbiddenException('HR must approve this request before you can download.');
+      throw new ForbiddenException(
+        'HR must approve this request before you can download.',
+      );
     }
     if (!request.period_from || !request.period_to) {
       throw new BadRequestException('Request is missing period range.');
@@ -516,9 +530,16 @@ export class HrService {
     );
     const staff = staffRows[0];
 
-    const monthKeys = enumerateYearMonthKeys(request.period_from, request.period_to);
+    const monthKeys = enumerateYearMonthKeys(
+      request.period_from,
+      request.period_to,
+    );
     const published = await this.payslips.find({
-      where: { staff_user_id: staffUserId, tenant_id: tenantId, is_published: true },
+      where: {
+        staff_user_id: staffUserId,
+        tenant_id: tenantId,
+        is_published: true,
+      },
     });
 
     const byKey = new Map<string, StaffPayslip>();
@@ -540,7 +561,9 @@ export class HrService {
       });
 
     if (!rows.length) {
-      throw new NotFoundException('No published payslips found for the approved period.');
+      throw new NotFoundException(
+        'No published payslips found for the approved period.',
+      );
     }
 
     const buffer = await this.payslipPdf.generatePeriodStatement({
@@ -567,7 +590,8 @@ export class HrService {
     if (filePath.startsWith('/uploads/')) {
       resolvedPath = resolve(uploadRoot, filePath.replace(/^\/uploads\//, ''));
     }
-    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) return null;
+    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath))
+      return null;
     return readFileSync(resolvedPath);
   }
 
@@ -578,9 +602,10 @@ export class HrService {
     const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
     const payslipDir = resolve(uploadRoot, 'payslips');
     mkdirSync(payslipDir, { recursive: true });
-    const fileName = `${payslip.staff_user_id}-${payslip.month}-${payslip.year}.pdf`
-      .replace(/\s+/g, '-')
-      .toLowerCase();
+    const fileName =
+      `${payslip.staff_user_id}-${payslip.month}-${payslip.year}.pdf`
+        .replace(/\s+/g, '-')
+        .toLowerCase();
     const relativePath = `/uploads/payslips/${fileName}`;
     const fullPath = resolve(uploadRoot, 'payslips', fileName);
 

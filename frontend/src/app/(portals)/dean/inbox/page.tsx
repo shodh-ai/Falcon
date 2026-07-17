@@ -38,6 +38,17 @@ type FundingRequest = {
   status: 'APPROVED_HOD';
 };
 
+type ResultApproval = {
+  request_id: string;
+  session_id: string;
+  course_code: string;
+  course_name: string;
+  exam_type: string;
+  semester: number;
+  requested_at: string;
+  requested_by_name?: string;
+};
+
 const TYPE_ROUTES: Record<string, string> = {
   FUNDING: '/dean/inbox',
   ATTENDANCE_POLICY: '/dean/attendance-policy',
@@ -45,12 +56,14 @@ const TYPE_ROUTES: Record<string, string> = {
   GRIEVANCE: '/dean/students/grievances',
   EXTRA_CLASS: '/dean/academics/timetable',
   CANCEL: '/dean/academics/timetable',
+  RESULT_APPROVAL: '/dean/inbox',
 };
 
 export default function DeanInboxPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<InboxRow[]>([]);
   const [funding, setFunding] = useState<FundingRequest[]>([]);
+  const [resultApprovals, setResultApprovals] = useState<ResultApproval[]>([]);
   const [loading, setLoading] = useState(true);
   const [comments, setComments] = useState<Record<string, string>>({});
   const [timelineId, setTimelineId] = useState<string | null>(null);
@@ -62,17 +75,20 @@ export default function DeanInboxPage() {
     setLoading(true);
     try {
       const qs = buildDeanPageQuery({ page: Math.floor(inboxOffset / inboxLimit) + 1, limit: inboxLimit });
-      const [inbox, fundingRows] = await Promise.all([
+      const [inbox, fundingRows, resultRows] = await Promise.all([
         api.get<PaginatedApiResponse<InboxRow>>(`/api/academics/dean/inbox?${qs}`),
         api.get<FundingRequest[]>('/api/academics/dean/funding-requests'),
+        api.get<{ data: ResultApproval[] }>('/api/academics/dean/intelligence/result-approvals?limit=50'),
       ]);
-      setRows((inbox.data ?? []).filter((row) => row.type !== 'FUNDING'));
+      setRows((inbox.data ?? []).filter((row) => !['FUNDING', 'RESULT_APPROVAL'].includes(row.type)));
       setInboxTotal(inbox.total ?? 0);
       setFunding((fundingRows ?? []).filter((r) => r.status === 'APPROVED_HOD'));
+      setResultApprovals(resultRows.data ?? []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load dean inbox');
       setRows([]);
       setFunding([]);
+      setResultApprovals([]);
     } finally {
       setLoading(false);
     }
@@ -107,6 +123,31 @@ export default function DeanInboxPage() {
     }
   };
 
+  const handleResultApproval = async (
+    requestId: string,
+    decision: 'APPROVED' | 'REJECTED',
+  ) => {
+    const comment = comments[requestId] || '';
+    if (decision === 'REJECTED' && !comment.trim()) {
+      toast.error('A comment is required when rejecting a result declaration.');
+      return;
+    }
+    try {
+      await api.post(
+        `/api/academics/dean/intelligence/result-approvals/${requestId}/decision`,
+        { decision, comment },
+      );
+      toast.success(
+        decision === 'APPROVED'
+          ? 'Result declaration approved. Exam Cell can now publish.'
+          : 'Result declaration rejected.',
+      );
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+    }
+  };
+
   return (
     <HodPageFrame>
       <HodPageHeader
@@ -115,7 +156,8 @@ export default function DeanInboxPage() {
         workspaceLabel="Dean Workspace"
         meta={
           <span>
-            {funding.length + rows.length} pending item{funding.length + rows.length === 1 ? '' : 's'}
+            {funding.length + resultApprovals.length + rows.length} pending item
+            {funding.length + resultApprovals.length + rows.length === 1 ? '' : 's'}
           </span>
         }
         actions={
@@ -171,6 +213,54 @@ export default function DeanInboxPage() {
                     size="sm"
                     className="bg-sgvu-navy text-white hover:bg-sgvu-navy/90"
                     onClick={() => void handleFundingAction(req.request_id, 'APPROVED_DEAN')}
+                  >
+                    <CheckCircle className="mr-1 h-4 w-4" />
+                    Approve
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </HodPanel>
+      ) : null}
+
+      {resultApprovals.length > 0 ? (
+        <HodPanel title="Result Declaration Approvals">
+          <div className="grid gap-4 xl:grid-cols-2">
+            {resultApprovals.map((req) => (
+              <div key={req.request_id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-3">
+                  <p className="font-semibold text-sgvu-navy">
+                    {req.course_code} — {req.course_name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {req.exam_type} · Sem {req.semester}
+                    {req.requested_by_name ? ` · Requested by ${req.requested_by_name}` : ''}
+                  </p>
+                </div>
+                <textarea
+                  placeholder="Comment (required for rejection)"
+                  aria-label={`Comment for result approval ${req.course_code}`}
+                  className="mb-3 flex min-h-[72px] w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                  value={comments[req.request_id] || ''}
+                  onChange={(e) =>
+                    setComments((prev) => ({ ...prev, [req.request_id]: e.target.value }))
+                  }
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600"
+                    onClick={() => void handleResultApproval(req.request_id, 'REJECTED')}
+                  >
+                    <XCircle className="mr-1 h-4 w-4" />
+                    Reject
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-sgvu-navy text-white hover:bg-sgvu-navy/90"
+                    onClick={() => void handleResultApproval(req.request_id, 'APPROVED')}
                   >
                     <CheckCircle className="mr-1 h-4 w-4" />
                     Approve

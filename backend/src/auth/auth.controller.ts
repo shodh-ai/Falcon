@@ -112,11 +112,7 @@ export class AuthController {
     const roleClaims = syncedUser
       ? this.authService.getRoleClaims(syncedUser)
       : {
-          roles: user.roles?.length
-            ? user.roles
-            : user.role
-              ? [user.role]
-              : [],
+          roles: user.roles?.length ? user.roles : user.role ? [user.role] : [],
           primaryRole: user.primaryRole ?? user.role,
         };
     const roles = roleClaims.roles;
@@ -145,7 +141,9 @@ export class AuthController {
           },
         })) > 0
       : false;
-    const isDepartmentHod = await this.authService.isDepartmentHod(user.user_id);
+    const isDepartmentHod = await this.authService.isDepartmentHod(
+      user.user_id,
+    );
     return {
       ...user,
       role: primaryRole,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { toast } from '@/lib/notifications/falcon-toast';
 import {
   HodMetricChip,
   HodPageFrame,
@@ -21,6 +22,7 @@ import {
   Legend,
 } from 'recharts';
 import { useAuthedApi } from '@/lib/api';
+import { useDeanDepartments } from '@/hooks/useDeanDepartments';
 import {
   DeanFilterBar,
   buildDeanFilterQuery,
@@ -39,17 +41,10 @@ type AnalyticsPayload = {
 
 export default function DeanAnalyticsPage() {
   const api = useAuthedApi();
+  const { departments } = useDeanDepartments();
   const [filters, setFilters] = useState<DeanFilterValues>({});
-  const [departments, setDepartments] = useState<Array<{ dept_id: number; dept_name: string }>>([]);
   const [data, setData] = useState<AnalyticsPayload | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void api
-      .get<Array<{ dept_id: number; dept_name: string }>>('/api/academics/dean/departments')
-      .then((rows) => setDepartments(rows))
-      .catch(() => setDepartments([]));
-  }, [api]);
 
   useEffect(() => {
     void (async () => {
@@ -61,6 +56,7 @@ export default function DeanAnalyticsPage() {
         setData(payload);
       } catch {
         setData(null);
+        toast.error('Failed to load analytics');
       } finally {
         setLoading(false);
       }

@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
-import { formatPeriodLabel, monthNameToNumber, toYearMonthKey } from './payslip-period.util';
+import {
+  formatPeriodLabel,
+  monthNameToNumber,
+  toYearMonthKey,
+} from './payslip-period.util';
 
 export type PayslipPeriodRow = {
   periodKey: string;
@@ -35,7 +39,12 @@ function pdfSafeText(value: string | number | null | undefined): string {
     .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '');
 }
 
-function wrapText(text: string, maxWidth: number, font: PDFFont, size: number): string[] {
+function wrapText(
+  text: string,
+  maxWidth: number,
+  font: PDFFont,
+  size: number,
+): string[] {
   const safe = pdfSafeText(text);
   const words = safe.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -71,7 +80,17 @@ function drawConsolidatedSalaryTable(opts: {
   monthCount: number;
   rows: PayslipPeriodRow[];
 }): number {
-  const { page, x, contentWidth, font, bold, staffName, periodLabel, monthCount, rows } = opts;
+  const {
+    page,
+    x,
+    contentWidth,
+    font,
+    bold,
+    staffName,
+    periodLabel,
+    monthCount,
+    rows,
+  } = opts;
   let y = opts.y;
 
   const rowCount = rows.length;
@@ -87,10 +106,22 @@ function drawConsolidatedSalaryTable(opts: {
     color: NAVY,
   });
   y -= 18;
-  page.drawText(`Employee: ${pdfSafeText(staffName)}`, { x, y, size: 9.5, font: bold, color: NAVY });
+  page.drawText(`Employee: ${pdfSafeText(staffName)}`, {
+    x,
+    y,
+    size: 9.5,
+    font: bold,
+    color: NAVY,
+  });
   y -= 14;
   const periodMeta = `Period: ${periodLabel} (${monthCount} month${monthCount === 1 ? '' : 's'})`;
-  page.drawText(pdfSafeText(periodMeta), { x, y, size: 8.5, font, color: MUTED });
+  page.drawText(pdfSafeText(periodMeta), {
+    x,
+    y,
+    size: 8.5,
+    font,
+    color: MUTED,
+  });
   y -= 20;
 
   const cols: TableColumn[] = [
@@ -105,7 +136,13 @@ function drawConsolidatedSalaryTable(opts: {
   for (const col of cols) {
     const labelW = bold.widthOfTextAtSize(col.label, headerSize);
     const tx = col.align === 'right' ? colX + col.width - labelW : colX;
-    page.drawText(col.label, { x: tx, y, size: headerSize, font: bold, color: NAVY });
+    page.drawText(col.label, {
+      x: tx,
+      y,
+      size: headerSize,
+      font: bold,
+      color: NAVY,
+    });
     colX += col.width;
   }
   y -= 6;
@@ -117,11 +154,7 @@ function drawConsolidatedSalaryTable(opts: {
   });
   y -= rowHeight;
 
-  const drawRow = (
-    cells: string[],
-    useBold = false,
-    color = MUTED,
-  ) => {
+  const drawRow = (cells: string[], useBold = false, color = MUTED) => {
     const rowFont = useBold ? bold : font;
     let cx = x;
     for (let i = 0; i < cols.length; i++) {
@@ -129,7 +162,13 @@ function drawConsolidatedSalaryTable(opts: {
       const text = pdfSafeText(cells[i] ?? '');
       const tw = rowFont.widthOfTextAtSize(text, dataSize);
       const tx = col.align === 'right' ? cx + col.width - tw : cx;
-      page.drawText(text, { x: tx, y, size: dataSize, font: rowFont, color: useBold ? NAVY : color });
+      page.drawText(text, {
+        x: tx,
+        y,
+        size: dataSize,
+        font: rowFont,
+        color: useBold ? NAVY : color,
+      });
       cx += col.width;
     }
     y -= rowHeight;
@@ -155,7 +194,10 @@ function drawConsolidatedSalaryTable(opts: {
 
   const totalGross = rows.reduce((s, r) => s + r.grossPay, 0);
   const totalNet = rows.reduce((s, r) => s + r.netPay, 0);
-  drawRow(['Total', formatAmount(totalGross), formatAmount(totalNet), '', ''], true);
+  drawRow(
+    ['Total', formatAmount(totalGross), formatAmount(totalNet), '', ''],
+    true,
+  );
 
   return y - 8;
 }
@@ -175,8 +217,20 @@ export class PayslipPdfService {
     const contentWidth = width - margin * 2;
 
     // Letterpad top bar
-    page.drawRectangle({ x: 0, y: height - 28, width, height: 28, color: BLUE_BAR });
-    page.drawRectangle({ x: margin, y: height - 108, width: contentWidth, height: 72, color: CREAM });
+    page.drawRectangle({
+      x: 0,
+      y: height - 28,
+      width,
+      height: 28,
+      color: BLUE_BAR,
+    });
+    page.drawRectangle({
+      x: margin,
+      y: height - 108,
+      width: contentWidth,
+      height: 72,
+      color: CREAM,
+    });
     page.drawLine({
       start: { x: margin, y: height - 108 },
       end: { x: width - margin, y: height - 108 },
@@ -186,14 +240,33 @@ export class PayslipPdfService {
 
     const uni = 'SURESH GYAN VIHAR UNIVERSITY';
     const uniW = bold.widthOfTextAtSize(uni, 14);
-    page.drawText(uni, { x: (width - uniW) / 2, y: height - 62, size: 14, font: bold, color: NAVY });
-    const sub = 'Jaipur, Rajasthan - 302017  |  hr@gyanvihar.org  |  www.gyanvihar.org';
+    page.drawText(uni, {
+      x: (width - uniW) / 2,
+      y: height - 62,
+      size: 14,
+      font: bold,
+      color: NAVY,
+    });
+    const sub =
+      'Jaipur, Rajasthan - 302017  |  hr@gyanvihar.org  |  www.gyanvihar.org';
     const subW = sans.widthOfTextAtSize(sub, 8);
-    page.drawText(sub, { x: (width - subW) / 2, y: height - 78, size: 8, font: sans, color: MUTED });
+    page.drawText(sub, {
+      x: (width - subW) / 2,
+      y: height - 78,
+      size: 8,
+      font: sans,
+      color: MUTED,
+    });
 
     const title = 'SALARY CERTIFICATE';
     const titleW = bold.widthOfTextAtSize(title, 13);
-    page.drawText(title, { x: (width - titleW) / 2, y: height - 128, size: 13, font: bold, color: NAVY });
+    page.drawText(title, {
+      x: (width - titleW) / 2,
+      y: height - 128,
+      size: 13,
+      font: bold,
+      color: NAVY,
+    });
 
     let y = height - 158;
     const today = new Date().toLocaleDateString('en-IN', {
@@ -201,11 +274,23 @@ export class PayslipPdfService {
       month: 'long',
       year: 'numeric',
     });
-    page.drawText(pdfSafeText(today), { x: margin, y, size: 10, font, color: MUTED });
+    page.drawText(pdfSafeText(today), {
+      x: margin,
+      y,
+      size: 10,
+      font,
+      color: MUTED,
+    });
     if (input.documentRef) {
       const ref = `Ref: ${input.documentRef}`;
       const refW = font.widthOfTextAtSize(ref, 9);
-      page.drawText(ref, { x: width - margin - refW, y, size: 9, font, color: MUTED });
+      page.drawText(ref, {
+        x: width - margin - refW,
+        y,
+        size: 9,
+        font,
+        color: MUTED,
+      });
     }
     y -= 28;
 
@@ -222,7 +307,13 @@ export class PayslipPdfService {
         ? formatPeriodLabel(input.periodFrom)
         : `${formatPeriodLabel(input.periodFrom)} to ${formatPeriodLabel(input.periodTo)}`;
 
-    page.drawText('To Whom It May Concern,', { x: margin, y, size: 11, font: bold, color: NAVY });
+    page.drawText('To Whom It May Concern,', {
+      x: margin,
+      y,
+      size: 11,
+      font: bold,
+      color: NAVY,
+    });
     y -= 24;
 
     drawParagraph(
@@ -262,17 +353,52 @@ export class PayslipPdfService {
     );
 
     y -= 8;
-    page.drawText('Yours sincerely,', { x: margin, y, size: 10.5, font, color: MUTED });
+    page.drawText('Yours sincerely,', {
+      x: margin,
+      y,
+      size: 10.5,
+      font,
+      color: MUTED,
+    });
     y -= 36;
-    page.drawLine({ start: { x: margin, y }, end: { x: margin + 180, y }, thickness: 0.5, color: MUTED });
+    page.drawLine({
+      start: { x: margin, y },
+      end: { x: margin + 180, y },
+      thickness: 0.5,
+      color: MUTED,
+    });
     y -= 16;
-    page.drawText('Authorised Signatory', { x: margin, y, size: 10, font: bold, color: NAVY });
+    page.drawText('Authorised Signatory', {
+      x: margin,
+      y,
+      size: 10,
+      font: bold,
+      color: NAVY,
+    });
     y -= 14;
-    page.drawText('Human Resources Manager', { x: margin, y, size: 9.5, font, color: MUTED });
+    page.drawText('Human Resources Manager', {
+      x: margin,
+      y,
+      size: 9.5,
+      font,
+      color: MUTED,
+    });
     y -= 13;
-    page.drawText('Suresh Gyan Vihar University', { x: margin, y, size: 9.5, font, color: MUTED });
+    page.drawText('Suresh Gyan Vihar University', {
+      x: margin,
+      y,
+      size: 9.5,
+      font,
+      color: MUTED,
+    });
     y -= 13;
-    page.drawText('Jaipur, Rajasthan - 302017', { x: margin, y, size: 9.5, font, color: MUTED });
+    page.drawText('Jaipur, Rajasthan - 302017', {
+      x: margin,
+      y,
+      size: 9.5,
+      font,
+      color: MUTED,
+    });
 
     page.drawLine({
       start: { x: margin, y: 42 },
@@ -280,9 +406,16 @@ export class PayslipPdfService {
       thickness: 0.4,
       color: rgb(0.8, 0.8, 0.82),
     });
-    const footer = 'Computer-generated salary certificate on official university letterpad.';
+    const footer =
+      'Computer-generated salary certificate on official university letterpad.';
     const fw = sans.widthOfTextAtSize(footer, 7);
-    page.drawText(footer, { x: (width - fw) / 2, y: 30, size: 7, font: sans, color: MUTED });
+    page.drawText(footer, {
+      x: (width - fw) / 2,
+      y: 30,
+      size: 7,
+      font: sans,
+      color: MUTED,
+    });
 
     const bytes = await pdf.save();
     return Buffer.from(bytes);

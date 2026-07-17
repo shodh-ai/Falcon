@@ -126,6 +126,7 @@ export class TicketService {
     >(
       `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
               t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
+              t.escalation_level,
               su.name AS student_name, au.name AS assigned_to_name
        FROM helpdesk_tickets t
        JOIN users su ON su.user_id = t.student_user_id
@@ -138,31 +139,7 @@ export class TicketService {
     if (!rows.length) throw new NotFoundException('Ticket not found');
 
     const t = rows[0];
-    const role = actorRole.trim().toLowerCase();
-    const isOwner = t.student_user_id === actorUserId;
-    const isAssignee = t.assigned_to_user_id === actorUserId;
-    const isAdmin = [
-      'superadmin',
-      'registrar',
-      'accountant',
-      'warden',
-      'hod',
-      'dean',
-      'faculty',
-      'chairman',
-      'president',
-      'hr',
-      'hradmin',
-    ].includes(role);
-
-    if (['student', 'applicant'].includes(role) && !isOwner) {
-      throw new ForbiddenException('You can only view your own tickets');
-    }
-    if (!isOwner && !isAssignee && !isAdmin) {
-      throw new ForbiddenException('You are not allowed to view this ticket');
-    }
-
-    return t;
+    return this.finalizeTicketRead(t, actorUserId, actorRole, tenantId);
   }
 
   /** Get a single ticket by ID with access checks for requesters and assignees. */
@@ -188,7 +165,7 @@ export class TicketService {
     >(
       `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
               t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
-              t.sla_deadline, t.resolved_at, t.rejection_reason,
+              t.sla_deadline, t.resolved_at, t.rejection_reason, t.escalation_level,
               su.name AS student_name, au.name AS assigned_to_name
        FROM helpdesk_tickets t
        JOIN users su ON su.user_id = t.student_user_id
@@ -202,16 +179,42 @@ export class TicketService {
     if (!rows.length) throw new NotFoundException('Ticket not found');
 
     const t = rows[0];
+    return this.finalizeTicketRead(t, actorUserId, actorRole, tenantId);
+  }
+
+  private async finalizeTicketRead(
+    t: Record<string, unknown>,
+    actorUserId: string,
+    actorRole: string,
+    tenantId: string,
+  ) {
     const role = actorRole.trim().toLowerCase();
     const isOwner = t.student_user_id === actorUserId;
     const isAssignee = t.assigned_to_user_id === actorUserId;
+
+    if (['student', 'applicant'].includes(role) && !isOwner) {
+      throw new ForbiddenException('You can only view your own tickets');
+    }
+    if (isOwner || isAssignee) {
+      return t;
+    }
+    if (['dean', 'hod'].includes(role)) {
+      await this.assertTicketActorScope(
+        {
+          student_user_id: t.student_user_id,
+          category: t.category,
+          escalation_level: Number(t.escalation_level ?? 0),
+        } as HelpdeskTicket,
+        { userId: actorUserId, role: actorRole, tenantId },
+      );
+      return t;
+    }
+
     const isAdmin = [
       'superadmin',
       'registrar',
       'accountant',
       'warden',
-      'hod',
-      'dean',
       'faculty',
       'chairman',
       'president',
@@ -219,10 +222,7 @@ export class TicketService {
       'hradmin',
     ].includes(role);
 
-    if (['student', 'applicant'].includes(role) && !isOwner) {
-      throw new ForbiddenException('You can only view your own tickets');
-    }
-    if (!isOwner && !isAssignee && !isAdmin) {
+    if (!isAdmin) {
       throw new ForbiddenException('You are not allowed to view this ticket');
     }
 
@@ -293,7 +293,9 @@ export class TicketService {
        SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL`,
       [hodUserId],
     );
-    return rows.map((r) => Number(r.dept_id)).filter((id) => Number.isFinite(id));
+    return rows
+      .map((r) => Number(r.dept_id))
+      .filter((id) => Number.isFinite(id));
   }
 
   async listProfileCorrectionTickets(
@@ -393,10 +395,9 @@ export class TicketService {
 
     const [student] = await this.dataSource.query<
       Array<{ dept_id: number | null; tenant_id: string }>
-    >(
-      `SELECT dept_id, tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
-      [ticket.student_user_id],
-    );
+    >(`SELECT dept_id, tenant_id FROM users WHERE user_id = $1 LIMIT 1`, [
+      ticket.student_user_id,
+    ]);
     if (!student || student.tenant_id !== actor.tenantId) {
       throw new ForbiddenException('Ticket is outside your tenant scope');
     }
@@ -511,12 +512,20 @@ export class TicketService {
   async escalateTicket(
     ticketId: string,
     actorUserId: string,
+    actorRole: string,
     tenantId: string,
   ) {
     const ticket = await this.tickets.findOne({
       where: { ticket_id: ticketId, tenant_id: tenantId },
     });
     if (!ticket) throw new NotFoundException('Ticket not found');
+
+    await this.assertTicketActorScope(ticket, {
+      userId: actorUserId,
+      role: actorRole,
+      tenantId,
+    });
+
     const newLevel = Math.min(Number(ticket.escalation_level ?? 0) + 1, 3);
     ticket.escalation_level = newLevel;
     return this.tickets.save(ticket);

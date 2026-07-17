@@ -1,0 +1,35 @@
+{
+  "defaultPassword": "password123",
+  "faculty": {
+    "email": "pooja.varshney@mygyanvihar.com",
+    "role": "Faculty"
+  },
+  "hod": {
+    "email": "hod@mygyanvihar.com",
+    "role": "HOD"
+  },
+  "hodMech": {
+    "email": "neeraj.kumar1@mygyanvihar.com",
+    "role": "HOD"
+  },
+  "dean": {
+    "email": "dean.isbm@mygyanvihar.com",
+    "role": "Dean"
+  },
+  "examcell": {
+    "email": "examcell@mygyanvihar.com",
+    "role": "examcell"
+  },
+  "examadmin": {
+    "email": "examadmin@mygyanvihar.com",
+    "role": "examadmin"
+  },
+  "examoperator": {
+    "email": "examoperator@mygyanvihar.com",
+    "role": "examoperator"
+  },
+  "superadmin": {
+    "email": "campusadmin@mygyanvihar.com",
+    "role": "SuperAdmin"
+  }
+}

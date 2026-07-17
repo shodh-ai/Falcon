@@ -120,7 +120,7 @@ export class AttendancePolicyController {
   @Get('hod/courses')
   @Roles('HOD', 'SuperAdmin')
   listCourses(@Req() req: { user: AuthUser }) {
-    return this.policy.listCourses(this.tenant(req));
+    return this.policy.listCourses(this.tenant(req), req.user.user_id);
   }
 
   @Post('hod/courses/:courseId/threshold')
@@ -137,7 +137,12 @@ export class AttendancePolicyController {
       dto.min_attendance !== undefined && dto.min_attendance !== null
         ? Number(dto.min_attendance)
         : null;
-    return this.policy.updateCourseThreshold(this.tenant(req), courseId, val);
+    return this.policy.updateCourseThreshold(
+      this.tenant(req),
+      courseId,
+      val,
+      req.user.user_id,
+    );
   }
 
   // --- Dean: decide threshold changes ---

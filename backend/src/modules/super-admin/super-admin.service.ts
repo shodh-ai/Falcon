@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Campus } from '../../entities/campus.entity';
@@ -286,7 +290,10 @@ export class SuperAdminService {
         `UPDATE schools SET dean_user_id = NULL WHERE school_id = $1 AND dean_user_id = $2`,
         [schoolId, row.user_id],
       );
-    } else if (row.assignment_type === 'HOD' && row.entity_type === 'DEPARTMENT') {
+    } else if (
+      row.assignment_type === 'HOD' &&
+      row.entity_type === 'DEPARTMENT'
+    ) {
       const deptId = Number(row.entity_id);
       await this.dataSource.query(
         `UPDATE departments SET hod_user_id = NULL WHERE dept_id = $1 AND hod_user_id = $2`,

@@ -1232,9 +1232,18 @@ export class HrTeamService {
   ) {
     const scope = parseTeamScope(scopeRaw);
     const today = new Date().toISOString().slice(0, 10);
-    const members = await this.scope.listScopedUsers(managerId, tenantId, scope);
+    const members = await this.scope.listScopedUsers(
+      managerId,
+      tenantId,
+      scope,
+    );
     if (!members.length) {
-      return { scope, date: today, employees: [], refreshed_at: new Date().toISOString() };
+      return {
+        scope,
+        date: today,
+        employees: [],
+        refreshed_at: new Date().toISOString(),
+      };
     }
     const userIds = members.map((m) => m.user_id);
     const rows = await this.dataSource.query(

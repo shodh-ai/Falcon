@@ -82,7 +82,10 @@ export class ExamCellService {
       [todaysAttendance],
       [formRegistrations],
     ] = await Promise.all([
-      this.queryOrEmpty<{ c: number }>(`SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`, [tenantId]),
+      this.queryOrEmpty<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`,
+        [tenantId],
+      ),
       this.queryOrEmpty<{ c: number }>(
         `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date > $2::date`,
         [tenantId, today],
@@ -177,7 +180,10 @@ export class ExamCellService {
       ),
     ]);
 
-    const resultStats = await this.queryOrEmpty<{ label: string; count: number }>(
+    const resultStats = await this.queryOrEmpty<{
+      label: string;
+      count: number;
+    }>(
       `SELECT ser.status AS label, COUNT(*)::int AS count
        FROM student_exam_reports ser
        JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
@@ -887,19 +893,33 @@ export class ExamCellService {
       ],
     );
     if (rows.length !== 2) {
-      throw new BadRequestException('Both students must be seated in the selected room');
+      throw new BadRequestException(
+        'Both students must be seated in the selected room',
+      );
     }
     const a = rows.find((r) => r.student_user_id === dto.student_user_id_a)!;
     const b = rows.find((r) => r.student_user_id === dto.student_user_id_b)!;
     await this.db.query(
       `UPDATE exam_seating_allocations SET seat_number = $4
        WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3 AND student_user_id = $5`,
-      [tenantId, dto.exam_schedule_id, dto.room, b.seat_number, dto.student_user_id_a],
+      [
+        tenantId,
+        dto.exam_schedule_id,
+        dto.room,
+        b.seat_number,
+        dto.student_user_id_a,
+      ],
     );
     await this.db.query(
       `UPDATE exam_seating_allocations SET seat_number = $4
        WHERE tenant_id = $1 AND exam_schedule_id = $2 AND room = $3 AND student_user_id = $5`,
-      [tenantId, dto.exam_schedule_id, dto.room, a.seat_number, dto.student_user_id_b],
+      [
+        tenantId,
+        dto.exam_schedule_id,
+        dto.room,
+        a.seat_number,
+        dto.student_user_id_b,
+      ],
     );
     return { swapped: true };
   }
@@ -1457,7 +1477,7 @@ export class ExamCellService {
     );
   }
 
-  async getReEvaluation(applicationId: string) {
+  async getReEvaluation(tenantId: string, applicationId: string) {
     const rows = await this.db.query(
       `SELECT a.*,
               u.name AS student_name,
@@ -1469,8 +1489,9 @@ export class ExamCellService {
        JOIN academic_subjects sub ON sub.subject_id = a.subject_id
        LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
        WHERE a.exam_application_id = $1
-         AND a.application_type = 'RE_EVALUATION'`,
-      [applicationId],
+         AND a.application_type = 'RE_EVALUATION'
+         AND a.tenant_id = $2`,
+      [applicationId, tenantId],
     );
     if (!rows[0])
       throw new NotFoundException('Re-evaluation application not found');
@@ -1538,7 +1559,7 @@ export class ExamCellService {
     applicationId: string,
     facultyUserId: string,
   ) {
-    const application = await this.getReEvaluation(applicationId);
+    const application = await this.getReEvaluation(tenantId, applicationId);
     if (application.status !== 'PENDING') {
       throw new BadRequestException(
         'Only pending applications can be assigned',
@@ -1582,7 +1603,7 @@ export class ExamCellService {
       userId: facultyUserId,
     });
 
-    return this.getReEvaluation(applicationId);
+    return this.getReEvaluation(tenantId, applicationId);
   }
 
   async submitReEvaluationReport(
@@ -1590,7 +1611,14 @@ export class ExamCellService {
     applicationId: string,
     dto: { revised_marks: number; report_notes: string },
   ) {
-    const application = await this.getReEvaluation(applicationId);
+    const [faculty] = await this.db.query<Array<{ tenant_id: string }>>(
+      `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
+      [facultyUserId],
+    );
+    const tenantId =
+      faculty?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+
+    const application = await this.getReEvaluation(tenantId, applicationId);
     if (application.assigned_faculty_user_id !== facultyUserId) {
       throw new ForbiddenException(
         'You are not assigned to this re-evaluation',
@@ -1612,16 +1640,15 @@ export class ExamCellService {
       [applicationId, dto.revised_marks, dto.report_notes.trim()],
     );
 
-    const refreshed = await this.getReEvaluation(applicationId);
+    const refreshed = await this.getReEvaluation(tenantId, applicationId);
     const [student] = await this.db.query<Array<{ tenant_id: string }>>(
       `SELECT tenant_id FROM users WHERE user_id = $1`,
       [refreshed.student_user_id],
     );
-    const tenantId =
-      student?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const notifyTenantId = student?.tenant_id ?? tenantId;
 
     this.notify.examRevaluationReportReady({
-      ...this.reEvalNotifyPayload(tenantId, {
+      ...this.reEvalNotifyPayload(notifyTenantId, {
         ...refreshed,
         revised_marks: dto.revised_marks,
         report_notes: dto.report_notes,
@@ -1637,7 +1664,7 @@ export class ExamCellService {
     actorUserId: string,
     applicationId: string,
   ) {
-    const application = await this.getReEvaluation(applicationId);
+    const application = await this.getReEvaluation(tenantId, applicationId);
     if (application.status !== 'UNDER_REVIEW') {
       throw new BadRequestException(
         'Only applications with a submitted report can be published',
@@ -1666,7 +1693,7 @@ export class ExamCellService {
       );
     }
 
-    const refreshed = await this.getReEvaluation(applicationId);
+    const refreshed = await this.getReEvaluation(tenantId, applicationId);
     const payload = this.reEvalNotifyPayload(tenantId, refreshed);
 
     this.notify.examRevaluationPublished({
@@ -1713,7 +1740,7 @@ export class ExamCellService {
     applicationId: string,
     reason?: string,
   ) {
-    const application = await this.getReEvaluation(applicationId);
+    const application = await this.getReEvaluation(tenantId, applicationId);
     if (!['PENDING', 'ASSIGNED', 'UNDER_REVIEW'].includes(application.status)) {
       throw new BadRequestException('This application cannot be rejected');
     }
@@ -1728,7 +1755,7 @@ export class ExamCellService {
       [applicationId, reason?.trim() || null, actorUserId],
     );
 
-    const refreshed = await this.getReEvaluation(applicationId);
+    const refreshed = await this.getReEvaluation(tenantId, applicationId);
     this.notify.examRevaluationPublished({
       ...this.reEvalNotifyPayload(tenantId, refreshed),
       userId: refreshed.student_user_id,
@@ -1808,10 +1835,7 @@ export class ExamCellService {
     return `COALESCE(${spAlias}.branch_name, ${deptAlias}.dept_name, 'General')`;
   }
 
-  listUfmCases(
-    tenantId: string,
-    filters?: { year?: number; month?: number },
-  ) {
+  listUfmCases(tenantId: string, filters?: { year?: number; month?: number }) {
     const params: unknown[] = [tenantId];
     let sql = `
       SELECT c.*, u.name AS student_name, u.official_email AS student_email,
@@ -2010,7 +2034,9 @@ export class ExamCellService {
     ]).then(([students, courses, departments]) => ({
       students,
       courses,
-      departments: departments.map((d: { department: string }) => d.department).filter(Boolean),
+      departments: departments
+        .map((d: { department: string }) => d.department)
+        .filter(Boolean),
     }));
   }
 

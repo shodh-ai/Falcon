@@ -9,6 +9,7 @@ import {
   Delete,
   Param,
   BadRequestException,
+  StreamableFile,
 } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -33,8 +34,18 @@ import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
 import { EXAM_CELL_ACCESS_ROLES } from './exam-cell.constants';
+import {
+  assertExamCellAction,
+  examCellRoleFromUser,
+  type ExamCellAction,
+} from './exam-cell-rbac.util';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  primaryRole?: string;
+};
 
 @Controller('api/exam-cell')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -71,6 +82,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
   ) {
+    this.requireAction(req, 'manage_schedules');
     return this.examCell.createSchedule(
       this.tenant(req),
       dto as Parameters<ExamCellService['createSchedule']>[1],
@@ -94,8 +106,13 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { batch_label: string; semester?: number },
   ) {
+    this.requireAction(req, 'generate_admit_cards');
     const tenantId = this.tenant(req);
-    const result = await this.examCell.generateAdmitCards(tenantId, dto, req.user.user_id);
+    const result = await this.examCell.generateAdmitCards(
+      tenantId,
+      dto,
+      req.user.user_id,
+    );
     await this.audit.log(tenantId, req.user.user_id, {
       action: 'ADMIT_CARDS_GENERATED',
       resource_type: 'admit_card_run',
@@ -123,6 +140,7 @@ export class ExamCellController {
       rooms: string[];
     },
   ) {
+    this.requireAction(req, 'manage_seating');
     return this.examCell.autoAllocateSeating(this.tenant(req), dto);
   }
 
@@ -138,6 +156,7 @@ export class ExamCellController {
       block?: string;
     },
   ) {
+    this.requireAction(req, 'manage_seating');
     return this.examCell.assignSubjectToRoom(this.tenant(req), dto);
   }
 
@@ -152,6 +171,7 @@ export class ExamCellController {
       student_user_id_b: string;
     },
   ) {
+    this.requireAction(req, 'manage_seating');
     return this.examCell.swapSeatingAllocations(this.tenant(req), dto);
   }
 
@@ -160,6 +180,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { exam_schedule_id?: string },
   ) {
+    this.requireAction(req, 'manage_seating');
     return this.examCell.publishSeatingPlans(
       this.tenant(req),
       dto.exam_schedule_id,
@@ -200,6 +221,7 @@ export class ExamCellController {
 
   @Delete('seating-runs/:id')
   deleteSeatingRun(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    this.requireAction(req, 'manage_seating');
     return this.examCell.deleteSeatingRun(this.tenant(req), id);
   }
 
@@ -229,6 +251,7 @@ export class ExamCellController {
       is_coordinator?: boolean;
     },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.examCell.assignInvigilation(this.tenant(req), dto);
   }
 
@@ -237,6 +260,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { exam_schedule_id: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.examCell.publishInvigilationRoster(
       this.tenant(req),
       dto.exam_schedule_id,
@@ -254,6 +278,7 @@ export class ExamCellController {
     @Param('requestId') requestId: string,
     @Body() dto: { status: 'APPROVED' | 'REJECTED'; comment: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     if (!dto.comment?.trim())
       throw new BadRequestException('Comment is required');
     return this.examCell.resolveInvigilationRequest(
@@ -320,6 +345,7 @@ export class ExamCellController {
     @Body()
     dto: { course_id: string; exam_type: string; batch_semester?: number },
   ) {
+    this.requireAction(req, 'publish_results');
     return this.examCell.publishResults(this.tenant(req), dto);
   }
 
@@ -329,8 +355,11 @@ export class ExamCellController {
   }
 
   @Get('re-evaluations/:applicationId')
-  reEvaluationDetail(@Param('applicationId') applicationId: string) {
-    return this.examCell.getReEvaluation(applicationId);
+  reEvaluationDetail(
+    @Req() req: { user: AuthUser },
+    @Param('applicationId') applicationId: string,
+  ) {
+    return this.examCell.getReEvaluation(this.tenant(req), applicationId);
   }
 
   @Post('re-evaluations/:applicationId/assign')
@@ -339,6 +368,7 @@ export class ExamCellController {
     @Param('applicationId') applicationId: string,
     @Body() dto: AssignReEvaluationDto,
   ) {
+    this.requireAction(req, 'publish_results');
     return this.examCell.assignReEvaluation(
       this.tenant(req),
       req.user.user_id,
@@ -352,6 +382,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('applicationId') applicationId: string,
   ) {
+    this.requireAction(req, 'publish_results');
     return this.examCell.publishReEvaluation(
       this.tenant(req),
       req.user.user_id,
@@ -365,6 +396,7 @@ export class ExamCellController {
     @Param('applicationId') applicationId: string,
     @Body() dto: RejectReEvaluationDto,
   ) {
+    this.requireAction(req, 'publish_results');
     return this.examCell.rejectReEvaluation(
       this.tenant(req),
       req.user.user_id,
@@ -389,6 +421,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { semester: number },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.semesterResults.generateGradeCards(
       this.tenant(req),
       Number(dto.semester),
@@ -400,6 +433,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { semester: number },
   ) {
+    this.requireAction(req, 'publish_results');
     return this.semesterResults.publishProvisional(
       this.tenant(req),
       Number(dto.semester),
@@ -411,6 +445,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { semester: number },
   ) {
+    this.requireAction(req, 'publish_results');
     return this.semesterResults.finalize(
       this.tenant(req),
       Number(dto.semester),
@@ -428,6 +463,21 @@ export class ExamCellController {
       Number(semester),
       limit ? Number(limit) : 10,
     );
+  }
+
+  @Get('grade-cards/:gradeCardId/export/pdf')
+  async exportGradeCardPdf(
+    @Req() req: { user: AuthUser },
+    @Param('gradeCardId') gradeCardId: string,
+  ) {
+    const file = await this.semesterResults.exportGradeCardPdf(
+      this.tenant(req),
+      gradeCardId,
+    );
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.filename}"`,
+    });
   }
 
   @Get('ufm-cases')
@@ -459,6 +509,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
   ) {
+    this.requireAction(req, 'approve_ufm');
     return this.examCell.createUfmCase(this.tenant(req), {
       ...(dto as Parameters<ExamCellService['createUfmCase']>[1]),
       reported_by: req.user.user_id,
@@ -470,6 +521,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { semester: number },
   ) {
+    this.requireAction(req, 'publish_results');
     return this.examCell.generateTranscripts(this.tenant(req), dto.semester);
   }
 
@@ -483,6 +535,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: CreateResultSessionDto,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.createSession(this.tenant(req), dto);
   }
 
@@ -500,6 +553,7 @@ export class ExamCellController {
     @Param('sessionId') sessionId: string,
     @Body() dto: OpenResultEntryDto,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.openEntry(this.tenant(req), sessionId, dto);
   }
 
@@ -508,6 +562,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('sessionId') sessionId: string,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.closeEntry(this.tenant(req), sessionId);
   }
 
@@ -516,6 +571,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('sessionId') sessionId: string,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.lockMarks(
       this.tenant(req),
       sessionId,
@@ -528,6 +584,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('sessionId') sessionId: string,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.prepareForDeclaration(
       this.tenant(req),
       sessionId,
@@ -541,6 +598,7 @@ export class ExamCellController {
     @Param('sessionId') sessionId: string,
     @Body() dto: ReopenResultEntryDto,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.reopenEntry(this.tenant(req), sessionId, dto);
   }
 
@@ -550,6 +608,7 @@ export class ExamCellController {
     @Param('sessionId') sessionId: string,
     @Body() dto: ConfigureSessionRulesDto,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.configureRules(this.tenant(req), sessionId, dto);
   }
 
@@ -568,6 +627,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('sessionId') sessionId: string,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.runFormulaAudit(
       this.tenant(req),
       sessionId,
@@ -580,6 +640,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('sessionId') sessionId: string,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.recordDeanApproval(
       this.tenant(req),
       sessionId,
@@ -593,6 +654,7 @@ export class ExamCellController {
     @Param('sessionId') sessionId: string,
     @Body() dto: { grace_marks: number },
   ) {
+    this.requireAction(req, 'publish_results');
     return this.resultControl.applySessionGraceMarks(
       this.tenant(req),
       sessionId,
@@ -606,6 +668,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('sessionId') sessionId: string,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.resultControl.processSession(
       this.tenant(req),
       sessionId,
@@ -619,6 +682,7 @@ export class ExamCellController {
     @Param('sessionId') sessionId: string,
     @Body() dto: DeclareResultSessionDto,
   ) {
+    this.requireAction(req, 'publish_results');
     return this.resultControl.declareSession(
       this.tenant(req),
       sessionId,
@@ -641,8 +705,16 @@ export class ExamCellController {
   }
 
   @Post('sessions')
-  createExamSession(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.sessions.createSession(this.tenant(req), req.user.user_id, dto as never);
+  createExamSession(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.sessions.createSession(
+      this.tenant(req),
+      req.user.user_id,
+      dto as never,
+    );
   }
 
   @Post('sessions/:sessionId/status')
@@ -651,6 +723,7 @@ export class ExamCellController {
     @Param('sessionId') sessionId: string,
     @Body() dto: { status: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.sessions.updateSessionStatus(
       this.tenant(req),
       sessionId,
@@ -681,8 +754,16 @@ export class ExamCellController {
   }
 
   @Post('calendar/events')
-  createCalendarEvent(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.enterprise.createCalendarEvent(this.tenant(req), req.user.user_id, dto);
+  createCalendarEvent(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    this.requireAction(req, 'manage_schedules');
+    return this.enterprise.createCalendarEvent(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Post('calendar/events/:eventId/reschedule')
@@ -691,6 +772,7 @@ export class ExamCellController {
     @Param('eventId') eventId: string,
     @Body() dto: { event_date: string },
   ) {
+    this.requireAction(req, 'manage_schedules');
     return this.enterprise.updateCalendarEventDate(
       this.tenant(req),
       eventId,
@@ -715,6 +797,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { semester: number; batch_label: string },
   ) {
+    this.requireAction(req, 'generate_admit_cards');
     return this.enterprise.syncHallTicketApprovals(
       this.tenant(req),
       dto.semester,
@@ -728,11 +811,17 @@ export class ExamCellController {
     @Query('semester') semester?: string,
     @Query('batch_label') batchLabel?: string,
     @Query('stage') stage?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ) {
     return this.enterprise.listHallTicketApprovals(this.tenant(req), {
       semester: semester ? Number(semester) : undefined,
       batch_label: batchLabel,
       stage,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      search,
     });
   }
 
@@ -742,6 +831,7 @@ export class ExamCellController {
     @Param('approvalId') approvalId: string,
     @Body() dto: { action: 'APPROVE' | 'REJECT'; stage?: string },
   ) {
+    this.requireAction(req, 'generate_admit_cards');
     return this.enterprise.advanceHallTicketApproval(
       this.tenant(req),
       approvalId,
@@ -754,8 +844,10 @@ export class ExamCellController {
   @Post('hall-ticket-approvals/bulk-approve')
   bulkApproveHallTickets(
     @Req() req: { user: AuthUser },
-    @Body() dto: { semester: number; batch_label: string; target_stage: string },
+    @Body()
+    dto: { semester: number; batch_label: string; target_stage: string },
   ) {
+    this.requireAction(req, 'generate_admit_cards');
     return this.enterprise.bulkApproveHallTickets(
       this.tenant(req),
       req.user.user_id,
@@ -768,6 +860,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { exam_schedule_id: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.enterprise.autoAssignInvigilators(
       this.tenant(req),
       dto.exam_schedule_id,
@@ -776,13 +869,24 @@ export class ExamCellController {
   }
 
   @Get('answer-sheets')
-  listAnswerSheets(@Req() req: { user: AuthUser }, @Query('status') status?: string) {
+  listAnswerSheets(
+    @Req() req: { user: AuthUser },
+    @Query('status') status?: string,
+  ) {
     return this.enterprise.listAnswerSheets(this.tenant(req), status);
   }
 
   @Post('answer-sheets')
-  createAnswerSheet(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.enterprise.createAnswerSheet(this.tenant(req), req.user.user_id, dto as never);
+  createAnswerSheet(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    return this.enterprise.createAnswerSheet(
+      this.tenant(req),
+      req.user.user_id,
+      dto as never,
+    );
   }
 
   @Post('answer-sheets/:sheetId/status')
@@ -791,6 +895,7 @@ export class ExamCellController {
     @Param('sheetId') sheetId: string,
     @Body() dto: { status: string; evaluator_user_id?: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.enterprise.updateAnswerSheetStatus(
       this.tenant(req),
       sheetId,
@@ -805,6 +910,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { qr_payload: string },
   ) {
+    this.requireAction(req, 'manage_seating');
     return this.enterprise.verifyStudentByQr(
       this.tenant(req),
       req.user.user_id,
@@ -823,7 +929,11 @@ export class ExamCellController {
   }
 
   @Post('grace-marks/apply')
-  applyGraceMarks(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+  applyGraceMarks(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    this.requireAction(req, 'publish_results');
     return this.enterprise.applyGraceMarks(this.tenant(req), dto as never);
   }
 
@@ -832,6 +942,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Param('studentUserId') studentUserId: string,
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.enterprise.runDegreeEligibilityAudit(
       this.tenant(req),
       studentUserId,
@@ -865,6 +976,7 @@ export class ExamCellController {
     @Param('docId') docId: string,
     @Body() dto: { status: 'VERIFIED' | 'REJECTED' },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.enterprise.verifyStudentDocument(
       this.tenant(req),
       docId,
@@ -884,8 +996,16 @@ export class ExamCellController {
   }
 
   @Post('deadlines')
-  createDeadline(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
-    return this.enterprise.createDeadline(this.tenant(req), req.user.user_id, dto);
+  createDeadline(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    this.requireAction(req, 'manage_schedules');
+    return this.enterprise.createDeadline(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
   }
 
   @Get('document-repository')
@@ -901,6 +1021,7 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Body() dto: { title: string; category: string; file_url?: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.enterprise.uploadRepositoryDocument(
       this.tenant(req),
       req.user.user_id,
@@ -931,13 +1052,17 @@ export class ExamCellController {
   auditLog(
     @Req() req: { user: AuthUser },
     @Query('limit') limit?: string,
+    @Query('page') page?: string,
     @Query('action') action?: string,
     @Query('resource_type') resourceType?: string,
+    @Query('search') search?: string,
   ) {
     return this.audit.list(this.tenant(req), {
-      limit: limit ? Number(limit) : 100,
+      limit: limit ? Number(limit) : 50,
+      page: page ? Number(page) : 1,
       action,
       resource_type: resourceType,
+      search,
     });
   }
 
@@ -947,7 +1072,11 @@ export class ExamCellController {
   }
 
   @Post('form-windows')
-  createFormWindow(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+  createFormWindow(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    this.requireAction(req, 'manage_sessions');
     return this.operations.createFormWindow(
       this.tenant(req),
       req.user.user_id,
@@ -961,6 +1090,7 @@ export class ExamCellController {
     @Param('windowId') windowId: string,
     @Body() dto: { status: 'OPEN' | 'CLOSED' | 'DRAFT' },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.operations.updateFormWindowStatus(
       this.tenant(req),
       windowId,
@@ -975,6 +1105,7 @@ export class ExamCellController {
     @Param('windowId') windowId: string,
     @Body() dto: { semester: number },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.operations.seedRegistrationsFromSemester(
       this.tenant(req),
       windowId,
@@ -1002,6 +1133,7 @@ export class ExamCellController {
     @Param('registrationId') registrationId: string,
     @Body() dto: { status: 'APPROVED' | 'REJECTED' },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.operations.reviewRegistration(
       this.tenant(req),
       registrationId,
@@ -1027,11 +1159,15 @@ export class ExamCellController {
   }
 
   @Post('question-papers')
-  createQuestionPaper(@Req() req: { user: AuthUser }, @Body() dto: Record<string, unknown>) {
+  createQuestionPaper(
+    @Req() req: { user: AuthUser },
+    @Body() dto: Record<string, unknown>,
+  ) {
+    this.requireAction(req, 'manage_qp');
     return this.operations.createQuestionPaperRecord(
       this.tenant(req),
       req.user.user_id,
-      dto as never,
+      dto,
     );
   }
 
@@ -1041,6 +1177,7 @@ export class ExamCellController {
     @Param('qpId') qpId: string,
     @Body() dto: { status: string },
   ) {
+    this.requireAction(req, 'manage_qp');
     return this.operations.updateQuestionPaperStatus(
       this.tenant(req),
       qpId,
@@ -1067,14 +1204,19 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Query('exam_schedule_id') examScheduleId: string,
   ) {
-    return this.operations.listExamDayAttendance(this.tenant(req), examScheduleId);
+    return this.operations.listExamDayAttendance(
+      this.tenant(req),
+      examScheduleId,
+    );
   }
 
   @Post('exam-day/attendance')
   markExamDayAttendance(
     @Req() req: { user: AuthUser },
-    @Body() dto: { exam_schedule_id: string; student_user_id: string; status: string },
+    @Body()
+    dto: { exam_schedule_id: string; student_user_id: string; status: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.operations.markExamDayAttendance(
       this.tenant(req),
       req.user.user_id,
@@ -1106,8 +1248,10 @@ export class ExamCellController {
   @Post('notifications/send')
   sendNotification(
     @Req() req: { user: AuthUser },
-    @Body() dto: { channel: string; subject: string; body: string; audience?: string },
+    @Body()
+    dto: { channel: string; subject: string; body: string; audience?: string },
   ) {
+    this.requireAction(req, 'manage_sessions');
     return this.operations.sendNotificationCampaign(
       this.tenant(req),
       req.user.user_id,
@@ -1143,5 +1287,9 @@ export class ExamCellController {
 
   private tenant(req: { user: AuthUser }) {
     return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private requireAction(req: { user: AuthUser }, action: ExamCellAction) {
+    assertExamCellAction(examCellRoleFromUser(req.user), action);
   }
 }

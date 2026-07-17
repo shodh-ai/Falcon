@@ -212,11 +212,14 @@ export class AuthService {
     const tokenUserForClaims = syncedUser ?? tokenUser;
     const roleClaims = this.getRoleClaims(tokenUserForClaims);
     // Issue token before optional enrichment so Redis/HR schema faults cannot block login.
-    const token = this.signToken(tokenUserForClaims, tenant.tenant_id, tenant.pg_schema);
+    const token = this.signToken(
+      tokenUserForClaims,
+      tenant.tenant_id,
+      tenant.pg_schema,
+    );
 
-    let caps: Awaited<
-      ReturnType<HrEntityContextService['getPermissions']>
-    > = null;
+    let caps: Awaited<ReturnType<HrEntityContextService['getPermissions']>> =
+      null;
     let permissions: string[] = [];
     let allowedEntities: ReturnType<
       HrEntityContextService['formatAllowedEntities']

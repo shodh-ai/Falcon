@@ -30,7 +30,10 @@ export function monthNumberToName(month: number): string {
   return MONTH_NAMES[month - 1] ?? `Month-${month}`;
 }
 
-export function parseYearMonthKey(key: string): { year: number; month: number } {
+export function parseYearMonthKey(key: string): {
+  year: number;
+  month: number;
+} {
   const match = /^(\d{4})-(\d{2})$/.exec(key?.trim() ?? '');
   if (!match) {
     throw new BadRequestException('Month must be in YYYY-MM format.');
@@ -47,7 +50,10 @@ export function toYearMonthKey(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
 
-export function payslipToYearMonthKey(monthName: string, year: number): string | null {
+export function payslipToYearMonthKey(
+  monthName: string,
+  year: number,
+): string | null {
   const month = monthNameToNumber(monthName);
   if (!month) return null;
   return toYearMonthKey(year, month);
@@ -61,7 +67,9 @@ export function compareYearMonthKeys(a: string, b: string): number {
 
 export function enumerateYearMonthKeys(from: string, to: string): string[] {
   if (compareYearMonthKeys(from, to) > 0) {
-    throw new BadRequestException('Start month must be before or equal to end month.');
+    throw new BadRequestException(
+      'Start month must be before or equal to end month.',
+    );
   }
   const start = parseYearMonthKey(from);
   const end = parseYearMonthKey(to);

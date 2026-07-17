@@ -26,6 +26,7 @@ export default function HodProxyApprovalsPage() {
     void api
       .get<Row[]>('/api/academics/hod/approvals/proxy-requests')
       .then(setRows)
+      .catch(() => toast.error('Failed to load proxy approvals'))
       .finally(() => setLoading(false));
   }, [api]);
 

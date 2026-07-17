@@ -288,7 +288,10 @@ export class AcademicsService {
     });
   }
 
-  async getWeeklyTimetableCalendar(studentUserId: string, weekStartInput?: string) {
+  async getWeeklyTimetableCalendar(
+    studentUserId: string,
+    weekStartInput?: string,
+  ) {
     const enrolled = await this.courseEnrollments.find({
       where: { student_user_id: studentUserId, status: 'ENROLLED' },
     });
@@ -313,7 +316,7 @@ export class AcademicsService {
     }
 
     const weekEnd = weekDates[weekDates.length - 1]?.date ?? weekStart;
-    const logs = (await this.courseEnrollments.manager.query(
+    const logs = await this.courseEnrollments.manager.query(
       `SELECT cal.date::text AS date, cal.course_id, cal.timetable_id, cal.attendance_data
        FROM course_attendance_logs cal
        WHERE cal.tenant_id = $1
@@ -321,16 +324,13 @@ export class AcademicsService {
          AND cal.date >= $3::date
          AND cal.date <= $4::date`,
       [tenantId, courseIds, weekStart, weekEnd],
-    )) as Array<{
-      date: string;
-      course_id: string;
-      timetable_id: string | null;
-      attendance_data: Array<{ student_id: string; status: string }> | null;
-    }>;
+    );
 
     const attendanceMap = new Map<string, string>();
     for (const log of logs) {
-      const entries = Array.isArray(log.attendance_data) ? log.attendance_data : [];
+      const entries = Array.isArray(log.attendance_data)
+        ? log.attendance_data
+        : [];
       const entry = entries.find((row) => row.student_id === studentUserId);
       if (!entry) continue;
       attendanceMap.set(
@@ -350,7 +350,8 @@ export class AcademicsService {
       if (sessionDate && this.isSessionDone(sessionDate, slot.end_time)) {
         const withTimetable = `${sessionDate}|${slot.course_id}|${slot.timetable_id}`;
         const courseOnly = `${sessionDate}|${slot.course_id}|`;
-        const raw = attendanceMap.get(withTimetable) ?? attendanceMap.get(courseOnly);
+        const raw =
+          attendanceMap.get(withTimetable) ?? attendanceMap.get(courseOnly);
         if (!raw) {
           attendance_status = 'PENDING';
         } else if (raw === 'ABSENT') {
@@ -560,8 +561,9 @@ export class AcademicsService {
         row.attendance_risk_count > 0 || row.syllabus_behind_count > 0,
     ).length;
     const facultyWorkloadSummary = {
-      overloaded: workloadRows.filter((row) => row.workload_status === 'OVERLOADED')
-        .length,
+      overloaded: workloadRows.filter(
+        (row) => row.workload_status === 'OVERLOADED',
+      ).length,
       underloaded: workloadRows.filter(
         (row) => row.workload_status === 'UNDERUTILIZED',
       ).length,
@@ -719,19 +721,21 @@ export class AcademicsService {
   async listDeanCourseAllocationSlots(tenantId: string, deanUserId: string) {
     const scope = await this.resolveDeanScope(deanUserId);
     const { departmentIds } = scope;
-    const [slots, faculty, workload, unassignedAllocations] = await Promise.all([
-      this.listDepartmentTimetableForDepartments(tenantId, departmentIds),
-      this.listDepartmentFacultyRaw(tenantId, departmentIds).then((rows) =>
-        rows.map((row) => ({
-          user_id: row.user_id,
-          name: row.name,
-          email: row.email,
-          department: row.department?.dept_name ?? null,
-        })),
-      ),
-      this.listFacultyWorkloadForDepartments(tenantId, departmentIds),
-      this.listUnassignedAllocationsForDepartments(tenantId, departmentIds),
-    ]);
+    const [slots, faculty, workload, unassignedAllocations] = await Promise.all(
+      [
+        this.listDepartmentTimetableForDepartments(tenantId, departmentIds),
+        this.listDepartmentFacultyRaw(tenantId, departmentIds).then((rows) =>
+          rows.map((row) => ({
+            user_id: row.user_id,
+            name: row.name,
+            email: row.email,
+            department: row.department?.dept_name ?? null,
+          })),
+        ),
+        this.listFacultyWorkloadForDepartments(tenantId, departmentIds),
+        this.listUnassignedAllocationsForDepartments(tenantId, departmentIds),
+      ],
+    );
 
     const overloadedFaculty = workload.filter(
       (row) => row.workload_status === 'OVERLOADED',
@@ -823,7 +827,9 @@ export class AcademicsService {
       throw new NotFoundException('Grievance not found or unauthorized');
     }
     if (!['PENDING', 'IN_PROGRESS'].includes(ticket.status)) {
-      throw new BadRequestException('Only open escalated grievances can be resolved');
+      throw new BadRequestException(
+        'Only open escalated grievances can be resolved',
+      );
     }
 
     if (message?.trim()) {
@@ -934,19 +940,76 @@ export class AcademicsService {
     deanUserId: string,
     query: ListQueryParams = {},
   ) {
-    const all = await this.listDeanFacultyWorkload(tenantId, deanUserId);
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    if (!departmentIds.length) {
+      return toPaginatedResponse([], 0, 20, 0);
+    }
+
     const { limit, offset, search } = parseListQuery(query);
-    const needle = search.toLowerCase();
-    const filtered = needle
-      ? all.filter(
-          (row) =>
-            row.name.toLowerCase().includes(needle) ||
-            (row.dept_name ?? '').toLowerCase().includes(needle),
-        )
-      : all;
+    const params: unknown[] = [tenantId, departmentIds];
+    let searchSql = '';
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      searchSql = ` AND (LOWER(w.name) LIKE $${params.length} OR LOWER(w.dept_name) LIKE $${params.length})`;
+    }
+
+    const baseSql = `
+      WITH workload AS (
+        SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
+               d.dept_name,
+               hod.name AS hod_name,
+               hod.official_email AS hod_email,
+               COALESCE(SUM(
+                 EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600
+               ), 0)::numeric(6,1) AS hours_per_week,
+               COUNT(DISTINCT t.course_id)::int AS course_count
+        FROM users u
+        LEFT JOIN departments d ON d.dept_id = u.dept_id
+        LEFT JOIN users hod ON hod.user_id = d.hod_user_id
+        LEFT JOIN academic_timetables t
+          ON t.faculty_user_id = u.user_id AND t.tenant_id = u.tenant_id
+        LEFT JOIN roles r ON r.role_id = u.role_id
+        WHERE u.tenant_id = $1
+          AND u.dept_id = ANY($2::int[])
+          AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+        GROUP BY u.user_id, u.name, u.official_email, u.dept_id, d.dept_name, hod.name, hod.official_email
+      )
+      SELECT w.* FROM workload w WHERE 1=1${searchSql}`;
+
+    const countRows = await this.users.manager.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::int AS total FROM (${baseSql}) sub`,
+      params,
+    );
+
+    params.push(limit, offset);
+    const rows = await this.users.manager.query(
+      `${baseSql}
+       ORDER BY w.dept_name ASC, w.hours_per_week DESC, w.name ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+
+    const data = rows.map((row: Record<string, unknown>) => ({
+      user_id: row.user_id,
+      name: row.name,
+      email: row.email,
+      dept_id: row.dept_id,
+      dept_name: row.dept_name,
+      hod_name: row.hod_name,
+      hod_email: row.hod_email,
+      hours_per_week: Number(row.hours_per_week ?? 0),
+      course_count: Number(row.course_count ?? 0),
+      workload_status:
+        Number(row.hours_per_week ?? 0) > 18
+          ? 'OVERLOADED'
+          : Number(row.hours_per_week ?? 0) < 6
+            ? 'UNDERUTILIZED'
+            : 'BALANCED',
+    }));
+
     return toPaginatedResponse(
-      filtered.slice(offset, offset + limit),
-      filtered.length,
+      data,
+      Number(countRows[0]?.total ?? 0),
       limit,
       offset,
     );
@@ -957,19 +1020,53 @@ export class AcademicsService {
     deanUserId: string,
     query: ListQueryParams = {},
   ) {
-    const all = await this.listDeanGrievances(tenantId, deanUserId);
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    if (!departmentIds.length) {
+      return toPaginatedResponse([], 0, 20, 0);
+    }
+
     const { limit, offset, search } = parseListQuery(query);
-    const needle = search.toLowerCase();
-    const filtered = needle
-      ? all.filter(
-          (row) =>
-            String(row.title ?? '').toLowerCase().includes(needle) ||
-            String(row.student_name ?? '').toLowerCase().includes(needle),
-        )
-      : all;
+    const params: unknown[] = [tenantId, departmentIds];
+    let searchSql = '';
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      searchSql = ` AND (LOWER(t.subject) LIKE $${params.length} OR LOWER(u.name) LIKE $${params.length})`;
+    }
+
+    const countRows = await this.users.manager.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::int AS total
+       FROM helpdesk_tickets t
+       INNER JOIN users u ON u.user_id = t.student_user_id
+       WHERE u.tenant_id = $1
+         AND t.category = 'ACADEMICS'
+         AND t.status IN ('PENDING', 'IN_PROGRESS')
+         AND COALESCE(t.escalation_level, 0) >= 1
+         AND u.dept_id = ANY($2::int[])${searchSql}`,
+      params,
+    );
+
+    params.push(limit, offset);
+    const rows = await this.users.manager.query(
+      `SELECT t.ticket_id, t.subject AS title, t.category, t.status, t.created_at, t.description,
+              COALESCE(t.escalation_level, 0) AS escalation_level,
+              u.user_id AS student_user_id, u.name AS student_name, u.official_email AS student_email,
+              d.dept_name
+       FROM helpdesk_tickets t
+       INNER JOIN users u ON u.user_id = t.student_user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE u.tenant_id = $1
+         AND t.category = 'ACADEMICS'
+         AND t.status IN ('PENDING', 'IN_PROGRESS')
+         AND COALESCE(t.escalation_level, 0) >= 1
+         AND u.dept_id = ANY($2::int[])${searchSql}
+       ORDER BY t.created_at ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+
     return toPaginatedResponse(
-      filtered.slice(offset, offset + limit),
-      filtered.length,
+      rows,
+      Number(countRows[0]?.total ?? 0),
       limit,
       offset,
     );
@@ -980,20 +1077,117 @@ export class AcademicsService {
     deanUserId: string,
     query: ListQueryParams = {},
   ) {
-    const all = await this.listDeanInbox(tenantId, deanUserId);
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    if (!departmentIds.length) {
+      return toPaginatedResponse([], 0, 20, 0);
+    }
+
     const { limit, offset, search } = parseListQuery(query);
-    const needle = search.toLowerCase();
-    const filtered = needle
-      ? all.filter(
-          (row) =>
-            String(row.title ?? '').toLowerCase().includes(needle) ||
-            String(row.type ?? '').toLowerCase().includes(needle) ||
-            String(row.employee_name ?? '').toLowerCase().includes(needle),
-        )
-      : all;
+    const params: unknown[] = [tenantId, departmentIds];
+    let searchSql = '';
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      const idx = params.length;
+      searchSql = ` AND (LOWER(i.title) LIKE $${idx} OR LOWER(i.employee_name) LIKE $${idx} OR LOWER(i.type) LIKE $${idx})`;
+    }
+
+    const unionSql = `
+      WITH inbox AS (
+        SELECT fr.request_id::text AS id, 'FUNDING'::text AS type,
+               COALESCE(g.project_title, 'Funding Request')::text AS title,
+               COALESCE(u.name, 'Faculty')::text AS employee_name,
+               ('₹' || COALESCE(fr.amount, 0)::text)::text AS date_label,
+               (COALESCE(d.dept_name, 'Department') || ' · ' || COALESCE(fr.purpose, '—'))::text AS detail,
+               fr.created_at
+        FROM project_funding_requests fr
+        INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
+        INNER JOIN users u ON u.user_id = fr.requested_by
+        INNER JOIN departments d ON d.dept_id = u.dept_id
+        WHERE fr.tenant_id = $1 AND fr.status = 'APPROVED_HOD' AND u.dept_id = ANY($2::int[])
+        UNION ALL
+        SELECT r.request_id::text, 'ATTENDANCE_POLICY',
+               'Attendance Threshold Relaxation',
+               COALESCE(hod.name, 'HOD'),
+               (COALESCE(r.requested_min_percent::text, '—') || '% threshold'),
+               COALESCE(d.dept_name, 'Department'),
+               r.created_at
+        FROM attendance_threshold_requests r
+        INNER JOIN departments d ON d.dept_id = r.dept_id
+        LEFT JOIN users hod ON hod.user_id = d.hod_user_id
+        WHERE r.tenant_id = $1 AND r.status = 'PENDING_DEAN' AND r.dept_id = ANY($2::int[])
+        UNION ALL
+        SELECT e.event_id::text, 'EVENT',
+               COALESCE(e.title, 'Campus Event'),
+               COALESCE(d.dept_name, 'School Event'),
+               COALESCE(to_char(e.event_date, 'DD Mon YYYY'), '—'),
+               COALESCE(c.name, 'Campus event'),
+               e.created_at
+        FROM campus_events e
+        LEFT JOIN campus_clubs c ON c.club_id = e.club_id
+        LEFT JOIN users advisor ON advisor.user_id = c.faculty_advisor_id
+        LEFT JOIN departments d ON d.dept_id = advisor.dept_id
+        WHERE e.tenant_id = $1 AND e.status = 'PENDING_DEAN'
+          AND e.dean_approval = 'PENDING' AND e.hod_approval = 'APPROVED'
+          AND advisor.dept_id = ANY($2::int[])
+        UNION ALL
+        SELECT t.ticket_id::text, 'GRIEVANCE',
+               COALESCE(t.subject, 'Grievance'),
+               COALESCE(u.name, 'Student'),
+               COALESCE(d.dept_name, 'Department'),
+               'Escalated by HOD',
+               t.created_at
+        FROM helpdesk_tickets t
+        INNER JOIN users u ON u.user_id = t.student_user_id
+        LEFT JOIN departments d ON d.dept_id = u.dept_id
+        WHERE u.tenant_id = $1 AND t.category = 'ACADEMICS'
+          AND t.status IN ('PENDING', 'IN_PROGRESS')
+          AND COALESCE(t.escalation_level, 0) >= 1
+          AND u.dept_id = ANY($2::int[])
+        UNION ALL
+        SELECT a.adjustment_id::text,
+               CASE WHEN a.adjustment_type = 'CANCEL' THEN 'CANCEL' ELSE 'EXTRA_CLASS' END,
+               CASE WHEN a.adjustment_type = 'CANCEL' THEN 'Class Cancellation' ELSE 'Extra / Substitute Class' END,
+               COALESCE(u.name, 'Faculty'),
+               COALESCE(to_char(a.new_date, 'DD Mon YYYY'), to_char(a.original_date, 'DD Mon YYYY'), '—'),
+               (c.course_code || ': ' || COALESCE(a.reason, '—')),
+               a.created_at
+        FROM class_adjustments a
+        INNER JOIN academic_courses c ON c.course_id = a.course_id
+        INNER JOIN users u ON u.user_id = a.faculty_user_id
+        LEFT JOIN departments d ON d.dept_id = u.dept_id
+        WHERE a.tenant_id = $1 AND a.status = 'PENDING_HOD_APPROVAL'
+          AND u.dept_id = ANY($2::int[])
+      )
+      SELECT i.id, i.type, i.title, i.employee_name, i.date_label, i.detail, i.created_at
+      FROM inbox i
+      WHERE 1=1${searchSql}`;
+
+    const countRows = await this.users.manager.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::int AS total FROM (${unionSql}) sub`,
+      params,
+    );
+
+    params.push(limit, offset);
+    const rows = await this.users.manager.query(
+      `${unionSql}
+       ORDER BY i.created_at ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+
+    const data = (rows as Array<Record<string, unknown>>).map((row) => ({
+      id: String(row.id),
+      type: String(row.type),
+      title: String(row.title),
+      employee_name: String(row.employee_name),
+      date_label: String(row.date_label),
+      detail: String(row.detail),
+      created_at: String(row.created_at ?? new Date().toISOString()),
+    }));
+
     return toPaginatedResponse(
-      filtered.slice(offset, offset + limit),
-      filtered.length,
+      data,
+      Number(countRows[0]?.total ?? 0),
       limit,
       offset,
     );
@@ -1005,34 +1199,90 @@ export class AcademicsService {
     lowAttendance = false,
     query: ListQueryParams = {},
   ) {
-    const all = await this.listDeanStudents(tenantId, deanUserId, lowAttendance);
-    const { limit, offset, search, sort, order } = parseListQuery(query);
-    const needle = search.toLowerCase();
-    let filtered = needle
-      ? all.filter(
-          (row) =>
-            String(row.name ?? '').toLowerCase().includes(needle) ||
-            String(row.email ?? '').toLowerCase().includes(needle) ||
-            String(row.department ?? '').toLowerCase().includes(needle),
-        )
-      : all;
-    if (sort) {
-      filtered = [...filtered].sort((a, b) => {
-        const av = (a as Record<string, unknown>)[sort];
-        const bv = (b as Record<string, unknown>)[sort];
-        const cmp =
-          typeof av === 'number' && typeof bv === 'number'
-            ? av - bv
-            : String(av ?? '').localeCompare(String(bv ?? ''));
-        return order === 'asc' ? cmp : -cmp;
-      });
+    const { departmentIds } = await this.resolveDeanScope(deanUserId);
+    if (!departmentIds.length) {
+      return toPaginatedResponse([], 0, 20, 0);
     }
-    return toPaginatedResponse(
-      filtered.slice(offset, offset + limit),
-      filtered.length,
-      limit,
-      offset,
+
+    const { limit, offset, search, sort, order } = parseListQuery(query);
+
+    if (lowAttendance) {
+      const all = await this.listDeanStudents(tenantId, deanUserId, true);
+      const needle = search.toLowerCase();
+      const filtered = needle
+        ? all.filter(
+            (row) =>
+              String(row.name ?? '')
+                .toLowerCase()
+                .includes(needle) ||
+              String(row.email ?? '')
+                .toLowerCase()
+                .includes(needle) ||
+              String(row.department ?? '')
+                .toLowerCase()
+                .includes(needle),
+          )
+        : all;
+      return toPaginatedResponse(
+        filtered.slice(offset, offset + limit),
+        filtered.length,
+        limit,
+        offset,
+      );
+    }
+
+    const params: unknown[] = [tenantId, departmentIds];
+    let searchSql = '';
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      searchSql = ` AND (LOWER(u.name) LIKE $${params.length} OR LOWER(u.official_email) LIKE $${params.length} OR LOWER(COALESCE(d.dept_name, '')) LIKE $${params.length})`;
+    }
+
+    const sortColumn =
+      sort === 'email'
+        ? 'u.official_email'
+        : sort === 'department'
+          ? 'd.dept_name'
+          : 'u.name';
+    const sortDirection = order === 'desc' ? 'DESC' : 'ASC';
+
+    const baseFrom = `
+      FROM users u
+      INNER JOIN roles r ON r.role_id = u.role_id
+      LEFT JOIN departments d ON d.dept_id = u.dept_id
+      WHERE u.tenant_id = $1
+        AND r.role_name = 'Student'
+        AND u.dept_id = ANY($2::int[])${searchSql}`;
+
+    const countRows = await this.users.manager.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::int AS total ${baseFrom}`,
+      params,
     );
+    const total = Number(countRows[0]?.total ?? 0);
+
+    const pageParams = [...params, limit, offset];
+    const idRows = await this.users.manager.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id ${baseFrom}
+       ORDER BY ${sortColumn} ${sortDirection}, u.user_id ASC
+       LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}`,
+      pageParams,
+    );
+    const pageIds = idRows.map((row) => row.user_id);
+    if (!pageIds.length) {
+      return toPaginatedResponse([], total, limit, offset);
+    }
+
+    const enriched = await this.listStudentsForDepartments(
+      tenantId,
+      departmentIds,
+      false,
+    );
+    const byId = new Map(enriched.map((row) => [String(row.user_id), row]));
+    const data = pageIds
+      .map((id) => byId.get(id))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+    return toPaginatedResponse(data, total, limit, offset);
   }
 
   private async buildCommandCenterForDepartments(
@@ -1517,13 +1767,15 @@ export class AcademicsService {
       key: 'extension',
       label: 'Extension & Outreach',
       weight: 0.15,
-      description: 'Workshops, community labs, industry connect, student mentoring',
+      description:
+        'Workshops, community labs, industry connect, student mentoring',
     },
     {
       key: 'administration',
       label: 'Administration & Duties',
       weight: 0.15,
-      description: 'Department coordination, exam duty, timetable, committee work',
+      description:
+        'Department coordination, exam duty, timetable, committee work',
     },
   ] as const;
 
@@ -1649,13 +1901,23 @@ export class AcademicsService {
       if (!created) {
         throw new NotFoundException('Could not create appraisal record');
       }
-      return this.submitHodAppraisalRating(tenantId, hodUserId, created.appraisal_record_id, payload);
+      return this.submitHodAppraisalRating(
+        tenantId,
+        hodUserId,
+        created.appraisal_record_id,
+        payload,
+      );
     }
 
     void deptId;
 
     const breakdown: Record<string, number> = {};
-    for (const key of ['research', 'academics', 'extension', 'administration'] as const) {
+    for (const key of [
+      'research',
+      'academics',
+      'extension',
+      'administration',
+    ] as const) {
       const val = payload[key];
       if (val === undefined || val === null) continue;
       if (val < 0 || val > 5) {
@@ -1665,7 +1927,9 @@ export class AcademicsService {
     }
 
     if (!Object.keys(breakdown).length && payload.hod_rating === undefined) {
-      throw new BadRequestException('Provide at least one criterion score or overall rating');
+      throw new BadRequestException(
+        'Provide at least one criterion score or overall rating',
+      );
     }
 
     const hodRating =
@@ -1674,7 +1938,9 @@ export class AcademicsService {
         : AcademicsService.computeWeightedHodRating(breakdown);
 
     if (hodRating === null || hodRating < 0 || hodRating > 5) {
-      throw new BadRequestException('Overall HOD rating must be between 0 and 5');
+      throw new BadRequestException(
+        'Overall HOD rating must be between 0 and 5',
+      );
     }
 
     await this.users.manager.query(
@@ -1954,10 +2220,16 @@ export class AcademicsService {
   ) {
     if (!deptIds.length) return [];
 
-    const [fundingRows, attendanceRows, eventRows, grievanceRows, adjustmentRows] =
-      await Promise.all([
-        this.users.manager.query(
-          `SELECT fr.request_id, g.project_title, u.name AS faculty_name, d.dept_name,
+    const [
+      fundingRows,
+      attendanceRows,
+      eventRows,
+      grievanceRows,
+      adjustmentRows,
+      resultApprovalRows,
+    ] = await Promise.all([
+      this.users.manager.query(
+        `SELECT fr.request_id, g.project_title, u.name AS faculty_name, d.dept_name,
                   fr.amount, fr.purpose, fr.created_at
            FROM project_funding_requests fr
            INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
@@ -1967,10 +2239,10 @@ export class AcademicsService {
              AND fr.status = 'APPROVED_HOD'
              AND u.dept_id = ANY($2::int[])
            ORDER BY fr.created_at ASC`,
-          [tenantId, deptIds],
-        ),
-        this.users.manager.query(
-          `SELECT r.request_id, r.status, r.requested_min_percent, r.reason, r.created_at,
+        [tenantId, deptIds],
+      ),
+      this.users.manager.query(
+        `SELECT r.request_id, r.status, r.requested_min_percent, r.reason, r.created_at,
                   d.dept_name, hod.name AS hod_name
            FROM attendance_threshold_requests r
            INNER JOIN departments d ON d.dept_id = r.dept_id
@@ -1979,10 +2251,10 @@ export class AcademicsService {
              AND r.status = 'PENDING_DEAN'
              AND r.dept_id = ANY($2::int[])
            ORDER BY r.created_at ASC`,
-          [tenantId, deptIds],
-        ),
-        this.users.manager.query(
-          `SELECT e.event_id, e.title, c.name AS club_name, e.event_date, e.created_at, d.dept_name
+        [tenantId, deptIds],
+      ),
+      this.users.manager.query(
+        `SELECT e.event_id, e.title, c.name AS club_name, e.event_date, e.created_at, d.dept_name
            FROM campus_events e
            LEFT JOIN campus_clubs c ON c.club_id = e.club_id
            LEFT JOIN users advisor ON advisor.user_id = c.faculty_advisor_id
@@ -1993,10 +2265,10 @@ export class AcademicsService {
              AND e.hod_approval = 'APPROVED'
              AND advisor.dept_id = ANY($2::int[])
            ORDER BY e.created_at ASC`,
-          [tenantId, deptIds],
-        ),
-        this.users.manager.query(
-          `SELECT t.ticket_id, t.subject, t.created_at, u.name AS student_name, d.dept_name
+        [tenantId, deptIds],
+      ),
+      this.users.manager.query(
+        `SELECT t.ticket_id, t.subject, t.created_at, u.name AS student_name, d.dept_name
            FROM helpdesk_tickets t
            INNER JOIN users u ON u.user_id = t.student_user_id
            LEFT JOIN departments d ON d.dept_id = u.dept_id
@@ -2006,10 +2278,10 @@ export class AcademicsService {
              AND COALESCE(t.escalation_level, 0) >= 1
              AND u.dept_id = ANY($2::int[])
            ORDER BY t.created_at ASC`,
-          [tenantId, deptIds],
-        ),
-        this.users.manager.query(
-          `SELECT a.adjustment_id, a.adjustment_type, a.original_date, a.new_date, a.reason, a.created_at,
+        [tenantId, deptIds],
+      ),
+      this.users.manager.query(
+        `SELECT a.adjustment_id, a.adjustment_type, a.original_date, a.new_date, a.reason, a.created_at,
                   c.course_code, u.name AS faculty_name, d.dept_name
            FROM class_adjustments a
            INNER JOIN academic_courses c ON c.course_id = a.course_id
@@ -2019,9 +2291,27 @@ export class AcademicsService {
              AND a.status = 'PENDING_HOD_APPROVAL'
              AND u.dept_id = ANY($2::int[])
            ORDER BY a.created_at ASC`,
+        [tenantId, deptIds],
+      ),
+      this.users.manager
+        .query(
+          `SELECT r.request_id, r.session_id, r.requested_at, r.request_summary,
+                  c.course_code, c.course_name, s.exam_type, s.semester
+           FROM exam_result_dean_approval_requests r
+           INNER JOIN exam_result_sessions s ON s.session_id = r.session_id
+           INNER JOIN academic_courses c ON c.course_id = s.course_id
+           WHERE r.tenant_id = $1 AND r.status = 'PENDING'
+             AND EXISTS (
+               SELECT 1 FROM academic_timetables t
+               INNER JOIN users fu ON fu.user_id = t.faculty_user_id
+               WHERE t.course_id = c.course_id AND t.tenant_id = r.tenant_id
+                 AND fu.dept_id = ANY($2::int[])
+             )
+           ORDER BY r.requested_at ASC`,
           [tenantId, deptIds],
-        ),
-      ]);
+        )
+        .catch(() => []),
+    ]);
 
     const inbox: Array<{
       id: string;
@@ -2088,13 +2378,28 @@ export class AcademicsService {
       });
     }
 
+    for (const row of resultApprovalRows as Array<Record<string, unknown>>) {
+      inbox.push({
+        id: String(row.request_id),
+        type: 'RESULT_APPROVAL',
+        title: `Result Declaration — ${row.course_code ?? 'Course'}`,
+        employee_name: 'Examination Cell',
+        date_label: String(row.exam_type ?? 'Exam'),
+        detail: `${row.course_name ?? ''} · Sem ${row.semester ?? '—'}`,
+        created_at: String(row.requested_at ?? new Date().toISOString()),
+        action_href: '/dean/inbox?type=RESULT_APPROVAL',
+      });
+    }
+
     for (const row of adjustmentRows as Array<Record<string, unknown>>) {
       const adjType = String(row.adjustment_type ?? 'EXTRA_CLASS');
       inbox.push({
         id: String(row.adjustment_id),
         type: adjType === 'CANCEL' ? 'CANCEL' : 'EXTRA_CLASS',
         title:
-          adjType === 'CANCEL' ? 'Class Cancellation' : 'Extra / Substitute Class',
+          adjType === 'CANCEL'
+            ? 'Class Cancellation'
+            : 'Extra / Substitute Class',
         employee_name: String(row.faculty_name ?? 'Faculty'),
         date_label: row.new_date
           ? new Date(String(row.new_date)).toLocaleDateString('en-IN')
@@ -2342,21 +2647,28 @@ export class AcademicsService {
       ),
     ]);
     const conductedMap = new Map<string, number>(
-      conductedRows.map((r: { faculty_user_id: string; course_id: string; conducted: number }) => [
-        `${r.faculty_user_id}_${r.course_id}`,
-        Number(r.conducted),
-      ]),
+      conductedRows.map(
+        (r: {
+          faculty_user_id: string;
+          course_id: string;
+          conducted: number;
+        }) => [`${r.faculty_user_id}_${r.course_id}`, Number(r.conducted)],
+      ),
     );
     const slotMap = new Map<string, number>(
-      slotRows.map((r: { faculty_user_id: string; course_id: string; weekly_slots: number }) => [
-        `${r.faculty_user_id}_${r.course_id}`,
-        Number(r.weekly_slots),
-      ]),
+      slotRows.map(
+        (r: {
+          faculty_user_id: string;
+          course_id: string;
+          weekly_slots: number;
+        }) => [`${r.faculty_user_id}_${r.course_id}`, Number(r.weekly_slots)],
+      ),
     );
 
-    const marksStatuses = courseIds.length > 0
-      ? await this.users.manager.query(
-          `SELECT course_id, exam_type, COUNT(*)::int AS count, MIN(status) AS min_status
+    const marksStatuses =
+      courseIds.length > 0
+        ? await this.users.manager.query(
+            `SELECT course_id, exam_type, COUNT(*)::int AS count, MIN(status) AS min_status
            FROM academic_marks 
            WHERE tenant_id = $1 AND course_id = ANY($2::uuid[]) 
            GROUP BY course_id, exam_type`,
@@ -2495,10 +2807,18 @@ export class AcademicsService {
           }
         }
 
-        const marks = marksMap.get(courseId) ?? { ga: false, wt: false, labs: false, theory: false, status: 'OPEN' };
-        const classesConducted = conductedMap.get(`${fac.user_id}_${courseId}`) ?? 0;
+        const marks = marksMap.get(courseId) ?? {
+          ga: false,
+          wt: false,
+          labs: false,
+          theory: false,
+          status: 'OPEN',
+        };
+        const classesConducted =
+          conductedMap.get(`${fac.user_id}_${courseId}`) ?? 0;
         const weeklySlots = slotMap.get(`${fac.user_id}_${courseId}`) ?? 0;
-        const totalClasses = weeklySlots > 0 ? weeklySlots * 15 : Math.max(35, classesConducted);
+        const totalClasses =
+          weeklySlots > 0 ? weeklySlots * 15 : Math.max(35, classesConducted);
 
         auditRecords.push({
           id: `a-${fac.user_id}-${courseId}`,
@@ -2512,9 +2832,14 @@ export class AcademicsService {
           classesConducted,
           attendanceMarked:
             totalClasses > 0
-              ? Math.min(100, Math.round((classesConducted / totalClasses) * 100))
+              ? Math.min(
+                  100,
+                  Math.round((classesConducted / totalClasses) * 100),
+                )
               : 0,
-          attendanceMissingClasses: missing.filter((m) => m.startsWith(alloc.course?.course_code || '')),
+          attendanceMissingClasses: missing.filter((m) =>
+            m.startsWith(alloc.course?.course_code || ''),
+          ),
           attendanceStatusLabel,
           marksUploaded: {
             ga: marks.ga,
@@ -2782,16 +3107,18 @@ export class AcademicsService {
       studentIds.length === 0
         ? []
         : await this.users.manager.query<
-            Array<{ user_id: string; branch_name: string | null; batch: string | null }>
+            Array<{
+              user_id: string;
+              branch_name: string | null;
+              batch: string | null;
+            }>
           >(
             `SELECT user_id, branch_name, batch
              FROM student_profiles
              WHERE user_id = ANY($1::uuid[]) AND deleted_at IS NULL`,
             [studentIds],
           );
-    const profileByUser = new Map(
-      profileRows.map((row) => [row.user_id, row]),
-    );
+    const profileByUser = new Map(profileRows.map((row) => [row.user_id, row]));
     const enrollments =
       studentIds.length === 0
         ? []
@@ -3694,7 +4021,10 @@ export class AcademicsService {
       syllabus_coverage: syllabus.map((row) => ({
         course: row.course_code,
         actual: row.coverage_percent,
-        planned: Math.min(100, row.coverage_percent + (row.behind_schedule ? 15 : 5)),
+        planned: Math.min(
+          100,
+          row.coverage_percent + (row.behind_schedule ? 15 : 5),
+        ),
       })),
       courses_summary: results.map((row) => {
         const syllabusRow = syllabus.find(
@@ -3795,8 +4125,9 @@ export class AcademicsService {
           )
         : Promise.resolve([]),
       facultyIds.length
-        ? this.users.manager.query(
-            `SELECT r.naac_criterion AS criterion_id,
+        ? this.users.manager
+            .query(
+              `SELECT r.naac_criterion AS criterion_id,
                     COUNT(*)::int AS document_count,
                     MAX(r.title) AS latest_file_name,
                     (
@@ -3816,20 +4147,23 @@ export class AcademicsService {
                AND r.academic_year = $4
                AND (u.dept_id = ANY($2::int[]) OR u.user_id = $3)
              GROUP BY r.naac_criterion`,
-            [tenantId, deptIds, hodUserId, academicYear],
-          ).catch(() => [])
+              [tenantId, deptIds, hodUserId, academicYear],
+            )
+            .catch(() => [])
         : Promise.resolve([]),
       deptIds.length
-        ? this.users.manager.query(
-            `SELECT audit_report_id, status, created_at, findings
+        ? this.users.manager
+            .query(
+              `SELECT audit_report_id, status, created_at, findings
              FROM academic_audit_reports
              WHERE tenant_id = $1
                AND department_id = ANY($2::int[])
                AND audit_type = 'DEPARTMENT_SSR'
              ORDER BY created_at DESC
              LIMIT 1`,
-            [tenantId, deptIds],
-          ).catch(() => [])
+              [tenantId, deptIds],
+            )
+            .catch(() => [])
         : Promise.resolve([]),
     ]);
 
@@ -3852,7 +4186,10 @@ export class AcademicsService {
       ]),
     );
     const vaultByCriterion = new Map<number, VaultCriterionRow>(
-      vaultRows.map((row: VaultCriterionRow) => [Number(row.criterion_id), row]),
+      vaultRows.map((row: VaultCriterionRow) => [
+        Number(row.criterion_id),
+        row,
+      ]),
     );
 
     const facultyCount = Math.max(faculty.length, 1);
@@ -3886,7 +4223,8 @@ export class AcademicsService {
         status,
         owner:
           vault?.coordinator_name ??
-          faculty.find((member) => member.role?.role_name === 'Faculty')?.name ??
+          faculty.find((member) => member.role?.role_name === 'Faculty')
+            ?.name ??
           faculty[0]?.name ??
           'HOD Office',
         evidence_file: vault?.latest_file_name ?? null,
@@ -3907,8 +4245,7 @@ export class AcademicsService {
         latestSubmission[0]?.findings?.comments ??
         latestSubmission[0]?.findings?.hod_comments ??
         null,
-      master_file:
-        latestSubmission[0]?.findings?.master_file_name ?? null,
+      master_file: latestSubmission[0]?.findings?.master_file_name ?? null,
       overall_progress: overallProgress,
       criteria,
     };
@@ -4006,8 +4343,9 @@ export class AcademicsService {
       ],
     );
 
-    await this.users.manager.query(
-      `INSERT INTO iqac_document_repository (
+    await this.users.manager
+      .query(
+        `INSERT INTO iqac_document_repository (
          tenant_id, naac_criterion, metric_number, title, file_path, uploaded_by, academic_year
        )
        SELECT $1,
@@ -4031,22 +4369,25 @@ export class AcademicsService {
              AND r.file_path = s.file_path
              AND r.naac_criterion = ((tm.task_id - 1) % 7) + 1
          )`,
-      [tenantId, deptIds, hodUserId, academicYear],
-    ).catch(() => undefined);
+        [tenantId, deptIds, hodUserId, academicYear],
+      )
+      .catch(() => undefined);
 
     if (dto.master_file_path?.trim()) {
-      await this.users.manager.query(
-        `INSERT INTO iqac_document_repository (
+      await this.users.manager
+        .query(
+          `INSERT INTO iqac_document_repository (
            tenant_id, naac_criterion, metric_number, title, file_path, uploaded_by, academic_year
          ) VALUES ($1, 1, 'SSR', $2, $3, $4, $5)`,
-        [
-          tenantId,
-          dto.master_file_name?.trim() || 'Department SSR Package',
-          dto.master_file_path.trim(),
-          hodUserId,
-          academicYear,
-        ],
-      ).catch(() => undefined);
+          [
+            tenantId,
+            dto.master_file_name?.trim() || 'Department SSR Package',
+            dto.master_file_path.trim(),
+            hodUserId,
+            academicYear,
+          ],
+        )
+        .catch(() => undefined);
     }
 
     return this.getHodIqacCompiler(tenantId, hodUserId);
@@ -4087,7 +4428,11 @@ export class AcademicsService {
     if (!deptIds.length) {
       throw new ForbiddenException('No department scope for this HOD');
     }
-    if (!dto.activity_name?.trim() || !dto.file_path?.trim() || !dto.file_name?.trim()) {
+    if (
+      !dto.activity_name?.trim() ||
+      !dto.file_path?.trim() ||
+      !dto.file_name?.trim()
+    ) {
       throw new BadRequestException(
         'activity_name, file_path, and file_name are required',
       );

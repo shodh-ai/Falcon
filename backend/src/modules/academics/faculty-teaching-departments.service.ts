@@ -64,10 +64,9 @@ export class FacultyTeachingDepartmentsService {
     facultyUserId: string,
     tenantId: string,
   ): Promise<TeachingDepartmentsResult> {
-    const homeRows = await this.dataSource.query<Array<{ dept_id: number | null }>>(
-      `SELECT dept_id FROM users WHERE user_id = $1`,
-      [facultyUserId],
-    );
+    const homeRows = await this.dataSource.query<
+      Array<{ dept_id: number | null }>
+    >(`SELECT dept_id FROM users WHERE user_id = $1`, [facultyUserId]);
     const homeDeptId = homeRows[0]?.dept_id ?? null;
 
     const deptRows = await this.dataSource.query<
@@ -145,7 +144,9 @@ export class FacultyTeachingDepartmentsService {
     const result = await this.getTeachingDepartments(facultyUserId, tenantId);
     const allowed = result.departments.some((d) => d.dept_id === deptId);
     if (!allowed) {
-      throw new ForbiddenException('You do not teach in the selected department');
+      throw new ForbiddenException(
+        'You do not teach in the selected department',
+      );
     }
   }
 

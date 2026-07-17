@@ -181,10 +181,8 @@ export class HodPortalExtService {
       const stuMarks = marksMap.get(s.student_user_id) ?? {};
       const numeric = Object.values(stuMarks).filter(
         (v) => typeof v === 'number',
-      ) as number[];
-      const total = numeric.length
-        ? numeric.reduce((a, b) => a + b, 0)
-        : null;
+      );
+      const total = numeric.length ? numeric.reduce((a, b) => a + b, 0) : null;
       return {
         student_user_id: s.student_user_id,
         student_name: s.student_name,
@@ -311,9 +309,7 @@ export class HodPortalExtService {
       );
       let students = table.students as Array<Record<string, unknown>>;
       if (studentUserId) {
-        students = students.filter(
-          (s) => s.student_user_id === studentUserId,
-        );
+        students = students.filter((s) => s.student_user_id === studentUserId);
       }
       for (const t of table.exam_types as string[]) examTypeSet.add(t);
       for (const student of students) {
@@ -332,7 +328,10 @@ export class HodPortalExtService {
     sheet.getRow(1).font = { bold: true };
 
     for (const row of rowData) {
-      const marks = (row.student.marks ?? {}) as Record<string, number | string>;
+      const marks = (row.student.marks ?? {}) as Record<
+        string,
+        number | string
+      >;
       sheet.addRow([
         row.semester,
         row.course_code,
@@ -351,7 +350,8 @@ export class HodPortalExtService {
 
   async getPlacementSettings(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    if (!deptIds.length) return { dept_id: null, coordinator: null, faculty_options: [] };
+    if (!deptIds.length)
+      return { dept_id: null, coordinator: null, faculty_options: [] };
 
     const deptId = deptIds[0];
     const settings = await this.db.query(
@@ -362,7 +362,10 @@ export class HodPortalExtService {
       [tenantId, deptId],
     );
 
-    const faculty = await this.academics.listHodFacultyRoster(tenantId, hodUserId);
+    const faculty = await this.academics.listHodFacultyRoster(
+      tenantId,
+      hodUserId,
+    );
 
     return {
       dept_id: deptId,
@@ -373,11 +376,13 @@ export class HodPortalExtService {
             email: settings[0].coordinator_email,
           }
         : null,
-      faculty_options: faculty.map((f: { user_id: string; name: string; email: string }) => ({
-        user_id: f.user_id,
-        name: f.name,
-        email: f.email,
-      })),
+      faculty_options: faculty.map(
+        (f: { user_id: string; name: string; email: string }) => ({
+          user_id: f.user_id,
+          name: f.name,
+          email: f.email,
+        }),
+      ),
     };
   }
 
@@ -387,14 +392,16 @@ export class HodPortalExtService {
     coordinatorUserId: string,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    if (!deptIds.length) throw new BadRequestException('No department assigned');
+    if (!deptIds.length)
+      throw new BadRequestException('No department assigned');
     const deptId = deptIds[0];
 
     const faculty = await this.db.query(
       `SELECT user_id FROM users WHERE user_id = $1 AND tenant_id = $2 AND dept_id = $3`,
       [coordinatorUserId, tenantId, deptId],
     );
-    if (!faculty[0]) throw new BadRequestException('Faculty must belong to your department');
+    if (!faculty[0])
+      throw new BadRequestException('Faculty must belong to your department');
 
     await this.db.query(
       `INSERT INTO hod_dept_placement_settings (tenant_id, dept_id, coordinator_user_id, updated_by, updated_at)
@@ -409,8 +416,15 @@ export class HodPortalExtService {
     return this.getPlacementSettings(tenantId, hodUserId);
   }
 
-  async listPlacementDrives(tenantId: string, actorUserId: string, _role: string) {
-    const deptIds = await this.resolvePlacementScopeDeptIds(tenantId, actorUserId);
+  async listPlacementDrives(
+    tenantId: string,
+    actorUserId: string,
+    _role: string,
+  ) {
+    const deptIds = await this.resolvePlacementScopeDeptIds(
+      tenantId,
+      actorUserId,
+    );
     if (!deptIds.length) return [];
 
     const drives = await this.db.query(
@@ -439,7 +453,10 @@ export class HodPortalExtService {
       description?: string;
     },
   ) {
-    const deptIds = await this.resolvePlacementScopeDeptIds(tenantId, actorUserId);
+    const deptIds = await this.resolvePlacementScopeDeptIds(
+      tenantId,
+      actorUserId,
+    );
     if (!deptIds.length) {
       throw new ForbiddenException('No department assigned for placement');
     }
@@ -553,7 +570,9 @@ export class HodPortalExtService {
     const drive = await this.getDriveOrThrow(tenantId, driveId);
     await this.assertDriveAccess(tenantId, actorUserId, role, drive);
     const dateFilter =
-      submittedDate && /^\d{4}-\d{2}-\d{2}$/.test(submittedDate) ? submittedDate : null;
+      submittedDate && /^\d{4}-\d{2}-\d{2}$/.test(submittedDate)
+        ? submittedDate
+        : null;
     return this.db.query(
       `SELECT response_id, student_user_id, student_name, student_email, enrollment_no, phone, submitted_at, response_json
        FROM hod_dept_placement_responses
@@ -574,7 +593,11 @@ export class HodPortalExtService {
     const q = query?.trim();
     if (!q || q.length < 2) return [];
 
-    const deptIds = await this.resolvePlacementDeptIds(tenantId, actorUserId, role);
+    const deptIds = await this.resolvePlacementDeptIds(
+      tenantId,
+      actorUserId,
+      role,
+    );
     if (!deptIds.length) return [];
 
     const pattern = `%${q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
@@ -698,7 +721,7 @@ export class HodPortalExtService {
     const drive = await this.getDriveOrThrow(tenantId, driveId);
     await this.assertDriveAccess(tenantId, actorUserId, role, drive);
 
-    let studentUserId: string | null = dto.student_user_id?.trim() || null;
+    const studentUserId: string | null = dto.student_user_id?.trim() || null;
     let name = dto.student_name?.trim() || '';
     let email = dto.student_email?.trim() || null;
     let enrollmentNo = dto.enrollment_no?.trim() || null;
@@ -726,7 +749,10 @@ export class HodPortalExtService {
          WHERE drive_id = $1 AND student_user_id = $2`,
         [driveId, studentUserId],
       );
-      if (existing[0]) throw new BadRequestException('Student is already registered for this drive');
+      if (existing[0])
+        throw new BadRequestException(
+          'Student is already registered for this drive',
+        );
     } else {
       if (!name) throw new BadRequestException('Student name is required');
       if (email || enrollmentNo) {
@@ -740,7 +766,10 @@ export class HodPortalExtService {
            LIMIT 1`,
           [driveId, email, enrollmentNo],
         );
-        if (existing[0]) throw new BadRequestException('Student is already registered for this drive');
+        if (existing[0])
+          throw new BadRequestException(
+            'Student is already registered for this drive',
+          );
       }
     }
 
@@ -798,7 +827,8 @@ export class HodPortalExtService {
        WHERE drive_id = $1 AND student_user_id = $2`,
       [driveId, studentUserId],
     );
-    if (existing[0]) throw new BadRequestException('You already registered for this drive');
+    if (existing[0])
+      throw new BadRequestException('You already registered for this drive');
 
     const formUrl = drive.form_url;
     if (formUrl?.trim()) {
@@ -887,7 +917,9 @@ export class HodPortalExtService {
     }));
     for (const alias of aliases) {
       const needle = alias.toLowerCase();
-      const hit = normalized.find((f) => f.key === needle || f.key.includes(needle));
+      const hit = normalized.find(
+        (f) => f.key === needle || f.key.includes(needle),
+      );
       if (hit?.value) return hit.value;
     }
     return null;
@@ -966,14 +998,18 @@ export class HodPortalExtService {
        WHERE drive_id = $1 AND deleted_at IS NULL`,
       [driveId],
     );
-    const drive = driveRows[0] as {
-      tenant_id: string;
-      dept_id: number;
-      google_form_webhook_secret?: string | null;
-      form_url?: string | null;
-    } | undefined;
+    const drive = driveRows[0] as
+      | {
+          tenant_id: string;
+          dept_id: number;
+          google_form_webhook_secret?: string | null;
+          form_url?: string | null;
+        }
+      | undefined;
     if (!drive?.form_url?.trim()) {
-      throw new NotFoundException('Drive not found or Google Form not configured');
+      throw new NotFoundException(
+        'Drive not found or Google Form not configured',
+      );
     }
     if (drive.google_form_webhook_secret !== secret) {
       throw new ForbiddenException('Invalid webhook secret');
@@ -982,22 +1018,44 @@ export class HodPortalExtService {
     const fields = dto.fields ?? {};
     const studentName =
       dto.student_name?.trim() ||
-      this.pickFormField(fields, ['Student Name', 'Name', 'Full Name', 'student name']) ||
+      this.pickFormField(fields, [
+        'Student Name',
+        'Name',
+        'Full Name',
+        'student name',
+      ]) ||
       null;
     if (!studentName) {
-      throw new BadRequestException('Could not detect student name from form submission');
+      throw new BadRequestException(
+        'Could not detect student name from form submission',
+      );
     }
     const studentEmail =
       dto.student_email?.trim() ||
-      this.pickFormField(fields, ['Email', 'College Email', 'Official Email', 'email']) ||
+      this.pickFormField(fields, [
+        'Email',
+        'College Email',
+        'Official Email',
+        'email',
+      ]) ||
       null;
     const enrollmentNo =
       dto.enrollment_no?.trim() ||
-      this.pickFormField(fields, ['Enrollment No', 'Enrollment Number', 'Roll No', 'Roll Number']) ||
+      this.pickFormField(fields, [
+        'Enrollment No',
+        'Enrollment Number',
+        'Roll No',
+        'Roll Number',
+      ]) ||
       null;
     const phone =
       dto.phone?.trim() ||
-      this.pickFormField(fields, ['Phone', 'Mobile', 'Contact', 'Phone Number']) ||
+      this.pickFormField(fields, [
+        'Phone',
+        'Mobile',
+        'Contact',
+        'Phone Number',
+      ]) ||
       null;
     const googleResponseId = dto.google_response_id?.trim() || null;
 
@@ -1008,7 +1066,12 @@ export class HodPortalExtService {
          LIMIT 1`,
         [driveId, googleResponseId],
       );
-      if (dup[0]) return { success: true, duplicate: true, response_id: dup[0].response_id };
+      if (dup[0])
+        return {
+          success: true,
+          duplicate: true,
+          response_id: dup[0].response_id,
+        };
     }
 
     if (studentEmail || enrollmentNo) {
@@ -1022,7 +1085,12 @@ export class HodPortalExtService {
          LIMIT 1`,
         [driveId, studentEmail, enrollmentNo],
       );
-      if (dup[0]) return { success: true, duplicate: true, response_id: dup[0].response_id };
+      if (dup[0])
+        return {
+          success: true,
+          duplicate: true,
+          response_id: dup[0].response_id,
+        };
     }
 
     let studentUserId: string | null = null;
@@ -1092,7 +1160,10 @@ export class HodPortalExtService {
     actorUserId: string,
     _role: string,
   ): Promise<number[]> {
-    const deptIds = await this.resolvePlacementScopeDeptIds(tenantId, actorUserId);
+    const deptIds = await this.resolvePlacementScopeDeptIds(
+      tenantId,
+      actorUserId,
+    );
     if (!deptIds.length) {
       throw new ForbiddenException('Not authorized for placement exports');
     }
@@ -1102,9 +1173,12 @@ export class HodPortalExtService {
   private formatRegistrationSource(responseJson: unknown): string {
     try {
       const parsed =
-        typeof responseJson === 'string' ? JSON.parse(responseJson) : responseJson;
+        typeof responseJson === 'string'
+          ? JSON.parse(responseJson)
+          : responseJson;
       const source = (parsed as { source?: string })?.source ?? 'UNKNOWN';
-      if (source === 'GOOGLE_FORM_CONFIRMED') return 'Google Form + Portal confirm';
+      if (source === 'GOOGLE_FORM_CONFIRMED')
+        return 'Google Form + Portal confirm';
       if (source === 'GOOGLE_FORM_WEBHOOK') return 'Google Form (auto-sync)';
       if (source === 'PORTAL') return 'Portal only';
       if (source === 'MANUAL_COORDINATOR') return 'Manual (coordinator)';
@@ -1136,22 +1210,24 @@ export class HodPortalExtService {
     allDrives: boolean,
   ): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
-    const sheet = wb.addWorksheet(allDrives ? 'All Registrations' : 'Registrations');
+    const sheet = wb.addWorksheet(
+      allDrives ? 'All Registrations' : 'Registrations',
+    );
     let headerRow = 1;
 
     if (driveMeta && !allDrives) {
       sheet.mergeCells('A1:F1');
-      sheet.getCell('A1').value = `${driveMeta.company_name} — ${driveMeta.job_role ?? 'Placement Drive'}`;
+      sheet.getCell('A1').value =
+        `${driveMeta.company_name} — ${driveMeta.job_role ?? 'Placement Drive'}`;
       sheet.getCell('A1').font = { bold: true, size: 14 };
       sheet.getCell('A2').value = `Drive date: ${
-        driveMeta.drive_date
-          ? String(driveMeta.drive_date).slice(0, 10)
-          : 'TBD'
+        driveMeta.drive_date ? String(driveMeta.drive_date).slice(0, 10) : 'TBD'
       } · Sem ${driveMeta.semester ?? '—'}`;
       headerRow = 4;
     } else if (allDrives) {
       sheet.mergeCells('A1:J1');
-      sheet.getCell('A1').value = 'Department placement registrations — all drives';
+      sheet.getCell('A1').value =
+        'Department placement registrations — all drives';
       sheet.getCell('A1').font = { bold: true, size: 14 };
       headerRow = 3;
     }
@@ -1169,7 +1245,14 @@ export class HodPortalExtService {
           'Submitted At',
           'Source',
         ]
-      : ['Student Name', 'Email', 'Enrollment No', 'Phone', 'Submitted At', 'Source'];
+      : [
+          'Student Name',
+          'Email',
+          'Enrollment No',
+          'Phone',
+          'Submitted At',
+          'Source',
+        ];
 
     const header = sheet.getRow(headerRow);
     headers.forEach((label, index) => {
@@ -1180,7 +1263,8 @@ export class HodPortalExtService {
     if (rows.length === 0) {
       const emptyColSpan = allDrives ? 10 : 6;
       sheet.mergeCells(headerRow + 1, 1, headerRow + 1, emptyColSpan);
-      sheet.getCell(headerRow + 1, 1).value = 'No student registrations recorded yet.';
+      sheet.getCell(headerRow + 1, 1).value =
+        'No student registrations recorded yet.';
     }
 
     for (const row of rows) {
@@ -1284,8 +1368,13 @@ export class HodPortalExtService {
     actorUserId: string,
     role: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
-    const deptIds = await this.resolvePlacementDeptIds(tenantId, actorUserId, role);
-    if (!deptIds.length) throw new BadRequestException('No department linked to your account');
+    const deptIds = await this.resolvePlacementDeptIds(
+      tenantId,
+      actorUserId,
+      role,
+    );
+    if (!deptIds.length)
+      throw new BadRequestException('No department linked to your account');
 
     const rows = await this.db.query(
       `SELECT d.company_name, d.job_role, d.drive_date, d.semester,
@@ -1332,7 +1421,10 @@ export class HodPortalExtService {
       return;
     }
     const coord = await this.isPlacementCoordinator(tenantId, actorUserId);
-    if (!coord.is_coordinator || Number(coord.dept_id) !== Number(drive.dept_id)) {
+    if (
+      !coord.is_coordinator ||
+      Number(coord.dept_id) !== Number(drive.dept_id)
+    ) {
       throw new ForbiddenException('Not authorized to manage this drive');
     }
   }
@@ -1343,7 +1435,10 @@ export class HodPortalExtService {
     { role_type: 'PLACEMENT_COORDINATOR', label: 'Placement Coordinator' },
     { role_type: 'LAB_INCHARGE', label: 'Lab In-charge' },
     { role_type: 'EXAM_COORDINATOR', label: 'Exam Coordinator' },
-    { role_type: 'INTERNAL_MARKS_COORDINATOR', label: 'Internal Marks Coordinator' },
+    {
+      role_type: 'INTERNAL_MARKS_COORDINATOR',
+      label: 'Internal Marks Coordinator',
+    },
   ] as const;
 
   async getStaffRoles(tenantId: string, hodUserId: string) {
@@ -1352,7 +1447,10 @@ export class HodPortalExtService {
       return { dept_id: null, roles: [], faculty_options: [] };
     }
     const deptId = deptIds[0];
-    const faculty = await this.academics.listHodFacultyRoster(tenantId, hodUserId);
+    const faculty = await this.academics.listHodFacultyRoster(
+      tenantId,
+      hodUserId,
+    );
     const facultyOptions = faculty.map(
       (f: { user_id: string; name: string; email: string }) => ({
         user_id: f.user_id,
@@ -1362,7 +1460,11 @@ export class HodPortalExtService {
     );
 
     const assigned = await this.db.query<
-      Array<{ role_type: string; faculty_user_id: string | null; faculty_name: string | null }>
+      Array<{
+        role_type: string;
+        faculty_user_id: string | null;
+        faculty_name: string | null;
+      }>
     >(
       `SELECT r.role_type, r.faculty_user_id, u.name AS faculty_name
        FROM hod_dept_staff_roles r
@@ -1419,7 +1521,8 @@ export class HodPortalExtService {
     facultyUserId: string,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    if (!deptIds.length) throw new BadRequestException('No department assigned');
+    if (!deptIds.length)
+      throw new BadRequestException('No department assigned');
     const deptId = deptIds[0];
     const valid = HodPortalExtService.STAFF_ROLE_TYPES.some(
       (r) => r.role_type === roleType,

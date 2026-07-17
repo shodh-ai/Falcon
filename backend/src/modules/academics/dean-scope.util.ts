@@ -18,7 +18,11 @@ export async function resolveDeanScope(
   deanUserId: string,
 ): Promise<DeanScope> {
   const schoolRows = await db.query<
-    Array<{ school_id: number; school_name: string; school_code: string | null }>
+    Array<{
+      school_id: number;
+      school_name: string;
+      school_code: string | null;
+    }>
   >(
     `SELECT DISTINCT s.school_id, s.school_name, s.school_code
      FROM schools s
@@ -71,7 +75,9 @@ export async function resolveDeanScope(
     [deanUserId],
   );
   if (deanRow[0]?.dept_id) {
-    departmentIds = Array.from(new Set([...departmentIds, Number(deanRow[0].dept_id)]));
+    departmentIds = Array.from(
+      new Set([...departmentIds, Number(deanRow[0].dept_id)]),
+    );
   }
 
   return {

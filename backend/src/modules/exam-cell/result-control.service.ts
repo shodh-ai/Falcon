@@ -7,6 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { ExamCellAuditService } from './exam-cell-audit.service';
+import { resolveDeanDepartmentIds } from '../academics/dean-scope.util';
 import {
   computeGradeFromPercent,
   computePassFail,
@@ -72,12 +73,23 @@ export class ResultControlService {
         : auditAction === 'RESULT_COE_AUDIT_ANOMALY'
           ? 'anomaly'
           : 'idle';
-    const dean_approved = await this.audit.hasAction(
-      tenantId,
-      sessionId,
-      'RESULT_DEAN_APPROVED',
-    );
-    return { coe_audit_status, dean_approved };
+    const approvalRows = await this.db
+      .query<Array<{ status: string }>>(
+        `SELECT status FROM exam_result_dean_approval_requests
+       WHERE tenant_id = $1 AND session_id = $2
+       ORDER BY requested_at DESC LIMIT 1`,
+        [tenantId, sessionId],
+      )
+      .catch(() => []);
+    const deanApprovalStatus = approvalRows[0]?.status ?? null;
+    const dean_approved =
+      deanApprovalStatus === 'APPROVED' ||
+      (await this.audit.hasAction(tenantId, sessionId, 'RESULT_DEAN_APPROVED'));
+    return {
+      coe_audit_status,
+      dean_approved,
+      dean_approval_status: deanApprovalStatus,
+    };
   }
 
   async createSession(tenantId: string, dto: CreateResultSessionDto) {
@@ -317,7 +329,11 @@ export class ResultControlService {
     };
   }
 
-  async runFormulaAudit(tenantId: string, sessionId: string, actorUserId: string) {
+  async runFormulaAudit(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+  ) {
     const session = await this.getSession(tenantId, sessionId);
     const passMarks =
       session.pass_marks != null ? Number(session.pass_marks) : null;
@@ -340,13 +356,19 @@ export class ResultControlService {
     }).length;
     const rate = failing / marks.length;
     const passed = rate < 0.5;
-    const action = passed ? 'RESULT_COE_AUDIT_PASSED' : 'RESULT_COE_AUDIT_ANOMALY';
+    const action = passed
+      ? 'RESULT_COE_AUDIT_PASSED'
+      : 'RESULT_COE_AUDIT_ANOMALY';
 
     await this.audit.log(tenantId, actorUserId, {
       action,
       resource_type: 'exam_result_session',
       resource_id: sessionId,
-      new_value: { failure_rate: Math.round(rate * 100), failing, total: marks.length },
+      new_value: {
+        failure_rate: Math.round(rate * 100),
+        failing,
+        total: marks.length,
+      },
     });
 
     return {
@@ -354,11 +376,25 @@ export class ResultControlService {
       failure_rate: Math.round(rate * 100),
       anomaly_subjects: passed
         ? []
-        : [{ course_code: session.course_code, failure_rate: Math.round(rate * 100) }],
+        : [
+            {
+              course_code: session.course_code,
+              failure_rate: Math.round(rate * 100),
+            },
+          ],
     };
   }
 
   async recordDeanApproval(
+    tenantId: string,
+    sessionId: string,
+    actorUserId: string,
+  ) {
+    return this.requestDeanApproval(tenantId, sessionId, actorUserId);
+  }
+
+  /** Exam Cell submits a result session for Dean approval (replaces simulated approval). */
+  async requestDeanApproval(
     tenantId: string,
     sessionId: string,
     actorUserId: string,
@@ -370,17 +406,247 @@ export class ResultControlService {
       'RESULT_COE_AUDIT_PASSED',
     );
     if (!coePassed) {
-      throw new BadRequestException('COE formula audit must pass before dean approval');
+      throw new BadRequestException(
+        'COE formula audit must pass before requesting dean approval',
+      );
     }
     if (session.declared_at) {
       throw new BadRequestException('Results already declared');
     }
+
+    const existing = await this.db.query(
+      `SELECT request_id, status FROM exam_result_dean_approval_requests
+       WHERE tenant_id = $1 AND session_id = $2 AND status = 'PENDING'
+       LIMIT 1`,
+      [tenantId, sessionId],
+    );
+    if (existing.length) {
+      return { request_id: existing[0].request_id, status: 'PENDING' };
+    }
+
+    const pendingMarks = await this.db.query(
+      `SELECT COUNT(*)::int AS c FROM academic_marks
+       WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
+      [tenantId, session.course_id, session.exam_type],
+    );
+
+    const summary = {
+      course_code: session.course_code,
+      course_name: session.course_name,
+      exam_type: session.exam_type,
+      semester: session.semester,
+      pending_marks: pendingMarks[0]?.c ?? 0,
+    };
+
+    const rows = await this.db.query(
+      `INSERT INTO exam_result_dean_approval_requests
+         (tenant_id, session_id, status, requested_by, request_summary)
+       VALUES ($1, $2, 'PENDING', $3, $4::jsonb)
+       RETURNING request_id, status, requested_at`,
+      [tenantId, sessionId, actorUserId, JSON.stringify(summary)],
+    );
+    const request = rows[0];
+
+    await this.appendDeanApprovalHistory(
+      tenantId,
+      request.request_id,
+      sessionId,
+      actorUserId,
+      'ExamCell',
+      'REQUESTED',
+      'PENDING',
+      null,
+    );
+
     await this.audit.log(tenantId, actorUserId, {
-      action: 'RESULT_DEAN_APPROVED',
+      action: 'RESULT_DEAN_APPROVAL_REQUESTED',
       resource_type: 'exam_result_session',
       resource_id: sessionId,
+      new_value: summary,
     });
-    return { dean_approved: true };
+
+    const deanUsers = await this.db.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND r.role_name = 'Dean'`,
+      [tenantId],
+    );
+    for (const dean of deanUsers) {
+      this.notify.approvalRequired({
+        tenantId,
+        userId: dean.user_id,
+        category: 'Results',
+        requestType: 'Result Declaration',
+        requesterName: 'Examination Cell',
+        title: `Result approval required — ${session.course_code}`,
+        message: `${session.course_name} (${session.exam_type}) is ready for your review before publication.`,
+        actionLink: '/dean/inbox?type=RESULT_APPROVAL',
+      });
+    }
+
+    return request;
+  }
+
+  async listPendingDeanResultApprovals(
+    tenantId: string,
+    deanUserId: string,
+    query: { page?: string; limit?: string; search?: string } = {},
+  ) {
+    const deptIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+    if (!deptIds.length) {
+      return { data: [], total: 0, limit: 20, offset: 0 };
+    }
+
+    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
+    const page = Math.max(Number(query.page) || 1, 1);
+    const offset = (page - 1) * limit;
+    const search = query.search?.trim();
+    const params: unknown[] = [tenantId, deptIds];
+    let searchSql = '';
+    if (search) {
+      params.push(`%${search}%`);
+      searchSql = ` AND (c.course_code ILIKE $${params.length} OR c.course_name ILIKE $${params.length})`;
+    }
+
+    const countRows = await this.db.query<Array<{ total: string }>>(
+      `SELECT COUNT(*)::int AS total
+       FROM exam_result_dean_approval_requests r
+       INNER JOIN exam_result_sessions s ON s.session_id = r.session_id
+       INNER JOIN academic_courses c ON c.course_id = s.course_id
+       INNER JOIN academic_timetables t ON t.course_id = c.course_id AND t.tenant_id = s.tenant_id
+       INNER JOIN users fu ON fu.user_id = t.faculty_user_id
+       WHERE r.tenant_id = $1 AND r.status = 'PENDING'
+         AND fu.dept_id = ANY($2::int[])${searchSql}`,
+      params,
+    );
+
+    params.push(limit, offset);
+    const rows = await this.db.query(
+      `SELECT r.request_id, r.session_id, r.status, r.requested_at, r.request_summary,
+              s.course_id, s.exam_type, s.semester, s.entry_status, s.marks_locked,
+              c.course_code, c.course_name,
+              req.name AS requested_by_name
+       FROM exam_result_dean_approval_requests r
+       INNER JOIN exam_result_sessions s ON s.session_id = r.session_id
+       INNER JOIN academic_courses c ON c.course_id = s.course_id
+       INNER JOIN users req ON req.user_id = r.requested_by
+       WHERE r.tenant_id = $1 AND r.status = 'PENDING'
+         AND EXISTS (
+           SELECT 1 FROM academic_timetables t
+           INNER JOIN users fu ON fu.user_id = t.faculty_user_id
+           WHERE t.course_id = c.course_id AND t.tenant_id = s.tenant_id
+             AND fu.dept_id = ANY($2::int[])
+         )${searchSql}
+       ORDER BY r.requested_at ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+
+    return {
+      data: rows,
+      total: Number(countRows[0]?.total ?? 0),
+      limit,
+      offset,
+    };
+  }
+
+  async decideDeanResultApproval(
+    tenantId: string,
+    deanUserId: string,
+    requestId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    comment?: string,
+    actorRole = 'Dean',
+  ) {
+    const [pending] = await this.db.query<
+      Array<{ request_id: string; session_id: string; status: string }>
+    >(
+      `SELECT request_id, session_id, status
+       FROM exam_result_dean_approval_requests
+       WHERE tenant_id = $1 AND request_id = $2 AND status = 'PENDING'
+       LIMIT 1`,
+      [tenantId, requestId],
+    );
+    if (!pending) {
+      throw new NotFoundException('Pending result approval request not found');
+    }
+
+    await this.db.query(
+      `UPDATE exam_result_dean_approval_requests
+       SET status = $3, decided_by = $4, decided_at = NOW(),
+           decision_comment = $5, updated_at = NOW()
+       WHERE request_id = $1 AND tenant_id = $2`,
+      [requestId, tenantId, decision, deanUserId, comment?.trim() ?? null],
+    );
+
+    await this.appendDeanApprovalHistory(
+      tenantId,
+      requestId,
+      pending.session_id,
+      deanUserId,
+      actorRole,
+      decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+      decision,
+      comment?.trim() ?? null,
+    );
+
+    await this.audit.log(tenantId, deanUserId, {
+      action:
+        decision === 'APPROVED'
+          ? 'RESULT_DEAN_APPROVED'
+          : 'RESULT_DEAN_REJECTED',
+      resource_type: 'exam_result_session',
+      resource_id: pending.session_id,
+      new_value: { comment: comment?.trim() ?? null, decision },
+    });
+
+    return {
+      request_id: requestId,
+      session_id: pending.session_id,
+      status: decision,
+    };
+  }
+
+  async getDeanResultApprovalHistory(tenantId: string, sessionId: string) {
+    return this.db
+      .query(
+        `SELECT h.*, u.name AS actor_name
+       FROM exam_result_dean_approval_history h
+       LEFT JOIN users u ON u.user_id = h.actor_user_id
+       WHERE h.tenant_id = $1 AND h.session_id = $2
+       ORDER BY h.created_at ASC`,
+        [tenantId, sessionId],
+      )
+      .catch(() => []);
+  }
+
+  private async appendDeanApprovalHistory(
+    tenantId: string,
+    requestId: string,
+    sessionId: string,
+    actorUserId: string,
+    actorRole: string,
+    action: string,
+    status: string,
+    comment: string | null,
+  ) {
+    await this.db
+      .query(
+        `INSERT INTO exam_result_dean_approval_history
+         (request_id, tenant_id, session_id, actor_user_id, actor_role, action, status, comment)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          requestId,
+          tenantId,
+          sessionId,
+          actorUserId,
+          actorRole,
+          action,
+          status,
+          comment,
+        ],
+      )
+      .catch(() => undefined);
   }
 
   async applySessionGraceMarks(
@@ -398,13 +664,19 @@ export class ResultControlService {
     }
 
     const marks = await this.db.query<
-      Array<{ mark_id: string; student_user_id: string; marks_obtained: string; max_marks: string }>
+      Array<{
+        mark_id: string;
+        student_user_id: string;
+        marks_obtained: string;
+        max_marks: string;
+      }>
     >(
       `SELECT mark_id, student_user_id, marks_obtained, max_marks FROM academic_marks
        WHERE tenant_id = $1 AND course_id = $2 AND exam_type = $3 AND status = 'PENDING_COE'`,
       [tenantId, session.course_id, session.exam_type],
     );
-    if (!marks.length) throw new BadRequestException('No pending marks to adjust');
+    if (!marks.length)
+      throw new BadRequestException('No pending marks to adjust');
 
     let updated = 0;
     for (const row of marks) {
@@ -424,7 +696,11 @@ export class ResultControlService {
       new_value: { grace_marks: graceMarks, students_updated: updated },
     });
 
-    const processed = await this.processSession(tenantId, sessionId, actorUserId);
+    const processed = await this.processSession(
+      tenantId,
+      sessionId,
+      actorUserId,
+    );
     return { updated, preview: processed.preview };
   }
 
@@ -438,13 +714,23 @@ export class ResultControlService {
     if (session.declared_at)
       throw new BadRequestException('Results already declared');
 
-    const deanApproved = await this.audit.hasAction(
-      tenantId,
-      sessionId,
-      'RESULT_DEAN_APPROVED',
+    const deanApproved = await this.db.query(
+      `SELECT 1 FROM exam_result_dean_approval_requests
+       WHERE tenant_id = $1 AND session_id = $2 AND status = 'APPROVED'
+       LIMIT 1`,
+      [tenantId, sessionId],
     );
-    if (!deanApproved) {
-      throw new BadRequestException('Dean/VC approval is required before publishing');
+    if (!deanApproved.length) {
+      const legacyApproved = await this.audit.hasAction(
+        tenantId,
+        sessionId,
+        'RESULT_DEAN_APPROVED',
+      );
+      if (!legacyApproved) {
+        throw new BadRequestException(
+          'Dean approval is required before publishing results',
+        );
+      }
     }
 
     const bands = await this.loadGradeBands(session);

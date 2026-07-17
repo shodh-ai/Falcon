@@ -44,11 +44,12 @@ export class NotificationDispatchService {
 
     const contact = await this.dataSource.query<
       Array<{ official_email: string | null; phone: string | null }>
-    >(`SELECT u.official_email, sp.phone FROM users u
+    >(
+      `SELECT u.official_email, sp.phone FROM users u
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-       WHERE u.user_id = $1 LIMIT 1`, [
-      input.userId,
-    ]);
+       WHERE u.user_id = $1 LIMIT 1`,
+      [input.userId],
+    );
 
     const job: NotificationDeliveryJob = {
       tenantId: input.tenantId,

@@ -293,7 +293,14 @@ export class StaffOnboardingController extends BaseOnboardingController {
 
 @Controller('api/admin/student-verifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'HR', 'HRAdmin')
+@Roles(
+  'CampusAdmin',
+  'SuperAdmin',
+  'AdmissionsOfficer',
+  'Registrar',
+  'HR',
+  'HRAdmin',
+)
 export class StudentVerificationAdminController {
   constructor(
     private readonly onboarding: StudentOnboardingService,

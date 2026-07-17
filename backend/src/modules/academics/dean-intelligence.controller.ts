@@ -3,6 +3,8 @@ import {
   Get,
   Param,
   Patch,
+  Post,
+  Body,
   Query,
   Req,
   Res,
@@ -164,7 +166,11 @@ export class DeanIntelligenceController {
     @Req() req: { user: AuthUser },
     @Query() query: DeanFilterQuery & ListQueryParams & { module?: string },
   ) {
-    return this.intelligence.getAuditLog(this.tenant(req), req.user.user_id, query);
+    return this.intelligence.getAuditLog(
+      this.tenant(req),
+      req.user.user_id,
+      query,
+    );
   }
 
   @Get('approval-timeline/:type/:id')
@@ -204,5 +210,49 @@ export class DeanIntelligenceController {
       `attachment; filename="${file.filename}"`,
     );
     res.send(file.buffer);
+  }
+
+  @Get('result-approvals')
+  @Roles('Dean', 'SuperAdmin')
+  resultApprovals(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    return this.intelligence.listResultApprovals(
+      this.tenant(req),
+      req.user.user_id,
+      query,
+    );
+  }
+
+  @Post('result-approvals/:requestId/decision')
+  @Roles('Dean', 'SuperAdmin')
+  decideResultApproval(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+    @Body() dto: { decision: 'APPROVED' | 'REJECTED'; comment?: string },
+  ) {
+    return this.intelligence.decideResultApproval(
+      this.tenant(req),
+      req.user.user_id,
+      requestId,
+      dto.decision,
+      dto.comment,
+      {
+        role: req.user.role ?? 'Dean',
+      },
+    );
+  }
+
+  @Get('result-approvals/session/:sessionId/history')
+  @Roles('Dean', 'SuperAdmin')
+  resultApprovalHistory(
+    @Req() req: { user: AuthUser },
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.intelligence.getResultApprovalHistory(
+      this.tenant(req),
+      sessionId,
+    );
   }
 }

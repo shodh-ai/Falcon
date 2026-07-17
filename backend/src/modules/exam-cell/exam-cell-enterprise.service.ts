@@ -36,7 +36,9 @@ export class ExamCellEnterpriseService {
       return await this.db.query(sql, params);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+      if (
+        /relation .* does not exist|column .* does not exist/i.test(message)
+      ) {
         return [];
       }
       throw err;
@@ -47,7 +49,12 @@ export class ExamCellEnterpriseService {
 
   async listCalendarEvents(
     tenantId: string,
-    filters: { from?: string; to?: string; event_type?: string; semester?: number },
+    filters: {
+      from?: string;
+      to?: string;
+      event_type?: string;
+      semester?: number;
+    },
   ) {
     const params: unknown[] = [tenantId];
     let sql = `SELECT * FROM exam_calendar_events WHERE tenant_id = $1`;
@@ -84,29 +91,38 @@ export class ExamCellEnterpriseService {
       ),
     ]);
 
-    const mappedSchedules = scheduleEvents.map((s: Record<string, unknown>) => ({
-      event_id: `schedule-${s.exam_schedule_id}`,
-      source: 'SCHEDULE',
-      title: `${s.subject_name ?? s.exam_type} — ${s.venue ?? 'TBA'}`,
-      event_type: String(s.exam_type ?? 'EXAM').includes('PRACTICAL')
-        ? 'PRACTICAL'
-        : String(s.exam_type).includes('VIVA')
-          ? 'VIVA'
-          : String(s.exam_type).includes('MID')
-            ? 'MID_SEMESTER'
-            : 'END_SEMESTER',
-      event_date: s.exam_date,
-      start_time: s.start_time,
-      end_time: s.end_time,
-      color_code: '#1e3a5f',
-      description: s.batch_label,
-      exam_schedule_id: s.exam_schedule_id,
-    }));
+    const mappedSchedules = scheduleEvents.map(
+      (s: Record<string, unknown>) => ({
+        event_id: `schedule-${s.exam_schedule_id}`,
+        source: 'SCHEDULE',
+        title: `${s.subject_name ?? s.exam_type} — ${s.venue ?? 'TBA'}`,
+        event_type: String(s.exam_type ?? 'EXAM').includes('PRACTICAL')
+          ? 'PRACTICAL'
+          : String(s.exam_type).includes('VIVA')
+            ? 'VIVA'
+            : String(s.exam_type).includes('MID')
+              ? 'MID_SEMESTER'
+              : 'END_SEMESTER',
+        event_date: s.exam_date,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        color_code: '#1e3a5f',
+        description: s.batch_label,
+        exam_schedule_id: s.exam_schedule_id,
+      }),
+    );
 
-    return [...customEvents.map((e) => ({ ...e, source: 'CALENDAR' })), ...mappedSchedules];
+    return [
+      ...customEvents.map((e) => ({ ...e, source: 'CALENDAR' })),
+      ...mappedSchedules,
+    ];
   }
 
-  async createCalendarEvent(tenantId: string, actorUserId: string, dto: Record<string, unknown>) {
+  async createCalendarEvent(
+    tenantId: string,
+    actorUserId: string,
+    dto: Record<string, unknown>,
+  ) {
     const [row] = await this.queryOrEmpty<Record<string, unknown>>(
       `INSERT INTO exam_calendar_events
          (tenant_id, title, event_type, event_date, end_date, start_time, end_time,
@@ -183,7 +199,11 @@ export class ExamCellEnterpriseService {
     }> = [];
 
     for (const s of students) {
-      const category = await this.categorizeStudent(tenantId, s.user_id, semester);
+      const category = await this.categorizeStudent(
+        tenantId,
+        s.user_id,
+        semester,
+      );
       items.push({
         student_user_id: s.user_id,
         name: s.name,
@@ -203,26 +223,33 @@ export class ExamCellEnterpriseService {
     return { semester, total: items.length, summary, items };
   }
 
-  private async categorizeStudent(tenantId: string, studentUserId: string, semester: number) {
-    const [attendance, pendingDues, ufm, pendingDocs, pendingMarks] = await Promise.all([
-      this.attendanceEligibility.evaluate(tenantId, studentUserId, { context: 'EXAM_DESK' }),
-      this.finance.getPendingDues(studentUserId),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM ufm_cases
+  private async categorizeStudent(
+    tenantId: string,
+    studentUserId: string,
+    semester: number,
+  ) {
+    const [attendance, pendingDues, ufm, pendingDocs, pendingMarks] =
+      await Promise.all([
+        this.attendanceEligibility.evaluate(tenantId, studentUserId, {
+          context: 'EXAM_DESK',
+        }),
+        this.finance.getPendingDues(studentUserId),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM ufm_cases
          WHERE tenant_id = $1 AND student_user_id = $2 AND status != 'CLOSED'`,
-        [tenantId, studentUserId],
-      ),
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM student_exam_documents
+          [tenantId, studentUserId],
+        ),
+        this.queryOrEmpty<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM student_exam_documents
          WHERE tenant_id = $1 AND student_user_id = $2 AND verification_status = 'PENDING'`,
-        [tenantId, studentUserId],
-      ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM academic_marks
+          [tenantId, studentUserId],
+        ),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM academic_marks
          WHERE tenant_id = $1 AND student_user_id = $2 AND status = 'DRAFT'`,
-        [tenantId, studentUserId],
-      ),
-    ]);
+          [tenantId, studentUserId],
+        ),
+      ]);
 
     const blockReasons: string[] = [];
     let category: EligibilityCategory = 'ELIGIBLE';
@@ -306,11 +333,20 @@ export class ExamCellEnterpriseService {
 
   async listHallTicketApprovals(
     tenantId: string,
-    filters: { semester?: number; batch_label?: string; stage?: string },
+    filters: {
+      semester?: number;
+      batch_label?: string;
+      stage?: string;
+      page?: number;
+      limit?: number;
+      search?: string;
+    },
   ) {
+    const limit = Math.min(Math.max(Number(filters.limit) || 50, 1), 200);
+    const page = Math.max(Number(filters.page) || 1, 1);
+    const offset = (page - 1) * limit;
     const params: unknown[] = [tenantId];
     let sql = `
-      SELECT a.*, u.name AS student_name, sp.enrollment_number
       FROM hall_ticket_approvals a
       JOIN users u ON u.user_id = a.student_user_id
       LEFT JOIN student_profiles sp ON sp.user_id = a.student_user_id
@@ -327,8 +363,27 @@ export class ExamCellEnterpriseService {
       params.push(filters.stage);
       sql += ` AND a.stage = $${params.length}`;
     }
-    sql += ' ORDER BY u.name LIMIT 500';
-    return this.queryOrEmpty(sql, params);
+    if (filters.search?.trim()) {
+      params.push(`%${filters.search.trim()}%`);
+      sql += ` AND (u.name ILIKE $${params.length} OR sp.enrollment_number ILIKE $${params.length})`;
+    }
+
+    const countRows = await this.queryOrEmpty<{ c: number }>(
+      `SELECT COUNT(*)::int AS c ${sql}`,
+      params,
+    );
+    params.push(limit, offset);
+    const rows = await this.queryOrEmpty(
+      `SELECT a.*, u.name AS student_name, sp.enrollment_number ${sql}
+       ORDER BY u.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+    return {
+      data: rows,
+      total: Number(countRows[0]?.c ?? 0),
+      limit,
+      offset,
+    };
   }
 
   async advanceHallTicketApproval(
@@ -344,7 +399,14 @@ export class ExamCellEnterpriseService {
     );
     if (!current) throw new NotFoundException('Approval record not found');
 
-    const flow = ['REGISTRATION', 'ELIGIBILITY', 'FINANCE', 'EXAM_OFFICE', 'COE', 'APPROVED'];
+    const flow = [
+      'REGISTRATION',
+      'ELIGIBILITY',
+      'FINANCE',
+      'EXAM_OFFICE',
+      'COE',
+      'APPROVED',
+    ];
     let nextStage = String(current.stage);
 
     if (action === 'REJECT') {
@@ -353,7 +415,8 @@ export class ExamCellEnterpriseService {
       nextStage = stage;
     } else {
       const idx = flow.indexOf(nextStage);
-      nextStage = idx >= 0 && idx < flow.length - 1 ? flow[idx + 1] : 'APPROVED';
+      nextStage =
+        idx >= 0 && idx < flow.length - 1 ? flow[idx + 1] : 'APPROVED';
     }
 
     const [row] = await this.queryOrEmpty<Record<string, unknown>>(
@@ -366,7 +429,8 @@ export class ExamCellEnterpriseService {
     );
 
     await this.audit.log(tenantId, actorUserId, {
-      action: action === 'REJECT' ? 'HALL_TICKET_REJECTED' : 'HALL_TICKET_APPROVED',
+      action:
+        action === 'REJECT' ? 'HALL_TICKET_REJECTED' : 'HALL_TICKET_APPROVED',
       resource_type: 'hall_ticket_approval',
       resource_id: approvalId,
       new_value: { stage: nextStage },
@@ -435,12 +499,14 @@ export class ExamCellEnterpriseService {
            WHERE d.tenant_id = $1 AND d.faculty_user_id = $2 AND es.exam_date = $3`,
           [tenantId, f.user_id, examDate],
         );
-        const onLeave = await this.db.query(
-          `SELECT COUNT(*)::int AS c FROM hr_leave_requests
+        const onLeave = await this.db
+          .query(
+            `SELECT COUNT(*)::int AS c FROM hr_leave_requests
            WHERE user_id = $1 AND status = 'APPROVED'
              AND $2::date BETWEEN start_date AND end_date`,
-          [f.user_id, examDate],
-        ).catch(() => [{ c: 0 }]);
+            [f.user_id, examDate],
+          )
+          .catch(() => [{ c: 0 }]);
 
         if ((conflicts[0]?.c ?? 0) < 2 && (onLeave[0]?.c ?? 0) === 0) {
           available.push(f);
@@ -585,7 +651,8 @@ export class ExamCellEnterpriseService {
       );
     }
 
-    if (!student) throw new NotFoundException('Student not found for QR payload');
+    if (!student)
+      throw new NotFoundException('Student not found for QR payload');
 
     const [seating, schedules] = await Promise.all([
       this.db.query(
@@ -665,11 +732,13 @@ export class ExamCellEnterpriseService {
          WHERE tenant_id = $1 AND status = 'LATE' AND marked_at::date = $2::date`,
         [tenantId, today],
       ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM ufm_cases
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS c FROM ufm_cases
          WHERE tenant_id = $1 AND incident_date = $2::date`,
-        [tenantId, today],
-      ).catch(() => [{ c: 0 }]),
+          [tenantId, today],
+        )
+        .catch(() => [{ c: 0 }]),
       this.queryOrEmpty<{ c: number }>(
         `SELECT COUNT(*)::int AS c FROM exam_question_papers
          WHERE tenant_id = $1 AND status = 'UPLOADED'`,
@@ -701,10 +770,16 @@ export class ExamCellEnterpriseService {
 
   async applyGraceMarks(
     tenantId: string,
-    dto: { student_user_id: string; subject_id: number; obtained_marks: number; max_marks: number },
+    dto: {
+      student_user_id: string;
+      subject_id: number;
+      obtained_marks: number;
+      max_marks: number;
+    },
   ) {
     const shortfall = dto.max_marks - dto.obtained_marks;
-    if (shortfall <= 0) return { grace_applied: 0, final_marks: dto.obtained_marks };
+    if (shortfall <= 0)
+      return { grace_applied: 0, final_marks: dto.obtained_marks };
 
     const [policy] = await this.queryOrEmpty<Record<string, unknown>>(
       `SELECT * FROM grace_marks_policies
@@ -718,7 +793,11 @@ export class ExamCellEnterpriseService {
     const maxShort = Number(policy?.max_shortfall ?? 5);
 
     if (shortfall < minShort || shortfall > maxShort) {
-      return { grace_applied: 0, final_marks: dto.obtained_marks, reason: 'Shortfall outside policy range' };
+      return {
+        grace_applied: 0,
+        final_marks: dto.obtained_marks,
+        reason: 'Shortfall outside policy range',
+      };
     }
 
     const grace = Math.min(maxGrace, shortfall);
@@ -744,12 +823,14 @@ export class ExamCellEnterpriseService {
       [studentUserId, tenantId],
     );
 
-    const [grade] = await this.db.query(
-      `SELECT cgpa FROM student_grade_cards
+    const [grade] = await this.db
+      .query(
+        `SELECT cgpa FROM student_grade_cards
        WHERE student_user_id = $1 AND tenant_id = $2
        ORDER BY semester DESC LIMIT 1`,
-      [studentUserId, tenantId],
-    ).catch(() => [{ cgpa: null }]);
+        [studentUserId, tenantId],
+      )
+      .catch(() => [{ cgpa: null }]);
 
     const [backlogs] = await this.db.query(
       `SELECT COUNT(*)::int AS c FROM exam_applications
@@ -767,23 +848,32 @@ export class ExamCellEnterpriseService {
     const creditsOk = creditsEarned >= 160;
     const cgpaOk = cgpaEarned != null && cgpaEarned >= 5.0;
 
-    const [libraryDues] = await this.db.query(
-      `SELECT COUNT(*)::int AS c FROM library_circulation
+    const [libraryDues] = await this.db
+      .query(
+        `SELECT COUNT(*)::int AS c FROM library_circulation
        WHERE student_user_id = $1 AND status IN ('ISSUED','OVERDUE')`,
-      [studentUserId],
-    ).catch(() => [{ c: 0 }]);
+        [studentUserId],
+      )
+      .catch(() => [{ c: 0 }]);
 
-    const [hostelDues] = await this.db.query(
-      `SELECT COUNT(*)::int AS c FROM hostel_fee_demands
+    const [hostelDues] = await this.db
+      .query(
+        `SELECT COUNT(*)::int AS c FROM hostel_fee_demands
        WHERE student_user_id = $1 AND status NOT IN ('PAID','WAIVED')`,
-      [studentUserId],
-    ).catch(() => [{ c: 0 }]);
+        [studentUserId],
+      )
+      .catch(() => [{ c: 0 }]);
 
     const libraryClear = (libraryDues?.c ?? 0) === 0;
     const hostelClear = (hostelDues?.c ?? 0) === 0;
 
     const finalStatus =
-      creditsOk && cgpaOk && financeClear && examClear && libraryClear && hostelClear
+      creditsOk &&
+      cgpaOk &&
+      financeClear &&
+      examClear &&
+      libraryClear &&
+      hostelClear
         ? 'ELIGIBLE'
         : 'NOT_ELIGIBLE';
 
@@ -809,14 +899,16 @@ export class ExamCellEnterpriseService {
       ],
     );
 
-    return row ?? {
-      final_status: finalStatus,
-      credits_earned: creditsEarned,
-      cgpa_earned: cgpaEarned,
-      pending_backlogs: pendingBacklogs,
-      finance_clearance: financeClear,
-      examination_clearance: examClear,
-    };
+    return (
+      row ?? {
+        final_status: finalStatus,
+        credits_earned: creditsEarned,
+        cgpa_earned: cgpaEarned,
+        pending_backlogs: pendingBacklogs,
+        finance_clearance: financeClear,
+        examination_clearance: examClear,
+      }
+    );
   }
 
   /* ── 19. Student Examination Timeline ── */
@@ -830,7 +922,12 @@ export class ExamCellEnterpriseService {
     );
     if (!student) throw new NotFoundException('Student not found');
 
-    const events: Array<{ stage: string; status: string; at: string | null; detail?: string }> = [];
+    const events: Array<{
+      stage: string;
+      status: string;
+      at: string | null;
+      detail?: string;
+    }> = [];
 
     const reg = await this.queryOrEmpty<{ status: string; created_at: string }>(
       `SELECT status, created_at FROM exam_semester_registrations
@@ -863,7 +960,10 @@ export class ExamCellEnterpriseService {
       at: admit[0]?.created_at ?? null,
     });
 
-    const attendance = await this.queryOrEmpty<{ status: string; marked_at: string }>(
+    const attendance = await this.queryOrEmpty<{
+      status: string;
+      marked_at: string;
+    }>(
       `SELECT status, marked_at FROM exam_day_attendance
        WHERE tenant_id = $1 AND student_user_id = $2 ORDER BY marked_at DESC LIMIT 1`,
       [tenantId, studentUserId],
@@ -874,13 +974,15 @@ export class ExamCellEnterpriseService {
       at: attendance[0]?.marked_at ?? null,
     });
 
-    const [result] = await this.db.query(
-      `SELECT ser.status, ser.updated_at FROM student_exam_reports ser
+    const [result] = await this.db
+      .query(
+        `SELECT ser.status, ser.updated_at FROM student_exam_reports ser
        JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
        WHERE ser.student_user_id = $1 AND ers.tenant_id = $2
        ORDER BY ser.updated_at DESC LIMIT 1`,
-      [studentUserId, tenantId],
-    ).catch(() => []);
+        [studentUserId, tenantId],
+      )
+      .catch(() => []);
     events.push({
       stage: 'Result',
       status: result[0]?.status ?? 'PENDING',
@@ -909,58 +1011,74 @@ export class ExamCellEnterpriseService {
   async advancedSearch(tenantId: string, query: string) {
     const q = `%${query.trim()}%`;
     if (!query.trim()) {
-      return { students: [], schedules: [], subjects: [], answer_sheets: [], hall_tickets: [] };
+      return {
+        students: [],
+        schedules: [],
+        subjects: [],
+        answer_sheets: [],
+        hall_tickets: [],
+      };
     }
 
-    const [students, schedules, subjects, answerSheets, hallTickets] = await Promise.all([
-      this.db.query(
-        `SELECT u.user_id, u.name, sp.enrollment_number, sp.prn_number
+    const [students, schedules, subjects, answerSheets, hallTickets] =
+      await Promise.all([
+        this.db.query(
+          `SELECT u.user_id, u.name, sp.enrollment_number, sp.prn_number
          FROM users u
          LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
          JOIN roles r ON r.role_id = u.role_id
          WHERE u.tenant_id = $1 AND r.role_name = 'Student'
            AND (u.name ILIKE $2 OR sp.enrollment_number ILIKE $2 OR sp.prn_number ILIKE $2)
          LIMIT 15`,
-        [tenantId, q],
-      ),
-      this.db.query(
-        `SELECT es.exam_schedule_id, es.exam_type, es.exam_date, es.venue,
+          [tenantId, q],
+        ),
+        this.db.query(
+          `SELECT es.exam_schedule_id, es.exam_type, es.exam_date, es.venue,
                 sub.subject_name, sub.subject_code
          FROM exam_schedules es
          LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
          WHERE es.tenant_id = $1
            AND (sub.subject_name ILIKE $2 OR sub.subject_code ILIKE $2 OR es.venue ILIKE $2)
          LIMIT 15`,
-        [tenantId, q],
-      ),
-      this.db.query(
-        `SELECT subject_id, subject_code, subject_name FROM academic_subjects
+          [tenantId, q],
+        ),
+        this.db.query(
+          `SELECT subject_id, subject_code, subject_name FROM academic_subjects
          WHERE subject_name ILIKE $1 OR subject_code ILIKE $1 LIMIT 15`,
-        [q],
-      ),
-      this.queryOrEmpty(
-        `SELECT sheet_id, sheet_number, status, qr_payload FROM answer_sheet_tracking
+          [q],
+        ),
+        this.queryOrEmpty(
+          `SELECT sheet_id, sheet_number, status, qr_payload FROM answer_sheet_tracking
          WHERE tenant_id = $1 AND (sheet_number ILIKE $2 OR qr_payload ILIKE $2) LIMIT 10`,
-        [tenantId, q],
-      ),
-      this.queryOrEmpty(
-        `SELECT e.entry_id, u.name, sp.enrollment_number, e.eligible, e.created_at
+          [tenantId, q],
+        ),
+        this.queryOrEmpty(
+          `SELECT e.entry_id, u.name, sp.enrollment_number, e.eligible, e.created_at
          FROM exam_admit_card_entries e
          JOIN users u ON u.user_id = e.student_user_id
          LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
          JOIN exam_admit_card_runs r ON r.run_id = e.run_id
          WHERE r.tenant_id = $1 AND (u.name ILIKE $2 OR sp.enrollment_number ILIKE $2)
          LIMIT 10`,
-        [tenantId, q],
-      ),
-    ]);
+          [tenantId, q],
+        ),
+      ]);
 
-    return { students, schedules, subjects, answer_sheets: answerSheets, hall_tickets: hallTickets };
+    return {
+      students,
+      schedules,
+      subjects,
+      answer_sheets: answerSheets,
+      hall_tickets: hallTickets,
+    };
   }
 
   /* ── 21. Student Document Verification ── */
 
-  async listStudentExamDocuments(tenantId: string, filters: { status?: string; student_user_id?: string }) {
+  async listStudentExamDocuments(
+    tenantId: string,
+    filters: { status?: string; student_user_id?: string },
+  ) {
     const params: unknown[] = [tenantId];
     let sql = `
       SELECT d.*, u.name AS student_name, sp.enrollment_number
@@ -1016,7 +1134,11 @@ export class ExamCellEnterpriseService {
     );
   }
 
-  async createDeadline(tenantId: string, actorUserId: string, dto: Record<string, unknown>) {
+  async createDeadline(
+    tenantId: string,
+    actorUserId: string,
+    dto: Record<string, unknown>,
+  ) {
     const [row] = await this.queryOrEmpty<Record<string, unknown>>(
       `INSERT INTO exam_deadlines
          (tenant_id, title, deadline_type, due_at, semester, program_label, created_by)
@@ -1065,16 +1187,19 @@ export class ExamCellEnterpriseService {
 
   async advancedAnalytics(tenantId: string, semester: number) {
     const [gradeDist, subjectAnalysis, facultyPerf] = await Promise.all([
-      this.db.query(
-        `SELECT aer.grade, COUNT(*)::int AS count
+      this.db
+        .query(
+          `SELECT aer.grade, COUNT(*)::int AS count
          FROM academic_exam_results aer
          JOIN student_course_enrollments e ON e.student_user_id = aer.student_user_id AND e.semester = $2
          WHERE aer.tenant_id = $1
          GROUP BY aer.grade ORDER BY aer.grade`,
-        [tenantId, semester],
-      ).catch(() => []),
-      this.db.query(
-        `SELECT sub.subject_code, sub.subject_name,
+          [tenantId, semester],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT sub.subject_code, sub.subject_name,
                 AVG(r.marks_obtained)::numeric(6,2) AS avg_marks,
                 COUNT(*)::int AS students
          FROM academic_exam_results r
@@ -1084,8 +1209,9 @@ export class ExamCellEnterpriseService {
          WHERE r.tenant_id = $1
          GROUP BY sub.subject_code, sub.subject_name
          ORDER BY avg_marks DESC LIMIT 15`,
-        [tenantId, semester],
-      ).catch(() => []),
+          [tenantId, semester],
+        )
+        .catch(() => []),
       this.queryOrEmpty(
         `SELECT u.name, COUNT(am.mark_id)::int AS submissions
          FROM academic_marks am
@@ -1096,16 +1222,24 @@ export class ExamCellEnterpriseService {
       ).catch(() => []),
     ]);
 
-    const passFail = await this.db.query(
-      `SELECT ser.status AS label, COUNT(*)::int AS count
+    const passFail = await this.db
+      .query(
+        `SELECT ser.status AS label, COUNT(*)::int AS count
        FROM student_exam_reports ser
        JOIN exam_result_sessions ers ON ers.session_id = ser.session_id
        WHERE ers.tenant_id = $1 AND ers.semester = $2
        GROUP BY ser.status`,
-      [tenantId, semester],
-    ).catch(() => []);
+        [tenantId, semester],
+      )
+      .catch(() => []);
 
-    return { semester, grade_distribution: gradeDist, subject_analysis: subjectAnalysis, faculty_performance: facultyPerf, pass_fail: passFail };
+    return {
+      semester,
+      grade_distribution: gradeDist,
+      subject_analysis: subjectAnalysis,
+      faculty_performance: facultyPerf,
+      pass_fail: passFail,
+    };
   }
 
   /* ── 26. AI Assistant Context (future-ready) ── */
@@ -1123,7 +1257,8 @@ export class ExamCellEnterpriseService {
         'backlog_count',
         'revaluation_status',
       ],
-      integration_note: 'Wire to LLM via POST /api/exam-cell/ai/query with this context payload',
+      integration_note:
+        'Wire to LLM via POST /api/exam-cell/ai/query with this context payload',
     };
 
     if (studentUserId) {

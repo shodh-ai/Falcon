@@ -4,6 +4,8 @@ import { DataSource } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { AcademicsService } from './academics.service';
+import { ResultControlService } from '../exam-cell/result-control.service';
+import { DeanAuditService } from './dean-audit.service';
 import { resolveDeanScope } from './dean-scope.util';
 import {
   ListQueryParams,
@@ -32,6 +34,8 @@ export class DeanIntelligenceService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly academics: AcademicsService,
+    private readonly resultControl: ResultControlService,
+    private readonly deanAudit: DeanAuditService,
   ) {}
 
   private clampScore(value: number) {
@@ -64,10 +68,7 @@ export class DeanIntelligenceService {
     return this.clampScore(raw);
   }
 
-  private parseDeptFilter(
-    departmentIds: number[],
-    deptId?: string,
-  ): number[] {
+  private parseDeptFilter(departmentIds: number[], deptId?: string): number[] {
     if (!deptId || deptId === 'ALL') return departmentIds;
     const parsed = Number(deptId);
     if (!Number.isFinite(parsed) || !departmentIds.includes(parsed)) {
@@ -84,14 +85,19 @@ export class DeanIntelligenceService {
     const scope = await resolveDeanScope(this.db, deanUserId);
     const deptIds = this.parseDeptFilter(scope.departmentIds, filters.dept_id);
 
-    const [commandCenter, results, weeklyAttendance, placementSummary, recentActivity] =
-      await Promise.all([
-        this.academics.getDeanCommandCenter(tenantId, deanUserId),
-        this.academics.listDeanResultAnalytics(tenantId, deanUserId),
-        this.safeWeeklyAttendance(tenantId, deptIds),
-        this.safePlacementSummary(tenantId, deptIds),
-        this.getActivityFeed(tenantId, deanUserId, { limit: 12 }),
-      ]);
+    const [
+      commandCenter,
+      results,
+      weeklyAttendance,
+      placementSummary,
+      recentActivity,
+    ] = await Promise.all([
+      this.academics.getDeanCommandCenter(tenantId, deanUserId),
+      this.academics.listDeanResultAnalytics(tenantId, deanUserId),
+      this.safeWeeklyAttendance(tenantId, deptIds),
+      this.safePlacementSummary(tenantId, deptIds),
+      this.getActivityFeed(tenantId, deanUserId, { limit: 12 }),
+    ]);
 
     const departments = (commandCenter.department_rows ?? []).filter((row) =>
       deptIds.includes(Number(row.dept_id)),
@@ -126,7 +132,8 @@ export class DeanIntelligenceService {
       totalFacultyWorkload > 0
         ? (workloadSummary.balanced / totalFacultyWorkload) * 100
         : 100;
-    const pendingCount = hm.pending_dean_approvals ?? hm.pending_inbox_total ?? 0;
+    const pendingCount =
+      hm.pending_dean_approvals ?? hm.pending_inbox_total ?? 0;
     const approvalHealth = this.clampScore(
       100 - Math.min(40, pendingCount * 4),
     );
@@ -252,8 +259,8 @@ export class DeanIntelligenceService {
         user: row.user_name ?? 'System',
         department: row.dept_name ?? 'School',
         action:
-          (row.new_value?.meta as Record<string, unknown> | undefined)?.action ??
-          row.action,
+          (row.new_value?.meta as Record<string, unknown> | undefined)
+            ?.action ?? row.action,
         module: row.table_name,
         timestamp: row.changed_at,
         priority: this.activityPriority(String(row.table_name)),
@@ -267,7 +274,11 @@ export class DeanIntelligenceService {
   }
 
   private activityPriority(module: string): AlertPriority {
-    if (['project_funding_requests', 'attendance_threshold_requests'].includes(module)) {
+    if (
+      ['project_funding_requests', 'attendance_threshold_requests'].includes(
+        module,
+      )
+    ) {
       return 'critical';
     }
     if (['helpdesk_tickets', 'campus_events'].includes(module)) {
@@ -399,10 +410,15 @@ export class DeanIntelligenceService {
         [tenantId, deptIds],
       );
 
-      const programRows = await this.db.query<
-        Array<{ program_type: string; allocated_amount: string; utilized_amount: string }>
-      >(
-        `SELECT COALESCE(p.program_type, 'General') AS program_type,
+      const programRows = await this.db
+        .query<
+          Array<{
+            program_type: string;
+            allocated_amount: string;
+            utilized_amount: string;
+          }>
+        >(
+          `SELECT COALESCE(p.program_type, 'General') AS program_type,
                 SUM(p.allocated_amount)::text AS allocated_amount,
                 SUM(p.utilized_amount)::text AS utilized_amount
          FROM fin_program_budgets p
@@ -411,13 +427,17 @@ export class DeanIntelligenceService {
            AND b.deleted_at IS NULL
            AND (b.department_id IS NULL OR b.department_id = ANY($2::int[]))
          GROUP BY COALESCE(p.program_type, 'General')`,
-        [tenantId, deptIds],
-      ).catch(() => []);
+          [tenantId, deptIds],
+        )
+        .catch(() => []);
 
       let allocated = 0;
       let spent = 0;
       const byDepartment: Array<Record<string, unknown>> = [];
-      const byCategory = new Map<string, { allocated: number; spent: number }>();
+      const byCategory = new Map<
+        string,
+        { allocated: number; spent: number }
+      >();
 
       for (const row of rows) {
         const alloc = Number(row.allocated_amount ?? 0);
@@ -429,7 +449,8 @@ export class DeanIntelligenceService {
           allocated: alloc,
           spent: util,
           remaining: alloc - util,
-          utilization_pct: alloc > 0 ? Number(((util / alloc) * 100).toFixed(1)) : 0,
+          utilization_pct:
+            alloc > 0 ? Number(((util / alloc) * 100).toFixed(1)) : 0,
         });
       }
 
@@ -458,10 +479,15 @@ export class DeanIntelligenceService {
         utilization_pct:
           allocated > 0 ? Number(((spent / allocated) * 100).toFixed(1)) : 0,
         department_wise: byDepartment,
-        research_budget: byCategory.get('Research') ?? { allocated: 0, spent: 0 },
+        research_budget: byCategory.get('Research') ?? {
+          allocated: 0,
+          spent: 0,
+        },
         lab_budget: byCategory.get('Lab') ?? { allocated: 0, spent: 0 },
-        infrastructure_budget:
-          byCategory.get('Infrastructure') ?? { allocated: 0, spent: 0 },
+        infrastructure_budget: byCategory.get('Infrastructure') ?? {
+          allocated: 0,
+          spent: 0,
+        },
         alerts,
         utilization_series: byDepartment.slice(0, 8).map((row) => ({
           label: String(row.dept_name),
@@ -660,7 +686,8 @@ export class DeanIntelligenceService {
         const key = row.dept_name ?? 'School-wide';
         deptParticipation.set(
           key,
-          (deptParticipation.get(key) ?? 0) + Number(row.participant_count ?? 0),
+          (deptParticipation.get(key) ?? 0) +
+            Number(row.participant_count ?? 0),
         );
       }
 
@@ -686,15 +713,20 @@ export class DeanIntelligenceService {
     }
   }
 
-  async globalSearch(
-    tenantId: string,
-    deanUserId: string,
-    query: string,
-  ) {
+  async globalSearch(tenantId: string, deanUserId: string, query: string) {
     const scope = await resolveDeanScope(this.db, deanUserId);
     const q = `%${query.trim()}%`;
     if (query.trim().length < 2) {
-      return { students: [], faculty: [], departments: [], courses: [], research: [], events: [], meetings: [], approvals: [] };
+      return {
+        students: [],
+        faculty: [],
+        departments: [],
+        courses: [],
+        research: [],
+        events: [],
+        meetings: [],
+        approvals: [],
+      };
     }
 
     const deptIds = scope.departmentIds;
@@ -747,42 +779,50 @@ export class DeanIntelligenceService {
          LIMIT 10`,
         [tenantId, deptIds, q],
       ),
-      this.db.query(
-        `SELECT p.research_project_id AS id, p.title AS name, u.name AS subtitle, 'research' AS type
+      this.db
+        .query(
+          `SELECT p.research_project_id AS id, p.title AS name, u.name AS subtitle, 'research' AS type
          FROM faculty_research_projects p
          INNER JOIN users u ON u.user_id = p.principal_investigator_user_id
          WHERE p.tenant_id = $1 AND u.dept_id = ANY($2::int[])
            AND p.title ILIKE $3
          LIMIT 10`,
-        [tenantId, deptIds, q],
-      ).catch(() => []),
-      this.db.query(
-        `SELECT e.event_id AS id, e.title AS name, e.status AS subtitle, 'event' AS type
+          [tenantId, deptIds, q],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT e.event_id AS id, e.title AS name, e.status AS subtitle, 'event' AS type
          FROM campus_events e
          LEFT JOIN campus_clubs c ON c.club_id = e.club_id
          LEFT JOIN users u ON u.user_id = c.faculty_advisor_id
          WHERE e.tenant_id = $1 AND u.dept_id = ANY($2::int[])
            AND e.title ILIKE $3
          LIMIT 10`,
-        [tenantId, deptIds, q],
-      ).catch(() => []),
-      this.db.query(
-        `SELECT m.meeting_id AS id, m.title AS name, m.status AS subtitle, 'meeting' AS type
+          [tenantId, deptIds, q],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT m.meeting_id AS id, m.title AS name, m.status AS subtitle, 'meeting' AS type
          FROM portal_meetings m
          WHERE m.tenant_id = $1 AND m.title ILIKE $2
          LIMIT 10`,
-        [tenantId, q],
-      ).catch(() => []),
-      this.db.query(
-        `SELECT r.request_id AS id, g.project_title AS name, fr.status AS subtitle, 'approval' AS type
+          [tenantId, q],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT r.request_id AS id, g.project_title AS name, fr.status AS subtitle, 'approval' AS type
          FROM project_funding_requests fr
          INNER JOIN faculty_project_guides g ON g.guide_id = fr.guide_id
          INNER JOIN users u ON u.user_id = fr.requested_by
          WHERE fr.tenant_id = $1 AND u.dept_id = ANY($2::int[])
            AND g.project_title ILIKE $3
          LIMIT 10`,
-        [tenantId, deptIds, q],
-      ).catch(() => []),
+          [tenantId, deptIds, q],
+        )
+        .catch(() => []),
     ]);
 
     return {
@@ -797,6 +837,63 @@ export class DeanIntelligenceService {
     };
   }
 
+  listResultApprovals(
+    tenantId: string,
+    deanUserId: string,
+    query: ListQueryParams = {},
+  ) {
+    return this.resultControl.listPendingDeanResultApprovals(
+      tenantId,
+      deanUserId,
+      {
+        page: query.page != null ? String(query.page) : undefined,
+        limit: query.limit != null ? String(query.limit) : undefined,
+        search: query.search,
+      },
+    );
+  }
+
+  async decideResultApproval(
+    tenantId: string,
+    deanUserId: string,
+    requestId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    comment?: string,
+    auditMeta?: { role?: string; ip?: string; userAgent?: string },
+  ) {
+    const scope = await resolveDeanScope(this.db, deanUserId);
+    const result = await this.resultControl.decideDeanResultApproval(
+      tenantId,
+      deanUserId,
+      requestId,
+      decision,
+      comment,
+      auditMeta?.role ?? 'Dean',
+    );
+
+    await this.deanAudit.logAction({
+      tenantId,
+      userId: deanUserId,
+      role: auditMeta?.role ?? 'Dean',
+      module: 'exam_result_sessions',
+      action:
+        decision === 'APPROVED'
+          ? 'RESULT_DECLARATION_APPROVED'
+          : 'RESULT_DECLARATION_REJECTED',
+      recordId: result.session_id,
+      schoolId: scope.schools[0]?.school_id,
+      newValue: { request_id: requestId, comment: comment?.trim() ?? null },
+      ip: auditMeta?.ip,
+      userAgent: auditMeta?.userAgent,
+    });
+
+    return result;
+  }
+
+  getResultApprovalHistory(tenantId: string, sessionId: string) {
+    return this.resultControl.getDeanResultApprovalHistory(tenantId, sessionId);
+  }
+
   async getDeanNotifications(
     tenantId: string,
     deanUserId: string,
@@ -806,7 +903,9 @@ export class DeanIntelligenceService {
     const unreadOnly = query.status === 'unread';
 
     try {
-      const countRows = await this.db.query<Array<{ total: string; unread: string }>>(
+      const countRows = await this.db.query<
+        Array<{ total: string; unread: string }>
+      >(
         `SELECT COUNT(*)::int AS total,
                 COUNT(*) FILTER (WHERE is_read = false)::int AS unread
          FROM falcon_notifications
@@ -875,16 +974,18 @@ export class DeanIntelligenceService {
     tenantId: string,
     deanUserId: string,
     filters: DeanFilterQuery & ListQueryParams & { module?: string } = {},
-  ): Promise<PaginatedResponse<{
-    id: string;
-    user: string;
-    action: string;
-    module: string;
-    old_value: Record<string, unknown> | null;
-    new_value: Record<string, unknown> | null;
-    timestamp: string;
-    ip: string | null;
-  }>> {
+  ): Promise<
+    PaginatedResponse<{
+      id: string;
+      user: string;
+      action: string;
+      module: string;
+      old_value: Record<string, unknown> | null;
+      new_value: Record<string, unknown> | null;
+      timestamp: string;
+      ip: string | null;
+    }>
+  > {
     const scope = await resolveDeanScope(this.db, deanUserId);
     const { limit, offset } = parseListQuery(filters, 20, 500);
     const search = filters.search?.trim();
@@ -945,16 +1046,17 @@ export class DeanIntelligenceService {
         id: row.log_id,
         user: row.user_name ?? row.changed_by_user_id ?? 'System',
         action: String(
-          (row.new_value?.meta as Record<string, unknown> | undefined)?.action ??
-            row.action,
+          (row.new_value?.meta as Record<string, unknown> | undefined)
+            ?.action ?? row.action,
         ),
         module: row.table_name,
         old_value: row.old_value,
         new_value: row.new_value,
         timestamp: row.changed_at,
         ip:
-          (row.new_value?.meta as Record<string, unknown> | undefined)?.ip?.toString() ??
-          null,
+          (
+            row.new_value?.meta as Record<string, unknown> | undefined
+          )?.ip?.toString() ?? null,
       }));
 
       return toPaginatedResponse(data, total, limit, offset);
@@ -990,25 +1092,29 @@ export class DeanIntelligenceService {
       if (!row || !scope.departmentIds.includes(Number(row.dept_id))) {
         throw new NotFoundException('Approval record not found');
       }
-      return this.buildTimeline([
-        { stage: 'Requested', status: 'completed', at: row.created_at },
-        {
-          stage: 'HOD Approved',
-          status: ['APPROVED_HOD', 'APPROVED_DEAN', 'REJECTED_DEAN'].includes(
-            row.status,
-          )
-            ? 'completed'
-            : 'pending',
-          at: row.updated_at,
-        },
-        {
-          stage: 'Dean Approved',
-          status: row.status === 'APPROVED_DEAN' ? 'completed' : 'pending',
-          at: row.status === 'APPROVED_DEAN' ? row.updated_at : null,
-        },
-        { stage: 'Registrar', status: 'pending' },
-        { stage: 'VC', status: 'pending' },
-      ], row.status, row.purpose);
+      return this.buildTimeline(
+        [
+          { stage: 'Requested', status: 'completed', at: row.created_at },
+          {
+            stage: 'HOD Approved',
+            status: ['APPROVED_HOD', 'APPROVED_DEAN', 'REJECTED_DEAN'].includes(
+              row.status,
+            )
+              ? 'completed'
+              : 'pending',
+            at: row.updated_at,
+          },
+          {
+            stage: 'Dean Approved',
+            status: row.status === 'APPROVED_DEAN' ? 'completed' : 'pending',
+            at: row.status === 'APPROVED_DEAN' ? row.updated_at : null,
+          },
+          { stage: 'Registrar', status: 'pending' },
+          { stage: 'VC', status: 'pending' },
+        ],
+        row.status,
+        row.purpose,
+      );
     }
 
     if (normalized === 'ATTENDANCE_POLICY') {
@@ -1082,7 +1188,8 @@ export class DeanIntelligenceService {
           { stage: 'Requested', status: 'completed', at: row.created_at },
           {
             stage: 'Advisor Approved',
-            status: row.advisor_approval === 'APPROVED' ? 'completed' : 'pending',
+            status:
+              row.advisor_approval === 'APPROVED' ? 'completed' : 'pending',
           },
           {
             stage: 'HOD Approved',
@@ -1141,8 +1248,16 @@ export class DeanIntelligenceService {
 
     if (['school', 'all'].includes(reportType)) {
       push('School Summary', 'Health Score', bundle.school_health.score);
-      push('School Summary', 'Attendance', bundle.school_health.components.attendance);
-      push('School Summary', 'Placement %', bundle.school_health.components.placement_readiness);
+      push(
+        'School Summary',
+        'Attendance',
+        bundle.school_health.components.attendance,
+      );
+      push(
+        'School Summary',
+        'Placement %',
+        bundle.school_health.components.placement_readiness,
+      );
     }
     if (['department', 'all'].includes(reportType)) {
       for (const dept of bundle.department_rankings) {
@@ -1344,7 +1459,9 @@ export class DeanIntelligenceService {
 
     const ranked = departments.map((dept) => {
       const deptId = Number(dept.dept_id);
-      const deptWorkload = workload.filter((row) => Number(row.dept_id) === deptId);
+      const deptWorkload = workload.filter(
+        (row) => Number(row.dept_id) === deptId,
+      );
       const balancedPct =
         deptWorkload.length > 0
           ? (deptWorkload.filter((row) => row.workload_status === 'BALANCED')
@@ -1391,7 +1508,11 @@ export class DeanIntelligenceService {
   private buildAlerts(input: {
     hm: Record<string, unknown>;
     departments: Array<Record<string, unknown>>;
-    workload: Array<{ workload_status: string; name: string; dept_name: string | null }>;
+    workload: Array<{
+      workload_status: string;
+      name: string;
+      dept_name: string | null;
+    }>;
     syllabus: Array<{ behind_schedule: boolean; course_code: string }>;
     pendingCount: number;
     placementSummary: { placement_pct: number };
@@ -1501,13 +1622,20 @@ export class DeanIntelligenceService {
     alerts: Array<{ title: string; detail: string; href?: string }>,
     departments: Array<Record<string, unknown>>,
   ) {
-    const recommendations: Array<{ id: string; title: string; detail: string; href?: string }> =
-      [];
+    const recommendations: Array<{
+      id: string;
+      title: string;
+      detail: string;
+      href?: string;
+    }> = [];
 
     for (const alert of alerts.slice(0, 4)) {
       recommendations.push({
         id: `rec-${alert.title}`,
-        title: alert.title.replace(/ below.*| risk| overloaded| delayed| backlog| decline| students/, ''),
+        title: alert.title.replace(
+          / below.*| risk| overloaded| delayed| backlog| decline| students/,
+          '',
+        ),
         detail: `Recommended action: review ${alert.detail.toLowerCase()}`,
         href: alert.href,
       });
@@ -1605,8 +1733,14 @@ export class DeanIntelligenceService {
         [tenantId, deptIds],
       );
 
-      const eligible = rows.reduce((sum, row) => sum + Number(row.eligible ?? 0), 0);
-      const placed = rows.reduce((sum, row) => sum + Number(row.placed ?? 0), 0);
+      const eligible = rows.reduce(
+        (sum, row) => sum + Number(row.eligible ?? 0),
+        0,
+      );
+      const placed = rows.reduce(
+        (sum, row) => sum + Number(row.placed ?? 0),
+        0,
+      );
       const placementPct =
         eligible > 0 ? Number(((placed / eligible) * 100).toFixed(1)) : 0;
       const packages = rows
@@ -1615,9 +1749,10 @@ export class DeanIntelligenceService {
       const avgPackage =
         packages.length > 0
           ? Number(
-              (packages.reduce((sum, value) => sum + value, 0) / packages.length).toFixed(
-                2,
-              ),
+              (
+                packages.reduce((sum, value) => sum + value, 0) /
+                packages.length
+              ).toFixed(2),
             )
           : 0;
       const maxPackage = Math.max(
@@ -1693,7 +1828,10 @@ export class DeanIntelligenceService {
          ORDER BY MIN(u.created_at) ASC`,
         [tenantId, deptIds],
       );
-      return rows.map((row) => ({ month: row.month, count: Number(row.count) }));
+      return rows.map((row) => ({
+        month: row.month,
+        count: Number(row.count),
+      }));
     } catch {
       return [];
     }
@@ -1713,7 +1851,10 @@ export class DeanIntelligenceService {
          ORDER BY MIN(u.created_at) ASC`,
         [tenantId, deptIds],
       );
-      return rows.map((row) => ({ month: row.month, count: Number(row.count) }));
+      return rows.map((row) => ({
+        month: row.month,
+        count: Number(row.count),
+      }));
     } catch {
       return [];
     }
@@ -1723,7 +1864,11 @@ export class DeanIntelligenceService {
     const map = new Map<string, { publications: number; projects: number }>();
     try {
       const rows = await this.db.query<
-        Array<{ faculty_user_id: string; publications: string; projects: string }>
+        Array<{
+          faculty_user_id: string;
+          publications: string;
+          projects: string;
+        }>
       >(
         `SELECT u.user_id AS faculty_user_id,
                 COUNT(DISTINCT l.log_id)::text AS publications,
@@ -1760,7 +1905,10 @@ export class DeanIntelligenceService {
          ORDER BY MIN(l.created_at) ASC`,
         [tenantId, deptIds],
       );
-      return rows.map((row) => ({ month: row.month, count: Number(row.count) }));
+      return rows.map((row) => ({
+        month: row.month,
+        count: Number(row.count),
+      }));
     } catch {
       return [];
     }

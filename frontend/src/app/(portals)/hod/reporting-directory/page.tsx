@@ -2,6 +2,7 @@
 
 import React, { Suspense, useState, useMemo, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { toast } from '@/lib/notifications/falcon-toast';
 import {
   Users,
   Search,
@@ -255,6 +256,7 @@ function ReportingDirectoryContent() {
         setMembers(mapped);
       } catch (err) {
         console.error('Failed to load faculty roster', err);
+        toast.error('Failed to load faculty roster');
       } finally {
         setLoading(false);
       }

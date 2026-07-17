@@ -314,7 +314,9 @@ export class HrWorkforceService {
       regularization_date: dto.regularization_date ?? null,
       missed_punch_type: dto.missed_punch_type ?? null,
       supporting_doc_urls: Array.isArray(dto.supporting_doc_urls)
-        ? dto.supporting_doc_urls.filter((u) => typeof u === 'string' && u.trim())
+        ? dto.supporting_doc_urls.filter(
+            (u) => typeof u === 'string' && u.trim(),
+          )
         : [],
       status: routing.is_final ? 'HR_APPROVED' : 'PENDING',
       entity_id: entityId,
