@@ -81,7 +81,9 @@ export class CourseAllocationBulkService {
     private readonly mentorSync: StudentMentorSyncService,
   ) {}
 
-  private async syncTeachingFacultyRole(facultyUserId: string | null | undefined) {
+  private async syncTeachingFacultyRole(
+    facultyUserId: string | null | undefined,
+  ) {
     if (!facultyUserId) return;
     await this.authService.ensureTeachingFacultyRoleForHod(facultyUserId);
   }
@@ -533,10 +535,14 @@ export class CourseAllocationBulkService {
     );
     if (!allocation[0]) throw new NotFoundException('Allocation not found');
     if (!deptIds.includes(Number(allocation[0].faculty_dept_id))) {
-      throw new BadRequestException('This subject is outside your department scope');
+      throw new BadRequestException(
+        'This subject is outside your department scope',
+      );
     }
     if (allocation[0].faculty_user_id === newFacultyUserId) {
-      throw new BadRequestException('Subject is already assigned to this faculty member');
+      throw new BadRequestException(
+        'Subject is already assigned to this faculty member',
+      );
     }
 
     const oldFacultyUserId = allocation[0].faculty_user_id;
@@ -567,7 +573,9 @@ export class CourseAllocationBulkService {
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
     if (!deptIds.length) {
-      throw new BadRequestException('Your HOD account is not linked to a department');
+      throw new BadRequestException(
+        'Your HOD account is not linked to a department',
+      );
     }
 
     const faculty = await this.dataSource.query<

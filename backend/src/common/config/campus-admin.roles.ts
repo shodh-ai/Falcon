@@ -14,7 +14,9 @@ const CAMPUS_ADMIN_ROLE_SET = new Set(
 );
 
 export function normalizeRoleName(role: string): string {
-  return String(role ?? '').trim().toLowerCase();
+  return String(role ?? '')
+    .trim()
+    .toLowerCase();
 }
 
 export function isCampusAdminFamilyRole(role: string): boolean {

@@ -657,6 +657,7 @@ export const hodPortal: PortalConfig = {
         { label: 'Profile Corrections', href: '/hod/approvals/profile-corrections', icon: ClipboardCheck, keywords: ['student profile', 'edit', 'correction'] },
         { label: 'Proxy Approvals', href: '/hod/approvals/proxy', icon: Users, keywords: ['substitute', 'alternate', 'leave', 'proxy'] },
         { label: 'Extra Class Approvals', href: '/hod/approvals/extra-classes', icon: CalendarClock, keywords: ['substitute', 'cancel', 'timetable'] },
+        { label: 'Gate Pass Approvals', href: '/hod/approvals/gate-passes', icon: DoorOpen, keywords: ['gate pass', 'outpass', 'leave gate'] },
         { label: 'Event Approvals', href: '/hod/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Venue Booking Approvals', href: '/hod/venue-requests', icon: MapPin, keywords: ['room', 'booking', 'venue'] },
         { label: 'Project Funding', href: '/hod/funding-approvals', icon: Banknote, keywords: ['research', 'funding', 'budget'] },
@@ -678,7 +679,9 @@ export const hodPortal: PortalConfig = {
       title: 'Student Affairs',
       items: [
         { label: 'Student Monitor', href: '/hod/student-monitor', icon: GraduationCap, keywords: ['students', 'branch', 'filter'] },
+        { label: 'Slow Learners', href: '/hod/academics/slow-learners', icon: AlertTriangle, keywords: ['remedial', 'at risk', 'weak students'] },
         { label: 'Disciplinary Actions', href: '/hod/students/discipline', icon: Scale, keywords: ['discipline', 'demerit', 'misconduct', 'dc'] },
+        { label: 'Safety Concerns', href: '/hod/safety-concerns', icon: Shield, keywords: ['ragging', 'harassment', 'posh', 'bullying'] },
         { label: 'Attendance Exemptions', href: '/hod/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'medical', 'accident', 'internship', 'admit card', 'low attendance'] },
         { label: 'Attendance Policy', href: '/hod/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum'] },
         { label: 'Grievance Escalations', href: '/hod/students/grievances', icon: LifeBuoy, keywords: ['academic', 'ticket', 'escalation'] },
@@ -859,6 +862,8 @@ export const deanPortal: PortalConfig = {
       items: [
         { label: 'Student Monitor', href: '/dean/students/monitor', icon: GraduationCap, keywords: ['students'] },
         { label: 'Grievances', href: '/dean/students/grievances', icon: LifeBuoy, keywords: ['grievances'] },
+        { label: 'Safety Concerns', href: '/dean/safety-concerns', icon: Shield, keywords: ['safety', 'posh', 'harassment'] },
+        { label: 'Ph.D. Degree Awards', href: '/dean/phd/approvals', icon: GraduationCap, keywords: ['phd', 'doctorate', 'viva'] },
       ],
     },
     {

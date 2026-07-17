@@ -19,6 +19,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { useAuthedApi } from '@/lib/api';
+import { useDeanDepartments } from '@/hooks/useDeanDepartments';
 import {
   DeanFilterBar,
   buildDeanFilterQuery,
@@ -38,17 +39,10 @@ type PlacementPayload = {
 
 export default function DeanPlacementPage() {
   const api = useAuthedApi();
+  const { departments } = useDeanDepartments();
   const [filters, setFilters] = useState<DeanFilterValues>({});
-  const [departments, setDepartments] = useState<Array<{ dept_id: number; dept_name: string }>>([]);
   const [data, setData] = useState<PlacementPayload | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void api
-      .get<Array<{ dept_id: number; dept_name: string }>>('/api/academics/dean/departments')
-      .then((rows) => setDepartments(rows))
-      .catch(() => setDepartments([]));
-  }, [api]);
 
   useEffect(() => {
     void (async () => {

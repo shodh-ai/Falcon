@@ -16,7 +16,8 @@ export class ExamCellDevService {
       return await this.db.query(sql, params);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (/relation .* does not exist|column .* does not exist/i.test(msg)) return [];
+      if (/relation .* does not exist|column .* does not exist/i.test(msg))
+        return [];
       throw err;
     }
   }
@@ -25,7 +26,9 @@ export class ExamCellDevService {
   async bootstrap(tenantId: string, actorUserId: string) {
     const summary: Record<string, number | string> = { tenant_id: tenantId };
 
-    const students = await this.db.query<Array<{ user_id: string; name: string }>>(
+    const students = await this.db.query<
+      Array<{ user_id: string; name: string }>
+    >(
       `SELECT u.user_id, u.name FROM users u
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND r.role_name = 'Student'
@@ -34,7 +37,9 @@ export class ExamCellDevService {
     );
     summary.students_found = students.length;
 
-    const faculty = await this.db.query<Array<{ user_id: string; name: string }>>(
+    const faculty = await this.db.query<
+      Array<{ user_id: string; name: string }>
+    >(
       `SELECT u.user_id, u.name FROM users u
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND r.role_name IN ('Faculty','HOD')
@@ -43,7 +48,9 @@ export class ExamCellDevService {
     );
     summary.faculty_found = faculty.length;
 
-    const courses = await this.db.query<Array<{ course_id: string; course_code: string }>>(
+    const courses = await this.db.query<
+      Array<{ course_id: string; course_code: string }>
+    >(
       `SELECT course_id, course_code FROM academic_courses
        WHERE tenant_id = $1 ORDER BY course_code LIMIT 20`,
       [tenantId],
@@ -78,11 +85,14 @@ export class ExamCellDevService {
       summary.schedules_created = (schedMid ? 1 : 0) + (schedEnd ? 1 : 0);
 
       const examScheduleId =
-        schedEnd?.exam_schedule_id ?? schedMid?.exam_schedule_id ??
-        (await this.queryOrSkip<{ exam_schedule_id: string }>(
-          `SELECT exam_schedule_id FROM exam_schedules WHERE tenant_id = $1 ORDER BY exam_date LIMIT 1`,
-          [tenantId],
-        ))[0]?.exam_schedule_id;
+        schedEnd?.exam_schedule_id ??
+        schedMid?.exam_schedule_id ??
+        (
+          await this.queryOrSkip<{ exam_schedule_id: string }>(
+            `SELECT exam_schedule_id FROM exam_schedules WHERE tenant_id = $1 ORDER BY exam_date LIMIT 1`,
+            [tenantId],
+          )
+        )[0]?.exam_schedule_id;
 
       if (examScheduleId) {
         let seats = 0;
@@ -147,16 +157,34 @@ export class ExamCellDevService {
       [tenantId, actorUserId, JSON.stringify(summary)],
     );
 
-    this.log.log(`Exam cell dev bootstrap for tenant ${tenantId}: ${JSON.stringify(summary)}`);
-    return { ok: true, message: 'Development examination data bootstrapped', summary };
+    this.log.log(
+      `Exam cell dev bootstrap for tenant ${tenantId}: ${JSON.stringify(summary)}`,
+    );
+    return {
+      ok: true,
+      message: 'Development examination data bootstrapped',
+      summary,
+    };
   }
 
   async status(tenantId: string) {
     const counts = await Promise.all([
-      this.queryOrSkip<{ c: number }>(`SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`, [tenantId]),
-      this.queryOrSkip<{ c: number }>(`SELECT COUNT(*)::int AS c FROM exam_sessions WHERE tenant_id = $1`, [tenantId]),
-      this.queryOrSkip<{ c: number }>(`SELECT COUNT(*)::int AS c FROM exam_seating_allocations WHERE tenant_id = $1`, [tenantId]),
-      this.queryOrSkip<{ c: number }>(`SELECT COUNT(*)::int AS c FROM hall_ticket_approvals WHERE tenant_id = $1`, [tenantId]),
+      this.queryOrSkip<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1`,
+        [tenantId],
+      ),
+      this.queryOrSkip<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM exam_sessions WHERE tenant_id = $1`,
+        [tenantId],
+      ),
+      this.queryOrSkip<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM exam_seating_allocations WHERE tenant_id = $1`,
+        [tenantId],
+      ),
+      this.queryOrSkip<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM hall_ticket_approvals WHERE tenant_id = $1`,
+        [tenantId],
+      ),
     ]);
     return {
       schedules: counts[0][0]?.c ?? 0,

@@ -109,7 +109,7 @@ export class StudentSafetyController {
   }
 
   @Patch('concerns/:id')
-  @Roles('DC_MEMBER', 'SuperAdmin')
+  @Roles('DC_MEMBER', 'Dean', 'SuperAdmin')
   updateConcern(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,

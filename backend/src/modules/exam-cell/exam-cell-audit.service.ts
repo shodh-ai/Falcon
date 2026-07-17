@@ -40,7 +40,8 @@ export class ExamCellAuditService {
   }
 
   async listRecent(tenantId: string, limit = 15) {
-    return this.list(tenantId, { limit });
+    const result = await this.list(tenantId, { limit });
+    return result.data;
   }
 
   async hasAction(
@@ -82,14 +83,20 @@ export class ExamCellAuditService {
 
   async list(
     tenantId: string,
-    opts: { limit?: number; action?: string; resource_type?: string } = {},
+    opts: {
+      limit?: number;
+      offset?: number;
+      page?: number;
+      action?: string;
+      resource_type?: string;
+      search?: string;
+    } = {},
   ) {
-    const limit = opts.limit ?? 50;
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const page = Math.max(opts.page ?? 1, 1);
+    const offset = opts.offset ?? (page - 1) * limit;
     const params: unknown[] = [tenantId];
     let sql = `
-      SELECT a.audit_id, a.action, a.resource_type, a.resource_id,
-             a.old_value, a.new_value, a.ip_address, a.created_at,
-             u.name AS actor_name
       FROM exam_audit_logs a
       LEFT JOIN users u ON u.user_id = a.actor_user_id
       WHERE a.tenant_id = $1`;
@@ -101,12 +108,35 @@ export class ExamCellAuditService {
       params.push(opts.resource_type);
       sql += ` AND a.resource_type = $${params.length}`;
     }
-    params.push(limit);
-    sql += ` ORDER BY a.created_at DESC LIMIT $${params.length}`;
+    if (opts.search?.trim()) {
+      params.push(`%${opts.search.trim()}%`);
+      sql += ` AND (a.action ILIKE $${params.length} OR a.resource_type ILIKE $${params.length} OR COALESCE(u.name, '') ILIKE $${params.length})`;
+    }
+
     try {
-      return await this.db.query(sql, params);
+      const countRows = await this.db.query<Array<{ total: string }>>(
+        `SELECT COUNT(*)::int AS total ${sql}`,
+        params,
+      );
+      const listParams = [...params, limit, offset];
+      const rows = await this.db.query(
+        `SELECT a.audit_id, a.action, a.resource_type, a.resource_id,
+                a.old_value, a.new_value, a.ip_address, a.created_at,
+                u.name AS actor_name ${sql}
+         ORDER BY a.created_at DESC
+         LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+        listParams,
+      );
+      const total = Number(countRows[0]?.total ?? 0);
+      return {
+        data: rows,
+        total,
+        limit,
+        offset,
+        page,
+      };
     } catch {
-      return [];
+      return { data: [], total: 0, limit, offset, page };
     }
   }
 }

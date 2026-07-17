@@ -196,13 +196,17 @@ export class FacultyWorkspacesService {
 
     const faculty = await this.dataSource.query(
       `SELECT user_id, name FROM users WHERE user_id = $1`,
-      [facultyUserId]
+      [facultyUserId],
     );
 
     return { allocations, timetables, faculty };
   }
 
-  async scheduleTimetableSlotBatch(facultyUserId: string, tenantId: string, dto: { slots: Array<any> }) {
+  async scheduleTimetableSlotBatch(
+    facultyUserId: string,
+    tenantId: string,
+    dto: { slots: Array<any> },
+  ) {
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
@@ -229,12 +233,17 @@ export class FacultyWorkspacesService {
       await runner.query(
         `DELETE FROM academic_timetables
          WHERE tenant_id = $1 AND faculty_user_id = $2`,
-        [tenantId, facultyUserId]
+        [tenantId, facultyUserId],
       );
 
       // 2. Insert new slots and check for conflicts
       for (const slot of slots) {
-        if (!slot.course_id || !slot.day_of_week || !slot.start_time || !slot.end_time) {
+        if (
+          !slot.course_id ||
+          !slot.day_of_week ||
+          !slot.start_time ||
+          !slot.end_time
+        ) {
           throw new BadRequestException('Invalid slot data');
         }
         if (slot.start_time >= slot.end_time) {
@@ -293,7 +302,16 @@ export class FacultyWorkspacesService {
         await runner.query(
           `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id, section)
            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)`,
-          [tenantId, slot.course_id, slot.day_of_week, slot.start_time, slot.end_time, slot.room || null, facultyUserId, slot.section || 'A']
+          [
+            tenantId,
+            slot.course_id,
+            slot.day_of_week,
+            slot.start_time,
+            slot.end_time,
+            slot.room || null,
+            facultyUserId,
+            slot.section || 'A',
+          ],
         );
       }
 
@@ -307,14 +325,19 @@ export class FacultyWorkspacesService {
     }
   }
 
-  async getAvailableRoomsForSlot(tenantId: string, dayOfWeek: number, startTime: string, endTime: string) {
+  async getAvailableRoomsForSlot(
+    tenantId: string,
+    dayOfWeek: number,
+    startTime: string,
+    endTime: string,
+  ) {
     // 1. Fetch all classroom spaces
     const spaces = await this.dataSource.query(
       `SELECT space_id, building_name, room_number, capacity, facilities, status
        FROM campus_spaces
        WHERE tenant_id = $1 AND space_type = 'CLASSROOM' AND status = 'AVAILABLE'
        ORDER BY building_name, room_number`,
-      [tenantId]
+      [tenantId],
     );
 
     // 2. Fetch occupied rooms for this specific time slot
@@ -327,18 +350,18 @@ export class FacultyWorkspacesService {
          AND start_time < $4
          AND end_time > $3
          AND room IS NOT NULL AND room != ''`,
-      [tenantId, dayOfWeek, startTime, endTime]
+      [tenantId, dayOfWeek, startTime, endTime],
     );
 
-    const occupiedRoomSet = new Set(occupied.map(o => o.room));
+    const occupiedRoomSet = new Set(occupied.map((o) => o.room));
 
     // 3. Map spaces to availability
-    return spaces.map(space => {
+    return spaces.map((space) => {
       const roomName = `${space.building_name} - ${space.room_number}`;
       return {
         ...space,
         roomName,
-        available: !occupiedRoomSet.has(roomName)
+        available: !occupiedRoomSet.has(roomName),
       };
     });
   }
@@ -1534,12 +1557,28 @@ export class FacultyWorkspacesService {
     hodUserId: string,
     tenantId: string,
   ) {
+    const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+      [hodUserId],
+    );
+    const deptIds = deptRows.map((row) => Number(row.dept_id));
+    if (!deptIds.length) {
+      throw new NotFoundException(
+        'Pending funding request not found or unauthorized',
+      );
+    }
+
     const rows = await this.dataSource.query(
-      `UPDATE project_funding_requests
+      `UPDATE project_funding_requests fr
        SET status = $1, hod_commit_message = $2, hod_user_id = $3, updated_at = NOW()
-       WHERE request_id = $4 AND tenant_id = $5 AND status = 'PENDING_HOD'
-       RETURNING *`,
-      [status, commitMessage, hodUserId, requestId, tenantId],
+       FROM users u
+       WHERE fr.request_id = $4
+         AND fr.tenant_id = $5
+         AND fr.status = 'PENDING_HOD'
+         AND u.user_id = fr.requested_by
+         AND u.dept_id = ANY($6::int[])
+       RETURNING fr.*`,
+      [status, commitMessage, hodUserId, requestId, tenantId, deptIds],
     );
     if (!rows.length) {
       throw new NotFoundException(
@@ -1634,7 +1673,8 @@ export class FacultyWorkspacesService {
       userId: deanUserId,
       role: 'Dean',
       module: 'project_funding_requests',
-      action: status === 'APPROVED_DEAN' ? 'FUNDING_APPROVED' : 'FUNDING_REJECTED',
+      action:
+        status === 'APPROVED_DEAN' ? 'FUNDING_APPROVED' : 'FUNDING_REJECTED',
       recordId: requestId,
       previousValue: { status: 'APPROVED_HOD' },
       newValue: {

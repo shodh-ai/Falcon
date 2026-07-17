@@ -418,8 +418,8 @@ export default function ExamCellResultsPage() {
     setBusy(true);
     try {
       await api.post(`/api/exam-cell/result-control/sessions/${selected.session_id}/dean-approval`, {});
-      setDeanApproved(true);
-      toast.success('Dean/VC approval recorded');
+      setDeanApproved(false);
+      toast.success('Submitted to Dean for approval. Results can be declared after Dean approves.');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Dean approval failed');
     } finally {
@@ -835,7 +835,7 @@ export default function ExamCellResultsPage() {
                   </Badge>
                   {!deanApproved && coeAuditStatus === 'passed' && (
                     <Button size="sm" variant="outline" disabled={busy} onClick={() => void recordDeanApproval()}>
-                      Record Dean Approval
+                      Submit for Dean Approval
                     </Button>
                   )}
                 </div>

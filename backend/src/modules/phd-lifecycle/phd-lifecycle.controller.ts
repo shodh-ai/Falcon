@@ -163,7 +163,10 @@ export class PhdLifecycleController {
     'SuperAdmin',
   )
   getCandidate(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.phd.getCandidate(this.tenant(req), id);
+    return this.phd.getCandidate(this.tenant(req), id, {
+      userId: req.user.user_id,
+      role: req.user.primaryRole ?? req.user.role ?? 'SuperAdmin',
+    });
   }
 
   @Post('candidates/:id/action')

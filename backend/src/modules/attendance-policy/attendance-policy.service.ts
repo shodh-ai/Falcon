@@ -331,7 +331,29 @@ export class AttendancePolicyService {
     return rows[0];
   }
 
-  async listCourses(tenantId: string) {
+  async listCourses(tenantId: string, hodUserId?: string) {
+    const deptIds =
+      hodUserId != null ? await this.resolveHodDepartmentIds(hodUserId) : null;
+    if (hodUserId != null && !deptIds?.length) return [];
+
+    const deptFilter =
+      deptIds?.length != null && deptIds.length > 0
+        ? `AND (
+             EXISTS (
+               SELECT 1 FROM academic_timetables t
+               JOIN users fu ON fu.user_id = t.faculty_user_id
+               WHERE t.course_id = c.course_id AND t.tenant_id = $1
+                 AND fu.dept_id = ANY($2::int[])
+             )
+             OR EXISTS (
+               SELECT 1 FROM student_course_enrollments e
+               JOIN users su ON su.user_id = e.student_user_id
+               WHERE e.course_id = c.course_id AND e.tenant_id = $1
+                 AND su.dept_id = ANY($2::int[])
+             )
+           )`
+        : '';
+
     return this.db.query(
       `SELECT 
          c.course_id, 
@@ -353,8 +375,9 @@ export class AttendancePolicyService {
          ) AS faculty_name
        FROM academic_courses c
        WHERE c.tenant_id = $1
+       ${deptFilter}
        ORDER BY c.course_code ASC`,
-      [tenantId],
+      deptIds?.length ? [tenantId, deptIds] : [tenantId],
     );
   }
 
@@ -362,6 +385,7 @@ export class AttendancePolicyService {
     tenantId: string,
     courseId: string,
     minPercent: number | null,
+    hodUserId?: string,
   ) {
     if (minPercent !== null) {
       const pct = Number(minPercent);
@@ -369,6 +393,18 @@ export class AttendancePolicyService {
         throw new BadRequestException('Threshold must be between 0 and 100.');
       }
     }
+
+    if (hodUserId != null) {
+      const scoped = await this.listCourses(tenantId, hodUserId);
+      if (
+        !scoped.some((row: { course_id: string }) => row.course_id === courseId)
+      ) {
+        throw new ForbiddenException(
+          'Course is outside your department scope.',
+        );
+      }
+    }
+
     const result = await this.db.query(
       `UPDATE academic_courses
        SET min_attendance = $1
@@ -447,9 +483,7 @@ export class AttendancePolicyService {
 
     if (actorRole !== 'SuperAdmin') {
       const deptIds = await resolveDeanDepartmentIds(this.db, deanUserId);
-      if (
-        !isDepartmentInDeanScope(request.dept_id, deptIds)
-      ) {
+      if (!isDepartmentInDeanScope(request.dept_id, deptIds)) {
         throw new ForbiddenException(
           'This threshold request is outside your school scope.',
         );

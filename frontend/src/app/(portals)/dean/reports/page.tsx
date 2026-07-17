@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
+import { useDeanDepartments } from '@/hooks/useDeanDepartments';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import {
@@ -31,16 +32,9 @@ const REPORT_TYPES = [
 export default function DeanReportsPage() {
   const api = useAuthedApi();
   const { token } = useAuth();
+  const { departments } = useDeanDepartments();
   const [filters, setFilters] = useState<DeanFilterValues>({});
-  const [departments, setDepartments] = useState<Array<{ dept_id: number; dept_name: string }>>([]);
   const [exporting, setExporting] = useState<string | null>(null);
-
-  useEffect(() => {
-    void api
-      .get<Array<{ dept_id: number; dept_name: string }>>('/api/academics/dean/departments')
-      .then((rows) => setDepartments(rows))
-      .catch(() => setDepartments([]));
-  }, [api]);
 
   const download = useCallback(
     async (type: string, format: 'excel' | 'csv' | 'pdf') => {

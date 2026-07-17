@@ -543,13 +543,42 @@ export class PhdLifecycleService {
     );
   }
 
-  async getCandidate(tenantId: string, candidateId: string) {
+  async getCandidate(
+    tenantId: string,
+    candidateId: string,
+    actor?: { userId: string; role: string },
+  ) {
     const rows = await this.listCandidatesWhere(
       tenantId,
       'c.candidate_id = $2',
       [tenantId, candidateId],
     );
     if (!rows.length) throw new NotFoundException('Ph.D. candidate not found');
+
+    if (actor && this.normalizeRole(actor.role) === 'Dean') {
+      const deptIds = await resolveDeanDepartmentIds(this.db, actor.userId);
+      const candidate = rows[0] as {
+        dept_id?: number | null;
+        user_id?: string;
+      };
+      let candidateDeptId =
+        candidate.dept_id != null ? Number(candidate.dept_id) : null;
+      if (candidateDeptId == null && candidate.user_id) {
+        const [student] = await this.db.query<
+          Array<{ dept_id: number | null }>
+        >(`SELECT dept_id FROM users WHERE user_id = $1 LIMIT 1`, [
+          candidate.user_id,
+        ]);
+        candidateDeptId =
+          student?.dept_id != null ? Number(student.dept_id) : null;
+      }
+      if (candidateDeptId == null || !deptIds.includes(candidateDeptId)) {
+        throw new ForbiddenException(
+          'Ph.D. candidate is outside your school scope.',
+        );
+      }
+    }
+
     const submissions = await this.db.query(
       `SELECT * FROM phd_submissions WHERE candidate_id = $1 ORDER BY created_at DESC`,
       [candidateId],
@@ -610,10 +639,11 @@ export class PhdLifecycleService {
         !isDepartmentInDeanScope(candidateDeptId, deptIds) &&
         candidate.user_id
       ) {
-        const [student] = await this.db.query<Array<{ dept_id: number | null }>>(
-          `SELECT dept_id FROM users WHERE user_id = $1 LIMIT 1`,
-          [candidate.user_id],
-        );
+        const [student] = await this.db.query<
+          Array<{ dept_id: number | null }>
+        >(`SELECT dept_id FROM users WHERE user_id = $1 LIMIT 1`, [
+          candidate.user_id,
+        ]);
         candidateDeptId =
           student?.dept_id != null ? Number(student.dept_id) : null;
       }

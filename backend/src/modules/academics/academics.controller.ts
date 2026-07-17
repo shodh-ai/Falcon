@@ -38,7 +38,10 @@ import { CourseLmsService } from './course-lms.service';
 import { AcademicProxyService } from './academic-proxy.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
-import { CourseAllocationBulkService, type CourseAllocationRowInput } from './course-allocation-bulk.service';
+import {
+  CourseAllocationBulkService,
+  type CourseAllocationRowInput,
+} from './course-allocation-bulk.service';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
@@ -1025,13 +1028,14 @@ export class AcademicsController {
     @Param('driveId') driveId: string,
     @Query('response_id') responseId?: string,
   ) {
-    const { buffer, filename } = await this.hodPortalExt.exportPlacementDriveRegistrationsExcel(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-      req.user.role ?? 'Faculty',
-      driveId,
-      responseId,
-    );
+    const { buffer, filename } =
+      await this.hodPortalExt.exportPlacementDriveRegistrationsExcel(
+        this.resolveTenantId(req.user),
+        req.user.user_id,
+        req.user.role ?? 'Faculty',
+        driveId,
+        responseId,
+      );
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1046,11 +1050,12 @@ export class AcademicsController {
     @Req() req: { user: AuthUser & { role?: string } },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { buffer, filename } = await this.hodPortalExt.exportAllPlacementRegistrationsExcel(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-      req.user.role ?? 'Faculty',
-    );
+    const { buffer, filename } =
+      await this.hodPortalExt.exportAllPlacementRegistrationsExcel(
+        this.resolveTenantId(req.user),
+        req.user.user_id,
+        req.user.role ?? 'Faculty',
+      );
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1080,7 +1085,12 @@ export class AcademicsController {
   @Get('hod/placement/drives/:driveId/google-form-sync')
   @Roles('HOD', 'SuperAdmin', 'Faculty')
   hodGoogleFormSyncSetup(
-    @Req() req: { user: AuthUser & { role?: string }; protocol: string; get: (h: string) => string | undefined },
+    @Req()
+    req: {
+      user: AuthUser & { role?: string };
+      protocol: string;
+      get: (h: string) => string | undefined;
+    },
     @Param('driveId') driveId: string,
   ) {
     const webhookBaseUrl =
@@ -1098,7 +1108,12 @@ export class AcademicsController {
   @Post('hod/placement/drives/:driveId/google-form-sync/regenerate-secret')
   @Roles('HOD', 'SuperAdmin', 'Faculty')
   hodRegenerateGoogleFormSyncSecret(
-    @Req() req: { user: AuthUser & { role?: string }; protocol: string; get: (h: string) => string | undefined },
+    @Req()
+    req: {
+      user: AuthUser & { role?: string };
+      protocol: string;
+      get: (h: string) => string | undefined;
+    },
     @Param('driveId') driveId: string,
   ) {
     const webhookBaseUrl =
@@ -1521,10 +1536,7 @@ export class AcademicsController {
 
   @Get('dean/inbox')
   @Roles('Dean', 'SuperAdmin')
-  deanInbox(
-    @Req() req: { user: AuthUser },
-    @Query() query: ListQueryParams,
-  ) {
+  deanInbox(@Req() req: { user: AuthUser }, @Query() query: ListQueryParams) {
     const tenantId = this.resolveTenantId(req.user);
     if (query.page || query.limit) {
       return this.academics.listDeanInboxPaged(
@@ -1814,7 +1826,7 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   facultyWorkspaceTimetableSlotsBatch(
     @Req() req: { user: AuthUser },
-    @Body() dto: { slots: Array<any> }
+    @Body() dto: { slots: Array<any> },
   ) {
     return this.facultyWorkspaces.scheduleTimetableSlotBatch(
       req.user.user_id,
@@ -1829,7 +1841,7 @@ export class AcademicsController {
     @Req() req: { user: AuthUser },
     @Query('day') day: string,
     @Query('startTime') startTime: string,
-    @Query('endTime') endTime: string
+    @Query('endTime') endTime: string,
   ) {
     if (!day || !startTime || !endTime) {
       throw new BadRequestException('day, startTime, and endTime are required');
@@ -1838,7 +1850,7 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       parseInt(day, 10),
       startTime,
-      endTime
+      endTime,
     );
   }
 
@@ -2580,7 +2592,9 @@ export class AcademicsController {
   }) {
     const forwarded = req.headers?.['x-forwarded-for'];
     const ip =
-      (typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined) ??
+      (typeof forwarded === 'string'
+        ? forwarded.split(',')[0]?.trim()
+        : undefined) ??
       req.ip ??
       undefined;
     const userAgent = req.headers?.['user-agent'];

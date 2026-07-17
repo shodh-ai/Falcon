@@ -99,7 +99,9 @@ describe('AuthService.localLogin', () => {
     signToken: jest.fn(),
   };
 
-  function mockSuccessfulLoginQueries(fixture: ReturnType<typeof buildLoginFixture>) {
+  function mockSuccessfulLoginQueries(
+    fixture: ReturnType<typeof buildLoginFixture>,
+  ) {
     mockDataSource.query.mockImplementation(async (sql: string) => {
       const text = String(sql);
       if (text.includes('password_hash')) {

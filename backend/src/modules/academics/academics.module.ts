@@ -48,6 +48,7 @@ import { StorageModule } from '../../storage/storage.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 import { HrModule } from '../hr/hr.module';
 import { AuthModule } from '../../auth/auth.module';
+import { ExamCellModule } from '../exam-cell/exam-cell.module';
 
 import { EarlyWarningService } from './early-warning.service';
 import { EarlyWarningController } from './early-warning.controller';
@@ -68,6 +69,7 @@ import { DeanAuditService } from './dean-audit.service';
     HelpdeskModule,
     HrModule,
     AuthModule,
+    ExamCellModule,
     TypeOrmModule.forFeature([
       Subject,
       Batch,

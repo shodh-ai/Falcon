@@ -1,13 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Award, FileCheck2, Medal, RefreshCw } from 'lucide-react';
+import { Award, Download, FileCheck2, Medal, RefreshCw } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { getSubdomainFromClient } from '@/lib/tenant';
+import { useAuth } from '@/context/AuthContext';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 
 type GradeCardPayload = {
@@ -53,6 +56,7 @@ function stageBadge(row: GradeCardRow) {
 
 export default function ExamCellGradeCardsPage() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const [semester, setSemester] = useState('4');
   const [rows, setRows] = useState<GradeCardRow[]>([]);
   const [topStudents, setTopStudents] = useState<TopStudent[]>([]);
@@ -102,6 +106,35 @@ export default function ExamCellGradeCardsPage() {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function downloadPdf(gradeCardId: string) {
+    if (!token) {
+      toast.error('Sign in again to download PDFs');
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${getApiBaseUrl()}/api/exam-cell/grade-cards/${gradeCardId}/export/pdf`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'x-tenant-subdomain': getSubdomainFromClient(),
+          },
+        },
+      );
+      if (!res.ok) throw new Error('PDF export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `grade-card-${gradeCardId.slice(0, 8)}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success('Grade card PDF downloaded');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'PDF export failed');
     }
   }
 
@@ -176,12 +209,13 @@ export default function ExamCellGradeCardsPage() {
                     <th className="px-3 py-2">CGPA</th>
                     <th className="px-3 py-2">Credits</th>
                     <th className="px-3 py-2">Stage</th>
+                    <th className="px-3 py-2">PDF</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td className="px-3 py-8 text-center text-muted-foreground" colSpan={6}>
+                      <td className="px-3 py-8 text-center text-muted-foreground" colSpan={7}>
                         No grade cards yet. Generate a provisional batch for this semester.
                       </td>
                     </tr>
@@ -202,6 +236,16 @@ export default function ExamCellGradeCardsPage() {
                           {row.payload?.credits_earned ?? 0}/{row.payload?.credits_attempted ?? 0}
                         </td>
                         <td className="px-3 py-2">{stageBadge(row)}</td>
+                        <td className="px-3 py-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-label={`Download grade card PDF for ${row.student_name}`}
+                            onClick={() => void downloadPdf(row.grade_card_id)}
+                          >
+                            <Download className="size-4" />
+                          </Button>
+                        </td>
                       </tr>
                     ))
                   )}

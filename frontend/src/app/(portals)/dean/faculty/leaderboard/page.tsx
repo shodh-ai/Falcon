@@ -9,6 +9,7 @@ import {
   HodPanel,
 } from '@/components/hod/HodPagePrimitives';
 import { useAuthedApi } from '@/lib/api';
+import { useDeanDepartments } from '@/hooks/useDeanDepartments';
 import {
   DeanFilterBar,
   buildDeanFilterQuery,
@@ -23,17 +24,10 @@ type LeaderboardPayload = {
 
 export default function DeanFacultyLeaderboardPage() {
   const api = useAuthedApi();
+  const { departments } = useDeanDepartments();
   const [filters, setFilters] = useState<DeanFilterValues>({});
-  const [departments, setDepartments] = useState<Array<{ dept_id: number; dept_name: string }>>([]);
   const [data, setData] = useState<LeaderboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    void api
-      .get<Array<{ dept_id: number; dept_name: string }>>('/api/academics/dean/departments')
-      .then((rows) => setDepartments(rows))
-      .catch(() => setDepartments([]));
-  }, [api]);
 
   useEffect(() => {
     void (async () => {

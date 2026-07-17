@@ -28,7 +28,9 @@ export class ExamCellOperationsService {
       return await this.db.query(sql, params);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/relation .* does not exist|column .* does not exist/i.test(message)) {
+      if (
+        /relation .* does not exist|column .* does not exist/i.test(message)
+      ) {
         return [];
       }
       throw err;
@@ -153,14 +155,21 @@ export class ExamCellOperationsService {
     );
     if (!row) throw new NotFoundException('Registration not found');
     await this.audit.log(tenantId, actorUserId, {
-      action: status === 'APPROVED' ? 'REGISTRATION_APPROVED' : 'REGISTRATION_REJECTED',
+      action:
+        status === 'APPROVED'
+          ? 'REGISTRATION_APPROVED'
+          : 'REGISTRATION_REJECTED',
       resource_type: 'exam_semester_registration',
       resource_id: registrationId,
     });
     return row;
   }
 
-  async seedRegistrationsFromSemester(tenantId: string, windowId: string, semester: number) {
+  async seedRegistrationsFromSemester(
+    tenantId: string,
+    windowId: string,
+    semester: number,
+  ) {
     const students = await this.db.query(
       `SELECT DISTINCT u.user_id
        FROM users u
@@ -171,7 +180,10 @@ export class ExamCellOperationsService {
 
     let created = 0;
     for (const s of students) {
-      const eligibility = await this.buildEligibilitySnapshot(tenantId, s.user_id);
+      const eligibility = await this.buildEligibilitySnapshot(
+        tenantId,
+        s.user_id,
+      );
       const feeClear = eligibility.fee_clear;
       const [existing] = await this.db.query(
         `SELECT registration_id FROM exam_semester_registrations
@@ -199,9 +211,14 @@ export class ExamCellOperationsService {
     return { created, total_students: students.length };
   }
 
-  private async buildEligibilitySnapshot(tenantId: string, studentUserId: string) {
+  private async buildEligibilitySnapshot(
+    tenantId: string,
+    studentUserId: string,
+  ) {
     const [attendance, pendingDues] = await Promise.all([
-      this.attendanceEligibility.evaluate(tenantId, studentUserId, { context: 'EXAM_DESK' }),
+      this.attendanceEligibility.evaluate(tenantId, studentUserId, {
+        context: 'EXAM_DESK',
+      }),
       this.finance.getPendingDues(studentUserId),
     ]);
     const blockReasons: string[] = [];
@@ -292,10 +309,13 @@ export class ExamCellOperationsService {
           'Question paper table not found. Run database migrations (npm run db:migrate) and restart the backend.',
         );
       }
-      throw new BadRequestException(message || 'Could not create question paper record');
+      throw new BadRequestException(
+        message || 'Could not create question paper record',
+      );
     }
     const row = rows[0];
-    if (!row) throw new BadRequestException('Could not create question paper record');
+    if (!row)
+      throw new BadRequestException('Could not create question paper record');
     await this.audit.log(tenantId, actorUserId, {
       action: 'QP_UPLOADED',
       resource_type: 'exam_question_paper',
@@ -310,7 +330,12 @@ export class ExamCellOperationsService {
     actorUserId: string,
     status: string,
   ) {
-    const allowed = ['UNDER_MODERATION', 'COE_APPROVED', 'PRINT_AUTHORIZED', 'REJECTED'];
+    const allowed = [
+      'UNDER_MODERATION',
+      'COE_APPROVED',
+      'PRINT_AUTHORIZED',
+      'REJECTED',
+    ];
     if (!allowed.includes(status)) {
       throw new BadRequestException('Invalid QP status transition');
     }
@@ -402,7 +427,13 @@ export class ExamCellOperationsService {
        ON CONFLICT (exam_schedule_id, student_user_id)
        DO UPDATE SET status = EXCLUDED.status, marked_by = EXCLUDED.marked_by, marked_at = NOW()
        RETURNING *`,
-      [tenantId, dto.exam_schedule_id, dto.student_user_id, dto.status, actorUserId],
+      [
+        tenantId,
+        dto.exam_schedule_id,
+        dto.student_user_id,
+        dto.status,
+        actorUserId,
+      ],
     );
     await this.audit.log(tenantId, actorUserId, {
       action: 'EXAM_DAY_ATTENDANCE_MARKED',
@@ -429,12 +460,7 @@ export class ExamCellOperationsService {
 
   async getReportsSummary(tenantId: string, semester?: number) {
     const sem = semester ?? 4;
-    const [
-      passFail,
-      topRankers,
-      deptStats,
-      backlogCount,
-    ] = await Promise.all([
+    const [passFail, topRankers, deptStats, backlogCount] = await Promise.all([
       this.queryOrEmpty<{ label: string; count: number }>(
         `SELECT ser.status AS label, COUNT(*)::int AS count
          FROM student_exam_reports ser
@@ -473,12 +499,15 @@ export class ExamCellOperationsService {
     ]);
 
     const totalPublished = passFail.reduce((s, r) => s + r.count, 0);
-    const passed = passFail.find((r) => r.label === 'PASS' || r.label === 'PUBLISHED')?.count ?? 0;
+    const passed =
+      passFail.find((r) => r.label === 'PASS' || r.label === 'PUBLISHED')
+        ?.count ?? 0;
 
     return {
       semester: sem,
       pass_fail: passFail,
-      pass_percentage: totalPublished > 0 ? Math.round((passed / totalPublished) * 100) : 0,
+      pass_percentage:
+        totalPublished > 0 ? Math.round((passed / totalPublished) * 100) : 0,
       top_rankers: topRankers,
       department_enrollment: deptStats,
       pending_backlog: backlogCount[0]?.c ?? 0,
@@ -497,7 +526,7 @@ export class ExamCellOperationsService {
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1 AND r.role_name = 'Student'`,
       [tenantId],
-    ) as Array<{ user_id: string }>;
+    );
 
     const [row] = await this.db.query(
       `INSERT INTO exam_notification_campaigns
@@ -515,7 +544,10 @@ export class ExamCellOperationsService {
       ],
     );
 
-    const queueDelivery = dto.channel === 'EMAIL' || dto.channel === 'WHATSAPP' || dto.channel === 'SMS';
+    const queueDelivery =
+      dto.channel === 'EMAIL' ||
+      dto.channel === 'WHATSAPP' ||
+      dto.channel === 'SMS';
     const userIds = students.map((s) => s.user_id);
 
     let delivered = 0;
@@ -541,7 +573,11 @@ export class ExamCellOperationsService {
       action: 'NOTIFICATION_CAMPAIGN_SENT',
       resource_type: 'exam_notification_campaign',
       resource_id: String(row?.campaign_id ?? ''),
-      new_value: { subject: dto.subject, channel: dto.channel, delivered: userIds.length },
+      new_value: {
+        subject: dto.subject,
+        channel: dto.channel,
+        delivered: userIds.length,
+      },
     });
 
     return {
@@ -572,37 +608,32 @@ export class ExamCellOperationsService {
 
   async listMyTasks(tenantId: string) {
     const today = new Date().toISOString().slice(0, 10);
-    const [
-      pendingRegs,
-      pendingQp,
-      todayExams,
-      pendingReEval,
-      openWindows,
-    ] = await Promise.all([
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_semester_registrations WHERE tenant_id = $1 AND status = 'PENDING'`,
-        [tenantId],
-      ),
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_question_papers WHERE tenant_id = $1 AND status = 'UPLOADED'`,
-        [tenantId],
-      ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date = $2`,
-        [tenantId, today],
-      ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS c FROM exam_applications a
+    const [pendingRegs, pendingQp, todayExams, pendingReEval, openWindows] =
+      await Promise.all([
+        this.queryOrEmpty<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM exam_semester_registrations WHERE tenant_id = $1 AND status = 'PENDING'`,
+          [tenantId],
+        ),
+        this.queryOrEmpty<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM exam_question_papers WHERE tenant_id = $1 AND status = 'UPLOADED'`,
+          [tenantId],
+        ),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM exam_schedules WHERE tenant_id = $1 AND exam_date = $2`,
+          [tenantId, today],
+        ),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM exam_applications a
          JOIN users u ON u.user_id = a.student_user_id
          WHERE u.tenant_id = $1 AND a.application_type = 'RE_EVALUATION'
            AND a.status IN ('PENDING','ASSIGNED','UNDER_REVIEW')`,
-        [tenantId],
-      ),
-      this.queryOrEmpty<{ c: number }>(
-        `SELECT COUNT(*)::int AS c FROM exam_form_windows WHERE tenant_id = $1 AND status = 'OPEN'`,
-        [tenantId],
-      ),
-    ]);
+          [tenantId],
+        ),
+        this.queryOrEmpty<{ c: number }>(
+          `SELECT COUNT(*)::int AS c FROM exam_form_windows WHERE tenant_id = $1 AND status = 'OPEN'`,
+          [tenantId],
+        ),
+      ]);
 
     const tasks: Array<{
       id: string;

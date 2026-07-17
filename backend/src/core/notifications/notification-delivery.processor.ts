@@ -28,6 +28,8 @@ export class NotificationDeliveryProcessor extends WorkerHost {
     } else if (email && deliveryChannel !== 'IN_APP') {
       await this.channels.sendEmail(email, title, message);
     }
-    this.logger.debug(`Delivered ${deliveryChannel} notification for user ${userId}`);
+    this.logger.debug(
+      `Delivered ${deliveryChannel} notification for user ${userId}`,
+    );
   }
 }

@@ -649,6 +649,8 @@ export class NotificationEventsListener {
   async onOnboardingVerificationRequested(
     payload: OnboardingVerificationRequestedPayload,
   ) {
-    await this.onboardingVerificationNotify.notifyVerificationRequested(payload);
+    await this.onboardingVerificationNotify.notifyVerificationRequested(
+      payload,
+    );
   }
 }

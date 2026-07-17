@@ -46,16 +46,17 @@ export function parseListQuery(
   );
   const pageNum = Number(query.page);
   const offset =
-    Number.isFinite(pageNum) && pageNum > 0
-      ? (pageNum - 1) * limit
-      : rawOffset;
+    Number.isFinite(pageNum) && pageNum > 0 ? (pageNum - 1) * limit : rawOffset;
   return {
     limit,
     offset,
     page: Math.floor(offset / limit) + 1,
     search: query.search?.trim() ?? '',
     sort: query.sort?.trim() ?? '',
-    order: query.order?.toLowerCase() === 'asc' ? ('asc' as const) : ('desc' as const),
+    order:
+      query.order?.toLowerCase() === 'asc'
+        ? ('asc' as const)
+        : ('desc' as const),
   };
 }
 
