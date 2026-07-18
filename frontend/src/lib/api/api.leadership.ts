@@ -245,7 +245,10 @@ export function useLeadershipApi() {
         ),
       flagToHod: (body: { node_key: string; label: string; message?: string }) =>
         api.post<{ success: boolean; notified_hod: string }>('/api/leadership/flag-to-hod', body),
-      issues: () => api.get<Record<string, unknown>>('/api/leadership/issues'),
+      issues: (period?: ExecutivePeriod) =>
+        api.get<Record<string, unknown>>(
+          `/api/leadership/issues${period ? `?period=${period}` : ''}`,
+        ),
       escalateIssue: (ticketId: string) =>
         api.post<{ success: boolean; notified_hod: string }>(`/api/leadership/issues/${ticketId}/escalate`, {}),
       ticker: () => api.get<IntelligenceTicker>('/api/leadership/intelligence/ticker'),

@@ -90,6 +90,9 @@ export class MeetingsService {
     if (r === 'hod') return `/hod/meetings?meeting=${meetingId}`;
     if (r === 'dean') return `/dean/meetings?meeting=${meetingId}`;
     if (r === 'president') return `/president/meetings?meeting=${meetingId}`;
+    if (r === 'chairman') return `/leadership/meetings?meeting=${meetingId}`;
+    if (r === 'registrar') return `/leadership/meetings?meeting=${meetingId}`;
+    if (r === 'superadmin') return `/leadership/meetings?meeting=${meetingId}`;
     if (r === 'hr' || r === 'hradmin')
       return `/hr/meetings?meeting=${meetingId}`;
     return `/faculty/meetings?meeting=${meetingId}`;
@@ -283,11 +286,23 @@ export class MeetingsService {
 
     if (this.isExecutive(roles)) {
       const rows = await this.dataSource.query<EligibleUser[]>(
-        `SELECT u.user_id, u.name, u.official_email AS email, r.role_name, d.dept_name,
-                'executive'::text AS relation
+        `SELECT u.user_id, u.name, u.official_email AS email, r.role_name,
+                COALESCE(d.dept_name, hod_d.dept_name) AS dept_name,
+                CASE
+                  WHEN hod_d.hod_user_id IS NOT NULL OR lower(r.role_name) = 'hod'
+                    THEN 'hod'
+                  ELSE 'executive'
+                END AS relation
          FROM users u
          JOIN roles r ON r.role_id = u.role_id
          LEFT JOIN departments d ON d.dept_id = u.dept_id
+         LEFT JOIN LATERAL (
+           SELECT hd.dept_name, hd.hod_user_id
+           FROM departments hd
+           WHERE hd.hod_user_id = u.user_id
+           ORDER BY hd.dept_name ASC
+           LIMIT 1
+         ) hod_d ON true
          WHERE u.tenant_id = $1
            AND u.is_active = true
            AND u.user_id <> $2

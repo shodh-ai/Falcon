@@ -81,7 +81,9 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
           onMobileOpenChange={setMobileOpen}
         />
 
-        <main className="min-h-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
+        {/* Below lg the bottom padding clears the fixed mobile nav; at lg+ the wrapper's own
+            py already provides ~20px, so only a small extra keeps total trailing space ≈32px. */}
+        <main className="min-h-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-3">
           <div className={cn('mx-auto w-full px-3 py-4 sm:px-6 sm:py-5', contentMaxWidthClass)}>
             {children}
           </div>

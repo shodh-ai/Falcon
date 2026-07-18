@@ -28,10 +28,6 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/hod/dashboard';
   }
 
-  if (r === 'dean') {
-    return '/dean/dashboard';
-  }
-
   if (r === 'student' || r === 'applicant') {
     return '/student/dashboard';
   }
@@ -56,7 +52,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return isRoleWorkspaceEnabled('librarian') ? '/library/dashboard' : '/dashboard';
   }
 
-  if (r === 'president') {
+  if (r === 'president' || r === 'vice chancellor') {
     return '/president/executive-summary';
   }
 
@@ -317,8 +313,8 @@ const portalRoles: Record<string, string[]> = {
   '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
   '/library': ['librarian', 'superadmin'],
   '/library-admin': ['librarian', 'superadmin'],
-  '/president': ['president', 'superadmin'],
-  '/leadership': ['chairman', 'president', 'superadmin', 'registrar'],
+  '/president': ['president', 'vice chancellor', 'superadmin'],
+  '/leadership': ['chairman', 'president', 'vice chancellor', 'superadmin', 'registrar'],
   '/parent': ['parent', 'superadmin'],
   '/exam-cell': ['examcell', 'superadmin', 'deputycoe', 'examadmin', 'examoperator'],
   '/disciplinary-committee': ['dc_member', 'superadmin'],
@@ -433,6 +429,7 @@ const EXPLICIT_PORTAL_PROFILE_PATHS: Record<string, string> = {
   '/alumni': '/alumni/profile',
   '/hr': '/hr/me/documents',
   '/exam-cell': '/exam-cell/profile',
+  '/president': '/president/settings',
 };
 
 const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {

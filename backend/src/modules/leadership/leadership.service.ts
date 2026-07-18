@@ -1156,15 +1156,20 @@ export class LeadershipService {
     return { refreshed_at: new Date().toISOString() };
   }
 
-  async getIssuesDashboard(tenantId?: string) {
+  async getIssuesDashboard(tenantId?: string, period?: string) {
     const tid = this.tenantId(tenantId);
+    // Only constrain by time when a period is explicitly requested, so internal
+    // callers (red flags, compliance summary) keep the all-time behavior.
+    const since = period ? this.periodSince(this.parsePeriod(period)) : null;
+    const sinceClause = since ? ' AND created_at >= $2' : '';
+    const params: unknown[] = since ? [tid, since] : [tid];
     const [kpis, heatmap, escalations, avgResolution] = await Promise.all([
       this.db.query(
         `SELECT
            COUNT(*) FILTER (WHERE status != 'RESOLVED')::int AS open_tickets,
            COUNT(*) FILTER (WHERE status != 'RESOLVED' AND sla_deadline < NOW())::int AS sla_breaches
-         FROM helpdesk_tickets WHERE tenant_id = $1`,
-        [tid],
+         FROM helpdesk_tickets WHERE tenant_id = $1${sinceClause}`,
+        params,
       ),
       this.db.query(
         `SELECT
@@ -1177,10 +1182,10 @@ export class LeadershipService {
            END AS department,
            COUNT(*) FILTER (WHERE status != 'RESOLVED')::int AS open_count
          FROM helpdesk_tickets
-         WHERE tenant_id = $1
+         WHERE tenant_id = $1${sinceClause}
          GROUP BY 1
          ORDER BY open_count DESC`,
-        [tid],
+        params,
       ),
       this.db.query(
         `SELECT t.ticket_id, t.category, t.subject, t.status, t.created_at, t.sla_deadline,
@@ -1190,16 +1195,16 @@ export class LeadershipService {
          LEFT JOIN departments d ON d.dept_id = u.dept_id
          WHERE t.tenant_id = $1
            AND t.status != 'RESOLVED'
-           AND t.sla_deadline < NOW()
+           AND t.sla_deadline < NOW()${since ? ' AND t.created_at >= $2' : ''}
          ORDER BY t.sla_deadline ASC
          LIMIT 50`,
-        [tid],
+        params,
       ),
       this.db.query(
         `SELECT ROUND(AVG(resolution_time_hours)::numeric, 1) AS avg_hours
          FROM helpdesk_tickets
-         WHERE tenant_id = $1 AND resolution_time_hours IS NOT NULL`,
-        [tid],
+         WHERE tenant_id = $1 AND resolution_time_hours IS NOT NULL${sinceClause}`,
+        params,
       ),
     ]);
 

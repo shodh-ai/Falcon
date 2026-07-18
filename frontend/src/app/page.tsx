@@ -33,7 +33,12 @@ export default function Home() {
     try {
       const result = await api.localLogin(email.trim(), password);
       login(result.token, result.user);
-      const fresh = await refreshUser();
+      let fresh = null;
+      try {
+        fresh = await refreshUser();
+      } catch {
+        /* keep login payload if profile refresh fails */
+      }
       router.push(getPostLoginPath(fresh ?? result.user));
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : 'Login failed');

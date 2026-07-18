@@ -46,7 +46,7 @@ function actorFromReq(req: {
 
 @Controller('api/president')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('President', 'SuperAdmin')
+@Roles('President', 'Vice Chancellor', 'SuperAdmin')
 export class PresidentController {
   constructor(
     private readonly president: PresidentService,
@@ -105,16 +105,31 @@ export class PresidentController {
 
   @Post('hr-approvals/:id/review')
   reviewHrApproval(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('id') id: string,
     @Body() body: { approve: boolean; note?: string },
   ) {
-    return this.workflows.reviewHrApproval(actorFromReq(req), id, body.approve, body.note);
+    return this.workflows.reviewHrApproval(
+      actorFromReq(req),
+      id,
+      body.approve,
+      body.note,
+    );
   }
 
   @Post('executive-orders')
   createExecutiveOrder(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Body()
     body: {
       subject: string;
@@ -129,20 +144,38 @@ export class PresidentController {
 
   @Patch('executive-orders/:id/status')
   updateExecutiveOrder(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('id') id: string,
     @Body() body: { status: string },
   ) {
-    return this.workflows.updateExecutiveOrderStatus(actorFromReq(req), id, body.status);
+    return this.workflows.updateExecutiveOrderStatus(
+      actorFromReq(req),
+      id,
+      body.status,
+    );
   }
 
   @Post('grievances/:ticketId/decide')
   grievanceDecision(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('ticketId') ticketId: string,
     @Body() body: { decision: string; assigned_officer_user_id?: string },
   ) {
-    return this.workflows.presidentEscalateGrievance(actorFromReq(req), ticketId, body);
+    return this.workflows.presidentEscalateGrievance(
+      actorFromReq(req),
+      ticketId,
+      body,
+    );
   }
 
   @Get('convocation/pending-ratification')
@@ -154,7 +187,12 @@ export class PresidentController {
 
   @Post('convocation/:applicationId/ratify')
   ratifyConvocation(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('applicationId') applicationId: string,
     @Body() body: { approve: boolean; note?: string },
   ) {
@@ -168,11 +206,20 @@ export class PresidentController {
 
   @Post('compliance/:assignmentId/action')
   complianceAction(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('assignmentId') assignmentId: string,
     @Body()
     body: {
-      action: 'ASSIGN_INVESTIGATION' | 'ESCALATE_DEPARTMENT' | 'REQUEST_REPORT' | 'MARK_REVIEWED';
+      action:
+        | 'ASSIGN_INVESTIGATION'
+        | 'ESCALATE_DEPARTMENT'
+        | 'REQUEST_REPORT'
+        | 'MARK_REVIEWED';
       note?: string;
     },
   ) {
@@ -186,11 +233,20 @@ export class PresidentController {
 
   @Post('meetings/:meetingId/action-items')
   meetingActionItems(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('meetingId') meetingId: string,
     @Body()
     body: {
-      items: Array<{ title: string; assigned_to_user_id: string; due_at?: string }>;
+      items: Array<{
+        title: string;
+        assigned_to_user_id: string;
+        due_at?: string;
+      }>;
     },
   ) {
     return this.workflows.createMeetingActionItems(
@@ -198,5 +254,30 @@ export class PresidentController {
       meetingId,
       body.items ?? [],
     );
+  }
+
+  @Get('admissions')
+  admissions(@Req() req: { user: AuthUser }) {
+    return this.president.getAdmissions(req.user.tenant_id);
+  }
+
+  @Get('placements')
+  placements(@Req() req: { user: AuthUser }) {
+    return this.president.getPlacementsOverview(req.user.tenant_id);
+  }
+
+  @Get('alumni-development')
+  alumniDevelopment(@Req() req: { user: AuthUser }) {
+    return this.president.getAlumniDevelopment(req.user.tenant_id);
+  }
+
+  @Get('achievements')
+  achievements(@Req() req: { user: AuthUser }) {
+    return this.president.getAchievements(req.user.tenant_id);
+  }
+
+  @Get('alerts')
+  alerts(@Req() req: { user: AuthUser }) {
+    return this.president.getAlerts(req.user.tenant_id);
   }
 }

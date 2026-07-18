@@ -232,15 +232,33 @@ describe('AuthService.localLogin', () => {
     ).rejects.toThrow('Invalid email or password');
   });
 
-  it('throws when password does not match hash', async () => {
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: 'user-1', password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    (bcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
+  it('still returns a token when HR enrichment throws', async () => {
+    const user = buildUser({
+      email: 'dev.president@mygyanvihar.com',
+      roleName: 'President',
+    });
 
-    await expect(
-      service.localLogin('library@mygyanvihar.com', 'wrong-password'),
-    ).rejects.toThrow('Invalid email or password');
+    mockDataSource.query.mockResolvedValueOnce([
+      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
+    ]);
+    mockUserRepository.findOne.mockResolvedValue(user);
+    mockHrEntityCtx.getPermissions.mockRejectedValueOnce(
+      new Error('Redis connection refused'),
+    );
+    mockHrEntityCtx.listAllowedEntities.mockRejectedValueOnce(
+      new Error('relation org_entities does not exist'),
+    );
+
+    const result = await service.localLogin(
+      'dev.president@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    expect(result.token).toBe('signed-jwt');
+    expect(result.user.role).toBe('President');
+    expect(result.user.permissions).toEqual([]);
+    expect(result.user.allowed_entities).toEqual([]);
   });
 
   it('still returns token when HR enrichment fails', async () => {

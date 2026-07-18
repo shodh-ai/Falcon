@@ -36,7 +36,7 @@ function portalForRole(role: string): PortalConfig {
   if (r === 'accountant') return financePortal;
   if (r === 'iqac') return iqacPortal;
   if (r === 'librarian') return libraryPortal;
-  if (r === 'president') return presidentPortal;
+  if (r === 'president' || r === 'vice chancellor') return presidentPortal;
   if (r === 'chairman') return leadershipPortal;
   if (r === 'parent') return parentPortal;
   if (r === 'alumni') return alumniPortal;

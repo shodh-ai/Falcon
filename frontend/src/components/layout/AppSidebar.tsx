@@ -28,11 +28,14 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const allHrefs = collectNavHrefs(navGroups);
+  const isExecutivePortal = personaLabel === 'President / VC';
 
   return (
     <aside
       className={cn(
         'flex h-full flex-col border-r border-sgvu-gold/25 bg-sgvu-navy text-white transition-[width] duration-200',
+        isExecutivePortal &&
+          'border-sgvu-gold/20 bg-[linear-gradient(180deg,var(--color-sgvu-navy)_0%,#071a35_100%)] shadow-[8px_0_32px_rgba(4,20,44,0.14)]',
         collapsed ? 'w-[var(--sidebar-width-collapsed)]' : 'w-[var(--sidebar-width)]',
         className,
       )}
@@ -42,16 +45,21 @@ export function AppSidebar({
           'relative',
           collapsed
             ? 'flex h-16 items-center justify-center px-2'
-            : 'flex flex-col items-center px-3 py-3 text-center',
+            : cn(
+                'flex flex-col items-center px-3 py-3 text-center',
+                isExecutivePortal && 'min-h-[116px] justify-center py-4',
+              ),
         )}
       >
         {!collapsed && (
-          <div className="flex w-full flex-col items-center gap-1">
-            <FalconLogo size={48} className="mx-auto" />
-            <p className="text-[9px] font-medium uppercase tracking-[0.14em] text-sgvu-gold/85">
+          <div className="flex w-full flex-col items-center gap-1.5">
+            <FalconLogo size={isExecutivePortal ? 52 : 48} className="mx-auto" />
+            <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-sgvu-gold/90">
               SGVU Workspace
             </p>
-            <p className="max-w-full truncate text-[10px] font-medium text-blue-100/70">{personaLabel}</p>
+            <p className="max-w-full truncate text-[10px] font-medium tracking-wide text-blue-100/70">
+              {personaLabel}
+            </p>
           </div>
         )}
         {collapsed && <FalconLogo size={36} compact className="mx-auto" />}
@@ -69,16 +77,26 @@ export function AppSidebar({
         </Button>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1 px-2 py-4 [&_[data-radix-scroll-area-thumb]]:bg-white/20 [&_[data-radix-scroll-area-thumb]:hover]:bg-white/30">
-        <nav className="space-y-4">
-          {navGroups.map((group) => (
+      <ScrollArea
+        className={cn(
+          'min-h-0 flex-1 px-2.5 py-4 [scrollbar-gutter:stable] [&_[data-radix-scroll-area-thumb]]:bg-white/20 [&_[data-radix-scroll-area-thumb]:hover]:bg-white/30',
+          isExecutivePortal && '[&_[data-orientation=vertical]]:translate-x-2.5',
+        )}
+      >
+        <nav className={cn('space-y-4', isExecutivePortal && 'space-y-5 pb-4')}>
+          {navGroups.map((group, groupIndex) => (
             <div key={group.title}>
               {!collapsed && (
-                <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-widest text-sgvu-gold/80">
+                <p
+                  className={cn(
+                    'mb-2 px-3 text-[10px] font-bold uppercase tracking-widest text-sgvu-gold/80',
+                    isExecutivePortal && 'mb-2.5 tracking-[0.18em] text-sgvu-gold/75',
+                  )}
+                >
                   {group.title}
                 </p>
               )}
-              <ul className="space-y-1">
+              <ul className={cn('space-y-1', isExecutivePortal && 'space-y-1.5')}>
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   const active = isNavHrefActive(pathname, item.href, allHrefs);
@@ -87,17 +105,36 @@ export function AppSidebar({
                       <Link
                         href={item.href}
                         title={collapsed ? item.label : undefined}
+                        aria-current={active ? 'page' : undefined}
                         className={cn(
                           'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition touch-target',
+                          isExecutivePortal &&
+                            'min-h-11 rounded-2xl px-3.5 py-2.5 font-semibold transition-all duration-200 ease-out',
                           active
                             ? 'bg-sgvu-gold text-sgvu-navy shadow-md'
-                            : 'text-blue-100 hover:bg-white/10 hover:text-white',
+                            : cn(
+                                'text-blue-100 hover:bg-white/10 hover:text-white',
+                                isExecutivePortal &&
+                                  'text-blue-100/85 hover:translate-x-0.5 hover:bg-white/8',
+                              ),
                           collapsed && 'justify-center px-2',
                         )}
                       >
-                        <Icon className="h-5 w-5 shrink-0" />
+                        <Icon
+                          className={cn(
+                            'h-5 w-5 shrink-0',
+                            isExecutivePortal && 'text-white/90 transition-colors',
+                            active && isExecutivePortal && 'text-white',
+                          )}
+                          strokeWidth={isExecutivePortal ? 1.9 : 2}
+                        />
                         {!collapsed && (
-                          <span className="min-w-0 flex-1 whitespace-normal break-words leading-snug">
+                          <span
+                            className={cn(
+                              'min-w-0 flex-1 whitespace-normal break-words leading-snug',
+                              isExecutivePortal && 'tracking-[0.005em]',
+                            )}
+                          >
                             {item.label}
                           </span>
                         )}
@@ -106,7 +143,9 @@ export function AppSidebar({
                   );
                 })}
               </ul>
-              {!collapsed && <Separator className="mt-4 bg-white/10" />}
+              {!collapsed && groupIndex < navGroups.length - 1 && (
+                <Separator className={cn('mt-4 bg-white/10', isExecutivePortal && 'mt-5 bg-white/8')} />
+              )}
             </div>
           ))}
         </nav>

@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { StaffPayslip } from '../../entities/staff-payslip.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
 import { TaskAssignment } from '../../entities/task-assignment.entity';
 import { User } from '../../entities/user.entity';
+import { LeadershipService } from '../leadership/leadership.service';
 
 @Injectable()
 export class PresidentService {
@@ -19,10 +19,15 @@ export class PresidentService {
     @InjectRepository(TaskAssignment)
     private taskAssignments: Repository<TaskAssignment>,
     @InjectRepository(StaffPayslip) private payslips: Repository<StaffPayslip>,
+    private readonly leadership: LeadershipService,
   ) {}
 
   private tenantId(tenantId?: string) {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private static text(value: unknown, fallback = ''): string {
+    return typeof value === 'string' && value.length > 0 ? value : fallback;
   }
 
   private fetchTenantDemands(tenantId: string) {
@@ -505,6 +510,258 @@ export class PresidentService {
         requested_by: a.requested_by_name ?? null,
         business_reason: a.title,
         financial_impact: a.amount,
+      })),
+    };
+  }
+
+  async getAdmissions(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [seatMatrix, applications, feeRow, trend] = await Promise.all([
+      this.db
+        .query(
+          `SELECT program_code, program_name, total_seats, filled_seats
+           FROM admission_seat_matrix
+           WHERE tenant_id = $1
+           ORDER BY total_seats DESC
+           LIMIT 20`,
+          [tid],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM admissions_applications a
+           JOIN admissions_leads l ON l.lead_id = a.lead_id
+           WHERE l.tenant_id = $1`,
+          [tid],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT COALESCE(SUM(paid_amount), 0)::numeric AS collected
+           FROM finance_fee_demands WHERE tenant_id = $1`,
+          [tid],
+        )
+        .catch(() => [{ collected: 0 }]),
+      this.db
+        .query(
+          `SELECT to_char(date_trunc('month', a.submitted_at), 'Mon') AS month,
+                  date_trunc('month', a.submitted_at) AS month_start,
+                  COUNT(*) FILTER (
+                    WHERE a.submitted_at >= date_trunc('year', NOW())
+                  )::int AS this_year,
+                  COUNT(*) FILTER (
+                    WHERE a.submitted_at < date_trunc('year', NOW())
+                      AND a.submitted_at >= date_trunc('year', NOW()) - INTERVAL '1 year'
+                  )::int AS last_year
+           FROM admissions_applications a
+           JOIN admissions_leads l ON l.lead_id = a.lead_id
+           WHERE l.tenant_id = $1 AND a.submitted_at IS NOT NULL
+           GROUP BY 1, 2
+           ORDER BY 2 ASC
+           LIMIT 12`,
+          [tid],
+        )
+        .catch(() => []),
+    ]);
+
+    const seats = seatMatrix as Array<Record<string, unknown>>;
+    const totalCapacity = seats.reduce(
+      (sum, r) => sum + Number(r.total_seats ?? 0),
+      0,
+    );
+    const totalFilled = seats.reduce(
+      (sum, r) => sum + Number(r.filled_seats ?? 0),
+      0,
+    );
+
+    return {
+      total_applications: Number(applications[0]?.total ?? 0),
+      seats_filled: totalFilled,
+      target_capacity: totalCapacity,
+      fee_collected: Number(feeRow[0]?.collected ?? 0),
+      monthly_trend: (trend as Array<Record<string, unknown>>).map((r) => ({
+        month: PresidentService.text(r.month),
+        this_year: Number(r.this_year ?? 0),
+        last_year: Number(r.last_year ?? 0),
+      })),
+      department_intake: seats.map((r) => ({
+        program: PresidentService.text(r.program_code, 'Program'),
+        program_name: PresidentService.text(
+          r.program_name,
+          PresidentService.text(r.program_code, 'Programme'),
+        ),
+        sanctioned: Number(r.total_seats ?? 0),
+        filled: Number(r.filled_seats ?? 0),
+      })),
+    };
+  }
+
+  async getPlacementsOverview(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [summary, byDepartment] = await Promise.all([
+      this.leadership.getPlacements(tid),
+      this.db
+        .query(
+          `SELECT COALESCE(d.dept_name, 'Unassigned') AS department,
+                  COUNT(DISTINCT u.user_id)::int AS eligible,
+                  COUNT(DISTINCT pja.student_user_id)::int AS placed
+           FROM users u
+           JOIN roles r ON r.role_id = u.role_id
+           LEFT JOIN departments d ON d.dept_id = u.dept_id
+           LEFT JOIN placement_job_applications pja
+             ON pja.student_user_id = u.user_id
+             AND pja.status IN ('ACCEPTED', 'OFFERED')
+           WHERE u.tenant_id = $1 AND r.role_name = 'Student' AND u.is_active = true
+           GROUP BY 1
+           ORDER BY placed DESC`,
+          [tid],
+        )
+        .catch(() => []),
+    ]);
+
+    return {
+      ...summary,
+      department_placements: (
+        byDepartment as Array<Record<string, unknown>>
+      ).map((r) => ({
+        department: PresidentService.text(r.department),
+        eligible: Number(r.eligible ?? 0),
+        placed: Number(r.placed ?? 0),
+        placement_pct: Number(r.eligible ?? 0)
+          ? Math.round((Number(r.placed ?? 0) / Number(r.eligible ?? 1)) * 100)
+          : 0,
+      })),
+    };
+  }
+
+  async getAlumniDevelopment(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [summary, donationsByYear, distinguished] = await Promise.all([
+      this.leadership.getAlumniSummary(tid),
+      this.db
+        .query(
+          `SELECT EXTRACT(YEAR FROM donated_at)::int AS year,
+                  COALESCE(SUM(amount), 0)::numeric AS total
+           FROM alumni_donations
+           WHERE tenant_id = $1
+           GROUP BY 1 ORDER BY 1 ASC LIMIT 6`,
+          [tid],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT name, batch_year,
+                  COALESCE(current_organization, current_company) AS current_organization,
+                  current_designation
+           FROM alumni_profiles
+           WHERE tenant_id = $1 AND verification_status IN ('VERIFIED', 'APPROVED')
+           ORDER BY batch_year DESC NULLS LAST
+           LIMIT 10`,
+          [tid],
+        )
+        .catch(() => []),
+    ]);
+
+    return {
+      ...summary,
+      donations_by_year: (
+        donationsByYear as Array<Record<string, unknown>>
+      ).map((r) => ({
+        year: Number(r.year),
+        total: Number(r.total ?? 0),
+      })),
+      distinguished_alumni: (
+        distinguished as Array<Record<string, unknown>>
+      ).map((r) => ({
+        name: PresidentService.text(r.name),
+        graduation_year: Number(r.batch_year ?? 0),
+        company: PresidentService.text(r.current_organization),
+        position: PresidentService.text(r.current_designation),
+      })),
+    };
+  }
+
+  async getAchievements(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [rankings, degreeAwards, certificates] = await Promise.all([
+      this.db
+        .query(
+          `SELECT ranking_type, cycle_year, simulated_score, rank_band
+           FROM ranking_analytics
+           WHERE tenant_id = $1
+           ORDER BY cycle_year DESC
+           LIMIT 10`,
+          [tid],
+        )
+        .catch(() => []),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM degree_awards da
+           JOIN users u ON u.user_id = da.student_user_id
+           WHERE u.tenant_id = $1`,
+          [tid],
+        )
+        .catch(() => [{ total: 0 }]),
+      this.db
+        .query(
+          `SELECT sc.title, sc.issuer, u.name AS student_name,
+                  d.dept_name AS department, sc.uploaded_at
+           FROM student_certificates sc
+           JOIN users u ON u.user_id = sc.student_user_id
+           LEFT JOIN departments d ON d.dept_id = u.dept_id
+           WHERE sc.tenant_id = $1 AND sc.verification_status = 'VERIFIED'
+           ORDER BY sc.uploaded_at DESC
+           LIMIT 20`,
+          [tid],
+        )
+        .catch(() => []),
+    ]);
+
+    return {
+      rankings: (rankings as Array<Record<string, unknown>>).map((r) => ({
+        body: PresidentService.text(r.ranking_type),
+        year: PresidentService.text(r.cycle_year),
+        score: Number(r.simulated_score ?? 0),
+        band: PresidentService.text(r.rank_band),
+      })),
+      degree_awards_total: Number(degreeAwards[0]?.total ?? 0),
+      recent_achievements: (certificates as Array<Record<string, unknown>>).map(
+        (r) => ({
+          title: PresidentService.text(r.title),
+          issuer: PresidentService.text(r.issuer),
+          student: PresidentService.text(r.student_name),
+          department: PresidentService.text(r.department),
+          date: r.uploaded_at,
+        }),
+      ),
+    };
+  }
+
+  async getAlerts(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const redFlags = await this.leadership.getRedFlags(tid).catch(() => null);
+    const flags = redFlags?.flags ?? [];
+
+    const hrefByPillar: Record<string, string> = {
+      finance: '/president/finance-budget',
+      academics: '/president/academics',
+      compliance: '/president/issues',
+      hr: '/president/hr-approvals',
+      admissions: '/president/admissions',
+      placements: '/president/placements',
+    };
+
+    return {
+      alerts: flags.map((flag, index) => ({
+        id: `live-${index}`,
+        source: 'live',
+        title: flag.message,
+        description: `Escalated from the ${flag.pillar} pillar — review and act from the linked workspace.`,
+        severity: flag.severity === 'red' ? 'critical' : 'warning',
+        category: flag.pillar.charAt(0).toUpperCase() + flag.pillar.slice(1),
+        status: flag.severity === 'red' ? 'Live' : 'Pending',
+        actionLabel: 'Open workspace',
+        actionHref: hrefByPillar[flag.pillar] ?? '/president/executive-summary',
       })),
     };
   }

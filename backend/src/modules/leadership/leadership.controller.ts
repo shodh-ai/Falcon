@@ -23,7 +23,7 @@ type AuthUser = { user_id: string; tenant_id?: string };
 
 @Controller('api/leadership')
 @UseGuards(JwtAuthGuard, RolesGuard, OwnerAccessGuard)
-@Roles('Chairman', 'President', 'SuperAdmin')
+@Roles('Chairman', 'President', 'Vice Chancellor', 'SuperAdmin')
 export class LeadershipController {
   constructor(
     private readonly leadership: LeadershipService,
@@ -300,8 +300,8 @@ export class LeadershipController {
 
   @Get('issues')
   @Roles('Chairman', 'President', 'SuperAdmin', 'Registrar', 'Vice Chancellor')
-  issues(@Req() req: { user: AuthUser }) {
-    return this.leadership.getIssuesDashboard(req.user.tenant_id);
+  issues(@Req() req: { user: AuthUser }, @Query('period') period?: string) {
+    return this.leadership.getIssuesDashboard(req.user.tenant_id, period);
   }
 
   @Post('issues/:ticketId/escalate')

@@ -2,13 +2,13 @@
 
 import { cn } from '@/lib/utils';
 import { EXECUTIVE_CARD, EXECUTIVE_TYPO } from './design-tokens';
-import { TRAFFIC_LIGHT_STYLES, type TrafficLightStatus } from './types';
+import type { TrafficLightStatus } from './types';
 
 export function TrafficLightKpi({
   label,
   value,
   sub,
-  status = 'green',
+  status: _status = 'green',
   hero = false,
 }: {
   label: string;
@@ -17,18 +17,17 @@ export function TrafficLightKpi({
   status?: TrafficLightStatus;
   hero?: boolean;
 }) {
-  const styles = TRAFFIC_LIGHT_STYLES[status];
+  void _status;
   return (
-    <div className={cn(EXECUTIVE_CARD, 'p-5 md:p-6', styles.border, styles.bg)}>
+    <div className={cn(EXECUTIVE_CARD, 'bg-white p-5 md:p-6')}>
       <div className="flex items-center gap-2">
-        <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', styles.dot)} aria-hidden />
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-sgvu-navy/40" aria-hidden />
         <p className={EXECUTIVE_TYPO.cardTitle}>{label}</p>
       </div>
       <p
         className={cn(
           hero ? EXECUTIVE_TYPO.heroKpi : 'mt-2 font-mono text-3xl font-black tabular-nums md:text-4xl',
-          'mt-3',
-          status === 'red' ? 'text-red-600' : status === 'yellow' ? 'text-amber-700' : 'text-sgvu-navy',
+          'mt-3 text-sgvu-navy',
         )}
       >
         {value}
