@@ -2,7 +2,7 @@
 /**
  * Phase F.4 — Executive Intelligence, Automation & Production Readiness Audit
  */
-import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

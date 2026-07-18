@@ -26,7 +26,10 @@ export default function LeadershipIssuesPage() {
   const api = useLeadershipApi();
   const presidentApi = usePresidentApi();
   const { user } = useAuth();
-  const isPresident = user?.role === 'President' || user?.role_name === 'President';
+  const isPresident =
+    user?.role === 'President' ||
+    user?.primaryRole === 'President' ||
+    user?.roles?.includes('President');
   const [period, setPeriod] = useState<ExecutivePeriod>('year');
   const [data, setData] = useState<IssuesDashboard | null>(null);
   const [compliance, setCompliance] = useState<Record<string, unknown> | null>(null);
