@@ -93,27 +93,31 @@ export class HrEntityContextService {
     userId: string,
     roles: string[] = [],
   ) {
-    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
-      return this.listEntities(tenantId);
-    }
+    try {
+      if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+        return this.listEntities(tenantId);
+      }
 
-    return this.dataSource.query(
-      `SELECT DISTINCT oe.entity_id, oe.entity_code, oe.entity_name, oe.is_active
-       FROM org_entities oe
-       WHERE oe.tenant_id = $1 AND oe.is_active = true
-         AND (
-           oe.entity_id IN (
-             SELECT uea.entity_id FROM user_entity_access uea WHERE uea.user_id = $2
+      return await this.dataSource.query(
+        `SELECT DISTINCT oe.entity_id, oe.entity_code, oe.entity_name, oe.is_active
+         FROM org_entities oe
+         WHERE oe.tenant_id = $1 AND oe.is_active = true
+           AND (
+             oe.entity_id IN (
+               SELECT uea.entity_id FROM user_entity_access uea WHERE uea.user_id = $2
+             )
+             OR oe.entity_id = (
+               SELECT u.entity_id
+               FROM users u
+               WHERE u.user_id = $2 AND u.tenant_id = $1
+             )
            )
-           OR oe.entity_id = (
-             SELECT u.entity_id
-             FROM users u
-             WHERE u.user_id = $2 AND u.tenant_id = $1
-           )
-         )
-       ORDER BY oe.entity_id ASC`,
-      [tenantId, userId],
-    );
+         ORDER BY oe.entity_id ASC`,
+        [tenantId, userId],
+      );
+    } catch {
+      return [];
+    }
   }
 
   formatAllowedEntities(

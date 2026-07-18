@@ -3,7 +3,7 @@
 import { Select } from '@/components/ui/select';
 import { FormEvent, useMemo, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { CalendarDays, Headphones, Loader2, Plus, Presentation } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -34,17 +34,16 @@ import {
 import { workforceRequestsApi } from '@/lib/workforce-api';
 
 type ModalKind = 'leave' | 'od' | 'ticket' | 'room' | null;
+type QuickActionKey = Exclude<ModalKind, null> | 'meeting';
 
 export function QuickActionMenu() {
   const api = useAuthedApi();
   const pathname = usePathname();
+  const router = useRouter();
   const { user } = useAuth();
+  const isPresidentPortal = pathname?.startsWith('/president');
   const isChairmanOnLeadership =
     (user?.primaryRole ?? user?.role ?? '').toLowerCase() === 'chairman' && pathname?.startsWith('/leadership');
-
-  if (isChairmanOnLeadership) {
-    return null;
-  }
 
   const canLeave = canUseWorkforceQuickActions(user);
   const canTicket = canRaiseHelpdeskTicket(user);
@@ -127,13 +126,18 @@ export function QuickActionMenu() {
   }
 
   const menuItems = useMemo(() => {
-    const items: Array<{ key: ModalKind; label: string; icon: typeof CalendarDays; show: boolean }> = [
+    const items: Array<{ key: QuickActionKey; label: string; icon: typeof CalendarDays; show: boolean }> = [
       { key: 'leave', label: 'Apply for Leave / OD', icon: CalendarDays, show: canLeave },
       { key: 'ticket', label: 'Raise IT Ticket', icon: Headphones, show: canTicket },
-      { key: 'room', label: 'Book Meeting Room', icon: Presentation, show: true },
+      { key: 'meeting', label: 'Schedule Executive Meeting', icon: Presentation, show: isPresidentPortal },
+      { key: 'room', label: 'Book Meeting Room', icon: Presentation, show: !isPresidentPortal },
     ];
     return items.filter((item) => item.show);
-  }, [canLeave, canTicket]);
+  }, [canLeave, canTicket, isPresidentPortal]);
+
+  if (isChairmanOnLeadership) {
+    return null;
+  }
 
   if (menuItems.length === 0) {
     return null;
@@ -155,7 +159,13 @@ export function QuickActionMenu() {
             <DropdownMenuItem
               key={item.key}
               className="cursor-pointer gap-2"
-              onClick={() => setOpen(item.key)}
+              onClick={() => {
+                if (item.key === 'meeting') {
+                  router.push('/president/meetings?compose=schedule');
+                  return;
+                }
+                setOpen(item.key);
+              }}
             >
               <item.icon className="h-4 w-4" />
               {item.label}

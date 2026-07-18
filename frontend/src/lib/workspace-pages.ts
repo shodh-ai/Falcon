@@ -1,6 +1,15 @@
 'use client';
 
 import type { WorkspacePageConfig } from '@/components/workspaces/WorkspaceScaffold';
+import {
+  COMPLIANCE_SMOKE_DATA,
+  CONVOCATION_SMOKE_DATA,
+  EXECUTIVE_ORDERS_SMOKE_DATA,
+  FINANCE_BUDGET_SMOKE_DATA,
+  FINANCE_SMOKE_DATA,
+  HR_ANALYTICS_SMOKE_DATA,
+  RESEARCH_SMOKE_DATA,
+} from '@/components/president/smokeData';
 
 const money = (value: unknown) => `₹${Number(value ?? 0).toLocaleString('en-IN')}`;
 const count = (data: unknown, key: string) => Number((data as Record<string, unknown> | null)?.[key] ?? 0);
@@ -56,7 +65,7 @@ export const hodPages = {
         },
       },
     ],
-    rowAction: 'student-details' as any,
+    rowAction: 'student-details',
   },
   leaveApprovals: {
     title: 'Faculty Leave Approvals',
@@ -255,17 +264,28 @@ export const presidentPages = {
     ],
   },
   finance: {
-    title: 'Revenue Analytics',
+    title: 'Financial Performance',
     subtitle: 'Collected versus pending revenue with fee status breakdown.',
     endpoint: '/api/president/finance',
     dataKey: 'status_breakdown',
+    smokeFallback: FINANCE_SMOKE_DATA,
     summary: (data) => [
       { label: 'Collected', value: money((data as Record<string, unknown> | null)?.collected) },
       { label: 'Pending', value: money((data as Record<string, unknown> | null)?.pending) },
     ],
     chart: (data) => [
-      { label: 'Collected', value: Number((data as Record<string, unknown> | null)?.collected ?? 0) / 1000, tone: 'green' },
-      { label: 'Pending', value: Number((data as Record<string, unknown> | null)?.pending ?? 0) / 1000, tone: 'gold' },
+      {
+        label: 'Collected',
+        value: Number((data as Record<string, unknown> | null)?.collected ?? 0),
+        displayValue: money((data as Record<string, unknown> | null)?.collected),
+        tone: 'green',
+      },
+      {
+        label: 'Pending',
+        value: Number((data as Record<string, unknown> | null)?.pending ?? 0),
+        displayValue: money((data as Record<string, unknown> | null)?.pending),
+        tone: 'gold',
+      },
     ],
     columns: [
       { key: 'status', label: 'Status' },
@@ -273,10 +293,43 @@ export const presidentPages = {
     ],
   },
   compliance: {
-    title: 'Compliance View',
+    title: 'Governance & Compliance',
     subtitle: 'IQAC defaulting units visible to leadership without operational edit access.',
     endpoint: '/api/president/compliance',
     dataKey: 'defaulting_units',
+    smokeFallback: COMPLIANCE_SMOKE_DATA,
+    summary: (data) => {
+      const rows = Array.isArray((data as Record<string, unknown> | null)?.defaulting_units)
+        ? ((data as Record<string, unknown>).defaulting_units as unknown[])
+        : [];
+      const overdue = rows.filter((row) => {
+        const due = (row as Record<string, unknown>)?.due_date;
+        return due && new Date(String(due)).getTime() < Date.now();
+      }).length;
+      return [
+        { label: 'Pending Tasks', value: Number((data as Record<string, unknown> | null)?.pending_count ?? rows.length) },
+        { label: 'Overdue', value: Number((data as Record<string, unknown> | null)?.overdue_count ?? overdue) },
+        { label: 'On-Track Departments', value: Number((data as Record<string, unknown> | null)?.on_track_departments ?? Math.max(0, 12 - overdue)) },
+      ];
+    },
+    chart: (data) => {
+      const rows = Array.isArray((data as Record<string, unknown> | null)?.defaulting_units)
+        ? ((data as Record<string, unknown>).defaulting_units as unknown[])
+        : [];
+      const byDept = new Map<string, number>();
+      for (const row of rows) {
+        const dept = String((row as Record<string, unknown>)?.department ?? 'Unassigned');
+        byDept.set(dept, (byDept.get(dept) ?? 0) + 1);
+      }
+      return Array.from(byDept.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([label, value]) => ({
+          label,
+          value,
+          tone: (value >= 2 ? 'gold' : 'navy') as 'navy' | 'gold',
+        }));
+    },
     columns: [
       { key: 'task', label: 'Task' },
       { key: 'assigned_to', label: 'Owner' },
@@ -288,6 +341,7 @@ export const presidentPages = {
     title: 'HR Analytics',
     subtitle: 'Faculty retention, faculty-to-student ratio, and monthly payroll exposure.',
     endpoint: '/api/president/hr-analytics',
+    smokeFallback: HR_ANALYTICS_SMOKE_DATA,
     summary: (data) => [
       { label: 'Retention Rate', value: `${count(data, 'faculty_retention_rate')}%` },
       { label: 'Faculty:Student Ratio', value: count(data, 'faculty_to_student_ratio') },
@@ -299,6 +353,7 @@ export const presidentPages = {
     subtitle: 'High-level overview of university finances, department-wise budget utilization, and pending approvals.',
     endpoint: '/api/president/finance-budget',
     dataKey: 'department_budgets',
+    smokeFallback: FINANCE_BUDGET_SMOKE_DATA,
     summary: (data) => [
       { label: 'Total Allocated', value: money((data as Record<string, unknown> | null)?.total_allocated) },
       { label: 'Total Utilized', value: money((data as Record<string, unknown> | null)?.total_utilized) },
@@ -312,10 +367,11 @@ export const presidentPages = {
     ],
   },
   researchHub: {
-    title: 'Research & Extension Hub',
+    title: 'Research & Innovation',
     subtitle: 'Metrics on active research projects, patent filings, grant statuses, and extension program outreach.',
     endpoint: '/api/president/research',
     dataKey: 'projects',
+    smokeFallback: RESEARCH_SMOKE_DATA,
     summary: (data) => [
       { label: 'Active Projects', value: count(data, 'active_projects') },
       { label: 'Patents Filed', value: count(data, 'patents_filed') },
@@ -330,10 +386,11 @@ export const presidentPages = {
     ],
   },
   executiveOrders: {
-    title: 'Disciplinary & Emergency Actions',
+    title: 'Strategic Directives',
     subtitle: 'Official log of emergency decisions and major disciplinary actions.',
     endpoint: '/api/president/executive-orders',
     dataKey: 'orders',
+    smokeFallback: EXECUTIVE_ORDERS_SMOKE_DATA,
     summary: (data) => [
       { label: 'Active Suspensions', value: count(data, 'active_suspensions') },
       { label: 'Pending Ratification', value: count(data, 'pending_ratifications') },
@@ -351,6 +408,7 @@ export const presidentPages = {
     subtitle: 'Seasonal module for graduation eligibility and medal approvals.',
     endpoint: '/api/president/convocation',
     dataKey: 'graduates',
+    smokeFallback: CONVOCATION_SMOKE_DATA,
     summary: (data) => [
       { label: 'Eligible Graduates', value: count(data, 'eligible_graduates') },
       { label: 'Medals Approved', value: count(data, 'medals_approved') },
@@ -408,6 +466,6 @@ export const deanPages = {
         },
       },
     ],
-    rowAction: 'student-details' as any,
+    rowAction: 'student-details',
   },
 } satisfies Record<string, WorkspacePageConfig>;

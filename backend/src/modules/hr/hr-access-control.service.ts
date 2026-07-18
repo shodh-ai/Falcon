@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CacheService } from '../../core/redis/cache.service';
@@ -71,6 +71,8 @@ export const LEGACY_TO_CONTROL_MODULE: Record<HrModuleKey, HrDelegationModule> =
 
 @Injectable()
 export class HrAccessControlService {
+  private readonly logger = new Logger(HrAccessControlService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly cache: CacheService,
@@ -136,7 +138,30 @@ export class HrAccessControlService {
     userId: string,
   ): Promise<HrCapabilities | null> {
     const cacheKey = `hr_caps:${tenantId}:${userId}`;
-    return this.cache.getOrSet(cacheKey, async () => {
+    try {
+      return await this.cache.getOrSet(cacheKey, () =>
+        this.loadCapabilitiesFromDb(tenantId, userId),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Capability lookup failed for ${userId}; returning null: ${String(err)}`,
+      );
+      try {
+        return await this.loadCapabilitiesFromDb(tenantId, userId);
+      } catch (inner) {
+        this.logger.warn(
+          `DB capability fallback failed for ${userId}: ${String(inner)}`,
+        );
+        return null;
+      }
+    }
+  }
+
+  private async loadCapabilitiesFromDb(
+    tenantId: string,
+    userId: string,
+  ): Promise<HrCapabilities | null> {
+    try {
       const rows = await this.dataSource.query<AccessControlRow[]>(
         `SELECT module_name, can_view, can_edit, can_approve, can_delete,
                 department_scope, entity_scope, access_id, user_id
@@ -146,13 +171,24 @@ export class HrAccessControlService {
       if (rows.length) {
         return this.buildCapabilitiesFromControls(rows);
       }
+    } catch (err) {
+      this.logger.warn(
+        `hr_access_controls unavailable for ${userId}: ${String(err)}`,
+      );
+    }
 
+    try {
       const legacy = await this.dataSource.query(
         `SELECT capabilities FROM hr_permissions WHERE tenant_id = $1 AND user_id = $2`,
         [tenantId, userId],
       );
       return (legacy[0]?.capabilities as HrCapabilities) ?? null;
-    });
+    } catch (err) {
+      this.logger.warn(
+        `hr_permissions unavailable for ${userId}: ${String(err)}`,
+      );
+      return null;
+    }
   }
 
   async syncHrPermissionsJsonb(

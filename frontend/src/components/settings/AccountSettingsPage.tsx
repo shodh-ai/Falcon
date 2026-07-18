@@ -21,6 +21,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { LeadershipPageHeader } from '@/components/leadership/LeadershipSectionCard';
+import { EXECUTIVE_SPACING } from '@/components/leadership/executive/design-tokens';
 import { FacultyDetailsSettingsSection } from '@/components/settings/FacultyDetailsSettingsSection';
 
 function canEditFacultyProfile(pathname: string, workspaceRole: string): boolean {
@@ -112,15 +114,13 @@ export function AccountSettingsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-black tracking-tight text-sgvu-navy md:text-3xl">
-          Settings
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your account, contact details, security, and workspace preferences.
-        </p>
-      </div>
+    <div className={EXECUTIVE_SPACING.page}>
+      <div className="mx-auto w-full max-w-3xl space-y-6">
+        <LeadershipPageHeader
+          eyebrow="Falcon Workspace"
+          title="Account Settings"
+          description="Manage your account, contact details, security, and workspace preferences."
+        />
 
       {showFacultyProfileEditor ? (
         <FacultyDetailsSettingsSection profileHref={profileHref} />
@@ -155,19 +155,21 @@ export function AccountSettingsPage() {
               <Badge variant="secondary">{getWorkspaceLabelForRole(workspaceRole)}</Badge>
             </dd>
           </div>
-          <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Profile
-            </dt>
-            <dd className="mt-1">
-              <Link
-                href={profileHref}
-                className="text-sm font-semibold text-sgvu-navy underline-offset-2 hover:underline"
-              >
-                Open full profile →
-              </Link>
-            </dd>
-          </div>
+          {profileHref !== pathname ? (
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Profile
+              </dt>
+              <dd className="mt-1">
+                <Link
+                  href={profileHref}
+                  className="text-sm font-semibold text-sgvu-navy underline-offset-2 hover:underline"
+                >
+                  Open full profile →
+                </Link>
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </SettingsSection>
 
@@ -251,6 +253,7 @@ export function AccountSettingsPage() {
           <li>Contact HR or IT if you need access changes or account deactivation.</li>
         </ul>
       </SettingsSection>
+      </div>
     </div>
   );
 }

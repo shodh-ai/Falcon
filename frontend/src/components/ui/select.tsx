@@ -71,11 +71,14 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           : undefined;
       const { defaultValue: _ignoredDefaultValue, ...rootProps } = props;
       const isControlled = activeValue !== undefined;
+      const radixValue =
+        isControlled && activeValue !== '' ? activeValue : undefined;
+      const selectableOptions = dedupedOptions.filter((opt) => opt.value !== '');
 
       return (
         <SelectPrimitive.Root
-          value={isControlled ? activeValue : undefined}
-          defaultValue={isControlled ? undefined : activeDefaultValue}
+          value={isControlled ? radixValue : undefined}
+          defaultValue={isControlled ? undefined : activeDefaultValue === '' ? undefined : activeDefaultValue}
           disabled={disabled}
           onValueChange={(val) => {
             if (onChange) {
@@ -93,8 +96,8 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
             <SelectValue placeholder={placeholderOption?.label ?? placeholder ?? 'Select...'} />
           </SelectTrigger>
           <SelectContent>
-            {dedupedOptions.map((opt) => (
-              <SelectItem key={opt.value === '' ? '__placeholder__' : opt.value} value={opt.value}>
+            {selectableOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
             ))}
