@@ -54,6 +54,18 @@ describe('allocation-semester.util', () => {
       ).toBe(false);
     });
 
+    it('matches ME allocation label to Mechanical Engineering batch', () => {
+      expect(
+        allocationMatchesStudentSlot(
+          'VII-A',
+          'B.Tech ME',
+          7,
+          'A',
+          'B.Tech Mechanical Engineering',
+        ),
+      ).toBe(true);
+    });
+
     it('rejects section mismatch', () => {
       expect(
         allocationMatchesStudentSlot('III-B', 'BTECH', 3, 'A', 'BTECH'),

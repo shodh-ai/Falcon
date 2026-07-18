@@ -1,10 +1,30 @@
 # Course Import Report
 
-Generated: 2026-07-18T11:56:45.884Z
+Generated: 2026-07-18T13:01:17.024Z
 
 ## Imported
 
-_No records._
+| course_code | course_name |
+| --- | --- |
+| ME3D02 | ME3D02 |
+| ME3D72 | ME3D72 |
+| AE1005 | AE1005 |
+| DME305 | DME305 |
+| DME319 | DME319 |
+| ME3D01 | ME3D01 |
+| ME3D71 | ME3D71 |
+| DME303 | DME303 |
+| DME317 | DME317 |
+| ME3D03 | ME3D03 |
+| ME3D73 | ME3D73 |
+| ME3D75 | ME3D75 |
+| DEP301 | DEP301 |
+| DIPLOMA | Diploma BS-1D01 |
+| ME3D04 | ME3D04 |
+| ME3D74 | ME3D74 |
+| DME301 | DME301 |
+| DME315 | DME315 |
+| AE3004 | AE3004 |
 
 ## Updated
 
@@ -16,6 +36,8 @@ _No records._
 | ME303 | ME 303 |
 | ME305 | ME 305 |
 | PC401 | PC 401 |
+| SODECAIII | SODECA-III |
+| PC301 | PC 301 |
 | ME3003 | ME3003 |
 | ME3703 | ME3703 |
 | ME3705 | ME3705 |
@@ -25,14 +47,28 @@ _No records._
 | ME3702 | ME3702 |
 | ME3005 | ME3005 |
 | UCFV1 | UCFV-1 |
+| UC351 | UC351 |
 | EM401 | EM 401 |
 | ME407 | ME 407 |
 | SM401 | SM 401 |
+| AG301 | AG301 |
+| AG351 | AG351 |
 | ME3001 | ME3001 |
 | ME3701 | ME3701 |
 | ME405 | ME 405 |
 | ME453 | ME 453 |
+| AE1008 | AE1008 |
+| UC3002 | UC 3002 |
+| UC3002 | UC 3002 |
 | ME355 | ME 355 |
 | ME411 | ME 411 |
+| DME307 | DME307 |
+| DME321 | DME321 |
+| AE3001 | AE3001 |
 | ME3004 | ME3004 |
 | ME3704 | ME3704 |
+| ME313 | ME 313 |
+| PT303 | PT 303 |
+| AE3002 | AE3002 |
+| ME353 | ME 353 |
+| AG365 | AG365 |

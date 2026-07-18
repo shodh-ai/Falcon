@@ -1,10 +1,12 @@
 # Student Import Report
 
-Generated: 2026-07-18T11:56:45.884Z
+Generated: 2026-07-18T13:01:17.024Z
 
 ## Created (new login accounts)
 
-_No records._
+| email | name | enrollment_no | semester | default_password |
+| --- | --- | --- | --- | --- |
+| jaid.2455159@mygyanvihar.com | JAID  KHAN | 2455159 | 5 | password123 |
 
 ## Role corrected (Faculty → Student)
 
@@ -27,7 +29,6 @@ _No records._
 | sourabh.2456436@mygyanvihar.com | Sourabh  Kumar |
 | raviraj.2455903@mygyanvihar.com | Raviraj  Kumar |
 | sunil.2455672@mygyanvihar.com | SUNIL   KUMAR |
-| jaid.2455159@mygyanvihar.com | JAID  KHAN |
 | rajnish.2454556@mygyanvihar.com | RAJNISH  KUMAR |
 | abhishek.2453220@mygyanvihar.com | ABHISHEK KUMAR   RANJAN |
 | md.2452746@mygyanvihar.com | Md Guljar  Ansari |
