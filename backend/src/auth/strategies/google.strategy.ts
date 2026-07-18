@@ -91,8 +91,10 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     if (!user) {
+      const isStudentEnrollmentEmail = /^[^@]*\.\d{5,}@/i.test(email);
+      const defaultRoleName = isStudentEnrollmentEmail ? 'Student' : 'Faculty';
       const defaultRole = await this.roleRepository.findOne({
-        where: { role_name: 'Faculty' },
+        where: { role_name: defaultRoleName },
       });
 
       user = this.userRepository.create({
