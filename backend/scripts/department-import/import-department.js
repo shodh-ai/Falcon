@@ -14,6 +14,7 @@ const {
   tableFromRows,
   DOCS_ROOT,
 } = require('./lib/utils');
+const { syncDepartmentStudents } = require('./lib/enrollment-sync');
 
 loadEnvFile();
 
@@ -171,6 +172,60 @@ async function resolveDepartmentHod(client, deptId) {
   return rows[0]?.hod_user_id || null;
 }
 
+function normFacultyName(name) {
+  return (name || '')
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function lookupFacultyEmail(emailMap, facultyName) {
+  const candidates = [
+    facultyName,
+    (facultyName || '').replace(/\s*\(.*?\)/g, ''),
+    (facultyName || '').replace(/\s*asst\.?\s*prof\.?.*$/gi, ''),
+  ].map(normFacultyName);
+
+  for (const candidate of candidates) {
+    if (emailMap[candidate]) return emailMap[candidate].toLowerCase();
+  }
+  for (const [key, value] of Object.entries(emailMap)) {
+    const normKey = normFacultyName(key);
+    if (candidates.some((c) => normKey.includes(c) || c.includes(normKey))) {
+      return value.toLowerCase();
+    }
+  }
+  return null;
+}
+
+async function provisionFacultyRosterFromConfig(client, tenantId, deptId, cfg, base, report) {
+  const mapPath = path.join(base, cfg.sources.faculty_email_map);
+  if (!fs.existsSync(mapPath)) return;
+  const emailMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+  const roster = [...((cfg.workload_matrix || {}).faculty_columns || [])];
+  if (cfg.default_faculty) roster.push(cfg.default_faculty);
+
+  const seen = new Set();
+  for (const faculty of roster) {
+    const email = lookupFacultyEmail(emailMap, faculty.name);
+    if (!email || seen.has(email)) continue;
+    seen.add(email);
+    await ensureFacultyUser(
+      client,
+      tenantId,
+      deptId,
+      {
+        faculty_name: faculty.name,
+        designation: faculty.designation || '',
+        faculty_email: email,
+      },
+      cfg,
+      report,
+    );
+  }
+}
+
 async function ensureFacultyUser(client, tenantId, deptId, row, cfg, report) {
   const email = row.faculty_email?.toLowerCase();
   if (!email) return null;
@@ -178,7 +233,7 @@ async function ensureFacultyUser(client, tenantId, deptId, row, cfg, report) {
   let faculty = await resolveFaculty(client, tenantId, email);
   if (faculty) {
     await client.query(
-      `UPDATE users SET name = $1, dept_id = COALESCE(dept_id, $2), updated_at = NOW()
+      `UPDATE users SET name = $1, dept_id = $2, updated_at = NOW()
        WHERE user_id = $3 AND tenant_id = $4`,
       [row.faculty_name, deptId, faculty.user_id, tenantId],
     );
@@ -554,6 +609,47 @@ async function upsertAllocation(client, tenantId, runId, academicYear, subjectId
   });
 }
 
+async function fixKnownStudentEmailAliases(client, tenantId, slug) {
+  if (slug !== 'mechanical') return;
+  const aliases = [
+    {
+      from: 'jaid.2455159@mygyanvihar.com',
+      to: 'zaid.2455159@mygyanvihar.com',
+      name: 'ZAID KHAN',
+    },
+  ];
+  for (const alias of aliases) {
+    const fromUser = await client.query(
+      `SELECT user_id FROM users
+       WHERE tenant_id = $1 AND lower(official_email) = lower($2) AND deleted_at IS NULL
+       LIMIT 1`,
+      [tenantId, alias.from],
+    );
+    const toUser = await client.query(
+      `SELECT user_id FROM users
+       WHERE tenant_id = $1 AND lower(official_email) = lower($2) AND deleted_at IS NULL
+       LIMIT 1`,
+      [tenantId, alias.to],
+    );
+    if (!fromUser.rows[0]) continue;
+
+    if (toUser.rows[0]) {
+      await client.query(
+        `UPDATE users SET is_active = false, deleted_at = NOW(), updated_at = NOW()
+         WHERE user_id = $1 AND tenant_id = $2`,
+        [fromUser.rows[0].user_id, tenantId],
+      );
+      continue;
+    }
+
+    await client.query(
+      `UPDATE users SET official_email = $1, name = $2, updated_at = NOW()
+       WHERE user_id = $3 AND tenant_id = $4`,
+      [alias.to, alias.name, fromUser.rows[0].user_id, tenantId],
+    );
+  }
+}
+
 async function runImport(slug, options) {
   const cfg = loadConfig(slug);
   const base = deptDir(slug);
@@ -595,6 +691,7 @@ async function runImport(slug, options) {
       role_corrected: [],
     },
     faculty: { imported: [], skipped: [], created: [], updated: [] },
+    enrollments: { synced: [], total_added: 0, total_courses: 0 },
     courses: { imported: [], updated: [] },
     rollback: { allocation_ids: [], student_snapshots: [], student_user_ids: [], faculty_user_ids: [] },
     validation,
@@ -641,6 +738,8 @@ async function runImport(slug, options) {
     );
     const runId = runInsert.rows[0].run_id;
     report.run_id = runId;
+
+    await fixKnownStudentEmailAliases(client, tenantId, slug);
 
     for (const row of studentRows) {
       await upsertStudent(client, tenantId, department.dept_id, row, cfg, report);
@@ -704,6 +803,18 @@ async function runImport(slug, options) {
       );
     }
 
+    await provisionFacultyRosterFromConfig(client, tenantId, department.dept_id, cfg, base, report);
+
+    const enrollmentResults = await syncDepartmentStudents(
+      client,
+      tenantId,
+      department.dept_id,
+      cfg.academic_year,
+    );
+    report.enrollments.synced = enrollmentResults;
+    report.enrollments.total_added = enrollmentResults.reduce((s, r) => s + r.added, 0);
+    report.enrollments.total_courses = enrollmentResults.reduce((s, r) => s + r.courses, 0);
+
     const summary = {
       students_created: report.students.created.length,
       students_updated: report.students.updated.length,
@@ -715,6 +826,8 @@ async function runImport(slug, options) {
       faculty_skipped: report.faculty.skipped.length,
       courses_imported: report.courses.imported.length,
       courses_updated: report.courses.updated.length,
+      enrollment_sync_added: report.enrollments.total_added,
+      enrollment_sync_students: enrollmentResults.length,
       validation_errors: validation.critical_errors.length,
       duplicate_records: validation.duplicates.length,
       rollback: report.rollback,

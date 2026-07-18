@@ -48,6 +48,9 @@ npm run import:department -- mechanical -- --strict
 
 # Rollback latest completed run for a department
 npm run rollback:department -- mechanical
+
+# Re-sync student CBCS enrollments from faculty allocations (after import or program-name fixes)
+npm run sync:department-enrollments -- mechanical
 ```
 
 ## Data layout
@@ -88,6 +91,7 @@ Migration `20260718180000_department_import_engine.sql` adds:
 - **Creates missing faculty login accounts** when `provision_missing_faculty` is true (default)
 - Default password for newly provisioned accounts: `password123` (same as other QA personas on sgvu tenant)
 - UPSERT `academic_subjects`, `academic_courses`, `academic_course_allocations`
+- **Sync `student_course_enrollments`** from allocations (semester + section + program) so CBCS registration shows core subjects
 - Ensure `iam_programs` row for department programme
 - Assign `import_run_id` on allocations for rollback
 

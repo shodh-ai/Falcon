@@ -22,16 +22,24 @@
   },
   "workload_matrix": {
     "rows": 8,
-    "program_filter": "ME",
-    "exclude_program_patterns": ["Agri", "Diploma"],
+    "columns": 8,
+    "column_faculty_map": [0, 1, 2, 3, 4, 4, 5, 6],
+    "cell_faculty_overrides": {
+      "24": 2,
+      "25": 2,
+      "26": 2,
+      "27": 2,
+      "46": 5,
+      "47": 5
+    },
     "faculty_columns": [
       {"name": "Prof. (Dr.) Neeraj Kumar", "designation": "HOD"},
       {"name": "Dr. Amit Tiwari", "designation": "Professor"},
       {"name": "Dr. Himanshu Vasnani", "designation": "Assistant Professor"},
-      {"name": "Dr. Raj Kumar", "designation": "Assistant Professor"},
       {"name": "Dr. Shri Krishna Mishra (Asst. Prof.-ME)", "designation": "Assistant Professor"},
-      {"name": "Mr. Tasnim Kaishar (Asst. Prof.-ME)", "designation": "Assistant Professor"},
-      {"name": "Dr. Akshat Srivastava", "designation": "Assistant Professor"}
+      {"name": "Dr. Raj Kumar", "designation": "Assistant Professor"},
+      {"name": "Dr. Akshat Srivastava", "designation": "Assistant Professor"},
+      {"name": "Mr. Tasnim Kaishar (Asst. Prof.-ME)", "designation": "Assistant Professor"}
     ]
   }
 }

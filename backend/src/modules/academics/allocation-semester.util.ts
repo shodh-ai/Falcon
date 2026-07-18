@@ -27,6 +27,26 @@ export function normalizeProgram(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, '').toUpperCase();
 }
 
+/** Match allocation program labels to varied official student batch names. */
+export function programsMatch(
+  allocationProgram: string | null | undefined,
+  studentProgram: string | null | undefined,
+): boolean {
+  const alloc = normalizeProgram(allocationProgram);
+  const prog = normalizeProgram(studentProgram);
+  if (!prog || !alloc) return true;
+  if (prog === alloc) return true;
+  if (alloc.includes('ME') && (prog.includes('MECHANICAL') || prog.includes('MECH'))) {
+    return true;
+  }
+  if (alloc.includes('AGRI') && prog.includes('AGRI')) return true;
+  if (alloc.includes('PHARM') && prog.includes('PHARM')) return true;
+  if (alloc.includes('CSE') && (prog.includes('COMPUTER') || prog.includes('CSE'))) {
+    return true;
+  }
+  return false;
+}
+
 export function allocationMatchesStudentSlot(
   allocationSemester: string | null,
   allocationProgram: string | null,
@@ -38,9 +58,7 @@ export function allocationMatchesStudentSlot(
     parseAllocationSemester(allocationSemester);
   if (semesterNum != null && semesterNum !== studentSemester) return false;
 
-  const allocProgram = normalizeProgram(allocationProgram);
-  const prog = normalizeProgram(studentProgram);
-  if (prog && allocProgram && prog !== allocProgram) return false;
+  if (!programsMatch(allocationProgram, studentProgram)) return false;
 
   const studentSectionNorm = studentSection?.trim().toUpperCase() ?? null;
   if (sectionCode && studentSectionNorm && sectionCode !== studentSectionNorm) {

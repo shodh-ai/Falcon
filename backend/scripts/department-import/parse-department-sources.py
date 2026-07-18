@@ -192,7 +192,6 @@ def parse_assignment_line(line: str) -> dict | None:
             code_match = CODE_RE.search(tail)
             prog_match = re.match(r"^(.+?)\s+([\w\s./-]+?\s+\d{2,3})$", tail)
             if code_match and prog_match:
-                m = fallback
                 course_token = prog_match.group(2)
                 programme = prog_match.group(1)
                 code = extract_course_code(course_token, line)
@@ -206,6 +205,43 @@ def parse_assignment_line(line: str) -> dict | None:
                         "programme_code": prog_code.group(1) if prog_code else "",
                         "raw_course_token": course_token,
                     }
+        single = re.match(
+            r"^(I|II|III|IV|V|VI|VII|VIII)\s+(.+?)\s+([\w][\w\s./-]*?)\s+(\d{2,3}|DP[- ]?\d{4})\s*$",
+            line,
+            re.I,
+        )
+        if single:
+            sem_num = ROMAN_SEM.get(single.group(1).upper(), 3)
+            programme = normalize_spaces(single.group(2))
+            course_token = normalize_spaces(single.group(3))
+            code = extract_course_code(course_token, line)
+            if code:
+                return {
+                    "programme": programme,
+                    "semester": f"{SEM_ROMAN.get(sem_num, str(sem_num))}-A",
+                    "course_code": code,
+                    "programme_code": single.group(4).replace(" ", "").replace("-", ""),
+                    "raw_course_token": course_token,
+                }
+        # Agri shorthand cells like "III AE3002 118" or "AE3002 P 118"
+        agri_short = re.match(
+            r"^(?:(I|II|III|IV|V|VI|VII|VIII)\s+)?(AE\d{3,4}P?)\s*(?:P\s+)?(\d{2,3}|DP[- ]?\d{4})\s*$",
+            line,
+            re.I,
+        )
+        if agri_short:
+            sem_token = agri_short.group(1) or "III"
+            sem_num = ROMAN_SEM.get(sem_token.upper(), 3)
+            course_token = agri_short.group(2)
+            code = extract_course_code(course_token, line)
+            if code:
+                return {
+                    "programme": "B.Tech (Agri.)",
+                    "semester": f"{SEM_ROMAN.get(sem_num, str(sem_num))}-A",
+                    "course_code": code,
+                    "programme_code": agri_short.group(3).replace(" ", "").replace("-", ""),
+                    "raw_course_token": course_token,
+                }
         return None
     programme = normalize_spaces(m.group(3))
     course_token = normalize_spaces(m.group(4))
@@ -246,7 +282,27 @@ def strip_designation_prefix(line: str) -> str:
     ).strip()
 
 
-def extract_workload_matrix_lines(text: str) -> list[str]:
+def map_programme_label(raw: str, cfg: dict) -> str:
+    """Map PDF programme text to allocation program_name used in Falcon."""
+    text = normalize_spaces(raw).lower()
+    default = cfg.get("program_allocation_name") or cfg.get("program_display_name") or "B.Tech ME"
+    if "agri" in text:
+        return "B.Tech Agri"
+    if "diploma" in text:
+        if "me" in text or "(me" in text:
+            return "Diploma ME"
+        return "Diploma"
+    if "me" in text or "b.tech" in text:
+        return default
+    return normalize_spaces(raw) or default
+
+
+def extract_workload_matrix_lines(
+    text: str,
+    *,
+    row_count: int = 8,
+    column_count: int = 8,
+) -> list[str]:
     chunk = text.split("-- 1 of 4 --")[0]
     raw = [normalize_spaces(ln) for ln in chunk.splitlines() if normalize_spaces(ln)]
     bounded: list[str] = []
@@ -272,9 +328,10 @@ def extract_workload_matrix_lines(text: str) -> list[str]:
             continue
         if buffer:
             buffer = candidate
-    while len(cells) < 56:
+    target = row_count * column_count
+    while len(cells) < target:
         cells.append("")
-    return cells[:56]
+    return cells[:target]
 
 
 def extract_workload_page(text: str) -> list[str]:
@@ -334,15 +391,23 @@ def parse_matrix_workload(
     matrix_cfg = cfg.get("workload_matrix") or {}
     columns = matrix_cfg.get("faculty_columns") or []
     row_count = int(matrix_cfg.get("rows") or 8)
-    program_filter = matrix_cfg.get("program_filter") or cfg.get("workload_program_filter")
-    exclude = matrix_cfg.get("exclude_program_patterns") or []
+    column_count = int(matrix_cfg.get("columns") or len(columns) or 8)
+    column_faculty_map = matrix_cfg.get("column_faculty_map") or list(range(len(columns)))
+    cell_faculty_overrides = {
+        int(k): int(v)
+        for k, v in (matrix_cfg.get("cell_faculty_overrides") or {}).items()
+    }
+    skip_columns = {int(x) for x in (matrix_cfg.get("skip_columns") or [])}
 
-    assignment_lines = extract_workload_matrix_lines(text)
+    assignment_lines = extract_workload_matrix_lines(
+        text,
+        row_count=row_count,
+        column_count=column_count,
+    )
     if not columns:
         return []
 
     workload: list[dict] = []
-    program_name = cfg.get("program_allocation_name") or cfg.get("program_display_name")
 
     for idx, line in enumerate(assignment_lines):
         if not line:
@@ -350,23 +415,31 @@ def parse_matrix_workload(
         parsed = parse_assignment_line(line)
         if not parsed:
             continue
-        programme = parsed["programme"]
-        if program_filter and program_filter.lower() not in programme.lower():
-            continue
-        if exclude and any(x.lower() in programme.lower() for x in exclude):
-            continue
 
         col_idx = idx // row_count
-        if col_idx >= len(columns):
+        if col_idx in skip_columns:
             continue
-        faculty = columns[col_idx]
+        if col_idx >= column_count:
+            continue
+
+        if idx in cell_faculty_overrides:
+            fac_idx = cell_faculty_overrides[idx]
+        elif col_idx < len(column_faculty_map):
+            fac_idx = column_faculty_map[col_idx]
+        else:
+            fac_idx = col_idx
+
+        if fac_idx >= len(columns):
+            continue
+        faculty = columns[fac_idx]
         email = lookup_faculty_email(email_map, faculty["name"])
+        programme = map_programme_label(parsed["programme"], cfg)
         meta = lookup_catalog(catalog, parsed["raw_course_token"], parsed["course_code"])
         workload.append(
             {
                 "faculty_name": faculty["name"],
                 "designation": faculty.get("designation", ""),
-                "programme": program_name,
+                "programme": programme,
                 "semester": parsed["semester"],
                 "course_code": parsed["course_code"],
                 "programme_code": parsed["programme_code"],
