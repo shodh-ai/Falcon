@@ -17,6 +17,7 @@ import { ApplyCertEventDto } from './dto/apply.dto';
 type AuthUser = {
   user_id: string;
   tenant_id?: string;
+  role?: string;
 };
 
 @Controller('api/certificate-automation')
@@ -80,15 +81,28 @@ export class CertificateAutomationController {
   @Post('applications/:id/verify')
   @Roles('SuperAdmin', 'Registrar')
   verify(
-    @Req() req: { user: AuthUser },
+    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
     @Param('id') id: string,
     @Body() body: { action: 'approve' | 'reject' },
   ) {
+    const forwarded = req.headers?.['x-forwarded-for'];
     return this.certs.verifyApplication(
       this.tenant(req),
       id,
       req.user.user_id,
       body.action,
+      {
+        role: req.user.role,
+        ip:
+          req.ip ??
+          (typeof forwarded === 'string'
+            ? forwarded.split(',')[0]?.trim()
+            : undefined),
+        sessionId:
+          typeof req.headers?.['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+      },
     );
   }
 

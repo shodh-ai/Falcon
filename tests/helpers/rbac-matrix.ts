@@ -5,6 +5,9 @@ export const PORTAL_RBAC: Record<string, string[]> = {
   '/dean': ['dean'],
   '/exam-cell': ['examcell', 'superadmin', 'deputycoe', 'examadmin', 'examoperator'],
   '/super-admin': ['campusadmin', 'superadmin', 'admissionsofficer'],
+  '/admin': ['superadmin', 'campusadmin', 'registrar'],
+  '/admin-ops': ['registrar', 'superadmin', 'campusadmin', 'transportofficer'],
+  '/directory': ['registrar', 'superadmin', 'campusadmin', 'president', 'hr', 'hod', 'dean', 'faculty'],
 };
 
 export const CROSS_PORTAL_DENIALS: Array<{
@@ -19,6 +22,8 @@ export const CROSS_PORTAL_DENIALS: Array<{
   { role: 'hod', deniedPath: '/super-admin/dashboard', allowedPortal: '/hod' },
   { role: 'dean', deniedPath: '/super-admin/dashboard', allowedPortal: '/dean' },
   { role: 'examoperator', deniedPath: '/faculty/dashboard', allowedPortal: '/exam-cell' },
+  { role: 'registrar', deniedPath: '/exam-cell/dashboard', allowedPortal: '/admin' },
+  { role: 'registrar', deniedPath: '/hod/dashboard', allowedPortal: '/admin' },
 ];
 
 export const EXAM_CELL_ACTIONS = [

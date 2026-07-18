@@ -18,6 +18,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { CreateSubmissionDto } from './dto/create-submission.dto';
 import { SUBMISSION_AI_QUEUE } from '../common/constants/ai-queue.constants';
 import { AiSubmissionStatus } from '../common/enums/ai-submission-status.enum';
+import { EnterpriseAuditService } from '../core/audit/enterprise-audit.service';
 
 function submissionIncludesPdf(dto: CreateSubmissionDto): boolean {
   return recordIncludesPdf(dto.file_path ?? null, dto.file_type ?? null);
@@ -48,6 +49,7 @@ export class TasksService {
     private userRepository: Repository<User>,
     private readonly configService: ConfigService,
     @InjectQueue(SUBMISSION_AI_QUEUE) private readonly submissionAiQueue: Queue,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   // Task Master CRUD Operations
@@ -264,6 +266,19 @@ export class TasksService {
 
     // Update assignment status to Completed
     await this.updateAssignmentStatus(assignmentId, 'Completed');
+
+    const user = await this.userRepository.findOne({ where: { user_id: userId } });
+    await this.enterpriseAudit.log({
+      tenantId: user?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
+      userId,
+      module: 'governance_tasks',
+      action: 'GOVERNANCE_SUBMISSION',
+      recordId: savedSubmission.submission_id,
+      newValue: {
+        assignment_id: assignmentId,
+        file_name: savedSubmission.file_name ?? null,
+      },
+    });
 
     return savedSubmission;
   }

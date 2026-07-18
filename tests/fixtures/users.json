@@ -31,5 +31,9 @@
   "superadmin": {
     "email": "campusadmin@mygyanvihar.com",
     "role": "SuperAdmin"
+  },
+  "registrar": {
+    "email": "dev.registrar@mygyanvihar.com",
+    "role": "Registrar"
   }
 }

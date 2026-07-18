@@ -11,6 +11,7 @@ describe('RBAC regression — portal route guards', () => {
     expect(PORTAL_RBAC['/hod']).toContain('hod');
     expect(PORTAL_RBAC['/dean']).toContain('dean');
     expect(PORTAL_RBAC['/exam-cell']).toContain('examcell');
+    expect(PORTAL_RBAC['/admin']).toContain('registrar');
   });
 
   it.each(CROSS_PORTAL_DENIALS)(

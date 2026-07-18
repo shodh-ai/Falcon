@@ -10,6 +10,7 @@ import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { FinanceService } from '../finance/finance.service';
 import { AlumniConversionService } from '../alumni/alumni-conversion.service';
 import { ObjectStorageService } from '../../storage/object-storage.service';
@@ -33,6 +34,7 @@ export class CertificateAutomationService {
     private readonly notify: NotificationEmitterService,
     private readonly pdf: DegreeCertificatePdfService,
     private readonly storage: ObjectStorageService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   private tenant(tenantId?: string) {
@@ -65,11 +67,11 @@ export class CertificateAutomationService {
        JOIN user_roles ur ON ur.user_id = u.user_id
        JOIN roles r ON r.role_id = ur.role_id
        JOIN student_profiles sp ON sp.user_id = u.user_id
-       JOIN batches b ON b.batch_id = sp.batch_id
        WHERE u.tenant_id = $1
          AND r.role_name = 'Student'
          AND u.is_active = true
-         AND b.current_semester >= 8`,
+         AND sp.deleted_at IS NULL
+         AND COALESCE(sp.current_semester, 0) >= 8`,
       [tenantId],
     );
     for (const row of students as { user_id: string }[]) {
@@ -315,6 +317,7 @@ export class CertificateAutomationService {
     applicationId: string,
     adminUserId: string,
     action: 'approve' | 'reject',
+    actorMeta?: { role?: string; ip?: string; sessionId?: string },
   ) {
     const tid = this.tenant(tenantId);
     const app = await this.db.query(
@@ -366,6 +369,19 @@ export class CertificateAutomationService {
         ? 'Your no-dues clearance is confirmed. Your degree certificate will be generated shortly.'
         : 'Your degree application was rejected during verification. Contact the Registrar office.',
     );
+
+    await this.enterpriseAudit.log({
+      tenantId: tid,
+      userId: adminUserId,
+      role: actorMeta?.role,
+      module: 'cert_applications',
+      action: action === 'approve' ? 'DEGREE_VERIFY_APPROVE' : 'DEGREE_VERIFY_REJECT',
+      recordId: applicationId,
+      oldValue: { verification_status: row.verification_status },
+      newValue: { verification_status: newStatus },
+      ip: actorMeta?.ip,
+      sessionId: actorMeta?.sessionId,
+    });
 
     return updated[0];
   }
@@ -458,6 +474,32 @@ export class CertificateAutomationService {
           'Degree Certificate Ready',
           'Your official degree certificate has been generated and is available for download.',
         );
+
+        await this.alumniConversion
+          .enqueueConversion({
+            tenantId: job.tenantId,
+            studentUserId: app.student_user_id,
+            autoVerify: true,
+          })
+          .catch((err) =>
+            this.logger.warn(
+              `Alumni conversion queue failed for ${app.student_user_id}: ${err instanceof Error ? err.message : err}`,
+            ),
+          );
+
+        await this.enterpriseAudit.log({
+          tenantId: job.tenantId,
+          userId: job.requestedBy,
+          module: 'cert_applications',
+          action: 'CERTIFICATE_GENERATED',
+          recordId: app.application_id,
+          newValue: {
+            certificate_url: url,
+            verification_code: verificationCode,
+            event_id: job.eventId,
+          },
+        });
+
         generated += 1;
       } catch (err) {
         this.logger.error(

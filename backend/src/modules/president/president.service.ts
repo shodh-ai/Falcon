@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { StaffPayslip } from '../../entities/staff-payslip.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
@@ -10,6 +11,7 @@ import { User } from '../../entities/user.entity';
 @Injectable()
 export class PresidentService {
   constructor(
+    @InjectDataSource() private readonly db: DataSource,
     @InjectRepository(User) private users: Repository<User>,
     @InjectRepository(FeeDemand) private demands: Repository<FeeDemand>,
     @InjectRepository(StudentCourseEnrollment)
@@ -19,17 +21,31 @@ export class PresidentService {
     @InjectRepository(StaffPayslip) private payslips: Repository<StaffPayslip>,
   ) {}
 
-  async getExecutiveSummary() {
-    const [students, staff, demands] = await Promise.all([
-      this.countUsersByRole('Student'),
-      this.users
-        .createQueryBuilder('user')
-        .leftJoin('user.role', 'role')
-        .where('user.is_active = true')
-        .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
-        .getCount(),
-      this.demands.find(),
-    ]);
+  private tenantId(tenantId?: string) {
+    return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  async getExecutiveSummary(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [students, staff, demands, pendingVerifications, pendingGovernance] =
+      await Promise.all([
+        this.countUsersByRole('Student'),
+        this.users
+          .createQueryBuilder('user')
+          .leftJoin('user.role', 'role')
+          .where('user.is_active = true')
+          .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+          .getCount(),
+        this.demands.find(),
+        this.db
+          .query(
+            `SELECT COUNT(*)::int AS total FROM users
+             WHERE tenant_id = $1 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'`,
+            [tid],
+          )
+          .then((r) => Number(r[0]?.total ?? 0)),
+        this.taskAssignments.count({ where: { status: 'Pending' } }),
+      ]);
 
     return {
       total_university_revenue: this.sumDemandTotal(demands),
@@ -42,6 +58,8 @@ export class PresidentService {
         staff,
         total: students + staff,
       },
+      pending_student_verifications: pendingVerifications,
+      pending_governance_tasks: pendingGovernance,
     };
   }
 
@@ -111,7 +129,17 @@ export class PresidentService {
       order: { due_date: 'ASC' },
       take: 50,
     });
+    const stats = await this.db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'Pending')::int AS pending,
+         COUNT(*) FILTER (WHERE status = 'Completed')::int AS completed,
+         COUNT(*)::int AS total
+       FROM task_assignments`,
+    );
     return {
+      pending_count: Number(stats[0]?.pending ?? 0),
+      completed_count: Number(stats[0]?.completed ?? 0),
+      total_assignments: Number(stats[0]?.total ?? 0),
       defaulting_units: pending.map((row) => ({
         assignment_id: row.assignment_id,
         task: row.task?.task_name,
@@ -123,23 +151,35 @@ export class PresidentService {
   }
 
   async getHrAnalytics() {
-    const [students, faculty, staff, currentPayslips] = await Promise.all([
-      this.countUsersByRole('Student'),
-      this.countUsersByRole('Faculty'),
-      this.users
-        .createQueryBuilder('user')
-        .leftJoin('user.role', 'role')
-        .where('user.is_active = true')
-        .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
-        .getCount(),
-      this.payslips.find({ order: { generated_at: 'DESC' }, take: 100 }),
-    ]);
+    const [students, faculty, staff, currentPayslips, activeFacultyYearAgo] =
+      await Promise.all([
+        this.countUsersByRole('Student'),
+        this.countUsersByRole('Faculty'),
+        this.users
+          .createQueryBuilder('user')
+          .leftJoin('user.role', 'role')
+          .where('user.is_active = true')
+          .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+          .getCount(),
+        this.payslips.find({ order: { generated_at: 'DESC' }, take: 100 }),
+        this.users
+          .createQueryBuilder('user')
+          .leftJoin('user.role', 'role')
+          .where('user.is_active = true')
+          .andWhere('role.role_name = :roleName', { roleName: 'Faculty' })
+          .andWhere('user.created_at <= NOW() - INTERVAL \'1 year\'')
+          .getCount(),
+      ]);
     const payrollExpense = currentPayslips.reduce(
       (sum, row) => sum + Number(row.net_pay ?? 0),
       0,
     );
+    const retentionRate =
+      activeFacultyYearAgo > 0
+        ? Number(((faculty / activeFacultyYearAgo) * 100).toFixed(1))
+        : null;
     return {
-      faculty_retention_rate: 94,
+      faculty_retention_rate: retentionRate,
       faculty_to_student_ratio:
         faculty > 0 ? Number((students / faculty).toFixed(2)) : 0,
       total_payroll_expense: payrollExpense,
@@ -160,224 +200,216 @@ export class PresidentService {
     return demands.reduce((sum, row) => sum + Number(row.total_amount ?? 0), 0);
   }
 
-  async getFinanceBudgetaryControl() {
-    let budgets = await this.users.manager.query(
-      `SELECT d.dept_name as department, b.allocated_amount, b.utilized_amount 
+  async getFinanceBudgetaryControl(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const budgets = await this.db.query(
+      `SELECT d.dept_name as department, b.allocated_amount, b.utilized_amount
        FROM fin_budgets b
        LEFT JOIN departments d ON d.dept_id = b.department_id
-       ORDER BY b.allocated_amount DESC LIMIT 10`,
+       WHERE b.tenant_id = $1
+       ORDER BY b.allocated_amount DESC NULLS LAST LIMIT 20`,
+      [tid],
     );
-
-    // Provide smoke data if the fin_budgets table is empty
-    if (!budgets || budgets.length === 0) {
-      budgets = [
-        {
-          department: 'Computer Science',
-          allocated_amount: 15000000,
-          utilized_amount: 12500000,
-        },
-        {
-          department: 'Mechanical Engineering',
-          allocated_amount: 12000000,
-          utilized_amount: 8000000,
-        },
-        {
-          department: 'Business Administration',
-          allocated_amount: 8000000,
-          utilized_amount: 7500000,
-        },
-        {
-          department: 'Electrical Engineering',
-          allocated_amount: 9000000,
-          utilized_amount: 4000000,
-        },
-        {
-          department: 'Civil Engineering',
-          allocated_amount: 6000000,
-          utilized_amount: 2500000,
-        },
-      ];
-    }
 
     let totalAllocated = 0;
     let totalUtilized = 0;
 
-    const department_budgets = budgets.map((b: any) => {
-      const allocated = Number(b.allocated_amount || 0);
-      const utilized = Number(b.utilized_amount || 0);
-      totalAllocated += allocated;
-      totalUtilized += utilized;
-      return {
-        department: b.department || 'Central',
-        allocated,
-        utilized,
-        status: utilized > allocated * 0.9 ? 'Critical' : 'Healthy',
-      };
-    });
+    const department_budgets = (budgets as Array<Record<string, unknown>>).map(
+      (b) => {
+        const allocated = Number(b.allocated_amount || 0);
+        const utilized = Number(b.utilized_amount || 0);
+        totalAllocated += allocated;
+        totalUtilized += utilized;
+        return {
+          department: (b.department as string) || 'Central',
+          allocated,
+          utilized,
+          status: utilized > allocated * 0.9 ? 'Critical' : 'Healthy',
+        };
+      },
+    );
+
+    const pendingApprovals = await this.db
+      .query(
+        `SELECT COUNT(*)::int AS total FROM finance_approval_requests
+         WHERE tenant_id = $1 AND status = 'PENDING'`,
+        [tid],
+      )
+      .catch(() => [{ total: 0 }]);
 
     return {
       department_budgets,
-      total_allocated: totalAllocated || 50000000,
-      total_utilized: totalUtilized || 34500000,
-      pending_approvals: 14,
-      grant_disbursements: 2450000,
-      audit_status: 'On Track',
+      total_allocated: totalAllocated,
+      total_utilized: totalUtilized,
+      pending_approvals: Number(pendingApprovals[0]?.total ?? 0),
+      grant_disbursements: 0,
+      audit_status:
+        department_budgets.length > 0 ? 'On Track' : 'No budget data',
     };
   }
 
-  async getResearchHub() {
+  async getResearchHub(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [counts, projects] = await Promise.all([
+      this.db
+        .query(
+          `SELECT
+             COUNT(*) FILTER (WHERE status NOT IN ('REJECTED', 'CLOSED'))::int AS active,
+             COUNT(*) FILTER (WHERE status = 'APPROVED')::int AS approved
+           FROM academic_rnd_applications WHERE tenant_id = $1`,
+          [tid],
+        )
+        .catch(() => [{ active: 0, approved: 0 }]),
+      this.db
+        .query(
+          `SELECT a.title, u.name AS pi, a.status, a.funding_amount AS funding, a.application_type AS type
+           FROM academic_rnd_applications a
+           LEFT JOIN users u ON u.user_id = a.applicant_user_id
+           WHERE a.tenant_id = $1
+           ORDER BY a.updated_at DESC NULLS LAST
+           LIMIT 20`,
+          [tid],
+        )
+        .catch(() => []),
+    ]);
+
+    const totalFunding = (projects as Array<{ funding: number }>).reduce(
+      (sum, p) => sum + Number(p.funding ?? 0),
+      0,
+    );
+
     return {
-      active_projects: 42,
-      patents_filed: 12,
-      grants_received: 8500000,
-      extension_programs: 8,
-      projects: [
-        {
-          title: 'AI in Agriculture Optimization',
-          pi: 'Dr. Sharma',
-          type: 'Research',
-          status: 'Ongoing',
-          funding: 1500000,
-        },
-        {
-          title: 'Smart Grid IoT Infrastructure',
-          pi: 'Dr. Verma',
-          type: 'Grant',
-          status: 'Approved',
-          funding: 2500000,
-        },
-        {
-          title: 'Advanced Water Purification Tech',
-          pi: 'Dr. Singh',
-          type: 'Patent',
-          status: 'Filed',
-          funding: 0,
-        },
-        {
-          title: 'Rural Digital Literacy Drive',
-          pi: 'Dr. Patel',
-          type: 'Extension',
-          status: 'Active',
-          funding: 500000,
-        },
-        {
-          title: 'Renewable Energy Storage Models',
-          pi: 'Dr. Gupta',
-          type: 'Research',
-          status: 'Ongoing',
-          funding: 3200000,
-        },
-        {
-          title: 'Blockchain for Academic Records',
-          pi: 'Dr. Reddy',
-          type: 'Research',
-          status: 'Completed',
-          funding: 1200000,
-        },
-        {
-          title: 'National Science Foundation Grant',
-          pi: 'Dr. Kumar',
-          type: 'Grant',
-          status: 'Pending',
-          funding: 5000000,
-        },
-      ],
+      active_projects: Number(counts[0]?.active ?? 0),
+      patents_filed: 0,
+      grants_received: totalFunding,
+      extension_programs: Number(counts[0]?.approved ?? 0),
+      projects: (projects as Array<Record<string, unknown>>).map((p) => ({
+        title: p.title ?? 'Untitled',
+        pi: p.pi ?? '—',
+        type: p.type ?? 'Research',
+        status: p.status ?? 'Unknown',
+        funding: Number(p.funding ?? 0),
+      })),
     };
   }
 
-  async getExecutiveOrders() {
+  async getExecutiveOrders(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const orders = await this.db
+      .query(
+        `SELECT order_id, order_code, subject, order_type, status, issued_at
+         FROM leadership_executive_orders
+         WHERE tenant_id = $1
+         ORDER BY issued_at DESC NULLS LAST
+         LIMIT 50`,
+        [tid],
+      )
+      .catch(() => []);
+
+    const stats = await this.db
+      .query(
+        `SELECT
+           COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active,
+           COUNT(*) FILTER (WHERE status LIKE '%Pending%')::int AS pending,
+           COUNT(*)::int AS total
+         FROM leadership_executive_orders WHERE tenant_id = $1`,
+        [tid],
+      )
+      .catch(() => [{ active: 0, pending: 0, total: 0 }]);
+
     return {
-      active_suspensions: 2,
-      pending_ratifications: 5,
-      emergency_orders_ytd: 12,
-      orders: [
-        {
-          id: 'EO-2026-001',
-          date: '2026-06-15',
-          subject: 'Emergency Campus Closure Due to Weather',
-          type: 'Administrative',
-          status: 'Ratified',
-        },
-        {
-          id: 'EO-2026-002',
-          date: '2026-06-20',
-          subject: 'Suspension of Student IDs 4521, 4522',
-          type: 'Disciplinary',
-          status: 'Pending Ratification',
-        },
-        {
-          id: 'EO-2026-003',
-          date: '2026-06-25',
-          subject: 'Immediate Appointment of Interim Dean',
-          type: 'HR',
-          status: 'Active',
-        },
-      ],
+      active_suspensions: Number(stats[0]?.active ?? 0),
+      pending_ratifications: Number(stats[0]?.pending ?? 0),
+      emergency_orders_ytd: Number(stats[0]?.total ?? 0),
+      orders: (orders as Array<Record<string, unknown>>).map((o) => ({
+        id: o.order_code ?? o.order_id,
+        date: o.issued_at,
+        subject: o.subject ?? 'Executive order',
+        type: o.order_type ?? 'Administrative',
+        status: o.status ?? 'Unknown',
+      })),
     };
   }
 
-  async getConvocation() {
+  async getConvocation(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [stats, graduates, events] = await Promise.all([
+      this.db.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE ca.verification_status = 'PENDING_VERIFICATION')::int AS pending_verifications,
+           COUNT(*) FILTER (WHERE ca.verification_status = 'VERIFIED')::int AS verified,
+           COUNT(*) FILTER (WHERE ca.certificate_generated = true)::int AS certificates_generated,
+           COUNT(*)::int AS total_applications
+         FROM cert_applications ca
+         WHERE ca.tenant_id = $1`,
+        [tid],
+      ),
+      this.db.query(
+        `SELECT u.name AS student_name,
+                COALESCE(sp.branch_name, sp.batch, 'Programme') AS program,
+                ca.verification_status AS status,
+                CASE WHEN ca.certificate_generated THEN 'Certificate Issued' ELSE 'Pending' END AS honors
+         FROM cert_applications ca
+         JOIN users u ON u.user_id = ca.student_user_id
+         LEFT JOIN student_profiles sp ON sp.user_id = ca.student_user_id
+         WHERE ca.tenant_id = $1
+         ORDER BY ca.updated_at DESC NULLS LAST
+         LIMIT 50`,
+        [tid],
+      ),
+      this.db.query(
+        `SELECT COUNT(DISTINCT sp.user_id)::int AS eligible
+         FROM student_profiles sp
+         JOIN users u ON u.user_id = sp.user_id AND u.is_active = true
+         WHERE u.tenant_id = $1
+           AND sp.deleted_at IS NULL
+           AND COALESCE(sp.current_semester, 0) >= 8`,
+        [tid],
+      ),
+    ]);
+
     return {
-      eligible_graduates: 1245,
-      medals_approved: 24,
-      pending_verifications: 156,
-      graduates: [
-        {
-          student_name: 'Aarav Patel',
-          program: 'B.Tech Computer Science',
-          status: 'Verified',
-          honors: 'Gold Medal',
-        },
-        {
-          student_name: 'Priya Sharma',
-          program: 'MBA Finance',
-          status: 'Pending',
-          honors: 'None',
-        },
-        {
-          student_name: 'Rahul Kumar',
-          program: 'B.Tech Mechanical',
-          status: 'Verified',
-          honors: 'Silver Medal',
-        },
-        {
-          student_name: 'Neha Singh',
-          program: 'Ph.D Physics',
-          status: 'Approved by VC',
-          honors: 'None',
-        },
-      ],
+      eligible_graduates: Number(events[0]?.eligible ?? 0),
+      medals_approved: Number(stats[0]?.verified ?? 0),
+      pending_verifications: Number(stats[0]?.pending_verifications ?? 0),
+      certificates_generated: Number(stats[0]?.certificates_generated ?? 0),
+      total_applications: Number(stats[0]?.total_applications ?? 0),
+      graduates: graduates.map((g: Record<string, unknown>) => ({
+        student_name: g.student_name,
+        program: g.program,
+        status: g.status,
+        honors: g.honors,
+      })),
     };
   }
 
-  async getHrApprovals() {
+  async getHrApprovals(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const [stats, approvals] = await Promise.all([
+      this.db.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE status = 'PENDING')::int AS pending_hires,
+           COUNT(*) FILTER (WHERE request_type ILIKE '%tenure%')::int AS tenure_reviews,
+           COUNT(*) FILTER (WHERE request_type ILIKE '%disciplinary%')::int AS disciplinary
+         FROM hr_approval_requests WHERE tenant_id = $1`,
+        [tid],
+      ).catch(() => [{ pending_hires: 0, tenure_reviews: 0, disciplinary: 0 }]),
+      this.db.query(
+        `SELECT candidate_name AS candidate, department_name AS department,
+                request_type AS action, submitted_at AS date_submitted, status
+         FROM hr_approval_requests
+         WHERE tenant_id = $1 AND status = 'PENDING'
+         ORDER BY submitted_at DESC NULLS LAST
+         LIMIT 20`,
+        [tid],
+      ).catch(() => []),
+    ]);
+
     return {
-      pending_hires: 8,
-      tenure_reviews: 3,
-      disciplinary_cases: 1,
-      approvals: [
-        {
-          candidate: 'Dr. Ananya Reddy',
-          department: 'Computer Science',
-          action: 'New Hire - Assistant Professor',
-          date_submitted: '2026-06-28',
-          status: 'Pending VC Approval',
-        },
-        {
-          candidate: 'Prof. Vikram Malhotra',
-          department: 'Mechanical',
-          action: 'Tenure Approval',
-          date_submitted: '2026-06-25',
-          status: 'Pending VC Approval',
-        },
-        {
-          candidate: 'Mr. Rohan Desai',
-          department: 'Administration',
-          action: 'Suspension Review',
-          date_submitted: '2026-06-30',
-          status: 'Under Investigation',
-        },
-      ],
+      pending_hires: Number(stats[0]?.pending_hires ?? 0),
+      tenure_reviews: Number(stats[0]?.tenure_reviews ?? 0),
+      disciplinary_cases: Number(stats[0]?.disciplinary ?? 0),
+      approvals: approvals as Array<Record<string, unknown>>,
     };
   }
 }

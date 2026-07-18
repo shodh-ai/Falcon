@@ -35,6 +35,8 @@ import {
   type AlumniWelcomeEmailPayload,
   type AlumniConversionApprovedPayload,
   type StudentOnboardingApprovedPayload,
+  type StudentOnboardingRejectedPayload,
+  type TranscriptGeneratedPayload,
   type OnboardingVerificationRequestedPayload,
   type EcellStatusUpdatedPayload,
   type EcellMentorMeetingRequestedPayload,
@@ -236,6 +238,14 @@ export class NotificationEmitterService {
 
   studentOnboardingApproved(payload: StudentOnboardingApprovedPayload) {
     this.events.emit(NotificationEvents.STUDENT_ONBOARDING_APPROVED, payload);
+  }
+
+  studentOnboardingRejected(payload: StudentOnboardingRejectedPayload) {
+    this.events.emit(NotificationEvents.STUDENT_ONBOARDING_REJECTED, payload);
+  }
+
+  transcriptGenerated(payload: TranscriptGeneratedPayload) {
+    this.events.emit(NotificationEvents.TRANSCRIPT_GENERATED, payload);
   }
 
   onboardingVerificationRequested(

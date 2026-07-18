@@ -6,6 +6,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { RegistrarExamIntegrationPanel } from '@/components/admin/RegistrarExamIntegrationPanel';
 import { useAuthedApi } from '@/lib/api';
 
 export default function AdminAcademicsPage() {
@@ -34,7 +35,7 @@ export default function AdminAcademicsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
+    <div className="mx-auto max-w-3xl space-y-6 p-6" data-testid="registrar-academics">
       <div>
         <h1 className="text-2xl font-semibold text-sgvu-navy">Academics & SIS</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -99,6 +100,8 @@ export default function AdminAcademicsPage() {
           </Button>
         </CardContent>
       </Card>
+
+      <RegistrarExamIntegrationPanel compact />
     </div>
   );
 }

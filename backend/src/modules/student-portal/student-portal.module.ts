@@ -6,10 +6,10 @@ import { AlumniModule } from '../alumni/alumni.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 import { FinanceModule } from '../finance/finance.module';
 import { AcademicsModule } from '../academics/academics.module';
-import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
+import { ExamCellModule } from '../exam-cell/exam-cell.module';
 
 @Module({
-  imports: [AlumniModule, HelpdeskModule, FinanceModule, AcademicsModule],
+  imports: [AlumniModule, HelpdeskModule, FinanceModule, AcademicsModule, ExamCellModule],
   controllers: [StudentPortalController],
   providers: [StudentPortalService, HrFieldEncryptionService],
 })

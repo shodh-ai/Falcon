@@ -36,6 +36,10 @@ export const TEST_USERS = {
     email: fixtureUsers.superadmin.email,
     role: fixtureUsers.superadmin.role,
   },
+  registrar: {
+    email: process.env.FALCON_TEST_REGISTRAR_EMAIL ?? fixtureUsers.registrar.email,
+    role: fixtureUsers.registrar.role,
+  },
 } as const;
 
 export type TestUserKey = keyof typeof TEST_USERS;
