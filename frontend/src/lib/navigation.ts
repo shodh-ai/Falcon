@@ -1527,7 +1527,7 @@ export const adminPortal: PortalConfig = {
       items: [
         { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
         { label: 'Governance Tasks', href: '/admin/tasks', icon: ListChecks },
-        { label: 'Upload History', href: '/admin/tasks?section=uploads', icon: History },
+        { label: 'Upload History', href: '/admin/upload-history', icon: History },
       ],
     },
     {
@@ -1550,8 +1550,8 @@ export const adminPortal: PortalConfig = {
   ],
   commandItems: [
     { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer'] },
-    { label: 'Pending Approvals', href: '/admin/inbox', icon: ListChecks },
+    { label: 'Pending Approvals', href: '/admin/verifications', icon: ListChecks },
     { label: 'University Directory', href: '/directory', icon: Contact },
-    { label: 'Export Reports', href: '/admin/reports', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'President', 'IQAC'] },
+    { label: 'Export Reports', href: '/reports', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'President', 'IQAC', 'Registrar'] },
   ],
 };

@@ -25,7 +25,7 @@ import { StudentBulkService } from './student-bulk.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadStageDto } from './dto/update-lead-stage.dto';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = { user_id: string; tenant_id?: string; role?: string };
 
 @Controller('admissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -91,16 +91,61 @@ export class AdmissionsController {
   )
   async studentBulkUpload(
     @UploadedFile() file: Express.Multer.File,
-    @Req() req: { user: AuthUser },
+    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
     @Query('rule_id') ruleId?: string,
   ) {
     if (!file) throw new BadRequestException('No file uploaded');
+    const forwarded = req.headers?.['x-forwarded-for'];
     return this.studentBulk.processBulkUpload(
       this.tenant(req),
       req.user.user_id,
       file.buffer,
       file.originalname,
       ruleId,
+      {
+        role: req.user.role,
+        ip:
+          req.ip ??
+          (typeof forwarded === 'string'
+            ? forwarded.split(',')[0]?.trim()
+            : undefined),
+        sessionId:
+          typeof req.headers?.['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+      },
+    );
+  }
+
+  @Get('students/bulk-upload/history')
+  @Roles('SuperAdmin', 'Registrar', 'AdmissionsOfficer')
+  bulkUploadHistory(@Req() req: { user: AuthUser }) {
+    return this.studentBulk.listUploadRuns(this.tenant(req));
+  }
+
+  @Post('students/bulk-upload/:runId/rollback')
+  @Roles('SuperAdmin', 'Registrar')
+  bulkUploadRollback(
+    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Param('runId') runId: string,
+  ) {
+    const forwarded = req.headers?.['x-forwarded-for'];
+    return this.studentBulk.rollbackRun(
+      this.tenant(req),
+      runId,
+      req.user.user_id,
+      {
+        role: req.user.role,
+        ip:
+          req.ip ??
+          (typeof forwarded === 'string'
+            ? forwarded.split(',')[0]?.trim()
+            : undefined),
+        sessionId:
+          typeof req.headers?.['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+      },
     );
   }
 }

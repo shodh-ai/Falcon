@@ -33,6 +33,7 @@ import { ExamCellSessionsService } from './exam-cell-sessions.service';
 import { ExamCellOperationsService } from './exam-cell-operations.service';
 import { ExamCellEnterpriseService } from './exam-cell-enterprise.service';
 import { ExamCellDevService } from './exam-cell-dev.service';
+import { OfficialTranscriptService } from './official-transcript.service';
 import { EXAM_CELL_ACCESS_ROLES } from './exam-cell.constants';
 import {
   assertExamCellAction,
@@ -60,6 +61,7 @@ export class ExamCellController {
     private readonly operations: ExamCellOperationsService,
     private readonly enterprise: ExamCellEnterpriseService,
     private readonly dev: ExamCellDevService,
+    private readonly officialTranscripts: OfficialTranscriptService,
   ) {}
 
   @Get('dashboard')
@@ -516,13 +518,65 @@ export class ExamCellController {
     });
   }
 
+  @Get('transcripts')
+  listTranscripts(
+    @Req() req: { user: AuthUser },
+    @Query('semester') semester?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.officialTranscripts.listForTenant(this.tenant(req), {
+      semester: semester ? Number(semester) : undefined,
+      status,
+    });
+  }
+
   @Post('transcripts/generate')
   transcripts(
-    @Req() req: { user: AuthUser },
+    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
     @Body() dto: { semester: number },
   ) {
     this.requireAction(req, 'publish_results');
-    return this.examCell.generateTranscripts(this.tenant(req), dto.semester);
+    const forwarded = req.headers?.['x-forwarded-for'];
+    return this.officialTranscripts.requestForSemester(
+      this.tenant(req),
+      dto.semester,
+      {
+        userId: req.user.user_id,
+        role: examCellRoleFromUser(req.user),
+        ip:
+          req.ip ??
+          (typeof forwarded === 'string'
+            ? forwarded.split(',')[0]?.trim()
+            : undefined),
+        sessionId:
+          typeof req.headers?.['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+      },
+      true,
+    );
+  }
+
+  @Post('transcripts/:id/approve')
+  approveTranscript(
+    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Param('id') id: string,
+  ) {
+    this.requireAction(req, 'publish_results');
+    const forwarded = req.headers?.['x-forwarded-for'];
+    return this.officialTranscripts.approve(this.tenant(req), id, {
+      userId: req.user.user_id,
+      role: examCellRoleFromUser(req.user),
+      ip:
+        req.ip ??
+        (typeof forwarded === 'string'
+          ? forwarded.split(',')[0]?.trim()
+          : undefined),
+      sessionId:
+        typeof req.headers?.['x-session-id'] === 'string'
+          ? req.headers['x-session-id']
+          : undefined,
+    });
   }
 
   @Get('result-control/sessions')

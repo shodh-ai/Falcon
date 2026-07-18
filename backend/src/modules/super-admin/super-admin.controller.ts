@@ -101,11 +101,13 @@ export class SuperAdminController {
   }
 
   @Get('hierarchy')
+  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
   hierarchy(@Req() req: { user: AuthUser }) {
     return this.superAdmin.getHierarchyTree(this.tenant(req));
   }
 
   @Get('hierarchy/assignable-users')
+  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
   hierarchyAssignableUsers(
     @Req() req: { user: AuthUser },
     @Query('q') q?: string,
@@ -114,6 +116,7 @@ export class SuperAdminController {
   }
 
   @Post('assignments')
+  @Roles('CampusAdmin', 'SuperAdmin')
   assign(
     @Req() req: { user: AuthUser },
     @Body()
@@ -132,11 +135,13 @@ export class SuperAdminController {
   }
 
   @Get('assignments')
+  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
   listAssignments(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listAssignments(this.tenant(req));
   }
 
   @Delete('assignments/:assignmentId')
+  @Roles('CampusAdmin', 'SuperAdmin')
   revokeAssignment(
     @Req() req: { user: AuthUser },
     @Param('assignmentId') assignmentId: string,
@@ -149,6 +154,7 @@ export class SuperAdminController {
   }
 
   @Patch('departments/:deptId/school')
+  @Roles('CampusAdmin', 'SuperAdmin')
   linkDepartmentToSchool(
     @Req() req: { user: AuthUser },
     @Param('deptId', ParseIntPipe) deptId: number,

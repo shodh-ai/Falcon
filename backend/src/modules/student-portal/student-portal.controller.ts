@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { StudentPortalService } from './student-portal.service';
+import { OfficialTranscriptService } from '../exam-cell/official-transcript.service';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
@@ -26,7 +27,10 @@ type AuthUser = { user_id: string; tenant_id?: string };
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Student', 'Applicant')
 export class StudentPortalController {
-  constructor(private readonly portal: StudentPortalService) {}
+  constructor(
+    private readonly portal: StudentPortalService,
+    private readonly officialTranscripts: OfficialTranscriptService,
+  ) {}
 
   @Get('profile')
   profile(@Req() req: { user: AuthUser }) {
@@ -114,6 +118,11 @@ export class StudentPortalController {
   @Get('marks')
   marks(@Req() req: { user: AuthUser }) {
     return this.portal.getMarks(this.tenant(req), req.user.user_id);
+  }
+
+  @Get('transcripts')
+  transcripts(@Req() req: { user: AuthUser }) {
+    return this.officialTranscripts.listForStudent(this.tenant(req), req.user.user_id);
   }
 
   @Get('exam-desk')

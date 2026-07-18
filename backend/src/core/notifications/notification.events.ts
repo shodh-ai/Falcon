@@ -43,6 +43,8 @@ export const NotificationEvents = {
   ALUMNI_CONVERSION_APPROVED: 'alumni.conversion_approved',
   ALUMNI_WELCOME_EMAIL: 'alumni.welcome_email',
   STUDENT_ONBOARDING_APPROVED: 'student.onboarding_approved',
+  STUDENT_ONBOARDING_REJECTED: 'student.onboarding_rejected',
+  TRANSCRIPT_GENERATED: 'transcript.generated',
   ONBOARDING_VERIFICATION_REQUESTED: 'onboarding.verification_requested',
   ECELL_STATUS_UPDATED: 'ecell.status_updated',
   ECELL_MENTOR_MEETING_REQUESTED: 'ecell.mentor_meeting_requested',
@@ -265,6 +267,20 @@ export type StudentOnboardingApprovedPayload = {
   studentName: string;
   officialEmail: string;
   dashboardPath?: string;
+};
+
+export type StudentOnboardingRejectedPayload = {
+  tenantId: string;
+  userId: string;
+  studentName: string;
+  officialEmail: string;
+  remarks: string;
+  dashboardPath?: string;
+};
+
+export type TranscriptGeneratedPayload = BaseNotificationPayload & {
+  semester: number;
+  verificationCode?: string;
 };
 
 export type OnboardingVerificationRequestedPayload = {

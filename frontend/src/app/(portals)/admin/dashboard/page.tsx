@@ -1,102 +1,197 @@
 'use client';
 
-import { useState } from 'react';
-import { toast } from '@/lib/notifications/falcon-toast';
-import { Users, Wallet, ClipboardList, Check, X } from 'lucide-react';
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ClipboardList,
+  FileCheck2,
+  GraduationCap,
+  Loader2,
+  Users,
+  AlertCircle,
+} from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ProfileCorrectionWidget } from '@/components/hod/ProfileCorrectionWidget';
+import { RegistrarExamIntegrationPanel } from '@/components/admin/RegistrarExamIntegrationPanel';
+import { useAuthedApi } from '@/lib/api';
 
-const approvals = [
-  { id: '1', type: 'Leave', who: 'Dr. Mehta', detail: 'CL · 2 days', status: 'pending' },
-  { id: '2', type: 'Fee waiver', who: 'Student #042', detail: 'Installment request', status: 'pending' },
-  { id: '3', type: 'Leave', who: 'Prof. Singh', detail: 'SL · 1 day', status: 'pending' },
-];
+type DirectoryPage = { total: number };
+type VerificationRow = {
+  user_id: string;
+  name: string;
+  official_email: string;
+  role_name: string;
+  portal_kind: string;
+  submitted_at: string | null;
+};
+type IssuesDashboard = {
+  kpis: { open_tickets: number; sla_breaches: number; avg_resolution_hours: number };
+};
 
 export default function AdminDashboardPage() {
-  const [queue, setQueue] = useState(approvals);
+  const api = useAuthedApi();
+  const [loading, setLoading] = useState(true);
+  const [studentCount, setStudentCount] = useState<number | null>(null);
+  const [facultyCount, setFacultyCount] = useState<number | null>(null);
+  const [pendingVerifications, setPendingVerifications] = useState<VerificationRow[]>([]);
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [issues, setIssues] = useState<IssuesDashboard['kpis'] | null>(null);
+  const [recentBulkImports, setRecentBulkImports] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const act = (id: string, action: 'approve' | 'reject') => {
-    setQueue((q) => q.filter((item) => item.id !== id));
-    toast.success(action === 'approve' ? 'Approved' : 'Rejected');
-  };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [students, faculty, queue, issuesData, bulkHistory] = await Promise.all([
+        api.get<DirectoryPage>('/api/search/directory?role=Student&limit=1&page=1').catch(() => ({ total: 0 })),
+        api.get<DirectoryPage>('/api/search/directory?role=Faculty&limit=1&page=1').catch(() => ({ total: 0 })),
+        api.get<VerificationRow[]>('/api/admin/student-verifications/queue').catch(() => []),
+        api.get<IssuesDashboard>('/api/leadership/issues').catch(() => null),
+        api.get<Array<{ rows_imported: number }>>('/admissions/students/bulk-upload/history').catch(() => []),
+      ]);
+      const queueRows = Array.isArray(queue) ? queue : [];
+      setStudentCount(students.total ?? 0);
+      setFacultyCount(faculty.total ?? 0);
+      setPendingVerifications(queueRows.slice(0, 5));
+      setPendingCount(queueRows.length);
+      setIssues(issuesData?.kpis ?? null);
+      const bulkRows = Array.isArray(bulkHistory) ? bulkHistory : [];
+      setRecentBulkImports(
+        bulkRows.slice(0, 5).reduce((sum, row) => sum + Number(row.rows_imported ?? 0), 0),
+      );
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Failed to load dashboard');
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6" data-testid="registrar-dashboard">
       <section>
-        <h2 className="text-2xl font-bold text-sgvu-navy">University Health</h2>
-        <p className="text-sm text-muted-foreground">Bird&apos;s-eye view for management</p>
+        <h2 className="text-2xl font-bold text-sgvu-navy">Registrar Command Center</h2>
+        <p className="text-sm text-muted-foreground">
+          Live counts from directory, verifications, and governance tickets
+        </p>
       </section>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      {loadError ? (
+        <p className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {loadError}
+        </p>
+      ) : null}
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Active students</CardDescription>
             <CardTitle className="flex items-center gap-2 text-3xl">
               <Users className="h-6 w-6 text-sgvu-gold" />
-              4,280
+              {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : (studentCount ?? '—')}
             </CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Staff attendance today</CardDescription>
-            <CardTitle className="text-3xl text-emerald-600">94%</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Fees collected (May)</CardDescription>
+            <CardDescription>Faculty records</CardDescription>
             <CardTitle className="flex items-center gap-2 text-3xl">
-              <Wallet className="h-6 w-6 text-sgvu-gold" />
-              ₹1.2Cr
+              <GraduationCap className="h-6 w-6 text-sgvu-gold" />
+              {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : (facultyCount ?? '—')}
             </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Pending verifications</CardDescription>
+            <CardTitle className="flex items-center gap-2 text-3xl text-amber-700">
+              <FileCheck2 className="h-6 w-6" />
+              {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : (pendingCount ?? '—')}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Open governance tickets</CardDescription>
+            <CardTitle className="flex items-center gap-2 text-3xl">
+              <ClipboardList className="h-6 w-6 text-sgvu-gold" />
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin" />
+              ) : (
+                (issues?.open_tickets ?? '—')
+              )}
+            </CardTitle>
+            {issues?.sla_breaches ? (
+              <CardDescription className="text-destructive">
+                {issues.sla_breaches} SLA breach{issues.sla_breaches === 1 ? '' : 'es'}
+              </CardDescription>
+            ) : null}
           </CardHeader>
         </Card>
       </div>
 
+      {!loading && recentBulkImports != null && recentBulkImports > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Recent bulk intake: {recentBulkImports} student
+          {recentBulkImports === 1 ? '' : 's'} imported in the last five upload runs.{' '}
+          <Link href="/admin/upload-history" className="font-medium text-sgvu-navy underline">
+            View upload history
+          </Link>
+        </p>
+      ) : null}
+
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ClipboardList className="h-5 w-5 text-sgvu-gold" />
-            Approvals queue
-          </CardTitle>
-          <CardDescription>Inline approve / reject — desktop table, mobile cards</CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <FileCheck2 className="h-5 w-5 text-sgvu-gold" />
+              Student & staff verifications
+            </CardTitle>
+            <CardDescription>Pending onboarding approvals — newest first</CardDescription>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/admin/verifications">Open full queue</Link>
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          {queue.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">Queue clear.</p>
+          {loading ? (
+            <p className="flex items-center gap-2 py-8 text-center text-sm text-muted-foreground">
+              <Loader2 className="mx-auto h-5 w-5 animate-spin" />
+            </p>
+          ) : pendingVerifications.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No pending verifications.</p>
           ) : (
-            queue.map((item) => (
+            pendingVerifications.map((item) => (
               <div
-                key={item.id}
+                key={item.user_id}
                 className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <Badge variant="outline" className="mb-2">
-                    {item.type}
+                    {item.portal_kind} · {item.role_name}
                   </Badge>
-                  <p className="font-semibold text-sgvu-navy">{item.who}</p>
-                  <p className="text-sm text-muted-foreground">{item.detail}</p>
+                  <p className="font-semibold text-sgvu-navy">{item.name}</p>
+                  <p className="text-sm text-muted-foreground">{item.official_email}</p>
                 </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" className="flex-1 touch-target" onClick={() => act(item.id, 'approve')}>
-                    <Check className="mr-1 h-4 w-4" />
-                    Approve
-                  </Button>
-                  <Button size="sm" variant="outline" className="flex-1 touch-target" onClick={() => act(item.id, 'reject')}>
-                    <X className="mr-1 h-4 w-4" />
-                    Reject
-                  </Button>
-                </div>
+                <Button asChild size="sm">
+                  <Link href="/admin/verifications">Review</Link>
+                </Button>
               </div>
             ))
           )}
         </CardContent>
       </Card>
 
-      <ProfileCorrectionWidget limit={10} />
+      <ProfileCorrectionWidget limit={10} reviewHref="/admin/verifications" />
+
+      <RegistrarExamIntegrationPanel compact />
     </div>
   );
 }

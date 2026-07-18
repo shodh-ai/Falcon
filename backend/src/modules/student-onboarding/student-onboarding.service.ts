@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { HrFieldEncryptionService } from '../../common/crypto/hr-field-encryption.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { OnboardingVerificationNotifyService } from '../../core/notifications/onboarding-verification-notify.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import {
   getDashboardPathForRoleName,
   getRequiredDocTypes,
@@ -101,6 +102,13 @@ type ProfileBody = {
 
 const DEFAULT_TENANT_ID = 'a0000000-0000-4000-8000-000000000001';
 
+export type OnboardingAuditActor = {
+  userId: string;
+  role?: string;
+  ip?: string;
+  sessionId?: string;
+};
+
 @Injectable()
 export class StudentOnboardingService {
   constructor(
@@ -108,6 +116,7 @@ export class StudentOnboardingService {
     private readonly notifications: NotificationEmitterService,
     private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
     private readonly crypto: HrFieldEncryptionService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   resolveTenantId(tenantId?: string | null) {
@@ -474,7 +483,11 @@ export class StudentOnboardingService {
     };
   }
 
-  async approve(tenantId: string, targetUserId: string) {
+  async approve(
+    tenantId: string,
+    targetUserId: string,
+    actor?: OnboardingAuditActor,
+  ) {
     const tenant = this.resolveTenantId(tenantId);
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -552,6 +565,21 @@ export class StudentOnboardingService {
         dashboardPath: getDashboardPathForRoleName(user.role_name),
       });
 
+      if (actor?.userId) {
+        await this.enterpriseAudit.log({
+          tenantId: tenant,
+          userId: actor.userId,
+          role: actor.role,
+          module: 'student_verifications',
+          action: 'VERIFY_APPROVE',
+          recordId: targetUserId,
+          oldValue: { onboarding_status: status },
+          newValue: { onboarding_status: 'COMPLETED' },
+          ip: actor.ip,
+          sessionId: actor.sessionId,
+        });
+      }
+
       return { onboarding_status: 'COMPLETED' };
     } catch (error) {
       await qr.rollbackTransaction();
@@ -561,7 +589,12 @@ export class StudentOnboardingService {
     }
   }
 
-  async reject(tenantId: string, targetUserId: string, remarks: string) {
+  async reject(
+    tenantId: string,
+    targetUserId: string,
+    remarks: string,
+    actor?: OnboardingAuditActor,
+  ) {
     const reason = remarks?.trim();
     if (!reason) throw new BadRequestException('Rejection reason is required');
 
@@ -572,7 +605,7 @@ export class StudentOnboardingService {
 
     try {
       const locked = (await qr.query(
-        `SELECT u.user_id, u.onboarding_status, r.role_name
+        `SELECT u.user_id, u.name, u.official_email, u.onboarding_status, r.role_name
          FROM users u
          JOIN roles r ON r.role_id = u.role_id
          WHERE u.user_id = $1 AND u.tenant_id = $2
@@ -580,6 +613,8 @@ export class StudentOnboardingService {
         [targetUserId, tenant],
       )) as Array<{
         user_id: string;
+        name: string;
+        official_email: string;
         onboarding_status: string;
         role_name: string;
       }>;
@@ -629,6 +664,30 @@ export class StudentOnboardingService {
       await this.onboardingVerificationNotify
         .dismissVerificationNotifications(tenant, targetUserId)
         .catch(() => undefined);
+
+      this.notifications.studentOnboardingRejected({
+        tenantId: tenant,
+        userId: targetUserId,
+        studentName: user.name,
+        officialEmail: user.official_email,
+        remarks: reason,
+        dashboardPath: getDashboardPathForRoleName(user.role_name),
+      });
+
+      if (actor?.userId) {
+        await this.enterpriseAudit.log({
+          tenantId: tenant,
+          userId: actor.userId,
+          role: actor.role,
+          module: 'student_verifications',
+          action: 'VERIFY_REJECT',
+          recordId: targetUserId,
+          oldValue: { onboarding_status: status },
+          newValue: { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason },
+          ip: actor.ip,
+          sessionId: actor.sessionId,
+        });
+      }
 
       return { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason };
     } catch (error) {

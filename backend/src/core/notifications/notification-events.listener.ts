@@ -87,6 +87,9 @@ import {
   type HrExportReadyPayload,
   type HrExportFailedPayload,
   type AlumniConversionRequestedPayload,
+  type StudentOnboardingApprovedPayload,
+  type StudentOnboardingRejectedPayload,
+  type TranscriptGeneratedPayload,
   type OnboardingVerificationRequestedPayload,
   type EcellStatusUpdatedPayload,
   type EcellMentorMeetingRequestedPayload,
@@ -652,5 +655,52 @@ export class NotificationEventsListener {
     await this.onboardingVerificationNotify.notifyVerificationRequested(
       payload,
     );
+  }
+
+  @OnEvent(NotificationEvents.STUDENT_ONBOARDING_APPROVED)
+  async onStudentOnboardingApproved(payload: StudentOnboardingApprovedPayload) {
+    await this.dispatch.dispatch({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'ACADEMICS',
+      intent: 'status_update',
+      title: 'Portal unlocked',
+      message: `${payload.studentName}, your documents have been verified. Your portal is now active.`,
+      actionLink: payload.dashboardPath ?? '/student/dashboard',
+      severity: 'success',
+      queueDelivery: false,
+    });
+  }
+
+  @OnEvent(NotificationEvents.STUDENT_ONBOARDING_REJECTED)
+  async onStudentOnboardingRejected(payload: StudentOnboardingRejectedPayload) {
+    await this.dispatch.dispatch({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'ACADEMICS',
+      intent: 'action_required',
+      title: 'Verification requires correction',
+      message: `Your submission was returned by the Registrar: ${payload.remarks}`,
+      actionLink: payload.dashboardPath ?? '/student/onboarding',
+      severity: 'warning',
+      queueDelivery: true,
+    });
+  }
+
+  @OnEvent(NotificationEvents.TRANSCRIPT_GENERATED)
+  async onTranscriptGenerated(payload: TranscriptGeneratedPayload) {
+    await this.dispatch.dispatch({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'EXAMS',
+      intent: 'status_update',
+      title: payload.title ?? 'Official transcript ready',
+      message:
+        payload.message ??
+        `Your official transcript for semester ${payload.semester} is available.`,
+      actionLink: payload.actionLink ?? '/student/transcripts',
+      severity: 'success',
+      queueDelivery: true,
+    });
   }
 }

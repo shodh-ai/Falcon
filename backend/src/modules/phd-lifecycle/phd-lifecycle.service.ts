@@ -7,6 +7,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import {
   PHD_ACTIONS,
   PHD_APPLICATION_TYPES,
@@ -89,6 +90,7 @@ export class PhdLifecycleService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly notify: NotificationEmitterService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   async createApplication(
@@ -760,6 +762,17 @@ export class PhdLifecycleService {
         requestType: 'PHD_LIFECYCLE',
       });
     }
+
+    await this.enterpriseAudit.log({
+      tenantId,
+      userId: actorUserId,
+      role: actorRole,
+      module: 'phd_candidates',
+      action: `PHD_${action}`,
+      recordId: candidateId,
+      oldValue: { lifecycle_status: candidate.lifecycle_status },
+      newValue: { lifecycle_status: def.to, remarks: dto.remarks ?? null },
+    });
 
     return { status: def.to, stage: def.stage };
   }

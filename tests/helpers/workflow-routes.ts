@@ -86,3 +86,29 @@ export const EXAM_CELL_API = {
   hallTicketApprovals: '/api/exam-cell/hall-ticket-approvals',
   auditLog: '/api/exam-cell/audit-log',
 } as const;
+
+export const REGISTRAR_ROUTES = {
+  dashboard: '/admin/dashboard',
+  governanceTasks: '/admin/tasks',
+  uploadHistory: '/admin/upload-history',
+  iam: '/admin/iam',
+  verifications: '/admin/verifications',
+  academics: '/admin/academics',
+  bulkUpload: '/admin/students/bulk-upload',
+  directory: '/directory',
+  phdAdmissions: '/admin/phd/admissions',
+  adminOps: '/admin-ops/dashboard',
+  reports: '/reports',
+} as const;
+
+export const REGISTRAR_API = {
+  directory: '/api/search/directory',
+  directoryFilters: '/api/search/directory/filters',
+  verificationsQueue: '/api/admin/student-verifications/queue',
+  assignRollNumbers: '/api/academics/enrollments/assign-roll-numbers',
+  phdCandidates: '/api/phd-lifecycle/registrar/candidates',
+  submissionsMy: '/tasks/submissions/my',
+  assignmentsMy: '/tasks/assignments/my',
+  leadershipIssues: '/api/leadership/issues',
+  profileCorrections: '/api/helpdesk/tickets/profile-corrections',
+} as const;

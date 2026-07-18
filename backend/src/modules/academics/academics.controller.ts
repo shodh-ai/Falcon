@@ -88,13 +88,27 @@ export class AcademicsController {
   @Post('enrollments/assign-roll-numbers')
   @Roles('SuperAdmin', 'Registrar', 'HOD')
   assignRollNumbers(
-    @Req() req: { user: AuthUser },
+    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
     @Body()
     dto: { semester: number; course_id?: string; sort_by?: 'name' | 'merit' },
   ) {
+    const forwarded = req.headers?.['x-forwarded-for'];
     return this.academics.assignSemesterRollNumbers(
       this.resolveTenantId(req.user),
       dto,
+      {
+        userId: req.user.user_id,
+        role: req.user.role,
+        ip:
+          req.ip ??
+          (typeof forwarded === 'string'
+            ? forwarded.split(',')[0]?.trim()
+            : undefined),
+        sessionId:
+          typeof req.headers?.['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+      },
     );
   }
 

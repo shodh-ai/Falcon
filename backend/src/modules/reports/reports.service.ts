@@ -18,7 +18,7 @@ export class ReportsService {
 
   async warehouseExport(tenantId: string, dataset: string) {
     const queries: Record<string, string> = {
-      admissions: `SELECT u.user_id, u.name, u.official_email, sp.enrollment_no, sp.batch_year, r.role_name, u.created_at
+      admissions: `SELECT u.user_id, u.name, u.official_email, sp.enrollment_no, sp.batch, r.role_name, u.created_at
                   FROM users u
                   LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
                   JOIN roles r ON r.role_id = u.role_id
@@ -45,10 +45,60 @@ export class ReportsService {
                         JOIN placement_companies c ON c.company_id = d.company_id
                         WHERE a.tenant_id = $1
                         GROUP BY c.company_name`,
+      convocation: `SELECT ca.application_id, u.name AS student_name, sp.enrollment_no,
+                           ca.verification_status, ca.certificate_generated, ca.updated_at
+                    FROM cert_applications ca
+                    JOIN users u ON u.user_id = ca.student_user_id
+                    LEFT JOIN student_profiles sp ON sp.user_id = ca.student_user_id
+                    WHERE ca.tenant_id = $1
+                    ORDER BY ca.updated_at DESC`,
+      degrees: `SELECT ca.application_id, u.name AS student_name, ca.verification_status,
+                       ca.certificate_url, ca.updated_at
+                FROM cert_applications ca
+                JOIN users u ON u.user_id = ca.student_user_id
+                WHERE ca.tenant_id = $1 AND ca.verification_status = 'VERIFIED'
+                ORDER BY ca.updated_at DESC`,
+      certificates: `SELECT ca.application_id, u.name AS student_name, ca.certificate_generated,
+                            ca.certificate_url, ce.event_name
+                     FROM cert_applications ca
+                     JOIN users u ON u.user_id = ca.student_user_id
+                     JOIN cert_events ce ON ce.event_id = ca.event_id
+                     WHERE ca.tenant_id = $1`,
+      transcripts: `SELECT t.transcript_id, u.name AS student_name, t.semester, t.status,
+                           t.verification_code, t.pdf_url, t.generated_at, t.archived_at
+                    FROM official_transcripts t
+                    JOIN users u ON u.user_id = t.student_user_id
+                    WHERE t.tenant_id = $1
+                    ORDER BY t.created_at DESC`,
+      phd: `SELECT pc.candidate_id, u.name AS candidate_name, pc.lifecycle_status,
+                   pc.stage, pc.updated_at
+            FROM phd_candidates pc
+            LEFT JOIN users u ON u.user_id = pc.user_id
+            WHERE pc.tenant_id = $1
+            ORDER BY pc.updated_at DESC`,
+      verification: `SELECT u.user_id, u.name, u.official_email, u.onboarding_status, u.updated_at
+                     FROM users u
+                     WHERE u.tenant_id = $1
+                       AND u.onboarding_status IN ('PENDING_ADMIN_APPROVAL', 'COMPLETED', 'PENDING_DOCUMENTS')
+                     ORDER BY u.updated_at DESC`,
+      bulk_upload: `SELECT r.run_id, r.filename, r.rows_total, r.rows_imported, r.rows_failed,
+                           r.duplicate_rows, r.status, r.created_at, u.name AS uploader_name
+                    FROM student_bulk_upload_runs r
+                    JOIN users u ON u.user_id = r.actor_user_id
+                    WHERE r.tenant_id = $1
+                    ORDER BY r.created_at DESC`,
+      governance: `SELECT ta.assignment_id, tm.task_name, u.name AS assignee,
+                          ta.status, ta.due_date, s.uploaded_at, s.file_name
+                   FROM task_assignments ta
+                   JOIN task_master tm ON tm.task_id = ta.task_id
+                   JOIN users u ON u.user_id = ta.assigned_to
+                   LEFT JOIN submissions s ON s.assignment_id = ta.assignment_id
+                   WHERE u.tenant_id = $1
+                   ORDER BY ta.due_date DESC`,
     };
     const sql = queries[dataset];
     if (!sql) return { dataset, rows: [], note: 'Unknown dataset key' };
-    const rows = await this.db.query(sql, [tenantId]);
+    const rows = await this.db.query(sql, [tenantId]).catch(() => []);
     return {
       dataset,
       exported_at: new Date().toISOString(),

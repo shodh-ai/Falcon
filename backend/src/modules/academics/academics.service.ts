@@ -34,6 +34,7 @@ import { StudentEnrollmentSyncService } from './student-enrollment-sync.service'
 import { StudentMentorSyncService } from './student-mentor-sync.service';
 import { resolveDeanScope as resolveDeanScopeUtil } from './dean-scope.util';
 import { DeanAuditService } from './dean-audit.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 
 /**
  * NOTE: `markAttendance` writes straight to Postgres for now. When traffic
@@ -71,6 +72,7 @@ export class AcademicsService {
     private readonly enrollmentSync: StudentEnrollmentSyncService,
     private readonly mentorSync: StudentMentorSyncService,
     private readonly deanAudit: DeanAuditService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   private async notifyCourseStudents(
@@ -3859,6 +3861,7 @@ export class AcademicsService {
   async assignSemesterRollNumbers(
     tenantId: string,
     dto: { semester: number; course_id?: string; sort_by?: 'name' | 'merit' },
+    actor?: { userId: string; role?: string; ip?: string; sessionId?: string },
   ) {
     const semester = Number(dto.semester);
     if (!Number.isFinite(semester) || semester <= 0) {
@@ -3898,6 +3901,25 @@ export class AcademicsService {
       enrollments[i].roll_number = String(i + 1);
     }
     await this.courseEnrollments.save(enrollments);
+
+    if (actor?.userId) {
+      await this.enterpriseAudit.log({
+        tenantId,
+        userId: actor.userId,
+        role: actor.role,
+        module: 'student_course_enrollments',
+        action: 'ASSIGN_ROLL_NUMBERS',
+        recordId: dto.course_id ?? `semester-${semester}`,
+        newValue: {
+          semester,
+          course_id: dto.course_id ?? null,
+          assigned: enrollments.length,
+          sort_by: sortBy,
+        },
+        ip: actor.ip,
+        sessionId: actor.sessionId,
+      });
+    }
 
     return {
       semester,
