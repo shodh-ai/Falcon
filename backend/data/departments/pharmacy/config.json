@@ -1,0 +1,27 @@
+{
+  "slug": "pharmacy",
+  "department_name": "Pharmacy",
+  "school_code": "PHARM",
+  "academic_year": "2026-2027",
+  "session_label": "July-December 2026",
+  "tenant_subdomain": "sgvu",
+  "program_code": "BPHARM",
+  "program_display_name": "B.Pharm",
+  "program_allocation_name": "B.Pharm",
+  "default_student_batch": "B.Pharm",
+  "default_section_code": "A",
+  "sources": {
+    "students_pdf": null,
+    "workload_pdf": null,
+    "students_csv": "students.csv",
+    "faculty_workload_csv": "faculty-workload.csv",
+    "faculty_email_map": "faculty-email-map.json",
+    "course_catalog_csv": "course-catalog.csv"
+  },
+  "workload_extract_mode": "programme_scan",
+  "workload_programme_match": "Pharm",
+  "default_faculty": {
+    "name": "Faculty",
+    "designation": "Assistant Professor"
+  }
+}

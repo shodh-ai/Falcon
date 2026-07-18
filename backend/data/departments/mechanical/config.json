@@ -1,0 +1,37 @@
+{
+  "slug": "mechanical",
+  "department_name": "Mech Engg",
+  "school_code": "MECH",
+  "academic_year": "2026-2027",
+  "session_label": "July-December 2026",
+  "tenant_subdomain": "sgvu",
+  "program_code": "BTECH-ME",
+  "program_display_name": "B.Tech ME",
+  "program_allocation_name": "B.Tech ME",
+  "default_student_batch": "B.Tech Mechanical Engineering",
+  "default_section_code": "A",
+  "provision_missing_faculty": true,
+  "provision_missing_students": true,
+  "sources": {
+    "students_pdf": "Falcon_Pharmacy_E2E_Minimum_Template_compressed.pdf",
+    "workload_pdf": "ME & Agri Workload Distribution for Session(July-Dec 2026) 15.7.26_compressed.pdf",
+    "students_csv": "students.csv",
+    "faculty_workload_csv": "faculty-workload.csv",
+    "faculty_email_map": "faculty-email-map.json",
+    "course_catalog_csv": "course-catalog.csv"
+  },
+  "workload_matrix": {
+    "rows": 8,
+    "program_filter": "ME",
+    "exclude_program_patterns": ["Agri", "Diploma"],
+    "faculty_columns": [
+      {"name": "Prof. (Dr.) Neeraj Kumar", "designation": "HOD"},
+      {"name": "Dr. Amit Tiwari", "designation": "Professor"},
+      {"name": "Dr. Himanshu Vasnani", "designation": "Assistant Professor"},
+      {"name": "Dr. Raj Kumar", "designation": "Assistant Professor"},
+      {"name": "Dr. Shri Krishna Mishra (Asst. Prof.-ME)", "designation": "Assistant Professor"},
+      {"name": "Mr. Tasnim Kaishar (Asst. Prof.-ME)", "designation": "Assistant Professor"},
+      {"name": "Dr. Akshat Srivastava", "designation": "Assistant Professor"}
+    ]
+  }
+}

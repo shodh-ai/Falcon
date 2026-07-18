@@ -1,0 +1,27 @@
+faculty_name,designation,programme,semester,course_code,programme_code,course_name,credits,lecture_hours,tutorial_hours,practical_hours,weekly_contact_hours,half_load,full_load,total_load,faculty_email
+Prof. (Dr.) Neeraj Kumar,HOD,B.Tech ME,III-A,SODECAIII,114,SODECA-III,3,3,0,0,4,0,4,4,neeraj.kumar1@mygyanvihar.com
+Prof. (Dr.) Neeraj Kumar,HOD,B.Tech ME,III-A,ME3002,114,ME3002,3,3,0,0,4,0,4,4,neeraj.kumar1@mygyanvihar.com
+Prof. (Dr.) Neeraj Kumar,HOD,B.Tech ME,V-A,PC301,114,PC 301,3,3,0,0,4,0,4,4,neeraj.kumar1@mygyanvihar.com
+Prof. (Dr.) Neeraj Kumar,HOD,B.Tech ME,V-A,ME303,114,ME 303,3,3,0,0,4,0,4,4,neeraj.kumar1@mygyanvihar.com
+Prof. (Dr.) Neeraj Kumar,HOD,B.Tech ME,V-A,ME305,114,ME 305,3,3,0,0,4,0,4,4,neeraj.kumar1@mygyanvihar.com
+Prof. (Dr.) Neeraj Kumar,HOD,B.Tech ME,VII-A,PC401,114,PC 401,3,3,0,0,4,0,4,4,neeraj.kumar1@mygyanvihar.com
+Dr. Amit Tiwari,Professor,B.Tech ME,III-A,ME3003,114,ME3003,3,3,0,0,4,0,4,4,amit.tiwari@mygyanvihar.com
+Dr. Amit Tiwari,Professor,B.Tech ME,III-A,ME3703,114,ME3703,3,3,0,0,4,0,4,4,amit.tiwari@mygyanvihar.com
+Dr. Amit Tiwari,Professor,B.Tech ME,III-A,ME3705,114,ME3705,3,3,0,0,4,0,4,4,amit.tiwari@mygyanvihar.com
+Dr. Amit Tiwari,Professor,B.Tech ME,V-A,ME301,114,ME 301,3,3,0,0,4,0,4,4,amit.tiwari@mygyanvihar.com
+Dr. Amit Tiwari,Professor,B.Tech ME,V-A,ME351,114,ME 351,3,3,0,0,4,0,4,4,amit.tiwari@mygyanvihar.com
+Dr. Amit Tiwari,Professor,B.Tech ME,VII-A,PE403,114,PE 403,3,3,0,0,4,0,4,4,amit.tiwari@mygyanvihar.com
+Dr. Himanshu Vasnani,Assistant Professor,B.Tech ME,III-A,ME3702,114,ME3702,3,3,0,0,4,0,4,4,himanshu.vasnani@mygyanvihar.com
+Dr. Himanshu Vasnani,Assistant Professor,B.Tech ME,III-A,ME3005,114,ME3005,3,3,0,0,4,0,4,4,himanshu.vasnani@mygyanvihar.com
+Dr. Himanshu Vasnani,Assistant Professor,B.Tech ME,III-A,UCFV1,114,UCFV-1,3,3,0,0,4,0,4,4,himanshu.vasnani@mygyanvihar.com
+Dr. Himanshu Vasnani,Assistant Professor,B.Tech ME,VII-A,EM401,114,EM 401,3,3,0,0,4,0,4,4,himanshu.vasnani@mygyanvihar.com
+Dr. Himanshu Vasnani,Assistant Professor,B.Tech ME,VII-A,ME407,114,ME 407,3,3,0,0,4,0,4,4,himanshu.vasnani@mygyanvihar.com
+Dr. Himanshu Vasnani,Assistant Professor,B.Tech ME,VII-A,SM401,114,SM 401,3,3,0,0,4,0,4,4,himanshu.vasnani@mygyanvihar.com
+Dr. Raj Kumar,Assistant Professor,B.Tech ME,III-A,ME3001,114,ME3001,3,3,0,0,4,0,4,4,raj.kumar@mygyanvihar.com
+Dr. Raj Kumar,Assistant Professor,B.Tech ME,III-A,ME3701,114,ME3701,3,3,0,0,4,0,4,4,raj.kumar@mygyanvihar.com
+Dr. Raj Kumar,Assistant Professor,B.Tech ME,VII-A,ME405,114,ME 405,3,3,0,0,4,0,4,4,raj.kumar@mygyanvihar.com
+Dr. Raj Kumar,Assistant Professor,B.Tech ME,VII-A,ME453,114,ME 453,3,3,0,0,4,0,4,4,raj.kumar@mygyanvihar.com
+Dr. Shri Krishna Mishra (Asst. Prof.-ME),Assistant Professor,B.Tech ME,V-A,ME355,114,ME 355,3,3,0,0,4,0,4,4,shri.krishna@mygyanvihar.com
+Mr. Tasnim Kaishar (Asst. Prof.-ME),Assistant Professor,B.Tech ME,VII-A,ME411,114,ME 411,3,3,0,0,4,0,4,4,tasnim.kaishar@mygyanvihar.com
+Mr. Tasnim Kaishar (Asst. Prof.-ME),Assistant Professor,B.Tech ME,III-A,ME3004,114,ME3004,3,3,0,0,4,0,4,4,tasnim.kaishar@mygyanvihar.com
+Mr. Tasnim Kaishar (Asst. Prof.-ME),Assistant Professor,B.Tech ME,III-A,ME3704,114,ME3704,3,3,0,0,4,0,4,4,tasnim.kaishar@mygyanvihar.com

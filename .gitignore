@@ -73,3 +73,6 @@ backend/scripts/ee-ids-parsed.json
 
 # One-off xlsx parse / credential migration generators (output lives in backend/migrations/)
 /scripts/
+
+# Generated login exports from department import (contain default passwords)
+backend/data/departments/**/import-credentials.csv

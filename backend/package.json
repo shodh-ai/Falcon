@@ -24,7 +24,10 @@
     "db:seed": "node scripts/run-migrations.js --seed",
     "migration:run": "npm run db:migrate",
     "seed": "npm run db:seed",
-    "db:migrate:tenants": "psql -d university_governance -f migrations/20260529120000_multi_tenant_saas_foundation.sql"
+    "db:migrate:tenants": "psql -d university_governance -f migrations/20260529120000_multi_tenant_saas_foundation.sql",
+    "parse:department": "python3 scripts/department-import/parse-department-sources.py",
+    "import:department": "node scripts/department-import/import-department.js",
+    "rollback:department": "node scripts/department-import/rollback-department.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1056.0",
