@@ -13,6 +13,7 @@ import {
   type MeetingParticipant,
   type PortalMeetingRecord,
 } from '@/lib/api/api.meetings';
+import { usePresidentApi } from '@/lib/api/api.president';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -54,11 +55,14 @@ function participantStatusLabel(
 export function MeetingWorkspace({
   workspaceLabel = 'Meetings',
   description = 'Schedule meetings with people in your scope, request time with seniors, and publish minutes.',
+  syncExecutiveActionItems = false,
 }: {
   workspaceLabel?: string;
   description?: string;
+  syncExecutiveActionItems?: boolean;
 }) {
   const api = useAuthedApi();
+  const presidentApi = usePresidentApi();
   const { user } = useAuth();
   const meetingsApi = useMemo(() => createMeetingsApi(api), [api]);
   const searchParams = useSearchParams();
@@ -238,6 +242,26 @@ export function MeetingWorkspace({
     setBusy(true);
     try {
       await meetingsApi.publishMinutes(selected.meeting_id, minutesDraft);
+      if (syncExecutiveActionItems && minutesDraft.action_items.trim()) {
+        const organizer = selected.participants?.find((p) => p.participant_role === 'ORGANIZER');
+        const fallbackAssignee = organizer?.user_id ?? user?.user_id ?? '';
+        const items = minutesDraft.action_items
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const [title, assignee] = line.split('|').map((part) => part.trim());
+            return {
+              title: title || line,
+              assigned_to_user_id: assignee || fallbackAssignee,
+            };
+          })
+          .filter((item) => item.assigned_to_user_id);
+        if (items.length) {
+          await presidentApi.meetingActionItems(selected.meeting_id, items);
+          toast.success(`Created ${items.length} executive action item(s)`);
+        }
+      }
       toast.success('Minutes published');
       await load();
       window.dispatchEvent(new CustomEvent('falcon:notifications-refresh'));

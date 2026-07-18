@@ -1,0 +1,36 @@
+/** President portal routes for E2E and API smoke registry. */
+export const PRESIDENT_ROUTES = {
+  executiveSummary: '/president/executive-summary',
+  academics: '/president/academics',
+  insights: '/president/insights',
+  finance: '/president/finance',
+  financeBudget: '/president/finance-budget',
+  research: '/president/research',
+  compliance: '/president/compliance',
+  hrAnalytics: '/president/hr-analytics',
+  hrApprovals: '/president/hr-approvals',
+  executiveOrders: '/president/executive-orders',
+  issues: '/president/issues',
+  convocation: '/president/convocation',
+  meetings: '/president/meetings',
+  settings: '/president/settings',
+} as const;
+
+export const PRESIDENT_API = {
+  executiveSummary: '/api/president/executive-summary',
+  academics: '/api/president/academics',
+  finance: '/api/president/finance',
+  financeBudget: '/api/president/finance-budget',
+  research: '/api/president/research',
+  compliance: '/api/president/compliance',
+  hrAnalytics: '/api/president/hr-analytics',
+  hrApprovals: '/api/president/hr-approvals',
+  executiveOrders: '/api/president/executive-orders',
+  convocation: '/api/president/convocation',
+  pendingRatification: '/api/president/convocation/pending-ratification',
+  leadershipIssues: '/api/leadership/issues',
+  leadershipInbox: '/api/leadership/action/approvals/inbox',
+  meetings: '/api/meetings',
+  notifications: '/api/notifications',
+  auditLog: '/api/leadership/audit-log',
+} as const;

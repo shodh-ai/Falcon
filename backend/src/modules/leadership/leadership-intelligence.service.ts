@@ -763,13 +763,13 @@ export class LeadershipIntelligenceService {
   }
 
   async getAuditLog(
-    tenantId?: string,
+    _tenantId?: string,
     tableName?: string,
     recordId?: string,
     limit = 100,
   ) {
-    const tid = this.tenantId(tenantId);
-    const params: unknown[] = [limit];
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 200);
+    const params: unknown[] = [];
     let where = '1=1';
     if (tableName) {
       params.push(tableName);
@@ -779,7 +779,7 @@ export class LeadershipIntelligenceService {
       params.push(recordId);
       where += ` AND record_id = $${params.length}::uuid`;
     }
-    params.unshift(tid);
+    params.push(safeLimit);
     const rows = await this.db.query(
       `SELECT log_id, table_name, record_id, action, old_value, new_value,
               changed_by_user_id, changed_at

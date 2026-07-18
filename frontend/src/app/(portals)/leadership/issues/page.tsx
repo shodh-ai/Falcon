@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
 import {
   ExecutiveDateRangeFilter,
@@ -12,6 +13,8 @@ import {
   type ExecutivePeriod,
 } from '@/components/leadership/executive';
 import { useLeadershipApi } from '@/lib/api/api.leadership';
+import { usePresidentApi } from '@/lib/api/api.president';
+import { useAuth } from '@/context/AuthContext';
 
 type IssuesDashboard = {
   kpis: { open_tickets: number; sla_breaches: number; avg_resolution_hours: number };
@@ -21,9 +24,13 @@ type IssuesDashboard = {
 
 export default function LeadershipIssuesPage() {
   const api = useLeadershipApi();
+  const presidentApi = usePresidentApi();
+  const { user } = useAuth();
+  const isPresident = user?.role === 'President' || user?.role_name === 'President';
   const [period, setPeriod] = useState<ExecutivePeriod>('year');
   const [data, setData] = useState<IssuesDashboard | null>(null);
   const [compliance, setCompliance] = useState<Record<string, unknown> | null>(null);
+  const [decisionDraft, setDecisionDraft] = useState<Record<string, string>>({});
 
   const reload = () => {
     void api.issues().then((d) => setData(d as IssuesDashboard)).catch(() => setData(null));
@@ -41,6 +48,21 @@ export default function LeadershipIssuesPage() {
       reload();
     } catch {
       toast.error('Escalation failed');
+    }
+  };
+
+  const presidentDecide = async (ticketId: string) => {
+    const decision = decisionDraft[ticketId]?.trim();
+    if (!decision) {
+      toast.error('Enter an executive decision');
+      return;
+    }
+    try {
+      await presidentApi.grievanceDecision(ticketId, { decision });
+      toast.success('Executive decision recorded');
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Decision failed');
     }
   };
 
@@ -130,11 +152,27 @@ export default function LeadershipIssuesPage() {
                   <p className="text-sm font-semibold text-sgvu-navy">{String(t.subject ?? 'Ticket')}</p>
                   <p className="text-xs text-muted-foreground">
                     {String(t.category ?? '')} · {String(t.student_name ?? '')}
+                    {t.escalation_level != null ? ` · Level ${String(t.escalation_level)}` : ''}
                   </p>
                 </div>
-                <Button size="sm" variant="destructive" onClick={() => void escalate(String(t.ticket_id))}>
-                  Escalate to HOD
-                </Button>
+                {isPresident && Number(t.escalation_level ?? 0) >= 4 ? (
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[320px]">
+                    <Input
+                      placeholder="Executive decision / assignment note"
+                      value={decisionDraft[String(t.ticket_id)] ?? ''}
+                      onChange={(e) =>
+                        setDecisionDraft((prev) => ({ ...prev, [String(t.ticket_id)]: e.target.value }))
+                      }
+                    />
+                    <Button size="sm" onClick={() => void presidentDecide(String(t.ticket_id))}>
+                      Record President decision
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="destructive" onClick={() => void escalate(String(t.ticket_id))}>
+                    Escalate to HOD
+                  </Button>
+                )}
               </div>
             ))}
           </div>
