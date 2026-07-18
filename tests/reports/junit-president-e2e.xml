@@ -1,0 +1,38 @@
+<testsuites id="" name="" tests="16" failures="0" skipped="0" errors="0" time="3.6248590000000003">
+<testsuite name="president/security.spec.ts" timestamp="2026-07-18T10:17:59.833Z" hostname="chromium" tests="2" failures="0" skipped="0" time="2.16" errors="0">
+<testcase name="President RBAC E2E › faculty cannot access president executive summary" classname="president/security.spec.ts" time="1.072">
+</testcase>
+<testcase name="President RBAC E2E › president session mock retains president portal path" classname="president/security.spec.ts" time="1.088">
+</testcase>
+</testsuite>
+<testsuite name="president/workspace.spec.ts" timestamp="2026-07-18T10:17:59.833Z" hostname="chromium" tests="14" failures="0" skipped="0" time="10.185" errors="0">
+<testcase name="President workspace navigation E2E › loads executiveSummary without console errors" classname="president/workspace.spec.ts" time="1.152">
+</testcase>
+<testcase name="President workspace navigation E2E › loads academics without console errors" classname="president/workspace.spec.ts" time="1.099">
+</testcase>
+<testcase name="President workspace navigation E2E › loads insights without console errors" classname="president/workspace.spec.ts" time="1.107">
+</testcase>
+<testcase name="President workspace navigation E2E › loads finance without console errors" classname="president/workspace.spec.ts" time="0.613">
+</testcase>
+<testcase name="President workspace navigation E2E › loads financeBudget without console errors" classname="president/workspace.spec.ts" time="0.598">
+</testcase>
+<testcase name="President workspace navigation E2E › loads research without console errors" classname="president/workspace.spec.ts" time="0.694">
+</testcase>
+<testcase name="President workspace navigation E2E › loads compliance without console errors" classname="president/workspace.spec.ts" time="0.691">
+</testcase>
+<testcase name="President workspace navigation E2E › loads hrAnalytics without console errors" classname="president/workspace.spec.ts" time="0.69">
+</testcase>
+<testcase name="President workspace navigation E2E › loads hrApprovals without console errors" classname="president/workspace.spec.ts" time="0.696">
+</testcase>
+<testcase name="President workspace navigation E2E › loads executiveOrders without console errors" classname="president/workspace.spec.ts" time="0.704">
+</testcase>
+<testcase name="President workspace navigation E2E › loads issues without console errors" classname="president/workspace.spec.ts" time="0.657">
+</testcase>
+<testcase name="President workspace navigation E2E › loads convocation without console errors" classname="president/workspace.spec.ts" time="0.633">
+</testcase>
+<testcase name="President workspace navigation E2E › loads meetings without console errors" classname="president/workspace.spec.ts" time="0.59">
+</testcase>
+<testcase name="President workspace navigation E2E › loads settings without console errors" classname="president/workspace.spec.ts" time="0.261">
+</testcase>
+</testsuite>
+</testsuites>

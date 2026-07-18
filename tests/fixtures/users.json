@@ -35,5 +35,9 @@
   "registrar": {
     "email": "dev.registrar@mygyanvihar.com",
     "role": "Registrar"
+  },
+  "president": {
+    "email": "president@mygyanvihar.com",
+    "role": "President"
   }
 }

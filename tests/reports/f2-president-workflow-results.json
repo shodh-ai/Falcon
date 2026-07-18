@@ -1,0 +1,112 @@
+{
+  "phase": "F.2",
+  "generated_at": "2026-07-18T09:56:51.766Z",
+  "production_readiness_score": 98,
+  "results": [
+    {
+      "name": "President login",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/executive-summary",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/academics",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/finance",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/compliance",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/hr-analytics",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/finance-budget",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/research",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/executive-orders",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "Executive orders table",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/convocation",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/president/hr-approvals",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "HR approvals data source",
+      "status": "pass",
+      "detail": "1 pending"
+    },
+    {
+      "name": "GET /api/president/convocation/pending-ratification",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/leadership/issues",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "GET /api/meetings",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "POST executive order",
+      "status": "pass",
+      "detail": "EO-2026-0002"
+    },
+    {
+      "name": "PATCH executive order status",
+      "status": "pass",
+      "detail": "HTTP 200"
+    },
+    {
+      "name": "POST HR approval review",
+      "status": "pass",
+      "detail": "HTTP 201"
+    },
+    {
+      "name": "POST compliance action",
+      "status": "warn",
+      "detail": "No pending compliance assignments"
+    },
+    {
+      "name": "POST grievance decision",
+      "status": "pass",
+      "detail": "HTTP 201"
+    }
+  ]
+}

@@ -40,6 +40,10 @@ export const TEST_USERS = {
     email: process.env.FALCON_TEST_REGISTRAR_EMAIL ?? fixtureUsers.registrar.email,
     role: fixtureUsers.registrar.role,
   },
+  president: {
+    email: process.env.FALCON_TEST_PRESIDENT_EMAIL ?? fixtureUsers.president?.email ?? 'president@mygyanvihar.com',
+    role: 'President',
+  },
 } as const;
 
 export type TestUserKey = keyof typeof TEST_USERS;

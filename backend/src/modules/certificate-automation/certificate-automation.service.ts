@@ -353,7 +353,9 @@ export class CertificateAutomationService {
     const newStatus = action === 'approve' ? 'VERIFIED' : 'REJECTED';
     const updated = await this.db.query(
       `UPDATE cert_applications
-       SET verification_status = $3, updated_at = NOW()
+       SET verification_status = $3,
+           president_ratification_status = CASE WHEN $3 = 'VERIFIED' THEN 'PENDING' ELSE president_ratification_status END,
+           updated_at = NOW()
        WHERE application_id = $1 AND tenant_id = $2 AND verification_status = 'PENDING_VERIFICATION'
        RETURNING *`,
       [applicationId, tid, newStatus],
@@ -396,6 +398,7 @@ export class CertificateAutomationService {
       `SELECT application_id FROM cert_applications
        WHERE tenant_id = $1 AND event_id = $2
          AND verification_status = 'VERIFIED'
+         AND president_ratification_status IN ('RATIFIED', 'NOT_REQUIRED')
          AND certificate_generated = false`,
       [tid, eventId],
     );
@@ -426,6 +429,7 @@ export class CertificateAutomationService {
        FROM cert_applications
        WHERE tenant_id = $1 AND event_id = $2
          AND verification_status = 'VERIFIED'
+         AND president_ratification_status IN ('RATIFIED', 'NOT_REQUIRED')
          AND certificate_generated = false`,
       [job.tenantId, job.eventId],
     );
@@ -435,77 +439,14 @@ export class CertificateAutomationService {
       application_id: string;
       student_user_id: string;
     }[]) {
-      try {
-        const { buffer, verificationCode } = await this.pdf.generate(
-          job.tenantId,
-          app.application_id,
-        );
-        const key = this.storage.buildKey(
-          job.tenantId,
-          `certificates/${app.application_id}.pdf`,
-        );
-        const stored = await this.storage.upload(
-          job.tenantId,
-          key,
-          buffer,
-          'application/pdf',
-        );
-        const url = stored.url;
-
-        await this.db.query(
-          `UPDATE cert_applications
-           SET certificate_generated = true,
-               certificate_url = $3,
-               digilocker_pushed_at = NOW(),
-               updated_at = NOW()
-           WHERE application_id = $1 AND tenant_id = $2`,
-          [app.application_id, job.tenantId, url],
-        );
-
-        await this.pushToDigilockerNad(
-          app.application_id,
-          verificationCode,
-          url,
-        );
-
-        await this.notifyStudent(
-          job.tenantId,
-          app.student_user_id,
-          'Degree Certificate Ready',
-          'Your official degree certificate has been generated and is available for download.',
-        );
-
-        await this.alumniConversion
-          .enqueueConversion({
-            tenantId: job.tenantId,
-            studentUserId: app.student_user_id,
-            autoVerify: true,
-          })
-          .catch((err) =>
-            this.logger.warn(
-              `Alumni conversion queue failed for ${app.student_user_id}: ${err instanceof Error ? err.message : err}`,
-            ),
-          );
-
-        await this.enterpriseAudit.log({
-          tenantId: job.tenantId,
-          userId: job.requestedBy,
-          module: 'cert_applications',
-          action: 'CERTIFICATE_GENERATED',
-          recordId: app.application_id,
-          newValue: {
-            certificate_url: url,
-            verification_code: verificationCode,
-            event_id: job.eventId,
-          },
-        });
-
-        generated += 1;
-      } catch (err) {
-        this.logger.error(
-          `Certificate generation failed for ${app.application_id}: ${err instanceof Error ? err.message : err}`,
-        );
-      }
+      const ok = await this.generateOneCertificate(
+        job.tenantId,
+        app.application_id,
+        app.student_user_id,
+        job.requestedBy,
+        job.eventId,
+      );
+      if (ok) generated += 1;
     }
 
     this.notify.certificateStatusUpdated({
@@ -517,6 +458,119 @@ export class CertificateAutomationService {
     });
 
     return { generated, total: apps.length };
+  }
+
+  async releaseCertificateAfterRatification(
+    tenantId: string | undefined,
+    applicationId: string,
+    requestedBy: string,
+  ) {
+    const tid = this.tenant(tenantId);
+    const rows = await this.db.query(
+      `SELECT application_id, student_user_id, event_id, verification_status, president_ratification_status
+       FROM cert_applications
+       WHERE tenant_id = $1 AND application_id = $2`,
+      [tid, applicationId],
+    );
+    if (!rows[0]) throw new NotFoundException('Application not found');
+    const app = rows[0] as {
+      student_user_id: string;
+      event_id: string;
+      verification_status: string;
+      president_ratification_status: string;
+    };
+    if (app.verification_status !== 'VERIFIED') {
+      throw new BadRequestException('Application must be verified before certificate release');
+    }
+    if (!['RATIFIED', 'NOT_REQUIRED'].includes(app.president_ratification_status)) {
+      throw new BadRequestException('President ratification required before certificate release');
+    }
+
+    const generated = await this.generateOneCertificate(
+      tid,
+      applicationId,
+      app.student_user_id,
+      requestedBy,
+      app.event_id,
+    );
+    return { generated: generated ? 1 : 0, application_id: applicationId };
+  }
+
+  private async generateOneCertificate(
+    tenantId: string,
+    applicationId: string,
+    studentUserId: string,
+    requestedBy: string,
+    eventId: string,
+  ): Promise<boolean> {
+    try {
+      const { buffer, verificationCode } = await this.pdf.generate(
+        tenantId,
+        applicationId,
+      );
+      const key = this.storage.buildKey(
+        tenantId,
+        `certificates/${applicationId}.pdf`,
+      );
+      const stored = await this.storage.upload(
+        tenantId,
+        key,
+        buffer,
+        'application/pdf',
+      );
+      const url = stored.url;
+
+      await this.db.query(
+        `UPDATE cert_applications
+         SET certificate_generated = true,
+             certificate_url = $3,
+             digilocker_pushed_at = NOW(),
+             updated_at = NOW()
+         WHERE application_id = $1 AND tenant_id = $2`,
+        [applicationId, tenantId, url],
+      );
+
+      await this.pushToDigilockerNad(applicationId, verificationCode, url);
+
+      await this.notifyStudent(
+        tenantId,
+        studentUserId,
+        'Degree Certificate Ready',
+        'Your official degree certificate has been generated and is available for download.',
+      );
+
+      await this.alumniConversion
+        .enqueueConversion({
+          tenantId,
+          studentUserId,
+          autoVerify: true,
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `Alumni conversion queue failed for ${studentUserId}: ${err instanceof Error ? err.message : err}`,
+          ),
+        );
+
+      await this.enterpriseAudit.log({
+        tenantId,
+        userId: requestedBy,
+        module: 'cert_applications',
+        action: 'CERTIFICATE_GENERATED',
+        recordId: applicationId,
+        newValue: {
+          certificate_url: url,
+          verification_code: verificationCode,
+          event_id: eventId,
+        },
+      });
+
+      return true;
+    } catch (err) {
+      this.logger.error(
+        `Certificate generation failed for ${applicationId}: ${err instanceof Error ? err.message : err}`,
+      );
+      return false;
+    }
   }
 
   /** Stub for DigiLocker / NAD integration — records push timestamp. */

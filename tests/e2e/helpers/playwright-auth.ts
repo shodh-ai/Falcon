@@ -65,4 +65,10 @@ export const PORTAL_MOCK_USERS = {
     role: 'Registrar',
     email: TEST_USERS.registrar.email,
   },
+  president: {
+    role: 'President',
+    roles: ['President'],
+    primaryRole: 'President',
+    email: TEST_USERS.president.email,
+  },
 } as const;

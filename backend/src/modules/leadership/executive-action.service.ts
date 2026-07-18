@@ -6,6 +6,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import type { NotificationMessage } from '../../core/notifications/notification-message.types';
 
 type AuthUser = { user_id: string; tenant_id?: string };
@@ -15,6 +16,7 @@ export class ExecutiveActionService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly notifyDispatch: NotificationDispatchService,
+    private readonly audit: EnterpriseAuditService,
   ) {}
 
   private tenantId(tenantId?: string) {
@@ -175,12 +177,70 @@ export class ExecutiveActionService {
     const status = dto.approve ? 'APPROVED' : 'REJECTED';
 
     if (dto.category === 'BUDGET') {
+      const existing = await this.db.query(
+        `SELECT request_id, requested_by, reason, budget_id, requested_amount, status
+         FROM fin_budget_expansion_requests
+         WHERE tenant_id = $1 AND request_id = $2`,
+        [tid, dto.id],
+      );
+      if (!existing[0]) throw new NotFoundException('Budget expansion request not found');
+
       await this.db.query(
         `UPDATE fin_budget_expansion_requests
          SET status = $3, reviewed_by = $4, reviewed_at = NOW()
          WHERE tenant_id = $1 AND request_id = $2`,
         [tid, dto.id, status, reviewerId],
       );
+
+      const row = existing[0] as {
+        requested_by: string;
+        reason: string;
+        requested_amount: number;
+      };
+
+      if (row.requested_by) {
+        await this.notifyDispatch.dispatch({
+          tenantId: tid,
+          userId: String(row.requested_by),
+          ...this.execNotify(
+            dto.approve ? 'Budget expansion approved' : 'Budget expansion rejected',
+            `${row.reason ?? 'Budget request'} was ${status.toLowerCase()} by executive review.`,
+            '/finance/dashboard',
+          ),
+          queueDelivery: true,
+        });
+      }
+
+      const hodRows = await this.db.query(
+        `SELECT u.user_id FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         JOIN fin_dept_budgets b ON b.department_id = u.dept_id
+         WHERE b.budget_id = $1 AND r.role_name = 'HOD' AND u.is_active = true
+         LIMIT 1`,
+        [(existing[0] as { budget_id: string }).budget_id],
+      );
+      if (hodRows[0]?.user_id) {
+        await this.notifyDispatch.dispatch({
+          tenantId: tid,
+          userId: String(hodRows[0].user_id),
+          ...this.execNotify(
+            'Annual budget decision',
+            `Executive ${status.toLowerCase()} budget expansion of ₹${Number(row.requested_amount ?? 0).toLocaleString('en-IN')}.`,
+            '/hod/dashboard',
+          ),
+          queueDelivery: true,
+        });
+      }
+
+      await this.audit.log({
+        tenantId: tid,
+        userId: reviewerId,
+        module: 'fin_budget_expansion_requests',
+        action: dto.approve ? 'PRESIDENT_BUDGET_APPROVED' : 'PRESIDENT_BUDGET_REJECTED',
+        recordId: dto.id,
+        newValue: { status, note: dto.note ?? null },
+      });
+
       return { ok: true, status };
     }
 

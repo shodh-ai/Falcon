@@ -25,18 +25,27 @@ export class PresidentService {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
   }
 
+  private fetchTenantDemands(tenantId: string) {
+    return this.demands
+      .createQueryBuilder('demand')
+      .innerJoin('users', 'u', 'u.user_id = demand.student_user_id')
+      .where('u.tenant_id = :tenantId', { tenantId })
+      .getMany();
+  }
+
   async getExecutiveSummary(tenantId?: string) {
     const tid = this.tenantId(tenantId);
-    const [students, staff, demands, pendingVerifications, pendingGovernance] =
+    const [students, staff, demands, pendingVerifications, pendingGovernance, pendingHr, pendingOrders, pendingRatify] =
       await Promise.all([
-        this.countUsersByRole('Student'),
+        this.countUsersByRole('Student', tid),
         this.users
           .createQueryBuilder('user')
           .leftJoin('user.role', 'role')
           .where('user.is_active = true')
+          .andWhere('user.tenant_id = :tid', { tid })
           .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
           .getCount(),
-        this.demands.find(),
+        this.fetchTenantDemands(tid),
         this.db
           .query(
             `SELECT COUNT(*)::int AS total FROM users
@@ -44,7 +53,28 @@ export class PresidentService {
             [tid],
           )
           .then((r) => Number(r[0]?.total ?? 0)),
-        this.taskAssignments.count({ where: { status: 'Pending' } }),
+        this.taskAssignments
+          .createQueryBuilder('ta')
+          .innerJoin('ta.assigned_user', 'u')
+          .where('ta.status = :status', { status: 'Pending' })
+          .andWhere('u.tenant_id = :tid', { tid })
+          .getCount(),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM executive_hr_approval_requests
+           WHERE tenant_id = $1 AND status = 'PENDING'`,
+          [tid],
+        ).then((r) => Number(r[0]?.c ?? 0)),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM leadership_executive_orders
+           WHERE tenant_id = $1 AND status IN ('ISSUED', 'IN_PROGRESS', 'ACKNOWLEDGED')`,
+          [tid],
+        ).catch(() => [{ c: 0 }]).then((r) => Number(r[0]?.c ?? 0)),
+        this.db.query(
+          `SELECT COUNT(*)::int AS c FROM cert_applications
+           WHERE tenant_id = $1 AND verification_status = 'VERIFIED'
+             AND president_ratification_status = 'PENDING' AND certificate_generated = false`,
+          [tid],
+        ).catch(() => [{ c: 0 }]).then((r) => Number(r[0]?.c ?? 0)),
       ]);
 
     return {
@@ -60,11 +90,16 @@ export class PresidentService {
       },
       pending_student_verifications: pendingVerifications,
       pending_governance_tasks: pendingGovernance,
+      pending_hr_approvals: pendingHr,
+      pending_executive_orders: pendingOrders,
+      pending_convocation_ratifications: pendingRatify,
     };
   }
 
-  async getAcademics() {
+  async getAcademics(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
     const rows = await this.enrollments.find({
+      where: { tenant_id: tid },
       relations: ['student', 'student.department'],
     });
     const byDepartment = new Map<
@@ -99,8 +134,9 @@ export class PresidentService {
     };
   }
 
-  async getFinance() {
-    const demands = await this.demands.find();
+  async getFinance(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const demands = await this.fetchTenantDemands(tid);
     const collected = demands.reduce(
       (sum, row) => sum + Number(row.paid_amount ?? 0),
       0,
@@ -122,19 +158,27 @@ export class PresidentService {
     };
   }
 
-  async getCompliance() {
-    const pending = await this.taskAssignments.find({
-      where: { status: 'Pending' },
-      relations: ['task', 'assigned_user', 'assigned_user.department'],
-      order: { due_date: 'ASC' },
-      take: 50,
-    });
+  async getCompliance(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
+    const pending = await this.taskAssignments
+      .createQueryBuilder('ta')
+      .leftJoinAndSelect('ta.task', 'task')
+      .leftJoinAndSelect('ta.assigned_user', 'assigned_user')
+      .leftJoinAndSelect('assigned_user.department', 'department')
+      .where('ta.status = :status', { status: 'Pending' })
+      .andWhere('assigned_user.tenant_id = :tid', { tid })
+      .orderBy('ta.due_date', 'ASC')
+      .take(50)
+      .getMany();
     const stats = await this.db.query(
       `SELECT
-         COUNT(*) FILTER (WHERE status = 'Pending')::int AS pending,
-         COUNT(*) FILTER (WHERE status = 'Completed')::int AS completed,
+         COUNT(*) FILTER (WHERE ta.status = 'Pending')::int AS pending,
+         COUNT(*) FILTER (WHERE ta.status = 'Completed')::int AS completed,
          COUNT(*)::int AS total
-       FROM task_assignments`,
+       FROM task_assignments ta
+       JOIN users u ON u.user_id = ta.assigned_to
+       WHERE u.tenant_id = $1`,
+      [tid],
     );
     return {
       pending_count: Number(stats[0]?.pending ?? 0),
@@ -150,22 +194,29 @@ export class PresidentService {
     };
   }
 
-  async getHrAnalytics() {
+  async getHrAnalytics(tenantId?: string) {
+    const tid = this.tenantId(tenantId);
     const [students, faculty, staff, currentPayslips, activeFacultyYearAgo] =
       await Promise.all([
-        this.countUsersByRole('Student'),
-        this.countUsersByRole('Faculty'),
+        this.countUsersByRole('Student', tid),
+        this.countUsersByRole('Faculty', tid),
         this.users
           .createQueryBuilder('user')
           .leftJoin('user.role', 'role')
           .where('user.is_active = true')
+          .andWhere('user.tenant_id = :tid', { tid })
           .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
           .getCount(),
-        this.payslips.find({ order: { generated_at: 'DESC' }, take: 100 }),
+        this.payslips.find({
+          where: { tenant_id: tid },
+          order: { generated_at: 'DESC' },
+          take: 100,
+        }),
         this.users
           .createQueryBuilder('user')
           .leftJoin('user.role', 'role')
           .where('user.is_active = true')
+          .andWhere('user.tenant_id = :tid', { tid })
           .andWhere('role.role_name = :roleName', { roleName: 'Faculty' })
           .andWhere('user.created_at <= NOW() - INTERVAL \'1 year\'')
           .getCount(),
@@ -187,13 +238,16 @@ export class PresidentService {
     };
   }
 
-  private countUsersByRole(roleName: string) {
-    return this.users
+  private countUsersByRole(roleName: string, tenantId?: string) {
+    const qb = this.users
       .createQueryBuilder('user')
       .leftJoin('user.role', 'role')
       .where('user.is_active = true')
-      .andWhere('role.role_name = :roleName', { roleName })
-      .getCount();
+      .andWhere('role.role_name = :roleName', { roleName });
+    if (tenantId) {
+      qb.andWhere('user.tenant_id = :tenantId', { tenantId });
+    }
+    return qb.getCount();
   }
 
   private sumDemandTotal(demands: FeeDemand[]) {
@@ -203,12 +257,21 @@ export class PresidentService {
   async getFinanceBudgetaryControl(tenantId?: string) {
     const tid = this.tenantId(tenantId);
     const budgets = await this.db.query(
-      `SELECT d.dept_name as department, b.allocated_amount, b.utilized_amount
-       FROM fin_budgets b
+      `SELECT d.dept_name AS department, b.allocated_amount, b.utilized_amount
+       FROM fin_dept_budgets b
        LEFT JOIN departments d ON d.dept_id = b.department_id
-       WHERE b.tenant_id = $1
+       WHERE b.tenant_id = $1 AND b.deleted_at IS NULL
        ORDER BY b.allocated_amount DESC NULLS LAST LIMIT 20`,
       [tid],
+    ).catch(async () =>
+      this.db.query(
+        `SELECT d.dept_name AS department, b.allocated_amount, b.utilized_amount
+         FROM fin_budgets b
+         LEFT JOIN departments d ON d.dept_id = b.department_id
+         WHERE b.tenant_id = $1 AND b.deleted_at IS NULL
+         ORDER BY b.allocated_amount DESC NULLS LAST LIMIT 20`,
+        [tid],
+      ),
     );
 
     let totalAllocated = 0;
@@ -229,20 +292,32 @@ export class PresidentService {
       },
     );
 
-    const pendingApprovals = await this.db
-      .query(
-        `SELECT COUNT(*)::int AS total FROM finance_approval_requests
+    const [pendingApprovals, pendingBudgetExpansions] = await Promise.all([
+      this.db.query(
+        `SELECT COUNT(*)::int AS total FROM fin_approval_requests
          WHERE tenant_id = $1 AND status = 'PENDING'`,
         [tid],
-      )
-      .catch(() => [{ total: 0 }]);
+      ),
+      this.db.query(
+        `SELECT COUNT(*)::int AS total FROM fin_budget_expansion_requests
+         WHERE tenant_id = $1 AND status = 'PENDING'`,
+        [tid],
+      ).catch(() => [{ total: 0 }]),
+    ]);
+
+    const grantRows = await this.db.query(
+      `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+       FROM fin_budget_reappropriations WHERE tenant_id = $1`,
+      [tid],
+    ).catch(() => [{ total: 0 }]);
 
     return {
       department_budgets,
       total_allocated: totalAllocated,
       total_utilized: totalUtilized,
       pending_approvals: Number(pendingApprovals[0]?.total ?? 0),
-      grant_disbursements: 0,
+      pending_budget_expansions: Number(pendingBudgetExpansions[0]?.total ?? 0),
+      grant_disbursements: Number(grantRows[0]?.total ?? 0),
       audit_status:
         department_budgets.length > 0 ? 'On Track' : 'No budget data',
     };
@@ -278,9 +353,15 @@ export class PresidentService {
       0,
     );
 
+    const patentCount = await this.db.query(
+      `SELECT COUNT(*)::int AS c FROM academic_rnd_applications
+       WHERE tenant_id = $1 AND application_type ILIKE '%patent%'`,
+      [tid],
+    ).catch(() => [{ c: 0 }]);
+
     return {
       active_projects: Number(counts[0]?.active ?? 0),
-      patents_filed: 0,
+      patents_filed: Number(patentCount[0]?.c ?? 0),
       grants_received: totalFunding,
       extension_programs: Number(counts[0]?.approved ?? 0),
       projects: (projects as Array<Record<string, unknown>>).map((p) => ({
@@ -295,38 +376,37 @@ export class PresidentService {
 
   async getExecutiveOrders(tenantId?: string) {
     const tid = this.tenantId(tenantId);
-    const orders = await this.db
-      .query(
-        `SELECT order_id, order_code, subject, order_type, status, issued_at
-         FROM leadership_executive_orders
-         WHERE tenant_id = $1
-         ORDER BY issued_at DESC NULLS LAST
-         LIMIT 50`,
-        [tid],
-      )
-      .catch(() => []);
+    const orders = await this.db.query(
+      `SELECT order_id, order_code, subject, order_type, destination_module,
+              status, issued_at, completed_at, assigned_to_user_id
+       FROM leadership_executive_orders
+       WHERE tenant_id = $1
+       ORDER BY issued_at DESC NULLS LAST
+       LIMIT 50`,
+      [tid],
+    );
 
-    const stats = await this.db
-      .query(
-        `SELECT
-           COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active,
-           COUNT(*) FILTER (WHERE status LIKE '%Pending%')::int AS pending,
-           COUNT(*)::int AS total
-         FROM leadership_executive_orders WHERE tenant_id = $1`,
-        [tid],
-      )
-      .catch(() => [{ active: 0, pending: 0, total: 0 }]);
+    const stats = await this.db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'ACTIVE' OR status = 'ISSUED')::int AS active,
+         COUNT(*) FILTER (WHERE status LIKE '%Pending%' OR status = 'IN_PROGRESS')::int AS pending,
+         COUNT(*)::int AS total
+       FROM leadership_executive_orders WHERE tenant_id = $1`,
+      [tid],
+    );
 
     return {
       active_suspensions: Number(stats[0]?.active ?? 0),
       pending_ratifications: Number(stats[0]?.pending ?? 0),
       emergency_orders_ytd: Number(stats[0]?.total ?? 0),
       orders: (orders as Array<Record<string, unknown>>).map((o) => ({
+        order_id: o.order_id,
         id: o.order_code ?? o.order_id,
         date: o.issued_at,
         subject: o.subject ?? 'Executive order',
         type: o.order_type ?? 'Administrative',
         status: o.status ?? 'Unknown',
+        destination_module: o.destination_module,
       })),
     };
   }
@@ -388,28 +468,44 @@ export class PresidentService {
     const [stats, approvals] = await Promise.all([
       this.db.query(
         `SELECT
-           COUNT(*) FILTER (WHERE status = 'PENDING')::int AS pending_hires,
-           COUNT(*) FILTER (WHERE request_type ILIKE '%tenure%')::int AS tenure_reviews,
-           COUNT(*) FILTER (WHERE request_type ILIKE '%disciplinary%')::int AS disciplinary
-         FROM hr_approval_requests WHERE tenant_id = $1`,
+           COUNT(*) FILTER (WHERE status = 'PENDING' AND request_type = 'HIRING')::int AS pending_hires,
+           COUNT(*) FILTER (WHERE status = 'PENDING' AND request_type ILIKE '%tenure%')::int AS tenure_reviews,
+           COUNT(*) FILTER (WHERE status = 'PENDING' AND request_type ILIKE '%disciplinary%')::int AS disciplinary
+         FROM executive_hr_approval_requests WHERE tenant_id = $1`,
         [tid],
-      ).catch(() => [{ pending_hires: 0, tenure_reviews: 0, disciplinary: 0 }]),
+      ),
       this.db.query(
-        `SELECT candidate_name AS candidate, department_name AS department,
-                request_type AS action, submitted_at AS date_submitted, status
-         FROM hr_approval_requests
-         WHERE tenant_id = $1 AND status = 'PENDING'
-         ORDER BY submitted_at DESC NULLS LAST
-         LIMIT 20`,
+        `SELECT r.request_id, r.title, r.request_type AS action, r.amount,
+                r.created_at AS date_submitted, r.status, r.payload,
+                (r.payload->>'candidate_name') AS candidate,
+                (r.payload->>'department_name') AS department,
+                u.name AS requested_by_name,
+                r.requested_by
+         FROM executive_hr_approval_requests r
+         LEFT JOIN users u ON u.user_id = r.requested_by
+         WHERE r.tenant_id = $1 AND r.status = 'PENDING'
+         ORDER BY r.created_at DESC NULLS LAST
+         LIMIT 50`,
         [tid],
-      ).catch(() => []),
+      ),
     ]);
 
     return {
       pending_hires: Number(stats[0]?.pending_hires ?? 0),
       tenure_reviews: Number(stats[0]?.tenure_reviews ?? 0),
       disciplinary_cases: Number(stats[0]?.disciplinary ?? 0),
-      approvals: approvals as Array<Record<string, unknown>>,
+      approvals: (approvals as Array<Record<string, unknown>>).map((a) => ({
+        request_id: a.request_id,
+        candidate: a.candidate ?? a.title,
+        department: a.department ?? '—',
+        action: a.action,
+        date_submitted: a.date_submitted,
+        status: a.status,
+        amount: a.amount,
+        requested_by: a.requested_by_name ?? null,
+        business_reason: a.title,
+        financial_impact: a.amount,
+      })),
     };
   }
 }
