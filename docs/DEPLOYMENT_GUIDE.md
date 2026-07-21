@@ -57,9 +57,27 @@ Backend and frontend run on the **host** during local dev (not containerized in 
 | API | `backend/Dockerfile` | 4000 | `backend/` |
 | Web | `frontend/Dockerfile` | 3000 | `frontend/` |
 
-Backend image: multi-stage Node 20 Alpine, includes `migrations/` and `scripts/`.
+Backend image: multi-stage Node 20 Alpine, includes `migrations/`, `scripts/`, and `data/departments/` (department import CSVs).
 
 Frontend image: Next.js standalone output; build args for `NEXT_PUBLIC_API_URL`, tenant subdomain, Google client ID.
+
+### Post-deploy: department data (ME + Agriculture)
+
+After backend redeploy, exec into the API container (or run on host with production `DB_*` in `.env`):
+
+```bash
+npm run db:migrate
+npm run bootstrap:departments
+```
+
+This imports committed CSVs for `mechanical` and `agriculture` and syncs student enrollments. Override departments with `BOOTSTRAP_DEPARTMENTS=mechanical`.
+
+Single department:
+
+```bash
+npm run import:department -- mechanical --skip-parse
+npm run sync:department-enrollments -- mechanical
+```
 
 ---
 
