@@ -8,6 +8,7 @@ import {
   ClipboardList,
   FileCheck2,
   CalendarDays,
+  CalendarRange,
   ListChecks,
   Users,
   BarChart3,
