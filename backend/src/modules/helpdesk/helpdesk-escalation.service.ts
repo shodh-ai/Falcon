@@ -30,6 +30,16 @@ export class HelpdeskEscalationService {
   /** Hourly SLA escalation pipeline for unresolved helpdesk tickets. */
   @Cron('0 * * * *')
   async escalatePendingTickets() {
+    try {
+      await this.runEscalationPass();
+    } catch (err) {
+      this.logger.warn(
+        `Helpdesk escalation skipped: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  private async runEscalationPass() {
     const tickets = await this.dataSource.query<PendingTicket[]>(
       `SELECT t.ticket_id, COALESCE(t.tenant_id, u.tenant_id) AS tenant_id,
               t.student_user_id, t.subject, t.category, t.assigned_to_user_id,
