@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import {
-  extractSubdomainFromHost,
-  resolveTenantSubdomain,
+  resolveTenantFromHost,
 } from '@/lib/resolve-tenant-subdomain';
 
 const TENANT_COOKIE = 'falcon_tenant_subdomain';
 
 function extractSubdomain(host: string): string {
-  const fromHost = extractSubdomainFromHost(host);
-  return resolveTenantSubdomain(fromHost);
+  return resolveTenantFromHost(host);
 }
 
 export function middleware(request: NextRequest) {

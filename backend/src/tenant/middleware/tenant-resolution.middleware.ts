@@ -3,8 +3,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { TenantService } from '../tenant.service';
 import { TenantContextService } from '../tenant-context.service';
 import {
-  extractSubdomainFromHost,
-  resolveTenantSubdomain,
+  resolveTenantFromHost,
 } from '../resolve-tenant-subdomain';
 
 @Injectable()
@@ -43,16 +42,14 @@ export class TenantResolutionMiddleware implements NestMiddleware {
 
   private extractSubdomain(req: Request): string | null {
     const header = req.headers['x-tenant-subdomain'];
+    const host = req.headers.host?.split(':')[0] ?? '';
+
     if (typeof header === 'string' && header.trim().length > 0) {
-      return header.trim().toLowerCase();
+      return resolveTenantFromHost(host, header);
     }
 
-    const host = req.headers.host?.split(':')[0] ?? '';
-    const fromHost = extractSubdomainFromHost(host);
-    if (fromHost) return fromHost;
-
-    const fallback = resolveTenantSubdomain(null);
-    return fallback || null;
+    const resolved = resolveTenantFromHost(host);
+    return resolved || null;
   }
 }
 
