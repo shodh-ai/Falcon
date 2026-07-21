@@ -28,6 +28,7 @@
     "parse:department": "python3 scripts/department-import/parse-department-sources.py",
     "import:department": "node scripts/department-import/import-department.js",
     "bootstrap:departments": "node scripts/department-import/bootstrap-departments.js",
+    "verify:me-login": "node scripts/verify-me-login.js",
     "rollback:department": "node scripts/department-import/rollback-department.js",
     "sync:department-enrollments": "node scripts/department-import/sync-student-enrollments.js"
   },
