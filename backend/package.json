@@ -27,6 +27,7 @@
     "db:migrate:tenants": "psql -d university_governance -f migrations/20260529120000_multi_tenant_saas_foundation.sql",
     "parse:department": "python3 scripts/department-import/parse-department-sources.py",
     "import:department": "node scripts/department-import/import-department.js",
+    "bootstrap:departments": "node scripts/department-import/bootstrap-departments.js",
     "rollback:department": "node scripts/department-import/rollback-department.js",
     "sync:department-enrollments": "node scripts/department-import/sync-student-enrollments.js"
   },
