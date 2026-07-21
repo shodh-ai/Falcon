@@ -130,4 +130,4 @@ VALUES (
 )
 ON CONFLICT (smoke_key) DO UPDATE SET
   notes = EXCLUDED.notes,
-  updated_at = NOW();
+  seeded_at = NOW();
