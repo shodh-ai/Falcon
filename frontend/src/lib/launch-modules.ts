@@ -4,7 +4,8 @@
  */
 export const LAUNCH_MODULES = {
   library: false,
-  finance: false,
+  /** Student fee ledger + Razorpay — required for exam admit-card fee gates. */
+  finance: true,
   admissionVault: false,
 } as const;
 
