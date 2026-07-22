@@ -388,16 +388,21 @@ export class AcademicsService {
       order: { semester: 'ASC' },
     });
 
+    const currentSemesterRows = rows.filter(
+      (row) => Number(row.semester) === slot.semester,
+    );
+
     const filtered =
       slot.courseIds.length > 0
-        ? rows.filter(
-            (row) =>
-              Number(row.semester) !== slot.semester ||
-              slot.courseIds.includes(row.course_id),
+        ? currentSemesterRows.filter((row) =>
+            slot.courseIds.includes(row.course_id),
           )
-        : rows;
+        : currentSemesterRows;
 
-    return filtered.map((row) => this.toEnrollmentDto(row));
+    return {
+      current_semester: slot.semester,
+      enrollments: filtered.map((row) => this.toEnrollmentDto(row)),
+    };
   }
 
   async listAvailableElectives(studentUserId: string, tenantId: string) {
