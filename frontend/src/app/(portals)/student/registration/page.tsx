@@ -54,10 +54,23 @@ function EnrollmentCard({ enrollment, registered }: { enrollment: EnrollmentRow;
 export default function StudentRegistrationPage() {
   const api = useAuthedApi();
   const [data, setData] = useState<RegistrationData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedElectives, setSelectedElectives] = useState<string[]>([]);
   const [registering, setRegistering] = useState(false);
 
-  const load = () => void api.get<RegistrationData>('/api/student/registration').then(setData);
+  const load = () =>
+    api
+      .get<RegistrationData>('/api/student/registration')
+      .then((payload) => {
+        setData(payload);
+        setLoadError(null);
+      })
+      .catch((e) => {
+        setData(null);
+        const message = e instanceof Error ? e.message : 'Could not load registration data';
+        setLoadError(message);
+        toast.error(message);
+      });
 
   useEffect(() => {
     load();
@@ -97,6 +110,10 @@ export default function StudentRegistrationPage() {
         title="Subjects & Registration (CBCS)"
         description="Choice Based Credit System — register electives and track graduation credits."
       />
+
+      {loadError ? (
+        <StudentEmptyState title="Could not load registration" description={loadError} />
+      ) : null}
 
       <StudentSectionCard
         title={`Credit tracker — Semester ${data?.current_semester ?? '—'}`}

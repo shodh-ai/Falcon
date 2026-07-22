@@ -55,6 +55,7 @@ export default function StudentDashboardPage() {
   const { notifications, refresh: refreshNotifications } = useNotificationHistory();
   const firstName = user?.name?.split(' ')[0] ?? 'Student';
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [metricsFailed, setMetricsFailed] = useState(false);
   const [openDrives, setOpenDrives] = useState<OpenDrive[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
 
@@ -70,7 +71,13 @@ export default function StudentDashboardPage() {
           api.get<Profile>('/api/student/profile'),
         ]);
 
-        if (metricsResult.status === 'fulfilled') setSummary(metricsResult.value);
+        if (metricsResult.status === 'fulfilled') {
+          setSummary(metricsResult.value);
+          setMetricsFailed(false);
+        } else {
+          setSummary(null);
+          setMetricsFailed(true);
+        }
         if (placementsResult.status === 'fulfilled' || deptDrivesResult.status === 'fulfilled') {
           const campus =
             placementsResult.status === 'fulfilled'
@@ -96,8 +103,9 @@ export default function StudentDashboardPage() {
   }, [api]);
 
   const alertItems = notifications.map(toAppNotification).filter((n) => n.unread).slice(0, 5);
-  const attendance = summary?.attendance_percent ?? 0;
-  const attendanceTone = attendance >= 75 ? 'success' : 'warning';
+  const attendance = summary?.attendance_percent ?? null;
+  const attendanceTone =
+    attendance == null ? 'default' : attendance >= 75 ? 'success' : 'warning';
 
   const openAlert = async (id: string, actionLink: string | null | undefined) => {
     if (!token) return;
@@ -163,21 +171,39 @@ export default function StudentDashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StudentStatCard
           label="Overall CGPA"
-          value={(summary?.cgpa ?? 8.2).toFixed(2)}
-          helper="Cumulative grade point average"
+          value={summary?.cgpa != null ? summary.cgpa.toFixed(2) : metricsFailed ? 'Unavailable' : '—'}
+          helper={
+            metricsFailed
+              ? 'Could not load academic metrics'
+              : 'Cumulative grade point average'
+          }
           icon={GraduationCap}
           tone="gold"
         />
         <StudentStatCard
           label="Credits"
-          value={`${summary?.credits_completed ?? 108} / ${summary?.credits_required ?? 160}`}
+          value={
+            summary
+              ? `${summary.credits_completed} / ${summary.credits_required}`
+              : metricsFailed
+                ? 'Unavailable'
+                : '—'
+          }
           helper="Graduation progress"
           icon={CreditCard}
         />
         <StudentStatCard
           label="Attendance"
-          value={`${attendance}%`}
-          helper={attendance >= 75 ? 'Above minimum threshold' : 'Below 75% minimum'}
+          value={attendance != null ? `${attendance}%` : metricsFailed ? 'Unavailable' : '—'}
+          helper={
+            attendance == null
+              ? metricsFailed
+                ? 'Could not load attendance'
+                : 'No attendance data yet'
+              : attendance >= 75
+                ? 'Above minimum threshold'
+                : 'Below 75% minimum'
+          }
           icon={UserRoundCheck}
           tone={attendanceTone}
         />
