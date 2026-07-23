@@ -81,3 +81,11 @@ export function getDashboardPathForRoleName(
   if (role === 'student' || role === 'applicant') return '/student/dashboard';
   return '/dashboard';
 }
+
+/** Where to send users when onboarding verification is rejected and docs must be re-uploaded. */
+export function getOnboardingResubmitPathForRoleName(
+  roleName: string | undefined | null,
+): string {
+  const kind = resolveOnboardingPortalKind(roleName);
+  return kind === 'staff' ? '/faculty/onboarding' : '/student/onboarding';
+}

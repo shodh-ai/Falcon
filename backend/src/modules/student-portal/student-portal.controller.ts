@@ -115,6 +115,11 @@ export class StudentPortalController {
     return this.portal.getAttendance(this.tenant(req), req.user.user_id);
   }
 
+  @Post('portal-bootstrap')
+  portalBootstrap(@Req() req: { user: AuthUser }) {
+    return this.portal.bootstrapPortal(this.tenant(req), req.user.user_id);
+  }
+
   @Get('marks')
   marks(@Req() req: { user: AuthUser }) {
     return this.portal.getMarks(this.tenant(req), req.user.user_id);

@@ -35,6 +35,9 @@ export async function handleNotificationAction(
     if (path === '/student/library' && !isLaunchModuleEnabled('library')) {
       path = '/student/dashboard';
     }
+    if (path === '/student/onboarding' || path === '/student/onboarding/documents') {
+      path = '/student/onboarding';
+    }
     if (path === '/student/admission-vault' && !isLaunchModuleEnabled('admissionVault')) {
       path = '/student/profile';
     }
