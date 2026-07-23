@@ -18,6 +18,7 @@ import { TenantService } from '../tenant/tenant.service';
 import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
+import { isStudentEnrollmentEmail } from './utils/student-enrollment-email.util';
 import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
 
 type LoginCredentialRow = {
@@ -309,6 +310,77 @@ export class AuthService {
         await this.userRolesRepository.save(existing);
       }
     }
+  }
+
+  /**
+   * Google OAuth can auto-provision Faculty before department import runs.
+   * Enrollment-style student emails (or existing student profiles) must stay Student.
+   */
+  async correctStudentRoleForEnrollmentEmail(
+    user: User,
+    tenantId: string,
+  ): Promise<User | null> {
+    const email = user.email ?? '';
+    if (!isStudentEnrollmentEmail(email)) return user;
+
+    const roleName = (user.role?.role_name ?? '').trim();
+    if (roleName === 'Student' || roleName === 'Applicant') return user;
+
+    const profileRows = await this.dataSource.query<
+      Array<{ user_id: string }>
+    >(
+      `SELECT user_id FROM student_profiles
+       WHERE user_id = $1 AND tenant_id = $2
+       LIMIT 1`,
+      [user.user_id, tenantId],
+    );
+    const hasStudentProfile = profileRows.length > 0;
+    if (!hasStudentProfile && roleName !== 'Faculty') return user;
+
+    const studentRoleRows = await this.dataSource.query<
+      Array<{ role_id: number }>
+    >(`SELECT role_id FROM roles WHERE role_name = 'Student' LIMIT 1`);
+    const studentRoleId = studentRoleRows[0]?.role_id;
+    if (!studentRoleId) return user;
+
+    await this.dataSource.query(
+      `UPDATE users
+       SET role_id = $1,
+           onboarding_status = CASE
+             WHEN onboarding_status IN ('COMPLETED', 'PENDING_ADMIN_APPROVAL', 'PENDING_DOCUMENTS', 'PENDING_PASSWORD_RESET')
+               THEN onboarding_status
+             WHEN $3 THEN 'COMPLETED'
+             ELSE onboarding_status
+           END,
+           updated_at = NOW()
+       WHERE user_id = $2`,
+      [studentRoleId, user.user_id, hasStudentProfile],
+    );
+
+    await this.dataSource.query(
+      `DELETE FROM user_roles ur
+       USING roles r
+       WHERE ur.role_id = r.role_id
+         AND ur.user_id = $1
+         AND r.role_name IN ('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin')`,
+      [user.user_id],
+    );
+
+    await this.dataSource.query(
+      `INSERT INTO user_roles (user_id, role_id, is_primary)
+       VALUES ($1, $2, true)
+       ON CONFLICT (user_id, role_id) DO UPDATE SET is_primary = EXCLUDED.is_primary`,
+      [user.user_id, studentRoleId],
+    );
+
+    this.logger.log(
+      `Corrected Google login role to Student for ${email} (was ${roleName || 'unknown'})`,
+    );
+
+    return this.userRepository.findOne({
+      where: { user_id: user.user_id, tenant_id: tenantId },
+      relations: ['role', 'department', 'userRoles', 'userRoles.role'],
+    });
   }
 
   /** Secondary Faculty role for HOD users — enables HOD ↔ Faculty workspace switcher. */

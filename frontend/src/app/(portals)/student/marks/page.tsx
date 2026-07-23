@@ -112,7 +112,10 @@ export default function StudentMarksPage() {
           setExpandedSemesters(new Set([payload.semesters[payload.semesters.length - 1].semester_number]));
         }
       })
-      .catch(() => setData(null))
+      .catch((e) => {
+        setData(null);
+        toast.error(e instanceof Error ? e.message : 'Could not load marks history');
+      })
       .finally(() => setLoading(false));
   }, [api]);
 

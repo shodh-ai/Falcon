@@ -14,6 +14,10 @@ export function StudentShell({ children }: { children: ReactNode }) {
   const [isCoordinator, setIsCoordinator] = useState(false);
 
   useEffect(() => {
+    void api.post('/api/student/portal-bootstrap', {}).catch(() => undefined);
+  }, [api]);
+
+  useEffect(() => {
     void eventsApi
       .isClubCoordinator()
       .then((r) => setIsCoordinator(r.is_coordinator))

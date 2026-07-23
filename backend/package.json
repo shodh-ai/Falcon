@@ -29,6 +29,8 @@
     "import:department": "node scripts/department-import/import-department.js",
     "bootstrap:departments": "node scripts/department-import/bootstrap-departments.js",
     "verify:me-login": "node scripts/verify-me-login.js",
+    "fix:student-roles": "node scripts/department-import/fix-student-roles.js",
+    "postdeploy:me": "npm run db:migrate && npm run verify:me-login && npm run bootstrap:departments && npm run sync:department-enrollments -- mechanical",
     "rollback:department": "node scripts/department-import/rollback-department.js",
     "sync:department-enrollments": "node scripts/department-import/sync-student-enrollments.js"
   },

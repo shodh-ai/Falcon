@@ -62,6 +62,17 @@ export class StudentPortalService {
     }
   }
 
+  /** Idempotent enrollment sync when the student portal loads (courses/timetable drift). */
+  async bootstrapPortal(tenantId: string, userId: string) {
+    const result = await this.enrollmentSync.syncStudent(tenantId, userId);
+    return {
+      synced: Boolean(result),
+      semester: result?.semester ?? null,
+      added: result?.added ?? 0,
+      removed: result?.removed ?? 0,
+    };
+  }
+
   async getMasterProfile(tenantId: string, userId: string) {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.onboarding_status,
@@ -520,6 +531,8 @@ export class StudentPortalService {
   }
 
   async getAttendance(tenantId: string, userId: string) {
+    await this.enrollmentSync.syncStudent(tenantId, userId).catch(() => null);
+
     const profileRows = await this.dataSource.query<
       Array<{ current_semester: number | null }>
     >(
