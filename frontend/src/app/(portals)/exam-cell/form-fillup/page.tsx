@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -166,11 +166,21 @@ export default function ExamCellFormFillupPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="form-fillup" actions={
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-        </Button>
-      } />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="form-fillup" actions={
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          } />
+        </CardContent>
+      </Card>
 
       <Card className="border-sgvu-gold/20 bg-amber-50/30">
         <CardContent className="py-3 text-sm">
@@ -181,14 +191,63 @@ export default function ExamCellFormFillupPage() {
 
       {canManage ? (
         <Card>
-          <CardHeader><CardTitle className="text-base">Create form window</CardTitle></CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Input placeholder="Window title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="sm:col-span-2 lg:col-span-3" />
-            <Input type="number" placeholder="Semester" value={form.semester} onChange={(e) => setForm((f) => ({ ...f, semester: e.target.value }))} />
-            <Input placeholder="Program" value={form.program_label} onChange={(e) => setForm((f) => ({ ...f, program_label: e.target.value }))} />
-            <Input type="datetime-local" value={form.opens_at} onChange={(e) => setForm((f) => ({ ...f, opens_at: e.target.value }))} />
-            <Input type="datetime-local" value={form.closes_at} onChange={(e) => setForm((f) => ({ ...f, closes_at: e.target.value }))} />
-            <Button onClick={() => void createWindow()} disabled={busy}><Plus className="mr-2 h-4 w-4" />Create window</Button>
+          <CardHeader>
+            <CardTitle className="text-base">Create form window</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex min-h-[4.5rem] flex-col gap-1.5 sm:col-span-2">
+                <label className="text-sm font-bold leading-5 text-sgvu-navy">Window title</label>
+                <Input
+                  className="h-10"
+                  placeholder="e.g. End Semester Form Fill-up — Sem 4"
+                  value={form.title}
+                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                />
+              </div>
+              <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+                <label className="text-sm font-bold leading-5 text-sgvu-navy">Semester</label>
+                <Input
+                  className="h-10"
+                  type="number"
+                  placeholder="4"
+                  value={form.semester}
+                  onChange={(e) => setForm((f) => ({ ...f, semester: e.target.value }))}
+                />
+              </div>
+              <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+                <label className="text-sm font-bold leading-5 text-sgvu-navy">Program</label>
+                <Input
+                  className="h-10"
+                  placeholder="B.Tech"
+                  value={form.program_label}
+                  onChange={(e) => setForm((f) => ({ ...f, program_label: e.target.value }))}
+                />
+              </div>
+              <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+                <label className="text-sm font-bold leading-5 text-sgvu-navy">Opens at</label>
+                <Input
+                  className="h-10"
+                  type="datetime-local"
+                  value={form.opens_at}
+                  onChange={(e) => setForm((f) => ({ ...f, opens_at: e.target.value }))}
+                />
+              </div>
+              <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+                <label className="text-sm font-bold leading-5 text-sgvu-navy">Closes at</label>
+                <Input
+                  className="h-10"
+                  type="datetime-local"
+                  value={form.closes_at}
+                  onChange={(e) => setForm((f) => ({ ...f, closes_at: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="flex justify-center pt-1">
+              <Button onClick={() => void createWindow()} disabled={busy}>
+                {busy ? 'Creating…' : 'Create window'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}

@@ -5,11 +5,11 @@ import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
-import { Download, Trash2, Eye, ArrowLeftRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -316,36 +316,69 @@ export default function ExamCellSeatingPage() {
 
   const currentBlockHalls = blocksData.find(b => b.block === selectedBlock)?.halls || [];
 
+  const fieldClass =
+    'h-10 w-full rounded-lg border border-sgvu-navy/20 bg-white px-3 text-sm font-medium text-sgvu-navy shadow-none transition-colors hover:border-sgvu-navy/40 focus:border-sgvu-gold focus:outline-none focus:ring-2 focus:ring-sgvu-gold/25 data-[state=open]:border-sgvu-gold data-[state=open]:ring-2 data-[state=open]:ring-sgvu-gold/25';
+  const labelClass = 'text-xs font-bold uppercase tracking-wide text-sgvu-navy/55';
+  const btnPrimary =
+    'h-10 border border-[#0B2447] bg-[#0B2447] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
+  const btnOutline =
+    'h-10 border border-[#0B2447] bg-white px-5 text-sm font-semibold text-[#0B2447] transition-colors hover:bg-[#0B2447]/5 active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
+
   return (
-    <div className="mx-auto max-w-5xl space-y-8 p-4 md:p-6">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">Seating Planner</h1>
-        <p className="text-sm text-muted-foreground">Auto-allocate ensures adjacent seats are not the same branch.</p>
-        {loading ? <p className="mt-2 text-xs text-muted-foreground">Loading exam schedules and halls…</p> : null}
-      </div>
+    <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="seating" />
+          {loading ? (
+            <p className="mt-3 text-xs text-muted-foreground">Loading exam schedules and halls…</p>
+          ) : null}
+        </CardContent>
+      </Card>
 
-      <div className="flex gap-4 border-b pb-4">
-        <Button variant={strategy === 'by_exam_type' ? 'default' : 'outline'} onClick={() => setStrategy('by_exam_type')}>Entire Exam (By Type)</Button>
-        <Button variant={strategy === 'by_schedule' ? 'default' : 'outline'} onClick={() => setStrategy('by_schedule')}>Specific Schedule</Button>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="space-y-5 p-5 md:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-sgvu-navy/10 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-sgvu-navy">Allocation parameters</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Choose strategy, halls, and run auto-allocate before publishing.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={strategy === 'by_exam_type' ? btnPrimary : btnOutline}
+                onClick={() => setStrategy('by_exam_type')}
+              >
+                Entire exam
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={strategy === 'by_schedule' ? btnPrimary : btnOutline}
+                onClick={() => setStrategy('by_schedule')}
+              >
+                Specific schedule
+              </Button>
+            </div>
+          </div>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Allocation Parameters</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             {strategy === 'by_exam_type' ? (
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Exam Type</label>
-                <Select className="w-full rounded-md border px-3 py-2 text-sm" value={examType} onChange={(e) => setExamType(e.target.value)}>
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>Exam type</label>
+                <Select className={fieldClass} value={examType} onChange={(e) => setExamType(e.target.value)}>
                   <option value="MID_TERM">Mid Term</option>
                   <option value="END_TERM">End Term</option>
                 </Select>
               </div>
             ) : (
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Exam Schedule</label>
-                <Select className="w-full rounded-md border px-3 py-2 text-sm" value={examId} onChange={(e) => setExamId(e.target.value)}>
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>Exam schedule</label>
+                <Select className={fieldClass} value={examId} onChange={(e) => setExamId(e.target.value)}>
                   {schedules.map((s) => (
                     <option key={s.exam_schedule_id} value={s.exam_schedule_id}>
                       {s.subject_name ? `${s.subject_name} (${s.subject_code})` : s.exam_type} · {String(s.exam_date).slice(0, 10)}
@@ -354,166 +387,258 @@ export default function ExamCellSeatingPage() {
                 </Select>
               </div>
             )}
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Semester</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
-                {[1,2,3,4,5,6,7,8].map(s => <option key={s} value={s}>Semester {s}</option>)}
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>Semester</label>
+              <Select className={fieldClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
+                  <option key={s} value={s}>Semester {s}</option>
+                ))}
               </Select>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Branch</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={branch} onChange={(e) => setBranch(e.target.value)}>
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>Branch</label>
+              <Select className={fieldClass} value={branch} onChange={(e) => setBranch(e.target.value)}>
                 <option value="All Branches">All Branches</option>
-                {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                {branches.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
               </Select>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Block</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={selectedBlock} onChange={(e) => { setSelectedBlock(e.target.value); setSelectedHalls([]); }}>
-                {blocksData.map((b) => <option key={b.block} value={b.block}>{b.block}</option>)}
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>Block</label>
+              <Select
+                className={fieldClass}
+                value={selectedBlock}
+                onChange={(e) => {
+                  setSelectedBlock(e.target.value);
+                  setSelectedHalls([]);
+                }}
+              >
+                {blocksData.map((b) => (
+                  <option key={b.block} value={b.block}>{b.block}</option>
+                ))}
               </Select>
-            </div>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Select Halls in {selectedBlock}</label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-              {currentBlockHalls.map(h => (
-                <label key={h.name} className="flex items-center space-x-2 border rounded-md p-2 text-sm cursor-pointer hover:bg-muted/50">
-                  <input type="checkbox" checked={selectedHalls.includes(h.name)} onChange={(e) => {
-                    if (e.target.checked) setSelectedHalls([...selectedHalls, h.name]);
-                    else setSelectedHalls(selectedHalls.filter(x => x !== h.name));
-                  }} />
-                  <span>{h.name} <span className="text-muted-foreground text-xs">({h.rows}x{h.cols})</span></span>
-                </label>
-              ))}
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button className="flex-1" onClick={() => void allocate()} disabled={selectedHalls.length === 0}>
+          <div className="rounded-xl border border-sgvu-navy/10 bg-sgvu-navy/[0.02] p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <label className={labelClass}>Halls in {selectedBlock || 'selected block'}</label>
+              <p className="text-xs text-muted-foreground">
+                {selectedHalls.length} selected
+              </p>
+            </div>
+            {currentBlockHalls.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No halls available for this block.</p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {currentBlockHalls.map((h) => {
+                  const checked = selectedHalls.includes(h.name);
+                  return (
+                    <label
+                      key={h.name}
+                      className={`flex cursor-pointer items-center gap-2.5 rounded-lg border bg-white px-3 py-2.5 text-sm transition-colors ${
+                        checked
+                          ? 'border-[#0B2447] ring-1 ring-[#0B2447]/20'
+                          : 'border-sgvu-navy/15 hover:border-sgvu-navy/35'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[#0B2447]"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedHalls([...selectedHalls, h.name]);
+                          else setSelectedHalls(selectedHalls.filter((x) => x !== h.name));
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-sgvu-navy">{h.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {h.rows}×{h.cols} · {h.capacity} seats
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap justify-center gap-2 pt-1">
+            <Button
+              className={btnPrimary}
+              onClick={() => void allocate()}
+              disabled={selectedHalls.length === 0}
+            >
               Auto-allocate seats
             </Button>
-            <Button variant="outline" onClick={() => void publishPlans()} disabled={publishing}>
+            <Button
+              variant="outline"
+              className={btnOutline}
+              onClick={() => void publishPlans()}
+              disabled={publishing}
+            >
               {publishing ? 'Publishing…' : 'Publish to student portal'}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {showVisualRooms && roomsVisual.length > 0 && (
-        <div className="space-y-4">
-          <div>
-            <h2 className="text-lg font-bold text-sgvu-navy">Visual Room Allocation</h2>
-            <p className="text-sm text-muted-foreground">
-              Verify capacity and branch mixing — adjacent seats should alternate branches to reduce malpractice risk.
-            </p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {roomsVisual.map((room) => (
-              <Card key={room.room} className="border-slate-200">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">{room.label}</CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    Capacity {room.capacity} · Assigned {room.assigned}
+      {showVisualRooms && roomsVisual.length > 0 ? (
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardContent className="space-y-4 p-5 md:p-6">
+            <div>
+              <h2 className="text-lg font-bold text-sgvu-navy">Visual room allocation</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Verify capacity and branch mixing — adjacent seats should alternate branches.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {roomsVisual.map((room) => (
+                <div key={room.room} className="rounded-xl border border-sgvu-navy/10 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-bold text-sgvu-navy">{room.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Capacity {room.capacity} · Assigned {room.assigned}
+                    </p>
+                    <Progress value={Math.min(100, (room.assigned / room.capacity) * 100)} className="mt-2 h-2" />
+                  </div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-sgvu-navy/50">
+                    Branch mix
                   </p>
-                  <Progress value={Math.min(100, (room.assigned / room.capacity) * 100)} className="mt-2 h-2" />
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <p className="text-xs font-semibold text-sgvu-navy">Anti-cheating branch mix</p>
-                  {room.branches.map((b) => (
-                    <div key={b.code} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <Badge variant="outline" className={b.badge}>
-                          {b.count} {b.code}
-                        </Badge>
-                        <span className="text-muted-foreground">{Math.round((b.count / room.assigned) * 100)}%</span>
+                  <div className="space-y-2">
+                    {room.branches.map((b) => (
+                      <div key={b.code} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <Badge variant="outline" className={b.badge}>
+                            {b.count} {b.code}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {Math.round((b.count / room.assigned) * 100)}%
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className={`h-full ${b.bar}`}
+                            style={{ width: `${(b.count / room.assigned) * 100}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className={`h-full ${b.bar}`}
-                          style={{ width: `${(b.count / room.assigned) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="w-full gap-2"
+                    className={`mt-4 w-full ${btnOutline}`}
                     onClick={() => {
                       setSwapRoom(room.room);
                       setSwapA('');
                       setSwapB('');
                     }}
                   >
-                    <ArrowLeftRight className="h-4 w-4" />
                     Manually swap student
                   </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-sgvu-navy">Seating Plan History</h2>
-        {runs.length === 0 ? (
-          <p className="text-sm text-muted-foreground bg-muted p-4 rounded-md">No seating plans generated yet.</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {runs.map(r => (
-              <Card key={r.run_id} className="flex flex-col">
-                <CardHeader className="flex flex-row items-start justify-between pb-2 space-y-0">
-                  <div className="space-y-1">
-                    <CardTitle className="text-sm font-medium">
-                      {r.allocation_strategy === 'by_exam_type' ? 'Entire Exam' : 'Specific Schedule'}
-                    </CardTitle>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="space-y-4 p-5 md:p-6">
+          <div>
+            <h2 className="text-lg font-bold text-sgvu-navy">Seating plan history</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {runs.length === 0
+                ? 'No seating plans generated yet'
+                : `${runs.length} plan${runs.length === 1 ? '' : 's'} on record`}
+            </p>
+          </div>
+
+          {runs.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-6 py-12 text-center">
+              <p className="text-sm font-semibold text-sgvu-navy">No seating plans yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Select halls and run Auto-allocate seats to create the first plan.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {runs.map((r) => (
+                <div key={r.run_id} className="flex flex-col rounded-xl border border-sgvu-navy/10 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-bold text-sgvu-navy">
+                      {r.allocation_strategy === 'by_exam_type' ? 'Entire exam' : 'Specific schedule'}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {new Date(r.created_at).toLocaleString()}
                     </p>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => exportPDF(r)} className="text-muted-foreground hover:text-sgvu-navy transition-colors" title="Export PDF">
-                      <Download className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => void deleteRun(r.run_id)} className="text-muted-foreground hover:text-red-600 transition-colors" title="Delete">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex flex-col flex-1 justify-between gap-4">
-                  <div className="text-sm space-y-1.5 text-muted-foreground">
-                    <p><strong className="text-foreground font-medium">Semester:</strong> {r.semester}</p>
-                    <p><strong className="text-foreground font-medium">Branch:</strong> {r.branch}</p>
-                    {r.allocation_strategy === 'by_schedule' && (
+                  <div className="mb-4 flex-1 space-y-1.5 text-sm text-sgvu-navy/80">
+                    <p><span className="font-semibold text-sgvu-navy">Semester:</span> {r.semester}</p>
+                    <p><span className="font-semibold text-sgvu-navy">Branch:</span> {r.branch}</p>
+                    {r.allocation_strategy === 'by_schedule' ? (
                       <>
-                        <p className="truncate"><strong className="text-foreground font-medium">Subject:</strong> {r.subject_name || 'N/A'}</p>
-                        <p><strong className="text-foreground font-medium">Date:</strong> {r.exam_date ? String(r.exam_date).slice(0, 10) : 'N/A'}</p>
+                        <p className="truncate">
+                          <span className="font-semibold text-sgvu-navy">Subject:</span> {r.subject_name || 'N/A'}
+                        </p>
+                        <p>
+                          <span className="font-semibold text-sgvu-navy">Date:</span>{' '}
+                          {r.exam_date ? String(r.exam_date).slice(0, 10) : 'N/A'}
+                        </p>
                       </>
-                    )}
-                    <p><strong className="text-foreground font-medium">Total Allocated:</strong> <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-xs">{r.total_allocated} seats</span></p>
+                    ) : null}
+                    <p>
+                      <span className="font-semibold text-sgvu-navy">Allocated:</span>{' '}
+                      <span className="rounded-md bg-sgvu-navy/[0.06] px-1.5 py-0.5 text-xs font-bold text-sgvu-navy">
+                        {r.total_allocated} seats
+                      </span>
+                    </p>
                   </div>
-                  <Button variant="secondary" size="sm" className="w-full mt-auto" onClick={() => setViewingRun(r)}>
-                    <Eye className="h-4 w-4 mr-2" /> View Details
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={btnPrimary}
+                      onClick={() => setViewingRun(r)}
+                    >
+                      View details
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={btnOutline}
+                      onClick={() => exportPDF(r)}
+                    >
+                      Export PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-10 border-red-600/30 px-4 text-sm font-semibold text-red-700 hover:bg-red-50 active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+                      onClick={() => void deleteRun(r.run_id)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Dialog open={!!viewingRun} onOpenChange={(open) => !open && setViewingRun(null)}>
-        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+        <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col">
           <DialogHeader>
             <DialogTitle>Seating Plan Details</DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto">
             {viewingRun && (
               <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-background z-10">
+                <thead className="sticky top-0 z-10 bg-background">
                   <tr className="border-b">
                     <th className="py-2">Student Name</th>
                     <th className="py-2">ID (Branch)</th>
@@ -553,7 +678,7 @@ export default function ExamCellSeatingPage() {
             <DialogTitle>Manually swap students — {swapRoom}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3 py-2">
-            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={swapA} onChange={(e) => setSwapA(e.target.value)}>
+            <Select className={fieldClass} value={swapA} onChange={(e) => setSwapA(e.target.value)}>
               <option value="">Student A</option>
               {visualAllocations
                 .filter((a) => a.room === swapRoom)
@@ -563,7 +688,7 @@ export default function ExamCellSeatingPage() {
                   </option>
                 ))}
             </Select>
-            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={swapB} onChange={(e) => setSwapB(e.target.value)}>
+            <Select className={fieldClass} value={swapB} onChange={(e) => setSwapB(e.target.value)}>
               <option value="">Student B</option>
               {visualAllocations
                 .filter((a) => a.room === swapRoom)
@@ -575,10 +700,12 @@ export default function ExamCellSeatingPage() {
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSwapRoom(null)}>
+            <Button variant="outline" className={btnOutline} onClick={() => setSwapRoom(null)}>
               Cancel
             </Button>
-            <Button onClick={applyManualSwap}>Swap seats</Button>
+            <Button className={btnPrimary} onClick={applyManualSwap}>
+              Swap seats
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -79,11 +79,12 @@ export function AppSidebar({
 
       <ScrollArea
         className={cn(
-          'min-h-0 flex-1 px-2.5 py-4 [scrollbar-gutter:stable] [&_[data-radix-scroll-area-thumb]]:bg-white/20 [&_[data-radix-scroll-area-thumb]:hover]:bg-white/30',
-          isExecutivePortal && '[&_[data-orientation=vertical]]:translate-x-2.5',
+          'min-h-0 flex-1',
+          // Flush gold thumb to track edges (no inset gap from ScrollBar p-px)
+          '[&_[data-orientation=vertical]]:p-0 [&_[data-radix-scroll-area-thumb]]:bg-sgvu-gold [&_[data-radix-scroll-area-thumb]]:hover:bg-sgvu-gold-hover',
         )}
       >
-        <nav className={cn('space-y-4', isExecutivePortal && 'space-y-5 pb-4')}>
+        <nav className={cn('space-y-4 px-2.5 py-4', isExecutivePortal && 'space-y-5 pb-4')}>
           {navGroups.map((group, groupIndex) => (
             <div key={group.title}>
               {!collapsed && (

@@ -57,8 +57,11 @@ export default function ExamCellDegreeAuditPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="degree-audit" />
-
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="degree-audit" />
+        </CardContent>
+      </Card>
       <Card className="border-sgvu-gold/20 bg-amber-50/30">
         <CardContent className="space-y-2 py-3 text-sm">
           <p><strong>How to run an audit:</strong></p>

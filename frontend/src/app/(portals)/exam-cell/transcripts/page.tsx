@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FileText, Loader2 } from 'lucide-react';
+import { FileText } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +17,10 @@ type Transcript = {
   digilocker_ready: boolean;
   status: string;
 };
+
+const btnIdle =
+  'h-10 border border-[#0B2447] bg-[#0B2447] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
+const btnBusy = 'h-10 border border-sgvu-gold bg-sgvu-gold px-5 text-sm font-semibold text-sgvu-navy';
 
 export default function ExamCellTranscriptsPage() {
   const api = useAuthedApi();
@@ -43,13 +47,15 @@ export default function ExamCellTranscriptsPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">Degree & Transcript Generator</h1>
-        <p className="text-sm text-muted-foreground">
-          Students with open UFM cases are excluded. ABC ID enables DigiLocker push.
-        </p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
+          <h1 className="text-2xl font-bold text-sgvu-navy">Degree & Transcript Generator</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Students with open UFM cases are excluded. ABC ID enables DigiLocker push.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card className="border-sgvu-gold/20 bg-amber-50/30">
         <CardContent className="space-y-2 py-3 text-sm">
@@ -63,21 +69,27 @@ export default function ExamCellTranscriptsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Generate batch transcripts</CardTitle></CardHeader>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base">Generate batch transcripts</CardTitle>
+        </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Semester</label>
-            <Input value={semester} onChange={(e) => setSemester(e.target.value)} className="w-32" placeholder="4" />
+            <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/55">Semester</label>
+            <Input
+              value={semester}
+              onChange={(e) => setSemester(e.target.value)}
+              className="h-10 w-32 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
+              placeholder="4"
+            />
           </div>
-          <Button onClick={() => void generate()} disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating…
-              </>
-            ) : (
-              'Generate transcripts'
-            )}
+          <Button
+            variant="outline"
+            className={loading ? btnBusy : btnIdle}
+            onClick={() => void generate()}
+            disabled={loading}
+          >
+            {loading ? 'Generating…' : 'Generate transcripts'}
           </Button>
         </CardContent>
       </Card>

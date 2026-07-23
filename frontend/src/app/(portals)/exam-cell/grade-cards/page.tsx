@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Award, Download, FileCheck2, Medal, RefreshCw } from 'lucide-react';
+import { Award, FileCheck2, Medal } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,19 @@ import { getApiBaseUrl } from '@/lib/api-base-url';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { useAuth } from '@/context/AuthContext';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
+
+const btnBase =
+  'h-10 border px-5 text-sm font-semibold transition-colors disabled:opacity-60';
+const btnIdle =
+  'border-[#0B2447] bg-[#0B2447] text-white hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy';
+const btnBusy =
+  'border-sgvu-gold bg-sgvu-gold text-sgvu-navy';
+
+type BusyKey = 'refresh' | 'generate' | 'publish-provisional' | 'finalize' | `pdf:${string}` | null;
+
+function actionBtnClass(busyKey: BusyKey, key: NonNullable<BusyKey>) {
+  return `${btnBase} ${busyKey === key ? btnBusy : btnIdle}`;
+}
 
 type GradeCardPayload = {
   result_stage?: 'DRAFT' | 'PROVISIONAL' | 'FINAL';
@@ -60,12 +73,11 @@ export default function ExamCellGradeCardsPage() {
   const [semester, setSemester] = useState('4');
   const [rows, setRows] = useState<GradeCardRow[]>([]);
   const [topStudents, setTopStudents] = useState<TopStudent[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [busyKey, setBusyKey] = useState<BusyKey>(null);
 
   const load = useCallback(async () => {
     const sem = Number(semester);
     if (!Number.isFinite(sem) || sem < 1) return;
-    setLoading(true);
     try {
       const [cards, toppers] = await Promise.all([
         api.get<GradeCardRow[]>(`/api/exam-cell/grade-cards?semester=${sem}`),
@@ -77,8 +89,6 @@ export default function ExamCellGradeCardsPage() {
       toast.error(e instanceof Error ? e.message : 'Could not load grade cards');
       setRows([]);
       setTopStudents([]);
-    } finally {
-      setLoading(false);
     }
   }, [api, semester]);
 
@@ -86,13 +96,22 @@ export default function ExamCellGradeCardsPage() {
     void load();
   }, [load]);
 
+  async function refresh() {
+    setBusyKey('refresh');
+    try {
+      await load();
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function runAction(action: 'generate' | 'publish-provisional' | 'finalize') {
     const sem = Number(semester);
     if (!Number.isFinite(sem) || sem < 1) {
       toast.error('Enter a valid semester');
       return;
     }
-    setLoading(true);
+    setBusyKey(action);
     try {
       const path =
         action === 'generate'
@@ -105,7 +124,7 @@ export default function ExamCellGradeCardsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
-      setLoading(false);
+      setBusyKey(null);
     }
   }
 
@@ -114,6 +133,8 @@ export default function ExamCellGradeCardsPage() {
       toast.error('Sign in again to download PDFs');
       return;
     }
+    const key = `pdf:${gradeCardId}` as const;
+    setBusyKey(key);
     try {
       const res = await fetch(
         `${getApiBaseUrl()}/api/exam-cell/grade-cards/${gradeCardId}/export/pdf`,
@@ -135,6 +156,8 @@ export default function ExamCellGradeCardsPage() {
       toast.success('Grade card PDF downloaded');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'PDF export failed');
+    } finally {
+      setBusyKey(null);
     }
   }
 
@@ -147,24 +170,33 @@ export default function ExamCellGradeCardsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader
-        pageId="grade-cards"
-        actions={
-          <>
-            <Input
-              className="w-28"
-              type="number"
-              min={1}
-              value={semester}
-              onChange={(e) => setSemester(e.target.value)}
-              placeholder="Semester"
-            />
-            <Button variant="outline" onClick={() => void load()} disabled={loading}>
-              <RefreshCw className="size-4" /> Refresh
-            </Button>
-          </>
-        }
-      />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader
+            pageId="grade-cards"
+            actions={
+              <>
+                <Input
+                  className="w-28"
+                  type="number"
+                  min={1}
+                  value={semester}
+                  onChange={(e) => setSemester(e.target.value)}
+                  placeholder="Semester"
+                />
+                <Button
+                  variant="outline"
+                  className={actionBtnClass(busyKey, 'refresh')}
+                  onClick={() => void refresh()}
+                  disabled={busyKey === 'refresh'}
+                >
+                  Refresh
+                </Button>
+              </>
+            }
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard icon={<FileCheck2 className="size-5" />} label="Grade cards" value={summary.total} />
@@ -178,13 +210,28 @@ export default function ExamCellGradeCardsPage() {
           <CardTitle className="text-base">Semester result workflow</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
-          <Button onClick={() => void runAction('generate')} disabled={loading}>
+          <Button
+            variant="outline"
+            className={actionBtnClass(busyKey, 'generate')}
+            onClick={() => void runAction('generate')}
+            disabled={busyKey === 'generate'}
+          >
             Generate provisional batch
           </Button>
-          <Button variant="urgent" onClick={() => void runAction('publish-provisional')} disabled={loading || rows.length === 0}>
+          <Button
+            variant="outline"
+            className={actionBtnClass(busyKey, 'publish-provisional')}
+            onClick={() => void runAction('publish-provisional')}
+            disabled={busyKey === 'publish-provisional' || rows.length === 0}
+          >
             Publish provisional
           </Button>
-          <Button variant="secondary" onClick={() => void runAction('finalize')} disabled={loading || rows.length === 0}>
+          <Button
+            variant="outline"
+            className={actionBtnClass(busyKey, 'finalize')}
+            onClick={() => void runAction('finalize')}
+            disabled={busyKey === 'finalize' || rows.length === 0}
+          >
             Finalize marksheets
           </Button>
           <p className="w-full text-xs text-muted-foreground">
@@ -240,10 +287,12 @@ export default function ExamCellGradeCardsPage() {
                           <Button
                             variant="outline"
                             size="sm"
+                            className={actionBtnClass(busyKey, `pdf:${row.grade_card_id}`)}
                             aria-label={`Download grade card PDF for ${row.student_name}`}
                             onClick={() => void downloadPdf(row.grade_card_id)}
+                            disabled={busyKey === `pdf:${row.grade_card_id}`}
                           >
-                            <Download className="size-4" />
+                            PDF
                           </Button>
                         </td>
                       </tr>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -12,22 +12,35 @@ import {
 } from '@/hooks/useNotifications';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
+import { areInAppAlertsEnabled } from '@/lib/notifications/account-prefs';
 
 export function LiveNotificationBell() {
   const router = useRouter();
   const { token } = useAuth();
   const { refresh: refreshCount } = useNotificationUnreadCount();
   const { notifications, isLoading, refresh: refreshList } = useNotificationHistory();
+  const [inAppEnabled, setInAppEnabled] = useState(true);
+
+  useEffect(() => {
+    setInAppEnabled(areInAppAlertsEnabled());
+    const onPrefs = () => setInAppEnabled(areInAppAlertsEnabled());
+    window.addEventListener('falcon:account-prefs-changed', onPrefs);
+    window.addEventListener('storage', onPrefs);
+    return () => {
+      window.removeEventListener('falcon:account-prefs-changed', onPrefs);
+      window.removeEventListener('storage', onPrefs);
+    };
+  }, []);
 
   const items = useMemo(
-    () => notifications.map(toAppNotification),
-    [notifications],
+    () => (inAppEnabled ? notifications.map(toAppNotification) : []),
+    [notifications, inAppEnabled],
   );
   const previewItems = useMemo(() => items.slice(0, 20), [items]);
   // Badge must match visible (role-filtered) rows — not the raw API unread-count.
   const visibleUnread = useMemo(
-    () => items.filter((n) => n.unread).length,
-    [items],
+    () => (inAppEnabled ? items.filter((n) => n.unread).length : 0),
+    [items, inAppEnabled],
   );
 
   useEffect(() => {
@@ -82,7 +95,7 @@ export function LiveNotificationBell() {
     <NotificationBell
       notifications={previewItems}
       unreadCount={visibleUnread}
-      isLoading={isLoading}
+      isLoading={inAppEnabled && isLoading}
       onSelect={handleSelect}
       onDismiss={handleDismiss}
       viewAllHref="/notifications"

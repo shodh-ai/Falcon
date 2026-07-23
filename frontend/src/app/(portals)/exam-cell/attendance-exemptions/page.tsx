@@ -2,14 +2,17 @@
 
 import { ExemptionReviewQueue } from '@/components/attendance/ExemptionReviewQueue';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
+import { Card, CardContent } from '@/components/ui/card';
 
 export default function ExamCellAttendanceExemptionsPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="attendance-exemptions" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="attendance-exemptions" />
+        </CardContent>
+      </Card>
       <ExemptionReviewQueue
-        title="Attendance Exemptions — Approved"
-        description="Students the HOD has approved for attendance exemption. Admit card generation is allowed for these students despite low attendance."
         listPath="/api/attendance-policy/approved/exemptions"
         decisionBasePath=""
         mode="VIEW"

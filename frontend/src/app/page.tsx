@@ -7,13 +7,14 @@ import { api } from '@/lib/api';
 import { getPostLoginPath } from '@/lib/auth-routing';
 import { FalconLogo } from '@/components/brand/FalconLogo';
 import { FalconLoader } from '@/components/brand/FalconLoader';
-import { LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
 
 export default function Home() {
   const { isAuthenticated, login, user, isLoading, refreshUser } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -168,15 +169,29 @@ export default function Home() {
                   <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-gray-700">
                     Password
                   </label>
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="password123"
-                    className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sgvu-gold"
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="password123"
+                      className="w-full rounded-xl border border-gray-200 px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-sgvu-gold"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer text-gray-400 transition-colors hover:text-sgvu-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold focus-visible:ring-offset-2"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-5 w-5" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-5 w-5" aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
                 </div>
                 {localError && <p className="text-sm text-red-600">{localError}</p>}
                 <button

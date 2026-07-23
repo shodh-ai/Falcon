@@ -1,6 +1,6 @@
 'use client';
 
-import { Database, Plus } from 'lucide-react';
+import { Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -43,8 +43,11 @@ export function ExamCellEmptyState({
           </Button>
         ) : null}
         {onRetry ? (
-          <Button size="sm" onClick={onRetry}>
-            <Plus className="mr-2 h-4 w-4" />
+          <Button
+            size="sm"
+            className="bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] active:bg-sgvu-gold active:text-sgvu-navy"
+            onClick={onRetry}
+          >
             Refresh
           </Button>
         ) : null}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,11 +72,21 @@ export default function ExamCellAuditLogPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="audit-log" actions={
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-        </Button>
-      } />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="audit-log" actions={
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          } />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">

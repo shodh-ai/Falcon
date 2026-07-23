@@ -88,11 +88,16 @@ export default function ExamCellSchedulePage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">Master Exam Schedule</h1>
-        <p className="text-sm text-muted-foreground">Central timetable for admit cards, seating, and invigilation. Students receive an in-app notification when a new slot is added.</p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
+          <h1 className="text-2xl font-bold text-sgvu-navy">Master Exam Schedule</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Central timetable for admit cards, seating, and invigilation. Students receive an in-app
+            notification when a new slot is added.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card className="border-sgvu-gold/20 bg-amber-50/30">
         <CardContent className="py-3 text-sm">
@@ -102,18 +107,18 @@ export default function ExamCellSchedulePage() {
 
       <Card>
         <CardHeader><CardTitle className="text-base">Add exam slot</CardTitle></CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Exam type</label>
-            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={form.exam_type} onChange={(e) => setForm((f) => ({ ...f, exam_type: e.target.value }))}>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label className="text-sm font-bold leading-5 text-sgvu-navy">Exam type</label>
+            <Select className="h-10 w-full rounded-md border px-3 text-sm" value={form.exam_type} onChange={(e) => setForm((f) => ({ ...f, exam_type: e.target.value }))}>
               <option value="MID_TERM">Mid Term</option>
               <option value="END_TERM">End Term</option>
               <option value="PRACTICAL">Practical</option>
             </Select>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Subject</label>
-            <Select className="w-full rounded-md border px-3 py-2 text-sm" value={form.subject_id} onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}>
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label className="text-sm font-bold leading-5 text-sgvu-navy">Subject</label>
+            <Select className="h-10 w-full rounded-md border px-3 text-sm" value={form.subject_id} onChange={(e) => setForm((f) => ({ ...f, subject_id: e.target.value }))}>
               <option value="">Select subject</option>
               {subjects.map((s) => (
                 <option key={s.subject_id} value={s.subject_id}>
@@ -122,18 +127,18 @@ export default function ExamCellSchedulePage() {
               ))}
             </Select>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Exam date</label>
-            <Input type="date" value={form.exam_date} onChange={(e) => setForm((f) => ({ ...f, exam_date: e.target.value }))} />
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label className="text-sm font-bold leading-5 text-sgvu-navy">Exam date</label>
+            <Input type="date" className="h-10" value={form.exam_date} onChange={(e) => setForm((f) => ({ ...f, exam_date: e.target.value }))} />
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Batch label</label>
-            <Input value={form.batch_label} onChange={(e) => setForm((f) => ({ ...f, batch_label: e.target.value }))} />
+          <div className="flex min-h-[4.5rem] flex-col gap-1.5">
+            <label className="text-sm font-bold leading-5 text-sgvu-navy">Batch label</label>
+            <Input className="h-10" value={form.batch_label} onChange={(e) => setForm((f) => ({ ...f, batch_label: e.target.value }))} />
           </div>
-          <Input type="time" value={form.start_time} onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))} />
-          <Input type="time" value={form.end_time} onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))} />
-          <Input placeholder="Venue" value={form.venue} onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))} />
-          <Input placeholder="Max marks" value={form.max_marks} onChange={(e) => setForm((f) => ({ ...f, max_marks: e.target.value }))} />
+          <Input type="time" className="h-10" value={form.start_time} onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))} />
+          <Input type="time" className="h-10" value={form.end_time} onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))} />
+          <Input className="h-10" placeholder="Venue" value={form.venue} onChange={(e) => setForm((f) => ({ ...f, venue: e.target.value }))} />
+          <Input className="h-10" placeholder="Max marks" value={form.max_marks} onChange={(e) => setForm((f) => ({ ...f, max_marks: e.target.value }))} />
           <Button className="sm:col-span-2" onClick={() => void create()}>Add to schedule</Button>
         </CardContent>
       </Card>

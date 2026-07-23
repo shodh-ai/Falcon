@@ -127,6 +127,13 @@ body {
   background: rgba(255, 255, 255, 0.12);
 }
 
+/* Flush gold thumb on navy surfaces — remove inset border gap */
+.bg-sgvu-navy::-webkit-scrollbar-thumb,
+.bg-sgvu-navy *::-webkit-scrollbar-thumb {
+  border: 0;
+  background-clip: border-box;
+}
+
 /* Minimum touch target for mobile */
 .touch-target {
   min-height: 44px;

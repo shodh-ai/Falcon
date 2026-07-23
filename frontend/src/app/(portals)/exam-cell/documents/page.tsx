@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -114,7 +114,11 @@ export default function ExamCellDocumentsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="documents" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="documents" />
+        </CardContent>
+      </Card>
 
       <Card className="border-sgvu-gold/20 bg-amber-50/30">
         <CardContent className="space-y-2 py-3 text-sm">
@@ -143,7 +147,7 @@ export default function ExamCellDocumentsPage() {
                 {REPO_CATEGORIES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
               </Select>
               <Input placeholder="File URL (optional)" value={repoForm.file_url} onChange={(e) => setRepoForm((f) => ({ ...f, file_url: e.target.value }))} />
-              <Button onClick={() => void uploadRepo()} className="sm:col-span-2"><Plus className="mr-2 h-4 w-4" />Add to repository</Button>
+              <Button onClick={() => void uploadRepo()} className="sm:col-span-2">Add to repository</Button>
             </CardContent>
           </Card>
           <Card>

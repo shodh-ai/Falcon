@@ -43,7 +43,11 @@ export default function ExamCellSearchPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="search" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="search" />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="flex gap-2 pt-6">
