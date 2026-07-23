@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -116,7 +116,11 @@ export default function ExamCellQuestionPapersPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="question-papers" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="question-papers" />
+        </CardContent>
+      </Card>
 
       {canManage ? (
         <Card>
@@ -144,7 +148,7 @@ export default function ExamCellQuestionPapersPage() {
             </div>
             <Input placeholder="Notes (setter reference, moderation notes…)" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="sm:col-span-2" />
             <Button onClick={() => void createRecord()} disabled={busy} className="sm:col-span-2">
-              <Plus className="mr-2 h-4 w-4" />Add record
+              {busy ? 'Adding…' : 'Add record'}
             </Button>
           </CardContent>
         </Card>

@@ -55,10 +55,13 @@ export default function ExamCellReportsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="reports" actions={
-        <Input type="number" className="w-24" value={semester} onChange={(e) => setSemester(e.target.value)} placeholder="Sem" />
-      } />
-
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="reports" actions={
+            <Input type="number" className="w-24" value={semester} onChange={(e) => setSemester(e.target.value)} placeholder="Sem" />
+          } />
+        </CardContent>
+      </Card>
       {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : summary ? (
         <>
           <div className="grid gap-4 sm:grid-cols-3">

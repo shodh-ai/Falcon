@@ -103,12 +103,30 @@ export default function ExamCellExamDayPage() {
   useEffect(() => { void loadAttendance(); }, [loadAttendance]);
 
   async function verifyQr() {
-    if (!qrInput.trim()) return;
+    const payload = qrInput.trim();
+    if (!payload) {
+      toast.error('Enter an enrollment number or scan a hall ticket QR');
+      return;
+    }
     setVerifying(true);
     try {
-      const res = await api.post<VerifiedStudent>('/api/exam-cell/identity/verify', { qr_payload: qrInput.trim() });
-      setVerified(res);
-      toast.success(`${res.student.name} verified`);
+      const res = await api.post<VerifiedStudent>('/api/exam-cell/identity/verify', {
+        qr_payload: payload,
+      });
+      const student = {
+        ...res.student,
+        branch:
+          res.student.branch ??
+          (res.student as { branch_name?: string | null }).branch_name ??
+          null,
+      };
+      setVerified({
+        ...res,
+        student,
+        seating: Array.isArray(res.seating) ? res.seating : [],
+        verified: true,
+      });
+      toast.success(`${student.name} verified`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Verification failed');
       setVerified(null);
@@ -177,14 +195,36 @@ export default function ExamCellExamDayPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="exam-day" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="exam-day" />
+        </CardContent>
+      </Card>
 
       <Card className="border-sgvu-gold/30">
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><QrCode className="h-4 w-4" />Student identity verification</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input placeholder="Scan hall ticket QR or enter enrollment number" value={qrInput} onChange={(e) => setQrInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void verifyQr()} />
-            <Button onClick={() => void verifyQr()} disabled={verifying}>{verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify'}</Button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              className="h-10 flex-1 rounded-lg border-sgvu-navy/20"
+              placeholder="Scan hall ticket QR or enter enrollment number"
+              value={qrInput}
+              onChange={(e) => setQrInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void verifyQr();
+                }
+              }}
+            />
+            <Button
+              variant="outline"
+              className="h-10 shrink-0 border border-[#0B2447] bg-[#0B2447] px-5 font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60"
+              onClick={() => void verifyQr()}
+              disabled={verifying}
+            >
+              {verifying ? 'Verifying…' : 'Verify'}
+            </Button>
           </div>
           {verified ? (
             <div className="flex flex-wrap gap-4 rounded-lg border bg-slate-50/80 p-4">

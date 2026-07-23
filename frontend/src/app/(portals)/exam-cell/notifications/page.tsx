@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Send, Info } from 'lucide-react';
+import { Loader2, Info } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,10 @@ import { Select } from '@/components/ui/select';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
+
+const btnIdle =
+  'h-10 border border-[#0B2447] bg-[#0B2447] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
+const btnBusy = 'h-10 border border-sgvu-gold bg-sgvu-gold px-5 text-sm font-semibold text-sgvu-navy';
 
 type Campaign = {
   campaign_id: string;
@@ -84,8 +88,11 @@ export default function ExamCellNotificationsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="notifications" />
-
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="notifications" />
+        </CardContent>
+      </Card>
       <Card className="border-sgvu-gold/20 bg-amber-50/40">
         <CardContent className="flex gap-3 py-4 text-sm">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-sgvu-gold" />
@@ -114,10 +121,16 @@ export default function ExamCellNotificationsPage() {
             value={form.body}
             onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
           />
-          <Button onClick={() => void send()} disabled={busy}>
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            Send to all students
-          </Button>
+          <div className="flex justify-center border-t border-sgvu-navy/10 pt-4">
+            <Button
+              variant="outline"
+              className={busy ? btnBusy : btnIdle}
+              onClick={() => void send()}
+              disabled={busy}
+            >
+              {busy ? 'Sending…' : 'Send to all students'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

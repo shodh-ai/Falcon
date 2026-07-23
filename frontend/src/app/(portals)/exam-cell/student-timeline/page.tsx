@@ -59,7 +59,11 @@ export default function ExamCellStudentTimelinePage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="student-timeline" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="student-timeline" />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="flex gap-2 pt-6">

@@ -27,7 +27,7 @@ export function ResultPublishingPipeline({ steps, compact }: Props) {
       {!compact && (
         <p className="text-sm font-semibold text-sgvu-navy">Result Publishing Pipeline</p>
       )}
-      <div className={cn('grid gap-3', compact ? 'grid-cols-1' : 'md:grid-cols-4')}>
+      <div className={cn('grid gap-3', compact ? 'grid-cols-2 md:grid-cols-4' : 'md:grid-cols-4')}>
         {steps.map((step, idx) => {
           const Icon = step.icon;
           return (

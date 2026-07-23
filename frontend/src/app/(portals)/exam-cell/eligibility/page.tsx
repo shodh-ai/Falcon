@@ -103,16 +103,30 @@ export default function ExamCellEligibilityPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="eligibility" actions={
-        <div className="flex items-center gap-2">
-          <Select className="rounded-md border px-2 py-1 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => <option key={s} value={String(s)}>Semester {s}</option>)}
-          </Select>
-          <Button variant="outline" size="sm" onClick={exportCsv} title="Export CSV">
-            <Download className="h-4 w-4" />
-          </Button>
-        </div>
-      } />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="eligibility" actions={
+            <div className="flex items-center gap-2">
+              <Select
+                className="h-9 rounded-md border border-[#0B2447] bg-[#0B2447] px-2 py-1 text-sm text-white transition-colors hover:bg-[#123A6D] focus:border-sgvu-gold focus:bg-sgvu-gold focus:text-sgvu-navy focus:outline-none active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+                value={semester}
+                onChange={(e) => setSemester(e.target.value)}
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => <option key={s} value={String(s)}>Semester {s}</option>)}
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#0B2447] bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+                onClick={exportCsv}
+                title="Export CSV"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            </div>
+          } />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {summaryCards.map(([cat, count]) => (
@@ -130,7 +144,11 @@ export default function ExamCellEligibilityPage() {
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base">Eligibility register</CardTitle>
           <div className="flex gap-2">
-            <Select className="rounded-md border px-2 py-1 text-sm" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <Select
+              className="h-9 rounded-md border border-[#0B2447] bg-[#0B2447] px-2 py-1 text-sm text-white transition-colors hover:bg-[#123A6D] focus:border-sgvu-gold focus:bg-sgvu-gold focus:text-sgvu-navy focus:outline-none active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
               <option value="">All categories</option>
               {summaryCards.map(([cat]) => <option key={cat} value={cat}>{cat.replace(/_/g, ' ')}</option>)}
             </Select>

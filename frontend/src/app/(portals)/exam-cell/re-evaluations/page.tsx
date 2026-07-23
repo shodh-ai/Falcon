@@ -139,13 +139,15 @@ export default function ExamCellReEvaluationsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">Re-evaluations</h1>
-        <p className="text-sm text-muted-foreground">
-          Workflow: Student pays fee → Assign faculty → Faculty submits report → Publish to student & parent.
-        </p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
+          <h1 className="text-2xl font-bold text-sgvu-navy">Re-evaluations</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Workflow: Student pays fee → Assign faculty → Faculty submits report → Publish to student & parent.
+          </p>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {steps.map((step, i) => (

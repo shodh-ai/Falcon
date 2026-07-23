@@ -6,6 +6,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
 import { useAuthedApi } from '@/lib/api';
 import Link from 'next/link';
 
@@ -47,17 +48,24 @@ export default function ExamCellSeatingPlansPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-          <h1 className="text-2xl font-bold text-sgvu-navy">Published Seating Plans</h1>
-          <p className="text-sm text-muted-foreground">Plans synced to the student portal after allocation or manual publish.</p>
-        </div>
-        <Button asChild variant="outline">
-          <Link href="/exam-cell/seating">Open Seating Planner →</Link>
-        </Button>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader
+            pageId="seating-plans"
+            actions={
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="border-[#0B2447] bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+              >
+                <Link href="/exam-cell/seating">Open Seating Planner</Link>
+              </Button>
+            }
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

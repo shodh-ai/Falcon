@@ -55,8 +55,11 @@ export default function ExamCellBacklogExamsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="backlog-exams" />
-
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="backlog-exams" />
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Backlog & supplementary applications</CardTitle>

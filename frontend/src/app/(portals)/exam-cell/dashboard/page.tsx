@@ -8,7 +8,6 @@ import {
   Eye,
   GraduationCap,
   Loader2,
-  RefreshCw,
   Shield,
   Ticket,
   TrendingUp,
@@ -108,9 +107,8 @@ export default function ExamCellDashboardPage() {
               Enterprise examination operations — sessions, hall tickets, seating, results, and compliance in one workspace.
             </p>
           </div>
-          <Button variant="outline" size="sm" className="border-white/30 bg-white/10 text-white hover:bg-white/20" onClick={() => void load()} disabled={loading}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Refresh
+          <Button variant="outline" size="sm" className="border-sgvu-gold bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold/90 hover:text-sgvu-navy" onClick={() => void load()} disabled={loading}>
+            {loading ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>
       </div>

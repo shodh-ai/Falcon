@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Download, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -143,15 +143,11 @@ export default function ExamCellAdmitCardsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader
-        pageId="admit-cards"
-        actions={
-          <div className="flex items-center gap-2 rounded-lg border border-sgvu-navy/15 bg-sgvu-navy/5 px-3 py-2 text-xs text-sgvu-navy">
-            <ShieldCheck className="h-4 w-4 text-sgvu-gold" />
-            <span>Secure pre-generation audit</span>
-          </div>
-        }
-      />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="admit-cards" />
+        </CardContent>
+      </Card>
 
       <Card className="border-sgvu-navy/10 shadow-sm">
         <CardHeader className="pb-3">
@@ -173,9 +169,13 @@ export default function ExamCellAdmitCardsPage() {
             </Select>
           </div>
           <div className="flex items-end sm:col-span-2 lg:col-span-1">
-            <Button variant="outline" className="h-10 w-full" onClick={() => void loadAudit()} disabled={auditLoading}>
-              {auditLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-              Refresh audit
+            <Button
+              variant="outline"
+              className="h-10 w-full border-[#0B2447] bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+              onClick={() => void loadAudit()}
+              disabled={auditLoading}
+            >
+              {auditLoading ? 'Refreshing…' : 'Refresh'}
             </Button>
           </div>
         </CardContent>

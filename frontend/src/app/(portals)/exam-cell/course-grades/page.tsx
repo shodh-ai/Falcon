@@ -66,13 +66,15 @@ export default function CourseGradesPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">Course Grades</h1>
-        <p className="text-sm text-muted-foreground">
-          Aggregated component marks — Quiz (10) + Internal (10) + Mid-Term CAT1+2 (30) + End-Term (50).
-        </p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
+          <h1 className="text-2xl font-bold text-sgvu-navy">Course Grades</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Aggregated component marks — Quiz (10) + Internal (10) + Mid-Term CAT1+2 (30) + End-Term (50).
+          </p>
+        </CardContent>
+      </Card>
 
       <div className="flex flex-wrap items-center justify-end gap-3">
         <Select

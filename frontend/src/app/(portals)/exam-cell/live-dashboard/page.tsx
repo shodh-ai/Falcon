@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, Loader2, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ExamCellPageHeader } from '@/components/exam-cell/ExamCellPageHeader';
@@ -23,7 +23,6 @@ export default function ExamCellLiveDashboardPage() {
   const api = useAuthedApi();
   const [stats, setStats] = useState<LiveStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -40,10 +39,9 @@ export default function ExamCellLiveDashboardPage() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!autoRefresh) return;
     const id = window.setInterval(() => void load(), 30000);
     return () => window.clearInterval(id);
-  }, [autoRefresh, load]);
+  }, [load]);
 
   const cards = [
     { label: 'Exams running', value: stats?.exams_running ?? 0 },
@@ -58,28 +56,51 @@ export default function ExamCellLiveDashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="live-dashboard" actions={
-        <div className="flex items-center gap-2">
-          <Button variant={autoRefresh ? 'default' : 'outline'} size="sm" onClick={() => setAutoRefresh((v) => !v)}>
-            <Activity className="mr-2 h-4 w-4" />Auto-refresh {autoRefresh ? 'ON' : 'OFF'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          </Button>
-        </div>
-      } />
-
-      <p className="text-xs text-muted-foreground">
-        Last updated: {stats?.as_of ? new Date(stats.as_of).toLocaleTimeString('en-IN') : '—'} · Refreshes every 30s when enabled
-      </p>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="space-y-4 p-5 md:p-6">
+          <ExamCellPageHeader
+            pageId="live-dashboard"
+            actions={
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-[#0B2447] bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+                onClick={() => void load()}
+                disabled={loading}
+              >
+                {loading ? 'Refreshing…' : 'Refresh'}
+              </Button>
+            }
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map(({ label, value }) => (
-          <Card key={label} className={value > 0 && label.includes('UFM') ? 'border-red-200 bg-red-50/30' : ''}>
-            <CardHeader className="pb-2"><CardTitle className="text-xs uppercase tracking-wide text-muted-foreground">{label}</CardTitle></CardHeader>
+          <Card
+            key={label}
+            className={
+              value > 0 && label.includes('UFM')
+                ? 'border-red-200 bg-white'
+                : 'border-sgvu-navy/10 bg-white'
+            }
+          >
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs uppercase tracking-wide text-sgvu-navy/70">
+                {label}
+              </CardTitle>
+            </CardHeader>
             <CardContent>
-              {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : (
-                <p className="text-3xl font-black tabular-nums text-sgvu-navy">{value}</p>
+              {loading ? (
+                <Loader2 className="h-6 w-6 animate-spin text-sgvu-navy" />
+              ) : (
+                <p
+                  className={`text-3xl font-black tabular-nums ${
+                    value > 0 && label.includes('UFM') ? 'text-red-600' : 'text-sgvu-navy'
+                  }`}
+                >
+                  {value}
+                </p>
               )}
             </CardContent>
           </Card>

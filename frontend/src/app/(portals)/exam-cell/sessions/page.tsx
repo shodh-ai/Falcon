@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -110,22 +110,30 @@ export default function ExamCellSessionsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="sessions" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="sessions" />
+        </CardContent>
+      </Card>
 
       {canManage ? (
         <Card>
           <CardHeader><CardTitle className="text-base">Create examination session</CardTitle></CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Input placeholder="Session name" value={form.session_name} onChange={(e) => setForm((f) => ({ ...f, session_name: e.target.value }))} className="sm:col-span-2 lg:col-span-3" />
-            <Input placeholder="Academic year" value={form.academic_year} onChange={(e) => setForm((f) => ({ ...f, academic_year: e.target.value }))} />
-            <Select className="rounded-md border px-3 py-2 text-sm" value={form.cycle_type} onChange={(e) => setForm((f) => ({ ...f, cycle_type: e.target.value }))}>
-              {CYCLE_TYPES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
-            </Select>
-            <Input type="number" placeholder="Semester" value={form.semester} onChange={(e) => setForm((f) => ({ ...f, semester: e.target.value }))} />
-            <Input placeholder="Program" value={form.program_label} onChange={(e) => setForm((f) => ({ ...f, program_label: e.target.value }))} />
-            <Input type="date" value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} />
-            <Input type="date" value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} />
-            <Button onClick={() => void createSession()} className="sm:col-span-2 lg:col-span-1"><Plus className="mr-2 h-4 w-4" />Create session</Button>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Input placeholder="Session name" value={form.session_name} onChange={(e) => setForm((f) => ({ ...f, session_name: e.target.value }))} className="sm:col-span-2 lg:col-span-3" />
+              <Input placeholder="Academic year" value={form.academic_year} onChange={(e) => setForm((f) => ({ ...f, academic_year: e.target.value }))} />
+              <Select className="rounded-md border px-3 py-2 text-sm" value={form.cycle_type} onChange={(e) => setForm((f) => ({ ...f, cycle_type: e.target.value }))}>
+                {CYCLE_TYPES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+              </Select>
+              <Input type="number" placeholder="Semester" value={form.semester} onChange={(e) => setForm((f) => ({ ...f, semester: e.target.value }))} />
+              <Input placeholder="Program" value={form.program_label} onChange={(e) => setForm((f) => ({ ...f, program_label: e.target.value }))} />
+              <Input type="date" value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} />
+              <Input type="date" value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} />
+            </div>
+            <div className="flex justify-center">
+              <Button onClick={() => void createSession()}>Create session</Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}

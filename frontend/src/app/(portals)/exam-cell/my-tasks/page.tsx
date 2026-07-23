@@ -43,7 +43,11 @@ export default function ExamCellMyTasksPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="my-tasks" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="my-tasks" />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Pending actions</CardTitle></CardHeader>

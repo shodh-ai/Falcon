@@ -93,11 +93,11 @@ export const EXAM_CELL_PAGES: Record<ExamCellPageId, ExamCellPageMeta> = {
   },
   seating: {
     title: 'Seating Planner',
-    subtitle: 'Allocate exam halls and seats, then publish to the student portal.',
+    subtitle: 'Auto-allocate ensures adjacent seats are not the same branch.',
   },
   'seating-plans': {
     title: 'Published Seating Plans',
-    subtitle: 'Read-only view of seating plans synced to the student portal.',
+    subtitle: 'Plans synced to the student portal after allocation or manual publish.',
   },
   'resource-allocation': {
     title: 'Exam Resource Allocation',
@@ -105,7 +105,7 @@ export const EXAM_CELL_PAGES: Record<ExamCellPageId, ExamCellPageMeta> = {
   },
   invigilation: {
     title: 'Invigilation Roster',
-    subtitle: 'Assign and publish faculty invigilation duties.',
+    subtitle: 'Assignments sync instantly to Faculty → Exam Invigilation Duty.',
   },
   'print-hub': {
     title: 'Print & Export Hub',
@@ -129,7 +129,7 @@ export const EXAM_CELL_PAGES: Record<ExamCellPageId, ExamCellPageMeta> = {
   },
   results: {
     title: 'Result Control Centre',
-    subtitle: 'Review faculty submissions, lock marks, and declare results.',
+    subtitle: 'Review faculty submissions, lock marks, preview grades, and declare results to students.',
   },
   'grade-cards': {
     title: 'Grade Cards & Merit List',

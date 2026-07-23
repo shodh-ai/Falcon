@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
@@ -35,7 +35,7 @@ export default function ExamCellHallTicketApprovalsPage() {
   const canApprove = canExamCellAction(user?.roles ?? user?.role, 'generate_admit_cards');
   const [semester, setSemester] = useState('4');
   const [examType, setExamType] = useState<ExamType>('END_TERM');
-  const [stageFilter, setStageFilter] = useState('');
+  const [stageFilter, setStageFilter] = useState('ALL');
   const [rows, setRows] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -46,10 +46,14 @@ export default function ExamCellHallTicketApprovalsPage() {
     setLoading(true);
     try {
       const qs = new URLSearchParams({ semester, batch_label: batchLabel });
-      if (stageFilter) qs.set('stage', stageFilter);
-      setRows(await api.get<Approval[]>(`/api/exam-cell/hall-ticket-approvals?${qs}`));
+      if (stageFilter && stageFilter !== 'ALL') qs.set('stage', stageFilter);
+      const res = await api.get<{ data: Approval[] } | Approval[]>(
+        `/api/exam-cell/hall-ticket-approvals?${qs}`,
+      );
+      setRows(Array.isArray(res) ? res : (res?.data ?? []));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load approvals');
+      setRows([]);
     } finally {
       setLoading(false);
     }
@@ -115,52 +119,138 @@ export default function ExamCellHallTicketApprovalsPage() {
       key: 'actions',
       header: 'Actions',
       render: (r) => canApprove && !['APPROVED', 'REJECTED'].includes(r.stage) ? (
-        <div className="flex gap-1">
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void advance(r.approval_id, 'APPROVE')}>Advance</Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void advance(r.approval_id, 'REJECT')}>Reject</Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            className="border-[#0B2447] bg-[#0B2447] text-white hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+            onClick={() => void advance(r.approval_id, 'APPROVE')}
+          >
+            Advance
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            className="border-red-600/30 text-red-700 hover:bg-red-50 active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy"
+            onClick={() => void advance(r.approval_id, 'REJECT')}
+          >
+            Reject
+          </Button>
         </div>
       ) : null,
     },
   ];
 
+  const filterSelectClass =
+    'h-10 w-full rounded-lg border border-sgvu-navy/20 bg-white px-3 text-sm font-medium text-sgvu-navy shadow-none transition-colors hover:border-sgvu-navy/40 focus:border-sgvu-gold focus:outline-none focus:ring-2 focus:ring-sgvu-gold/25 data-[state=open]:border-sgvu-gold data-[state=open]:ring-2 data-[state=open]:ring-sgvu-gold/25';
+  const actionBtnClass =
+    'h-10 border border-[#0B2447] bg-[#0B2447] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
+
+  const workflowSteps = [
+    'Registration',
+    'Eligibility',
+    'Finance',
+    'Exam Office',
+    'COE',
+    'Hall Ticket',
+  ];
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="hall-ticket-approvals" actions={
-        <Button asChild variant="outline" size="sm"><Link href="/exam-cell/admit-cards">Generate hall tickets →</Link></Button>
-      } />
-
-      <Card className="border-sgvu-gold/20 bg-amber-50/30">
-        <CardContent className="py-4 text-sm">
-          <strong>Workflow:</strong> Registration → Eligibility → Finance → Exam Office → COE → Generate Hall Ticket
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="hall-ticket-approvals" actions={
+            <Button asChild variant="outline" size="sm" className={actionBtnClass}>
+              <Link href="/exam-cell/admit-cards">Generate hall tickets</Link>
+            </Button>
+          } />
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-base">Approval queue</CardTitle>
-          <div className="flex flex-wrap gap-2">
-            <Select className="rounded-md border px-2 py-1 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => <option key={s} value={String(s)}>Sem {s}</option>)}
-            </Select>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={examType} onChange={(e) => setExamType(e.target.value as ExamType)}>
-              <option value="MID_TERM">Mid Term</option>
-              <option value="END_TERM">End Term</option>
-            </Select>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
-              <option value="">All stages</option>
-              {STAGES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-            </Select>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-sgvu-navy/50">Approval workflow</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {workflowSteps.map((step, index) => (
+              <div key={step} className="flex items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-sgvu-navy/15 bg-sgvu-navy/[0.04] px-3 py-1.5 text-xs font-semibold text-sgvu-navy">
+                  <span className="mr-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#0B2447] text-[10px] font-bold text-white">
+                    {index + 1}
+                  </span>
+                  {step}
+                </span>
+                {index < workflowSteps.length - 1 ? (
+                  <span className="hidden text-sgvu-navy/30 sm:inline" aria-hidden>
+                    →
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="space-y-5 p-5 md:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-sgvu-navy/10 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-sgvu-navy">Approval queue</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                {loading ? 'Loading records…' : `${rows.length} record${rows.length === 1 ? '' : 's'} · ${batchLabel}`}
+              </p>
+            </div>
             {canApprove ? (
-              <>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void syncQueue()}><RefreshCw className="mr-2 h-4 w-4" />Sync from eligibility</Button>
-                <Button size="sm" disabled={busy} onClick={() => void bulkApprove()}>Bulk advance to COE</Button>
-              </>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" disabled={busy} className={actionBtnClass} onClick={() => void syncQueue()}>
+                  {busy ? 'Working…' : 'Sync from eligibility'}
+                </Button>
+                <Button size="sm" disabled={busy} className={actionBtnClass} onClick={() => void bulkApprove()}>
+                  Bulk advance to COE
+                </Button>
+              </div>
             ) : null}
           </div>
-        </CardHeader>
-        <CardContent>
-          {loading ? <Loader2 className="h-6 w-6 animate-spin" /> : (
-            <DataTable columns={columns} rows={rows} rowKey={(r) => r.approval_id} emptyMessage="No approval records. Sync from eligibility dashboard first." />
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Semester</label>
+              <Select className={filterSelectClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
+                  <option key={s} value={String(s)}>Semester {s}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Exam type</label>
+              <Select className={filterSelectClass} value={examType} onChange={(e) => setExamType(e.target.value as ExamType)}>
+                <option value="MID_TERM">Mid Term</option>
+                <option value="END_TERM">End Term</option>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold uppercase tracking-wide text-sgvu-navy/60">Stage</label>
+              <Select className={filterSelectClass} value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                <option value="ALL">All stages</option>
+                {STAGES.map((s) => (
+                  <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-7 w-7 animate-spin text-sgvu-navy" />
+            </div>
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.approval_id}
+              emptyMessage="No approval records yet. Use Sync from eligibility to build the queue."
+            />
           )}
         </CardContent>
       </Card>

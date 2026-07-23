@@ -5,11 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { useAuthedApi } from '@/lib/api';
-import { ShieldAlert } from 'lucide-react';
 
 type UfmCase = {
   case_id: string;
@@ -175,7 +174,11 @@ export default function ExamCellUfmPage() {
       {
         key: 'status',
         header: 'Case Status',
-        render: (c) => <Badge variant="destructive">{c.status}</Badge>,
+        render: (c) => {
+          const s = c.status.toUpperCase();
+          const variant = s === 'CLOSED' ? 'secondary' : s === 'UNDER_REVIEW' ? 'warning' : 'destructive';
+          return <Badge variant={variant}>{c.status}</Badge>;
+        },
       },
       {
         key: 'automation',
@@ -183,12 +186,11 @@ export default function ExamCellUfmPage() {
         render: (c) => {
           const subject = c.exam_type ?? c.course_scope ?? 'All subjects';
           return (
-            <div className="space-y-1.5">
-              <Badge variant="outline" className="border-red-200 bg-red-50 text-red-800">
-                <ShieldAlert className="mr-1 inline h-3 w-3" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-sgvu-navy">
                 Marks locked to 0 for {subject}
-              </Badge>
-              <p className="text-xs font-medium text-red-700">Student grade card set to WITHHELD (UFM)</p>
+              </p>
+              <p className="text-xs text-muted-foreground">Student grade card set to WITHHELD (UFM)</p>
             </div>
           );
         },
@@ -197,41 +199,69 @@ export default function ExamCellUfmPage() {
     [],
   );
 
-  return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">UFM Malpractice Desk</h1>
-        <p className="text-sm text-muted-foreground">
-          Step 1: Select semester → Step 2: Pick department & student → Step 3: Choose course scope → Log case.
-        </p>
-      </div>
+  const fieldClass =
+    'h-10 w-full rounded-lg border border-sgvu-navy/20 bg-white px-3 text-sm font-medium text-sgvu-navy shadow-none transition-colors hover:border-sgvu-navy/40 focus:border-sgvu-gold focus:outline-none focus:ring-2 focus:ring-sgvu-gold/25 data-[state=open]:border-sgvu-gold data-[state=open]:ring-2 data-[state=open]:ring-sgvu-gold/25';
+  const labelClass = 'text-xs font-bold uppercase tracking-wide text-sgvu-navy/55';
+  const btnPrimary =
+    'h-10 border border-[#0B2447] bg-[#0B2447] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Log new UFM case</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">1. Semester</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={semester} onChange={(e) => setSemester(e.target.value)}>
+  return (
+    <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <p className="text-sm font-semibold text-sgvu-gold">Falcon Exam OS</p>
+          <h1 className="text-2xl font-bold text-sgvu-navy">UFM Malpractice Desk</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Step 1: Select semester → Step 2: Pick department & student → Step 3: Choose course scope → Log case.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="space-y-5 p-5 md:p-6">
+          <div className="border-b border-sgvu-navy/10 pb-4">
+            <h2 className="text-lg font-bold text-sgvu-navy">Log new UFM case</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Filter the roster, identify the student, then record the incident and penalty.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>1. Semester</label>
+              <Select className={fieldClass} value={semester} onChange={(e) => setSemester(e.target.value)}>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
-                  <option key={s} value={String(s)}>Semester {s}</option>
+                  <option key={s} value={String(s)}>
+                    Semester {s}
+                  </option>
                 ))}
               </Select>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">2. Department</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={department} onChange={(e) => setDepartment(e.target.value)}>
-                <option value="">All departments</option>
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>2. Department</label>
+              <Select
+                className={fieldClass}
+                value={department || 'ALL'}
+                onChange={(e) => setDepartment(e.target.value === 'ALL' ? '' : e.target.value)}
+              >
+                <option value="ALL">All departments</option>
                 {departments.map((d) => (
-                  <option key={d} value={d}>{d}</option>
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
                 ))}
               </Select>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">3. Course (optional)</label>
-              <Select className="w-full rounded-md border px-3 py-2 text-sm" value={form.course_id} onChange={(e) => setForm((f) => ({ ...f, course_id: e.target.value }))}>
-                <option value="">All courses — zero all marks</option>
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>3. Course (optional)</label>
+              <Select
+                className={fieldClass}
+                value={form.course_id || 'ALL'}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, course_id: e.target.value === 'ALL' ? '' : e.target.value }))
+                }
+              >
+                <option value="ALL">All courses — zero all marks</option>
                 {courses.map((c) => (
                   <option key={c.course_id} value={c.course_id}>
                     {c.course_code} — {c.course_name}
@@ -241,31 +271,38 @@ export default function ExamCellUfmPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Student (from filtered list)</label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>Student (from filtered list)</label>
               <Select
-                className="w-full rounded-md border px-3 py-2 text-sm"
-                value={form.student_pick}
+                className={fieldClass}
+                value={form.student_pick || undefined}
+                placeholder="Select student…"
                 onChange={(e) => setForm((f) => ({ ...f, student_pick: e.target.value, student_ref: '' }))}
               >
                 <option value="">Select student…</option>
                 {students.map((s) => (
                   <option key={s.user_id} value={s.user_id}>
-                    {s.name}{s.enrollment_number ? ` · ${s.enrollment_number}` : ''}
+                    {s.name}
+                    {s.enrollment_number ? ` · ${s.enrollment_number}` : ''}
                   </option>
                 ))}
               </Select>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Or look up by one identifier</label>
-              <div className="flex gap-2">
-                <Select className="w-36 shrink-0 rounded-md border px-2 py-2 text-sm" value={lookupType} onChange={(e) => setLookupType(e.target.value as LookupType)}>
+            <div className="flex flex-col gap-1.5">
+              <label className={labelClass}>Or look up by identifier</label>
+              <div className="grid grid-cols-[9rem_1fr] gap-2">
+                <Select
+                  className={fieldClass}
+                  value={lookupType}
+                  onChange={(e) => setLookupType(e.target.value as LookupType)}
+                >
                   <option value="ENROLLMENT">Enrollment</option>
                   <option value="EMAIL">Email</option>
                   <option value="SID">Student ID</option>
                 </Select>
                 <Input
+                  className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
                   placeholder={lookupPlaceholder}
                   value={form.student_ref}
                   onChange={(e) => setForm((f) => ({ ...f, student_ref: e.target.value, student_pick: '' }))}
@@ -274,44 +311,95 @@ export default function ExamCellUfmPage() {
             </div>
           </div>
 
-          <textarea
-            className="min-h-[80px] w-full rounded-md border px-3 py-2 text-sm"
-            placeholder="Incident description"
-            value={form.description}
-            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-          />
-          <Input placeholder="Penalty" value={form.penalty_applied} onChange={(e) => setForm((f) => ({ ...f, penalty_applied: e.target.value }))} />
-          <Button onClick={() => void logCase()} disabled={submitting}>
-            {submitting ? 'Logging UFM…' : 'Log UFM & trigger auto-penalties'}
-          </Button>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-1.5 md:col-span-2">
+              <label className={labelClass}>Incident description</label>
+              <textarea
+                className="min-h-[96px] w-full rounded-lg border border-sgvu-navy/20 bg-white px-3 py-2.5 text-sm text-sgvu-navy shadow-none transition-colors hover:border-sgvu-navy/40 focus:border-sgvu-gold focus:outline-none focus:ring-2 focus:ring-sgvu-gold/25"
+                placeholder="Describe what happened during the exam…"
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5 md:col-span-2">
+              <label className={labelClass}>Penalty</label>
+              <Input
+                className="h-10 rounded-lg border-sgvu-navy/20 focus-visible:ring-sgvu-gold/40"
+                placeholder="Exam cancelled — UFM"
+                value={form.penalty_applied}
+                onChange={(e) => setForm((f) => ({ ...f, penalty_applied: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-center border-t border-sgvu-navy/10 pt-4">
+            <Button
+              variant="outline"
+              className={btnPrimary}
+              onClick={() => void logCase()}
+              disabled={submitting}
+            >
+              {submitting ? 'Logging UFM…' : 'Log UFM & trigger auto-penalties'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
-          <div>
-            <CardTitle className="text-base">UFM case history</CardTitle>
-            <p className="text-sm text-muted-foreground">Default: last 1 month. Filter by year and month for older records.</p>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="space-y-4 p-5 md:p-6">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-sgvu-navy/10 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-sgvu-navy">UFM case history</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Default: last 1 month. Filter by year and month for older records.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>Year</label>
+                <Select className={`${fieldClass} w-[7.5rem]`} value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+                  {[now.getFullYear(), now.getFullYear() - 1].map((y) => (
+                    <option key={y} value={String(y)}>
+                      {y}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>Period</label>
+                <Select
+                  className={`${fieldClass} w-[11rem]`}
+                  value={filterMonth || 'RECENT'}
+                  onChange={(e) => setFilterMonth(e.target.value === 'RECENT' ? '' : e.target.value)}
+                >
+                  <option value="RECENT">Last 1 month</option>
+                  {MONTHS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Select className="rounded-md border px-2 py-1 text-sm" value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
-              {[now.getFullYear(), now.getFullYear() - 1].map((y) => (
-                <option key={y} value={String(y)}>{y}</option>
-              ))}
-            </Select>
-            <Select className="rounded-md border px-2 py-1 text-sm" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
-              <option value="">Last 1 month</option>
-              {MONTHS.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
+
           {loadingCases ? (
-            <p className="text-sm text-muted-foreground">Loading case history…</p>
+            <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-4 py-10 text-center text-sm text-muted-foreground">
+              Loading case history…
+            </div>
+          ) : cases.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-4 py-10 text-center text-sm text-muted-foreground">
+              No UFM cases in this period.
+            </div>
           ) : (
-            <DataTable columns={tableColumns} rows={cases} rowKey={(c) => c.case_id} emptyMessage="No UFM cases in this period." />
+            <div className="overflow-x-auto rounded-xl border border-sgvu-navy/10">
+              <DataTable
+                columns={tableColumns}
+                rows={cases}
+                rowKey={(c) => c.case_id}
+                emptyMessage="No UFM cases in this period."
+              />
+            </div>
           )}
         </CardContent>
       </Card>

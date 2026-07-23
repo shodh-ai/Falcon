@@ -84,7 +84,11 @@ export default function ExamCellCalendarPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-6">
-      <ExamCellPageHeader pageId="calendar" />
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <ExamCellPageHeader pageId="calendar" />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
@@ -105,13 +109,20 @@ export default function ExamCellCalendarPage() {
       {canManage ? (
         <Card>
           <CardHeader><CardTitle className="text-base">Add calendar milestone</CardTitle></CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Input placeholder="Title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="sm:col-span-2" />
-            <Select className="rounded-md border px-3 py-2 text-sm" value={form.event_type} onChange={(e) => setForm((f) => ({ ...f, event_type: e.target.value }))}>
-              {EVENT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-            </Select>
-            <Input type="date" value={form.event_date} onChange={(e) => setForm((f) => ({ ...f, event_date: e.target.value }))} />
-            <Button onClick={() => void createEvent()} className="sm:col-span-2 lg:col-span-1"><Plus className="mr-2 h-4 w-4" />Add event</Button>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Input placeholder="Title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} className="sm:col-span-2 lg:col-span-1" />
+              <Select className="rounded-md border px-3 py-2 text-sm" value={form.event_type} onChange={(e) => setForm((f) => ({ ...f, event_type: e.target.value }))}>
+                {EVENT_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+              </Select>
+              <Input type="date" value={form.event_date} onChange={(e) => setForm((f) => ({ ...f, event_date: e.target.value }))} />
+            </div>
+            <div className="flex justify-center">
+              <Button onClick={() => void createEvent()}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add event
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}
