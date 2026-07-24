@@ -1,41 +1,28 @@
-import { API_URL, apiFetch } from './client';
-
-export interface GatePass {
-  pass_id: string;
-  student_user_id: string;
-  reason: string;
-  expected_exit_at: string;
-  expected_return_at: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXITED' | 'RETURNED' | 'EXPIRED';
-  qr_token?: string | null;
-}
-
-export const operationsApi = {
-  listRooms: (token: string) =>
-    apiFetch<unknown[]>(token, { url: `${API_URL}/operations/hostel/rooms`, headers: {} }),
-  requestGatePass: (
-    token: string,
-    payload: { student_user_id: string; reason: string; expected_exit_at: string; expected_return_at: string },
-  ) =>
-    apiFetch<GatePass>(token, {
-      url: `${API_URL}/operations/gate-passes`,
-      method: 'POST',
-      headers: {},
-      data: payload,
-    }),
-  approveGatePass: (token: string, passId: string) =>
-    apiFetch<GatePass>(token, {
-      url: `${API_URL}/operations/gate-passes/${passId}/approve`,
-      method: 'PATCH',
-      headers: {},
-    }),
-  listGatePasses: (token: string, studentUserId?: string) =>
-    apiFetch<GatePass[]>(token, {
-      url: `${API_URL}/operations/gate-passes${studentUserId ? `?studentUserId=${studentUserId}` : ''}`,
-      headers: {},
-    }),
-  listBooks: (token: string) =>
-    apiFetch<unknown[]>(token, { url: `${API_URL}/operations/library/books`, headers: {} }),
-  listRoutes: (token: string) =>
-    apiFetch<unknown[]>(token, { url: `${API_URL}/operations/transport/routes`, headers: {} }),
+type AuthedApi = {
+  get: <T>(path: string) => Promise<T>;
+  post: <T>(path: string, body?: unknown) => Promise<T>;
 };
+
+export function createOperationsApi(api: AuthedApi) {
+  return {
+    dashboard: () => api.get<any>('/api/operations/dashboard'),
+    queues: () => api.get<any[]>('/api/operations/esm/queues'),
+    locations: () => api.get<any[]>('/api/operations/esm/locations'),
+    fromQr: (body: { qr_code: string; subject?: string }) =>
+      api.post('/api/operations/esm/from-qr', body),
+    scanClose: (id: string) => api.post(`/api/operations/esm/tickets/${id}/scan-close`),
+    dofa: () => api.get<any[]>('/api/operations/p2p/dofa'),
+    purchaseOrders: () => api.get<any[]>('/api/operations/p2p/purchase-orders'),
+    createPo: (body: { description: string; amount: number; vendor_id?: string }) =>
+      api.post('/api/operations/p2p/purchase-orders', body),
+    grns: () => api.get<any[]>('/api/operations/p2p/grn'),
+    createGrn: (body: { po_id: string; notes?: string }) =>
+      api.post('/api/operations/p2p/grn', body),
+    threeWayMatch: (id: string) =>
+      api.get<any>(`/api/operations/p2p/purchase-orders/${id}/three-way-match`),
+    payPo: (id: string) => api.post(`/api/operations/p2p/purchase-orders/${id}/pay`),
+    penalties: () => api.get<any[]>('/api/operations/p2p/penalties'),
+    applyPenalty: (body: { vendor_id: string; reason: string; amount_inr: number }) =>
+      api.post('/api/operations/p2p/penalties', body),
+  };
+}

@@ -408,6 +408,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Events & Clubs', href: '/student/falcon-events', icon: PartyPopper, keywords: ['falcon events', 'clubs', 'chapters', 'tickets', 'ncc', 'nss', 'fest', 'membership'], shortLabel: 'Events' },
         { label: 'Venue Booking', href: '/student/venues', icon: Building2, keywords: ['room', 'gd', 'seminar', 'hall', 'classroom', 'booking'] },
         { label: 'E-Cell & Incubation', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
+        { label: 'Tokamak Challenges', href: '/student/challenges', icon: Target, keywords: ['gladiator', 'hackathon', 'whitepaper', 'golden ticket'] },
         { label: 'Research Grants', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
         { label: 'Ph.D. Programme', href: '/student/phd', icon: GraduationCap, keywords: ['phd', 'pet', 'doctorate', 'research', 'thesis'] },
       ],
@@ -1002,7 +1003,19 @@ export const incubationPortal: PortalConfig = {
           label: 'Mentor Network',
           href: '/incubation/mentors',
           icon: Handshake,
-          keywords: ['alumni', 'industry', 'experts'],
+          keywords: ['alumni', 'industry', 'experts', 'wrangler'],
+        },
+        {
+          label: 'Fellowships',
+          href: '/incubation/fellowships',
+          icon: Timer,
+          keywords: ['hacker filter', 'trial', 'elite fellow'],
+        },
+        {
+          label: 'IP Agreements',
+          href: '/incubation/ip',
+          icon: FileLock,
+          keywords: ['founder first', 'equity', 'reversion', 'patent'],
         },
       ],
     },
@@ -1031,6 +1044,8 @@ export const incubationPortal: PortalConfig = {
     { label: 'Active Portfolio', href: '/incubation/portfolio', icon: Briefcase },
     { label: 'Grant Management', href: '/incubation/grants', icon: DollarSign },
     { label: 'Mentor Network', href: '/incubation/mentors', icon: Handshake },
+    { label: 'Fellowships', href: '/incubation/fellowships', icon: Timer },
+    { label: 'IP Agreements', href: '/incubation/ip', icon: FileLock },
     { label: 'Cohort Settings', href: '/incubation/settings/cohort', icon: Settings },
     { label: 'NAAC / NIRF Export', href: '/incubation/reports', icon: FileSpreadsheet },
   ],
@@ -1068,6 +1083,9 @@ export const financePortal: PortalConfig = {
       items: [
         { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'] },
         { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'] },
+        { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'] },
+        { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', '3-way match', 'receipt'] },
+        { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'] },
         { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'] },
         { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'] },
       ],
@@ -1233,6 +1251,7 @@ export const researchPortal: PortalConfig = {
         { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText, keywords: ['thesis', 'viva', 'synopsis'], roles: ['RRC_MEMBER', 'SuperAdmin'] },
         { label: 'Adjudicator Reviews', href: '/research/adjudicator/reviews', icon: Scale, keywords: ['synopsis', 'thesis', 'evaluation'], roles: ['PHD_ADJUDICATOR', 'SuperAdmin'] },
         { label: 'Research Grants', href: '/research/grants', icon: FlaskConical, keywords: ['grants', 'funding'], roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Chairman'] },
+        { label: 'Deep-Tech Moonshots', href: '/research/moonshots', icon: Rocket, keywords: ['zero-day', 'programmable matter', 'quantum', 'microfluidics'], roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Dean', 'LabAdmin', 'Wrangler'] },
       ],
     },
   ],
@@ -1241,6 +1260,7 @@ export const researchPortal: PortalConfig = {
     { label: 'RAC Reviews', href: '/research/rac/reviews', icon: Users },
     { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText },
     { label: 'Scholar Pipeline', href: '/research/scholars', icon: GraduationCap },
+    { label: 'Moonshots', href: '/research/moonshots', icon: Rocket },
   ],
 };
 
@@ -1273,6 +1293,7 @@ export const examCellPortal: PortalConfig = {
         { label: 'Exam Centres & Rooms', href: '/exam-cell/exam-centres', icon: DoorOpen, keywords: ['building', 'hall', 'capacity'] },
         { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
         { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'low attendance'] },
+        { label: 'Product Viva Panel', href: '/exam-cell/product-viva', icon: Users, keywords: ['product viva', 'urop', 'industry', 'shodh'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms', 'ai'] },
         { label: 'Published Seating Plans', href: '/exam-cell/seating-plans', icon: ClipboardList, keywords: ['published seating'] },
         { label: 'Resource Allocation', href: '/exam-cell/resource-allocation', icon: LayoutGrid, keywords: ['coordinator', 'room'] },
@@ -1294,6 +1315,7 @@ export const examCellPortal: PortalConfig = {
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
         { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
+        { label: 'Portfolio Transcripts', href: '/exam-cell/portfolio-transcripts', icon: Briefcase, keywords: ['github', 'patents', 'hardware', 'portfolio degree'] },
         { label: 'Degree Eligibility Audit', href: '/exam-cell/degree-audit', icon: FileCheck2, keywords: ['credits', 'cgpa', 'clearance'] },
         { label: 'Examination Reports', href: '/exam-cell/reports', icon: BarChart3, keywords: ['pass percentage', 'rankers'] },
         { label: 'Advanced Analytics', href: '/exam-cell/analytics', icon: PieChart, keywords: ['management', 'charts', 'export'] },
@@ -1417,8 +1439,11 @@ export const leadershipPortal: PortalConfig = {
     { label: 'Result Insights', href: '/leadership/insights', icon: PieChart },
     { label: 'HR Economics', href: '/leadership/hr-ops', icon: Users },
     { label: 'Alumni & Fundraising', href: '/leadership/alumni', icon: Heart },
-    { label: 'Infrastructure', href: '/leadership/infrastructure', icon: Building2 },
-    { label: 'Grievances', href: '/leadership/issues', icon: AlertTriangle },
+        { label: 'Infrastructure', href: '/leadership/infrastructure', icon: Building2 },
+        { label: 'COO Operations', href: '/operations/dashboard', icon: Target },
+        { label: 'Tokamak Labs', href: '/labs/dashboard', icon: Microscope },
+        { label: 'Challenges Funnel', href: '/competitions/funnel', icon: TrendingUp },
+        { label: 'Grievances', href: '/leadership/issues', icon: AlertTriangle },
     { label: 'Automated Insights', href: '/leadership/intelligence', icon: LineChart },
     { label: 'Versus Analytics', href: '/leadership/versus', icon: LineChart },
     { label: 'Strategy Forecast', href: '/leadership/forecasting', icon: TrendingUp },
@@ -1585,5 +1610,109 @@ export const adminPortal: PortalConfig = {
     { label: 'Pending Approvals', href: '/admin/verifications', icon: ListChecks },
     { label: 'University Directory', href: '/directory', icon: Contact },
     { label: 'Export Reports', href: '/reports', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'President', 'IQAC', 'Registrar'] },
+  ],
+};
+
+/** Tokamak Labs — LabAdmin workspace */
+export const labsPortal: PortalConfig = {
+  personaLabel: 'Tokamak Labs',
+  personaTitle: 'Hardware Foundry',
+  homeHref: '/labs/dashboard',
+  navGroups: [
+    {
+      title: 'Labs',
+      items: [
+        { label: 'Dashboard', href: '/labs/dashboard', icon: LayoutDashboard, keywords: ['tokamak', 'zones', 'utilization'] },
+        { label: 'Zones & Equipment', href: '/labs/equipment', icon: Microscope, keywords: ['optical', 'cnc', 'gpu', 'zone'] },
+        { label: 'Bookings & Checkout', href: '/labs/bookings', icon: CalendarDays, keywords: ['booking', 'checkout', 'safety'] },
+        { label: 'Tokamak Budget', href: '/labs/budget', icon: Wallet, keywords: ['2 lakh', 'rnd', 'fast path'] },
+        { label: 'Fabless Network', href: '/labs/partners', icon: Network, keywords: ['istem', 'ceeri', 'mnit', 'work order'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Labs Dashboard', href: '/labs/dashboard', icon: LayoutDashboard },
+    { label: 'Equipment', href: '/labs/equipment', icon: Microscope },
+    { label: 'Bookings', href: '/labs/bookings', icon: CalendarDays },
+    { label: 'Budget', href: '/labs/budget', icon: Wallet },
+    { label: 'Fabless Partners', href: '/labs/partners', icon: Network },
+  ],
+};
+
+/** Tokamak Challenges — CompetitionAdmin */
+export const competitionsPortal: PortalConfig = {
+  personaLabel: 'Tokamak Challenges',
+  personaTitle: 'Gladiator Competitions',
+  homeHref: '/competitions/dashboard',
+  navGroups: [
+    {
+      title: 'Competitions',
+      items: [
+        { label: 'Dashboard', href: '/competitions/dashboard', icon: LayoutDashboard, keywords: ['gladiator', 'funnel'] },
+        { label: 'Active Challenges', href: '/competitions/challenges', icon: Target, keywords: ['sim-to-real', 'laser', 'junk physics'] },
+        { label: 'Funnel & Golden Tickets', href: '/competitions/funnel', icon: TrendingUp, keywords: ['whitepaper', 'top20', 'poach'] },
+        { label: 'Tokamak Network', href: '/competitions/network', icon: Network, keywords: ['community', 'channels', 'bounties'] },
+        { label: 'Bounties', href: '/competitions/bounties', icon: DollarSign, keywords: ['shodh', 'paid', 'tasks'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Competitions Dashboard', href: '/competitions/dashboard', icon: LayoutDashboard },
+    { label: 'Challenges', href: '/competitions/challenges', icon: Target },
+    { label: 'Funnel', href: '/competitions/funnel', icon: TrendingUp },
+    { label: 'Network', href: '/competitions/network', icon: Network },
+    { label: 'Bounties', href: '/competitions/bounties', icon: DollarSign },
+  ],
+};
+
+/** Wartime COO — operations isolation */
+export const operationsPortal: PortalConfig = {
+  personaLabel: 'COO Operations',
+  personaTitle: 'Wartime Command',
+  homeHref: '/operations/dashboard',
+  navGroups: [
+    {
+      title: 'Command',
+      items: [
+        { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, keywords: ['campus health', 'sla', 'dials'] },
+        { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, keywords: ['helpdesk', 'routing', 'queues'] },
+        { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode, keywords: ['physical', 'scan', 'location'] },
+        { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, keywords: ['dofa', 'grn', '3-way', 'penalties'] },
+        { label: 'Vendor Penalties', href: '/operations/penalties', icon: Scale, keywords: ['sla', 'auto debit'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard },
+    { label: 'ESM Queues', href: '/operations/esm', icon: Ticket },
+    { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode },
+    { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt },
+    { label: 'Vendor Penalties', href: '/operations/penalties', icon: Scale },
+  ],
+};
+
+/** Special programs — Wetware / portfolio degree admin */
+export const specialProgramsPortal: PortalConfig = {
+  personaLabel: 'Special Programs',
+  personaTitle: 'MIT-Killer Tracks',
+  homeHref: '/special-programs/dashboard',
+  navGroups: [
+    {
+      title: 'Programs',
+      items: [
+        { label: 'Dashboard', href: '/special-programs/dashboard', icon: LayoutDashboard, keywords: ['wetware', 'portfolio', 'hs direct'] },
+        { label: 'Wetware Biotech', href: '/special-programs/wetware', icon: FlaskConical, keywords: ['bsl-1', 'biobricks', 'biology'] },
+        { label: 'Portfolio Degree', href: '/special-programs/portfolio', icon: Briefcase, keywords: ['github', 'patents', 'builds'] },
+        { label: 'HS Direct Admissions', href: '/special-programs/hs-direct', icon: GraduationCap, keywords: ['11th', '12th', 'bypass jee'] },
+        { label: 'Professors of Practice', href: '/special-programs/pop', icon: Users, keywords: ['equity', 'founders', 'isro'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Programs Dashboard', href: '/special-programs/dashboard', icon: LayoutDashboard },
+    { label: 'Wetware', href: '/special-programs/wetware', icon: FlaskConical },
+    { label: 'Portfolio Degree', href: '/special-programs/portfolio', icon: Briefcase },
+    { label: 'HS Direct', href: '/special-programs/hs-direct', icon: GraduationCap },
+    { label: 'PoP', href: '/special-programs/pop', icon: Users },
   ],
 };

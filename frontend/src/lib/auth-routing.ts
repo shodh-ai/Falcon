@@ -96,8 +96,32 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/placements/dashboard';
   }
 
-  if (r === 'ecelladmin' || r === 'e-cell admin' || r === 'incubation_admin' || r === 'incubation admin') {
+  if (r === 'ecelladmin' || r === 'e-cell admin' || r === 'incubation_admin' || r === 'incubation admin' || r === 'fellowshipadmin') {
     return '/incubation/dashboard';
+  }
+
+  if (r === 'coo') {
+    return '/operations/dashboard';
+  }
+
+  if (r === 'estateofficer' || r === 'estate officer') {
+    return '/operations/esm';
+  }
+
+  if (r === 'labadmin' || r === 'lab admin') {
+    return '/labs/dashboard';
+  }
+
+  if (r === 'competitionadmin' || r === 'competition admin') {
+    return '/competitions/dashboard';
+  }
+
+  if (r === 'pop' || r === 'professor of practice') {
+    return '/special-programs/pop';
+  }
+
+  if (r === 'wrangler') {
+    return '/incubation/mentors';
   }
 
   if (r === 'transportofficer' || r === 'transport officer') {
@@ -136,7 +160,13 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'alumni') return 'Alumni Network';
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell Workspace';
   if (r === 'dc_member' || r === 'dc member') return 'Disciplinary Committee';
-  if (r === 'incubation_admin' || r === 'ecelladmin') return 'Incubation';
+  if (r === 'incubation_admin' || r === 'ecelladmin' || r === 'fellowshipadmin') return 'Incubation';
+  if (r === 'coo') return 'COO Operations';
+  if (r === 'estateofficer') return 'Estate Operations';
+  if (r === 'labadmin') return 'Tokamak Labs';
+  if (r === 'competitionadmin') return 'Tokamak Challenges';
+  if (r === 'pop') return 'Special Programs';
+  if (r === 'wrangler') return 'Wrangler Mentorship';
   if (r === 'campusadmin' || r === 'superadmin') return 'Campus Admin Workspace';
   if (r.includes('admission')) return 'Campus Admin Workspace';
   return `${role} Workspace`;
@@ -309,7 +339,7 @@ const portalRoles: Record<string, string[]> = {
   '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
   '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],
-  '/finance': ['accountant', 'superadmin'],
+  '/finance': ['accountant', 'superadmin', 'coo'],
   '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
   '/library': ['librarian', 'superadmin'],
   '/library-admin': ['librarian', 'superadmin'],
@@ -322,8 +352,12 @@ const portalRoles: Record<string, string[]> = {
   '/alumni-admin': ['iqac', 'superadmin', 'campusadmin', 'registrar', 'president'],
   '/admin-ops': ['registrar', 'superadmin', 'campusadmin', 'transportofficer'],
   '/placements': ['placementcell', 'superadmin', 'campusadmin', 'registrar'],
-  '/incubation': ['incubation_admin', 'ecelladmin', 'superadmin', 'campusadmin', 'hod', 'dean', 'president'],
+  '/incubation': ['incubation_admin', 'ecelladmin', 'fellowshipadmin', 'wrangler', 'superadmin', 'campusadmin', 'hod', 'dean', 'president'],
   '/ecell-admin': ['incubation_admin', 'ecelladmin', 'superadmin', 'campusadmin'],
+  '/labs': ['labadmin', 'superadmin', 'campusadmin', 'coo', 'wrangler'],
+  '/competitions': ['competitionadmin', 'superadmin', 'campusadmin', 'coo', 'incubation_admin'],
+  '/operations': ['coo', 'estateofficer', 'superadmin', 'campusadmin', 'chairman', 'president'],
+  '/special-programs': ['pop', 'dean', 'registrar', 'superadmin', 'campusadmin', 'hr', 'hradmin'],
   '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'campusadmin', 'parent'],
   '/reports': ['registrar', 'superadmin', 'campusadmin', 'president', 'accountant'],
   '/admin': ['superadmin', 'campusadmin', 'registrar'],
@@ -346,8 +380,8 @@ const portalRoles: Record<string, string[]> = {
     'student',
     'applicant',
   ],
-  '/tickets': ['student', 'faculty', 'hod', 'dean', 'hr', 'hradmin', 'superadmin', 'campusadmin', 'registrar', 'parent'],
-  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'campusadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator'],
+  '/tickets': ['student', 'faculty', 'hod', 'dean', 'hr', 'hradmin', 'superadmin', 'campusadmin', 'registrar', 'parent', 'coo', 'estateofficer'],
+  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'campusadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator', 'labadmin', 'wrangler'],
 };
 
 /** Derive the active workspace role from the current pathname (for multi-role users). */

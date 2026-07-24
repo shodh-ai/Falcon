@@ -73,28 +73,98 @@ export class TicketService {
 
     const ticketRef = await this.nextTicketRef();
 
+    const policyRows = await this.dataSource.query<
+      Array<{ resolve_mins: number; first_response_mins: number }>
+    >(
+      `SELECT resolve_mins, first_response_mins
+       FROM helpdesk_sla_policies
+       WHERE tenant_id = $1 AND category = $2 AND priority = 'NORMAL'
+       LIMIT 1`,
+      [tenantId, dto.category],
+    );
+    const resolveMins = Number(policyRows[0]?.resolve_mins ?? 1440);
+    const slaDeadline = new Date(Date.now() + resolveMins * 60 * 1000);
+
+    const queueRows = await this.dataSource.query<
+      Array<{ queue_id: string; assignee_role: string }>
+    >(
+      `SELECT queue_id, assignee_role FROM helpdesk_queues
+       WHERE tenant_id = $1 AND category = $2
+       LIMIT 1`,
+      [tenantId, dto.category],
+    );
+    const queue = queueRows[0];
+
+    let finalAssignee = assignee;
+    if (queue?.assignee_role && !dto.assigned_to_user_id) {
+      const roleUser = await this.dataSource.query<
+        Array<{ user_id: string; name: string; official_email: string }>
+      >(
+        `SELECT u.user_id, u.name, u.official_email
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.tenant_id = $1 AND u.is_active = true
+           AND lower(r.role_name) = lower($2)
+         LIMIT 1`,
+        [tenantId, queue.assignee_role],
+      );
+      if (roleUser[0]) {
+        finalAssignee = {
+          userId: roleUser[0].user_id,
+          name: roleUser[0].name,
+          email: roleUser[0].official_email ?? '',
+          routeReason: `QUEUE_${queue.assignee_role}`,
+        };
+      }
+    }
+
     const ticket = await this.tickets.save(
       this.tickets.create({
         student_user_id: studentUserId,
         ...ticketFields,
-        assigned_to_user_id: assignee.userId,
+        assigned_to_user_id: finalAssignee.userId,
         status: 'PENDING',
         tenant_id: tenantId,
         ticket_ref: ticketRef,
-        sla_deadline: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        sla_deadline: slaDeadline,
       } as Partial<HelpdeskTicket>),
     );
+
+    if (queue?.queue_id) {
+      await this.dataSource.query(
+        `UPDATE helpdesk_tickets SET queue_id = $2 WHERE ticket_id = $1`,
+        [ticket.ticket_id, queue.queue_id],
+      );
+    }
+
+    try {
+      await this.dataSource.query(
+        `INSERT INTO helpdesk_ticket_events (ticket_id, event_type, actor_user_id, payload)
+         VALUES ($1, 'CREATED', $2, $3::jsonb)`,
+        [
+          ticket.ticket_id,
+          studentUserId,
+          JSON.stringify({
+            category: dto.category,
+            resolve_mins: resolveMins,
+            queue_id: queue?.queue_id ?? null,
+          }),
+        ],
+      );
+    } catch {
+      // Event ledger is best-effort; ticket create must not fail if ledger lags.
+    }
 
     const actionLink =
       dto.category === 'HR'
         ? `/hr/grievances/${ticket.ticket_id}`
         : dto.category === 'FACILITIES'
-          ? `/hr/grievances/${ticket.ticket_id}`
+          ? `/operations/esm`
           : `/helpdesk/tickets/${ticket.ticket_id}`;
 
     this.workflowNotify.notifyApprover({
       tenantId,
-      approver: assignee,
+      approver: finalAssignee,
       title: `Helpdesk: ${dto.subject}`,
       message: `${student?.name ?? 'Student'} opened a ${dto.category} ticket.`,
       actionLink,

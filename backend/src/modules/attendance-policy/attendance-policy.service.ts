@@ -19,6 +19,7 @@ const EXEMPTION_REASONS = [
   'INTERNSHIP',
   'BEREAVEMENT',
   'OTHER',
+  'ELITE_FELLOW',
 ];
 
 interface CreateExemptionDto {
@@ -608,5 +609,33 @@ export class AttendancePolicyService {
         ...payload,
       });
     }
+  }
+
+  /** Auto-approve 100% attendance waiver for elite / Hacker Filter fellows. */
+  async ensureEliteFellowWaiver(tenantId: string, studentUserId: string) {
+    const existing = await this.db.query(
+      `SELECT * FROM student_attendance_exemptions
+       WHERE tenant_id = $1 AND student_user_id = $2
+         AND reason_category = 'ELITE_FELLOW' AND status = 'APPROVED'
+       LIMIT 1`,
+      [tenantId, studentUserId],
+    );
+    if (existing[0]) return existing[0];
+
+    const attendance =
+      await this.eligibility.computeAttendancePercent(studentUserId);
+
+    const rows = await this.db.query(
+      `INSERT INTO student_attendance_exemptions
+         (tenant_id, student_user_id, reason_category, description, supporting_doc_url,
+          attendance_percent_at_request, status, final_decided_at, final_remarks)
+       VALUES ($1, $2, 'ELITE_FELLOW',
+               'Elite fellow / Hacker Filter — 100% lecture attendance waiver (UROP)',
+               'system://hacker-filter',
+               $3, 'APPROVED', NOW(), 'Auto-approved via fellowship conversion')
+       RETURNING *`,
+      [tenantId, studentUserId, attendance],
+    );
+    return rows[0];
   }
 }
