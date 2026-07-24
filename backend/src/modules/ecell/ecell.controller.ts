@@ -237,7 +237,14 @@ export class EcellController {
   }
 
   @Get('admin/dashboard')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'FellowshipAdmin',
+    'Wrangler',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   dashboard(@Req() req: { user: AuthUser }) {
     return this.ecell.dashboardSummary(this.tenant(req));
   }

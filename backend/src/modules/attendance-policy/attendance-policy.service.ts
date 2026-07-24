@@ -613,6 +613,11 @@ export class AttendancePolicyService {
 
   /** Auto-approve 100% attendance waiver for elite / Hacker Filter fellows. */
   async ensureEliteFellowWaiver(tenantId: string, studentUserId: string) {
+    if (!studentUserId) {
+      throw new BadRequestException(
+        'studentUserId is required for elite fellow waiver',
+      );
+    }
     const existing = await this.db.query(
       `SELECT * FROM student_attendance_exemptions
        WHERE tenant_id = $1 AND student_user_id = $2
