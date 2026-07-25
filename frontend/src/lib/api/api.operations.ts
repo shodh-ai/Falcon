@@ -10,13 +10,13 @@ export function createOperationsApi(api: AuthedApi) {
     queues: () => api.get<any[]>('/api/operations/esm/queues'),
     locations: () => api.get<any[]>('/api/operations/esm/locations'),
     fromQr: (body: { qr_code: string; subject?: string }) =>
-      api.post('/api/operations/esm/from-qr', body),
-    scanClose: (id: string) => api.post(`/api/operations/esm/tickets/${id}/scan-close`),
+      api.post<any>('/api/operations/esm/from-qr', body),
+    scanClose: (id: string) => api.post<any>(`/api/operations/esm/tickets/${id}/scan-close`),
     dofa: () => api.get<any[]>('/api/operations/p2p/dofa'),
     dofaLevels: () => api.get<any[]>('/api/operations/p2p/dofa/levels'),
     purchaseOrders: () => api.get<any[]>('/api/operations/p2p/purchase-orders'),
     createPo: (body: { description: string; amount: number; vendor_id?: string }) =>
-      api.post('/api/operations/p2p/purchase-orders', body),
+      api.post<any>('/api/operations/p2p/purchase-orders', body),
     grns: () => api.get<any[]>('/api/operations/p2p/grn'),
     createGrn: (body: {
       po_id: string;
@@ -26,13 +26,13 @@ export function createOperationsApi(api: AuthedApi) {
       asset_barcode: string;
       qty_received?: number;
       received_at_gate?: boolean;
-    }) => api.post('/api/operations/p2p/grn', body),
+    }) => api.post<any>('/api/operations/p2p/grn', body),
     threeWayMatch: (id: string) =>
       api.get<any>(`/api/operations/p2p/purchase-orders/${id}/three-way-match`),
-    payPo: (id: string) => api.post(`/api/operations/p2p/purchase-orders/${id}/pay`),
+    payPo: (id: string) => api.post<any>(`/api/operations/p2p/purchase-orders/${id}/pay`),
     penalties: () => api.get<any[]>('/api/operations/p2p/penalties'),
     applyPenalty: (body: { vendor_id: string; reason: string; amount_inr: number }) =>
-      api.post('/api/operations/p2p/penalties', body),
+      api.post<any>('/api/operations/p2p/penalties', body),
 
     requisitions: (status?: string) =>
       api.get<any[]>(
@@ -48,9 +48,9 @@ export function createOperationsApi(api: AuthedApi) {
       technical_specs?: string;
       budget_id?: string;
       program_id?: string;
-    }) => api.post('/api/operations/p2p/requisitions', body),
+    }) => api.post<any>('/api/operations/p2p/requisitions', body),
     claimRequisition: (id: string) =>
-      api.post(`/api/operations/p2p/requisitions/${id}/claim`),
+      api.post<any>(`/api/operations/p2p/requisitions/${id}/claim`),
     addQuote: (
       id: string,
       body: {
@@ -60,20 +60,28 @@ export function createOperationsApi(api: AuthedApi) {
         pdf_path: string;
         vendor_id?: string;
       },
-    ) => api.post(`/api/operations/p2p/requisitions/${id}/quotes`, body),
+    ) => api.post<any>(`/api/operations/p2p/requisitions/${id}/quotes`, body),
     submitForApproval: (
       id: string,
       body: { selected_quote_id: string; non_lowest_justification?: string },
-    ) => api.post(`/api/operations/p2p/requisitions/${id}/submit-for-approval`, body),
+    ) =>
+      api.post<any>(
+        `/api/operations/p2p/requisitions/${id}/submit-for-approval`,
+        body,
+      ),
     submitRequisition: (
       id: string,
-      body: { selected_quote_id: string; l2_justification?: string; non_lowest_justification?: string },
-    ) => api.post(`/api/operations/p2p/requisitions/${id}/submit`, body),
+      body: {
+        selected_quote_id: string;
+        l2_justification?: string;
+        non_lowest_justification?: string;
+      },
+    ) => api.post<any>(`/api/operations/p2p/requisitions/${id}/submit`, body),
     approvalsInbox: () => api.get<any[]>('/api/operations/p2p/approvals/inbox'),
     approveRequisition: (
       id: string,
       body?: { notes?: string; decision?: 'APPROVED' | 'REJECTED' },
-    ) => api.post(`/api/operations/p2p/requisitions/${id}/approve`, body ?? {}),
+    ) => api.post<any>(`/api/operations/p2p/requisitions/${id}/approve`, body ?? {}),
 
     catalog: () => api.get<any[]>('/api/operations/p2p/catalog'),
     upsertCatalog: (body: {
@@ -84,14 +92,15 @@ export function createOperationsApi(api: AuthedApi) {
       locked_unit_price: number;
       vendor_id: string;
       catalog_item_id?: string;
-    }) => api.post('/api/operations/p2p/catalog', body),
+    }) => api.post<any>('/api/operations/p2p/catalog', body),
     orderCatalog: (body: { catalog_item_id: string; qty: number }) =>
-      api.post('/api/operations/p2p/catalog/order', body),
+      api.post<any>('/api/operations/p2p/catalog/order', body),
 
     fraudSignals: () => api.get<any>('/api/operations/p2p/analytics/fraud-signals'),
-    invoiceSplitScan: () => api.post('/api/operations/p2p/analytics/invoice-split-scan'),
+    invoiceSplitScan: () =>
+      api.post<any>('/api/operations/p2p/analytics/invoice-split-scan'),
     verifyVendorGst: (id: string) =>
-      api.post(`/api/operations/p2p/vendors/${id}/verify-gst`),
+      api.post<any>(`/api/operations/p2p/vendors/${id}/verify-gst`),
     orgPillars: () => api.get<any>('/api/operations/org/pillars'),
   };
 }
