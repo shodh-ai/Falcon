@@ -20,7 +20,22 @@ export default function Page() {
           <CardHeader className="pb-2"><CardTitle className="text-base">{c.equipment_name}</CardTitle></CardHeader>
           <CardContent className="flex gap-2 text-sm">
             <span>{c.user_name} · {c.returned_at ? 'Returned' : 'Out'}</span>
-            {!c.returned_at && <Button size="sm" onClick={() => labs.returnCheckout(c.checkout_id).then(reload)}>Return</Button>}
+            {!c.returned_at && (
+              <Button
+                size="sm"
+                onClick={() =>
+                  labs
+                    .returnCheckout(c.checkout_id)
+                    .then(() => {
+                      toast.success(`${c.equipment_name} returned`);
+                      return reload();
+                    })
+                    .catch((err) => toast.error(String(err.message ?? err)))
+                }
+              >
+                Return
+              </Button>
+            )}
           </CardContent>
         </Card>
       ))}

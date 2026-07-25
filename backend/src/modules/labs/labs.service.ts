@@ -21,25 +21,70 @@ export class LabsService {
     );
   }
 
+  private equipmentStatusExpr = `CASE
+    WHEN e.status = 'MAINTENANCE' THEN 'MAINTENANCE'
+    WHEN EXISTS (
+      SELECT 1 FROM lab_equipment_checkouts c
+      WHERE c.equipment_id = e.equipment_id AND c.returned_at IS NULL
+    ) THEN 'CHECKED_OUT'
+    ELSE 'AVAILABLE'
+  END`;
+
+  private equipmentSelect = `
+    SELECT
+      e.equipment_id,
+      e.tenant_id,
+      e.zone_id,
+      e.name,
+      e.asset_tag,
+      e.specs,
+      e.requires_safety_training,
+      (${this.equipmentStatusExpr}) AS status,
+      z.zone_code,
+      z.name AS zone_name
+    FROM lab_equipment e
+    JOIN lab_zones z ON z.zone_id = e.zone_id`;
+
   listEquipment(tenantId?: string, zoneId?: string) {
     const tid = this.tenant(tenantId);
     if (zoneId) {
       return this.db.query(
-        `SELECT e.*, z.zone_code, z.name AS zone_name
-         FROM lab_equipment e
-         JOIN lab_zones z ON z.zone_id = e.zone_id
+        `${this.equipmentSelect}
          WHERE e.tenant_id = $1 AND e.zone_id = $2
          ORDER BY e.name`,
         [tid, zoneId],
       );
     }
     return this.db.query(
-      `SELECT e.*, z.zone_code, z.name AS zone_name
-       FROM lab_equipment e
-       JOIN lab_zones z ON z.zone_id = e.zone_id
+      `${this.equipmentSelect}
        WHERE e.tenant_id = $1
        ORDER BY z.zone_code, e.name`,
       [tid],
+    );
+  }
+
+  /** Align stored status with open checkout rows (repairs drift after return). */
+  private async syncEquipmentAvailability(
+    equipmentId: string,
+    runner: Pick<DataSource, 'query'> = this.db,
+  ) {
+    const eqRows = await runner.query(
+      `SELECT status FROM lab_equipment WHERE equipment_id = $1`,
+      [equipmentId],
+    );
+    if (eqRows[0]?.status === 'MAINTENANCE') return;
+
+    const open = await runner.query(
+      `SELECT 1 FROM lab_equipment_checkouts
+       WHERE equipment_id = $1 AND returned_at IS NULL
+       LIMIT 1`,
+      [equipmentId],
+    );
+    const status = open.length ? 'CHECKED_OUT' : 'AVAILABLE';
+    await runner.query(
+      `UPDATE lab_equipment SET status = $2
+       WHERE equipment_id = $1 AND status <> 'MAINTENANCE'`,
+      [equipmentId, status],
     );
   }
 
@@ -50,8 +95,11 @@ export class LabsService {
     safetyAck?: boolean,
   ) {
     const tid = this.tenant(tenantId);
+    await this.syncEquipmentAvailability(equipmentId);
+
     const rows = await this.db.query(
-      `SELECT * FROM lab_equipment WHERE equipment_id = $1 AND tenant_id = $2`,
+      `${this.equipmentSelect}
+       WHERE e.equipment_id = $1 AND e.tenant_id = $2`,
       [equipmentId, tid],
     );
     const eq = rows[0];
@@ -62,35 +110,55 @@ export class LabsService {
     if (eq.requires_safety_training && !safetyAck) {
       throw new BadRequestException('Safety acknowledgement required');
     }
-    await this.db.query(
-      `UPDATE lab_equipment SET status = 'CHECKED_OUT' WHERE equipment_id = $1`,
-      [equipmentId],
-    );
-    const checkout = await this.db.query(
-      `INSERT INTO lab_equipment_checkouts (
-         tenant_id, equipment_id, user_id, due_at, safety_ack
-       ) VALUES ($1, $2, $3, NOW() + INTERVAL '8 hours', $4)
-       RETURNING *`,
-      [tid, equipmentId, userId, Boolean(safetyAck)],
-    );
-    return checkout[0];
+
+    const qr = this.db.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    try {
+      await qr.query(
+        `UPDATE lab_equipment SET status = 'CHECKED_OUT' WHERE equipment_id = $1`,
+        [equipmentId],
+      );
+      const checkout = await qr.query(
+        `INSERT INTO lab_equipment_checkouts (
+           tenant_id, equipment_id, user_id, due_at, safety_ack
+         ) VALUES ($1, $2, $3, NOW() + INTERVAL '8 hours', $4)
+         RETURNING *`,
+        [tid, equipmentId, userId, Boolean(safetyAck)],
+      );
+      await qr.commitTransaction();
+      return checkout[0];
+    } catch (err) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
   }
 
   async returnEquipment(tenantId: string | undefined, checkoutId: string) {
     const tid = this.tenant(tenantId);
-    const rows = await this.db.query(
-      `UPDATE lab_equipment_checkouts
-       SET returned_at = NOW()
-       WHERE checkout_id = $1 AND tenant_id = $2 AND returned_at IS NULL
-       RETURNING *`,
-      [checkoutId, tid],
-    );
-    if (!rows[0]) throw new NotFoundException('Checkout not found');
-    await this.db.query(
-      `UPDATE lab_equipment SET status = 'AVAILABLE' WHERE equipment_id = $1`,
-      [rows[0].equipment_id],
-    );
-    return rows[0];
+    const qr = this.db.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    try {
+      const rows = await qr.query(
+        `UPDATE lab_equipment_checkouts
+         SET returned_at = NOW()
+         WHERE checkout_id = $1 AND tenant_id = $2 AND returned_at IS NULL
+         RETURNING *`,
+        [checkoutId, tid],
+      );
+      if (!rows[0]) throw new NotFoundException('Checkout not found');
+      await this.syncEquipmentAvailability(rows[0].equipment_id, qr);
+      await qr.commitTransaction();
+      return rows[0];
+    } catch (err) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
   }
 
   listCheckouts(tenantId?: string) {

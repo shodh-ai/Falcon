@@ -17,7 +17,18 @@ export default function Page() {
       <h1 className="text-2xl font-black text-sgvu-navy">Portfolio Degree</h1>
       <div className="flex gap-2">
         <Button size="sm" onClick={() => sp.addArtifact({ artifact_type: 'GITHUB_REPO', title: 'Demo repo', url: 'https://github.com/example/demo' }).then(reload)}>Add GitHub</Button>
-        <Button size="sm" variant="outline" onClick={() => sp.publishTranscript({ mode: 'PORTFOLIO' }).then(() => toast.success('Published'))}>Publish transcript</Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            sp
+              .publishTranscript({ mode: 'PORTFOLIO' })
+              .then(() => toast.success('Portfolio transcript published'))
+              .catch((e) => toast.error(String(e.message ?? e)))
+          }
+        >
+          Publish transcript
+        </Button>
       </div>
       {arts.map((a) => <Card key={a.artifact_id}><CardContent className="pt-4 text-sm">{a.artifact_type}: {a.title}</CardContent></Card>)}
     </div>

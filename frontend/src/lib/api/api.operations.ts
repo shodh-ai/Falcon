@@ -11,13 +11,17 @@ export function createOperationsApi(api: AuthedApi) {
     fromQr: (body: { qr_code: string; subject?: string }) =>
       api.post('/api/operations/esm/from-qr', body),
     scanClose: (id: string) => api.post(`/api/operations/esm/tickets/${id}/scan-close`),
+    tickets: () => api.get<any[]>('/api/operations/esm/tickets'),
     dofa: () => api.get<any[]>('/api/operations/p2p/dofa'),
     purchaseOrders: () => api.get<any[]>('/api/operations/p2p/purchase-orders'),
     createPo: (body: { description: string; amount: number; vendor_id?: string }) =>
       api.post('/api/operations/p2p/purchase-orders', body),
     grns: () => api.get<any[]>('/api/operations/p2p/grn'),
+    vendors: () => api.get<any[]>('/api/operations/p2p/vendors'),
     createGrn: (body: { po_id: string; notes?: string }) =>
       api.post('/api/operations/p2p/grn', body),
+    createInvoice: (poId: string) =>
+      api.post(`/api/operations/p2p/purchase-orders/${poId}/invoice`, {}),
     threeWayMatch: (id: string) =>
       api.get<any>(`/api/operations/p2p/purchase-orders/${id}/three-way-match`),
     payPo: (id: string) => api.post(`/api/operations/p2p/purchase-orders/${id}/pay`),

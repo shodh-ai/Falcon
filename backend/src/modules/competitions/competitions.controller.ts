@@ -102,4 +102,10 @@ export class CompetitionsController {
   pay(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     return this.competitions.markBountyPaid(this.tenant(req), id);
   }
+
+  @Post('bounties/:id/reopen')
+  @Roles('CompetitionAdmin', 'SuperAdmin')
+  reopen(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.competitions.reopenBounty(this.tenant(req), id);
+  }
 }

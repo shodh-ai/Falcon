@@ -172,6 +172,31 @@ export class CooOpsService {
     return rows[0];
   }
 
+  listOpenTickets(tenantId?: string) {
+    return this.db.query(
+      `SELECT t.ticket_id, t.ticket_ref, t.subject, t.category, t.status, t.sla_deadline,
+              t.created_at, l.label AS location_label, l.qr_code
+       FROM helpdesk_tickets t
+       LEFT JOIN helpdesk_locations l ON l.location_id = t.location_id
+       WHERE t.tenant_id = $1
+         AND t.status NOT IN ('RESOLVED', 'CLOSED', 'REJECTED')
+       ORDER BY t.created_at DESC
+       LIMIT 50`,
+      [this.tenant(tenantId)],
+    );
+  }
+
+  listVendors(tenantId?: string) {
+    return this.db.query(
+      `SELECT vendor_id, business_name, contact_email
+       FROM fin_vendors
+       WHERE tenant_id = $1 AND is_active = true
+       ORDER BY business_name
+       LIMIT 100`,
+      [this.tenant(tenantId)],
+    );
+  }
+
   listDofa(tenantId?: string) {
     return this.db.query(
       `SELECT * FROM fin_dofa_rules WHERE tenant_id = $1 ORDER BY max_amount_inr DESC`,
@@ -319,6 +344,14 @@ export class CooOpsService {
     poId: string,
   ) {
     const tid = this.tenant(tenantId);
+    const poCheck = await this.db.query(
+      `SELECT status FROM fin_purchase_orders WHERE po_id = $1 AND tenant_id = $2`,
+      [poId, tid],
+    );
+    if (!poCheck[0]) throw new NotFoundException('PO not found');
+    if (poCheck[0].status === 'PAID') {
+      throw new BadRequestException('PO already paid');
+    }
     const match = await this.threeWayMatch(tid, poId);
     if (!match.can_pay) {
       throw new BadRequestException({
@@ -389,5 +422,64 @@ export class CooOpsService {
        LIMIT 100`,
       [this.tenant(tenantId)],
     );
+  }
+
+  private async resolvePoVendorId(tenantId: string, po: { po_id: string; vendor_id?: string | null }) {
+    if (po.vendor_id) return po.vendor_id;
+    const existing = await this.db.query(
+      `SELECT vendor_id FROM fin_vendors WHERE tenant_id = $1 AND is_active = true ORDER BY created_at LIMIT 1`,
+      [tenantId],
+    );
+    let vendorId = existing[0]?.vendor_id as string | undefined;
+    if (!vendorId) {
+      const created = await this.db.query(
+        `INSERT INTO fin_vendors (tenant_id, business_name, contact_email, is_active)
+         VALUES ($1, 'P2P Demo Vendor', 'vendor@demo.local', true)
+         RETURNING vendor_id`,
+        [tenantId],
+      );
+      vendorId = created[0]?.vendor_id;
+    }
+    if (!vendorId) throw new BadRequestException('No vendor available for invoice');
+    await this.db.query(
+      `UPDATE fin_purchase_orders SET vendor_id = $1 WHERE po_id = $2`,
+      [vendorId, po.po_id],
+    );
+    return vendorId;
+  }
+
+  async createVendorInvoiceForPo(tenantId: string | undefined, poId: string) {
+    const tid = this.tenant(tenantId);
+    const poRows = await this.db.query(
+      `SELECT * FROM fin_purchase_orders WHERE po_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [poId, tid],
+    );
+    const po = poRows[0];
+    if (!po) throw new NotFoundException('PO not found');
+
+    const existing = await this.db.query(
+      `SELECT invoice_id FROM fin_vendor_invoices WHERE tenant_id = $1 AND po_id = $2 LIMIT 1`,
+      [tid, poId],
+    );
+    if (existing[0]) {
+      return this.db.query(
+        `SELECT * FROM fin_vendor_invoices WHERE invoice_id = $1`,
+        [existing[0].invoice_id],
+      ).then((rows) => rows[0]);
+    }
+
+    const vendorId = await this.resolvePoVendorId(tid, po);
+    const amount = Number(po.amount);
+    const invoiceNumber = `PO-${String(poId).slice(0, 8).toUpperCase()}`;
+    const rows = await this.db.query(
+      `INSERT INTO fin_vendor_invoices (
+         tenant_id, vendor_id, invoice_number, invoice_date,
+         taxable_amount, gst_amount, tds_amount, total_amount, net_payable,
+         status, po_id
+       ) VALUES ($1, $2, $3, CURRENT_DATE, $4, 0, 0, $4, $4, 'APPROVED', $5)
+       RETURNING *`,
+      [tid, vendorId, invoiceNumber, amount, poId],
+    );
+    return rows[0];
   }
 }

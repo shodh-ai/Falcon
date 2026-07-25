@@ -206,6 +206,20 @@ export type AdmissionsAnalytics = {
     converted: number;
     conversion_rate_pct: number;
   }>;
+  golden_ticket_leads?: Array<{
+    lead_id: string;
+    full_name: string;
+    email: string;
+    stage: string;
+    golden_ticket_code: string | null;
+    competition_title: string;
+    created_at: string;
+  }>;
+  golden_ticket_summary?: {
+    total: number;
+    enrolled: number;
+    pending_conversion: number;
+  };
 };
 
 export function useLeadershipApi() {

@@ -81,7 +81,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
-import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
+import { rolesIncludeAny, rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
@@ -109,6 +109,22 @@ export interface NavItem {
   /** Shorter label for mobile bottom nav */
   shortLabel?: string;
 }
+
+/** Cross-portal nav — Blueprint Track 3 (Deep-Tech R&D Moonshots). */
+export const moonshotsNavItem: NavItem = {
+  label: 'Deep-Tech Moonshots',
+  href: '/research/moonshots',
+  icon: Rocket,
+  keywords: [
+    'zero-day',
+    'programmable matter',
+    'quantum',
+    'microfluidics',
+    'moonshots',
+    'deep-tech',
+    'rnd',
+  ],
+};
 
 export interface NavGroup {
   title: string;
@@ -267,16 +283,24 @@ export function flattenNavToCommandItems(navGroups: NavGroup[]): NavItem[] {
 
 export function filterPortalConfigForRole(config: PortalConfig, role: string | undefined | null): PortalConfig {
   const normalizedRole = (role ?? '').trim();
+  return filterPortalConfigForRoles(config, normalizedRole ? [normalizedRole] : []);
+}
+
+export function filterPortalConfigForRoles(
+  config: PortalConfig,
+  roles: string[] | undefined | null,
+): PortalConfig {
+  const roleList = (roles ?? []).map((r) => r.trim()).filter(Boolean);
   const navGroups = config.navGroups
     .map((group) => ({
       ...group,
       items: group.items.filter(
-        (item) => !item.roles || rolesMatchForAccess(normalizedRole, item.roles),
+        (item) => !item.roles || rolesIncludeAny(roleList, item.roles),
       ),
     }))
     .filter((group) => group.items.length > 0);
   const commandItems = config.commandItems.filter(
-    (item) => !item.roles || rolesMatchForAccess(normalizedRole, item.roles),
+    (item) => !item.roles || rolesIncludeAny(roleList, item.roles),
   );
 
   return { ...config, navGroups, commandItems };
@@ -409,6 +433,8 @@ export const studentPortal: PortalConfig = {
         { label: 'Venue Booking', href: '/student/venues', icon: Building2, keywords: ['room', 'gd', 'seminar', 'hall', 'classroom', 'booking'] },
         { label: 'E-Cell & Incubation', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
         { label: 'Tokamak Challenges', href: '/student/challenges', icon: Target, keywords: ['gladiator', 'hackathon', 'whitepaper', 'golden ticket'] },
+        { label: 'Portfolio Degree', href: '/student/portfolio', icon: BriefcaseBusiness, keywords: ['github', 'patents', 'portfolio', 'transcript', 'builds'] },
+        { label: 'Wetware Biotech', href: '/student/wetware', icon: FlaskConical, keywords: ['bsl-1', 'biobricks', 'biology', 'wetware', 'biotech'] },
         { label: 'Research Grants', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
         { label: 'Ph.D. Programme', href: '/student/phd', icon: GraduationCap, keywords: ['phd', 'pet', 'doctorate', 'research', 'thesis'] },
       ],
@@ -489,6 +515,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
         { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
         { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
+        moonshotsNavItem,
       ],
     },
     {
@@ -538,6 +565,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
         { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
         { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
+        moonshotsNavItem,
       ],
     },
     {
@@ -711,6 +739,10 @@ export const hodPortal: PortalConfig = {
         { label: 'Department Analytics', href: '/hod/reports', icon: LineChart, keywords: ['analytics', 'reports', 'trends', 'departmental'] },
       ],
     },
+    {
+      title: 'Research & Innovation',
+      items: [moonshotsNavItem],
+    },
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
@@ -828,6 +860,7 @@ export const deanPortal: PortalConfig = {
         { label: 'Faculty Leaderboard', href: '/dean/faculty/leaderboard', icon: Medal, keywords: ['performance', 'ranking', 'api'] },
         { label: 'Placement Dashboard', href: '/dean/placement', icon: Briefcase, keywords: ['placement', 'offers', 'companies'] },
         { label: 'Research Dashboard', href: '/dean/research', icon: Microscope, keywords: ['publications', 'grants', 'projects'] },
+        moonshotsNavItem,
         { label: 'Budget Monitoring', href: '/dean/budget', icon: Wallet, keywords: ['budget', 'spend', 'allocation'] },
         { label: 'Executive Reports', href: '/dean/reports', icon: FileText, keywords: ['export', 'pdf', 'excel', 'csv'] },
         { label: 'Global Search', href: '/dean/search', icon: Search, keywords: ['find', 'lookup', 'directory'] },
@@ -887,6 +920,7 @@ export const deanPortal: PortalConfig = {
         { label: 'Faculty Leaderboard', href: '/dean/faculty/leaderboard', icon: Medal, keywords: ['leaderboard'] },
         { label: 'Placement Dashboard', href: '/dean/placement', icon: Briefcase, keywords: ['placement'] },
         { label: 'Research Dashboard', href: '/dean/research', icon: Microscope, keywords: ['research'] },
+        moonshotsNavItem,
         { label: 'Budget Monitoring', href: '/dean/budget', icon: Wallet, keywords: ['budget'] },
         { label: 'Executive Reports', href: '/dean/reports', icon: FileText, keywords: ['reports'] },
         { label: 'Global Search', href: '/dean/search', icon: Search, keywords: ['search'] },
@@ -1251,7 +1285,7 @@ export const researchPortal: PortalConfig = {
         { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText, keywords: ['thesis', 'viva', 'synopsis'], roles: ['RRC_MEMBER', 'SuperAdmin'] },
         { label: 'Adjudicator Reviews', href: '/research/adjudicator/reviews', icon: Scale, keywords: ['synopsis', 'thesis', 'evaluation'], roles: ['PHD_ADJUDICATOR', 'SuperAdmin'] },
         { label: 'Research Grants', href: '/research/grants', icon: FlaskConical, keywords: ['grants', 'funding'], roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Chairman'] },
-        { label: 'Deep-Tech Moonshots', href: '/research/moonshots', icon: Rocket, keywords: ['zero-day', 'programmable matter', 'quantum', 'microfluidics'], roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Dean', 'LabAdmin', 'Wrangler'] },
+        { ...moonshotsNavItem, roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Dean', 'HOD', 'LabAdmin', 'Wrangler'] },
       ],
     },
   ],
@@ -1260,7 +1294,7 @@ export const researchPortal: PortalConfig = {
     { label: 'RAC Reviews', href: '/research/rac/reviews', icon: Users },
     { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText },
     { label: 'Scholar Pipeline', href: '/research/scholars', icon: GraduationCap },
-    { label: 'Moonshots', href: '/research/moonshots', icon: Rocket },
+    moonshotsNavItem,
   ],
 };
 
@@ -1415,6 +1449,8 @@ export const leadershipPortal: PortalConfig = {
         { label: 'Financials', href: '/leadership/financial-oversight', icon: Landmark, keywords: ['budget', 'treasury', 'cash', 'revenue', 'defaulters'] },
         { label: 'Academics', href: '/leadership/academics', icon: GraduationCap, keywords: ['attendance', 'naac', 'placements', 'admissions'] },
         { label: 'Reports', href: '/leadership/intelligence', icon: LineChart, keywords: ['analytics', 'versus', 'forecast', 'ai', 'insights'] },
+        { label: 'Action Center', href: '/leadership/action-center', icon: Target, keywords: ['tasks', 'memos', 'approvals', 'executive'] },
+        { label: 'Admissions Funnel', href: '/leadership/admissions-funnel', icon: TrendingUp, keywords: ['golden ticket', 'gladiator', 'leads', 'enrollment'] },
         { label: 'Vault', href: '/leadership/vault', icon: FileLock, keywords: ['documents', 'mou', 'legal', 'audit'] },
       ],
     },
@@ -1602,11 +1638,33 @@ export const adminPortal: PortalConfig = {
         { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['CampusAdmin', 'SuperAdmin'] },
         { label: 'University Directory', href: '/directory', icon: Contact, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'President'] },
         { label: 'Ph.D. Admissions & Awards', href: '/admin/phd/admissions', icon: GraduationCap, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
+        {
+          label: 'HS Direct Admissions',
+          href: '/special-programs/hs-direct',
+          icon: ScrollText,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'AdmissionsOfficer'],
+          keywords: ['hs direct', 'high school', '11th', '12th', 'bypass jee', 'mit-killer'],
+        },
+        {
+          label: 'Portfolio Degree',
+          href: '/special-programs/portfolio',
+          icon: BriefcaseBusiness,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'PoP'],
+          keywords: ['portfolio', 'github', 'transcript'],
+        },
+        {
+          label: 'Wetware Biotech',
+          href: '/special-programs/wetware',
+          icon: FlaskConical,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'PoP', 'Dean'],
+          keywords: ['wetware', 'biotech', 'biobricks'],
+        },
       ],
     },
   ],
   commandItems: [
     { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer'] },
+    { label: 'HS Direct Admissions', href: '/special-programs/hs-direct', icon: ScrollText, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'AdmissionsOfficer'] },
     { label: 'Pending Approvals', href: '/admin/verifications', icon: ListChecks },
     { label: 'University Directory', href: '/directory', icon: Contact },
     { label: 'Export Reports', href: '/reports', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'President', 'IQAC', 'Registrar'] },
@@ -1627,6 +1685,7 @@ export const labsPortal: PortalConfig = {
         { label: 'Bookings & Checkout', href: '/labs/bookings', icon: CalendarDays, keywords: ['booking', 'checkout', 'safety'] },
         { label: 'Tokamak Budget', href: '/labs/budget', icon: Wallet, keywords: ['2 lakh', 'rnd', 'fast path'] },
         { label: 'Fabless Network', href: '/labs/partners', icon: Network, keywords: ['istem', 'ceeri', 'mnit', 'work order'] },
+        moonshotsNavItem,
       ],
     },
   ],
@@ -1636,6 +1695,7 @@ export const labsPortal: PortalConfig = {
     { label: 'Bookings', href: '/labs/bookings', icon: CalendarDays },
     { label: 'Budget', href: '/labs/budget', icon: Wallet },
     { label: 'Fabless Partners', href: '/labs/partners', icon: Network },
+    moonshotsNavItem,
   ],
 };
 
