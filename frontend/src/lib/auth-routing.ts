@@ -40,8 +40,12 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/hostel-admin/dashboard';
   }
 
-  if (r === 'accountant') {
+  if (r === 'accountant' || r === 'cfo' || r === 'apmanager' || r === 'apclerk' || r === 'financecontroller') {
     return isRoleWorkspaceEnabled('accountant') ? '/finance/dashboard' : '/dashboard';
+  }
+
+  if (r === 'internalauditor') {
+    return '/leadership/org-chart';
   }
 
   if (r === 'iqac') {
@@ -151,7 +155,8 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'dean') return 'Dean Workspace';
   if (r === 'hr' || r === 'hradmin') return 'HR Workspace';
   if (r === 'warden') return 'Hostel Workspace';
-  if (r === 'accountant') return 'Finance Workspace';
+  if (r === 'accountant' || r === 'cfo' || r === 'apmanager' || r === 'apclerk') return 'Finance Workspace';
+  if (r === 'internalauditor') return 'Internal Audit';
   if (r === 'iqac') return 'IQAC Workspace';
   if (r === 'librarian') return 'Library Workspace';
   if (r === 'president') return 'Executive Workspace';
@@ -339,12 +344,60 @@ const portalRoles: Record<string, string[]> = {
   '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
   '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],
-  '/finance': ['accountant', 'superadmin', 'coo'],
+  '/finance': [
+    'accountant',
+    'superadmin',
+    'coo',
+    'cfo',
+    'apmanager',
+    'apclerk',
+    'financecontroller',
+    'procurement',
+    'procurementhead',
+    'procurementbuyer',
+    'stores',
+    'security',
+    'receivingclerk',
+    'internalauditor',
+  ],
+  '/approvals': [
+    'superadmin',
+    'campusadmin',
+    'chairman',
+    'president',
+    'coo',
+    'cfo',
+    'dean',
+    'hod',
+    'hr',
+    'hradmin',
+    'examcell',
+    'examadmin',
+    'deputycoe',
+    'faculty',
+    'labadmin',
+    'accountant',
+    'apmanager',
+    'financecontroller',
+    'estateofficer',
+    'security',
+    'legalofficer',
+    'procurementhead',
+  ],
   '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
   '/library': ['librarian', 'superadmin'],
   '/library-admin': ['librarian', 'superadmin'],
   '/president': ['president', 'vice chancellor', 'superadmin'],
-  '/leadership': ['chairman', 'president', 'vice chancellor', 'superadmin', 'registrar'],
+  '/leadership': [
+    'chairman',
+    'president',
+    'vice chancellor',
+    'superadmin',
+    'registrar',
+    'cfo',
+    'coo',
+    'internalauditor',
+  ],
   '/parent': ['parent', 'superadmin'],
   '/exam-cell': ['examcell', 'superadmin', 'deputycoe', 'examadmin', 'examoperator'],
   '/disciplinary-committee': ['dc_member', 'superadmin'],
@@ -356,7 +409,17 @@ const portalRoles: Record<string, string[]> = {
   '/ecell-admin': ['incubation_admin', 'ecelladmin', 'superadmin', 'campusadmin'],
   '/labs': ['labadmin', 'superadmin', 'campusadmin', 'coo', 'wrangler'],
   '/competitions': ['competitionadmin', 'superadmin', 'campusadmin', 'coo', 'incubation_admin'],
-  '/operations': ['coo', 'estateofficer', 'superadmin', 'campusadmin', 'chairman', 'president'],
+  '/operations': [
+    'coo',
+    'estateofficer',
+    'superadmin',
+    'campusadmin',
+    'chairman',
+    'president',
+    'cfo',
+    'helpdeskdispatcher',
+    'internalauditor',
+  ],
   '/special-programs': ['pop', 'dean', 'registrar', 'superadmin', 'campusadmin', 'hr', 'hradmin'],
   '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'campusadmin', 'parent'],
   '/reports': ['registrar', 'superadmin', 'campusadmin', 'president', 'accountant'],

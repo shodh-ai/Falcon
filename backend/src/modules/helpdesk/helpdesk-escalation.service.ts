@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { WorkflowRoutingService } from '../../core/workflow/workflow-routing.service';
+import { DofaEngineService } from '../dofa-engine/dofa-engine.service';
 
 type PendingTicket = {
   ticket_id: string;
@@ -23,7 +24,7 @@ type PendingTicket = {
  * 1 Estate/COO (ops isolation)
  * 2 HOD / category owner
  * 3 VC only if still breached
- * 4 Chairman last resort
+ * 4 Chairman last resort (+ Universal DOFA ESM_EXCEPTION when ≥10 days)
  * Uses sla_deadline from policies when present.
  */
 @Injectable()
@@ -34,6 +35,7 @@ export class HelpdeskEscalationService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
     private readonly workflowRouting: WorkflowRoutingService,
+    private readonly dofa: DofaEngineService,
   ) {}
 
   @Cron('0 * * * *')
@@ -131,6 +133,36 @@ export class HelpdeskEscalationService {
       this.logger.log(
         `Escalated ticket ${ticket.ticket_id} to level ${targetLevel} after ${Math.floor(hoursOpen)}h`,
       );
+
+      // Universal DOFA: Management by Exception (≥10 days open)
+      if (hoursOpen >= 240 || targetLevel >= 4) {
+        try {
+          const existing = await this.dataSource.query(
+            `SELECT case_id FROM dofa_cases
+             WHERE tenant_id = $1 AND domain = 'ESM_EXCEPTION' AND source_id = $2
+               AND status IN ('PENDING','ESCALATED')
+             LIMIT 1`,
+            [ticket.tenant_id, ticket.ticket_id],
+          );
+          if (!existing[0]) {
+            await this.dofa.openCase(ticket.tenant_id, {
+              domain: 'ESM_EXCEPTION',
+              title: `SLA exception: ${ticket.subject}`,
+              requester_id: ticket.student_user_id,
+              source_table: 'helpdesk_tickets',
+              source_id: ticket.ticket_id,
+              escalate_now: true,
+              exception_reason: `Ticket open ${Math.floor(hoursOpen)}h — elevating to Chairman`,
+              payload: { category: ticket.category, hours_open: hoursOpen },
+              rule_key: 'SLA_10D',
+            });
+          }
+        } catch (err) {
+          this.logger.warn(
+            `DOFA ESM exception skipped: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
     }
   }
 
