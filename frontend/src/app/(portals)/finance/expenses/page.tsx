@@ -10,7 +10,12 @@ import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 
 type Head = { expense_head_id: string; head_name: string };
-type Vendor = { vendor_id: string; business_name: string; default_tds_rate: string };
+type Vendor = {
+  vendor_id: string;
+  business_name: string;
+  default_tds_rate: string;
+  gstin?: string | null;
+};
 type Bill = { invoice_id: string; vendor_name: string; head_name: string; total_amount: string; net_payable: string; gst_amount: string; tds_amount: string };
 type Budget = { budget_id: string; department_id: number; department_name: string };
 
@@ -26,21 +31,39 @@ export default function FinanceExpensesPage() {
     invoice_number: '',
     invoice_date: new Date().toISOString().slice(0, 10),
     taxable_amount: '',
-    gst_rate: '18',
+    gst_rate: '0',
     department_id: '',
     po_id: '',
   });
   const [preview, setPreview] = useState<{ gst: number; tds: number; net: number } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const load = () => {
-    void api.get<Head[]>('/finance/expense-heads').then(setHeads);
-    void api.get<Vendor[]>('/finance/vendors').then(setVendors);
-    void api.get<Bill[]>('/finance/expenses').then(setBills).catch(() => setBills([]));
-    void api.get<Budget[]>('/finance/budgets').then(setBudgets).catch(() => setBudgets([]));
+  const load = async () => {
+    try {
+      const [headRows, vendorRows, billRows, budgetRows] = await Promise.all([
+        api.get<Head[]>('/finance/expense-heads'),
+        api.get<Vendor[]>('/finance/vendors'),
+        api.get<Bill[]>('/finance/expenses').catch(() => [] as Bill[]),
+        api.get<Budget[]>('/finance/budgets').catch(() => [] as Budget[]),
+      ]);
+      setHeads(headRows);
+      setVendors(vendorRows);
+      setBills(billRows);
+      setBudgets(budgetRows);
+      setLoadError(null);
+    } catch (e) {
+      setHeads([]);
+      setVendors([]);
+      setBills([]);
+      setBudgets([]);
+      const msg = e instanceof Error ? e.message : 'Failed to load expense form';
+      setLoadError(msg);
+      toast.error(msg);
+    }
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, [api]);
 
   useEffect(() => {
@@ -75,8 +98,19 @@ export default function FinanceExpensesPage() {
     <div className="mx-auto max-w-6xl space-y-4 p-4 md:p-6">
       <FinancePageHeader
         title="Expense Heads & Bills"
-        description="Log vendor invoices — GST input credit and TDS are computed from the vendor profile."
+        description="Log vendor invoices — GST input credit and TDS are computed from the vendor profile. Link the PO ID for 3-way match on AP Desk."
       />
+      {loadError && (
+        <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          {loadError}
+        </div>
+      )}
+      {!loadError && !vendors.length && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          No vendors in master yet. Vendors are auto-created when Procurement saves quotes on a PR.
+          Complete sourcing first, then refresh this page.
+        </div>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Log bill</CardTitle>
@@ -87,6 +121,7 @@ export default function FinanceExpensesPage() {
             {vendors.map((v) => (
               <option key={v.vendor_id} value={v.vendor_id}>
                 {v.business_name}
+                {v.gstin ? ` (${v.gstin})` : ''}
               </option>
             ))}
           </Select>
@@ -98,9 +133,17 @@ export default function FinanceExpensesPage() {
               </option>
             ))}
           </Select>
-          <Input placeholder="Invoice number" value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} />
+          <Input placeholder="Invoice number (vendor tax invoice ref — any unique ID for UAT)" value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} />
           <Input type="date" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} />
           <Input placeholder="Taxable amount (₹)" type="number" value={form.taxable_amount} onChange={(e) => setForm({ ...form, taxable_amount: e.target.value })} />
+          <Input
+            placeholder="GST rate % (use 0 to match PO amount exactly)"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.gst_rate}
+            onChange={(e) => setForm({ ...form, gst_rate: e.target.value })}
+          />
           <Select className="rounded-md border px-3 py-2 text-sm" value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })}>
             <option value="">Select Department (for budget allocation)</option>
             {budgets.map((b) => (
@@ -112,7 +155,9 @@ export default function FinanceExpensesPage() {
           <Input placeholder="PO ID (Optional)" value={form.po_id} onChange={(e) => setForm({ ...form, po_id: e.target.value })} />
           {preview && (
             <p className="text-sm sm:col-span-2">
-              GST {formatInr(preview.gst)} · TDS {formatInr(preview.tds)} · <strong>Net payable {formatInr(preview.net)}</strong>
+              GST {formatInr(preview.gst)} · TDS {formatInr(preview.tds)} ·{' '}
+              <strong>Invoice total {formatInr(preview.net + preview.tds)}</strong> (must match PO
+              amount on AP Desk)
             </p>
           )}
           <Button className="sm:col-span-2" onClick={() => void submit()}>

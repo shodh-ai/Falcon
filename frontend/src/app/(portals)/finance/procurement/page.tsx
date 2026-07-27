@@ -7,6 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/lib/notifications/falcon-toast';
+import {
+  findRelatedPartyCollisions,
+  isValidGstinFormat,
+  normalizeGstin,
+  panFromGstin,
+  panFromQuote,
+} from '@/lib/gstin.util';
 
 type QuoteForm = {
   vendor_name: string;
@@ -65,6 +72,17 @@ export default function ProcurementDeskPage() {
   const minQuotes = Number(active?.quote_rule?.min_quotes ?? 1);
   const lowestId = quotes.find((q) => q.is_system_l1)?.quote_id;
   const selectingNonLowest = selectedQuoteId && lowestId && selectedQuoteId !== lowestId;
+  const relatedPartyCollisions = findRelatedPartyCollisions(quotes);
+  const hasRelatedPartyBlock = relatedPartyCollisions.length > 0;
+  const draftGstin = normalizeGstin(quote.gstin);
+  const draftPan = draftGstin ? panFromGstin(draftGstin) : null;
+  const draftPanCollision =
+    draftPan &&
+    quotes.some((q) => {
+      const existingPan = panFromQuote(q);
+      return existingPan === draftPan;
+    });
+  const draftGstinInvalid = draftGstin.length > 0 && !isValidGstinFormat(draftGstin);
 
   return (
     <div className="space-y-4 p-6">
@@ -126,6 +144,24 @@ export default function ProcurementDeskPage() {
 
               {['SOURCING', 'QUOTED'].includes(active.status) && (
                 <>
+                  {hasRelatedPartyBlock && (
+                    <div className="rounded-md border border-red-300 bg-red-50 p-3 text-red-900">
+                      <div className="font-semibold">Related-party quotes detected</div>
+                      <p className="mt-1 text-xs">
+                        These vendors share the same PAN — Lock vendor will be blocked. Quotes on this PR
+                        cannot be edited; create a new PR with three GSTINs from different companies
+                        (different PAN, not just the last digit).
+                      </p>
+                      <ul className="mt-2 list-disc pl-4 text-xs">
+                        {relatedPartyCollisions.map(({ pan, vendors }) => (
+                          <li key={pan}>
+                            PAN {pan}: {vendors.join(', ')}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   {quotes.map((q) => (
                     <label
                       key={q.quote_id}
@@ -143,8 +179,8 @@ export default function ProcurementDeskPage() {
                           {q.vendor_name} {q.is_system_l1 ? '(Lowest quote)' : ''}
                         </div>
                         <div>
-                          ₹{Number(q.amount_inr).toLocaleString('en-IN')} · {q.gstin} ·{' '}
-                          {q.gst_verify_status}
+                          ₹{Number(q.amount_inr).toLocaleString('en-IN')} · {q.gstin}
+                          {panFromQuote(q) ? ` · PAN ${panFromQuote(q)}` : ''} · {q.gst_verify_status}
                         </div>
                       </div>
                     </label>
@@ -152,16 +188,33 @@ export default function ProcurementDeskPage() {
 
                   <div className="space-y-2 border-t pt-3">
                     <div className="font-medium">Add quote ({quotes.length}/{minQuotes} min)</div>
+                    <p className="text-xs text-muted-foreground">
+                      Each quote must be a different vendor (unique PAN). Example GSTINs for UAT:{' '}
+                      <span className="font-mono">27AABCU9603R1ZM</span>,{' '}
+                      <span className="font-mono">29AABCT1332L1ZV</span>,{' '}
+                      <span className="font-mono">07AAACS4429R1ZR</span>.
+                    </p>
                     <Input
                       placeholder="Vendor name"
                       value={quote.vendor_name}
                       onChange={(e) => setQuote({ ...quote, vendor_name: e.target.value })}
                     />
                     <Input
-                      placeholder="GSTIN"
+                      placeholder="GSTIN (15 chars — PAN is chars 3–12)"
                       value={quote.gstin}
-                      onChange={(e) => setQuote({ ...quote, gstin: e.target.value })}
+                      onChange={(e) => setQuote({ ...quote, gstin: e.target.value.toUpperCase() })}
                     />
+                    {draftGstinInvalid && (
+                      <p className="text-xs text-amber-700">Invalid GSTIN format (need 15 characters).</p>
+                    )}
+                    {draftPan && !draftGstinInvalid && (
+                      <p className="text-xs text-muted-foreground">Extracted PAN: {draftPan}</p>
+                    )}
+                    {draftPanCollision && (
+                      <p className="text-xs text-red-700">
+                        This PAN already appears on another quote — use a GSTIN from a different company.
+                      </p>
+                    )}
                     <Input
                       placeholder="Amount ₹"
                       type="number"
@@ -178,12 +231,18 @@ export default function ProcurementDeskPage() {
                     />
                     <Button
                       variant="secondary"
-                      disabled={!quote.pdf_path}
+                      disabled={
+                        !quote.pdf_path ||
+                        draftGstinInvalid ||
+                        Boolean(draftPanCollision) ||
+                        !quote.vendor_name.trim() ||
+                        !(Number(quote.amount_inr) > 0)
+                      }
                       onClick={() =>
                         ops
                           .addQuote(active.pr_id, {
                             vendor_name: quote.vendor_name,
-                            gstin: quote.gstin,
+                            gstin: draftGstin,
                             amount_inr: Number(quote.amount_inr),
                             pdf_path: quote.pdf_path,
                           })
@@ -208,7 +267,7 @@ export default function ProcurementDeskPage() {
                   )}
 
                   <Button
-                    disabled={quotes.length < minQuotes || !selectedQuoteId}
+                    disabled={quotes.length < minQuotes || !selectedQuoteId || hasRelatedPartyBlock}
                     onClick={() =>
                       ops
                         .submitForApproval(active.pr_id, {

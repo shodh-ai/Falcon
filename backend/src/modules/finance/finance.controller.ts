@@ -30,6 +30,17 @@ import { GatewayWebhookDto } from './dto/gateway-webhook.dto';
 
 type AuthUser = { user_id: string; tenant_id?: string };
 
+/** Accounts payable desk — log bills and run 3-way match settlement */
+const ACCOUNTS_PAYABLE = [
+  'SuperAdmin',
+  'CampusAdmin',
+  'Accountant',
+  'APManager',
+  'APClerk',
+  'CFO',
+  'FinanceController',
+] as const;
+
 @Controller(['finance', 'api/finance'])
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class FinanceController {
@@ -157,13 +168,13 @@ export class FinanceController {
   }
 
   @Get('vendors')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...ACCOUNTS_PAYABLE)
   vendors(@Req() req: { user: AuthUser }) {
     return this.accounts.listVendors(this.tenant(req));
   }
 
   @Post('vendors')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles('SuperAdmin', 'Accountant', 'CampusAdmin')
   createVendor(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -172,19 +183,19 @@ export class FinanceController {
   }
 
   @Get('expense-heads')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...ACCOUNTS_PAYABLE)
   expenseHeads(@Req() req: { user: AuthUser }) {
     return this.accounts.listExpenseHeads(this.tenant(req));
   }
 
   @Get('expenses')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...ACCOUNTS_PAYABLE)
   expenses(@Req() req: { user: AuthUser }) {
     return this.accounts.listExpenses(this.tenant(req));
   }
 
   @Post('expenses')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...ACCOUNTS_PAYABLE)
   createExpense(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -247,7 +258,7 @@ export class FinanceController {
   }
 
   @Get('budgets')
-  @Roles('SuperAdmin', 'Accountant', 'President')
+  @Roles(...ACCOUNTS_PAYABLE, 'President')
   budgets(@Req() req: { user: AuthUser }) {
     return this.accounts.listBudgets(this.tenant(req));
   }

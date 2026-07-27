@@ -37,12 +37,17 @@ const DOFA_ROLES = [
   'LabAdmin',
   'Accountant',
   'APManager',
+  'APClerk',
   'FinanceController',
   'EstateOfficer',
   'Security',
   'LegalOfficer',
+  'Procurement',
   'ProcurementHead',
+  'ProcurementBuyer',
   'Stores',
+  'ReceivingClerk',
+  'InternalAuditor',
 ] as const;
 
 @Controller('api/dofa')

@@ -116,6 +116,18 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/labs/dashboard';
   }
 
+  if (r === 'procurement' || r === 'procurementbuyer') {
+    return '/finance/procurement';
+  }
+
+  if (r === 'procurementhead') {
+    return '/finance/procurement';
+  }
+
+  if (r === 'stores' || r === 'receivingclerk') {
+    return '/finance/grn';
+  }
+
   if (r === 'competitionadmin' || r === 'competition admin') {
     return '/competitions/dashboard';
   }
@@ -169,6 +181,9 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'coo') return 'COO Operations';
   if (r === 'estateofficer') return 'Estate Operations';
   if (r === 'labadmin') return 'Tokamak Labs';
+  if (r === 'procurement' || r === 'procurementbuyer') return 'Central Procurement';
+  if (r === 'procurementhead') return 'Procurement Head';
+  if (r === 'stores' || r === 'receivingclerk') return 'Central Stores';
   if (r === 'competitionadmin') return 'Tokamak Challenges';
   if (r === 'pop') return 'Special Programs';
   if (r === 'wrangler') return 'Wrangler Mentorship';
@@ -378,11 +393,17 @@ const portalRoles: Record<string, string[]> = {
     'labadmin',
     'accountant',
     'apmanager',
+    'apclerk',
     'financecontroller',
     'estateofficer',
     'security',
     'legalofficer',
     'procurementhead',
+    'procurement',
+    'procurementbuyer',
+    'stores',
+    'receivingclerk',
+    'internalauditor',
   ],
   '/iqac': ['iqac', 'superadmin', 'registrar', 'president'],
   '/library': ['librarian', 'superadmin'],
@@ -464,6 +485,87 @@ export function getActiveWorkspaceRoleFromPath(
 
 const ENTITY_CREATOR_EMAIL = CAMPUS_ADMIN_LOGIN_EMAIL;
 
+/** Module 2 P2P — granular finance paths (requestors are not full Finance users). */
+const FINANCE_P2P_PATH_ROLES: Record<string, string[]> = {
+  '/finance/requisitions': [
+    'labadmin',
+    'hod',
+    'faculty',
+    'warden',
+    'estateofficer',
+    'superadmin',
+    'campusadmin',
+  ],
+  '/finance/procurement': [
+    'procurement',
+    'procurementhead',
+    'procurementbuyer',
+    'superadmin',
+    'campusadmin',
+  ],
+  '/finance/catalog': [
+    'procurement',
+    'procurementhead',
+    'procurementbuyer',
+    'labadmin',
+    'hod',
+    'faculty',
+    'superadmin',
+    'campusadmin',
+  ],
+  '/finance/grn': ['stores', 'security', 'receivingclerk', 'superadmin', 'campusadmin'],
+  '/finance/ap-desk': [
+    'apmanager',
+    'apclerk',
+    'cfo',
+    'accountant',
+    'financecontroller',
+    'superadmin',
+    'campusadmin',
+  ],
+  '/finance/approvals': [
+    'hod',
+    'dean',
+    'procurementhead',
+    'financecontroller',
+    'cfo',
+    'coo',
+    'chairman',
+    'president',
+    'superadmin',
+    'campusadmin',
+  ],
+  '/finance/procurement-intelligence': [
+    'coo',
+    'cfo',
+    'internalauditor',
+    'procurementhead',
+    'chairman',
+    'superadmin',
+    'campusadmin',
+  ],
+  '/finance/dofa': [
+    'coo',
+    'cfo',
+    'accountant',
+    'financecontroller',
+    'procurementhead',
+    'chairman',
+    'superadmin',
+    'campusadmin',
+    'hod',
+    'dean',
+  ],
+};
+
+function canAccessFinanceP2pPath(roles: string[], pathname: string): boolean | null {
+  const match = Object.keys(FINANCE_P2P_PATH_ROLES)
+    .sort((a, b) => b.length - a.length)
+    .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  if (!match) return null;
+  return roles.some((role) => FINANCE_P2P_PATH_ROLES[match].includes(role));
+}
+
 export function canRoleAccessPath(
   roleOrRoles: string | string[] | undefined | null,
   pathname: string,
@@ -497,6 +599,11 @@ export function canRoleAccessPath(
 
   if (isPathHiddenForLaunch(pathname)) {
     return false;
+  }
+
+  const p2pAccess = canAccessFinanceP2pPath(roles, pathname);
+  if (p2pAccess !== null) {
+    return p2pAccess;
   }
 
   if (pathname.startsWith('/admin-ops/directory') || pathname.startsWith('/directory/')) {

@@ -80,7 +80,8 @@ export function getOnboardingStepPath(
 
 export function isFirstLoginOnboardingComplete(status: string | undefined | null, role?: string | null): boolean {
   if (getOnboardingConfigForRole(role)) {
-    return normalizeOnboardingStatus(status, role) === 'COMPLETED';
+    const normalized = normalizeOnboardingStatus(status, role);
+    return normalized === 'COMPLETED' || normalized === 'ACTIVE';
   }
   const value = (status ?? '').trim();
   return value === 'COMPLETED' || value === 'ACTIVE';

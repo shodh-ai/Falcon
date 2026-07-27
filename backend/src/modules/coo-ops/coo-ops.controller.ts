@@ -26,8 +26,8 @@ const PROCUREMENT = [
   'SuperAdmin',
 ] as const;
 
-/** Stores gatekeepers */
-const STORES = ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin'] as const;
+/** Stores gatekeepers (+ admin override for UAT) */
+const STORES = ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] as const;
 
 /** Finance AP — 3-way match + pay (AP Manager primary; CFO / Accountant compat) */
 const FINANCE_AP = [

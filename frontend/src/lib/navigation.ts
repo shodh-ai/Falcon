@@ -715,6 +715,13 @@ export const hodPortal: PortalConfig = {
         { label: 'Department Analytics', href: '/hod/reports', icon: LineChart, keywords: ['analytics', 'reports', 'trends', 'departmental'] },
       ],
     },
+    {
+      title: 'Procurement (P2P)',
+      items: [
+        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'pr', 'maker'] },
+        { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['dofa', 'p2p', 'purchase'] },
+      ],
+    },
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
@@ -820,6 +827,7 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
+        { label: 'DOFA Purchase Approvals', href: '/finance/approvals', icon: Scale, keywords: ['p2p', 'dofa', 'procurement', 'dean'] },
         { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'faculty', 'minutes'] },
@@ -1088,16 +1096,16 @@ export const financePortal: PortalConfig = {
         { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'] },
         { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'] },
         { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'] },
-        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'requestor', 'maker', 'pr'] },
-        { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, keywords: ['sourcing', 'quotes', 'gst'] },
-        { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['hierarchy', 'joint committee'] },
-        { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'] },
-        { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', 'stores', 'barcode'] },
-        { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'] },
+        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'requestor', 'maker', 'pr'], roles: ['LabAdmin', 'HOD', 'Faculty', 'Warden', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, keywords: ['sourcing', 'quotes', 'gst'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['hierarchy', 'joint committee'], roles: ['HOD', 'Dean', 'ProcurementHead', 'FinanceController', 'CFO', 'COO', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'LabAdmin', 'HOD', 'Faculty', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', 'stores', 'barcode'], roles: ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'], roles: ['APManager', 'APClerk', 'CFO', 'Accountant', 'FinanceController', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'] },
         { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'] },
         { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'] },
-        { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'] },
+        { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'], roles: ['COO', 'CFO', 'InternalAuditor', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'] },
         { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'] },
       ],
@@ -1648,6 +1656,17 @@ export const labsPortal: PortalConfig = {
         { label: 'Fabless Network', href: '/labs/partners', icon: Network, keywords: ['istem', 'ceeri', 'mnit', 'work order'] },
       ],
     },
+    {
+      title: 'Procurement (P2P)',
+      items: [
+        {
+          label: 'Purchase Requisitions',
+          href: '/finance/requisitions',
+          icon: ClipboardList,
+          keywords: ['rfq', 'pr', 'oscilloscope', 'quotes', 'maker'],
+        },
+      ],
+    },
   ],
   commandItems: [
     { label: 'Labs Dashboard', href: '/labs/dashboard', icon: LayoutDashboard },
@@ -1655,6 +1674,12 @@ export const labsPortal: PortalConfig = {
     { label: 'Bookings', href: '/labs/bookings', icon: CalendarDays },
     { label: 'Budget', href: '/labs/budget', icon: Wallet },
     { label: 'Fabless Partners', href: '/labs/partners', icon: Network },
+    {
+      label: 'Purchase Requisitions',
+      href: '/finance/requisitions',
+      icon: ClipboardList,
+      keywords: ['p2p', 'procurement', 'pr'],
+    },
   ],
 };
 

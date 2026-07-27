@@ -11,6 +11,7 @@ import {
   Kanban,
   LayoutDashboard,
   Network,
+  Scale,
   Settings,
   UserCog,
   Users,
@@ -46,6 +47,12 @@ export function CampusAdminShell({ children }: { children: ReactNode }) {
           { label: 'Impersonation', href: campusAdminRoutes.impersonation, icon: UserCog },
           { label: 'Override Logs', href: campusAdminRoutes.overrideLogs, icon: ClipboardList },
           { label: 'Master Settings', href: campusAdminRoutes.settings, icon: Settings },
+          {
+            label: 'DOFA Policy Vault',
+            href: '/admin/dofa-policy-vault',
+            icon: Scale,
+            keywords: ['constitution', 'dual-key', 'workflow', 'policy vault', 'dofa'],
+          },
         ],
       },
       {
@@ -71,7 +78,14 @@ export function CampusAdminShell({ children }: { children: ReactNode }) {
         ],
       },
     ],
-    commandItems: [],
+    commandItems: [
+      {
+        label: 'DOFA Policy Vault',
+        href: '/admin/dofa-policy-vault',
+        icon: Scale,
+        keywords: ['constitution', 'dual-key', 'policy vault', 'dofa'],
+      },
+    ],
   };
 
   return (
