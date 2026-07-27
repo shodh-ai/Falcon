@@ -2,6 +2,6 @@
 
 import { DofaPurchaseApprovalsPanel } from '@/components/dofa/DofaPurchaseApprovalsPanel';
 
-export default function FinanceDofaApprovalsPage() {
+export default function DeanDofaApprovalsPage() {
   return <DofaPurchaseApprovalsPanel />;
 }

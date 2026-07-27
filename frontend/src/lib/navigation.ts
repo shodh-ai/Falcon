@@ -193,6 +193,62 @@ export function withAccountSettingsNav(config: PortalConfig): PortalConfig {
   };
 }
 
+export function portalHasDofaInboxLink(config: PortalConfig): boolean {
+  const items = [
+    ...config.navGroups.flatMap((group) => group.items),
+    ...config.commandItems,
+    ...(config.mobileNavItems ?? []),
+  ];
+  return items.some(
+    (item) =>
+      item.href.includes('/dofa-inbox') ||
+      /dofa inbox \(universal\)/i.test(item.label),
+  );
+}
+
+/** Inject universal DOFA inbox link when this portal lacks one but the user can approve. */
+export function withRoleAwareDofaInboxNav(
+  config: PortalConfig,
+  inboxHref: string | null,
+): PortalConfig {
+  if (!inboxHref || portalHasDofaInboxLink(config)) return config;
+
+  const inboxItem: NavItem = {
+    label: 'DOFA Inbox (Universal)',
+    href: inboxHref,
+    icon: Inbox,
+    keywords: ['write-off', 'grade change', 'hire', 'approve', 'asset', 'dofa'],
+    shortLabel: 'DOFA',
+  };
+
+  const navGroups = config.navGroups.map((group, index) =>
+    index === 0
+      ? {
+          ...group,
+          items: [inboxItem, ...group.items.filter((item) => item.href !== inboxHref)],
+        }
+      : group,
+  );
+
+  const commandItems = [
+    inboxItem,
+    ...config.commandItems.filter((item) => item.href !== inboxHref),
+  ];
+
+  const mobileNavItems = (
+    config.mobileNavItems ?? config.commandItems.slice(0, 4)
+  )
+    .filter((item) => item.href !== inboxHref);
+  mobileNavItems.unshift(inboxItem);
+
+  return {
+    ...config,
+    navGroups,
+    commandItems,
+    mobileNavItems: mobileNavItems.slice(0, 4),
+  };
+}
+
 /** Build command palette items from sidebar nav so search keywords stay in sync. */
 /** Self-service links embedded in Faculty / HOD / HR sidebars (formerly ESS portal). */
 export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
@@ -496,7 +552,7 @@ export const facultyPortal: PortalConfig = {
       title: 'Administration',
       items: [
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals'] },
+        { label: 'DOFA Inbox (Universal)', href: '/faculty/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
         { label: 'Placement Coordinator', href: '/faculty/placement-coordinator', icon: Briefcase, keywords: ['placement', 'drives', 'coordinator', 'attendance'] },
@@ -578,7 +634,7 @@ export const hrPortal: PortalConfig = {
       items: [
         { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'], hrModule: 'attendance' },
         { label: 'Pending on Me', href: '/hr/inbox', icon: Inbox, keywords: ['approve', 'inbox', 'pending', 'workflow'], roles: ['HR', 'HRAdmin', 'Faculty', 'HOD', 'Dean', 'SuperAdmin'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'headcount', 'hire'] },
+        { label: 'DOFA Inbox (Universal)', href: '/hr/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'headcount', 'hire'] },
         { label: 'Meetings', href: '/hr/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes', 'agenda'] },
         { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval', 'balances'], hrModule: 'leaves' },
       ],
@@ -718,8 +774,9 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Procurement (P2P)',
       items: [
-        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'pr', 'maker'] },
-        { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['dofa', 'p2p', 'purchase'] },
+        { label: 'Purchase Requisitions', href: '/hod/procurement/requisitions', icon: ClipboardList, keywords: ['rfq', 'pr', 'maker'] },
+        { label: 'DOFA Purchase Approvals', href: '/hod/approvals/dofa', icon: Scale, keywords: ['dofa', 'p2p', 'purchase'] },
+        { label: 'Universal DOFA Inbox', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['grade change', 'hire', 'write-off', 'cross department'] },
       ],
     },
     myHrOperationsNavGroup('hod'),
@@ -827,7 +884,8 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
-        { label: 'DOFA Purchase Approvals', href: '/finance/approvals', icon: Scale, keywords: ['p2p', 'dofa', 'procurement', 'dean'] },
+        { label: 'DOFA Purchase Approvals', href: '/dean/approvals/dofa', icon: Scale, keywords: ['p2p', 'dofa', 'procurement', 'dean'] },
+        { label: 'Universal DOFA Inbox', href: '/dean/approvals/dofa-inbox', icon: Inbox, keywords: ['grade change', 'hire', 'cross department'] },
         { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'faculty', 'minutes'] },
@@ -1102,7 +1160,7 @@ export const financePortal: PortalConfig = {
         { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'LabAdmin', 'HOD', 'Faculty', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', 'stores', 'barcode'], roles: ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'], roles: ['APManager', 'APClerk', 'CFO', 'Accountant', 'FinanceController', 'SuperAdmin', 'CampusAdmin'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'] },
+        { label: 'DOFA Inbox (Universal)', href: '/finance/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'] },
         { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'] },
         { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'] },
         { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'], roles: ['COO', 'CFO', 'InternalAuditor', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin'] },
@@ -1331,6 +1389,7 @@ export const examCellPortal: PortalConfig = {
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
+        { label: 'Grade Change DOFA', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa', 'grade change', 'coe approval'] },
         { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
@@ -1434,6 +1493,12 @@ export const leadershipPortal: PortalConfig = {
         { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard, keywords: ['morning briefing', 'overview', 'kpi', 'home'] },
         { label: 'Org Chart', href: '/leadership/org-chart', icon: Network, keywords: ['pillars', 'reporting', 'cfo', 'coo', 'dofa'] },
         { label: 'Exceptions', href: '/leadership/exceptions', icon: TriangleAlert, keywords: ['dofa', 'management by exception', 'sla', 'escalate'] },
+        {
+          label: 'DOFA Inbox (Universal)',
+          href: '/leadership/dofa-inbox',
+          icon: Inbox,
+          keywords: ['write-off', 'asset', 'grade change', 'hire', 'approve', 'pending'],
+        },
         { label: 'DOFA Policy Vault', href: '/leadership/dofa-policy-vault', icon: Scale, keywords: ['constitution', 'dual-key', 'audit stone', 'who holds the pen'] },
         { label: 'MOU Approvals', href: '/leadership/mou-approvals', icon: ScrollText, keywords: ['legal', 'mou', 'ceeri', 'vault'] },
         { label: 'Approvals', href: '/leadership/approvals', icon: CheckSquare, keywords: ['inbox', 'approve', 'reject', 'workflow', 'po', 'waiver'] },
@@ -1446,12 +1511,13 @@ export const leadershipPortal: PortalConfig = {
   ],
   mobileNavItems: [
     { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard, shortLabel: 'Home' },
+    { label: 'DOFA Inbox', href: '/leadership/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
     { label: 'Approvals', href: '/leadership/approvals', icon: CheckSquare, shortLabel: 'Inbox' },
     { label: 'Financials', href: '/leadership/financial-oversight', icon: Landmark, shortLabel: 'Finance' },
-    { label: 'Academics', href: '/leadership/academics', icon: GraduationCap, shortLabel: 'Academic' },
   ],
   commandItems: [
     { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard },
+    { label: 'DOFA Inbox (Universal)', href: '/leadership/dofa-inbox', icon: Inbox },
     { label: 'Approvals Inbox', href: '/leadership/approvals', icon: CheckSquare },
     { label: 'Financial Oversight', href: '/leadership/financial-oversight', icon: Landmark },
     { label: 'Cash Flow', href: '/leadership/finance', icon: Wallet },
@@ -1654,6 +1720,12 @@ export const labsPortal: PortalConfig = {
         { label: 'Bookings & Checkout', href: '/labs/bookings', icon: CalendarDays, keywords: ['booking', 'checkout', 'safety'] },
         { label: 'Tokamak Budget', href: '/labs/budget', icon: Wallet, keywords: ['2 lakh', 'rnd', 'fast path'] },
         { label: 'Fabless Network', href: '/labs/partners', icon: Network, keywords: ['istem', 'ceeri', 'mnit', 'work order'] },
+        {
+          label: 'Asset Lifecycle (ALM)',
+          href: '/labs/asset-lifecycle',
+          icon: Archive,
+          keywords: ['write-off', 'calibration', 'dofa', 'scrap'],
+        },
       ],
     },
     {
@@ -1661,7 +1733,7 @@ export const labsPortal: PortalConfig = {
       items: [
         {
           label: 'Purchase Requisitions',
-          href: '/finance/requisitions',
+          href: '/labs/procurement/requisitions',
           icon: ClipboardList,
           keywords: ['rfq', 'pr', 'oscilloscope', 'quotes', 'maker'],
         },
@@ -1675,8 +1747,14 @@ export const labsPortal: PortalConfig = {
     { label: 'Budget', href: '/labs/budget', icon: Wallet },
     { label: 'Fabless Partners', href: '/labs/partners', icon: Network },
     {
+      label: 'Asset Lifecycle (ALM)',
+      href: '/labs/asset-lifecycle',
+      icon: Archive,
+      keywords: ['write-off', 'calibration', 'dofa'],
+    },
+    {
       label: 'Purchase Requisitions',
-      href: '/finance/requisitions',
+      href: '/labs/procurement/requisitions',
       icon: ClipboardList,
       keywords: ['p2p', 'procurement', 'pr'],
     },
@@ -1719,12 +1797,12 @@ export const operationsPortal: PortalConfig = {
       title: 'Command',
       items: [
         { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, keywords: ['campus health', 'sla', 'dials'] },
+        { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'write-off', 'asset', 'exceptions'] },
         { label: 'Org Pillars', href: '/leadership/org-chart', icon: Network, keywords: ['three pillar', 'reporting', 'anti-collusion'] },
         { label: 'Space Calendar', href: '/operations/space-calendar', icon: CalendarDays, keywords: ['auditorium', 'venue', 'dofa', 'club'] },
         { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, keywords: ['helpdesk', 'routing', 'queues'] },
         { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode, keywords: ['physical', 'scan', 'location'] },
         { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, keywords: ['dofa', 'grn', '3-way', 'penalties'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'write-off', 'exceptions'] },
         { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['quotes', 'l1', 'rfq'] },
         { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['locked price'] },
         { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'split'] },
@@ -1734,10 +1812,16 @@ export const operationsPortal: PortalConfig = {
   ],
   commandItems: [
     { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard },
+    { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
     { label: 'ESM Queues', href: '/operations/esm', icon: Ticket },
     { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode },
     { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt },
-    { label: 'Vendor Penalties', href: '/operations/penalties', icon: Scale },
+  ],
+  mobileNavItems: [
+    { label: 'Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, shortLabel: 'Home' },
+    { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
+    { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, shortLabel: 'ESM' },
+    { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, shortLabel: 'P2P' },
   ],
 };
 

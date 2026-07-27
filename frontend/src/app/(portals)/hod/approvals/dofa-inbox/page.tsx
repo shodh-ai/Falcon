@@ -2,6 +2,6 @@
 
 import { UniversalDofaInboxPanel } from '@/components/dofa/UniversalDofaInboxPanel';
 
-export default function DofaInboxPage() {
+export default function HodUniversalDofaInboxPage() {
   return <UniversalDofaInboxPanel />;
 }

@@ -60,6 +60,10 @@ export class DofaEngineService {
     return need.some((n) => have.includes(n));
   }
 
+  private matchesAnyRole(requiredRole: string, userRoles: string[]): boolean {
+    return userRoles.some((role) => this.roleMatches(requiredRole, role));
+  }
+
   async resolveMatrix(
     tenantId: string | undefined,
     domain: DofaDomain,
@@ -190,8 +194,9 @@ export class DofaEngineService {
     return { ...rows[0], steps };
   }
 
-  async inbox(tenantId: string | undefined, userRole: string) {
+  async inbox(tenantId: string | undefined, userRoles: string | string[]) {
     const tid = this.tenant(tenantId);
+    const roles = Array.isArray(userRoles) ? userRoles : [userRoles];
     const cases = await this.db.query(
       `SELECT c.*, s.required_role AS awaiting_role, s.step_no AS awaiting_step
        FROM dofa_cases c
@@ -204,7 +209,7 @@ export class DofaEngineService {
     );
 
     const filtered = cases.filter((c: { awaiting_role: string }) =>
-      this.roleMatches(c.awaiting_role, userRole),
+      this.matchesAnyRole(c.awaiting_role, roles),
     );
 
     // Project open P2P PRs awaiting this role's DOFA level (read-only projection)
@@ -220,7 +225,6 @@ export class DofaEngineService {
          LIMIT 50`,
         [tid],
       );
-      const role = userRole.toLowerCase();
       const levelMap: Record<string, number[]> = {
         hod: [1],
         labadmin: [1],
@@ -233,7 +237,9 @@ export class DofaEngineService {
         chairman: [5],
         president: [5],
       };
-      const levels = levelMap[role] ?? [];
+      const levels = Array.from(
+        new Set(roles.flatMap((role) => levelMap[role.toLowerCase()] ?? [])),
+      );
       p2p = (p2p as { required_level: number; status: string }[]).filter(
         (p) =>
           levels.includes(Number(p.required_level)) ||
@@ -259,11 +265,12 @@ export class DofaEngineService {
   async decide(
     tenantId: string | undefined,
     userId: string,
-    userRole: string,
+    userRoles: string | string[],
     caseId: string,
     body: { decision: 'APPROVED' | 'REJECTED'; notes?: string },
   ) {
     const tid = this.tenant(tenantId);
+    const roles = Array.isArray(userRoles) ? userRoles : [userRoles];
     const c = await this.getCase(tid, caseId);
     if (
       ![DOFA_STATUS.PENDING, DOFA_STATUS.ESCALATED].includes(
@@ -291,9 +298,9 @@ export class DofaEngineService {
     if (!step || step.decision) {
       throw new BadRequestException('No open step');
     }
-    if (!this.roleMatches(step.required_role, userRole)) {
+    if (!this.matchesAnyRole(step.required_role, roles)) {
       throw new ForbiddenException({
-        message: `Role ${userRole} cannot sign step requiring ${step.required_role}`,
+        message: `Your roles (${roles.join(', ')}) cannot sign step requiring ${step.required_role}`,
         code: 'DOFA_ROLE_MISMATCH',
       });
     }
@@ -310,9 +317,11 @@ export class DofaEngineService {
         `UPDATE dofa_cases SET status = $2, updated_at = NOW() WHERE case_id = $1`,
         [caseId, DOFA_STATUS.REJECTED],
       );
-      await this.applyDomainCallback(tid, caseId, DOFA_DECISION.REJECTED);
+      await this.applyDomainCallback(tid, caseId, DOFA_DECISION.REJECTED, userId);
       return this.getCase(tid, caseId);
     }
+
+    await this.syncDomainStepProgress(tid, c, step, userId, body.decision);
 
     const nextStep = Number(c.current_step) + 1;
     const steps = c.steps as Array<{ step_no: number }>;
@@ -322,7 +331,7 @@ export class DofaEngineService {
          WHERE case_id = $1`,
         [caseId, nextStep, DOFA_STATUS.APPROVED],
       );
-      await this.applyDomainCallback(tid, caseId, DOFA_DECISION.APPROVED);
+      await this.applyDomainCallback(tid, caseId, DOFA_DECISION.APPROVED, userId);
     } else {
       await this.db.query(
         `UPDATE dofa_cases SET current_step = $2, status = $3, updated_at = NOW()
@@ -333,11 +342,35 @@ export class DofaEngineService {
     return this.getCase(tid, caseId);
   }
 
+  /** Keep domain records in sync after each approval step (not only terminal). */
+  private async syncDomainStepProgress(
+    tenantId: string,
+    caseRow: { domain: string; source_id?: string | null },
+    completedStep: { required_role: string },
+    userId: string,
+    decision: string,
+  ) {
+    if (decision !== DOFA_DECISION.APPROVED || !caseRow.source_id) return;
+    const domain = String(caseRow.domain);
+    const sourceId = caseRow.source_id;
+    const role = completedStep.required_role.toLowerCase();
+
+    if (domain === 'GRADE_CHANGE' && role === 'hod') {
+      await this.db.query(
+        `UPDATE sis_grade_change_requests
+         SET hod_by = $2, hod_at = NOW(), status = 'AWAITING_COE', updated_at = NOW()
+         WHERE change_id = $1 AND tenant_id = $3`,
+        [sourceId, userId, tenantId],
+      );
+    }
+  }
+
   /** Domain side-effects when case reaches terminal state */
   private async applyDomainCallback(
     tenantId: string,
     caseId: string,
     outcome: 'APPROVED' | 'REJECTED',
+    userId?: string,
   ) {
     const c = await this.getCase(tenantId, caseId);
     const domain = String(c.domain);
@@ -363,12 +396,21 @@ export class DofaEngineService {
 
     if (domain === 'GRADE_CHANGE' && sourceId) {
       if (outcome === 'APPROVED') {
-        await this.db.query(
-          `UPDATE sis_grade_change_requests
-           SET status = 'APPLIED', applied_at = NOW(), updated_at = NOW()
-           WHERE change_id = $1 AND tenant_id = $2`,
-          [sourceId, tenantId],
-        );
+        if (userId) {
+          await this.db.query(
+            `UPDATE sis_grade_change_requests
+             SET status = 'APPLIED', applied_at = NOW(), coe_by = $3, coe_at = NOW(), updated_at = NOW()
+             WHERE change_id = $1 AND tenant_id = $2`,
+            [sourceId, tenantId, userId],
+          );
+        } else {
+          await this.db.query(
+            `UPDATE sis_grade_change_requests
+             SET status = 'APPLIED', applied_at = NOW(), updated_at = NOW()
+             WHERE change_id = $1 AND tenant_id = $2`,
+            [sourceId, tenantId],
+          );
+        }
       } else {
         await this.db.query(
           `UPDATE sis_grade_change_requests
@@ -381,18 +423,24 @@ export class DofaEngineService {
 
     if (domain === 'ASSET_WRITEOFF' && sourceId) {
       if (outcome === 'APPROVED') {
-        const w = await this.db.query(
+        await this.db.query(
           `UPDATE asset_writeoff_requests
            SET status = 'WRITTEN_OFF', finance_at = NOW(), updated_at = NOW()
-           WHERE writeoff_id = $1 AND tenant_id = $2
-           RETURNING asset_id`,
+           WHERE writeoff_id = $1::uuid AND tenant_id = $2::uuid`,
           [sourceId, tenantId],
         );
-        if (w[0]?.asset_id) {
+        const assetRows: Array<{ asset_id?: string }> = await this.db.query(
+          `SELECT asset_id FROM asset_writeoff_requests
+           WHERE writeoff_id = $1::uuid AND tenant_id = $2::uuid`,
+          [sourceId, tenantId],
+        );
+        const assetId = assetRows[0]?.asset_id;
+        if (assetId) {
           await this.db.query(
-            `UPDATE university_assets SET status = 'WRITTEN_OFF', book_value = 0
-             WHERE asset_id = $1`,
-            [w[0].asset_id],
+            `UPDATE university_assets
+             SET status = 'WRITTEN_OFF', book_value = 0
+             WHERE asset_id = $1::uuid AND tenant_id = $2::uuid`,
+            [assetId, tenantId],
           );
         }
       } else {

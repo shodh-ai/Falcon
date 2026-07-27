@@ -55,8 +55,12 @@ const DOFA_ROLES = [
 export class DofaEngineController {
   constructor(private readonly dofa: DofaEngineService) {}
 
-  private role(user: AuthUser) {
-    return user.role ?? user.roles?.[0] ?? 'Faculty';
+  private userRoles(user: AuthUser): string[] {
+    const merged = [
+      ...(user.roles ?? []),
+      ...(user.role ? [user.role] : []),
+    ].filter(Boolean);
+    return Array.from(new Set(merged));
   }
 
   @Post('cases')
@@ -91,7 +95,7 @@ export class DofaEngineController {
   @Get('inbox')
   @Roles(...DOFA_ROLES)
   inbox(@Req() req: { user: AuthUser }) {
-    return this.dofa.inbox(req.user.tenant_id, this.role(req.user));
+    return this.dofa.inbox(req.user.tenant_id, this.userRoles(req.user));
   }
 
   @Get('exceptions')
@@ -110,7 +114,7 @@ export class DofaEngineController {
     return this.dofa.decide(
       req.user.tenant_id,
       req.user.user_id,
-      this.role(req.user),
+      this.userRoles(req.user),
       id,
       body,
     );

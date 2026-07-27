@@ -424,7 +424,7 @@ const portalRoles: Record<string, string[]> = {
   '/disciplinary-committee': ['dc_member', 'superadmin'],
   '/alumni': ['alumni'],
   '/alumni-admin': ['iqac', 'superadmin', 'campusadmin', 'registrar', 'president'],
-  '/admin-ops': ['registrar', 'superadmin', 'campusadmin', 'transportofficer'],
+  '/admin-ops': ['registrar', 'superadmin', 'campusadmin', 'transportofficer', 'labadmin'],
   '/placements': ['placementcell', 'superadmin', 'campusadmin', 'registrar'],
   '/incubation': ['incubation_admin', 'ecelladmin', 'fellowshipadmin', 'wrangler', 'superadmin', 'campusadmin', 'hod', 'dean', 'president'],
   '/ecell-admin': ['incubation_admin', 'ecelladmin', 'superadmin', 'campusadmin'],

@@ -156,7 +156,7 @@ export class UosGovernanceService {
       title: `Write-off ${asset[0]?.asset_tag || body.asset_id}: ${body.reason.trim().slice(0, 80)}`,
       requester_id: userId,
       source_table: 'asset_writeoff_requests',
-      source_id: row.writeoff_id,
+      source_id: String(row.writeoff_id),
       payload: { asset_id: body.asset_id, asset_name: asset[0]?.name },
       rule_key: 'HEAVY',
     });
@@ -166,7 +166,7 @@ export class UosGovernanceService {
   async advanceWriteoff(
     tenantId: string | undefined,
     userId: string,
-    roleName: string,
+    userRoles: string | string[],
     writeoffId: string,
     decision: 'APPROVED' | 'REJECTED' = 'APPROVED',
   ) {
@@ -184,7 +184,7 @@ export class UosGovernanceService {
         code: 'DOFA_CASE_MISSING',
       });
     }
-    const decided = await this.dofa.decide(tid, userId, roleName, cases[0].case_id, {
+    const decided = await this.dofa.decide(tid, userId, userRoles, cases[0].case_id, {
       decision,
     });
     const out = await this.db.query(
@@ -231,11 +231,43 @@ export class UosGovernanceService {
 
   listGradeChanges(tenantId?: string) {
     return this.db.query(
-      `SELECT g.*, s.name AS student_name, r.name AS requester_name
-       FROM sis_grade_change_requests g
-       LEFT JOIN users s ON s.user_id = g.student_user_id
-       LEFT JOIN users r ON r.user_id = g.requested_by
-       WHERE g.tenant_id = $1 ORDER BY g.created_at DESC`,
+      `SELECT
+         q.change_id, q.tenant_id, q.student_user_id, q.course_code, q.course_name,
+         q.from_grade, q.to_grade, q.reason, q.requested_by,
+         q.hod_by, q.hod_at, q.dean_by, q.dean_at, q.coe_by, q.coe_at, q.applied_at,
+         q.created_at, q.updated_at,
+         q.student_name, q.requester_name, q.dofa_case_id, q.dofa_status, q.dofa_step,
+         q.dofa_awaiting_role,
+         CASE
+           WHEN q.raw_status IN ('APPLIED', 'REJECTED', 'AWAITING_COE') THEN q.raw_status
+           WHEN q.dofa_awaiting_role = 'ExamCell' AND q.dofa_status = 'PENDING' THEN 'AWAITING_COE'
+           ELSE q.raw_status
+         END AS status
+       FROM (
+         SELECT g.*, g.status AS raw_status,
+                s.name AS student_name, r.name AS requester_name,
+                dc.case_id AS dofa_case_id, dc.status AS dofa_status,
+                dc.current_step AS dofa_step,
+                ds.required_role AS dofa_awaiting_role
+         FROM sis_grade_change_requests g
+         LEFT JOIN users s ON s.user_id = g.student_user_id
+         LEFT JOIN users r ON r.user_id = g.requested_by
+         LEFT JOIN LATERAL (
+           SELECT case_id, status, current_step
+           FROM dofa_cases
+           WHERE tenant_id = g.tenant_id
+             AND domain = 'GRADE_CHANGE'
+             AND source_id = g.change_id::text
+           ORDER BY created_at DESC
+           LIMIT 1
+         ) dc ON true
+         LEFT JOIN dofa_case_steps ds
+           ON ds.case_id = dc.case_id
+          AND ds.step_no = dc.current_step
+          AND ds.decision IS NULL
+         WHERE g.tenant_id = $1
+       ) q
+       ORDER BY q.created_at DESC`,
       [this.tenant(tenantId)],
     );
   }
@@ -259,6 +291,27 @@ export class UosGovernanceService {
       });
     }
     const tid = this.tenant(tenantId);
+    const dup = await this.db.query(
+      `SELECT change_id FROM sis_grade_change_requests
+       WHERE tenant_id = $1 AND student_user_id = $2 AND course_code = $3
+         AND from_grade = $4 AND to_grade = $5
+         AND status IN ('PENDING_DOFA', 'AWAITING_COE', 'PENDING_HOD')
+       LIMIT 1`,
+      [
+        tid,
+        body.student_user_id,
+        body.course_code,
+        body.from_grade,
+        body.to_grade,
+      ],
+    );
+    if (dup[0]) {
+      throw new BadRequestException({
+        message:
+          'An open grade change request already exists for this student, course, and grade transition.',
+        code: 'DUPLICATE_GRADE_CHANGE',
+      });
+    }
     const rows = await this.db.query(
       `INSERT INTO sis_grade_change_requests (
          tenant_id, student_user_id, course_code, course_name,
@@ -281,7 +334,7 @@ export class UosGovernanceService {
       title: `Grade ${body.course_code}: ${body.from_grade}→${body.to_grade}`,
       requester_id: userId,
       source_table: 'sis_grade_change_requests',
-      source_id: row.change_id,
+      source_id: String(row.change_id),
       payload: {
         student_user_id: body.student_user_id,
         from_grade: body.from_grade,
@@ -295,7 +348,7 @@ export class UosGovernanceService {
   async advanceGradeChange(
     tenantId: string | undefined,
     userId: string,
-    roleName: string,
+    userRoles: string | string[],
     changeId: string,
   ) {
     const tid = this.tenant(tenantId);
@@ -312,9 +365,13 @@ export class UosGovernanceService {
         code: 'DOFA_CASE_MISSING',
       });
     }
-    const decided = await this.dofa.decide(tid, userId, roleName, cases[0].case_id, {
-      decision: 'APPROVED',
-    });
+    const decided = await this.dofa.decide(
+      tid,
+      userId,
+      userRoles,
+      cases[0].case_id,
+      { decision: 'APPROVED' },
+    );
     if (decided.status === 'APPROVED') {
       await this.recordEvidence(tid, 'SIS', changeId, 'Grade change applied via DOFA', {});
     }
