@@ -437,7 +437,7 @@ export class CooOpsController {
   }
 
   @Post('p2p/analytics/invoice-split-scan')
-  @Roles(...FINANCE_AP, 'COO', 'Chairman', 'President', 'SuperAdmin', 'InternalAuditor')
+  @Roles(...FINANCE_AP, 'COO', 'Chairman', 'President', 'SuperAdmin', 'ProcurementHead')
   splitScan(@Req() req: { user: AuthUser }) {
     return this.procurement.runNightlyInvoiceSplitScan(this.tenant(req));
   }

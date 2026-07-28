@@ -5,10 +5,14 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { ProcurementService } from '../coo-ops/procurement.service';
 
 @Injectable()
 export class LabsService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly procurement: ProcurementService,
+  ) {}
 
   private tenant(id?: string) {
     return id ?? 'a0000000-0000-4000-8000-000000000001';
@@ -23,9 +27,21 @@ export class LabsService {
 
   listEquipment(tenantId?: string, zoneId?: string) {
     const tid = this.tenant(tenantId);
+    const statusExpr = `CASE
+      WHEN e.status = 'MAINTENANCE' THEN 'MAINTENANCE'
+      WHEN EXISTS (
+        SELECT 1 FROM lab_equipment_checkouts c
+        WHERE c.equipment_id = e.equipment_id
+          AND c.tenant_id = e.tenant_id
+          AND c.returned_at IS NULL
+      ) THEN 'CHECKED_OUT'
+      ELSE 'AVAILABLE'
+    END`;
     if (zoneId) {
       return this.db.query(
-        `SELECT e.*, z.zone_code, z.name AS zone_name
+        `SELECT e.equipment_id, e.tenant_id, e.zone_id, e.name, e.asset_tag, e.specs,
+                e.requires_safety_training, ${statusExpr} AS status,
+                z.zone_code, z.name AS zone_name
          FROM lab_equipment e
          JOIN lab_zones z ON z.zone_id = e.zone_id
          WHERE e.tenant_id = $1 AND e.zone_id = $2
@@ -34,12 +50,32 @@ export class LabsService {
       );
     }
     return this.db.query(
-      `SELECT e.*, z.zone_code, z.name AS zone_name
+      `SELECT e.equipment_id, e.tenant_id, e.zone_id, e.name, e.asset_tag, e.specs,
+              e.requires_safety_training, ${statusExpr} AS status,
+              z.zone_code, z.name AS zone_name
        FROM lab_equipment e
        JOIN lab_zones z ON z.zone_id = e.zone_id
        WHERE e.tenant_id = $1
        ORDER BY z.zone_code, e.name`,
       [tid],
+    );
+  }
+
+  private async syncEquipmentAvailability(tenantId: string, equipmentId: string) {
+    await this.db.query(
+      `UPDATE lab_equipment e
+       SET status = CASE
+         WHEN e.status = 'MAINTENANCE' THEN 'MAINTENANCE'
+         WHEN EXISTS (
+           SELECT 1 FROM lab_equipment_checkouts c
+           WHERE c.equipment_id = e.equipment_id
+             AND c.tenant_id = e.tenant_id
+             AND c.returned_at IS NULL
+         ) THEN 'CHECKED_OUT'
+         ELSE 'AVAILABLE'
+       END
+       WHERE e.equipment_id = $1 AND e.tenant_id = $2`,
+      [equipmentId, tenantId],
     );
   }
 
@@ -56,7 +92,16 @@ export class LabsService {
     );
     const eq = rows[0];
     if (!eq) throw new NotFoundException('Equipment not found');
-    if (eq.status !== 'AVAILABLE') {
+    if (eq.status === 'MAINTENANCE') {
+      throw new BadRequestException('Equipment under maintenance');
+    }
+    const active = await this.db.query(
+      `SELECT 1 FROM lab_equipment_checkouts
+       WHERE equipment_id = $1 AND tenant_id = $2 AND returned_at IS NULL
+       LIMIT 1`,
+      [equipmentId, tid],
+    );
+    if (active.length > 0) {
       throw new BadRequestException('Equipment not available');
     }
     if (eq.requires_safety_training && !safetyAck) {
@@ -86,10 +131,7 @@ export class LabsService {
       [checkoutId, tid],
     );
     if (!rows[0]) throw new NotFoundException('Checkout not found');
-    await this.db.query(
-      `UPDATE lab_equipment SET status = 'AVAILABLE' WHERE equipment_id = $1`,
-      [rows[0].equipment_id],
-    );
+    await this.syncEquipmentAvailability(tid, rows[0].equipment_id);
     return rows[0];
   }
 
@@ -118,6 +160,27 @@ export class LabsService {
     userId: string,
     body: { partner_id: string; title: string; notes?: string },
   ) {
+    const tid = this.tenant(tenantId);
+    const existing = await this.db.query(
+      `SELECT work_order_id, status, title, created_at
+       FROM lab_partner_work_orders
+       WHERE tenant_id = $1
+         AND partner_id = $2
+         AND requested_by = $3
+         AND status IN ('REQUESTED', 'IN_PROGRESS')
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [tid, body.partner_id, userId],
+    );
+    if (existing[0]) {
+      throw new BadRequestException({
+        message:
+          'An open work order already exists for this partner. Wait for COO triage or cancel the pending request.',
+        code: 'WORK_ORDER_ALREADY_OPEN',
+        work_order_id: existing[0].work_order_id,
+        status: existing[0].status,
+      });
+    }
     const rows = await this.db.query(
       `INSERT INTO lab_partner_work_orders (
          tenant_id, partner_id, title, requested_by, notes
@@ -134,15 +197,181 @@ export class LabsService {
     return rows[0];
   }
 
-  listWorkOrders(tenantId?: string) {
-    return this.db.query(
-      `SELECT w.*, p.name AS partner_name
-       FROM lab_partner_work_orders w
-       JOIN lab_partner_orgs p ON p.partner_id = w.partner_id
-       WHERE w.tenant_id = $1
-       ORDER BY w.created_at DESC`,
-      [this.tenant(tenantId)],
+  private workOrderSelect = `
+    SELECT w.*, p.name AS partner_name, p.partner_code,
+           ru.name AS requester_name, ru.official_email AS requester_email,
+           au.name AS accepted_by_name,
+           pr.description AS pr_description, pr.status AS pr_status,
+           pr.amount_estimate AS pr_amount
+    FROM lab_partner_work_orders w
+    JOIN lab_partner_orgs p ON p.partner_id = w.partner_id
+    LEFT JOIN users ru ON ru.user_id = w.requested_by
+    LEFT JOIN users au ON au.user_id = w.accepted_by
+    LEFT JOIN fin_purchase_requisitions pr ON pr.pr_id = w.pr_id
+  `;
+
+  private async getWorkOrder(tenantId: string, workOrderId: string) {
+    const rows = await this.db.query(
+      `${this.workOrderSelect}
+       WHERE w.work_order_id = $1 AND w.tenant_id = $2`,
+      [workOrderId, tenantId],
     );
+    if (!rows[0]) throw new NotFoundException('Work order not found');
+    return rows[0];
+  }
+
+  listWorkOrders(tenantId?: string, status?: string) {
+    const tid = this.tenant(tenantId);
+    const params: unknown[] = [tid];
+    let statusClause = '';
+    if (status?.trim()) {
+      params.push(status.trim().toUpperCase());
+      statusClause = ` AND w.status = $${params.length}`;
+    }
+    return this.db.query(
+      `${this.workOrderSelect}
+       WHERE w.tenant_id = $1${statusClause}
+       ORDER BY
+         CASE w.status
+           WHEN 'REQUESTED' THEN 0
+           WHEN 'IN_PROGRESS' THEN 1
+           WHEN 'DONE' THEN 2
+           ELSE 3
+         END,
+         w.created_at DESC`,
+      params,
+    );
+  }
+
+  async acceptWorkOrder(
+    tenantId: string | undefined,
+    workOrderId: string,
+    userId: string,
+    notes?: string,
+  ) {
+    const tid = this.tenant(tenantId);
+    const wo = await this.getWorkOrder(tid, workOrderId);
+    if (wo.status !== 'REQUESTED') {
+      throw new BadRequestException('Only REQUESTED work orders can be accepted');
+    }
+    await this.db.query(
+      `UPDATE lab_partner_work_orders
+       SET status = 'IN_PROGRESS',
+           accepted_by = $1,
+           accepted_at = NOW(),
+           status_notes = COALESCE($2, status_notes)
+       WHERE work_order_id = $3 AND tenant_id = $4`,
+      [userId, notes?.trim() ?? null, workOrderId, tid],
+    );
+    return this.getWorkOrder(tid, workOrderId);
+  }
+
+  async completeWorkOrder(
+    tenantId: string | undefined,
+    workOrderId: string,
+    notes?: string,
+  ) {
+    const tid = this.tenant(tenantId);
+    const wo = await this.getWorkOrder(tid, workOrderId);
+    if (wo.status === 'DONE' || wo.status === 'CANCELLED') {
+      throw new BadRequestException('Work order is already closed');
+    }
+    await this.db.query(
+      `UPDATE lab_partner_work_orders
+       SET status = 'DONE',
+           status_notes = COALESCE($1, status_notes)
+       WHERE work_order_id = $2 AND tenant_id = $3`,
+      [notes?.trim() ?? null, workOrderId, tid],
+    );
+    return this.getWorkOrder(tid, workOrderId);
+  }
+
+  async cancelWorkOrder(
+    tenantId: string | undefined,
+    workOrderId: string,
+    userId: string,
+    notes?: string,
+  ) {
+    const tid = this.tenant(tenantId);
+    const wo = await this.getWorkOrder(tid, workOrderId);
+    if (wo.status === 'DONE' || wo.status === 'CANCELLED') {
+      throw new BadRequestException('Work order is already closed');
+    }
+    await this.db.query(
+      `UPDATE lab_partner_work_orders
+       SET status = 'CANCELLED',
+           accepted_by = COALESCE(accepted_by, $1),
+           accepted_at = COALESCE(accepted_at, NOW()),
+           status_notes = COALESCE($2, status_notes)
+       WHERE work_order_id = $3 AND tenant_id = $4`,
+      [userId, notes?.trim() ?? null, workOrderId, tid],
+    );
+    return this.getWorkOrder(tid, workOrderId);
+  }
+
+  async spawnProcurementFromWorkOrder(
+    tenantId: string | undefined,
+    workOrderId: string,
+    userId: string,
+    body: {
+      amount_estimate: number;
+      description?: string;
+      technical_specs?: string;
+    },
+  ) {
+    const tid = this.tenant(tenantId);
+    const wo = await this.getWorkOrder(tid, workOrderId);
+    if (wo.status === 'DONE' || wo.status === 'CANCELLED') {
+      throw new BadRequestException('Closed work orders cannot spawn procurement');
+    }
+    if (wo.pr_id) {
+      throw new BadRequestException('Purchase requisition already linked');
+    }
+    if (!(body.amount_estimate > 0)) {
+      throw new BadRequestException('amount_estimate required');
+    }
+
+    const programRows = await this.db.query(
+      `SELECT program_id, budget_id
+       FROM fin_program_budgets
+       WHERE tenant_id = $1 AND program_name = 'TOKAMAK_RND' AND deleted_at IS NULL
+       LIMIT 1`,
+      [tid],
+    );
+    const program = programRows[0];
+
+    const description =
+      body.description?.trim() ||
+      `${wo.title} — ${wo.partner_name} (Fabless network WO)`;
+    const technicalSpecs =
+      body.technical_specs?.trim() ||
+      [wo.notes, wo.partner_code ? `Partner: ${wo.partner_code}` : null]
+        .filter(Boolean)
+        .join('\n') ||
+      undefined;
+
+    const pr = await this.procurement.createRequisition(tid, userId, {
+      description,
+      amount_estimate: body.amount_estimate,
+      technical_specs: technicalSpecs,
+      budget_id: program?.budget_id ?? undefined,
+      program_id: program?.program_id ?? undefined,
+    });
+
+    await this.db.query(
+      `UPDATE lab_partner_work_orders
+       SET pr_id = $1,
+           status = 'IN_PROGRESS',
+           accepted_by = COALESCE(accepted_by, $2),
+           accepted_at = COALESCE(accepted_at, NOW())
+       WHERE work_order_id = $3 AND tenant_id = $4`,
+      [pr.pr_id, userId, workOrderId, tid],
+    );
+
+    return {
+      work_order: await this.getWorkOrder(tid, workOrderId),
+      requisition: pr,
+    };
   }
 
   async budgetSummary(tenantId?: string) {

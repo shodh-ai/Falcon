@@ -128,6 +128,14 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/finance/grn';
   }
 
+  if (r === 'legalofficer' || r === 'legal officer') {
+    return '/leadership/mou-approvals';
+  }
+
+  if (r === 'deanofresearch' || r === 'dean of research') {
+    return '/research/grants';
+  }
+
   if (r === 'competitionadmin' || r === 'competition admin') {
     return '/competitions/dashboard';
   }
@@ -465,7 +473,7 @@ const portalRoles: Record<string, string[]> = {
     'applicant',
   ],
   '/tickets': ['student', 'faculty', 'hod', 'dean', 'hr', 'hradmin', 'superadmin', 'campusadmin', 'registrar', 'parent', 'coo', 'estateofficer'],
-  '/research': ['iqac', 'faculty', 'hod', 'dean', 'chairman', 'superadmin', 'campusadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator', 'labadmin', 'wrangler'],
+  '/research': ['iqac', 'faculty', 'hod', 'dean', 'deanofresearch', 'chairman', 'superadmin', 'campusadmin', 'drc_member', 'rac_member', 'rrc_member', 'phd_adjudicator', 'labadmin', 'wrangler'],
 };
 
 /** Derive the active workspace role from the current pathname (for multi-role users). */
@@ -599,6 +607,15 @@ export function canRoleAccessPath(
 
   if (isPathHiddenForLaunch(pathname)) {
     return false;
+  }
+
+  if (
+    pathname === '/leadership/mou-approvals' ||
+    pathname.startsWith('/leadership/mou-approvals/')
+  ) {
+    return roles.some((role) =>
+      ['chairman', 'president', 'vice chancellor', 'superadmin', 'registrar', 'cfo', 'coo', 'legalofficer'].includes(role),
+    );
   }
 
   const p2pAccess = canAccessFinanceP2pPath(roles, pathname);

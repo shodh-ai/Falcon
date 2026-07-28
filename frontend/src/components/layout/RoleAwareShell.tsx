@@ -8,6 +8,8 @@ import {
   adminOpsPortal,
   adminPortal,
   alumniPortal,
+  labsPortal,
+  operationsPortal,
   deanPortal,
   examCellPortal,
   facultyPortal,
@@ -21,6 +23,7 @@ import {
   parentPortal,
   placementPortal,
   presidentPortal,
+  researchPortal,
   studentPortal,
   type PortalConfig,
 } from '@/lib/navigation';
@@ -36,8 +39,15 @@ function portalForRole(role: string): PortalConfig {
   if (r === 'accountant' || r === 'apmanager' || r === 'apclerk' || r === 'financecontroller') {
     return financePortal;
   }
-  if (r === 'cfo' || r === 'coo') return financePortal;
+  if (r === 'cfo') return financePortal;
+  if (r === 'coo') return operationsPortal;
   if (r === 'procurement' || r === 'procurementhead' || r === 'procurementbuyer') return financePortal;
+  if (r === 'stores' || r === 'receivingclerk') return financePortal;
+  if (r === 'internalauditor') return leadershipPortal;
+  if (r === 'legalofficer') return leadershipPortal;
+  if (r === 'deanofresearch') return researchPortal;
+  if (r === 'labadmin') return labsPortal;
+  if (r === 'estateofficer') return operationsPortal;
   if (r === 'iqac') return iqacPortal;
   if (r === 'librarian') return libraryPortal;
   if (r === 'president' || r === 'vice chancellor') return presidentPortal;

@@ -41,6 +41,9 @@ const ACCOUNTS_PAYABLE = [
   'FinanceController',
 ] as const;
 
+/** Finance desk — full finance portal (receivables, payables, R&D budget, etc.) */
+const FINANCE_DESK = ACCOUNTS_PAYABLE;
+
 @Controller(['finance', 'api/finance'])
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class FinanceController {
@@ -60,19 +63,19 @@ export class FinanceController {
   }
 
   @Get('dashboard')
-  @Roles('SuperAdmin', 'Accountant', 'President')
+  @Roles(...FINANCE_DESK, 'President')
   dashboard(@Req() req: { user: AuthUser }) {
     return this.finance.getDashboard(this.tenant(req));
   }
 
   @Get('fee-templates')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   feeTemplates(@Req() req: { user: AuthUser }) {
     return this.accounts.listTemplates(this.tenant(req));
   }
 
   @Post('fee-templates')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   createFeeTemplate(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -84,13 +87,13 @@ export class FinanceController {
   }
 
   @Get('demands')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   listDemands(@Query('studentUserId') studentUserId?: string) {
     return this.finance.listDemands(studentUserId);
   }
 
   @Post('demands')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   createDemand(
     @Req() req: { user: AuthUser },
     @Body() dto: CreateFeeDemandDto,
@@ -99,7 +102,7 @@ export class FinanceController {
   }
 
   @Post('demands/bulk-generate')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   async bulkGenerateDemands(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -119,43 +122,43 @@ export class FinanceController {
   }
 
   @Get('demands/jobs/:jobId')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   bulkJobStatus(@Param('jobId') jobId: string) {
     return this.accounts.getBulkJob(jobId);
   }
 
   @Get('collections')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   collections(@Req() req: { user: AuthUser }, @Query('q') q?: string) {
     return this.accounts.listCollections(this.tenant(req), q);
   }
 
   @Get('transactions')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   listTransactions(@Query('studentUserId') studentUserId?: string) {
     return this.finance.listTransactions(studentUserId);
   }
 
   @Patch('transactions/:id/receipt')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
     return this.finance.uploadReceipt(id, dto.receipt_url);
   }
 
   @Get('defaulters')
-  @Roles('SuperAdmin', 'Accountant', 'President')
+  @Roles(...FINANCE_DESK, 'President')
   listDefaulters() {
     return this.finance.listDefaulters();
   }
 
   @Post('defaulters/lock-admit-cards')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   lockAdmitCards(@Req() req: { user: AuthUser }) {
     return this.finance.lockAdmitCards(this.tenant(req));
   }
 
   @Post('scholarships')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   applyScholarship(
     @Body() dto: { student_user_id?: string; discount_percent?: number },
   ) {
@@ -174,7 +177,7 @@ export class FinanceController {
   }
 
   @Post('vendors')
-  @Roles('SuperAdmin', 'Accountant', 'CampusAdmin')
+  @Roles(...FINANCE_DESK)
   createVendor(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -207,7 +210,7 @@ export class FinanceController {
   }
 
   @Post('approvals/:approvalId/request-otp')
-  @Roles('SuperAdmin', 'Accountant', 'President', 'Chairman')
+  @Roles(...FINANCE_DESK, 'President', 'Chairman')
   requestApprovalOtp(
     @Req() req: { user: AuthUser },
     @Param('approvalId') approvalId: string,
@@ -230,7 +233,7 @@ export class FinanceController {
   }
 
   @Get('salary-processing')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   salarySummary(
     @Req() req: { user: AuthUser },
     @Query('month') month?: string,
@@ -239,7 +242,7 @@ export class FinanceController {
   }
 
   @Get('salary-processing/bank-export')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   @Header('Content-Type', 'text/csv')
   bankExport(
     @Req() req: { user: AuthUser },
@@ -264,7 +267,7 @@ export class FinanceController {
   }
 
   @Post('budgets')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   upsertBudget(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -276,7 +279,7 @@ export class FinanceController {
   }
 
   @Post('purchase-orders')
-  @Roles('SuperAdmin', 'Accountant', 'HOD', 'Faculty')
+  @Roles(...FINANCE_DESK, 'HOD', 'Faculty')
   createPurchaseOrder(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -295,7 +298,7 @@ export class FinanceController {
   }
 
   @Post('budget-expansion')
-  @Roles('SuperAdmin', 'Accountant', 'HOD', 'Faculty')
+  @Roles(...FINANCE_DESK, 'HOD', 'Faculty')
   requestBudgetExpansion(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -313,13 +316,13 @@ export class FinanceController {
   }
 
   @Get('funding-requests')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   listFundingRequests(@Req() req: { user: AuthUser }) {
     return this.finance.listFundingRequests(this.tenant(req));
   }
 
   @Patch('funding-requests/:requestId/transfer')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   transferFunding(
     @Req() req: { user: AuthUser },
     @Param('requestId') requestId: string,
@@ -332,13 +335,13 @@ export class FinanceController {
   }
 
   @Get('ledger-accounts')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   ledgerAccounts(@Req() req: { user: AuthUser }) {
     return this.ledger.listAccounts(this.tenant(req));
   }
 
   @Get('audit-reports/day-book')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   @Header('Content-Type', 'text/csv')
   async dayBook(
     @Req() req: { user: AuthUser },
@@ -356,7 +359,7 @@ export class FinanceController {
   }
 
   @Get('audit-reports/trial-balance')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   @Header('Content-Type', 'text/csv')
   async trialBalance(@Req() req: { user: AuthUser }, @Res() res: Response) {
     const rows = await this.ledger.trialBalance(this.tenant(req));
@@ -372,7 +375,7 @@ export class FinanceController {
   }
 
   @Get('audit-reports/gst')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   @Header('Content-Type', 'text/csv')
   async gstExport(
     @Req() req: { user: AuthUser },
@@ -395,7 +398,7 @@ export class FinanceController {
   }
 
   @Get('audit-reports/tds')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   @Header('Content-Type', 'text/csv')
   async tdsExport(
     @Req() req: { user: AuthUser },
@@ -427,13 +430,13 @@ export class FinanceController {
   }
 
   @Get('cheques/pending')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   pendingCheques(@Req() req: { user: AuthUser }) {
     return this.cheques.listPendingCheques(this.tenant(req));
   }
 
   @Post('cheques/log')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   logCheque(
     @Req() req: { user: AuthUser },
     @Body() body: Record<string, unknown>,
@@ -445,7 +448,7 @@ export class FinanceController {
   }
 
   @Patch('cheques/:transactionId/clear')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   clearCheque(
     @Req() req: { user: AuthUser },
     @Param('transactionId') transactionId: string,
@@ -459,7 +462,7 @@ export class FinanceController {
   }
 
   @Patch('cheques/:transactionId/return')
-  @Roles('SuperAdmin', 'Accountant')
+  @Roles(...FINANCE_DESK)
   returnCheque(
     @Req() req: { user: AuthUser },
     @Param('transactionId') transactionId: string,

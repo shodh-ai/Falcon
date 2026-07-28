@@ -1499,6 +1499,13 @@ export const leadershipPortal: PortalConfig = {
           icon: Inbox,
           keywords: ['write-off', 'asset', 'grade change', 'hire', 'approve', 'pending'],
         },
+        {
+          label: 'Fabless Work Orders',
+          href: '/operations/fabless-work-orders',
+          icon: Network,
+          keywords: ['ceeri', 'istem', 'mnit', 'tokamak', 'partner', 'labs'],
+          roles: ['COO', 'SuperAdmin', 'CampusAdmin'],
+        },
         { label: 'DOFA Policy Vault', href: '/leadership/dofa-policy-vault', icon: Scale, keywords: ['constitution', 'dual-key', 'audit stone', 'who holds the pen'] },
         { label: 'MOU Approvals', href: '/leadership/mou-approvals', icon: ScrollText, keywords: ['legal', 'mou', 'ceeri', 'vault'] },
         { label: 'Approvals', href: '/leadership/approvals', icon: CheckSquare, keywords: ['inbox', 'approve', 'reject', 'workflow', 'po', 'waiver'] },
@@ -1797,6 +1804,7 @@ export const operationsPortal: PortalConfig = {
       title: 'Command',
       items: [
         { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, keywords: ['campus health', 'sla', 'dials'] },
+        { label: 'Fabless Work Orders', href: '/operations/fabless-work-orders', icon: Network, keywords: ['ceeri', 'istem', 'mnit', 'tokamak', 'partner'] },
         { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'write-off', 'asset', 'exceptions'] },
         { label: 'Org Pillars', href: '/leadership/org-chart', icon: Network, keywords: ['three pillar', 'reporting', 'anti-collusion'] },
         { label: 'Space Calendar', href: '/operations/space-calendar', icon: CalendarDays, keywords: ['auditorium', 'venue', 'dofa', 'club'] },
@@ -1812,6 +1820,7 @@ export const operationsPortal: PortalConfig = {
   ],
   commandItems: [
     { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard },
+    { label: 'Fabless Work Orders', href: '/operations/fabless-work-orders', icon: Network },
     { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
     { label: 'ESM Queues', href: '/operations/esm', icon: Ticket },
     { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode },
@@ -1819,6 +1828,7 @@ export const operationsPortal: PortalConfig = {
   ],
   mobileNavItems: [
     { label: 'Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, shortLabel: 'Home' },
+    { label: 'Fabless WOs', href: '/operations/fabless-work-orders', icon: Network, shortLabel: 'Fabless' },
     { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
     { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, shortLabel: 'ESM' },
     { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, shortLabel: 'P2P' },
