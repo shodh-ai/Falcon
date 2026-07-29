@@ -80,7 +80,7 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
-import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
+import { getAccountSettingsHrefForPortal, FINANCE_DESK_ROLE_NAMES } from '@/lib/auth-routing';
 import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
@@ -1124,6 +1124,15 @@ export const incubationPortal: PortalConfig = {
 /** @deprecated Use incubationPortal — legacy alias for redirects */
 export const ecellAdminPortal = incubationPortal;
 
+const FINANCE_DESK_ROLES = [...FINANCE_DESK_ROLE_NAMES];
+const PROCUREMENT_P2P_ROLES = [
+  'Procurement',
+  'ProcurementHead',
+  'ProcurementBuyer',
+  'SuperAdmin',
+  'CampusAdmin',
+] as const;
+
 export const financePortal: PortalConfig = {
   personaLabel: 'Finance Office',
   personaTitle: 'Finance & Accounts',
@@ -1132,58 +1141,66 @@ export const financePortal: PortalConfig = {
     {
       title: 'Overview',
       items: [
-        { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, keywords: ['cash flow', 'collection', 'budget'] },
+        {
+          label: 'Finance Dashboard',
+          href: '/finance/dashboard',
+          icon: LayoutDashboard,
+          keywords: ['cash flow', 'collection', 'budget'],
+          roles: FINANCE_DESK_ROLES,
+        },
       ],
     },
     {
       title: 'Receivables (Student Revenue)',
       items: [
-        { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
-        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
-        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
-        { label: 'Cheque Clearing', href: '/finance/cheque-clearing', icon: Banknote, keywords: ['cheque', 'bounce', 'deposit'] },
-        { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'] },
-        { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'] },
-        { label: 'R&D Grant Budget Review', href: '/finance/rnd-budget', icon: FlaskConical, keywords: ['research', 'grant', 'budget'] },
-        { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
+        { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'], roles: FINANCE_DESK_ROLES },
+        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'], roles: FINANCE_DESK_ROLES },
+        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'], roles: FINANCE_DESK_ROLES },
+        { label: 'Cheque Clearing', href: '/finance/cheque-clearing', icon: Banknote, keywords: ['cheque', 'bounce', 'deposit'], roles: FINANCE_DESK_ROLES },
+        { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'], roles: FINANCE_DESK_ROLES },
+        { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'], roles: FINANCE_DESK_ROLES },
+        { label: 'R&D Grant Budget Review', href: '/finance/rnd-budget', icon: FlaskConical, keywords: ['research', 'grant', 'budget'], roles: FINANCE_DESK_ROLES },
+        { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'], roles: FINANCE_DESK_ROLES },
       ],
     },
     {
       title: 'Payables & Expenses',
       items: [
-        { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'] },
-        { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'] },
-        { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'] },
+        { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'], roles: [...FINANCE_DESK_ROLES, 'ProcurementHead'] },
+        { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'], roles: FINANCE_DESK_ROLES },
+        { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'], roles: [...FINANCE_DESK_ROLES, ...PROCUREMENT_P2P_ROLES] },
         { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'requestor', 'maker', 'pr'], roles: ['LabAdmin', 'HOD', 'Faculty', 'Warden', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, keywords: ['sourcing', 'quotes', 'gst'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['hierarchy', 'joint committee'], roles: ['HOD', 'Dean', 'ProcurementHead', 'FinanceController', 'CFO', 'COO', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'LabAdmin', 'HOD', 'Faculty', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', 'stores', 'barcode'], roles: ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'], roles: ['APManager', 'APClerk', 'CFO', 'Accountant', 'FinanceController', 'SuperAdmin', 'CampusAdmin'] },
-        { label: 'DOFA Inbox (Universal)', href: '/finance/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'] },
-        { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'] },
-        { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'] },
+        { label: 'DOFA Inbox (Universal)', href: '/finance/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'], roles: ['COO', 'CFO', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'], roles: ['COO', 'CFO', 'Accountant', 'FinanceController', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin', 'HOD', 'Dean'] },
+        { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'], roles: FINANCE_DESK_ROLES },
         { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'], roles: ['COO', 'CFO', 'InternalAuditor', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin'] },
-        { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'] },
-        { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'] },
+        { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'], roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
+        { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'], roles: FINANCE_DESK_ROLES },
       ],
     },
     {
       title: 'Core Accounting',
       items: [
-        { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'] },
-        { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'] },
-        { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'] },
+        { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'], roles: FINANCE_DESK_ROLES },
+        { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'], roles: FINANCE_DESK_ROLES },
+        { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'], roles: FINANCE_DESK_ROLES },
       ],
     },
   ],
   commandItems: [
-    { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
-    { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet },
-    { label: 'Collections', href: '/finance/collections', icon: Banknote },
-    { label: 'Vendors', href: '/finance/vendors', icon: Building2 },
-    { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt },
-    { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet },
+    { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, roles: [...PROCUREMENT_P2P_ROLES] },
+    { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, roles: [...PROCUREMENT_P2P_ROLES, 'LabAdmin', 'HOD', 'Faculty'] },
+    { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, roles: FINANCE_DESK_ROLES },
+    { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet, roles: FINANCE_DESK_ROLES },
+    { label: 'Collections', href: '/finance/collections', icon: Banknote, roles: FINANCE_DESK_ROLES },
+    { label: 'Vendors', href: '/finance/vendors', icon: Building2, roles: [...FINANCE_DESK_ROLES, 'ProcurementHead'] },
+    { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
+    { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, roles: FINANCE_DESK_ROLES },
   ],
 };
 

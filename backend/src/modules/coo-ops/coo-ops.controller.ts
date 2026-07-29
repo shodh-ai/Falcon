@@ -407,7 +407,7 @@ export class CooOpsController {
   }
 
   @Post('p2p/catalog/order')
-  @Roles(...REQUESTOR)
+  @Roles(...REQUESTOR, ...PROCUREMENT)
   orderCatalog(
     @Req() req: { user: AuthUser },
     @Body() body: { catalog_item_id: string; qty: number },

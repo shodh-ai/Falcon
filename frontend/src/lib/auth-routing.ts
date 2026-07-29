@@ -493,6 +493,101 @@ export function getActiveWorkspaceRoleFromPath(
 
 const ENTITY_CREATOR_EMAIL = CAMPUS_ADMIN_LOGIN_EMAIL;
 
+/** Full finance desk — receivables, payables settlement, core accounting */
+export const FINANCE_DESK_ROLE_NAMES = [
+  'Accountant',
+  'CFO',
+  'APManager',
+  'APClerk',
+  'FinanceController',
+  'SuperAdmin',
+  'CampusAdmin',
+] as const;
+
+const FINANCE_DESK_ROLE_SET = new Set(FINANCE_DESK_ROLE_NAMES.map((r) => r.toLowerCase()));
+
+const PROCUREMENT_BUYER_FINANCE_PATHS = [
+  '/finance/procurement',
+  '/finance/catalog',
+  '/finance/purchase-orders',
+] as const;
+
+const PROCUREMENT_HEAD_EXTRA_FINANCE_PATHS = [
+  '/finance/approvals',
+  '/finance/procurement-intelligence',
+  '/finance/dofa',
+  '/finance/vendors',
+] as const;
+
+const STORES_FINANCE_PATHS = ['/finance/grn'] as const;
+
+const INTERNAL_AUDITOR_FINANCE_PATHS = [
+  '/finance/procurement-intelligence',
+  '/finance/approvals/dofa-inbox',
+] as const;
+
+function matchesFinancePrefix(pathname: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+/** Password, contact, notifications — any role using the finance shell. */
+function isFinanceAccountSelfServicePath(pathname: string): boolean {
+  return (
+    pathname === '/finance/settings' ||
+    pathname.startsWith('/finance/settings/') ||
+    pathname === '/finance/profile' ||
+    pathname.startsWith('/finance/profile/')
+  );
+}
+
+/** Whether this finance-office role may open this /finance/* path. */
+export function isFinancePathAllowedForRole(
+  role: string | undefined | null,
+  pathname: string,
+): boolean {
+  if (!pathname.startsWith('/finance')) return true;
+
+  if (isFinanceAccountSelfServicePath(pathname)) {
+    const r = (role ?? '').trim().toLowerCase();
+    return (
+      FINANCE_DESK_ROLE_SET.has(r) ||
+      r === 'cfo' ||
+      r === 'coo' ||
+      r === 'procurement' ||
+      r === 'procurementhead' ||
+      r === 'procurementbuyer' ||
+      r === 'stores' ||
+      r === 'security' ||
+      r === 'receivingclerk' ||
+      r === 'internalauditor'
+    );
+  }
+
+  const r = (role ?? '').trim().toLowerCase();
+  if (FINANCE_DESK_ROLE_SET.has(r) || r === 'cfo' || r === 'coo') return true;
+
+  if (r === 'internalauditor') {
+    return matchesFinancePrefix(pathname, INTERNAL_AUDITOR_FINANCE_PATHS);
+  }
+
+  if (r === 'procurementhead') {
+    return matchesFinancePrefix(pathname, [
+      ...PROCUREMENT_BUYER_FINANCE_PATHS,
+      ...PROCUREMENT_HEAD_EXTRA_FINANCE_PATHS,
+    ]);
+  }
+
+  if (r === 'procurement' || r === 'procurementbuyer') {
+    return matchesFinancePrefix(pathname, PROCUREMENT_BUYER_FINANCE_PATHS);
+  }
+
+  if (r === 'stores' || r === 'security' || r === 'receivingclerk') {
+    return matchesFinancePrefix(pathname, STORES_FINANCE_PATHS);
+  }
+
+  return true;
+}
+
 /** Module 2 P2P — granular finance paths (requestors are not full Finance users). */
 const FINANCE_P2P_PATH_ROLES: Record<string, string[]> = {
   '/finance/requisitions': [
@@ -621,6 +716,12 @@ export function canRoleAccessPath(
   const p2pAccess = canAccessFinanceP2pPath(roles, pathname);
   if (p2pAccess !== null) {
     return p2pAccess;
+  }
+
+  if (pathname.startsWith('/finance')) {
+    if (!roles.some((role) => isFinancePathAllowedForRole(role, pathname))) {
+      return false;
+    }
   }
 
   if (pathname.startsWith('/admin-ops/directory') || pathname.startsWith('/directory/')) {

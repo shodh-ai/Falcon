@@ -1,7 +1,13 @@
 /**
  * Role-scoped DOFA / P2P routes — keep approvers in their home portal shell.
  */
-import { getActiveWorkspaceRoleFromPath, getDashboardPathForRole } from '@/lib/auth-routing';
+import {
+  getActiveWorkspaceRoleFromPath,
+  getDashboardPathForRole,
+  isFinancePathAllowedForRole,
+} from '@/lib/auth-routing';
+
+export { FINANCE_DESK_ROLE_NAMES } from '@/lib/auth-routing';
 
 const FINANCE_OFFICE_ROLES = new Set([
   'accountant',
@@ -24,6 +30,50 @@ function norm(role: string | undefined | null): string {
 export function isFinanceOfficeRole(role: string | undefined | null): boolean {
   const r = norm(role);
   return FINANCE_OFFICE_ROLES.has(r) || r === 'cfo' || r === 'coo';
+}
+
+/** Sidebar/header branding when limited finance-office roles share the finance shell. */
+export function getFinancePortalBranding(role: string | undefined | null): {
+  personaLabel: string;
+  personaTitle: string;
+  homeHref: string;
+} {
+  const r = norm(role);
+  switch (r) {
+    case 'procurement':
+    case 'procurementbuyer':
+      return {
+        personaLabel: 'Central Procurement',
+        personaTitle: 'Sourcing & Vendor Selection',
+        homeHref: '/finance/procurement',
+      };
+    case 'procurementhead':
+      return {
+        personaLabel: 'Procurement Head',
+        personaTitle: 'Procurement Governance',
+        homeHref: '/finance/procurement',
+      };
+    case 'stores':
+    case 'security':
+    case 'receivingclerk':
+      return {
+        personaLabel: 'Central Stores',
+        personaTitle: 'Goods Receipt & Inventory',
+        homeHref: '/finance/grn',
+      };
+    case 'internalauditor':
+      return {
+        personaLabel: 'Internal Audit',
+        personaTitle: 'Procurement Intelligence',
+        homeHref: '/finance/procurement-intelligence',
+      };
+    default:
+      return {
+        personaLabel: 'Finance Office',
+        personaTitle: 'Finance & Accounts',
+        homeHref: '/finance/dashboard',
+      };
+  }
 }
 
 export function getP2pDofaApprovalsPath(role: string | undefined | null): string {
@@ -127,9 +177,15 @@ export function getFinancePortalRedirect(
   pathname: string,
 ): string | null {
   if (!pathname.startsWith('/finance')) return null;
-  if (isFinanceOfficeRole(role)) return null;
 
   const r = norm(role);
+
+  if (isFinanceOfficeRole(role) || r === 'cfo' || r === 'coo') {
+    if (isFinancePathAllowedForRole(role, pathname)) return null;
+    const target = getDashboardPathForRole(role);
+    return target === pathname ? null : target;
+  }
+
   if (pathname === '/finance/approvals' || pathname.startsWith('/finance/approvals/')) {
     const target = getP2pDofaApprovalsPath(r);
     return target === pathname ? null : target;
