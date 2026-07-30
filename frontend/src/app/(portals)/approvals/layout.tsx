@@ -1,5 +1,13 @@
 'use client';
 
-export default function ApprovalsLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen bg-background">{children}</div>;
+import type { ReactNode } from 'react';
+import { RoleGate } from '@/components/layout/RoleGate';
+import { RoleAwareShell } from '@/components/layout/RoleAwareShell';
+
+export default function ApprovalsLayout({ children }: { children: ReactNode }) {
+  return (
+    <RoleGate>
+      <RoleAwareShell>{children}</RoleAwareShell>
+    </RoleGate>
+  );
 }

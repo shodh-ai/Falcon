@@ -205,7 +205,10 @@ export class FinanceAccountsService {
 
   listVendors(tenantId: string) {
     return this.dataSource.query(
-      `SELECT * FROM fin_vendors WHERE tenant_id = $1 ORDER BY business_name`,
+      `SELECT vendor_id, business_name, default_tds_rate, gstin, is_active
+       FROM fin_vendors
+       WHERE tenant_id = $1 AND COALESCE(is_active, true) = true
+       ORDER BY business_name`,
       [tenantId],
     );
   }
@@ -301,21 +304,20 @@ export class FinanceAccountsService {
           budgetId: deptBudgetId,
           amount: netPayable,
         });
-      }
-
-      const budget = await this.checkBudget(
-        tenantId,
-        dto.department_id,
-        netPayable,
-        deptBudgetId,
-      );
-      if (!budget.allowed) {
-        throw new BadRequestException(
-          budget.message ?? 'Department budget exceeded',
+        const budget = await this.checkBudget(
+          tenantId,
+          dto.department_id,
+          netPayable,
+          deptBudgetId,
         );
+        if (!budget.allowed) {
+          throw new BadRequestException(
+            budget.message ?? 'Department budget exceeded',
+          );
+        }
       }
 
-      const requiresBoard = netPayable >= 100000;
+      const requiresBoard = !dto.po_id && netPayable >= 100000;
       const status = requiresBoard ? 'PENDING_BOARD_APPROVAL' : 'APPROVED';
 
       const rows = await tx.query(

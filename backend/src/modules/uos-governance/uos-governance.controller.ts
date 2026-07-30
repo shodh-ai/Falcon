@@ -32,6 +32,11 @@ export class UosGovernanceController {
     return user.role ?? user.roles?.[0] ?? 'Faculty';
   }
 
+  private userRoles(user: AuthUser): string[] {
+    const merged = [...(user.roles ?? []), ...(user.role ? [user.role] : [])].filter(Boolean);
+    return Array.from(new Set(merged));
+  }
+
   // ALM
   @Get('assets/amc')
   @Roles('SuperAdmin', 'CampusAdmin', 'EstateOfficer', 'COO', 'Accountant', 'LabAdmin', 'Stores')
@@ -123,7 +128,7 @@ export class UosGovernanceController {
     return this.uos.advanceWriteoff(
       this.tenant(req),
       req.user.user_id,
-      this.role(req.user),
+      this.userRoles(req.user),
       id,
       body?.decision ?? 'APPROVED',
     );
@@ -169,7 +174,7 @@ export class UosGovernanceController {
     return this.uos.advanceGradeChange(
       this.tenant(req),
       req.user.user_id,
-      this.role(req.user),
+      this.userRoles(req.user),
       id,
     );
   }

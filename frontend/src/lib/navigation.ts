@@ -80,7 +80,7 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
-import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
+import { getAccountSettingsHrefForPortal, FINANCE_DESK_ROLE_NAMES } from '@/lib/auth-routing';
 import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
@@ -190,6 +190,62 @@ export function withAccountSettingsNav(config: PortalConfig): PortalConfig {
     ...config,
     navGroups: [...config.navGroups, { title: 'Account', items: [settingsItem] }],
     commandItems: commandHasSettings ? config.commandItems : [...config.commandItems, settingsItem],
+  };
+}
+
+export function portalHasDofaInboxLink(config: PortalConfig): boolean {
+  const items = [
+    ...config.navGroups.flatMap((group) => group.items),
+    ...config.commandItems,
+    ...(config.mobileNavItems ?? []),
+  ];
+  return items.some(
+    (item) =>
+      item.href.includes('/dofa-inbox') ||
+      /dofa inbox \(universal\)/i.test(item.label),
+  );
+}
+
+/** Inject universal DOFA inbox link when this portal lacks one but the user can approve. */
+export function withRoleAwareDofaInboxNav(
+  config: PortalConfig,
+  inboxHref: string | null,
+): PortalConfig {
+  if (!inboxHref || portalHasDofaInboxLink(config)) return config;
+
+  const inboxItem: NavItem = {
+    label: 'DOFA Inbox (Universal)',
+    href: inboxHref,
+    icon: Inbox,
+    keywords: ['write-off', 'grade change', 'hire', 'approve', 'asset', 'dofa'],
+    shortLabel: 'DOFA',
+  };
+
+  const navGroups = config.navGroups.map((group, index) =>
+    index === 0
+      ? {
+          ...group,
+          items: [inboxItem, ...group.items.filter((item) => item.href !== inboxHref)],
+        }
+      : group,
+  );
+
+  const commandItems = [
+    inboxItem,
+    ...config.commandItems.filter((item) => item.href !== inboxHref),
+  ];
+
+  const mobileNavItems = (
+    config.mobileNavItems ?? config.commandItems.slice(0, 4)
+  )
+    .filter((item) => item.href !== inboxHref);
+  mobileNavItems.unshift(inboxItem);
+
+  return {
+    ...config,
+    navGroups,
+    commandItems,
+    mobileNavItems: mobileNavItems.slice(0, 4),
   };
 }
 
@@ -496,7 +552,7 @@ export const facultyPortal: PortalConfig = {
       title: 'Administration',
       items: [
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals'] },
+        { label: 'DOFA Inbox (Universal)', href: '/faculty/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
         { label: 'Placement Coordinator', href: '/faculty/placement-coordinator', icon: Briefcase, keywords: ['placement', 'drives', 'coordinator', 'attendance'] },
@@ -578,7 +634,7 @@ export const hrPortal: PortalConfig = {
       items: [
         { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'], hrModule: 'attendance' },
         { label: 'Pending on Me', href: '/hr/inbox', icon: Inbox, keywords: ['approve', 'inbox', 'pending', 'workflow'], roles: ['HR', 'HRAdmin', 'Faculty', 'HOD', 'Dean', 'SuperAdmin'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'headcount', 'hire'] },
+        { label: 'DOFA Inbox (Universal)', href: '/hr/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'headcount', 'hire'] },
         { label: 'Meetings', href: '/hr/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes', 'agenda'] },
         { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval', 'balances'], hrModule: 'leaves' },
       ],
@@ -715,6 +771,14 @@ export const hodPortal: PortalConfig = {
         { label: 'Department Analytics', href: '/hod/reports', icon: LineChart, keywords: ['analytics', 'reports', 'trends', 'departmental'] },
       ],
     },
+    {
+      title: 'Procurement (P2P)',
+      items: [
+        { label: 'Purchase Requisitions', href: '/hod/procurement/requisitions', icon: ClipboardList, keywords: ['rfq', 'pr', 'maker'] },
+        { label: 'DOFA Purchase Approvals', href: '/hod/approvals/dofa', icon: Scale, keywords: ['dofa', 'p2p', 'purchase'] },
+        { label: 'Universal DOFA Inbox', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['grade change', 'hire', 'write-off', 'cross department'] },
+      ],
+    },
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
@@ -820,6 +884,8 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
+        { label: 'DOFA Purchase Approvals', href: '/dean/approvals/dofa', icon: Scale, keywords: ['p2p', 'dofa', 'procurement', 'dean'] },
+        { label: 'Universal DOFA Inbox', href: '/dean/approvals/dofa-inbox', icon: Inbox, keywords: ['grade change', 'hire', 'cross department'] },
         { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'faculty', 'minutes'] },
@@ -1058,6 +1124,15 @@ export const incubationPortal: PortalConfig = {
 /** @deprecated Use incubationPortal — legacy alias for redirects */
 export const ecellAdminPortal = incubationPortal;
 
+const FINANCE_DESK_ROLES = [...FINANCE_DESK_ROLE_NAMES];
+const PROCUREMENT_P2P_ROLES = [
+  'Procurement',
+  'ProcurementHead',
+  'ProcurementBuyer',
+  'SuperAdmin',
+  'CampusAdmin',
+] as const;
+
 export const financePortal: PortalConfig = {
   personaLabel: 'Finance Office',
   personaTitle: 'Finance & Accounts',
@@ -1066,58 +1141,66 @@ export const financePortal: PortalConfig = {
     {
       title: 'Overview',
       items: [
-        { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, keywords: ['cash flow', 'collection', 'budget'] },
+        {
+          label: 'Finance Dashboard',
+          href: '/finance/dashboard',
+          icon: LayoutDashboard,
+          keywords: ['cash flow', 'collection', 'budget'],
+          roles: FINANCE_DESK_ROLES,
+        },
       ],
     },
     {
       title: 'Receivables (Student Revenue)',
       items: [
-        { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
-        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
-        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
-        { label: 'Cheque Clearing', href: '/finance/cheque-clearing', icon: Banknote, keywords: ['cheque', 'bounce', 'deposit'] },
-        { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'] },
-        { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'] },
-        { label: 'R&D Grant Budget Review', href: '/finance/rnd-budget', icon: FlaskConical, keywords: ['research', 'grant', 'budget'] },
-        { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
+        { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'], roles: FINANCE_DESK_ROLES },
+        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'], roles: FINANCE_DESK_ROLES },
+        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'], roles: FINANCE_DESK_ROLES },
+        { label: 'Cheque Clearing', href: '/finance/cheque-clearing', icon: Banknote, keywords: ['cheque', 'bounce', 'deposit'], roles: FINANCE_DESK_ROLES },
+        { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'], roles: FINANCE_DESK_ROLES },
+        { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'], roles: FINANCE_DESK_ROLES },
+        { label: 'R&D Grant Budget Review', href: '/finance/rnd-budget', icon: FlaskConical, keywords: ['research', 'grant', 'budget'], roles: FINANCE_DESK_ROLES },
+        { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'], roles: FINANCE_DESK_ROLES },
       ],
     },
     {
       title: 'Payables & Expenses',
       items: [
-        { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'] },
-        { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'] },
-        { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'] },
-        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'requestor', 'maker', 'pr'] },
-        { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, keywords: ['sourcing', 'quotes', 'gst'] },
-        { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['hierarchy', 'joint committee'] },
-        { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'] },
-        { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', 'stores', 'barcode'] },
-        { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'] },
-        { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'] },
-        { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'] },
-        { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'] },
-        { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'] },
-        { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'] },
+        { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'], roles: [...FINANCE_DESK_ROLES, 'ProcurementHead'] },
+        { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'], roles: FINANCE_DESK_ROLES },
+        { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'], roles: [...FINANCE_DESK_ROLES, ...PROCUREMENT_P2P_ROLES] },
+        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'requestor', 'maker', 'pr'], roles: ['LabAdmin', 'HOD', 'Faculty', 'Warden', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, keywords: ['sourcing', 'quotes', 'gst'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['hierarchy', 'joint committee'], roles: ['HOD', 'Dean', 'ProcurementHead', 'FinanceController', 'CFO', 'COO', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'LabAdmin', 'HOD', 'Faculty', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', 'stores', 'barcode'], roles: ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'], roles: ['APManager', 'APClerk', 'CFO', 'Accountant', 'FinanceController', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'DOFA Inbox (Universal)', href: '/finance/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'], roles: ['COO', 'CFO', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'], roles: ['COO', 'CFO', 'Accountant', 'FinanceController', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin', 'HOD', 'Dean'] },
+        { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'], roles: FINANCE_DESK_ROLES },
+        { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'], roles: ['COO', 'CFO', 'InternalAuditor', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'], roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
+        { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'], roles: FINANCE_DESK_ROLES },
       ],
     },
     {
       title: 'Core Accounting',
       items: [
-        { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'] },
-        { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'] },
-        { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'] },
+        { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'], roles: FINANCE_DESK_ROLES },
+        { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'], roles: FINANCE_DESK_ROLES },
+        { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'], roles: FINANCE_DESK_ROLES },
       ],
     },
   ],
   commandItems: [
-    { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
-    { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet },
-    { label: 'Collections', href: '/finance/collections', icon: Banknote },
-    { label: 'Vendors', href: '/finance/vendors', icon: Building2 },
-    { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt },
-    { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet },
+    { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, roles: [...PROCUREMENT_P2P_ROLES] },
+    { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, roles: [...PROCUREMENT_P2P_ROLES, 'LabAdmin', 'HOD', 'Faculty'] },
+    { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, roles: FINANCE_DESK_ROLES },
+    { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet, roles: FINANCE_DESK_ROLES },
+    { label: 'Collections', href: '/finance/collections', icon: Banknote, roles: FINANCE_DESK_ROLES },
+    { label: 'Vendors', href: '/finance/vendors', icon: Building2, roles: [...FINANCE_DESK_ROLES, 'ProcurementHead'] },
+    { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
+    { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, roles: FINANCE_DESK_ROLES },
   ],
 };
 
@@ -1323,6 +1406,7 @@ export const examCellPortal: PortalConfig = {
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
+        { label: 'Grade Change DOFA', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa', 'grade change', 'coe approval'] },
         { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
@@ -1426,6 +1510,19 @@ export const leadershipPortal: PortalConfig = {
         { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard, keywords: ['morning briefing', 'overview', 'kpi', 'home'] },
         { label: 'Org Chart', href: '/leadership/org-chart', icon: Network, keywords: ['pillars', 'reporting', 'cfo', 'coo', 'dofa'] },
         { label: 'Exceptions', href: '/leadership/exceptions', icon: TriangleAlert, keywords: ['dofa', 'management by exception', 'sla', 'escalate'] },
+        {
+          label: 'DOFA Inbox (Universal)',
+          href: '/leadership/dofa-inbox',
+          icon: Inbox,
+          keywords: ['write-off', 'asset', 'grade change', 'hire', 'approve', 'pending'],
+        },
+        {
+          label: 'Fabless Work Orders',
+          href: '/operations/fabless-work-orders',
+          icon: Network,
+          keywords: ['ceeri', 'istem', 'mnit', 'tokamak', 'partner', 'labs'],
+          roles: ['COO', 'SuperAdmin', 'CampusAdmin'],
+        },
         { label: 'DOFA Policy Vault', href: '/leadership/dofa-policy-vault', icon: Scale, keywords: ['constitution', 'dual-key', 'audit stone', 'who holds the pen'] },
         { label: 'MOU Approvals', href: '/leadership/mou-approvals', icon: ScrollText, keywords: ['legal', 'mou', 'ceeri', 'vault'] },
         { label: 'Approvals', href: '/leadership/approvals', icon: CheckSquare, keywords: ['inbox', 'approve', 'reject', 'workflow', 'po', 'waiver'] },
@@ -1438,12 +1535,13 @@ export const leadershipPortal: PortalConfig = {
   ],
   mobileNavItems: [
     { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard, shortLabel: 'Home' },
+    { label: 'DOFA Inbox', href: '/leadership/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
     { label: 'Approvals', href: '/leadership/approvals', icon: CheckSquare, shortLabel: 'Inbox' },
     { label: 'Financials', href: '/leadership/financial-oversight', icon: Landmark, shortLabel: 'Finance' },
-    { label: 'Academics', href: '/leadership/academics', icon: GraduationCap, shortLabel: 'Academic' },
   ],
   commandItems: [
     { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard },
+    { label: 'DOFA Inbox (Universal)', href: '/leadership/dofa-inbox', icon: Inbox },
     { label: 'Approvals Inbox', href: '/leadership/approvals', icon: CheckSquare },
     { label: 'Financial Oversight', href: '/leadership/financial-oversight', icon: Landmark },
     { label: 'Cash Flow', href: '/leadership/finance', icon: Wallet },
@@ -1646,6 +1744,23 @@ export const labsPortal: PortalConfig = {
         { label: 'Bookings & Checkout', href: '/labs/bookings', icon: CalendarDays, keywords: ['booking', 'checkout', 'safety'] },
         { label: 'Tokamak Budget', href: '/labs/budget', icon: Wallet, keywords: ['2 lakh', 'rnd', 'fast path'] },
         { label: 'Fabless Network', href: '/labs/partners', icon: Network, keywords: ['istem', 'ceeri', 'mnit', 'work order'] },
+        {
+          label: 'Asset Lifecycle (ALM)',
+          href: '/labs/asset-lifecycle',
+          icon: Archive,
+          keywords: ['write-off', 'calibration', 'dofa', 'scrap'],
+        },
+      ],
+    },
+    {
+      title: 'Procurement (P2P)',
+      items: [
+        {
+          label: 'Purchase Requisitions',
+          href: '/labs/procurement/requisitions',
+          icon: ClipboardList,
+          keywords: ['rfq', 'pr', 'oscilloscope', 'quotes', 'maker'],
+        },
       ],
     },
   ],
@@ -1655,6 +1770,18 @@ export const labsPortal: PortalConfig = {
     { label: 'Bookings', href: '/labs/bookings', icon: CalendarDays },
     { label: 'Budget', href: '/labs/budget', icon: Wallet },
     { label: 'Fabless Partners', href: '/labs/partners', icon: Network },
+    {
+      label: 'Asset Lifecycle (ALM)',
+      href: '/labs/asset-lifecycle',
+      icon: Archive,
+      keywords: ['write-off', 'calibration', 'dofa'],
+    },
+    {
+      label: 'Purchase Requisitions',
+      href: '/labs/procurement/requisitions',
+      icon: ClipboardList,
+      keywords: ['p2p', 'procurement', 'pr'],
+    },
   ],
 };
 
@@ -1694,12 +1821,13 @@ export const operationsPortal: PortalConfig = {
       title: 'Command',
       items: [
         { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, keywords: ['campus health', 'sla', 'dials'] },
+        { label: 'Fabless Work Orders', href: '/operations/fabless-work-orders', icon: Network, keywords: ['ceeri', 'istem', 'mnit', 'tokamak', 'partner'] },
+        { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'write-off', 'asset', 'exceptions'] },
         { label: 'Org Pillars', href: '/leadership/org-chart', icon: Network, keywords: ['three pillar', 'reporting', 'anti-collusion'] },
         { label: 'Space Calendar', href: '/operations/space-calendar', icon: CalendarDays, keywords: ['auditorium', 'venue', 'dofa', 'club'] },
         { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, keywords: ['helpdesk', 'routing', 'queues'] },
         { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode, keywords: ['physical', 'scan', 'location'] },
         { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, keywords: ['dofa', 'grn', '3-way', 'penalties'] },
-        { label: 'DOFA Inbox (Universal)', href: '/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'write-off', 'exceptions'] },
         { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['quotes', 'l1', 'rfq'] },
         { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['locked price'] },
         { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'split'] },
@@ -1709,10 +1837,18 @@ export const operationsPortal: PortalConfig = {
   ],
   commandItems: [
     { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard },
+    { label: 'Fabless Work Orders', href: '/operations/fabless-work-orders', icon: Network },
+    { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
     { label: 'ESM Queues', href: '/operations/esm', icon: Ticket },
     { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode },
     { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt },
-    { label: 'Vendor Penalties', href: '/operations/penalties', icon: Scale },
+  ],
+  mobileNavItems: [
+    { label: 'Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, shortLabel: 'Home' },
+    { label: 'Fabless WOs', href: '/operations/fabless-work-orders', icon: Network, shortLabel: 'Fabless' },
+    { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
+    { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, shortLabel: 'ESM' },
+    { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, shortLabel: 'P2P' },
   ],
 };
 

@@ -1,15 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useAuthedApi } from '@/lib/api';
 import { createOperationsApi } from '@/lib/api/api.operations';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/lib/notifications/falcon-toast';
+import { useAuth } from '@/context/AuthContext';
+import { canRoleAccessPath } from '@/lib/auth-routing';
 
 export default function Page() {
   const api = useAuthedApi();
+  const { user } = useAuth();
   const ops = useMemo(() => createOperationsApi(api), [api]);
   const [rows, setRows] = useState<any[]>([]);
   const [pos, setPos] = useState<any[]>([]);
@@ -17,16 +21,61 @@ export default function Page() {
   const [photoPath, setPhotoPath] = useState('');
   const [challanPath, setChallanPath] = useState('');
   const [barcode, setBarcode] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const reload = () =>
-    Promise.all([ops.grns(), ops.purchaseOrders()]).then(([g, p]) => {
-      setRows(g);
-      setPos(p.filter((x: any) => x.status === 'APPROVED'));
-    });
+  const role = user?.primaryRole ?? user?.role;
+  const canAccessGrn = canRoleAccessPath(
+    user?.roles?.length ? user.roles : role,
+    '/finance/grn',
+    user?.hr_capabilities,
+    user?.permissions,
+    user?.email,
+  );
+
+  const reload = useCallback(async () => {
+    if (!canAccessGrn) {
+      setRows([]);
+      setPos([]);
+      setLoadError('forbidden');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const [grnResult, poResult] = await Promise.allSettled([
+        ops.grns(),
+        ops.purchaseOrders(),
+      ]);
+
+      if (grnResult.status === 'rejected') {
+        throw grnResult.reason;
+      }
+
+      setRows(grnResult.value);
+      if (poResult.status === 'fulfilled') {
+        setPos(poResult.value.filter((x: any) => x.status === 'APPROVED'));
+      } else {
+        setPos([]);
+      }
+      setLoadError(null);
+    } catch (e: unknown) {
+      setRows([]);
+      setPos([]);
+      const msg = String((e as Error)?.message ?? e);
+      setLoadError(msg);
+      if (!/forbidden/i.test(msg)) {
+        toast.error(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [canAccessGrn, ops]);
 
   useEffect(() => {
-    void reload().catch(() => toast.error('Load failed'));
-  }, [ops]);
+    void reload();
+  }, [reload]);
 
   async function upload(file: File, kind: 'photo' | 'challan') {
     const form = new FormData();
@@ -39,6 +88,22 @@ export default function Page() {
     toast.success(`${kind} uploaded`);
   }
 
+  if (!canAccessGrn) {
+    return (
+      <div className="space-y-4 p-6">
+        <h1 className="text-2xl font-black text-sgvu-navy">Central Stores — GRN</h1>
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          Goods receipt is for gatekeepers only. Sign in as{' '}
+          <span className="font-mono">stores@mygyanvihar.com</span> (password{' '}
+          <span className="font-mono">password123</span>), then return here.
+        </div>
+        <Link href="/finance/ap-desk" className="text-sm underline text-sgvu-navy">
+          Back to AP Desk
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 p-6">
       <h1 className="text-2xl font-black text-sgvu-navy">Central Stores — GRN</h1>
@@ -46,6 +111,18 @@ export default function Page() {
         Gatekeepers only: open the box, photograph it, tag with SGVU barcode, upload delivery
         challan. The requestor cannot click Received.
       </p>
+
+      {loadError && (
+        <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          {/forbidden/i.test(loadError)
+            ? 'Could not load GRN data — confirm you are signed in as Central Stores.'
+            : loadError}
+        </div>
+      )}
+
+      {loading && !loadError && (
+        <p className="text-sm text-muted-foreground">Loading approved POs…</p>
+      )}
 
       <Card>
         <CardHeader>
@@ -91,7 +168,7 @@ export default function Page() {
           <Button
             disabled={!poId || !photoPath || !challanPath || !barcode.trim()}
             onClick={() =>
-              ops
+              void ops
                 .createGrn({
                   po_id: poId,
                   photo_path: photoPath,

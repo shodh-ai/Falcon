@@ -15,7 +15,13 @@ export default function CatalogPage() {
   const [qty, setQty] = useState<Record<string, string>>({});
 
   const reload = () =>
-    ops.catalog().then(setItems).catch(() => toast.error('Failed to load catalog'));
+    ops
+      .catalog()
+      .then((rows) => setItems(Array.isArray(rows) ? rows : []))
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : 'Failed to load catalog');
+        setItems([]);
+      });
 
   useEffect(() => {
     void reload();

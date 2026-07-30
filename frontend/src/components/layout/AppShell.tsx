@@ -12,8 +12,12 @@ import {
   isNavHrefActive,
   resolveActiveNavHref,
   withAccountSettingsNav,
+  withRoleAwareDofaInboxNav,
   type PortalConfig,
 } from '@/lib/navigation';
+import { useAuth } from '@/context/AuthContext';
+import { resolveDofaInboxPathForUser } from '@/lib/dofa-portal-routes';
+import { resolveUserRoleList } from '@/lib/available-workspaces';
 
 interface AppShellProps {
   config: PortalConfig;
@@ -41,10 +45,13 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const launchConfig = useMemo(
-    () => withAccountSettingsNav(filterPortalConfigForLaunchModules(config)),
-    [config],
-  );
+  const { user } = useAuth();
+  const launchConfig = useMemo(() => {
+    const roles = resolveUserRoleList(user);
+    const inboxHref = resolveDofaInboxPathForUser(roles, pathname);
+    const withDofa = withRoleAwareDofaInboxNav(config, inboxHref);
+    return withAccountSettingsNav(filterPortalConfigForLaunchModules(withDofa));
+  }, [config, pathname, user]);
 
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;

@@ -271,7 +271,15 @@ export class EcellController {
   }
 
   @Get('finance/payouts')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(
+    'Accountant',
+    'CFO',
+    'APManager',
+    'APClerk',
+    'FinanceController',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   financePayouts(@Req() req: { user: AuthUser }) {
     return this.ecell.listFinancePayoutsSanitized(this.tenant(req));
   }

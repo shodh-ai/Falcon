@@ -26,8 +26,8 @@ const PROCUREMENT = [
   'SuperAdmin',
 ] as const;
 
-/** Stores gatekeepers */
-const STORES = ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin'] as const;
+/** Stores gatekeepers (+ admin override for UAT) */
+const STORES = ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] as const;
 
 /** Finance AP — 3-way match + pay (AP Manager primary; CFO / Accountant compat) */
 const FINANCE_AP = [
@@ -407,7 +407,7 @@ export class CooOpsController {
   }
 
   @Post('p2p/catalog/order')
-  @Roles(...REQUESTOR)
+  @Roles(...REQUESTOR, ...PROCUREMENT)
   orderCatalog(
     @Req() req: { user: AuthUser },
     @Body() body: { catalog_item_id: string; qty: number },
@@ -437,7 +437,7 @@ export class CooOpsController {
   }
 
   @Post('p2p/analytics/invoice-split-scan')
-  @Roles(...FINANCE_AP, 'COO', 'Chairman', 'President', 'SuperAdmin', 'InternalAuditor')
+  @Roles(...FINANCE_AP, 'COO', 'Chairman', 'President', 'SuperAdmin', 'ProcurementHead')
   splitScan(@Req() req: { user: AuthUser }) {
     return this.procurement.runNightlyInvoiceSplitScan(this.tenant(req));
   }
