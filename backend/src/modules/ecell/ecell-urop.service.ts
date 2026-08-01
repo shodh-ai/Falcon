@@ -18,6 +18,16 @@ export class EcellUropService {
     return id ?? 'a0000000-0000-4000-8000-000000000001';
   }
 
+  /** TypeORM returns `[rows, affected]` for UPDATE…RETURNING; SELECT/INSERT return `rows`. */
+  private firstRow<T extends Record<string, unknown>>(
+    result: T[] | [T[], number],
+  ): T | undefined {
+    if (Array.isArray(result) && Array.isArray(result[0])) {
+      return (result as [T[], number])[0][0];
+    }
+    return (result as T[])[0];
+  }
+
   async getIpAgreement(tenantId: string | undefined, projectId: string) {
     const rows = await this.db.query(
       `SELECT * FROM ecell_ip_agreements WHERE tenant_id = $1 AND project_id = $2`,
@@ -85,7 +95,7 @@ export class EcellUropService {
         body.signed_doc_url ?? null,
       ],
     );
-    return rows[0];
+    return this.firstRow(rows);
   }
 
   async assertSignedIpBeforeFund(tenantId: string | undefined, projectId: string) {
@@ -200,12 +210,19 @@ export class EcellUropService {
        RETURNING *`,
       [trialId, tid, decision, notes ?? null, decidedBy],
     );
-    if (!rows[0]) throw new NotFoundException('Trial not found or already decided');
+    const trial = this.firstRow<{
+      student_user_id: string;
+      [key: string]: unknown;
+    }>(rows);
+    if (!trial) throw new NotFoundException('Trial not found or already decided');
+    if (!trial.student_user_id) {
+      throw new BadRequestException('Fellowship trial is missing student_user_id');
+    }
 
     if (decision === 'PASSED' || decision === 'CONVERTED') {
-      await this.attendance.ensureEliteFellowWaiver(tid, rows[0].student_user_id);
+      await this.attendance.ensureEliteFellowWaiver(tid, trial.student_user_id);
     }
-    return rows[0];
+    return trial;
   }
 
   async listMentorsWithWranglers(tenantId?: string) {

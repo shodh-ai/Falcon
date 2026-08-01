@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 import { createOperationsApi } from '@/lib/api/api.operations';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { toast } from '@/lib/notifications/falcon-toast';
 
 type MatchState = { match_status: string; can_pay: boolean };
@@ -11,6 +10,7 @@ type MatchState = { match_status: string; can_pay: boolean };
 export default function Page() {
   const api = useAuthedApi();
   const ops = useMemo(() => createOperationsApi(api), [api]);
+  const [levels, setLevels] = useState<any[]>([]);
   const [pos, setPos] = useState<any[]>([]);
   const [dofa, setDofa] = useState<any[]>([]);
   const [matches, setMatches] = useState<Record<string, MatchState>>({});

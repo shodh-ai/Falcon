@@ -874,6 +874,34 @@ flowchart TB
 
 ## 10. Known Gaps & Dual Systems
 
+### Universal DOFA Engine — shipped (capstone)
+
+DOFA is the **middle-layer nervous system**, not a separate product. See [`DOFA_UNIVERSAL_NERVOUS_SYSTEM.md`](./DOFA_UNIVERSAL_NERVOUS_SYSTEM.md).
+
+| Surface | Path |
+|---------|------|
+| Engine API | `/api/dofa/cases`, `/inbox`, `/exceptions` |
+| Unified inbox | `/approvals/dofa-inbox` |
+| Management by Exception | `/leadership/exceptions` |
+| **Policy Vault (dual-key)** | `/admin/dofa-policy-vault`, `/api/dofa/policy/*` |
+| Narrative | `docs/DOFA_UNIVERSAL_NERVOUS_SYSTEM.md` (constitution / who holds the pen) |
+
+Smoke: `node backend/scripts/dofa-engine-api-test.js` · `node backend/scripts/dofa-policy-vault-api-test.js`
+
+### UOS Missing 20% — shipped (2026-08)
+
+DOFA-connected slices under `/api/uos` + RMS research APIs:
+
+| Wave | Capability | Entry points |
+|------|------------|--------------|
+| 1 RMS | Grant proposals → DeanOfResearch; grant-gated P2P; IP docket | `/api/research/proposals`, `/research/grants`, `/research/ip` |
+| 2 ALM | AMC, calibration→ESM, write-off DOFA, GRN→asset | `/api/uos/assets/*`, `/admin-ops/asset-lifecycle` |
+| 3 SIS | Grade change + Curriculum/BoS | `/api/uos/sis/*`, `/faculty/grade-change`, `/dean/academics/bos` |
+| 4 Legal | MOU Legal→Dean→VC + accreditation evidence feed | `/api/uos/legal/mous`, `/leadership/mou-approvals` |
+| 5 Space | Venue booking Mentor→Estate→Security | `/api/uos/space/bookings`, `/operations/space-calendar` |
+
+Smoke: `node backend/scripts/uos-missing20-api-test.js`
+
 Document these honestly — the map reflects current code, not idealized flows.
 
 1. **Exit clearance flags** — `student_exit_clearances` (`library_cleared`, `finance_cleared`, `hostel_cleared`, `dept_cleared`) are read as prerequisites for alumni conversion approval, but no dedicated backend service was found that sets them to `true` (migration seed creates rows with `FALSE`).

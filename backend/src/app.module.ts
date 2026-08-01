@@ -66,6 +66,8 @@ import { MoonshotsModule } from './modules/moonshots/moonshots.module';
 import { CompetitionsModule } from './modules/competitions/competitions.module';
 import { SpecialProgramsModule } from './modules/special-programs/special-programs.module';
 import { CooOpsModule } from './modules/coo-ops/coo-ops.module';
+import { UosGovernanceModule } from './modules/uos-governance/uos-governance.module';
+import { DofaEngineModule } from './modules/dofa-engine/dofa-engine.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -196,6 +198,8 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     CompetitionsModule,
     SpecialProgramsModule,
     CooOpsModule,
+    UosGovernanceModule,
+    DofaEngineModule,
   ],
   controllers: [AppController],
   providers: [

@@ -48,6 +48,7 @@ import {
   resolveDefaultReportingOfficerId,
   canAccessTeamApprovals as canAccessTeamApprovalsUtil,
 } from './utils/reporting-officer.util';
+import { validatePillarReporting } from './utils/pillar-reporting.util';
 
 /** HOD (reporting officer) first, then HR admin — no generic HR inbox on create. */
 const APPROVAL_FLOW: Partial<Record<LeaveRequestStatus, LeaveRequestStatus>> = {
@@ -1049,10 +1050,95 @@ export class HrService {
       });
     }
 
+    // Resolve subject role name for pillar checks
+    let subjectRole = user.role?.role_name ?? null;
+    if (user.role_id) {
+      const roleRows = await this.users.manager.query<
+        Array<{ role_name: string }>
+      >(`SELECT role_name FROM roles WHERE role_id = $1 LIMIT 1`, [user.role_id]);
+      subjectRole = roleRows[0]?.role_name ?? subjectRole;
+    }
+
+    if (subjectRole && user.reporting_officer_id) {
+      await this.assertPillarReportingAllowed(
+        tenantId,
+        user.user_id,
+        subjectRole,
+        user.reporting_officer_id,
+      );
+    }
+
     await this.users.save(user);
     return this.listEmployees(tenantId).then((all) =>
       all.find((row) => row.user_id === userId),
     );
+  }
+
+  /** Anti-collusion: Finance↛COO, Procurement≠Stores manager, Auditor→Chairman */
+  private async assertPillarReportingAllowed(
+    tenantId: string,
+    subjectUserId: string,
+    subjectRole: string,
+    officerId: string,
+  ) {
+    const officer = await this.users.findOne({
+      where: { user_id: officerId, tenant_id: tenantId },
+      relations: ['role'],
+    });
+    if (!officer) {
+      throw new BadRequestException('reporting_officer_id not found');
+    }
+
+    const chainRoles: string[] = [];
+    let cursor: string | null = officerId;
+    const seen = new Set<string>();
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      const row = await this.users.manager.query(
+        `SELECT u.user_id, u.reporting_officer_id, r.role_name
+         FROM users u LEFT JOIN roles r ON r.role_id = u.role_id
+         WHERE u.user_id = $1 AND u.tenant_id = $2`,
+        [cursor, tenantId],
+      );
+      if (!row[0]) break;
+      if (row[0].role_name) chainRoles.push(String(row[0].role_name));
+      cursor = row[0].reporting_officer_id ?? null;
+      if (seen.size > 20) break;
+    }
+
+    const peers = await this.users.manager.query(
+      `SELECT r.role_name FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.reporting_officer_id = $2
+         AND u.user_id <> $3 AND u.is_active = true`,
+      [tenantId, officerId, subjectUserId],
+    );
+
+    const existingRoles = await this.users.manager.query(
+      `SELECT r.role_name FROM user_roles ur
+       JOIN roles r ON r.role_id = ur.role_id
+       WHERE ur.user_id = $1`,
+      [subjectUserId],
+    );
+
+    const violation = validatePillarReporting({
+      subjectRole,
+      officerRole: officer.role?.role_name ?? null,
+      officerChainRoles: chainRoles,
+      managerId: officerId,
+      peersUnderSameManager: peers.map((p: { role_name: string }) => ({
+        role_name: p.role_name,
+      })),
+      existingPrimaryRoles: existingRoles.map(
+        (r: { role_name: string }) => r.role_name,
+      ),
+    });
+    if (violation) {
+      throw new BadRequestException({
+        message: violation.message,
+        code: violation.code,
+      });
+    }
   }
 
   async getAttendanceMatrix(tenantId: string, month: string) {

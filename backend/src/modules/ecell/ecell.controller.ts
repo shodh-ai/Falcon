@@ -237,7 +237,14 @@ export class EcellController {
   }
 
   @Get('admin/dashboard')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'FellowshipAdmin',
+    'Wrangler',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   dashboard(@Req() req: { user: AuthUser }) {
     return this.ecell.dashboardSummary(this.tenant(req));
   }
@@ -264,7 +271,15 @@ export class EcellController {
   }
 
   @Get('finance/payouts')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(
+    'Accountant',
+    'CFO',
+    'APManager',
+    'APClerk',
+    'FinanceController',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   financePayouts(@Req() req: { user: AuthUser }) {
     return this.ecell.listFinancePayoutsSanitized(this.tenant(req));
   }

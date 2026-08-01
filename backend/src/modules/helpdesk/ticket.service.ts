@@ -284,6 +284,11 @@ export class TicketService {
       'superadmin',
       'registrar',
       'accountant',
+      'cfo',
+      'apmanager',
+      'apclerk',
+      'financecontroller',
+      'campusadmin',
       'warden',
       'faculty',
       'chairman',
@@ -327,6 +332,30 @@ export class TicketService {
        ORDER BY
          CASE t.status WHEN 'PENDING' THEN 0 WHEN 'IN_PROGRESS' THEN 1 ELSE 2 END,
          t.created_at DESC`,
+      [tenantId],
+    );
+  }
+
+  /** List FINANCE category helpdesk tickets for the finance desk. */
+  async listFinanceGrievances(tenantId: string) {
+    return this.dataSource.query(
+      `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description,
+              t.status, t.escalation_level, t.created_at, t.sla_deadline, t.resolved_at,
+              t.rejection_reason,
+              t.student_user_id,
+              u.name AS raised_by_name, u.official_email AS raised_by_email,
+              COALESCE(r.role_name, 'Staff') AS raised_by_role,
+              au.name AS assigned_to_name,
+              t.conversation
+       FROM helpdesk_tickets t
+       JOIN users u ON u.user_id = t.student_user_id
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN users au ON au.user_id = t.assigned_to_user_id
+       WHERE t.category = 'FINANCE'
+         AND COALESCE(t.tenant_id, u.tenant_id) = $1
+         AND t.deleted_at IS NULL
+         AND t.status IN ('PENDING', 'IN_PROGRESS')
+       ORDER BY t.created_at DESC`,
       [tenantId],
     );
   }

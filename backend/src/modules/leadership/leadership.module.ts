@@ -45,6 +45,8 @@ import { OwnerAccessGuard } from '../../common/guards/owner-access.guard';
     FinancialFeedEmitter,
     DepartmentScoreService,
     ExecutiveActionService,
+    AnomalyDetectionService,
   ],
 })
 export class LeadershipModule {}
+

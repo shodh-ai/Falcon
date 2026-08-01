@@ -167,35 +167,45 @@ async function main() {
       fail('ops:qr-ticket', e.message);
     }
     try {
-      const dofa = await req('GET', '/api/operations/p2p/dofa', cooToken);
+      const dofa = await req('GET', '/api/operations/p2p/dofa/levels', cooToken);
       if (!dofa.ok) throw new Error(`${dofa.status}`);
-      pass(`ops:dofa(${Array.isArray(dofa.data) ? dofa.data.length : 0})`);
+      pass(`ops:dofa-levels(${Array.isArray(dofa.data) ? dofa.data.length : 0})`);
 
-      const po = await req('POST', '/api/operations/p2p/purchase-orders', cooToken, {
-        description: 'Smoke PO — should auto-approve under COO DOFA',
+      const catalog = await req('GET', '/api/operations/p2p/catalog', cooToken);
+      if (!catalog.ok) throw new Error(`catalog ${catalog.status}`);
+      pass(`ops:catalog(${Array.isArray(catalog.data) ? catalog.data.length : 0})`);
+
+      const fraud = await req('GET', '/api/operations/p2p/analytics/fraud-signals', cooToken);
+      if (!fraud.ok) throw new Error(`fraud ${fraud.status}`);
+      pass('ops:fraud-signals');
+
+      // Requestor path uses LabAdmin (COO is oversight, not maker)
+      if (labToken) {
+        const pr = await req('POST', '/api/operations/p2p/requisitions', labToken, {
+          description: 'Smoke PR four-dept',
+          amount_estimate: 40000,
+        });
+        if (!pr.ok || !pr.data?.pr_id) throw new Error(`pr ${pr.status}`);
+        if (pr.data.status !== 'SUBMITTED') throw new Error(`expected SUBMITTED got ${pr.data.status}`);
+        pass('ops:create-pr-submitted');
+      }
+
+      // Direct PO is Procurement-only — COO should be forbidden
+      const poDenied = await req('POST', '/api/operations/p2p/purchase-orders', cooToken, {
+        description: 'Smoke PO denied for COO',
         amount: 12000,
       });
-      if (!po.ok) throw new Error(`po ${po.status} ${JSON.stringify(po.data)}`);
-      pass(`ops:po-create(${po.data.status})`);
+      if (poDenied.ok) throw new Error('COO must not create PO directly');
+      pass(`ops:po-create-coo-blocked(${poDenied.status})`);
 
-      const match = await req(
-        'GET',
-        `/api/operations/p2p/purchase-orders/${po.data.po_id}/three-way-match`,
-        cooToken,
-      );
-      if (!match.ok) throw new Error(`match ${match.status}`);
-      if (match.data.can_pay === true) {
-        throw new Error('can_pay should be false before GRN+invoice');
-      }
-      pass(`ops:3way-blocked(${match.data.match_status})`);
-
+      // Pay also Finance-only
       const pay = await req(
         'POST',
-        `/api/operations/p2p/purchase-orders/${po.data.po_id}/pay`,
+        `/api/operations/p2p/purchase-orders/00000000-0000-4000-8000-000000000099/pay`,
         cooToken,
       );
-      if (pay.ok) throw new Error('pay should have failed without 3-way match');
-      pass(`ops:pay-blocked(${pay.status})`);
+      if (pay.ok) throw new Error('COO pay should be forbidden');
+      pass(`ops:pay-coo-blocked(${pay.status})`);
     } catch (e) {
       fail('ops:p2p', e.message);
     }

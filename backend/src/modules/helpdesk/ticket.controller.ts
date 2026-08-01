@@ -39,6 +39,18 @@ const HELPDESK_REQUESTER_ROLES = [
   'DC_MEMBER',
 ] as const;
 
+/** Finance desk — grievance queue and ticket actions. */
+const FINANCE_HELPDESK_ROLES = [
+  'Accountant',
+  'CFO',
+  'APManager',
+  'APClerk',
+  'FinanceController',
+  'SuperAdmin',
+  'CampusAdmin',
+  'Registrar',
+] as const;
+
 @Controller('api/helpdesk/tickets')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TicketController {
@@ -66,7 +78,7 @@ export class TicketController {
   @Roles(
     'SuperAdmin',
     'Registrar',
-    'Accountant',
+    ...FINANCE_HELPDESK_ROLES,
     'Warden',
     'HOD',
     'Dean',
@@ -74,6 +86,12 @@ export class TicketController {
   )
   listAssigned(@Req() req: { user: AuthUser }) {
     return this.tickets.listTicketsForAssignee(req.user.user_id);
+  }
+
+  @Get('finance-grievances')
+  @Roles(...FINANCE_HELPDESK_ROLES)
+  listFinanceGrievances(@Req() req: { user: AuthUser }) {
+    return this.tickets.listFinanceGrievances(this.tenant(req));
   }
 
   @Get('ref/:ticketRef')
@@ -148,7 +166,7 @@ export class TicketController {
     'SuperAdmin',
     'AdmissionsOfficer',
     'Registrar',
-    'Accountant',
+    ...FINANCE_HELPDESK_ROLES,
     'Warden',
     'HOD',
     'Dean',

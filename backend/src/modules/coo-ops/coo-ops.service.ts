@@ -2,6 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { evaluateThreeWayMatch } from './three-way-match.util';
+import { computePenaltyNetPay } from './penalty-net.util';
+import { pillarOfRole } from '../hr/utils/pillar-reporting.util';
+import { assertGrantSpendAllowed } from '../research/grant-spend.util';
 
 @Injectable()
 export class CooOpsService {
@@ -232,11 +235,12 @@ export class CooOpsService {
     const autoApprove = limit > 0 && body.amount <= limit;
     const status = autoApprove ? 'APPROVED' : 'PENDING';
 
+    // DOFA auto-approve must not stamp requester as approved_by (SoD)
     const po = await this.db.query(
       `INSERT INTO fin_purchase_orders (
          tenant_id, description, amount, status, requested_by, vendor_id, program_id,
-         approved_by, approved_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         approved_by, approved_at, dofa_auto_approved
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         tid,
@@ -246,8 +250,9 @@ export class CooOpsService {
         userId,
         body.vendor_id ?? null,
         body.program_id ?? null,
-        autoApprove ? userId : null,
+        null,
         autoApprove ? new Date() : null,
+        autoApprove,
       ],
     );
 
@@ -263,7 +268,15 @@ export class CooOpsService {
   async createGrn(
     tenantId: string | undefined,
     userId: string,
-    body: { po_id: string; notes?: string; qty_received?: number },
+    body: {
+      po_id: string;
+      notes?: string;
+      qty_received?: number;
+      photo_path?: string;
+      challan_path?: string;
+      asset_barcode?: string;
+      received_at_gate?: boolean;
+    },
   ) {
     const tid = this.tenant(tenantId);
     const po = await this.db.query(
@@ -272,10 +285,41 @@ export class CooOpsService {
     );
     if (!po[0]) throw new NotFoundException('PO not found');
 
+    if (po[0].requested_by && String(po[0].requested_by) === userId) {
+      throw new BadRequestException({
+        message:
+          'Separation of duties: the person who ordered cannot mark goods as received',
+        code: 'SOD_RECEIVER_VIOLATION',
+      });
+    }
+    if (!body.photo_path?.trim() || !body.challan_path?.trim()) {
+      throw new BadRequestException({
+        message: 'photo_path and challan_path are required for GRN',
+        code: 'GRN_EVIDENCE_REQUIRED',
+      });
+    }
+    if (!body.asset_barcode?.trim()) {
+      throw new BadRequestException({
+        message: 'asset_barcode is required (SGVU tag at gate)',
+        code: 'GRN_BARCODE_REQUIRED',
+      });
+    }
+
     const grn = await this.db.query(
-      `INSERT INTO fin_goods_receipts (tenant_id, po_id, received_by, notes)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [tid, body.po_id, userId, body.notes ?? null],
+      `INSERT INTO fin_goods_receipts (
+         tenant_id, po_id, received_by, notes, photo_path, challan_path,
+         received_at_gate, asset_barcode
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [
+        tid,
+        body.po_id,
+        userId,
+        body.notes ?? null,
+        body.photo_path.trim(),
+        body.challan_path.trim(),
+        body.received_at_gate !== false,
+        body.asset_barcode.trim(),
+      ],
     );
 
     const lines = await this.db.query(
@@ -294,6 +338,33 @@ export class CooOpsService {
         ],
       );
     }
+
+    // ALM: register physical asset from barcode
+    try {
+      const existing = await this.db.query(
+        `SELECT asset_id FROM university_assets WHERE tenant_id = $1 AND asset_tag = $2 LIMIT 1`,
+        [tid, body.asset_barcode.trim()],
+      );
+      if (!existing[0]) {
+        await this.db.query(
+          `INSERT INTO university_assets (
+             tenant_id, asset_tag, asset_type, name, status, po_id, vendor_id,
+             asset_value, book_value, purchase_date
+           ) VALUES ($1,$2,'EQUIPMENT',$3,'AVAILABLE',$4,$5,$6,$6,CURRENT_DATE)`,
+          [
+            tid,
+            body.asset_barcode.trim(),
+            po[0].description || body.asset_barcode.trim(),
+            body.po_id,
+            po[0].vendor_id ?? null,
+            Number(po[0].amount) || null,
+          ],
+        );
+      }
+    } catch {
+      // asset register optional if schema drift
+    }
+
     return grn[0];
   }
 
@@ -327,6 +398,22 @@ export class CooOpsService {
       invoiceAmount,
     });
 
+    const openPenalties = po[0].vendor_id
+      ? await this.db.query(
+          `SELECT penalty_id, amount_inr, reason
+           FROM fin_vendor_penalties
+           WHERE tenant_id = $1 AND vendor_id = $2 AND settled_at IS NULL
+           ORDER BY created_at ASC`,
+          [tid, po[0].vendor_id],
+        )
+      : [];
+    const payPreview = computePenaltyNetPay({
+      grossAmount: invoiceAmount > 0 ? invoiceAmount : poAmount,
+      openPenaltyAmounts: openPenalties.map(
+        (p: { amount_inr: string | number }) => Number(p.amount_inr),
+      ),
+    });
+
     return {
       po_id: poId,
       has_grn: Boolean(grn[0]),
@@ -335,6 +422,10 @@ export class CooOpsService {
       invoice_amount: invoiceAmount,
       match_status: evaluated.match_status,
       can_pay: evaluated.can_pay,
+      open_penalties: openPenalties,
+      gross: payPreview.gross,
+      penalties: payPreview.penalties,
+      net_paid: payPreview.net_paid,
     };
   }
 
@@ -364,19 +455,108 @@ export class CooOpsService {
       `SELECT * FROM fin_purchase_orders WHERE po_id = $1 AND tenant_id = $2`,
       [poId, tid],
     );
+    const gross = Number(match.invoice_amount || po[0].amount);
+    const openPenalties = po[0].vendor_id
+      ? await this.db.query(
+          `SELECT penalty_id, amount_inr
+           FROM fin_vendor_penalties
+           WHERE tenant_id = $1 AND vendor_id = $2 AND settled_at IS NULL
+           ORDER BY created_at ASC`,
+          [tid, po[0].vendor_id],
+        )
+      : [];
+    const netting = computePenaltyNetPay({
+      grossAmount: gross,
+      openPenaltyAmounts: openPenalties.map(
+        (p: { amount_inr: string | number }) => Number(p.amount_inr),
+      ),
+    });
+
+    // Settle penalties FIFO up to netting.penalties (partial last row reduces balance)
+    let settleBudget = netting.penalties;
+    for (const pen of openPenalties) {
+      if (settleBudget <= 0) break;
+      const amt = Number(pen.amount_inr);
+      if (amt <= 0) continue;
+      if (amt <= settleBudget) {
+        await this.db.query(
+          `UPDATE fin_vendor_penalties
+           SET settled_at = NOW(), settled_po_id = $2
+           WHERE penalty_id = $1 AND settled_at IS NULL`,
+          [pen.penalty_id, poId],
+        );
+        settleBudget -= amt;
+      } else {
+        await this.db.query(
+          `UPDATE fin_vendor_penalties
+           SET amount_inr = amount_inr - $2
+           WHERE penalty_id = $1 AND settled_at IS NULL`,
+          [pen.penalty_id, settleBudget],
+        );
+        settleBudget = 0;
+      }
+    }
+
     if (po[0].program_id) {
       await this.db.query(
         `UPDATE fin_program_budgets SET encumbered_amount = GREATEST(0, encumbered_amount - $2),
          utilized_amount = utilized_amount + $2 WHERE program_id = $1`,
-        [po[0].program_id, Number(po[0].amount)],
+        [po[0].program_id, netting.net_paid],
       );
     }
     if (po[0].budget_id) {
       await this.db.query(
         `UPDATE fin_dept_budgets SET encumbered_amount = GREATEST(0, encumbered_amount - $2),
          utilized_amount = utilized_amount + $2 WHERE budget_id = $1`,
-        [po[0].budget_id, Number(po[0].amount)],
+        [po[0].budget_id, netting.net_paid],
       );
+    }
+    if (po[0].grant_id && netting.net_paid > 0) {
+      const grants = await this.db.query(
+        `SELECT * FROM research_grants WHERE grant_id = $1 AND tenant_id = $2`,
+        [po[0].grant_id, tid],
+      );
+      if (grants[0]) {
+        const cat = String(po[0].grant_expense_category || 'EQUIPMENT').toUpperCase();
+        const check = assertGrantSpendAllowed({
+          grantStatus: grants[0].status,
+          availableAmount: Number(
+            grants[0].available_amount ??
+              Number(grants[0].sanctioned_amount) -
+                Number(grants[0].utilized_amount),
+          ),
+          requestedAmount: netting.net_paid,
+          expenseCategory: cat,
+          allowedCategories: grants[0].allowed_expense_categories || [],
+        });
+        if (!check.ok) {
+          throw new BadRequestException({ message: check.message, code: check.code });
+        }
+        await this.db.query(
+          `UPDATE research_grants
+           SET utilized_amount = utilized_amount + $2,
+               available_amount = GREATEST(
+                 0,
+                 COALESCE(available_amount, sanctioned_amount - utilized_amount) - $2
+               ),
+               equipment_purchases = equipment_purchases + CASE WHEN $3 = 'EQUIPMENT' THEN $2 ELSE 0 END
+           WHERE grant_id = $1 AND tenant_id = $4`,
+          [po[0].grant_id, netting.net_paid, cat, tid],
+        );
+        await this.db.query(
+          `INSERT INTO research_grant_expenses (
+             grant_id, expense_type, description, amount, expense_date, po_id, tenant_id
+           ) VALUES ($1,$2,$3,$4,CURRENT_DATE,$5,$6)`,
+          [
+            po[0].grant_id,
+            cat,
+            `PO payment ${poId}`,
+            netting.net_paid,
+            poId,
+            tid,
+          ],
+        );
+      }
     }
     const rows = await this.db.query(
       `UPDATE fin_purchase_orders SET status = 'PAID'
@@ -384,7 +564,64 @@ export class CooOpsService {
        RETURNING *`,
       [poId, tid],
     );
-    return { ...rows[0], paid_by: userId, match };
+    return {
+      ...rows[0],
+      paid_by: userId,
+      match,
+      gross: netting.gross,
+      penalties: netting.penalties,
+      net_paid: netting.net_paid,
+    };
+  }
+
+  /** Three-pillar reporting tree for leadership / ops UI */
+  async orgPillars(tenantId?: string) {
+    const tid = this.tenant(tenantId);
+    const people = await this.db.query(
+      `SELECT u.user_id, u.name, u.official_email, u.reporting_officer_id,
+              r.role_name
+       FROM users u
+       LEFT JOIN roles r ON r.role_id = u.role_id
+       WHERE u.tenant_id = $1 AND u.is_active = true
+         AND r.role_name IN (
+           'Chairman','President','Dean','HOD','LabAdmin','Faculty','Warden',
+           'COO','ProcurementHead','Procurement','ProcurementBuyer',
+           'Stores','Security','ReceivingClerk','EstateOfficer','HelpdeskDispatcher',
+           'CFO','APManager','APClerk','Accountant','FinanceController','InternalAuditor'
+         )
+       ORDER BY r.role_name, u.name`,
+      [tid],
+    );
+
+    const nodes = people.map(
+      (p: {
+        user_id: string;
+        name: string;
+        official_email: string;
+        reporting_officer_id: string | null;
+        role_name: string;
+      }) => ({
+        user_id: p.user_id,
+        name: p.name,
+        email: p.official_email,
+        role_name: p.role_name,
+        reporting_officer_id: p.reporting_officer_id,
+        pillar: pillarOfRole(p.role_name),
+      }),
+    );
+
+    const chairman = nodes.find((n) => n.role_name === 'Chairman') ?? null;
+    const byPillar = {
+      ACADEMIC: nodes.filter((n) => n.pillar === 'ACADEMIC'),
+      OPERATIONS: nodes.filter((n) => n.pillar === 'OPERATIONS'),
+      FINANCE: nodes.filter((n) => n.pillar === 'FINANCE'),
+    };
+
+    return {
+      chairman,
+      pillars: byPillar,
+      people: nodes,
+    };
   }
 
   listPenalties(tenantId?: string) {

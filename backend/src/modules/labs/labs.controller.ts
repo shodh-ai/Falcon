@@ -61,8 +61,68 @@ export class LabsController {
 
   @Get('work-orders')
   @Roles('LabAdmin', 'COO', 'SuperAdmin', 'CampusAdmin')
-  workOrders(@Req() req: { user: AuthUser }) {
-    return this.labs.listWorkOrders(this.tenant(req));
+  workOrders(@Req() req: { user: AuthUser }, @Query('status') status?: string) {
+    return this.labs.listWorkOrders(this.tenant(req), status);
+  }
+
+  @Post('work-orders/:id/accept')
+  @Roles('COO', 'SuperAdmin', 'CampusAdmin')
+  acceptWo(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+  ) {
+    return this.labs.acceptWorkOrder(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      body.notes,
+    );
+  }
+
+  @Post('work-orders/:id/complete')
+  @Roles('COO', 'SuperAdmin', 'CampusAdmin')
+  completeWo(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+  ) {
+    return this.labs.completeWorkOrder(this.tenant(req), id, body.notes);
+  }
+
+  @Post('work-orders/:id/cancel')
+  @Roles('COO', 'SuperAdmin', 'CampusAdmin')
+  cancelWo(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() body: { notes?: string },
+  ) {
+    return this.labs.cancelWorkOrder(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      body.notes,
+    );
+  }
+
+  @Post('work-orders/:id/spawn-pr')
+  @Roles('COO', 'SuperAdmin', 'CampusAdmin')
+  spawnPr(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body()
+    body: {
+      amount_estimate: number;
+      description?: string;
+      technical_specs?: string;
+    },
+  ) {
+    return this.labs.spawnProcurementFromWorkOrder(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+      body,
+    );
   }
 
   @Post('work-orders')
