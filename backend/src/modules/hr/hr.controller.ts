@@ -357,7 +357,7 @@ export class HrController {
   }
 
   @Get('dashboard/metrics')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar')
   @HrPermission('dashboard', 'read')
   async dashboardMetrics(
     @Req() req: { user: AuthUser },
@@ -369,7 +369,7 @@ export class HrController {
   }
 
   @Get('dashboard/master')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar')
   @HrPermission('dashboard', 'read')
   async masterDashboard(
     @Req() req: { user: AuthUser },
@@ -525,7 +525,7 @@ export class HrController {
 
   @Get('entities')
   @SkipEntityScope()
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'Faculty', 'HOD', 'Dean')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar', 'Faculty', 'HOD', 'Dean')
   listEntities(@Req() req: { user: AuthUser }) {
     const roles = req.user.roles?.length
       ? req.user.roles
@@ -2290,7 +2290,7 @@ export class HrController {
   }
 
   @Get('admin/workflows')
-  @Roles('HRAdmin', 'SuperAdmin')
+  @Roles('HRAdmin', 'SuperAdmin', 'CampusAdmin', 'Registrar')
   async listWorkflows(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId?: string,

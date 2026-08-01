@@ -460,11 +460,51 @@ export class SearchService {
 
   private statusLabelSql() {
     return `CASE
-      WHEN LOWER(r.role_name) = 'alumni' OR u.onboarding_status = 'EXITED' THEN 'Alumni'
-      WHEN u.is_active = false OR COALESCE(sp.status, 'ACTIVE') = 'SUSPENDED' THEN 'Suspended'
-      WHEN u.onboarding_status IN ('PENDING_ONBOARDING', 'IN_PROGRESS') THEN 'On Leave'
+      WHEN LOWER(r.role_name) = 'alumni'
+        OR u.onboarding_status = 'EXITED'
+        OR UPPER(COALESCE(sp.status, '')) IN ('GRADUATED', 'ALUMNI')
+        THEN 'Graduated'
+      WHEN UPPER(COALESCE(sp.status, '')) = 'BLOCKED'
+        OR UPPER(COALESCE(u.onboarding_status, '')) = 'BLOCKED'
+        THEN 'Blocked'
+      WHEN UPPER(COALESCE(sp.status, '')) = 'SUSPENDED'
+        THEN 'Suspended'
+      WHEN u.is_active = false
+        THEN 'Inactive'
+      WHEN u.onboarding_status IN (
+        'PENDING_ONBOARDING',
+        'IN_PROGRESS',
+        'PENDING_PASSWORD_RESET',
+        'PENDING_DOCUMENTS'
+      )
+        THEN 'Pending'
+      WHEN UPPER(COALESCE(u.onboarding_status, '')) = 'ON_LEAVE'
+        OR UPPER(COALESCE(sp.status, '')) = 'ON_LEAVE'
+        THEN 'On Leave'
       ELSE 'Active'
     END`;
+  }
+
+  private directorySortSql(
+    sortBy?: string,
+    sortDir?: string,
+    statusSql?: string,
+  ) {
+    const dir =
+      String(sortDir ?? 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+    const key = String(sortBy ?? 'name').toLowerCase();
+    const statusExpr = statusSql ?? this.statusLabelSql();
+    const columnMap: Record<string, string> = {
+      name: 'u.name',
+      email: 'u.official_email',
+      role: 'r.role_name',
+      university_id: 'COALESCE(sp.enrollment_no, ep.employee_id)',
+      department: `COALESCE(d.dept_name, 'University-wide')`,
+      batch: 'sp.batch',
+      status: `(${statusExpr})`,
+    };
+    const column = columnMap[key] ?? columnMap.name;
+    return `${column} ${dir} NULLS LAST, u.name ASC`;
   }
 
   private applyDirectoryFilters(
@@ -513,14 +553,21 @@ export class SearchService {
 
     if (filters.status?.trim()) {
       const status = filters.status.trim().toLowerCase();
+      const label = this.statusLabelSql();
       if (status === 'active') {
-        conditions.push(`(${this.statusLabelSql()}) = 'Active'`);
-      } else if (status === 'alumni') {
-        conditions.push(`(${this.statusLabelSql()}) = 'Alumni'`);
-      } else if (status === 'on leave' || status === 'on_leave') {
-        conditions.push(`(${this.statusLabelSql()}) = 'On Leave'`);
+        conditions.push(`(${label}) = 'Active'`);
+      } else if (status === 'inactive') {
+        conditions.push(`(${label}) = 'Inactive'`);
       } else if (status === 'suspended') {
-        conditions.push(`(${this.statusLabelSql()}) = 'Suspended'`);
+        conditions.push(`(${label}) = 'Suspended'`);
+      } else if (status === 'graduated' || status === 'alumni') {
+        conditions.push(`(${label}) = 'Graduated'`);
+      } else if (status === 'pending') {
+        conditions.push(`(${label}) = 'Pending'`);
+      } else if (status === 'blocked') {
+        conditions.push(`(${label}) = 'Blocked'`);
+      } else if (status === 'on leave' || status === 'on_leave') {
+        conditions.push(`(${label}) = 'On Leave'`);
       }
     }
 
@@ -545,7 +592,15 @@ export class SearchService {
         roles: [],
         departments: [],
         batches: [],
-        statuses: ['Active', 'Alumni', 'On Leave', 'Suspended'],
+        statuses: [
+          'Active',
+          'Inactive',
+          'Suspended',
+          'Graduated',
+          'Pending',
+          'Blocked',
+          'On Leave',
+        ],
       };
     }
 
@@ -587,7 +642,15 @@ export class SearchService {
       roles: roles.map((r: { role_name: string }) => r.role_name),
       departments: departments.map((d: { dept_name: string }) => d.dept_name),
       batches: batches.map((b: { batch: string }) => b.batch),
-      statuses: ['Active', 'Alumni', 'On Leave', 'Suspended'],
+      statuses: [
+        'Active',
+        'Inactive',
+        'Suspended',
+        'Graduated',
+        'Pending',
+        'Blocked',
+        'On Leave',
+      ],
     };
   }
 
@@ -603,6 +666,8 @@ export class SearchService {
       batch?: string;
       page?: number;
       limit?: number;
+      sort_by?: string;
+      sort_dir?: string;
     },
   ) {
     if (!this.canBrowseDirectory(roleName)) {
@@ -622,6 +687,11 @@ export class SearchService {
     const where = conditions.join(' AND ');
     const from = this.directoryFromClause();
     const statusSql = this.statusLabelSql();
+    const orderBy = this.directorySortSql(
+      filters.sort_by,
+      filters.sort_dir,
+      statusSql,
+    );
 
     const countRows = await this.db.query(
       `SELECT COUNT(*)::int AS total ${from} WHERE ${where}`,
@@ -644,7 +714,7 @@ export class SearchService {
               ${statusSql} AS status_label
        ${from}
        WHERE ${where}
-       ORDER BY u.name ASC
+       ORDER BY ${orderBy}
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
     );
@@ -677,6 +747,8 @@ export class SearchService {
       department?: string;
       status?: string;
       batch?: string;
+      sort_by?: string;
+      sort_dir?: string;
     },
   ) {
     const result = await this.browseDirectory(
@@ -715,7 +787,7 @@ export class SearchService {
           .join(','),
       );
     }
-    return lines.join('\n');
+    return `\uFEFF${lines.join('\n')}`;
   }
 
   private async buildScopeSql(

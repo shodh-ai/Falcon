@@ -616,71 +616,111 @@ export class ExamCellEnterpriseService {
     actorUserId: string,
     qrPayload: string,
   ) {
-    const studentMatch = qrPayload.match(/student:([a-f0-9-]{36})/i);
-    const studentUserId = studentMatch?.[1];
+    const payload = String(qrPayload ?? '').trim();
+    if (!payload) {
+      throw new BadRequestException('Enter an enrollment number or scan a hall ticket QR');
+    }
 
-    let student;
+    const studentMatch = payload.match(/student:([a-f0-9-]{36})/i);
+    const bareUuid = payload.match(
+      /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i,
+    );
+    const studentUserId = studentMatch?.[1] ?? bareUuid?.[0];
+
+    const studentSelect = `
+      SELECT u.user_id, u.name, u.profile_picture_url,
+             sp.enrollment_number, sp.prn_number,
+             sp.branch_name,
+             sp.branch_name AS branch,
+             e.semester
+      FROM users u
+      LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+      LEFT JOIN LATERAL (
+        SELECT semester FROM student_course_enrollments
+        WHERE student_user_id = u.user_id ORDER BY semester DESC LIMIT 1
+      ) e ON true
+    `;
+
+    let student: Record<string, unknown> | undefined;
+
     if (studentUserId) {
-      [student] = await this.db.query(
-        `SELECT u.user_id, u.name, u.profile_picture_url, sp.enrollment_number, sp.prn_number,
-                sp.branch_name, e.semester
-         FROM users u
-         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-         LEFT JOIN LATERAL (
-           SELECT semester FROM student_course_enrollments
-           WHERE student_user_id = u.user_id ORDER BY semester DESC LIMIT 1
-         ) e ON true
-         WHERE u.user_id = $1 AND u.tenant_id = $2`,
+      const rows = await this.queryOrEmpty<Record<string, unknown>>(
+        `${studentSelect}
+         WHERE u.user_id = $1::uuid AND u.tenant_id = $2
+         LIMIT 1`,
         [studentUserId, tenantId],
       );
+      student = rows[0];
     }
 
     if (!student) {
-      [student] = await this.db.query(
-        `SELECT u.user_id, u.name, u.profile_picture_url, sp.enrollment_number, sp.prn_number,
-                sp.branch_name, e.semester
-         FROM users u
-         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-         LEFT JOIN LATERAL (
-           SELECT semester FROM student_course_enrollments
-           WHERE student_user_id = u.user_id ORDER BY semester DESC LIMIT 1
-         ) e ON true
+      const rows = await this.queryOrEmpty<Record<string, unknown>>(
+        `${studentSelect}
          WHERE u.tenant_id = $1
-           AND (sp.enrollment_number = $2 OR sp.prn_number = $2)`,
-        [tenantId, qrPayload],
+           AND (
+             LOWER(TRIM(COALESCE(sp.enrollment_number, ''))) = LOWER($2)
+             OR LOWER(TRIM(COALESCE(sp.prn_number, ''))) = LOWER($2)
+             OR LOWER(TRIM(u.name)) = LOWER($2)
+             OR sp.enrollment_number ILIKE $3
+             OR sp.prn_number ILIKE $3
+           )
+         LIMIT 1`,
+        [tenantId, payload, `%${payload}%`],
+      );
+      student = rows[0];
+    }
+
+    if (!student) {
+      throw new NotFoundException(
+        'Student not found. Try enrollment number, PRN, or a hall ticket QR payload.',
       );
     }
 
-    if (!student)
-      throw new NotFoundException('Student not found for QR payload');
+    const seating = await this.queryOrEmpty<{
+      room: string;
+      seat_number: string;
+      subject_name: string;
+      exam_date: string;
+    }>(
+      `SELECT esa.room, esa.seat_number, es.exam_date, es.exam_type, sub.subject_name
+       FROM exam_seating_allocations esa
+       JOIN exam_schedules es ON es.exam_schedule_id = esa.exam_schedule_id
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+       WHERE esa.student_user_id = $1 AND esa.tenant_id = $2
+       ORDER BY es.exam_date DESC
+       LIMIT 5`,
+      [student.user_id, tenantId],
+    );
 
-    const [seating, schedules] = await Promise.all([
-      this.db.query(
-        `SELECT esa.room, esa.seat_number, es.exam_date, es.exam_type, sub.subject_name
-         FROM exam_seating_allocations esa
-         JOIN exam_schedules es ON es.exam_schedule_id = esa.exam_schedule_id
-         LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-         WHERE esa.student_user_id = $1 AND esa.tenant_id = $2
-         ORDER BY es.exam_date LIMIT 5`,
-        [student.user_id, tenantId],
-      ),
-      this.db.query(
-        `SELECT es.*, sub.subject_name FROM exam_schedules es
-         LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
-         WHERE es.tenant_id = $1 AND es.exam_date >= CURRENT_DATE
-         ORDER BY es.exam_date LIMIT 5`,
-        [tenantId],
-      ),
-    ]);
+    const schedules = await this.queryOrEmpty(
+      `SELECT es.*, sub.subject_name FROM exam_schedules es
+       LEFT JOIN academic_subjects sub ON sub.subject_id = es.subject_id
+       WHERE es.tenant_id = $1 AND es.exam_date >= CURRENT_DATE
+       ORDER BY es.exam_date LIMIT 5`,
+      [tenantId],
+    );
 
     await this.queryOrEmpty(
       `INSERT INTO student_identity_verifications
          (tenant_id, student_user_id, qr_payload, verified, verified_by, verified_at)
        VALUES ($1,$2,$3,true,$4,NOW())`,
-      [tenantId, student.user_id, qrPayload, actorUserId],
+      [tenantId, student.user_id, payload, actorUserId],
     );
 
-    return { student, seating, upcoming_exams: schedules, verified: true };
+    return {
+      student: {
+        user_id: student.user_id,
+        name: student.name,
+        enrollment_number: student.enrollment_number ?? null,
+        profile_picture_url: student.profile_picture_url ?? null,
+        branch: student.branch_name ?? student.branch ?? null,
+        branch_name: student.branch_name ?? null,
+        semester: student.semester ?? null,
+      },
+      seating,
+      upcoming_exams: schedules,
+      verified: true,
+    };
   }
 
   /* ── 9. Live Examination Dashboard ── */

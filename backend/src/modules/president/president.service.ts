@@ -43,13 +43,13 @@ export class PresidentService {
     const [students, staff, demands, pendingVerifications, pendingGovernance, pendingHr, pendingOrders, pendingRatify] =
       await Promise.all([
         this.countUsersByRole('Student', tid),
-        this.users
-          .createQueryBuilder('user')
-          .leftJoin('user.role', 'role')
-          .where('user.is_active = true')
+      this.users
+        .createQueryBuilder('user')
+        .leftJoin('user.role', 'role')
+        .where('user.is_active = true')
           .andWhere('user.tenant_id = :tid', { tid })
-          .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
-          .getCount(),
+        .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+        .getCount(),
         this.fetchTenantDemands(tid),
         this.db
           .query(
@@ -80,7 +80,7 @@ export class PresidentService {
              AND president_ratification_status = 'PENDING' AND certificate_generated = false`,
           [tid],
         ).catch(() => [{ c: 0 }]).then((r) => Number(r[0]?.c ?? 0)),
-      ]);
+    ]);
 
     return {
       total_university_revenue: this.sumDemandTotal(demands),
@@ -205,13 +205,13 @@ export class PresidentService {
       await Promise.all([
         this.countUsersByRole('Student', tid),
         this.countUsersByRole('Faculty', tid),
-        this.users
-          .createQueryBuilder('user')
-          .leftJoin('user.role', 'role')
-          .where('user.is_active = true')
+      this.users
+        .createQueryBuilder('user')
+        .leftJoin('user.role', 'role')
+        .where('user.is_active = true')
           .andWhere('user.tenant_id = :tid', { tid })
-          .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
-          .getCount(),
+        .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+        .getCount(),
         this.payslips.find({
           where: { tenant_id: tid },
           order: { generated_at: 'DESC' },
@@ -225,7 +225,7 @@ export class PresidentService {
           .andWhere('role.role_name = :roleName', { roleName: 'Faculty' })
           .andWhere('user.created_at <= NOW() - INTERVAL \'1 year\'')
           .getCount(),
-      ]);
+    ]);
     const payrollExpense = currentPayslips.reduce(
       (sum, row) => sum + Number(row.net_pay ?? 0),
       0,
@@ -284,16 +284,16 @@ export class PresidentService {
 
     const department_budgets = (budgets as Array<Record<string, unknown>>).map(
       (b) => {
-        const allocated = Number(b.allocated_amount || 0);
-        const utilized = Number(b.utilized_amount || 0);
-        totalAllocated += allocated;
-        totalUtilized += utilized;
-        return {
+      const allocated = Number(b.allocated_amount || 0);
+      const utilized = Number(b.utilized_amount || 0);
+      totalAllocated += allocated;
+      totalUtilized += utilized;
+      return {
           department: (b.department as string) || 'Central',
-          allocated,
-          utilized,
-          status: utilized > allocated * 0.9 ? 'Critical' : 'Healthy',
-        };
+        allocated,
+        utilized,
+        status: utilized > allocated * 0.9 ? 'Critical' : 'Healthy',
+      };
       },
     );
 
