@@ -1,15 +1,16 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { FalconLogo } from '@/components/brand/FalconLogo';
 import type { NavGroup } from '@/lib/navigation';
 import { collectNavHrefs, isNavHrefActive } from '@/lib/navigation';
+import { readSidebarScroll, writeSidebarScroll } from '@/lib/sidebar-ui-state';
 
 interface AppSidebarProps {
   personaLabel: string;
@@ -29,11 +30,33 @@ export function AppSidebar({
   const pathname = usePathname();
   const allHrefs = collectNavHrefs(navGroups);
   const isExecutivePortal = personaLabel === 'President / VC';
+  const navRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    el.scrollTop = readSidebarScroll();
+  }, [collapsed]);
+
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => writeSidebarScroll(el.scrollTop));
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, []);
 
   return (
     <aside
       className={cn(
-        'flex h-full flex-col border-r border-sgvu-gold/25 bg-sgvu-navy text-white transition-[width] duration-200',
+        'flex h-full min-h-0 flex-col overflow-hidden border-r border-sgvu-gold/25 bg-sgvu-navy text-white transition-[width] duration-200',
         isExecutivePortal &&
           'border-sgvu-gold/20 bg-[linear-gradient(180deg,var(--color-sgvu-navy)_0%,#071a35_100%)] shadow-[8px_0_32px_rgba(4,20,44,0.14)]',
         collapsed ? 'w-[var(--sidebar-width-collapsed)]' : 'w-[var(--sidebar-width)]',
@@ -42,7 +65,7 @@ export function AppSidebar({
     >
       <div
         className={cn(
-          'relative',
+          'relative shrink-0',
           collapsed
             ? 'flex h-16 items-center justify-center px-2'
             : cn(
@@ -77,14 +100,17 @@ export function AppSidebar({
         </Button>
       </div>
 
-      <ScrollArea
+      {/* Native overflow scroll — Radix ScrollArea was clipping long module lists */}
+      <nav
+        ref={navRef}
+        aria-label="Workspace modules"
         className={cn(
-          'min-h-0 flex-1',
-          // Flush gold thumb to track edges (no inset gap from ScrollBar p-px)
-          '[&_[data-orientation=vertical]]:p-0 [&_[data-radix-scroll-area-thumb]]:bg-sgvu-gold [&_[data-radix-scroll-area-thumb]]:hover:bg-sgvu-gold-hover',
+          'min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-2.5 py-4',
+          '[scrollbar-gutter:stable]',
+          isExecutivePortal && 'pb-6',
         )}
       >
-        <nav className={cn('space-y-4 px-2.5 py-4', isExecutivePortal && 'space-y-5 pb-4')}>
+        <div className={cn('space-y-4 pb-8', isExecutivePortal && 'space-y-5')}>
           {navGroups.map((group, groupIndex) => (
             <div key={group.title}>
               {!collapsed && (
@@ -149,8 +175,8 @@ export function AppSidebar({
               )}
             </div>
           ))}
-        </nav>
-      </ScrollArea>
+        </div>
+      </nav>
     </aside>
   );
 }

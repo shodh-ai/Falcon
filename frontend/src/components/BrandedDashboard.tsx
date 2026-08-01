@@ -4,6 +4,7 @@ import { Select } from '@/components/ui/select';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { AppShell, EmptyTaskState } from '@/components/AppShell';
 import { useAuth } from '@/context/AuthContext';
+import { toast } from '@/lib/notifications/falcon-toast';
 import {
   AlertCircle,
   BarChart3,
@@ -20,6 +21,21 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+
+const GOVERNANCE_MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
 
 type Assignment = {
   assignment_id: string;
@@ -270,6 +286,100 @@ function MetricCard({ title, value, tone, icon: Icon }: { title: string; value: 
   );
 }
 
+function YearlyGovernanceCalendar({
+  assignments,
+  onBack,
+  onRefresh,
+}: {
+  assignments: Assignment[];
+  onBack: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [refreshing, setRefreshing] = useState(false);
+  const year = new Date().getFullYear();
+
+  const brandBtn =
+    'rounded-xl border border-[#0B2447] bg-[#0B2447] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#123A6D] active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
+  const outlineBtn =
+    'rounded-xl border border-[#0B2447] bg-white px-5 py-2.5 text-sm font-semibold text-[#0B2447] transition-colors hover:bg-[#0B2447]/5 active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy';
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#d6b65d]">Yearly Calendar</p>
+            <h2 className="mt-2 text-3xl font-bold text-[#08234a]">{year} Governance Calendar</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Monthly IQAC assignment windows for your role. Open a month to track pending and completed duties.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={brandBtn}
+              disabled={refreshing}
+              onClick={() => {
+                void (async () => {
+                  setRefreshing(true);
+                  try {
+                    await onRefresh();
+                  } finally {
+                    setRefreshing(false);
+                  }
+                })();
+              }}
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+            <button type="button" className={outlineBtn} onClick={onBack}>
+              Back to Tasks
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {GOVERNANCE_MONTHS.map((month) => {
+          const monthRows = assignments.filter((row) => {
+            const label = (row.task?.month || '').trim().toLowerCase();
+            return label === month.toLowerCase() || label.startsWith(month.slice(0, 3).toLowerCase());
+          });
+          const pending = monthRows.filter((row) => row.status === 'Pending' || row.status === 'Overdue').length;
+          const completed = monthRows.filter((row) => row.status === 'Completed').length;
+          const isCurrent = month === new Date().toLocaleString('en-US', { month: 'long' });
+
+          return (
+            <div
+              key={month}
+              className={`rounded-2xl border bg-white p-4 shadow-sm ${
+                isCurrent ? 'border-[#d6b65d] ring-1 ring-[#d6b65d]/40' : 'border-slate-200'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-bold text-[#08234a]">{month}</h3>
+                {isCurrent ? (
+                  <span className="rounded-full bg-[#d6b65d]/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#08234a]">
+                    Current
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-3 text-2xl font-black text-[#08234a]">{monthRows.length}</p>
+              <p className="text-xs text-slate-500">assigned task{monthRows.length === 1 ? '' : 's'}</p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+                <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800">{pending} pending</span>
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800">
+                  {completed} done
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MyTasksDashboard({
   assignments,
   submissions,
@@ -288,9 +398,29 @@ function MyTasksDashboard({
   const [textInput, setTextInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [checkingTasks, setCheckingTasks] = useState(false);
   const pendingAssignments = assignments.filter((assignment) => assignment.status === 'Pending');
   const completedAssignments = assignments.filter((assignment) => assignment.status === 'Completed');
   const overdueAssignments = assignments.filter((assignment) => assignment.status === 'Overdue');
+
+  const goToTasksHome = () => {
+    const path = window.location.pathname || '/dashboard';
+    window.history.pushState({}, '', path);
+    window.dispatchEvent(new Event('dashboard-section-change'));
+  };
+
+  if (section === 'calendar') {
+    return (
+      <YearlyGovernanceCalendar
+        assignments={assignments}
+        onBack={goToTasksHome}
+        onRefresh={async () => {
+          await onRefresh();
+          toast.success('Calendar refreshed');
+        }}
+      />
+    );
+  }
 
   if (section === 'uploads') {
     return (
@@ -437,7 +567,20 @@ function MyTasksDashboard({
           ))}
         </div>
       ) : (
-        <EmptyTaskState />
+        <EmptyTaskState
+          checking={checkingTasks}
+          onCheckTasks={async () => {
+            setCheckingTasks(true);
+            try {
+              await onRefresh();
+              toast.success('Task list refreshed');
+            } catch {
+              toast.error('Could not refresh tasks. Please try again.');
+            } finally {
+              setCheckingTasks(false);
+            }
+          }}
+        />
       )}
 
       {completedAssignments.length > 0 && (

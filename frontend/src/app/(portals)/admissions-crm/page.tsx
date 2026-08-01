@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
-import { campusAdminRoutes } from '@/lib/campus-admin.roles';
+import { ADMISSIONS_CRM_DASHBOARD_HREF } from '@/components/admissions-crm/admissions-crm-constants';
 
 export default function AdmissionsCrmIndexPage() {
-  redirect(campusAdminRoutes.admissionsPipeline);
+  redirect(ADMISSIONS_CRM_DASHBOARD_HREF);
 }

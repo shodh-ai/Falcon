@@ -227,12 +227,14 @@ export default function AdminStudentVerificationsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-bold text-sgvu-navy">First-Login Onboarding Verifications</h2>
-        <p className="text-sm text-muted-foreground">
-          Review students, faculty, and HOD submissions awaiting approval.
-        </p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <h2 className="text-xl font-bold text-sgvu-navy">First-Login Onboarding Verifications</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Review students, faculty, and HOD submissions awaiting approval.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">

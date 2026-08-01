@@ -25,7 +25,7 @@ import {
   type PortalConfig,
 } from '@/lib/navigation';
 
-function portalForRole(role: string): PortalConfig {
+export function portalForRole(role: string): PortalConfig {
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return studentPortal;
   if (r === 'faculty') return facultyPortal;
@@ -45,6 +45,11 @@ function portalForRole(role: string): PortalConfig {
   if (r === 'transportofficer' || r === 'transport officer') return adminOpsPortal;
   if (r === 'registrar') return adminPortal;
   return adminPortal;
+}
+
+/** True when the role uses the Management adminPortal sidebar (shared with /admin/*). */
+export function usesManagementAdminSidebar(role: string | undefined | null): boolean {
+  return portalForRole(role ?? '') === adminPortal;
 }
 
 export function RoleAwareShell({ children }: { children: ReactNode }) {

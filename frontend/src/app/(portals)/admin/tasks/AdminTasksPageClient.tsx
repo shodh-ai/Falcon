@@ -2,8 +2,8 @@
 
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import BrandedDashboard from '@/components/BrandedDashboard';
 import { FalconLoader } from '@/components/brand/FalconLoader';
+import { GovernanceTasksPanel } from '@/components/admin/GovernanceTasksPanel';
 
 export default function AdminTasksPageClient() {
   const router = useRouter();
@@ -20,5 +20,9 @@ export default function AdminTasksPageClient() {
     return <FalconLoader label="Opening upload history…" className="min-h-[40vh]" />;
   }
 
-  return <BrandedDashboard hideShell />;
+  return (
+    <div className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
+      <GovernanceTasksPanel />
+    </div>
+  );
 }

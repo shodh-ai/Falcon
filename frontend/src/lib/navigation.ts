@@ -130,6 +130,26 @@ export interface PortalConfig {
 }
 
 /**
+ * Nav hrefs that share routes with another prefix (redirects / cross-portal re-exports).
+ * Keeps sidebar items golden when the browser path differs from the nav link target.
+ */
+const NAV_ACTIVE_ALIASES: Record<string, string[]> = {
+  '/admin/admissions': ['/admissions-crm'],
+  '/campus-admin/admissions/pipeline': ['/admissions-crm/pipeline'],
+  '/campus-admin/admissions/verifications': ['/admissions-crm/verifications'],
+  '/campus-admin/admissions/enrolled-students': ['/admissions-crm/enrolled-students'],
+  '/campus-admin/admissions/counseling': ['/admissions-crm/counseling'],
+  '/campus-admin/admissions/leaves': ['/admissions-crm/leaves'],
+};
+
+function pathnameMatchesNavHref(pathname: string, href: string): boolean {
+  if (pathname === href || pathname.startsWith(`${href}/`)) return true;
+  const aliases = NAV_ACTIVE_ALIASES[href];
+  if (!aliases) return false;
+  return aliases.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+/**
  * Resolve which nav href should be active for the current path.
  * Prefers the longest matching href so nested routes (e.g. /hr/reports/documents)
  * do not also highlight their parent (/hr/reports).
@@ -142,8 +162,7 @@ export function resolveActiveNavHref(
   let best: string | null = null;
   for (const href of hrefs) {
     if (!href) continue;
-    const matches = pathname === href || pathname.startsWith(`${href}/`);
-    if (!matches) continue;
+    if (!pathnameMatchesNavHref(pathname, href)) continue;
     if (!best || href.length > best.length) best = href;
   }
   return best;

@@ -106,7 +106,11 @@ export function MeetingWorkspace({
 }) {
   return (
     <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Loading meetings…</p>}>
-      <MeetingWorkspaceInner workspaceLabel={workspaceLabel} description={description} />
+      <MeetingWorkspaceInner
+        workspaceLabel={workspaceLabel}
+        description={description}
+        syncExecutiveActionItems={syncExecutiveActionItems}
+      />
     </Suspense>
   );
 }
@@ -114,9 +118,11 @@ export function MeetingWorkspace({
 function MeetingWorkspaceInner({
   workspaceLabel = 'Meetings',
   description = 'Schedule meetings with people in your scope, request time with seniors, and publish minutes.',
+  syncExecutiveActionItems = false,
 }: {
   workspaceLabel?: string;
   description?: string;
+  syncExecutiveActionItems?: boolean;
 }) {
   const api = useAuthedApi();
   const presidentApi = usePresidentApi();

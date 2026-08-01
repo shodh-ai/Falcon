@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,12 @@ import {
   withAccountSettingsNav,
   type PortalConfig,
 } from '@/lib/navigation';
+import {
+  getSidebarCollapsedServerSnapshot,
+  getSidebarCollapsedSnapshot,
+  subscribeSidebarCollapsed,
+  writeSidebarCollapsed,
+} from '@/lib/sidebar-ui-state';
 
 interface AppShellProps {
   config: PortalConfig;
@@ -38,7 +44,11 @@ function findActiveNavItem(config: PortalConfig, pathname: string | null) {
 }
 
 export function AppShell({ config, children, profileHref, headerExtra, contentMaxWidthClass }: AppShellProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useSyncExternalStore(
+    subscribeSidebarCollapsed,
+    getSidebarCollapsedSnapshot,
+    getSidebarCollapsedServerSnapshot,
+  );
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const launchConfig = useMemo(
@@ -56,14 +66,16 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
       personaLabel={launchConfig.personaLabel}
       navGroups={launchConfig.navGroups}
       collapsed={collapsed}
-      onToggleCollapse={() => setCollapsed((v) => !v)}
+      onToggleCollapse={() => writeSidebarCollapsed(!collapsed)}
       className="h-full"
     />
   );
 
   return (
     <div className="bg-sgvu-surface">
-      <div className="fixed inset-y-0 left-0 z-30 hidden h-svh lg:block">{sidebar}</div>
+      <div className="fixed inset-y-0 left-0 z-30 hidden h-svh min-h-0 overflow-hidden lg:block">
+        {sidebar}
+      </div>
 
       <div
         className={cn(

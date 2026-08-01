@@ -54,25 +54,30 @@ export function AdminModuleHub({
 }) {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-sgvu-navy">{title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <h1 className="text-2xl font-bold tracking-tight text-sgvu-navy sm:text-3xl">{title}</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+        </CardContent>
+      </Card>
       <div className="grid gap-4 sm:grid-cols-2">
         {links.map((link) => {
           const Icon = link.icon ? ICONS[link.icon] : null;
           return (
-            <Link key={link.href} href={link.href}>
-              <Card className="h-full transition hover:border-sgvu-navy/40">
+            <Link
+              key={link.href}
+              href={link.href}
+              className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/60"
+            >
+              <Card className="h-full border-sgvu-navy/10 bg-white shadow-sm transition hover:border-sgvu-navy/40 hover:shadow-md">
                 <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    {Icon ? <Icon className="h-4 w-4 text-sgvu-gold" /> : null}
-                    {link.label}
-                    <ArrowRight className="ml-auto h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="flex items-center gap-2 text-base text-sgvu-navy">
+                    {Icon ? <Icon className="h-4 w-4 shrink-0 text-sgvu-gold" /> : null}
+                    <span className="min-w-0 flex-1">{link.label}</span>
+                    <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   </CardTitle>
                   <CardDescription>{link.description}</CardDescription>
                 </CardHeader>
-                <CardContent />
               </Card>
             </Link>
           );

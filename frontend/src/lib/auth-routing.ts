@@ -281,10 +281,17 @@ function canAccessHrPath(
   caps?: HrCapabilities | null,
   permissions?: string[],
 ): boolean {
-  if (roles.some((r) => ['hradmin', 'superadmin', 'campusadmin', 'hr', 'president'].includes(r))) return true;
+  // Management console hubs deep-link into HR; keep portal access aligned.
+  if (
+    roles.some((r) =>
+      ['hradmin', 'superadmin', 'campusadmin', 'hr', 'president', 'registrar'].includes(r),
+    )
+  ) {
+    return true;
+  }
 
   if (pathname.startsWith('/hr/admin')) {
-    return roles.some((r) => ['hradmin', 'superadmin', 'campusadmin'].includes(r));
+    return roles.some((r) => ['hradmin', 'superadmin', 'campusadmin', 'registrar'].includes(r));
   }
 
   if (pathname.startsWith('/hr/me/') || pathname.startsWith('/hr/inbox')) {
@@ -306,7 +313,18 @@ const portalRoles: Record<string, string[]> = {
   '/faculty': ['faculty'],
   '/dean': ['dean'],
   '/hod': ['hod'],
-  '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
+  '/hr': [
+    'hr',
+    'hradmin',
+    'superadmin',
+    'campusadmin',
+    'registrar',
+    'faculty',
+    'hod',
+    'dean',
+    'president',
+    'accountant',
+  ],
   '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],
   '/finance': ['accountant', 'superadmin'],
