@@ -30,7 +30,11 @@ export function createLabsApi(api: AuthedApi) {
     spawnWorkOrderPr: (
       id: string,
       body: { amount_estimate: number; description?: string; technical_specs?: string },
-    ) => api.post(`/api/labs/work-orders/${id}/spawn-pr`, body),
+    ) =>
+      api.post<{ requisition?: { status?: string } }>(
+        `/api/labs/work-orders/${id}/spawn-pr`,
+        body,
+      ),
     budget: () => api.get<any>('/api/labs/budget'),
   };
 }
