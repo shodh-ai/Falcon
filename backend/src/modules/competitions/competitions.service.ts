@@ -171,9 +171,21 @@ export class CompetitionsService {
 
   listBounties(tenantId?: string) {
     return this.db.query(
-      `SELECT * FROM bounty_tasks WHERE tenant_id = $1 ORDER BY created_at DESC`,
+      `SELECT b.*, u.name AS claimed_by_name
+       FROM bounty_tasks b
+       LEFT JOIN users u ON u.user_id = b.claimed_by
+       WHERE b.tenant_id = $1
+       ORDER BY b.created_at DESC`,
       [this.tenant(tenantId)],
     );
+  }
+
+  /** TypeORM/pg can nest RETURNING rows; empty [] is truthy and must not pass validation. */
+  private firstQueryRow<T extends { bounty_id?: string }>(rows: unknown): T | undefined {
+    if (!Array.isArray(rows) || rows.length === 0) return undefined;
+    const head = rows[0];
+    const row = Array.isArray(head) ? head[0] : head;
+    return row?.bounty_id ? (row as T) : undefined;
   }
 
   async claimBounty(tenantId: string | undefined, bountyId: string, userId: string) {
@@ -184,18 +196,33 @@ export class CompetitionsService {
        RETURNING *`,
       [bountyId, this.tenant(tenantId), userId],
     );
-    if (!rows[0]) throw new BadRequestException('Bounty not available');
-    return rows[0];
+    const row = this.firstQueryRow(rows);
+    if (!row) throw new BadRequestException('Bounty not available');
+    return row;
   }
 
   async markBountyPaid(tenantId: string | undefined, bountyId: string) {
     const rows = await this.db.query(
       `UPDATE bounty_tasks SET status = 'PAID'
-       WHERE bounty_id = $1 AND tenant_id = $2
+       WHERE bounty_id = $1 AND tenant_id = $2 AND status = 'CLAIMED'
        RETURNING *`,
       [bountyId, this.tenant(tenantId)],
     );
-    if (!rows[0]) throw new NotFoundException('Bounty not found');
-    return rows[0];
+    const row = this.firstQueryRow(rows);
+    if (!row) throw new BadRequestException('Bounty must be claimed before marking paid');
+    return row;
+  }
+
+  async reopenBounty(tenantId: string | undefined, bountyId: string) {
+    const rows = await this.db.query(
+      `UPDATE bounty_tasks
+       SET status = 'OPEN', claimed_by = NULL
+       WHERE bounty_id = $1 AND tenant_id = $2 AND status IN ('CLAIMED', 'PAID')
+       RETURNING *`,
+      [bountyId, this.tenant(tenantId)],
+    );
+    const row = this.firstQueryRow(rows);
+    if (!row) throw new BadRequestException('Bounty is already open');
+    return row;
   }
 }

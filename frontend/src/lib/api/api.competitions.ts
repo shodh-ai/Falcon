@@ -26,7 +26,8 @@ export function createCompetitionsApi(api: AuthedApi) {
     createPost: (body: { channel_id: string; body: string }) =>
       api.post('/api/competitions/network/posts', body),
     bounties: () => api.get<any[]>('/api/competitions/bounties'),
-    claimBounty: (id: string) => api.post(`/api/competitions/bounties/${id}/claim`),
-    payBounty: (id: string) => api.post(`/api/competitions/bounties/${id}/pay`),
+    claimBounty: (id: string) => api.post<any>(`/api/competitions/bounties/${id}/claim`, {}),
+    payBounty: (id: string) => api.post<any>(`/api/competitions/bounties/${id}/pay`, {}),
+    reopenBounty: (id: string) => api.post<any>(`/api/competitions/bounties/${id}/reopen`, {}),
   };
 }

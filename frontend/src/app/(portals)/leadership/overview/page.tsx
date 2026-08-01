@@ -105,8 +105,8 @@ export default function LeadershipOverviewPage() {
         }
       />
 
-      {brief && brief.bullets.length > 1 ? (
-        <LeadershipSectionCard title="Today's Brief" description="AI-generated owner summary">
+      {brief && brief.bullets.length > 0 ? (
+        <LeadershipSectionCard title="Today's Brief" description="Proactive strategy summary — not reactive firefighting">
           <ul className="space-y-2">
             {brief.bullets.slice(0, 5).map((bullet) => (
               <li key={bullet} className="text-sm leading-relaxed text-sgvu-navy">

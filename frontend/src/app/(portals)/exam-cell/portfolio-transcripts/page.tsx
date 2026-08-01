@@ -9,12 +9,33 @@ export default function Page() {
   const api = useAuthedApi();
   const sp = useMemo(() => createSpecialProgramsApi(api), [api]);
   const [arts, setArts] = useState<any[]>([]);
-  useEffect(() => { void sp.artifacts().then(setArts).catch(() => toast.error('Load failed')); }, [sp]);
+  const reload = () =>
+    sp
+      .artifacts()
+      .then(setArts)
+      .catch(() => toast.error('Load failed'));
+  useEffect(() => {
+    void reload();
+  }, [sp]);
   return (
     <div className="space-y-4 p-6">
       <h1 className="text-2xl font-black text-sgvu-navy">Portfolio Transcripts</h1>
-      <p className="text-sm text-muted-foreground">Artifacts replacing GPA-only graduation evidence.</p>
-      {arts.map((a) => <Card key={a.artifact_id}><CardContent className="pt-4 text-sm">{a.student_name ?? a.student_user_id}: {a.artifact_type} — {a.title}</CardContent></Card>)}
+      <p className="text-sm text-muted-foreground">
+        Artifacts replacing GPA-only graduation evidence — all students who added portfolio items.
+      </p>
+      {arts.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No portfolio artifacts yet. Students add repos under Student → Portfolio Degree, then publish.
+        </p>
+      ) : (
+        arts.map((a) => (
+          <Card key={a.artifact_id}>
+            <CardContent className="pt-4 text-sm">
+              {a.student_name ?? a.student_user_id}: {a.artifact_type} — {a.title}
+            </CardContent>
+          </Card>
+        ))
+      )}
     </div>
   );
 }

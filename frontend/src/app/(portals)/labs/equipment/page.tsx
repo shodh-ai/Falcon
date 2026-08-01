@@ -11,7 +11,12 @@ export default function Page() {
   const labs = useMemo(() => createLabsApi(api), [api]);
   const [rows, setRows] = useState<any[]>([]);
   const reload = () => labs.equipment().then(setRows).catch(() => toast.error('Load failed'));
-  useEffect(() => { void reload(); }, [labs]);
+  useEffect(() => {
+    void reload();
+    const onFocus = () => void reload();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [labs]);
   return (
     <div className="space-y-4 p-6">
       <h1 className="text-2xl font-black text-sgvu-navy">Zones & Equipment</h1>

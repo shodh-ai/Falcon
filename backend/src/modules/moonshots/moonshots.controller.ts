@@ -16,13 +16,13 @@ export class MoonshotsController {
   }
 
   @Get('programs')
-  @Roles('Student', 'Faculty', 'LabAdmin', 'Wrangler', 'IQAC', 'Dean', 'SuperAdmin', 'CampusAdmin', 'COO', 'Chairman', 'President')
+  @Roles('Student', 'Faculty', 'HOD', 'LabAdmin', 'Wrangler', 'IQAC', 'Dean', 'SuperAdmin', 'CampusAdmin', 'COO', 'Chairman', 'President')
   programs(@Req() req: { user: AuthUser }) {
     return this.moonshots.listPrograms(this.tenant(req));
   }
 
   @Get('projects')
-  @Roles('Student', 'Faculty', 'LabAdmin', 'Wrangler', 'IQAC', 'Dean', 'SuperAdmin', 'CampusAdmin', 'COO', 'Chairman', 'President')
+  @Roles('Student', 'Faculty', 'HOD', 'LabAdmin', 'Wrangler', 'IQAC', 'Dean', 'SuperAdmin', 'CampusAdmin', 'COO', 'Chairman', 'President')
   projects(@Req() req: { user: AuthUser }) {
     const roles = (req.user as AuthUser & { roles?: string[] }).roles ?? [];
     const isStudentOnly =

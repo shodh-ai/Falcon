@@ -140,6 +140,12 @@ export class CooOpsController {
     return this.ops.scanCloseTicket(this.tenant(req), req.user.user_id, id);
   }
 
+  @Get('esm/tickets')
+  @Roles('COO', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin', 'Chairman', 'President')
+  tickets(@Req() req: { user: AuthUser }) {
+    return this.ops.listOpenTickets(this.tenant(req));
+  }
+
   @Get('p2p/dofa')
   @Roles(...P2P_READ)
   dofa(@Req() req: { user: AuthUser }) {
@@ -179,6 +185,12 @@ export class CooOpsController {
     return this.ops.listGrns(this.tenant(req));
   }
 
+  @Get('p2p/vendors')
+  @Roles('COO', 'Accountant', 'SuperAdmin', 'CampusAdmin')
+  vendors(@Req() req: { user: AuthUser }) {
+    return this.ops.listVendors(this.tenant(req));
+  }
+
   @Post('p2p/grn')
   @Roles(...STORES)
   createGrn(
@@ -195,6 +207,12 @@ export class CooOpsController {
     },
   ) {
     return this.ops.createGrn(this.tenant(req), req.user.user_id, body);
+  }
+
+  @Post('p2p/purchase-orders/:id/invoice')
+  @Roles('COO', 'Accountant', 'SuperAdmin', 'CampusAdmin')
+  createInvoice(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.ops.createVendorInvoiceForPo(this.tenant(req), id);
   }
 
   @Get('p2p/purchase-orders/:id/three-way-match')

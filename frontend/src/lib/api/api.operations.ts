@@ -10,23 +10,20 @@ export function createOperationsApi(api: AuthedApi) {
     queues: () => api.get<any[]>('/api/operations/esm/queues'),
     locations: () => api.get<any[]>('/api/operations/esm/locations'),
     fromQr: (body: { qr_code: string; subject?: string }) =>
-      api.post<any>('/api/operations/esm/from-qr', body),
-    scanClose: (id: string) => api.post<any>(`/api/operations/esm/tickets/${id}/scan-close`),
+      api.post('/api/operations/esm/from-qr', body),
+    scanClose: (id: string) => api.post(`/api/operations/esm/tickets/${id}/scan-close`),
+    tickets: () => api.get<any[]>('/api/operations/esm/tickets'),
     dofa: () => api.get<any[]>('/api/operations/p2p/dofa'),
     dofaLevels: () => api.get<any[]>('/api/operations/p2p/dofa/levels'),
     purchaseOrders: () => api.get<any[]>('/api/operations/p2p/purchase-orders'),
     createPo: (body: { description: string; amount: number; vendor_id?: string }) =>
       api.post<any>('/api/operations/p2p/purchase-orders', body),
     grns: () => api.get<any[]>('/api/operations/p2p/grn'),
-    createGrn: (body: {
-      po_id: string;
-      notes?: string;
-      photo_path: string;
-      challan_path: string;
-      asset_barcode: string;
-      qty_received?: number;
-      received_at_gate?: boolean;
-    }) => api.post<any>('/api/operations/p2p/grn', body),
+    vendors: () => api.get<any[]>('/api/operations/p2p/vendors'),
+    createGrn: (body: { po_id: string; notes?: string }) =>
+      api.post('/api/operations/p2p/grn', body),
+    createInvoice: (poId: string) =>
+      api.post(`/api/operations/p2p/purchase-orders/${poId}/invoice`, {}),
     threeWayMatch: (id: string) =>
       api.get<any>(`/api/operations/p2p/purchase-orders/${id}/three-way-match`),
     payPo: (id: string) => api.post<any>(`/api/operations/p2p/purchase-orders/${id}/pay`),

@@ -1,7 +1,8 @@
 'use client';
 
-import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { ExecutiveFeatureGrid, EXECUTIVE_SPACING } from '@/components/leadership/executive';
 import { PremiumKPICards, GlassCard } from '@/components/leadership/intelligence/PremiumKPICards';
 import { LiveFeedColumn } from '@/components/leadership/intelligence/LiveFeedColumn';
@@ -39,11 +40,13 @@ export default function LeadershipIntelligencePage() {
     cash_in_bank: number;
   } | null>(null);
   const [quadrants, setQuadrants] = useState<IntelligenceQuadrants | null>(null);
+  const [forecast, setForecast] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     void api.ownerBrief().then(setBrief).catch(() => setBrief(null));
     void api.ticker().then(setTicker).catch(() => setTicker(null));
     void api.quadrants('year').then(setQuadrants).catch(() => setQuadrants(null));
+    void api.predictiveForecast().then(setForecast).catch(() => setForecast(null));
   }, [api]);
 
   const [charts, setCharts] = useState<ReturnType<
@@ -56,6 +59,8 @@ export default function LeadershipIntelligencePage() {
   }, [quadrants]);
 
   const reportsHub = getLeadershipHubRoutes('reports');
+  const intake = (forecast?.intake_analysis as Record<string, unknown>) ?? {};
+  const resource = (forecast?.resource_forecasting as Record<string, unknown>) ?? {};
 
   return (
     <div className={EXECUTIVE_SPACING.page}>
@@ -86,7 +91,7 @@ export default function LeadershipIntelligencePage() {
       />
 
       {brief?.bullets?.length ? (
-        <GlassCard title={`Falcon Owner's Brief · ${brief.brief_date}`} subtitle="Auto-generated morning summary" variant="light">
+        <GlassCard title={`Falcon Owner's Brief · ${brief.brief_date}`} subtitle="Proactive morning summary — strategy before firefighting" variant="light">
           <ul className="space-y-2">
             {brief.bullets.slice(0, 4).map((b) => (
               <li key={b} className="rounded-xl border border-sgvu-navy/10 bg-slate-50 px-4 py-3 text-sm text-sgvu-navy">
@@ -96,6 +101,28 @@ export default function LeadershipIntelligencePage() {
           </ul>
         </GlassCard>
       ) : null}
+
+      <GlassCard title="Predictive Forecast" subtitle="Intake conversion and resource planning" variant="light">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-xl border border-sgvu-navy/10 bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">Avg conversion</p>
+            <p className="mt-1 text-2xl font-bold text-sgvu-navy">{String(intake.avg_conversion_rate_pct ?? '—')}%</p>
+          </div>
+          <div className="rounded-xl border border-sgvu-navy/10 bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">Faculty:student ratio</p>
+            <p className="mt-1 text-2xl font-bold text-sgvu-navy">{String(resource.current_faculty_student_ratio ?? '—')}</p>
+          </div>
+          <div className="rounded-xl border border-sgvu-navy/10 bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">Faculty needed (+500 intake)</p>
+            <p className="mt-1 text-2xl font-bold text-sgvu-navy">
+              {String((resource.if_admit_500_more as Record<string, unknown>)?.additional_faculty_needed ?? '—')}
+            </p>
+          </div>
+        </div>
+        <Link href="/leadership/forecasting" className="mt-3 inline-block text-xs font-bold text-sgvu-gold hover:underline">
+          Full forecasting model →
+        </Link>
+      </GlassCard>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <GlassCard title="Q1 · Revenue vs Expenses" subtitle="Ledger trend by period" variant="light">
