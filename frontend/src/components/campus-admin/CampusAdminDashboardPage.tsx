@@ -70,6 +70,19 @@ export function CampusAdminDashboardPage() {
             </Button>
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">DOFA Policy Vault</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Draft university DOFA rules (dual-key). IT proposes; CFO unlocks with OTP before publish.
+            </p>
+            <Button asChild variant="outline">
+              <Link href="/admin/dofa-policy-vault">Open policy vault</Link>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
       <ProfileCorrectionWidget />
     </div>

@@ -62,6 +62,17 @@ export class StudentPortalService {
     }
   }
 
+  /** Idempotent enrollment sync when the student portal loads (courses/timetable drift). */
+  async bootstrapPortal(tenantId: string, userId: string) {
+    const result = await this.enrollmentSync.syncStudent(tenantId, userId);
+    return {
+      synced: Boolean(result),
+      semester: result?.semester ?? null,
+      added: result?.added ?? 0,
+      removed: result?.removed ?? 0,
+    };
+  }
+
   async getMasterProfile(tenantId: string, userId: string) {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.onboarding_status,
@@ -72,6 +83,7 @@ export class StudentPortalService {
               sp.blood_group, sp.abc_id,
               d.dept_name AS department,
               COALESCE(
+                sp.current_semester,
                 (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
                 1
               ) AS current_semester,
@@ -519,6 +531,16 @@ export class StudentPortalService {
   }
 
   async getAttendance(tenantId: string, userId: string) {
+    await this.enrollmentSync.syncStudent(tenantId, userId).catch(() => null);
+
+    const profileRows = await this.dataSource.query<
+      Array<{ current_semester: number | null }>
+    >(
+      `SELECT current_semester FROM student_profiles WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [userId, tenantId],
+    );
+    const currentSemester = profileRows[0]?.current_semester ?? null;
+
     const subjectWise = await this.dataSource.query(
       `SELECT c.course_code,
               c.course_name,
@@ -549,8 +571,9 @@ export class StudentPortalService {
            AND entry->>'student_id' = e.student_user_id::text
        ) stats ON true
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
+         AND ($3::int IS NULL OR e.semester = $3)
        ORDER BY e.semester, c.course_code`,
-      [userId, tenantId],
+      [userId, tenantId, currentSemester],
     );
 
     const avg =

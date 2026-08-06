@@ -53,6 +53,13 @@ export const GRADING_COMPONENT_CATALOG: GradingComponent[] = [
 
   { id: 'LAB_VIVA', label: 'Viva', max: 10, readOnly: false },
 
+  {
+    id: 'PRODUCT_VIVA',
+    label: 'Semester-End Product Viva',
+    max: 40,
+    readOnly: false,
+  },
+
   { id: 'MINOR_PRACTICAL', label: 'Minor Practical', max: 10, readOnly: false },
 
   { id: 'MAJOR_PRACTICAL', label: 'Major Practical', max: 20, readOnly: false },

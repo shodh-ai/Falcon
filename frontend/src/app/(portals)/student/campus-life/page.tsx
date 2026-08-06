@@ -140,6 +140,11 @@ export default function CampusLifePage() {
             <Button className="mt-3" onClick={() => void submitGatePass()} disabled={!allocation}>
               Submit to Warden
             </Button>
+            {!allocation ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Gate pass requests require an active hostel allocation. Book a room from Campus Life when sales are open.
+              </p>
+            ) : null}
             <p className="mt-2 text-xs text-muted-foreground">
               Academic leave of absence?{' '}
               <Link href="/student/mentorship" className="font-semibold text-sgvu-navy underline">

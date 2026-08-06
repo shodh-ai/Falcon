@@ -18,6 +18,10 @@ import {
   alumniAdminPortal,
   adminOpsPortal,
   placementPortal,
+  labsPortal,
+  competitionsPortal,
+  operationsPortal,
+  specialProgramsPortal,
 } from '@/lib/navigation';
 
 type PortalKey =
@@ -35,7 +39,11 @@ type PortalKey =
   | 'alumni'
   | 'alumni-admin'
   | 'admin-ops'
-  | 'placements';
+  | 'placements'
+  | 'labs'
+  | 'competitions'
+  | 'operations'
+  | 'special-programs';
 
 const configs = {
   hod: hodPortal,
@@ -53,6 +61,10 @@ const configs = {
   'alumni-admin': alumniAdminPortal,
   'admin-ops': adminOpsPortal,
   placements: placementPortal,
+  labs: labsPortal,
+  competitions: competitionsPortal,
+  operations: operationsPortal,
+  'special-programs': specialProgramsPortal,
 };
 
 export function GenericPortalShell({

@@ -1,7 +1,7 @@
 export const TENANT_COOKIE = 'falcon_tenant_subdomain';
 
 import {
-  extractSubdomainFromHost,
+  resolveTenantFromHost,
   resolveTenantSubdomain,
 } from '@/lib/resolve-tenant-subdomain';
 
@@ -20,16 +20,14 @@ export function getSubdomainFromClient(): string {
     return resolveTenantSubdomain(null);
   }
 
-  const fromCookie = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith(`${TENANT_COOKIE}=`))
-    ?.split('=')[1];
-  if (fromCookie?.trim()) {
-    return resolveTenantSubdomain(decodeURIComponent(fromCookie));
+  const hostname = window.location.hostname;
+  if (hostname) {
+    const fromCookie = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith(`${TENANT_COOKIE}=`))
+      ?.split('=')[1];
+    return resolveTenantFromHost(hostname, fromCookie ? decodeURIComponent(fromCookie) : null);
   }
-
-  const fromHost = extractSubdomainFromHost(window.location.hostname);
-  if (fromHost) return fromHost;
 
   return resolveTenantSubdomain(null);
 }

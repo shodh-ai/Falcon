@@ -44,6 +44,11 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/data ./data
+
+# Department import: parse PDFs → CSV inside the container (one-off ops)
+RUN apk add --no-cache python3 py3-pip \
+    && pip3 install --break-system-packages pypdf
 
 RUN mkdir -p /app/uploads
 

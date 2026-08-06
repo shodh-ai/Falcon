@@ -430,6 +430,18 @@ export class EcellService {
     const project = await this.getProject(tid, projectId);
     this.assertTransition(String(project.current_status), 'L2_APPROVED');
 
+    const ip = await this.db.query(
+      `SELECT status FROM ecell_ip_agreements
+       WHERE tenant_id = $1 AND project_id = $2 AND status = 'SIGNED'
+       LIMIT 1`,
+      [tid, projectId],
+    );
+    if (!ip[0]) {
+      throw new BadRequestException(
+        'Founder-First IP agreement must be SIGNED before L2 funding',
+      );
+    }
+
     const l1Rows = await this.db.query(
       `SELECT approval_id, approved_funding_amount
        FROM ecell_approvals

@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 import { AttendanceDrillDown } from '@/components/leadership/AttendanceDrillDown';
 import { LiveTickerRow } from '@/components/leadership/LiveTicker';
 import { FinancialTickerGrid } from '@/components/leadership/intelligence/FinancialTickerTape';
@@ -34,6 +36,8 @@ function formatCr(n: number) {
 }
 
 export default function LeadershipOverviewPage() {
+  const router = useRouter();
+  const { user } = useAuth();
   const api = useLeadershipApi();
   const [data, setData] = useState<LeadershipOverview | null>(null);
   const [flags, setFlags] = useState<RedFlag[]>([]);
@@ -44,6 +48,13 @@ export default function LeadershipOverviewPage() {
   const [pillarsOpen, setPillarsOpen] = useState(false);
 
   const dashboardHub = getLeadershipHubRoutes('dashboard');
+
+  useEffect(() => {
+    const r = (user?.primaryRole ?? user?.role ?? '').trim().toLowerCase();
+    if (r === 'coo') {
+      router.replace('/operations/dashboard');
+    }
+  }, [router, user]);
 
   useEffect(() => {
     void api.overview().then(setData).catch(() => setData(null));
@@ -94,8 +105,8 @@ export default function LeadershipOverviewPage() {
         }
       />
 
-      {brief && brief.bullets.length > 1 ? (
-        <LeadershipSectionCard title="Today's Brief" description="AI-generated owner summary">
+      {brief && brief.bullets.length > 0 ? (
+        <LeadershipSectionCard title="Today's Brief" description="Proactive strategy summary — not reactive firefighting">
           <ul className="space-y-2">
             {brief.bullets.slice(0, 5).map((bullet) => (
               <li key={bullet} className="text-sm leading-relaxed text-sgvu-navy">

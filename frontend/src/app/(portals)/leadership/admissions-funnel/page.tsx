@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import ReactECharts from 'echarts-for-react';
 import { DefaulterHeatmap } from '@/components/leadership/LeadershipCharts';
-import { LeadershipLineChart, NAVY, GOLD } from '@/components/leadership/LeadershipCharts';
+import { LeadershipLineChart, NAVY } from '@/components/leadership/LeadershipCharts';
 import { LeadershipPageHeader, LeadershipSectionCard } from '@/components/leadership/LeadershipSectionCard';
 import {
   ExecutiveDateRangeFilter,
@@ -69,13 +70,15 @@ export default function LeadershipAdmissionsFunnelPage() {
   const enrolledTotal = (data?.funnel ?? []).find((s) => s.stage.toLowerCase().includes('enroll'))?.count ?? 0;
   const leadsTotal = (data?.funnel ?? [])[0]?.count ?? 0;
   const fillPct = leadsTotal > 0 ? Math.round((enrolledTotal / leadsTotal) * 100) : 0;
+  const gt = data?.golden_ticket_summary;
+  const goldenLeads = data?.golden_ticket_leads ?? [];
 
   return (
     <div className={EXECUTIVE_SPACING.page}>
       <LeadershipPageHeader
         eyebrow="Admissions & Enrollment"
         title="Admissions & Growth Funnel"
-        description="Lead funnel, YoY growth, seat occupancy, demographics, and marketing ROI"
+        description="Lead funnel, YoY growth, seat occupancy, demographics, and Gladiator golden ticket pipeline"
         action={
           <div className="flex flex-col gap-2 sm:items-end">
             <ExecutiveDateRangeFilter value={period} onChange={setPeriod} />
@@ -85,6 +88,72 @@ export default function LeadershipAdmissionsFunnelPage() {
       />
 
       <div id="admissions-dashboard" className={EXECUTIVE_SPACING.section}>
+        <LeadershipSectionCard
+          title="Gladiator Golden Ticket Leads"
+          description="Tokamak challenge winners routed into admissions CRM"
+          action={
+            <Link
+              href="/competitions/funnel"
+              className="text-xs font-bold uppercase tracking-wider text-sgvu-gold hover:underline"
+            >
+              Competition funnel →
+            </Link>
+          }
+        >
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <TrafficLightKpi label="Golden tickets" value={String(gt?.total ?? goldenLeads.length)} status="green" />
+            <TrafficLightKpi
+              label="Enrolled"
+              value={String(gt?.enrolled ?? 0)}
+              status={(gt?.enrolled ?? 0) > 0 ? 'green' : 'yellow'}
+            />
+            <TrafficLightKpi
+              label="Pending conversion"
+              value={String(gt?.pending_conversion ?? 0)}
+              status={(gt?.pending_conversion ?? 0) > 0 ? 'yellow' : 'green'}
+            />
+          </div>
+          {goldenLeads.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="pb-2 pr-4">Candidate</th>
+                    <th className="pb-2 pr-4">Competition</th>
+                    <th className="pb-2 pr-4">Ticket code</th>
+                    <th className="pb-2">Stage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {goldenLeads.map((row) => (
+                    <tr key={row.lead_id} className="border-b border-sgvu-navy/5">
+                      <td className="py-2.5">
+                        <div className="font-medium text-sgvu-navy">{row.full_name}</div>
+                        <div className="text-xs text-muted-foreground">{row.email}</div>
+                      </td>
+                      <td className="py-2.5">{row.competition_title}</td>
+                      <td className="py-2.5 font-mono text-xs">{row.golden_ticket_code ?? '—'}</td>
+                      <td className="py-2.5">
+                        <span className="rounded bg-sgvu-gold/15 px-2 py-0.5 text-xs font-semibold text-sgvu-navy">
+                          {row.stage}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No golden ticket leads yet. Issue tickets from{' '}
+              <Link href="/competitions/funnel" className="text-sgvu-navy underline">
+                Competition Funnel
+              </Link>
+              .
+            </p>
+          )}
+        </LeadershipSectionCard>
+
         <ExecutiveDrillDown
           label="Admissions Pipeline"
           value={`${fillPct}%`}
@@ -158,8 +227,13 @@ export default function LeadershipAdmissionsFunnelPage() {
               </thead>
               <tbody>
                 {(data?.marketing_roi ?? []).map((row) => (
-                  <tr key={row.source} className="border-b border-sgvu-navy/5">
-                    <td className="py-2.5 font-medium text-sgvu-navy">{row.source}</td>
+                  <tr
+                    key={row.source}
+                    className={`border-b border-sgvu-navy/5 ${row.source === 'TOKAMAK_GOLDEN_TICKET' ? 'bg-sgvu-gold/5' : ''}`}
+                  >
+                    <td className="py-2.5 font-medium text-sgvu-navy">
+                      {row.source === 'TOKAMAK_GOLDEN_TICKET' ? 'Gladiator Golden Ticket' : row.source}
+                    </td>
                     <td className="py-2.5 font-mono">{row.leads}</td>
                     <td className="py-2.5 font-mono">{row.converted}</td>
                     <td className="py-2.5">

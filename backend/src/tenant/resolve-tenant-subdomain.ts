@@ -1,11 +1,26 @@
 const DEFAULT_SUBDOMAIN = 'sgvu';
 
+/** Hostname subdomains that map to DEFAULT_TENANT_SUBDOMAIN (not real tenants). */
+const TENANT_SUBDOMAIN_ALIASES = new Set(['falcon', 'apifalcon']);
+
+/** App URLs that are not tenant subdomains (e.g. falcon.jataka.io → sgvu). */
+export function isDedicatedAppHost(hostname: string): boolean {
+  const host = hostname.split(':')[0].trim().toLowerCase();
+  const dedicated = (
+    process.env.DEDICATED_APP_HOSTS ?? 'falcon.jataka.io,apifalcon.jataka.io'
+  )
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return dedicated.includes(host);
+}
+
 export function resolveTenantSubdomain(
   value?: string | null,
   fallback?: string | null,
 ): string {
-  const trimmed = (value ?? '').trim();
-  if (trimmed) return trimmed.toLowerCase();
+  const trimmed = (value ?? '').trim().toLowerCase();
+  if (trimmed && !TENANT_SUBDOMAIN_ALIASES.has(trimmed)) return trimmed;
 
   const fb = (
     fallback ??
@@ -13,6 +28,21 @@ export function resolveTenantSubdomain(
     DEFAULT_SUBDOMAIN
   ).trim();
   return fb || DEFAULT_SUBDOMAIN;
+}
+
+/** Resolve tenant from hostname + optional header/cookie override. */
+export function resolveTenantFromHost(
+  hostname: string,
+  explicitSubdomain?: string | null,
+): string {
+  const host = hostname.split(':')[0].trim().toLowerCase();
+  if (isDedicatedAppHost(host)) {
+    return resolveTenantSubdomain(null);
+  }
+  if (explicitSubdomain?.trim()) {
+    return resolveTenantSubdomain(explicitSubdomain);
+  }
+  return resolveTenantSubdomain(extractSubdomainFromHost(host));
 }
 
 export function extractSubdomainFromHost(

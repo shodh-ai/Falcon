@@ -35,6 +35,7 @@ export default function StudentPlacementsPage() {
   const [registeringDeptId, setRegisteringDeptId] = useState<string | null>(null);
   const [hub, setHub] = useState<PlacementHub | null>(null);
   const [hubDegraded, setHubDegraded] = useState(false);
+  const [hubLoadError, setHubLoadError] = useState<string | null>(null);
   const [selectedDrive, setSelectedDrive] = useState<PlacementDrive | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
   const [eligibilityLoading, setEligibilityLoading] = useState<string | null>(null);
@@ -90,6 +91,7 @@ export default function StudentPlacementsPage() {
 
   const load = useCallback(async () => {
     setHubDegraded(false);
+    setHubLoadError(null);
     try {
       const data = await api.get<PlacementHub>('/api/placement/student/hub');
       setHub(data);
@@ -100,34 +102,41 @@ export default function StudentPlacementsPage() {
       }
     } catch {
       setHubDegraded(true);
-      const fallback = await api.get<{
-        open_jobs: Array<Record<string, unknown>>;
-        my_applications: Array<Record<string, unknown>>;
-      }>('/api/student/placements');
-      const drives: PlacementDrive[] = (fallback.open_jobs ?? []).map((j) => ({
-        drive_id: String(j.drive_id ?? j.jd_id ?? ''),
-        company_name: String(j.company_name ?? ''),
-        job_role: String(j.job_title ?? j.job_role ?? ''),
-        package_lpa: (j.package_lpa as string | number | undefined) ?? 0,
-        min_cgpa: j.min_cgpa as string | number,
-        description: j.description as string | undefined,
-        deadline: j.application_deadline as string | undefined,
-      }));
-      const enrichedDrives = await enrichDrivesWithEligibility(drives);
-      setHub({
-        open_drives: enrichedDrives,
-        my_applications: (fallback.my_applications ?? []).map((a) => ({
-          application_id: String(a.application_id),
-          drive_id: String(a.drive_id ?? ''),
-          pipeline_stage: String(a.status ?? 'APPLIED') as PlacementHub['my_applications'][0]['pipeline_stage'],
-          applied_at: String(a.applied_at ?? ''),
-          job_role: String(a.job_title ?? ''),
-          company_name: String(a.company_name ?? ''),
-        })),
-        student_cgpa: 0,
-        student_backlogs: 0,
-        placement_lock: { locked: false, offerLpa: null, reason: null },
-      });
+      try {
+        const fallback = await api.get<{
+          open_jobs: Array<Record<string, unknown>>;
+          my_applications: Array<Record<string, unknown>>;
+        }>('/api/student/placements');
+        const drives: PlacementDrive[] = (fallback.open_jobs ?? []).map((j) => ({
+          drive_id: String(j.drive_id ?? j.jd_id ?? ''),
+          company_name: String(j.company_name ?? ''),
+          job_role: String(j.job_title ?? j.job_role ?? ''),
+          package_lpa: (j.package_lpa as string | number | undefined) ?? 0,
+          min_cgpa: j.min_cgpa as string | number,
+          description: j.description as string | undefined,
+          deadline: j.application_deadline as string | undefined,
+        }));
+        const enrichedDrives = await enrichDrivesWithEligibility(drives);
+        setHub({
+          open_drives: enrichedDrives,
+          my_applications: (fallback.my_applications ?? []).map((a) => ({
+            application_id: String(a.application_id),
+            drive_id: String(a.drive_id ?? ''),
+            pipeline_stage: String(a.status ?? 'APPLIED') as PlacementHub['my_applications'][0]['pipeline_stage'],
+            applied_at: String(a.applied_at ?? ''),
+            job_role: String(a.job_title ?? ''),
+            company_name: String(a.company_name ?? ''),
+          })),
+          student_cgpa: 0,
+          student_backlogs: 0,
+          placement_lock: { locked: false, offerLpa: null, reason: null },
+        });
+      } catch (e) {
+        setHub(null);
+        const message = e instanceof Error ? e.message : 'Could not load placements';
+        setHubLoadError(message);
+        toast.error(message);
+      }
     }
   }, [api, searchParams, enrichDrivesWithEligibility]);
 
@@ -196,7 +205,14 @@ export default function StudentPlacementsPage() {
         description="Browse campus drives, apply in one click, and track your interview pipeline."
       />
 
-      {hubDegraded && (
+      {hubLoadError ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>{hubLoadError}</p>
+        </div>
+      ) : null}
+
+      {hubDegraded && !hubLoadError && (
         <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <p>Could not load full hub — checking eligibility per drive.</p>

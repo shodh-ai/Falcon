@@ -75,6 +75,41 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
     edit: ['*'],
     approve: ['*'],
   },
+  COO: {
+    view: ['operations', 'helpdesk', 'esm', 'finance', 'labs', 'competitions', 'fellowship'],
+    edit: ['operations', 'helpdesk', 'esm'],
+    approve: ['operations_escalations', 'vendor_penalties'],
+  },
+  EstateOfficer: {
+    view: ['helpdesk', 'esm', 'facilities', 'assets'],
+    edit: ['helpdesk', 'esm', 'facilities'],
+    approve: ['facilities_tickets'],
+  },
+  LabAdmin: {
+    view: ['labs', 'lab_equipment', 'tokamak_budget', 'fabless'],
+    edit: ['labs', 'lab_equipment', 'fabless'],
+    approve: ['lab_checkout', 'tokamak_po_fastpath'],
+  },
+  Wrangler: {
+    view: ['incubation', 'mentorship', 'fellowship', 'moonshots'],
+    edit: ['mentorship', 'sprint_checkins'],
+    approve: ['fellowship_trial_reviews'],
+  },
+  CompetitionAdmin: {
+    view: ['competitions', 'bounties', 'tokamak_network', 'admissions_funnel'],
+    edit: ['competitions', 'bounties', 'tokamak_network'],
+    approve: ['golden_ticket', 'competition_rounds'],
+  },
+  PoP: {
+    view: ['academics', 'incubation', 'special_programs', 'portfolio'],
+    edit: ['academics', 'special_programs'],
+    approve: ['portfolio_artifacts'],
+  },
+  FellowshipAdmin: {
+    view: ['fellowship', 'incubation', 'attendance_exemptions'],
+    edit: ['fellowship'],
+    approve: ['hacker_filter_convert', 'elite_fellow_waiver'],
+  },
 };
 
 export function roleCanEdit(role: string, resource: string): boolean {

@@ -26,6 +26,8 @@ export class AnomalyDetectionProcessor extends WorkerHost {
         data.tenantId,
         data.departmentId,
       );
+    } else if (data.type === 'nightly_scan') {
+      await this.anomaly.runNightlyProcurementScan(data.tenantId);
     }
     return { ok: true };
   }

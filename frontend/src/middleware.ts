@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import {
-  extractSubdomainFromHost,
-  resolveTenantSubdomain,
+  resolveTenantFromHost,
 } from '@/lib/resolve-tenant-subdomain';
 
 const TENANT_COOKIE = 'falcon_tenant_subdomain';
@@ -20,8 +19,7 @@ const PUBLIC_PREFIXES = [
 ];
 
 function extractSubdomain(host: string): string {
-  const fromHost = extractSubdomainFromHost(host);
-  return resolveTenantSubdomain(fromHost);
+  return resolveTenantFromHost(host);
 }
 
 function isPublicPath(pathname: string): boolean {

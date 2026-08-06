@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { EcellService } from './ecell.service';
 import { EcellFounderService } from './ecell-founder.service';
+import { EcellUropService } from './ecell-urop.service';
 import { SubmitEcellProjectDto } from './dto/submit-project.dto';
 import { UpsertEcellConfigDto } from './dto/upsert-config.dto';
 import {
@@ -44,6 +45,7 @@ export class EcellController {
   constructor(
     private readonly ecell: EcellService,
     private readonly founder: EcellFounderService,
+    private readonly urop: EcellUropService,
   ) {}
 
   private tenant(req: { user: AuthUser }) {
@@ -235,7 +237,14 @@ export class EcellController {
   }
 
   @Get('admin/dashboard')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'FellowshipAdmin',
+    'Wrangler',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   dashboard(@Req() req: { user: AuthUser }) {
     return this.ecell.dashboardSummary(this.tenant(req));
   }
@@ -262,7 +271,15 @@ export class EcellController {
   }
 
   @Get('finance/payouts')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(
+    'Accountant',
+    'CFO',
+    'APManager',
+    'APClerk',
+    'FinanceController',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   financePayouts(@Req() req: { user: AuthUser }) {
     return this.ecell.listFinancePayoutsSanitized(this.tenant(req));
   }
@@ -441,5 +458,94 @@ export class EcellController {
   @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'SuperAdmin')
   mentorProgress(@Req() req: { user: AuthUser }) {
     return this.founder.listAdminMentorProgress(this.tenant(req));
+  }
+
+  @Get('ip-agreements')
+  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'SuperAdmin', 'Student')
+  listIp(@Req() req: { user: AuthUser }) {
+    return this.urop.listIpAgreements(this.tenant(req));
+  }
+
+  @Post('ip-agreements')
+  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'SuperAdmin', 'Student')
+  upsertIp(
+    @Req() req: { user: AuthUser },
+    @Body()
+    body: {
+      project_id: string;
+      lead_inventor_user_id?: string;
+      university_equity_pct?: number;
+      sgvu_pays_legal_fees?: boolean;
+      reversion_years?: number;
+      status?: string;
+      signed_doc_url?: string;
+    },
+  ) {
+    return this.urop.upsertIpAgreement(this.tenant(req), {
+      ...body,
+      lead_inventor_user_id: body.lead_inventor_user_id ?? req.user.user_id,
+    });
+  }
+
+  @Get('fellowships')
+  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'Wrangler', 'SuperAdmin', 'Student')
+  listFellowships(@Req() req: { user: AuthUser }) {
+    return this.urop.listFellowships(this.tenant(req));
+  }
+
+  @Post('fellowships/apply')
+  @Roles('Student')
+  applyFellowship(
+    @Req() req: { user: AuthUser },
+    @Body() body: { linked_project_id?: string; paid_stipend_inr?: number },
+  ) {
+    return this.urop.applyFellowship(this.tenant(req), req.user.user_id, body);
+  }
+
+  @Post('fellowships/:id/decide')
+  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'Wrangler', 'SuperAdmin')
+  decideFellowship(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() body: { decision: 'PASSED' | 'FAILED' | 'CONVERTED'; notes?: string },
+  ) {
+    return this.urop.decideFellowship(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      body.decision,
+      body.notes,
+    );
+  }
+
+  @Get('product-viva/panelists')
+  @Roles(
+    'Faculty',
+    'ExamCell',
+    'Dean',
+    'President',
+    INCUBATION_ADMIN,
+    'SuperAdmin',
+    'CampusAdmin',
+  )
+  listPanelists(
+    @Req() req: { user: AuthUser },
+    @Query('course_offering_id') courseOfferingId?: string,
+  ) {
+    return this.urop.listProductVivaPanelists(this.tenant(req), courseOfferingId);
+  }
+
+  @Post('product-viva/panelists')
+  @Roles('ExamCell', 'Dean', 'President', 'SuperAdmin', 'CampusAdmin')
+  addPanelist(
+    @Req() req: { user: AuthUser },
+    @Body()
+    body: {
+      user_id: string;
+      panel_role: 'VC' | 'INDUSTRY' | 'SHODH' | 'FACULTY';
+      course_offering_id?: string;
+    },
+  ) {
+    return this.urop.addProductVivaPanelist(this.tenant(req), body);
   }
 }

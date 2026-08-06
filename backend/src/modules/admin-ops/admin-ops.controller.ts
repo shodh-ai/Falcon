@@ -35,7 +35,15 @@ export class AdminOpsController {
   }
 
   @Get('assets')
-  @Roles('SuperAdmin', 'Registrar', 'TransportOfficer')
+  @Roles(
+    'SuperAdmin',
+    'Registrar',
+    'TransportOfficer',
+    'LabAdmin',
+    'COO',
+    'CampusAdmin',
+    'EstateOfficer',
+  )
   assets(@Req() req: { user: AuthUser }) {
     return this.adminOps.listAssets(this.tenant(req));
   }
