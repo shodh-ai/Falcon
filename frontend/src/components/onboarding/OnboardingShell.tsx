@@ -1,9 +1,10 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { usePathname } from 'next/navigation';
-import { Check, ShieldCheck } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Check, LogOut, ShieldCheck } from 'lucide-react';
 import { FalconLogo } from '@/components/brand/FalconLogo';
+import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 import type { PortalOnboardingConfig } from '@/lib/onboarding/portal-onboarding';
 
@@ -84,17 +85,42 @@ function StepList({ vertical }: { vertical?: boolean }) {
   );
 }
 
+function SignOutButton({ className }: { className?: string }) {
+  const { logout } = useAuth();
+  const router = useRouter();
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        logout();
+        router.replace('/');
+      }}
+      className={cn(
+        'inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors',
+        className,
+      )}
+    >
+      <LogOut className="h-4 w-4" aria-hidden />
+      Back to sign in
+    </button>
+  );
+}
+
 function MobileHeader({ config }: { config: PortalOnboardingConfig }) {
   const current = useCurrentStep();
   return (
     <header className="border-b border-border/60 bg-white/90 backdrop-blur lg:hidden">
       <div className="mx-auto max-w-3xl px-4 py-4">
-        <div className="flex items-center gap-3">
-          <FalconLogo size={36} />
-          <div>
-            <p className="text-sm font-semibold text-sgvu-navy">{config.portalLabel} onboarding</p>
-            <p className="text-xs text-muted-foreground">Step {current} of 3</p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <FalconLogo size={36} />
+            <div>
+              <p className="text-sm font-semibold text-sgvu-navy">{config.portalLabel} onboarding</p>
+              <p className="text-xs text-muted-foreground">Step {current} of 3</p>
+            </div>
           </div>
+          <SignOutButton className="border-sgvu-navy/15 bg-white text-sgvu-navy hover:bg-sgvu-navy/5 active:border-sgvu-gold active:bg-sgvu-gold" />
         </div>
         <div className="mt-5">
           <StepList />
@@ -132,16 +158,19 @@ export function OnboardingShell({
             <StepList vertical />
           </div>
 
-          <div className="mt-auto rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-            <div className="flex items-start gap-3">
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-sgvu-gold" />
-              <div>
-                <p className="text-sm font-medium text-white">Secure onboarding</p>
-                <p className="mt-1 text-xs leading-relaxed text-white/60">
-                  Your data is encrypted and reviewed only by authorized university staff.
-                </p>
+          <div className="mt-auto space-y-3">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+              <div className="flex items-start gap-3">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-sgvu-gold" />
+                <div>
+                  <p className="text-sm font-medium text-white">Secure onboarding</p>
+                  <p className="mt-1 text-xs leading-relaxed text-white/60">
+                    Your data is encrypted and reviewed only by authorized university staff.
+                  </p>
+                </div>
               </div>
             </div>
+            <SignOutButton className="w-full border-white/20 bg-white/10 text-white hover:bg-white/15 active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy" />
           </div>
         </div>
       </aside>

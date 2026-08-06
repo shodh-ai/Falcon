@@ -339,10 +339,17 @@ function canAccessHrPath(
   caps?: HrCapabilities | null,
   permissions?: string[],
 ): boolean {
-  if (roles.some((r) => ['hradmin', 'superadmin', 'campusadmin', 'hr', 'president'].includes(r))) return true;
+  // Management console hubs deep-link into HR; keep portal access aligned.
+  if (
+    roles.some((r) =>
+      ['hradmin', 'superadmin', 'campusadmin', 'hr', 'president', 'registrar'].includes(r),
+    )
+  ) {
+    return true;
+  }
 
   if (pathname.startsWith('/hr/admin')) {
-    return roles.some((r) => ['hradmin', 'superadmin', 'campusadmin'].includes(r));
+    return roles.some((r) => ['hradmin', 'superadmin', 'campusadmin', 'registrar'].includes(r));
   }
 
   if (pathname.startsWith('/hr/me/') || pathname.startsWith('/hr/inbox')) {
@@ -364,7 +371,18 @@ const portalRoles: Record<string, string[]> = {
   '/faculty': ['faculty'],
   '/dean': ['dean'],
   '/hod': ['hod'],
-  '/hr': ['hr', 'hradmin', 'superadmin', 'faculty', 'hod', 'dean', 'president', 'accountant'],
+  '/hr': [
+    'hr',
+    'hradmin',
+    'superadmin',
+    'campusadmin',
+    'registrar',
+    'faculty',
+    'hod',
+    'dean',
+    'president',
+    'accountant',
+  ],
   '/ess': ['faculty', 'hod', 'dean', 'hr', 'superadmin'],
   '/hostel-admin': ['warden', 'superadmin'],
   '/finance': [
@@ -740,6 +758,32 @@ export function canRoleAccessPath(
     if (!inPortalRoles && !hasAnyHrCapability(hrCapabilities) && !permissions?.length) return false;
     return canAccessHrPath(roles, pathname, hrCapabilities, permissions);
   }
+
+  // Pure Registrar: block Admin module hubs that are intentionally nav-hidden
+  // (Finance, HR, IQAC, Operations, Settings, Ph.D. demo). CampusAdmin/SuperAdmin keep access.
+  if (
+    portal === '/admin' &&
+    roles.includes('registrar') &&
+    !roles.includes('campusadmin') &&
+    !roles.includes('superadmin')
+  ) {
+    const registrarDeniedPrefixes = [
+      '/admin/finance',
+      '/admin/hr',
+      '/admin/iqac',
+      '/admin/operations',
+      '/admin/settings',
+      '/admin/phd',
+    ];
+    if (
+      registrarDeniedPrefixes.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+      )
+    ) {
+      return false;
+    }
+  }
+
   return roles.some((role) => portalRoles[portal].includes(role));
 }
 

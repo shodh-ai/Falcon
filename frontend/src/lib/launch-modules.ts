@@ -3,10 +3,9 @@
  * Hides navigation, blocks portal routes, and filters workspace switcher entries.
  */
 export const LAUNCH_MODULES = {
-  library: false,
-  /** Student fee ledger + Razorpay — required for exam admit-card fee gates. */
+  library: true,
   finance: true,
-  admissionVault: false,
+  admissionVault: true,
 } as const;
 
 export type LaunchModule = keyof typeof LAUNCH_MODULES;

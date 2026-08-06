@@ -2,8 +2,8 @@
 
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import BrandedDashboard from '@/components/BrandedDashboard';
 import { FalconLoader } from '@/components/brand/FalconLoader';
+import { RegistrarGovernanceWorkspace } from '@/components/admin/registrar-desk/RegistrarGovernanceWorkspace';
 
 export default function AdminTasksPageClient() {
   const router = useRouter();
@@ -20,5 +20,5 @@ export default function AdminTasksPageClient() {
     return <FalconLoader label="Opening upload history…" className="min-h-[40vh]" />;
   }
 
-  return <BrandedDashboard hideShell />;
+  return <RegistrarGovernanceWorkspace />;
 }

@@ -47,15 +47,16 @@ export function AppTopBar({
           </SheetTrigger>
           <SheetContent
             side="left"
-            className="w-[min(100vw,18rem)] p-0"
+            className="flex h-svh w-[min(100vw,18rem)] flex-col overflow-hidden p-0"
             onInteractOutside={() => onMobileOpenChange(false)}
           >
-            <div className="h-full" onClick={() => onMobileOpenChange(false)}>
+            <div className="min-h-0 flex-1" onClick={() => onMobileOpenChange(false)}>
               <AppSidebar
                 personaLabel={config.personaLabel}
                 navGroups={config.navGroups}
                 collapsed={false}
                 onToggleCollapse={() => {}}
+                className="h-full"
               />
             </div>
           </SheetContent>

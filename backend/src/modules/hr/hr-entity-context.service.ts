@@ -37,6 +37,7 @@ const MASTER_ROLES = new Set([
   'CampusAdmin',
   'HR',
   'President',
+  'Registrar',
 ]);
 /** Roles that may list and scope all tenant entities without per-user access rows. */
 const UNIVERSAL_ENTITY_ROLES = new Set([
@@ -45,7 +46,15 @@ const UNIVERSAL_ENTITY_ROLES = new Set([
   'HRAdmin',
   'HR',
   'President',
+  'Registrar',
 ]);
+
+function roleSetHas(set: Set<string>, roles: string[]): boolean {
+  const normalized = new Set(
+    [...set].map((r) => r.trim().toLowerCase()),
+  );
+  return roles.some((r) => normalized.has(String(r ?? '').trim().toLowerCase()));
+}
 
 export type AllowedEntity = { id: number; name: string; code: string };
 
@@ -94,7 +103,7 @@ export class HrEntityContextService {
     roles: string[] = [],
   ) {
     try {
-      if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+      if (roleSetHas(UNIVERSAL_ENTITY_ROLES, roles)) {
         return this.listEntities(tenantId);
       }
 
@@ -140,7 +149,7 @@ export class HrEntityContextService {
     roles: string[],
     entityId: number,
   ): Promise<void> {
-    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+    if (roleSetHas(UNIVERSAL_ENTITY_ROLES, roles)) {
       await this.resolveEntityId(tenantId, entityId);
       return;
     }
@@ -185,7 +194,7 @@ export class HrEntityContextService {
     if (allowed.length === 1) {
       return Number(allowed[0].entity_id);
     }
-    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+    if (roleSetHas(UNIVERSAL_ENTITY_ROLES, roles)) {
       return Number(allowed[0].entity_id);
     }
 
@@ -237,7 +246,7 @@ export class HrEntityContextService {
     module: HrModuleKey,
     level: 'read' | 'write',
   ) {
-    if (roles.some((r) => MASTER_ROLES.has(r))) return;
+    if (roleSetHas(MASTER_ROLES, roles)) return;
 
     const caps = await this.getPermissions(tenantId, userId);
     if (!caps) {

@@ -18,6 +18,12 @@ export default function AdminHrPage() {
           description: 'Policies, delegation, and approval chains.',
           icon: 'clipboard-list',
         },
+        {
+          href: '/admin/staff-appointments',
+          label: 'Staff Appointment & Verification',
+          description: 'Review appointments, verify documents, and issue signed letters.',
+          icon: 'users',
+        },
       ]}
     />
   );

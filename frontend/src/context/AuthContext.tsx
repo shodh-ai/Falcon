@@ -38,6 +38,18 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const AUTH_COOKIE = 'falcon_auth_token';
+
+function writeAuthCookie(token: string | null) {
+  if (typeof document === 'undefined') return;
+  if (token) {
+    // Readable by Next middleware for portal route protection (same-site).
+    document.cookie = `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
+  } else {
+    document.cookie = `${AUTH_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0`;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -51,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (storedToken && storedUser) {
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
+        writeAuthCookie(storedToken);
         try {
           const api = getApiBaseUrl();
           const { getSubdomainFromClient } = await import('@/lib/tenant');
@@ -87,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(newUser);
     localStorage.setItem('token', newToken);
     localStorage.setItem('user', JSON.stringify(newUser));
+    writeAuthCookie(newToken);
   }, []);
 
   const logout = useCallback(() => {
@@ -94,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    writeAuthCookie(null);
   }, []);
 
   const refreshUser = useCallback(async () => {

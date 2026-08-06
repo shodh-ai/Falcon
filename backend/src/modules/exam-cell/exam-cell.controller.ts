@@ -962,13 +962,13 @@ export class ExamCellController {
   @Post('identity/verify')
   verifyStudentIdentity(
     @Req() req: { user: AuthUser },
-    @Body() dto: { qr_payload: string },
+    @Body() dto: { qr_payload?: string },
   ) {
     this.requireAction(req, 'manage_seating');
     return this.enterprise.verifyStudentByQr(
       this.tenant(req),
       req.user.user_id,
-      dto.qr_payload,
+      dto?.qr_payload ?? '',
     );
   }
 
