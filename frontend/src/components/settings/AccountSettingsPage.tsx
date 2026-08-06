@@ -7,6 +7,7 @@ import {
   Bell,
   Eye,
   EyeOff,
+  FileSignature,
   KeyRound,
   Mail,
   Shield,
@@ -44,6 +45,16 @@ const fieldClass =
   'h-10 rounded-lg border-sgvu-navy/20 pr-10 focus-visible:ring-sgvu-gold/40';
 
 const MAX_PASSWORD_LENGTH = 128;
+
+function canAccessDigitalSignature(workspaceRole: string): boolean {
+  const role = workspaceRole.toLowerCase();
+  return (
+    role.includes('registrar') ||
+    role.includes('campusadmin') ||
+    role.includes('superadmin') ||
+    role === 'admin'
+  );
+}
 
 function canEditFacultyProfile(pathname: string, workspaceRole: string): boolean {
   if (
@@ -248,6 +259,8 @@ export function AccountSettingsPage() {
     'User';
   const profileHref = getProfileHrefFromPath(pathname, workspaceRole);
   const showFacultyProfileEditor = canEditFacultyProfile(pathname, workspaceRole);
+  const showDigitalSignature = canAccessDigitalSignature(workspaceRole);
+  const digitalSignatureHref = '/admin/account/settings/digital-signature';
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -394,6 +407,22 @@ export function AccountSettingsPage() {
           </dl>
         )}
       </SettingsSection>
+
+      {showDigitalSignature ? (
+        <SettingsSection
+          title="Digital Signature & Credentials"
+          description="Manage your official university digital signature, DSC status, and document signing."
+          icon={FileSignature}
+        >
+          <p className="mb-4 text-sm text-muted-foreground">
+            Upload your signature image, monitor certificate expiry, digitally sign degree certificates,
+            transcripts, appointment letters, and other approved documents.
+          </p>
+          <Button asChild variant="outline" className={btnIdle}>
+            <Link href={digitalSignatureHref}>Open Digital Signature &amp; Credentials</Link>
+          </Button>
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
         title="Password & security"

@@ -1,7 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { REGISTRAR_DESK } from '@/lib/api/api.registrar-desk';
+import { useAuthedApi } from '@/lib/api';
 import {
   Bell,
   CalendarDays,
@@ -1129,6 +1131,38 @@ export function GovernanceTasksPanel({ compact = false }: { compact?: boolean })
 }
 
 export function GovernanceTasksSummaryCard() {
+  const api = useAuthedApi();
+  const [pending, setPending] = useState(0);
+  const [meetings, setMeetings] = useState(0);
+  const [policies, setPolicies] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [kpis, tasks] = await Promise.all([
+        api.get<{ pending_governance?: number }>(REGISTRAR_DESK.dashboardKpis).catch(() => null),
+        api.get<Array<{ status?: string; title?: string; body?: string }>>(REGISTRAR_DESK.governance).catch(() => []),
+      ]);
+      const list = Array.isArray(tasks) ? tasks : [];
+      const pendingCount =
+        kpis?.pending_governance ??
+        list.filter((t) => String(t.status ?? '').toUpperCase() === 'PENDING').length;
+      setPending(pendingCount);
+      setMeetings(
+        list.filter((t) => /meeting|committee|senate|board/i.test(`${t.title ?? ''} ${t.body ?? ''}`)).length,
+      );
+      setPolicies(
+        list.filter((t) => /policy|ordinance|regulation|statute/i.test(`${t.title ?? ''} ${t.body ?? ''}`)).length,
+      );
+    } finally {
+      setLoaded(true);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   return (
     <Card className="border-sgvu-navy/10 bg-white shadow-sm">
       <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5 md:p-6">
@@ -1142,13 +1176,13 @@ export function GovernanceTasksSummaryCard() {
           </p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
             <span className="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-800">
-              23 Pending
+              {loaded ? `${pending} Pending` : '… Pending'}
             </span>
             <span className="rounded-full bg-purple-50 px-2.5 py-1 font-semibold text-purple-800">
-              3 Meetings
+              {loaded ? `${meetings} Meetings` : '… Meetings'}
             </span>
             <span className="rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-800">
-              8 Policies
+              {loaded ? `${policies} Policies` : '… Policies'}
             </span>
           </div>
         </div>

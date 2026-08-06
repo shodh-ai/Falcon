@@ -80,15 +80,40 @@ export function useAdmissionsKanban() {
     }
   }
 
-  async function addLead(source = 'CRM'): Promise<CrmLead | null> {
+  async function addLead(
+    source = 'CRM',
+    input?: {
+      full_name: string;
+      email?: string;
+      phone?: string;
+      program?: string;
+      city?: string;
+    },
+  ): Promise<CrmLead | null> {
     if (creatingLead) return null;
+    const fullName = (input?.full_name ?? '').trim();
+    if (!fullName) {
+      toast.warning('Candidate name is required');
+      return null;
+    }
+    const email = (input?.email ?? '').trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.warning('Enter a valid email address');
+      return null;
+    }
     setCreatingLead(true);
     try {
       const created = await api.post<CrmLead>('/api/admissions-crm/leads', {
-        full_name: `New Lead ${new Date().toLocaleTimeString('en-IN')}`,
+        full_name: fullName,
+        email: email || undefined,
+        phone: input?.phone?.trim() || undefined,
         stage: 'RAW_LEAD',
         source,
-        metadata: { program: 'B.Tech CSE', city: 'Jaipur', counsellor: 'Unassigned' },
+        metadata: {
+          program: input?.program?.trim() || 'General Programme',
+          city: input?.city?.trim() || '—',
+          counsellor: 'Unassigned',
+        },
       });
       toast.success('Lead created in Raw Lead stage');
       load();

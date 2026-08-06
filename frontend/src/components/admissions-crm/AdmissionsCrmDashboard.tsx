@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ClipboardList,
   FileSpreadsheet,
@@ -11,6 +11,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
+import { AddLeadDialog } from '@/components/admissions-crm/AddLeadDialog';
 import { LeadPipelineSummaryCard } from '@/components/admissions-crm/LeadPipelineSummaryCard';
 import {
   computeKpis,
@@ -20,6 +21,10 @@ import {
   DEMO_PENDING_WORK,
   DEMO_PROGRAM_BARS,
   DEMO_TREND,
+  STAGE_LABELS,
+  formatRelative,
+  leadMeta,
+  type CrmLead,
 } from '@/components/admissions-crm/admissions-crm-dashboard-data';
 import {
   ADMISSIONS_CRM_PIPELINE_HREF,
@@ -31,6 +36,52 @@ import { HrAvatar } from '@/components/hr/HrAvatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+
+function buildLiveProgramBars(leads: CrmLead[]) {
+  const counts = new Map<string, number>();
+  for (const lead of leads) {
+    const program = leadMeta(lead, 'program', leadMeta(lead, 'preferred_program', 'General'));
+    counts.set(program, (counts.get(program) ?? 0) + 1);
+  }
+  const rows = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([label, value]) => ({ label, value, max: 1 }));
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  return rows.map((r) => ({ ...r, max }));
+}
+
+function buildLiveStageBars(stageCounts: Record<string, number>) {
+  const keys = Object.keys(STAGE_LABELS);
+  const rows = keys
+    .map((key) => ({
+      label: STAGE_LABELS[key] ?? key,
+      value: stageCounts[key] ?? 0,
+      max: 1,
+    }))
+    .filter((r) => r.value > 0);
+  const max = Math.max(1, ...rows.map((r) => r.value), 1);
+  return (rows.length ? rows : [{ label: 'No data', value: 0, max: 1 }]).map((r) => ({
+    ...r,
+    max,
+  }));
+}
+
+function buildLiveActivity(leads: CrmLead[]) {
+  return [...leads]
+    .sort(
+      (a, b) =>
+        new Date(b.updated_at ?? b.created_at ?? 0).getTime() -
+        new Date(a.updated_at ?? a.created_at ?? 0).getTime(),
+    )
+    .slice(0, 5)
+    .map((lead) => ({
+      id: lead.lead_id,
+      actor: lead.full_name,
+      text: `is in ${STAGE_LABELS[lead.stage] ?? lead.stage}`,
+      time: formatRelative(lead.updated_at ?? lead.created_at),
+    }));
+}
 
 function HorizontalBars({
   title,
@@ -72,14 +123,38 @@ function HorizontalBars({
 export function AdmissionsCrmDashboard() {
   const router = useRouter();
   const { allLeads, stageCounts, useDemo, loading, creatingLead, load, addLead } = useAdmissionsKanban();
+  const [addLeadOpen, setAddLeadOpen] = useState(false);
   const kpis = useMemo(() => computeKpis(allLeads, stageCounts, useDemo), [allLeads, stageCounts, useDemo]);
-
-  async function handleAddLead(source = 'CRM Dashboard') {
-    const created = await addLead(source);
-    if (created?.lead_id) {
-      router.push(ADMISSIONS_CRM_PIPELINE_HREF);
-    }
-  }
+  const liveActivity = useMemo(
+    () => (useDemo ? DEMO_ACTIVITIES : buildLiveActivity(allLeads)),
+    [allLeads, useDemo],
+  );
+  const stageBars = useMemo(
+    () => (useDemo ? DEMO_TREND : buildLiveStageBars(stageCounts)),
+    [stageCounts, useDemo],
+  );
+  const programBars = useMemo(
+    () => (useDemo ? DEMO_PROGRAM_BARS : buildLiveProgramBars(allLeads)),
+    [allLeads, useDemo],
+  );
+  const enrollmentBars = useMemo(() => {
+    if (useDemo) return DEMO_ENROLLMENTS;
+    const enrolled = stageCounts.ENROLLED ?? 0;
+    const feePaid = stageCounts.FEE_PAID ?? 0;
+    return [
+      { label: 'Fee paid', value: feePaid, max: Math.max(feePaid, enrolled, 1) },
+      { label: 'Enrolled', value: enrolled, max: Math.max(feePaid, enrolled, 1) },
+    ];
+  }, [stageCounts, useDemo]);
+  const feeBars = useMemo(() => {
+    if (useDemo) return DEMO_FEE_COLLECTION;
+    const feePaid = stageCounts.FEE_PAID ?? 0;
+    const started = stageCounts.APPLICATION_STARTED ?? 0;
+    return [
+      { label: 'Applications', value: started, max: Math.max(started, feePaid, 1) },
+      { label: 'Fee paid', value: feePaid, max: Math.max(started, feePaid, 1) },
+    ];
+  }, [stageCounts, useDemo]);
 
   const pendingWork = useMemo(() => {
     if (useDemo) return DEMO_PENDING_WORK;
@@ -117,7 +192,7 @@ export function AdmissionsCrmDashboard() {
                   BRAND_BTN,
                 )}
                 disabled={creatingLead || loading}
-                onClick={() => void handleAddLead('CRM Dashboard')}
+                onClick={() => setAddLeadOpen(true)}
               >
                 {creatingLead ? 'Adding…' : 'Add Lead'}
               </button>
@@ -188,7 +263,7 @@ export function AdmissionsCrmDashboard() {
           </CardHeader>
           <CardContent className="grid gap-2">
             {[
-              { label: 'Add Lead', onClick: () => void handleAddLead('CRM Dashboard') },
+              { label: 'Add Lead', onClick: () => setAddLeadOpen(true) },
               { label: 'Import Excel', href: '/admin/students/bulk-upload' },
               { label: 'View Pipeline', href: ADMISSIONS_CRM_PIPELINE_HREF },
               { label: 'Verify Documents', href: '/admissions-crm/verifications' },
@@ -221,7 +296,7 @@ export function AdmissionsCrmDashboard() {
             <CardTitle className="text-base font-bold text-sgvu-navy">Recent Activity</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {DEMO_ACTIVITIES.map((item) => (
+            {liveActivity.map((item) => (
               <div key={item.id} className="flex gap-3 border-b border-sgvu-navy/5 pb-3 last:border-0 last:pb-0">
                 <HrAvatar name={item.actor} size="sm" />
                 <div className="min-w-0">
@@ -239,11 +314,28 @@ export function AdmissionsCrmDashboard() {
       </div>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <HorizontalBars title="Admissions Trend" data={DEMO_TREND} />
-        <HorizontalBars title="Monthly Enrollments" data={DEMO_ENROLLMENTS} />
-        <HorizontalBars title="Fee Collection (₹ L)" data={DEMO_FEE_COLLECTION} suffix=" L" />
-        <HorizontalBars title="Program-wise Admissions" data={DEMO_PROGRAM_BARS} />
+        <HorizontalBars title={useDemo ? 'Admissions Trend' : 'Pipeline by stage'} data={stageBars} />
+        <HorizontalBars title={useDemo ? 'Monthly Enrollments' : 'Enrollment progress'} data={enrollmentBars} />
+        <HorizontalBars
+          title={useDemo ? 'Fee Collection (₹ L)' : 'Fee conversion'}
+          data={feeBars}
+          suffix={useDemo ? ' L' : ''}
+        />
+        <HorizontalBars title="Program-wise Admissions" data={programBars} />
       </section>
+
+      <AddLeadDialog
+        open={addLeadOpen}
+        onOpenChange={setAddLeadOpen}
+        submitting={creatingLead}
+        onSubmit={async (values) => {
+          const created = await addLead('CRM Dashboard', values);
+          if (created?.lead_id) {
+            setAddLeadOpen(false);
+            router.push(ADMISSIONS_CRM_PIPELINE_HREF);
+          }
+        }}
+      />
     </div>
   );
 }

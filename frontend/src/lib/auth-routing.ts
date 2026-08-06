@@ -436,6 +436,32 @@ export function canRoleAccessPath(
     if (!inPortalRoles && !hasAnyHrCapability(hrCapabilities) && !permissions?.length) return false;
     return canAccessHrPath(roles, pathname, hrCapabilities, permissions);
   }
+
+  // Pure Registrar: block Admin module hubs that are intentionally nav-hidden
+  // (Finance, HR, IQAC, Operations, Settings, Ph.D. demo). CampusAdmin/SuperAdmin keep access.
+  if (
+    portal === '/admin' &&
+    roles.includes('registrar') &&
+    !roles.includes('campusadmin') &&
+    !roles.includes('superadmin')
+  ) {
+    const registrarDeniedPrefixes = [
+      '/admin/finance',
+      '/admin/hr',
+      '/admin/iqac',
+      '/admin/operations',
+      '/admin/settings',
+      '/admin/phd',
+    ];
+    if (
+      registrarDeniedPrefixes.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+      )
+    ) {
+      return false;
+    }
+  }
+
   return roles.some((role) => portalRoles[portal].includes(role));
 }
 

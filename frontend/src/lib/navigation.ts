@@ -79,6 +79,9 @@ import {
   BriefcaseBusiness,
   ShieldCheck,
   TriangleAlert,
+  UserCheck,
+  UserPlus,
+  BadgeCheck,
 } from 'lucide-react';
 import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
 import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
@@ -284,18 +287,28 @@ export function flattenNavToCommandItems(navGroups: NavGroup[]): NavItem[] {
   return items;
 }
 
-export function filterPortalConfigForRole(config: PortalConfig, role: string | undefined | null): PortalConfig {
-  const normalizedRole = (role ?? '').trim();
+export function filterPortalConfigForRole(
+  config: PortalConfig,
+  role: string | string[] | undefined | null,
+): PortalConfig {
+  const userRoles = (Array.isArray(role) ? role : [role])
+    .filter((r): r is string => Boolean(r && String(r).trim()))
+    .map((r) => String(r).trim());
+
   const navGroups = config.navGroups
     .map((group) => ({
       ...group,
       items: group.items.filter(
-        (item) => !item.roles || rolesMatchForAccess(normalizedRole, item.roles),
+        (item) =>
+          !item.roles ||
+          userRoles.some((userRole) => rolesMatchForAccess(userRole, item.roles!)),
       ),
     }))
     .filter((group) => group.items.length > 0);
   const commandItems = config.commandItems.filter(
-    (item) => !item.roles || rolesMatchForAccess(normalizedRole, item.roles),
+    (item) =>
+      !item.roles ||
+      userRoles.some((userRole) => rolesMatchForAccess(userRole, item.roles!)),
   );
 
   return { ...config, navGroups, commandItems };
@@ -1575,20 +1588,114 @@ export const adminPortal: PortalConfig = {
       title: 'Overview',
       items: [
         { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
-        { label: 'Governance Tasks', href: '/admin/tasks', icon: ListChecks },
+        { label: 'Governance Tasks', href: '/admin/tasks', icon: ListChecks, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
+        { label: 'Legal & RTI', href: '/admin/legal-rti', icon: Scale, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
         { label: 'Upload History', href: '/admin/upload-history', icon: History },
+        {
+          label: 'Registrar Reports',
+          href: '/admin/registrar-reports',
+          icon: BarChart3,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+        },
+      ],
+    },
+    {
+      title: 'Registrar Desk',
+      items: [
+        {
+          label: 'Student Enrollment',
+          href: '/admin/enrollment',
+          icon: UserPlus,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['enroll', 'prn', 'fee', 'admission', 'student id'],
+        },
+        {
+          label: 'Academic Placement',
+          href: '/admin/academic-placement',
+          icon: MapPin,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['school', 'department', 'program', 'section', 'advisor', 'batch'],
+        },
+        {
+          label: 'Student Lifecycle',
+          href: '/admin/student-lifecycle',
+          icon: Users,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['suspend', 'withdraw', 'graduate', 'alumni', 'status'],
+        },
+        {
+          label: 'Student Records',
+          href: '/admin/student-records',
+          icon: Contact,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['profile', 'documents', 'student 360', 'edit student', 'vault'],
+        },
+        {
+          label: 'Semester Registrations',
+          href: '/admin/semester-registrations',
+          icon: ClipboardCheck,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['approve', 'reject', 'send back', 'registration'],
+        },
+        {
+          label: 'Academic Petitions',
+          href: '/admin/academic-petitions',
+          icon: ClipboardList,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['transfer certificate', 'tc', 'name correction', 'course change', 'migration'],
+        },
+        {
+          label: 'Certificate Desk',
+          href: '/admin/certificates',
+          icon: ScrollText,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['transcript', 'bonafide', 'migration', 'degree', 'dsc'],
+        },
+        {
+          label: 'Degree Eligibility',
+          href: '/admin/degree-eligibility',
+          icon: BadgeCheck,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['graduation', 'credits', 'cgpa', 'clearance'],
+        },
+        {
+          label: 'Digital Signature',
+          href: '/admin/account/settings/digital-signature',
+          icon: PenLine,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['dsc', 'sign', 'certificate', 'renewal'],
+        },
       ],
     },
     {
       title: 'Modules',
       items: [
         { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
-        { label: 'Admissions CRM', href: '/admin/admissions', icon: Kanban, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer'] },
+        {
+          label: 'Admissions CRM',
+          href: '/admin/admissions',
+          icon: Kanban,
+          roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar'],
+        },
         { label: 'Student Verifications', href: '/admin/verifications', icon: FileCheck2, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar'] },
+        {
+          label: 'Profile Corrections',
+          href: '/admin/profile-corrections',
+          icon: ClipboardCheck,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+          keywords: ['profile', 'correction', 'tickets', 'edit unlock'],
+        },
         { label: 'Academics', href: '/admin/academics', icon: GraduationCap, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
         { label: 'Student Excel Upload', href: '/admin/students/bulk-upload', icon: Upload, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'AdmissionsOfficer'] },
         { label: 'Finance', href: '/admin/finance', icon: Wallet, roles: ['CampusAdmin', 'SuperAdmin', 'Accountant', 'President'] },
         { label: 'HR & Payroll', href: '/admin/hr', icon: Users, roles: ['CampusAdmin', 'SuperAdmin', 'HR', 'President'] },
+        {
+          label: 'Staff Appointment & Verification',
+          href: '/admin/staff-appointments',
+          icon: UserCheck,
+          keywords: ['appointment', 'verification', 'hiring', 'letter', 'faculty', 'staff', 'dsc', 'sign'],
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+        },
         { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },
         { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['CampusAdmin', 'SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
         { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['CampusAdmin', 'SuperAdmin'] },
@@ -1598,9 +1705,68 @@ export const adminPortal: PortalConfig = {
     },
   ],
   commandItems: [
-    { label: 'Admissions Kanban', href: '/admin/admissions', icon: Kanban, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer'] },
+    {
+      label: 'Student Enrollment',
+      href: '/admin/enrollment',
+      icon: UserPlus,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Student Records',
+      href: '/admin/student-records',
+      icon: Contact,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Semester Registrations',
+      href: '/admin/semester-registrations',
+      icon: ClipboardCheck,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Admissions Kanban',
+      href: '/admin/admissions',
+      icon: Kanban,
+      roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar'],
+    },
     { label: 'Pending Approvals', href: '/admin/verifications', icon: ListChecks },
+    {
+      label: 'Academic Petitions',
+      href: '/admin/academic-petitions',
+      icon: ClipboardList,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Academic Placement',
+      href: '/admin/academic-placement',
+      icon: MapPin,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Certificate Desk',
+      href: '/admin/certificates',
+      icon: ScrollText,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Degree Eligibility',
+      href: '/admin/degree-eligibility',
+      icon: BadgeCheck,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Staff Appointments',
+      href: '/admin/staff-appointments',
+      icon: UserCheck,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
     { label: 'University Directory', href: '/directory', icon: Contact },
+    {
+      label: 'Registrar Reports',
+      href: '/admin/registrar-reports',
+      icon: BarChart3,
+      roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
     { label: 'Export Reports', href: '/reports', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'President', 'IQAC', 'Registrar'] },
   ],
 };

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { useAuthedApi } from '@/lib/api';
 
 const BRAND_BTN =
   'border border-[#0B2447] bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy';
@@ -24,7 +25,8 @@ type ScholarStatus =
   | 'Coursework'
   | 'Synopsis Submitted'
   | 'Thesis Defended'
-  | 'Degree Awarded';
+  | 'Degree Awarded'
+  | string;
 
 type PhdScholar = {
   id: string;
@@ -35,56 +37,30 @@ type PhdScholar = {
   status: ScholarStatus;
 };
 
-const DUMMY_SCHOLARS: PhdScholar[] = [
-  {
-    id: 'PHD-2024-0142',
-    name: 'Ananya Sharma',
-    topic: 'Edge-aware federated learning for campus IoT telemetry',
-    guide: 'Dr. Meera Krishnan',
-    department: 'Computer Science',
-    status: 'Coursework',
-  },
-  {
-    id: 'PHD-2023-0087',
-    name: 'Rohan Mehta',
-    topic: 'Sustainable materials for high-strength concrete composites',
-    guide: 'Prof. Suresh Iyer',
-    department: 'Civil Engineering',
-    status: 'Synopsis Submitted',
-  },
-  {
-    id: 'PHD-2022-0031',
-    name: 'Priya Nair',
-    topic: 'Pharmacokinetic modelling of plant-derived antimicrobials',
-    guide: 'Dr. Kavita Rao',
-    department: 'Pharmaceutical Sciences',
-    status: 'Thesis Defended',
-  },
-  {
-    id: 'PHD-2021-0019',
-    name: 'Aarav Patel',
-    topic: 'Governance analytics for multi-campus academic quality',
-    guide: 'Prof. Neha Gupta',
-    department: 'Management Studies',
-    status: 'Degree Awarded',
-  },
-  {
-    id: 'PHD-2024-0158',
-    name: 'Ishita Verma',
-    topic: 'Low-latency speech translation for regional classrooms',
-    guide: 'Dr. Arjun Desai',
-    department: 'Electronics & Communication',
-    status: 'Coursework',
-  },
-  {
-    id: 'PHD-2023-0112',
-    name: 'Kabir Singh',
-    topic: 'Climate-resilient irrigation scheduling with remote sensing',
-    guide: 'Prof. Lakshmi Reddy',
-    department: 'Agricultural Engineering',
-    status: 'Synopsis Submitted',
-  },
-];
+type ResearchScholarRow = {
+  scholar_id?: string;
+  enrollment_no?: string;
+  scholar_name?: string;
+  guide_name?: string;
+  research_topic?: string;
+  topic?: string;
+  department_name?: string;
+  dept_name?: string;
+  current_phase?: string;
+  status?: string;
+};
+
+function mapPhaseToStatus(phase?: string | null): ScholarStatus {
+  const p = (phase ?? '').trim().toLowerCase();
+  if (!p) return 'Coursework';
+  if (p.includes('award') || p.includes('degree')) return 'Degree Awarded';
+  if (p.includes('defend') || p.includes('viva') || p.includes('thesis')) {
+    return 'Thesis Defended';
+  }
+  if (p.includes('synopsis')) return 'Synopsis Submitted';
+  if (p.includes('course')) return 'Coursework';
+  return phase ?? 'Coursework';
+}
 
 function statusBadgeClass(status: ScholarStatus) {
   switch (status) {
@@ -96,22 +72,64 @@ function statusBadgeClass(status: ScholarStatus) {
       return 'border-transparent bg-blue-100 text-blue-800';
     case 'Degree Awarded':
       return 'border-transparent bg-emerald-100 text-emerald-800';
+    default:
+      return 'border-transparent bg-slate-100 text-slate-700';
   }
 }
 
 export default function RegistrarPhdAdmissionsPage() {
+  const api = useAuthedApi();
   const [query, setQuery] = useState('');
+  const [scholars, setScholars] = useState<PhdScholar[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const rows = await api.get<ResearchScholarRow[]>('/api/research/scholars');
+        if (cancelled) return;
+        setScholars(
+          (rows ?? []).map((row) => ({
+            id:
+              row.enrollment_no ||
+              row.scholar_id ||
+              '—',
+            name: row.scholar_name || 'Unnamed scholar',
+            topic: row.research_topic || row.topic || '—',
+            guide: row.guide_name || '—',
+            department: row.department_name || row.dept_name || '—',
+            status: mapPhaseToStatus(row.current_phase || row.status),
+          })),
+        );
+      } catch (err) {
+        if (cancelled) return;
+        setScholars([]);
+        setLoadError(
+          err instanceof Error ? err.message : 'Failed to load research scholars',
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return DUMMY_SCHOLARS;
-    return DUMMY_SCHOLARS.filter(
+    if (!q) return scholars;
+    return scholars.filter(
       (row) =>
         row.name.toLowerCase().includes(q) ||
         row.id.toLowerCase().includes(q) ||
         row.topic.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [query, scholars]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6" data-testid="phd-admissions-page">
@@ -163,10 +181,22 @@ export default function RegistrarPhdAdmissionsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {loading ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
-                    No scholars match your search.
+                    Loading scholars…
+                  </TableCell>
+                </TableRow>
+              ) : loadError ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                    {loadError}
+                  </TableCell>
+                </TableRow>
+              ) : filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                    No Ph.D. scholars on record yet.
                   </TableCell>
                 </TableRow>
               ) : (

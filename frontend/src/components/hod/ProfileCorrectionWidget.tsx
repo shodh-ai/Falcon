@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -186,11 +187,15 @@ export function ProfileCorrectionWidget({
               )}
             </div>
           ))}
-        {reviewHref && tickets.length > 0 && (
-          <Button asChild variant="link" className="px-0">
-            <a href={reviewHref}>View all tickets</a>
+        {reviewHref ? (
+          <Button asChild variant="link" className="h-auto px-0 text-sgvu-navy">
+            <Link href={reviewHref}>
+              {tickets.length > limit
+                ? `View all tickets (${tickets.length})`
+                : 'View all tickets'}
+            </Link>
           </Button>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   );

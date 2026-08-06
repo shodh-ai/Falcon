@@ -24,9 +24,18 @@ import {
   RegistrarKpiSection,
   type RegistrarKpiSnapshot,
 } from '@/components/admin/RegistrarKpiSection';
+import { RegistrarWorkflowStepper } from '@/components/admin/registrar-desk/RegistrarWorkflowStepper';
 import { GovernanceTasksSummaryCard } from '@/components/admin/GovernanceTasksPanel';
+import { REGISTRAR_DESK } from '@/lib/api/api.registrar-desk';
 import { useAuthedApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 type VerificationRow = {
   user_id: string;
@@ -38,6 +47,19 @@ type VerificationRow = {
 };
 
 type BulkHistoryRow = { rows_imported: number; status?: string; created_at?: string };
+
+type WorkflowStudent = {
+  user_id: string;
+  name: string;
+  enrollment_no?: string;
+};
+
+type ReportSummary = {
+  enrollment_active?: number;
+  graduated_alumni?: number;
+  pending_registrations?: number;
+  status_breakdown?: Array<{ status: string; count: number }>;
+};
 
 const QUICK_ACTIONS = [
   {
@@ -100,6 +122,12 @@ export default function AdminDashboardPage() {
   const [recentBulkImports, setRecentBulkImports] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [kpi, setKpi] = useState<RegistrarKpiSnapshot | null>(null);
+  const [workflowStudents, setWorkflowStudents] = useState<WorkflowStudent[]>([]);
+  const [workflowStudentId, setWorkflowStudentId] = useState<string>('');
+  const [reportSummary, setReportSummary] = useState<ReportSummary | null>(null);
+  const [recentActivity, setRecentActivity] = useState<
+    Array<{ kind: string; id: string; title: string; actor_name?: string; occurred_at?: string }>
+  >([]);
 
   const onSnapshot = useCallback((snapshot: RegistrarKpiSnapshot) => {
     setKpi(snapshot);
@@ -109,9 +137,18 @@ export default function AdminDashboardPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [queue, bulkHistory] = await Promise.all([
+      const [queue, bulkHistory, placement, reports, activity] = await Promise.all([
         api.get<VerificationRow[]>('/api/admin/student-verifications/queue').catch(() => []),
         api.get<BulkHistoryRow[]>('/admissions/students/bulk-upload/history').catch(() => []),
+        api
+          .get<{ rows: WorkflowStudent[] }>(`${REGISTRAR_DESK.placementStudents}?limit=50&offset=0`)
+          .catch(() => ({ rows: [] })),
+        api.get<ReportSummary>(REGISTRAR_DESK.reportsSummary).catch(() => null),
+        api
+          .get<
+            Array<{ kind: string; id: string; title: string; actor_name?: string; occurred_at?: string }>
+          >(`${REGISTRAR_DESK.activity}?limit=8`)
+          .catch(() => []),
       ]);
       const queueRows = Array.isArray(queue) ? queue : [];
       setPendingVerifications(queueRows.slice(0, 5));
@@ -119,6 +156,11 @@ export default function AdminDashboardPage() {
       setRecentBulkImports(
         bulkRows.slice(0, 5).reduce((sum, row) => sum + Number(row.rows_imported ?? 0), 0),
       );
+      const students = Array.isArray(placement?.rows) ? placement.rows : [];
+      setWorkflowStudents(students);
+      setWorkflowStudentId((prev) => prev || students[0]?.user_id || '');
+      setReportSummary(reports);
+      setRecentActivity(Array.isArray(activity) ? activity : []);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Failed to load dashboard');
     } finally {
@@ -205,6 +247,103 @@ export default function AdminDashboardPage() {
       </Card>
 
       <RegistrarKpiSection onSnapshot={onSnapshot} />
+
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">
+            Student lifecycle
+          </p>
+          <h3 className="mt-1 text-lg font-bold text-sgvu-navy sm:text-xl">
+            Registrar workflow
+          </h3>
+          <p className="mt-1 mb-4 text-sm text-muted-foreground">
+            Select a student to track live progress from admission through graduation.
+          </p>
+          <div className="mb-4 max-w-md">
+            <Select
+              value={workflowStudentId || undefined}
+              onValueChange={setWorkflowStudentId}
+            >
+              <SelectTrigger className="h-10">
+                <SelectValue placeholder="Select student for workflow" />
+              </SelectTrigger>
+              <SelectContent>
+                {workflowStudents.map((s) => (
+                  <SelectItem key={s.user_id} value={s.user_id}>
+                    {s.name}
+                    {s.enrollment_no ? ` (${s.enrollment_no})` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <RegistrarWorkflowStepper studentUserId={workflowStudentId || undefined} />
+        </CardContent>
+      </Card>
+
+      {reportSummary?.status_breakdown?.length ? (
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold text-sgvu-navy">Lifecycle distribution</CardTitle>
+            <CardDescription>
+              Active {reportSummary.enrollment_active ?? 0} · Alumni{' '}
+              {reportSummary.graduated_alumni ?? 0} · Pending regs{' '}
+              {reportSummary.pending_registrations ?? 0}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 pb-5">
+            {reportSummary.status_breakdown.slice(0, 8).map((row) => {
+              const max = Math.max(
+                ...reportSummary.status_breakdown!.map((r) => Number(r.count) || 0),
+                1,
+              );
+              const pct = Math.round(((Number(row.count) || 0) / max) * 100);
+              return (
+                <div key={row.status} className="grid grid-cols-[120px_1fr_40px] items-center gap-2 text-sm">
+                  <span className="truncate text-muted-foreground">
+                    {String(row.status).replace(/_/g, ' ')}
+                  </span>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-[#0B2447]"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-right tabular-nums text-sgvu-navy">{row.count}</span>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {recentActivity.length ? (
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold text-sgvu-navy">Registrar activity</CardTitle>
+            <CardDescription>Latest certificates, petitions, and signing events</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 pb-5">
+            {recentActivity.map((item) => (
+              <div
+                key={`${item.kind}-${item.id}`}
+                className="flex items-start justify-between gap-3 rounded-lg border border-sgvu-navy/5 px-3 py-2 text-sm"
+              >
+                <div>
+                  <p className="font-medium text-sgvu-navy">{item.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {item.kind}
+                    {item.actor_name ? ` · ${item.actor_name}` : ''}
+                  </p>
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {item.occurred_at ? new Date(item.occurred_at).toLocaleString() : '—'}
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <GovernanceTasksSummaryCard />
 
@@ -379,7 +518,7 @@ export default function AdminDashboardPage() {
         </Card>
       </div>
 
-      <ProfileCorrectionWidget limit={10} reviewHref="/admin/verifications" />
+      <ProfileCorrectionWidget limit={10} reviewHref="/admin/profile-corrections" />
     </div>
   );
 }

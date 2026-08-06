@@ -3,9 +3,9 @@
  * Hides navigation, blocks portal routes, and filters workspace switcher entries.
  */
 export const LAUNCH_MODULES = {
-  library: false,
-  finance: false,
-  admissionVault: false,
+  library: true,
+  finance: true,
+  admissionVault: true,
 } as const;
 
 export type LaunchModule = keyof typeof LAUNCH_MODULES;

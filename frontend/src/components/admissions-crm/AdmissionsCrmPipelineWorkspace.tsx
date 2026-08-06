@@ -18,6 +18,7 @@ import {
   ADMISSIONS_CRM_DASHBOARD_HREF,
   BRAND_BTN,
 } from '@/components/admissions-crm/admissions-crm-constants';
+import { AddLeadDialog } from '@/components/admissions-crm/AddLeadDialog';
 import { useAdmissionsKanban } from '@/components/admissions-crm/useAdmissionsKanban';
 import { KanbanBoard } from '@/components/workspaces/KanbanBoard';
 import { Badge } from '@/components/ui/badge';
@@ -79,6 +80,7 @@ export function AdmissionsCrmPipelineWorkspace() {
   const [counsellorDraft, setCounsellorDraft] = useState('');
   const [stageDraft, setStageDraft] = useState('RAW_LEAD');
   const [saving, setSaving] = useState(false);
+  const [addLeadOpen, setAddLeadOpen] = useState(false);
 
   const selectedLead = selectedLeadId ? leadsById.get(selectedLeadId) : undefined;
 
@@ -149,8 +151,9 @@ export function AdmissionsCrmPipelineWorkspace() {
         body: counsellorDraft.trim(),
         metadata: { counsellor: counsellorDraft.trim() },
       });
-      toast.success('Counsellor assignment logged');
+      toast.success('Counsellor assigned');
       setCounsellorDraft('');
+      load();
       await loadTimeline(selectedLeadId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not assign counsellor');
@@ -202,7 +205,7 @@ export function AdmissionsCrmPipelineWorkspace() {
                 type="button"
                 className={cn('inline-flex h-10 items-center rounded-lg px-4 text-sm font-semibold', BRAND_BTN)}
                 disabled={creatingLead || loading}
-                onClick={() => void addLead('Lead Pipeline')}
+                onClick={() => setAddLeadOpen(true)}
               >
                 {creatingLead ? 'Adding…' : 'Add Lead'}
               </button>
@@ -295,7 +298,7 @@ export function AdmissionsCrmPipelineWorkspace() {
               type="button"
               className={cn('inline-flex h-10 items-center rounded-lg px-5 text-sm font-bold', BRAND_BTN)}
               disabled={creatingLead || loading}
-              onClick={() => void addLead('Lead Pipeline')}
+              onClick={() => setAddLeadOpen(true)}
             >
               {creatingLead ? 'Adding…' : 'Add Lead'}
             </button>
@@ -435,6 +438,16 @@ export function AdmissionsCrmPipelineWorkspace() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <AddLeadDialog
+        open={addLeadOpen}
+        onOpenChange={setAddLeadOpen}
+        submitting={creatingLead}
+        onSubmit={async (values) => {
+          const created = await addLead('Lead Pipeline', values);
+          if (created) setAddLeadOpen(false);
+        }}
+      />
     </div>
   );
 }

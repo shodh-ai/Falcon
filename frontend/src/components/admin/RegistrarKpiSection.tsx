@@ -14,16 +14,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
+import { REGISTRAR_DESK } from '@/lib/api/api.registrar-desk';
 import { RegistrarHealthGauge } from '@/components/admin/RegistrarHealthGauge';
 import { RegistrarKpiCard } from '@/components/admin/RegistrarKpiCard';
-
-type DirectoryPage = { total: number };
-type FilterOptions = { departments?: string[] };
-type VerificationRow = unknown;
-type IssuesDashboard = {
-  kpis: { open_tickets: number; sla_breaches: number; avg_resolution_hours: number };
-};
-type BulkHistoryRow = { rows_imported?: number; rows_failed?: number; status?: string };
 
 export type RegistrarKpiSnapshot = {
   totalStudents: number;
@@ -46,56 +39,39 @@ export type RegistrarKpiSnapshot = {
   totalFields: number;
 };
 
-const DEMO: Omit<RegistrarKpiSnapshot, 'liveFields' | 'totalFields'> = {
-  totalStudents: 18462,
-  studentsDeltaLabel: '+128 this week',
-  studentsTrendPositive: true,
-  totalFaculty: 842,
-  facultyDeltaLabel: '12 joined this month',
-  facultyTrendPositive: true,
-  activeDepartments: 28,
-  departmentsDeltaLabel: '2 inactive',
-  departmentsTrendPositive: false,
-  admissionsToday: 47,
-  admissionsDeltaLabel: '+8 vs yesterday',
-  admissionsTrendPositive: true,
-  pendingApprovals: 23,
-  verificationRequests: 18,
-  documentsPending: 9,
-  healthScore: 86,
+type DeskKpis = {
+  total_students: number;
+  total_faculty: number;
+  active_departments: number;
+  admissions_today: number;
+  pending_approvals: number;
+  verification_requests: number;
+  documents_pending: number;
+  pending_registrations?: number;
+  pending_petitions?: number;
+  pending_certificates?: number;
+  pending_governance?: number;
+  health_score: number;
 };
 
-function computeHealthScore(input: {
-  pendingApprovals: number;
-  verificationRequests: number;
-  documentsPending: number;
-  slaBreaches: number;
-}): number {
-  let score = 96;
-  score -= Math.min(18, Math.sqrt(Math.max(0, input.pendingApprovals)) * 2.4);
-  score -= Math.min(18, Math.sqrt(Math.max(0, input.verificationRequests)) * 2.8);
-  score -= Math.min(14, Math.sqrt(Math.max(0, input.documentsPending)) * 2.2);
-  score -= Math.min(16, input.slaBreaches * 3.5);
-  return Math.max(55, Math.min(100, Math.round(score)));
-}
-
-async function safeGet<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
-
-function scaledWeeklyJoiners(total: number): number {
-  if (total <= 0) return 0;
-  return Math.max(1, Math.min(48, Math.round(total * 0.004)));
-}
-
-function scaledMonthlyFaculty(total: number): number {
-  if (total <= 0) return 0;
-  return Math.max(0, Math.min(24, Math.round(total * 0.02)));
-}
+const EMPTY: Omit<RegistrarKpiSnapshot, 'liveFields' | 'totalFields'> = {
+  totalStudents: 0,
+  studentsDeltaLabel: 'Active student accounts',
+  studentsTrendPositive: true,
+  totalFaculty: 0,
+  facultyDeltaLabel: 'Faculty / HOD / Dean',
+  facultyTrendPositive: true,
+  activeDepartments: 0,
+  departmentsDeltaLabel: 'Departments in tenant',
+  departmentsTrendPositive: true,
+  admissionsToday: 0,
+  admissionsDeltaLabel: 'Leads created today (live)',
+  admissionsTrendPositive: true,
+  pendingApprovals: 0,
+  verificationRequests: 0,
+  documentsPending: 0,
+  healthScore: 0,
+};
 
 export function RegistrarKpiSection({
   onSnapshot,
@@ -104,116 +80,57 @@ export function RegistrarKpiSection({
 }) {
   const api = useAuthedApi();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<RegistrarKpiSnapshot>({
-    ...DEMO,
+    ...EMPTY,
     liveFields: 0,
     totalFields: 8,
   });
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const [students, faculty, filters, queue, issuesData, bulkHistory] = await Promise.all([
-        safeGet(() => api.get<DirectoryPage>('/api/search/directory?role=Student&limit=1&page=1'), {
-          total: -1,
-        }),
-        safeGet(() => api.get<DirectoryPage>('/api/search/directory?role=Faculty&limit=1&page=1'), {
-          total: -1,
-        }),
-        safeGet(() => api.get<FilterOptions>('/api/search/directory/filters'), {
-          departments: undefined,
-        }),
-        safeGet(() => api.get<VerificationRow[]>('/api/admin/student-verifications/queue'), null),
-        safeGet(() => api.get<IssuesDashboard>('/api/leadership/issues'), null),
-        safeGet(
-          () => api.get<BulkHistoryRow[]>('/admissions/students/bulk-upload/history'),
-          null,
-        ),
-      ]);
-
-      let liveFields = 0;
-      const queueRows = Array.isArray(queue) ? queue : null;
-      const bulkRows = Array.isArray(bulkHistory) ? bulkHistory : null;
-      const deptCount = filters.departments?.length ?? -1;
-
-      const totalStudents = students.total >= 0 ? ((liveFields += 1), students.total) : DEMO.totalStudents;
-      const totalFaculty = faculty.total >= 0 ? ((liveFields += 1), faculty.total) : DEMO.totalFaculty;
-      const activeDepartments =
-        deptCount >= 0 ? ((liveFields += 1), deptCount) : DEMO.activeDepartments;
-      const pendingApprovals =
-        issuesData?.kpis?.open_tickets != null
-          ? ((liveFields += 1), issuesData.kpis.open_tickets)
-          : DEMO.pendingApprovals;
-      const verificationRequests =
-        queueRows != null ? ((liveFields += 1), queueRows.length) : DEMO.verificationRequests;
-
-      let documentsPending = DEMO.documentsPending;
-      if (bulkRows != null) {
-        liveFields += 1;
-        const pending = bulkRows.filter((row) => {
-          const status = String(row.status ?? '').toLowerCase();
-          return (
-            status.includes('pending') ||
-            status.includes('processing') ||
-            status.includes('review') ||
-            Number(row.rows_failed ?? 0) > 0
-          );
-        }).length;
-        documentsPending = pending;
-      }
-
-      // Admissions daily counts are not yet exposed — estimate from student base when live.
-      const admissionsToday =
-        students.total >= 0
-          ? Math.max(1, Math.min(36, Math.round(totalStudents * 0.0012) + 3))
-          : DEMO.admissionsToday;
-
-      const studentDelta = students.total >= 0 ? scaledWeeklyJoiners(totalStudents) : 128;
-      const facultyDelta = faculty.total >= 0 ? scaledMonthlyFaculty(totalFaculty) : 12;
-      const inactiveDepartments = deptCount >= 0 ? Math.max(0, Math.min(3, Math.round(deptCount * 0.08))) : 2;
-      const admissionsYesterday = Math.max(0, admissionsToday - (students.total >= 0 ? 2 : 8));
-      const admissionsDelta = admissionsToday - admissionsYesterday;
+      const kpis = await api.get<DeskKpis>(REGISTRAR_DESK.dashboardKpis);
+      const pendingLabel = [
+        kpis.pending_registrations != null ? `${kpis.pending_registrations} regs` : null,
+        kpis.pending_petitions != null ? `${kpis.pending_petitions} petitions` : null,
+        kpis.pending_certificates != null ? `${kpis.pending_certificates} certs` : null,
+        kpis.pending_governance != null ? `${kpis.pending_governance} governance` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
 
       const next: RegistrarKpiSnapshot = {
-        totalStudents,
-        studentsDeltaLabel:
-          students.total >= 0
-            ? `+${studentDelta.toLocaleString('en-IN')} estimated this week`
-            : DEMO.studentsDeltaLabel,
+        totalStudents: kpis.total_students ?? 0,
+        studentsDeltaLabel: 'Active student accounts',
         studentsTrendPositive: true,
-        totalFaculty,
-        facultyDeltaLabel:
-          faculty.total >= 0
-            ? `${facultyDelta} joined this month`
-            : DEMO.facultyDeltaLabel,
-        facultyTrendPositive: facultyDelta >= 0,
-        activeDepartments,
-        departmentsDeltaLabel:
-          inactiveDepartments > 0
-            ? `${inactiveDepartments} inactive`
-            : 'All departments active',
-        departmentsTrendPositive: inactiveDepartments === 0,
-        admissionsToday,
-        admissionsDeltaLabel:
-          admissionsDelta === 0
-            ? 'Flat vs yesterday'
-            : `${admissionsDelta > 0 ? '+' : ''}${admissionsDelta} vs yesterday`,
-        admissionsTrendPositive: admissionsDelta >= 0,
-        pendingApprovals,
-        verificationRequests,
-        documentsPending,
-        healthScore: computeHealthScore({
-          pendingApprovals,
-          verificationRequests,
-          documentsPending,
-          slaBreaches: issuesData?.kpis?.sla_breaches ?? 0,
-        }),
-        liveFields,
+        totalFaculty: kpis.total_faculty ?? 0,
+        facultyDeltaLabel: 'Faculty / HOD / Dean',
+        facultyTrendPositive: true,
+        activeDepartments: kpis.active_departments ?? 0,
+        departmentsDeltaLabel: 'Departments in tenant',
+        departmentsTrendPositive: true,
+        admissionsToday: kpis.admissions_today ?? 0,
+        admissionsDeltaLabel: 'Leads created today (live)',
+        admissionsTrendPositive: true,
+        pendingApprovals: kpis.pending_approvals ?? 0,
+        verificationRequests: kpis.verification_requests ?? 0,
+        documentsPending: kpis.documents_pending ?? 0,
+        healthScore: kpis.health_score ?? 0,
+        liveFields: 8,
         totalFields: 8,
       };
 
+      if (pendingLabel) {
+        next.studentsDeltaLabel = `${next.totalStudents.toLocaleString('en-IN')} active`;
+      }
+
       setSnapshot(next);
       onSnapshot?.(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load KPIs');
+      setSnapshot({ ...EMPTY, liveFields: 0, totalFields: 8 });
     } finally {
       setLoading(false);
     }
@@ -237,9 +154,11 @@ export function RegistrarKpiSection({
               University KPI overview
             </h3>
             <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-              {snapshot.liveFields === 0
-                ? 'Showing demo figures — connect live feeds for production counts.'
-                : `${snapshot.liveFields}/${snapshot.totalFields} metrics live · ${coverage}% coverage`}
+              {error
+                ? `Unable to load live KPIs — ${error}`
+                : snapshot.liveFields === 0
+                  ? 'Loading registrar desk metrics…'
+                  : `${snapshot.liveFields}/${snapshot.totalFields} metrics live · ${coverage}% coverage · Pending = regs + petitions + certs + governance`}
             </p>
           </div>
           <Button
@@ -254,10 +173,10 @@ export function RegistrarKpiSection({
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <RegistrarKpiCard
           title="Total Students"
-          subtitle="Active student records"
+          subtitle="Active student role accounts"
           value={snapshot.totalStudents}
           trendLabel={snapshot.studentsDeltaLabel}
           trendPositive={snapshot.studentsTrendPositive}
@@ -268,18 +187,18 @@ export function RegistrarKpiSection({
         />
         <RegistrarKpiCard
           title="Total Faculty"
-          subtitle="Active faculty members"
+          subtitle="Faculty, HOD, and Dean"
           value={snapshot.totalFaculty}
           trendLabel={snapshot.facultyDeltaLabel}
           trendPositive={snapshot.facultyTrendPositive}
-          href="/directory?role=Faculty"
+          href="/directory"
           icon={Users}
           accent="indigo"
           loading={loading}
         />
         <RegistrarKpiCard
           title="Active Departments"
-          subtitle="Schools & departments"
+          subtitle="Departments in tenant"
           value={snapshot.activeDepartments}
           trendLabel={snapshot.departmentsDeltaLabel}
           trendPositive={snapshot.departmentsTrendPositive}
@@ -290,7 +209,7 @@ export function RegistrarKpiSection({
         />
         <RegistrarKpiCard
           title="Admissions Today"
-          subtitle="Students admitted today"
+          subtitle="Leads created today (live)"
           value={snapshot.admissionsToday}
           trendLabel={snapshot.admissionsDeltaLabel}
           trendPositive={snapshot.admissionsTrendPositive}
@@ -301,18 +220,18 @@ export function RegistrarKpiSection({
         />
         <RegistrarKpiCard
           title="Pending Approvals"
-          subtitle="Awaiting Registrar action"
+          subtitle="Registrar desk queues"
           value={snapshot.pendingApprovals}
-          trendLabel="Open governance tickets"
+          trendLabel="Regs · petitions · certs · governance"
           trendPositive={snapshot.pendingApprovals < 15}
-          href="/admin/tasks"
+          href="/admin/semester-registrations"
           icon={ClipboardCheck}
           accent="amber"
           loading={loading}
         />
         <RegistrarKpiCard
           title="Verification Requests"
-          subtitle="Document verification queue"
+          subtitle="Pending admin approval"
           value={snapshot.verificationRequests}
           trendLabel={
             snapshot.verificationRequests === 0
@@ -327,9 +246,9 @@ export function RegistrarKpiSection({
         />
         <RegistrarKpiCard
           title="Documents Pending"
-          subtitle="Uploads awaiting review"
+          subtitle="Failed imports + petition docs"
           value={snapshot.documentsPending}
-          trendLabel="Bulk / document intake"
+          trendLabel="Bulk / petition intake"
           trendPositive={snapshot.documentsPending < 10}
           href="/admin/upload-history"
           icon={FileText}
@@ -348,7 +267,7 @@ export function RegistrarKpiSection({
                 : 'Needs attention'
           }
           trendPositive={snapshot.healthScore >= 70}
-          href="/admin/reports"
+          href="/admin/registrar-reports"
           icon={Activity}
           accent="health"
           loading={loading}
