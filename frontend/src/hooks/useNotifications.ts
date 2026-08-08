@@ -5,6 +5,11 @@ import useSWR from 'swr';
 import { useAuth } from '@/context/AuthContext';
 import { notificationsApi, type FalconNotification } from '@/lib/api/notifications';
 import {
+  DEMO_DASHBOARD_METRICS,
+  demoNotificationsAsFalcon,
+} from '@/lib/mock/student-portal-demo';
+import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
+import {
   defaultActionLabel,
   inferIntentFromTitle,
   inferSeverityFromCategory,
@@ -16,14 +21,36 @@ import {
 
 const POLL_MS = 15_000;
 
+function isStudentRole(user: { role?: string | null; primaryRole?: string | null } | null | undefined) {
+  const role = user?.role?.trim().toLowerCase() || user?.primaryRole?.trim().toLowerCase();
+  return role === 'student' || role === 'applicant';
+}
+
+function withStudentDemoNotifications(
+  data: FalconNotification[] | undefined,
+  user: { user_id?: string; role?: string | null; primaryRole?: string | null } | null | undefined,
+) {
+  if (!data) return [];
+  const filtered = isStudentRole(user) ? data.filter((n) => n.category !== 'HR') : data;
+  if (isStudentRole(user) && filtered.length === 0 && isStudentDemoModeEnabled()) {
+    return demoNotificationsAsFalcon(user?.user_id ?? 'demo-student');
+  }
+  return filtered;
+}
+
 export function useNotificationUnreadCount() {
-  const { token, isAuthenticated } = useAuth();
+  const { token, isAuthenticated, user } = useAuth();
   const { data, mutate } = useSWR(
     isAuthenticated && token ? ['notifications-unread', token] : null,
     () => notificationsApi.unreadCount(token!),
     { refreshInterval: POLL_MS, revalidateOnFocus: true },
   );
-  return { count: data?.count ?? 0, refresh: mutate };
+  const count = data?.count ?? 0;
+  const demoCount =
+    isStudentRole(user) && count === 0 && isStudentDemoModeEnabled()
+      ? DEMO_DASHBOARD_METRICS.unread_notifications
+      : count;
+  return { count: demoCount, refresh: mutate };
 }
 
 export function useRecentNotifications() {
@@ -34,15 +61,10 @@ export function useRecentNotifications() {
     { refreshInterval: POLL_MS, revalidateOnFocus: true },
   );
 
-  const filteredNotifications = useMemo(() => {
-    if (!data) return [];
-    const role = user?.role?.trim().toLowerCase() || user?.primaryRole?.trim().toLowerCase();
-    const isStudent = role === 'student' || role === 'applicant';
-    if (isStudent) {
-      return data.filter((n) => n.category !== 'HR');
-    }
-    return data;
-  }, [data, user]);
+  const filteredNotifications = useMemo(
+    () => withStudentDemoNotifications(data, user).slice(0, 8),
+    [data, user],
+  );
 
   return {
     notifications: filteredNotifications,
@@ -60,15 +82,10 @@ export function useNotificationHistory() {
     { refreshInterval: POLL_MS, revalidateOnFocus: true },
   );
 
-  const filteredNotifications = useMemo(() => {
-    if (!data) return [];
-    const role = user?.role?.trim().toLowerCase() || user?.primaryRole?.trim().toLowerCase();
-    const isStudent = role === 'student' || role === 'applicant';
-    if (isStudent) {
-      return data.filter((n) => n.category !== 'HR');
-    }
-    return data;
-  }, [data, user]);
+  const filteredNotifications = useMemo(
+    () => withStudentDemoNotifications(data, user),
+    [data, user],
+  );
 
   return {
     notifications: filteredNotifications,

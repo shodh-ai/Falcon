@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Building2, Plus, ShoppingBag, Wallet } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
@@ -12,47 +12,45 @@ import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { StudentInfoTile } from '@/components/student/StudentInfoTile';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
-import { isLaunchModuleEnabled } from '@/lib/launch-modules';
+import { DEMO_HOSTEL } from '@/lib/mock/student-portal-demo';
+import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
 
 type Allocation = {
   hostel_block: string | null;
   room_number: string | null;
   bed_number: string | null;
+  floor?: string;
   mess_plan: string;
+  mess_status?: string;
   warden: { name: string } | null;
 };
-
-type WalletData = { current_balance: string };
-type CatalogItem = { item_id: string; item_name: string; price: string; meal_type: string };
 
 export default function CampusLifePage() {
   const api = useAuthedApi();
   const [allocation, setAllocation] = useState<Allocation | null>(null);
-  const [wallet, setWallet] = useState<WalletData | null>(null);
-  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [hostelSaleActive, setHostelSaleActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [gatePass, setGatePass] = useState({ out_date: '', in_date: '', reason: '', destination: '' });
-  const [cart, setCart] = useState<Record<string, number>>({});
 
   useEffect(() => {
     async function load() {
       try {
-        const [alloc, wal, cat, settings] = await Promise.all([
+        const [alloc, settings] = await Promise.all([
           api.get<Allocation | null>('/api/operations/hostel/my-allocation'),
-          api.get<WalletData>('/api/campus-wallet/me').catch(() => null),
-          api.get<CatalogItem[]>('/api/campus-wallet/mess/catalog').catch(() => []),
           api.get<{ is_hostel_sale_active: boolean }>('/api/student/campus-settings'),
         ]);
-        setAllocation(alloc);
-        setWallet(wal);
-        setCatalog(cat);
+        setAllocation(alloc ?? (isStudentDemoModeEnabled() ? DEMO_HOSTEL : null));
         setHostelSaleActive(settings.is_hostel_sale_active);
       } catch {
-        toast.error('Could not load campus life data');
+        if (isStudentDemoModeEnabled()) {
+          setAllocation(DEMO_HOSTEL);
+          toast.error('Could not load campus life data — showing demo allocation');
+        } else {
+          setAllocation(null);
+          toast.error('Could not load campus life data');
+        }
       } finally {
         setLoading(false);
       }
@@ -78,28 +76,13 @@ export default function CampusLifePage() {
     }
   }
 
-  async function orderAddon(item: CatalogItem) {
-    const qty = cart[item.item_id] ?? 1;
-    try {
-      await api.post('/api/mess/order', {
-        item_id: item.item_id,
-        meal_type: item.meal_type,
-        quantity: qty,
-        order_date: new Date().toISOString().slice(0, 10),
-      });
-      toast.success(`${item.item_name} added to your mess order`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Order failed');
-    }
-  }
-
   if (loading) return <StudentLoadingState label="Loading campus life…" />;
 
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Campus Life"
-        description="Hostel, Falcon Wallet, and mess add-ons — one unified Falcon workspace."
+        description="Hostel allocation, room details, and gate pass requests."
       />
 
       <motion.section
@@ -122,9 +105,16 @@ export default function CampusLifePage() {
             />
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
-              <StudentInfoTile label="Block · Room" value={`${allocation.hostel_block} · ${allocation.room_number}`} />
-              <StudentInfoTile label="Bed" value={allocation.bed_number} />
-              <StudentInfoTile label="Mess plan" value={allocation.mess_plan} />
+              <StudentInfoTile label="Hostel · Room" value={`${allocation.hostel_block} · ${allocation.room_number}`} />
+              <StudentInfoTile label="Bed / Floor" value={`${allocation.bed_number}${'floor' in allocation && allocation.floor ? ` · ${allocation.floor}` : ''}`} />
+              <StudentInfoTile
+                label="Mess status"
+                value={`${allocation.mess_plan}${
+                  'mess_status' in allocation && allocation.mess_status
+                    ? ` · ${String(allocation.mess_status)}`
+                    : ''
+                }`}
+              />
               <StudentInfoTile label="Warden" value={allocation.warden?.name} />
             </div>
           )}
@@ -147,53 +137,6 @@ export default function CampusLifePage() {
               </Link>
             </p>
           </div>
-        </StudentSectionCard>
-      </motion.section>
-
-      <motion.section
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.08 }}
-        className="space-y-6"
-      >
-        <StudentSectionCard title="Falcon Wallet & Mess" description="Balance and Swiggy-style add-ons" icon={Wallet}>
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-sgvu-navy p-5 text-white">
-            <div>
-              <p className="text-xs uppercase tracking-wider text-white/70">Falcon Pay balance</p>
-              <p className="text-3xl font-black">₹{Number(wallet?.current_balance ?? 0).toFixed(2)}</p>
-            </div>
-            <Button asChild variant="secondary" size="sm" disabled={!isLaunchModuleEnabled('finance')}>
-              {isLaunchModuleEnabled('finance') ? (
-                <Link href="/student/finance">Top up via Finance</Link>
-              ) : (
-                <span>Top-up coming soon</span>
-              )}
-            </Button>
-          </div>
-
-          <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-sgvu-navy">
-            <ShoppingBag className="h-4 w-4" />
-            Mess add-on menu
-          </p>
-          {catalog.length === 0 ? (
-            <StudentEmptyState title="No add-ons today" description="Check back at meal times." />
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {catalog.slice(0, 8).map((item) => (
-                <div key={item.item_id} className="flex items-center justify-between rounded-2xl border p-4">
-                  <div>
-                    <p className="font-medium text-sgvu-navy">{item.item_name}</p>
-                    <Badge variant="outline" className="mt-1">{item.meal_type}</Badge>
-                    <p className="mt-1 text-sm text-muted-foreground">₹{item.price}</p>
-                  </div>
-                  <Button size="sm" onClick={() => void orderAddon(item)}>
-                    <Plus className="h-4 w-4" />
-                    Add
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
         </StudentSectionCard>
       </motion.section>
     </StudentPageShell>

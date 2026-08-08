@@ -57,7 +57,7 @@ function PitchTracker({ project }: { project: EcellProject }) {
           This pitch was rejected. You may submit again in a future cohort if applications reopen.
         </p>
       ) : (
-        <ol className="grid gap-3 sm:grid-cols-5">
+        <ol className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
           {ECELL_TRACKER_STEPS.map((step, idx) => {
             const done = idx <= activeIdx;
             const current = idx === activeIdx;
@@ -225,7 +225,7 @@ export default function StudentEcellPage() {
   return (
     <StudentPageShell>
       <StudentPageHeader
-        title="E-Cell & Incubation Hub"
+        title="Innovation Hub"
         description="Pitch your startup idea, track multi-tier approvals, and receive grant funding through Falcon ERP."
       />
 

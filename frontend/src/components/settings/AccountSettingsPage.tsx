@@ -354,7 +354,7 @@ export function AccountSettingsPage() {
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="p-5 md:p-6">
           <p className="text-sm font-semibold text-sgvu-gold">Falcon Workspace</p>
-          <h1 className="text-2xl font-bold text-sgvu-navy">Account Settings</h1>
+          <h1 className="text-2xl font-bold text-sgvu-navy">Settings</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage your account, contact details, security, and workspace preferences.
           </p>

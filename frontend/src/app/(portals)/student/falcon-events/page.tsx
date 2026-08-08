@@ -85,7 +85,7 @@ export default function FalconEventsPage() {
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
-        title="Events & Clubs"
+        title="Events"
         description="Club fests, chapter memberships, and your NCC/NSS/SODECA points — one hub."
       />
 

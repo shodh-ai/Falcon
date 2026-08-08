@@ -6,16 +6,23 @@ import { getApiBaseUrl } from '@/lib/api-base-url';
 
 let authRedirectInFlight = false;
 
+function clearClientAuthSession() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  // Mirror AuthContext cookie clear so middleware stops treating the session as live.
+  document.cookie = 'falcon_auth_token=; Path=/; SameSite=Lax; Max-Age=0';
+}
+
 function scheduleAuthRedirect(router: ReturnType<typeof useRouter>) {
   if (typeof window === 'undefined' || authRedirectInFlight) return;
   authRedirectInFlight = true;
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
+  clearClientAuthSession();
   window.setTimeout(() => {
+    // Portal login lives at `/` (there is no student `/login` route).
     try {
-      router.replace('/login');
+      router.replace('/');
     } catch {
-      window.location.assign('/login');
+      window.location.assign('/');
     }
   }, 0);
 }

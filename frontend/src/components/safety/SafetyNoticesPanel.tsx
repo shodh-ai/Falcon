@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Loader2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AlertTriangle, Bell, Loader2, Shield } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { useAuthedApi } from '@/lib/api';
 import { concernStatusLabel, concernTypeLabel } from '@/lib/student-safety';
+import { cn } from '@/lib/utils';
 
 type Notice = {
   concern_id: string;
@@ -19,18 +21,32 @@ type Notice = {
 function noticeBody(row: Notice): string {
   if (row.status === 'RESOLVED' || row.status === 'CLOSED') {
     return row.resolution_summary?.trim()
-      ? `This concern has been ${row.status.toLowerCase()}. ${row.resolution_summary.trim()}`
-      : `This concern has been ${row.status.toLowerCase()} by the Disciplinary Committee.`;
+      ? `This matter has been ${row.status.toLowerCase()}. ${row.resolution_summary.trim()}`
+      : `This matter has been ${row.status.toLowerCase()} by the Disciplinary Committee.`;
   }
-  return 'A confidential concern is under review. The Disciplinary Committee / ICC will contact you through official channels if your statement is required.';
+  return 'A confidential concern involving you is under review. The Disciplinary Committee / ICC will contact you through official channels if your statement is required. Do not discuss the case with other students.';
+}
+
+function statusTone(status: string) {
+  const s = status.toUpperCase();
+  if (s === 'RESOLVED' || s === 'CLOSED') {
+    return 'border-transparent bg-emerald-100 text-emerald-800';
+  }
+  if (s === 'UNDER_REVIEW' || s === 'ESCALATED') {
+    return 'border-transparent bg-amber-100 text-amber-900';
+  }
+  return 'border-transparent bg-sgvu-navy/10 text-sgvu-navy';
 }
 
 export function SafetyNoticesPanel({
-  title,
-  description,
+  title = 'Safety notices',
+  description = 'Official notices when a safety concern involving you is under review or has been closed. Do not contact any student about these matters.',
+  embedded = false,
 }: {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
+  /** When true, omit page-level title (parent workspace already shows chrome). */
+  embedded?: boolean;
 }) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Notice[]>([]);
@@ -56,45 +72,88 @@ export function SafetyNoticesPanel({
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-bold text-sgvu-navy">{title}</h1>
-        <p className="text-sm text-muted-foreground">{description}</p>
-      </div>
+    <div className={cn('space-y-5', !embedded && 'mx-auto max-w-3xl p-4 md:p-6')}>
+      {!embedded ? (
+        <div>
+          <h1 className="text-2xl font-bold text-sgvu-navy">{title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-sgvu-navy/10 bg-white p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy">
+              <Bell className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-sgvu-navy">{title}</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                {description}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-        </p>
+        <div className="flex items-center justify-center gap-2 rounded-2xl border border-sgvu-navy/10 bg-white py-16 text-sm text-muted-foreground shadow-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading notices…
+        </div>
       ) : error ? (
-        <Card>
-          <CardContent className="p-6 text-sm text-destructive">{error}</CardContent>
-        </Card>
+        <StudentEmptyState
+          icon={AlertTriangle}
+          title="Could not load notices"
+          description={error}
+          action={
+            <Button variant="outline" onClick={() => void load()}>
+              Try again
+            </Button>
+          }
+        />
       ) : rows.length === 0 ? (
-        <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">No notices.</CardContent>
-        </Card>
+        <StudentEmptyState
+          icon={Shield}
+          title="No safety notices for you"
+          description="If the Disciplinary Committee opens a case that involves you, an official notice will appear here. You will not see who filed the report."
+          className="bg-white py-16 shadow-sm"
+        />
       ) : (
-        rows.map((row) => (
-          <Card key={row.concern_id}>
-            <CardHeader className="flex flex-row items-start justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                {concernTypeLabel(row.concern_type)}
-              </CardTitle>
-              <Badge>{concernStatusLabel(row.status as never)}</Badge>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <p>{noticeBody(row)}</p>
-              {row.accused_notified_at ? (
-                <p className="text-xs">
-                  Official notice sent on{' '}
-                  {new Date(row.accused_notified_at).toLocaleString('en-IN')}.
-                </p>
-              ) : null}
-            </CardContent>
-          </Card>
-        ))
+        <div className="space-y-3">
+          {rows.map((row) => (
+            <article
+              key={row.concern_id}
+              className="rounded-2xl border border-sgvu-navy/10 bg-white p-5 shadow-sm transition hover:border-sgvu-gold/40"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+                    <AlertTriangle className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sgvu-navy">
+                      {concernTypeLabel(row.concern_type)}
+                    </h3>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      {noticeBody(row)}
+                    </p>
+                    {row.accused_notified_at ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Official notice sent{' '}
+                        {new Date(row.accused_notified_at).toLocaleString('en-IN', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <Badge className={cn('border', statusTone(row.status))}>
+                  {concernStatusLabel(row.status as never)}
+                </Badge>
+              </div>
+            </article>
+          ))}
+        </div>
       )}
     </div>
   );

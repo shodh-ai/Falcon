@@ -16,6 +16,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
 import { notificationSummary } from '@/lib/notifications/notification-display';
+import { isDemoNotificationId } from '@/lib/mock/student-portal-demo';
 import { NotificationFilterBar } from '@/components/notifications/NotificationFilterBar';
 import {
   NotificationEmptyState,
@@ -72,8 +73,11 @@ export default function NotificationsPage() {
 
   const markAll = async () => {
     if (!token) return;
-    await notificationsApi.markAllRead(token);
-    await refresh();
+    const hasLive = notifications.some((n) => !isDemoNotificationId(n.notification_id));
+    if (hasLive) {
+      await notificationsApi.markAllRead(token);
+      await refresh();
+    }
     toast.success('All notifications marked as read');
   };
 
@@ -90,7 +94,7 @@ export default function NotificationsPage() {
       toast.error(e instanceof Error ? e.message : 'Action failed');
       return;
     }
-    if (unread) {
+    if (unread && !isDemoNotificationId(id)) {
       await notificationsApi.markRead(token, id).catch(() => undefined);
       await refresh();
     }
@@ -98,6 +102,10 @@ export default function NotificationsPage() {
 
   const dismissNotification = async (id: string) => {
     if (!token) return;
+    if (isDemoNotificationId(id)) {
+      toast.success('Demo notification dismissed');
+      return;
+    }
     await refresh(
       (current) => current?.filter((row) => row.notification_id !== id) ?? [],
       { revalidate: false },
@@ -126,29 +134,38 @@ export default function NotificationsPage() {
           </Link>
         </Button>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-2">
-              <Bell className="h-6 w-6 text-sgvu-gold" />
-              <h1 className="text-2xl font-black text-sgvu-navy">Notification Center</h1>
+        <div className="relative overflow-hidden rounded-[1.75rem] border border-sgvu-navy/10 bg-white p-5 shadow-sm md:p-6">
+          <div className="pointer-events-none absolute right-0 top-0 h-32 w-32 rounded-full bg-sgvu-gold/15 blur-2xl" />
+          <div className="relative flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-sgvu-gold/20 text-sgvu-navy">
+                  <Bell className="h-5 w-5" />
+                </div>
+                <h1 className="text-2xl font-black tracking-tight text-sgvu-navy">
+                  Notification Center
+                </h1>
+              </div>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Updates, approvals, and alerts from across Falcon — with clear next steps.
+              </p>
+              {summary ? (
+                <p className="mt-3 inline-flex rounded-full border border-sgvu-navy/10 bg-slate-50 px-3 py-1 text-xs font-semibold text-sgvu-navy">
+                  {summary}
+                </p>
+              ) : null}
             </div>
-            <p className="text-sm text-muted-foreground">
-              Updates, approvals, and alerts from across Falcon — with clear next steps.
-            </p>
-            {summary && (
-              <p className="mt-2 text-xs font-medium text-muted-foreground">{summary}</p>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full border-sgvu-navy/15 bg-white text-sgvu-navy sm:w-auto"
+              onClick={markAll}
+              disabled={unreadCount === 0}
+            >
+              <CheckCheck className="mr-1 h-4 w-4" />
+              Mark all read
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full sm:w-auto"
-            onClick={markAll}
-            disabled={unreadCount === 0}
-          >
-            <CheckCheck className="mr-1 h-4 w-4" />
-            Mark all read
-          </Button>
         </div>
       </div>
 

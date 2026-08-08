@@ -175,7 +175,7 @@ export default function Home() {
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="password123"
+                      placeholder="Enter your password"
                       className="w-full rounded-xl border border-gray-200 px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-sgvu-gold"
                       required
                     />
@@ -211,8 +211,13 @@ export default function Home() {
               </form>
 
               <p className="text-center text-xs font-medium text-muted-foreground">
-                Google: @mygyanvihar.com / @mygyanvihar.org · QA: library@ / registrar@ /
-                dev.librarian@ / dev.registrar@ — password123
+                Google SSO: institutional @mygyanvihar.com / @mygyanvihar.org accounts
+                {process.env.NODE_ENV === 'development' ? (
+                  <>
+                    {' '}
+                    · Local QA seeds use password123 (never on public production)
+                  </>
+                ) : null}
               </p>
             </div>
           </div>

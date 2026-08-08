@@ -32,6 +32,7 @@ export default function StudentMentorshipPage() {
   const api = useAuthedApi();
   const [mentor, setMentor] = useState<MentorAssignmentResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [meetingLoading, setMeetingLoading] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<StudentMeeting[]>([]);
   const [meetingDate, setMeetingDate] = useState(() => {
@@ -54,19 +55,38 @@ export default function StudentMentorshipPage() {
     void api.get<StudentMeeting[]>('/api/academics/proctor/meetings/my').then(setMeetings).catch(() => setMeetings([]));
   }
 
-  useEffect(() => {
-    api
-      .get<MentorAssignmentResponse>('/api/academics/proctor/me')
+  function loadMentor() {
+    setLoading(true);
+    setLoadError(null);
+    void api
+      .get<MentorAssignmentResponse | null>('/api/academics/proctor/me')
       .then((data) => {
-        setMentor(data);
+        setMentor(data ?? null);
         setLoading(false);
-        loadMeetings();
-        loadLeaveRequests();
+        if (data) {
+          loadMeetings();
+          loadLeaveRequests();
+        } else {
+          setMeetings([]);
+          setLeaveRequests([]);
+        }
       })
       .catch((err) => {
-        toast.error(err.message || 'Failed to load mentor info');
+        setMentor(null);
+        setMeetings([]);
+        setLeaveRequests([]);
+        setLoadError(
+          err instanceof Error
+            ? err.message
+            : 'Could not load mentorship. Confirm the backend is running, then retry.',
+        );
         setLoading(false);
       });
+  }
+
+  useEffect(() => {
+    loadMentor();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per api client
   }, [api]);
 
   /** Parse a slot label (e.g. '10:00 AM') + a date string ('YYYY-MM-DD') into a Date. */
@@ -149,17 +169,37 @@ export default function StudentMentorshipPage() {
   return (
     <StudentPageShell>
       <StudentPageHeader
-        title="Mentorship Connect"
+        title="Mentorship"
         description="Direct line to your mentor for meetings, approvals, and confidential academic guidance."
       />
 
       {loading && <StudentLoadingState label="Loading mentor details…" />}
 
-      {!loading && !mentor && (
+      {!loading && loadError && (
+        <StudentEmptyState
+          icon={UserRound}
+          title="Could not load mentorship"
+          description={
+            /cannot reach|failed to fetch|network/i.test(loadError)
+              ? 'The API server is not reachable. Start the backend (port 4000), then retry.'
+              : loadError
+          }
+          action={
+            <Button
+              className="bg-sgvu-navy text-white hover:bg-[#123A6D] active:bg-sgvu-gold active:text-sgvu-navy"
+              onClick={() => loadMentor()}
+            >
+              Retry
+            </Button>
+          }
+        />
+      )}
+
+      {!loading && !loadError && !mentor && (
         <StudentEmptyState
           icon={UserRound}
           title="No mentor assigned"
-          description="Please contact your department to get a mentor assigned."
+          description="Your department has not assigned a faculty mentor yet. Ask your HOD / academic office to map a proctor in Academics → Mentorship. Smoke environments need a proctor assignment for this student."
         />
       )}
 
@@ -187,11 +227,13 @@ export default function StudentMentorshipPage() {
             </StudentSectionCard>
 
             <StudentSectionCard title="Book a 15-min meeting" description="Pick a date & select an available slot" icon={CalendarClock} className="h-full">
-              <div className="mb-3 flex items-center gap-3">
-                <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Meeting date</label>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                  Meeting date
+                </label>
                 <Input
                   type="date"
-                  className="max-w-[180px]"
+                  className="w-full max-w-none sm:max-w-[180px]"
                   value={meetingDate}
                   min={todayStr}
                   max={maxDateStr}

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { academicsApi } from '@/lib/api/api.academics';
-import { API_URL } from '@/lib/api/client';
+import { API_URL, authHeaders } from '@/lib/api/client';
 import { examsApi, type ExamApplication, type ExamEligibilityResult, type ExamSchedule } from '@/lib/api/api.exams';
 import { useAuthedApi } from '@/lib/api';
 import { StudentExemptionPanel } from '@/components/attendance/StudentExemptionPanel';
@@ -16,6 +16,10 @@ import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentTabBar } from '@/components/student/StudentTabBar';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
+import { DEMO_EXAMS } from '@/lib/mock/student-portal-demo';
+import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
+import { toast } from '@/lib/notifications/falcon-toast';
+import { extractApiErrorMessage } from '@/lib/notifications/parse-api-error';
 
 type TabKey = 'schedule' | 'admit' | 'reeval';
 
@@ -57,6 +61,24 @@ function formatExamType(type: string) {
   return type.replace(/_/g, ' ');
 }
 
+/** Split venue strings like "Block C — Hall A" or "Lab 204" into building + room. */
+function parseVenue(venue: string | null | undefined): { building: string; room: string } {
+  const raw = String(venue ?? '').trim();
+  if (!raw) return { building: '—', room: '—' };
+
+  const dashed = raw.split(/\s*[—–-]\s*/).map((p) => p.trim()).filter(Boolean);
+  if (dashed.length >= 2) {
+    return { building: dashed[0], room: dashed.slice(1).join(' — ') };
+  }
+
+  const labOrRoom = raw.match(/^(Lab|Room)\s+(.+)$/i);
+  if (labOrRoom) {
+    return { building: labOrRoom[1], room: labOrRoom[2] };
+  }
+
+  return { building: raw, room: '—' };
+}
+
 function ExamTypeBadge({ type }: { type: string }) {
   return (
     <Badge
@@ -69,7 +91,6 @@ function ExamTypeBadge({ type }: { type: string }) {
 }
 
 type ExamDesk = {
-  ufm_cases: { description: string; penalty_applied?: string; incident_type?: string }[];
   seating: {
     exam_name: string;
     block: string | null;
@@ -95,6 +116,7 @@ export default function StudentExamsPage() {
   const [error, setError] = useState<string | null>(null);
   const [applications, setApplications] = useState<ExamApplication[]>([]);
   const [results, setResults] = useState<unknown[]>([]);
+  const [downloadingAdmit, setDownloadingAdmit] = useState(false);
 
   const ineligibleMessage = useMemo(() => {
     if (!eligibility || eligibility.eligible) return null;
@@ -132,7 +154,24 @@ export default function StudentExamsPage() {
           examsApi.eligibility(token),
           examsApi.myApplications(token),
         ]);
-        setSchedules(sched);
+        const demoSchedules = () =>
+          DEMO_EXAMS.map((ex, i) => ({
+            exam_schedule_id: ex.exam_id,
+            exam_type: ex.exam_type as ExamSchedule['exam_type'],
+            subject_id: i + 1,
+            exam_date: ex.exam_date,
+            start_time: ex.start_time,
+            end_time: ex.end_time,
+            venue: ex.hall,
+            seat_no: ex.seat,
+          }));
+        setSchedules(
+          sched?.length
+            ? sched
+            : isStudentDemoModeEnabled()
+              ? demoSchedules()
+              : [],
+        );
         setEligibility(elig);
         setApplications(apps);
 
@@ -142,38 +181,90 @@ export default function StudentExamsPage() {
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load examinations data');
+        setSchedules(
+          isStudentDemoModeEnabled()
+            ? DEMO_EXAMS.map((ex, i) => ({
+                exam_schedule_id: ex.exam_id,
+                exam_type: ex.exam_type as ExamSchedule['exam_type'],
+                subject_id: i + 1,
+                exam_date: ex.exam_date,
+                start_time: ex.start_time,
+                end_time: ex.end_time,
+                venue: ex.hall,
+                seat_no: ex.seat,
+              }))
+            : [],
+        );
       } finally {
         setLoading(false);
       }
     };
     void load();
-    void api.get<ExamDesk>('/api/student/exam-desk').then(setExamDesk).catch(() => setExamDesk(null));
+    const demoSeating = () =>
+      DEMO_EXAMS.map((ex) => ({
+        exam_name: `${ex.course_code} — ${ex.subject}`,
+        block: ex.hall.split('—')[0]?.trim() ?? ex.hall,
+        room: ex.hall,
+        seat: ex.seat,
+        exam_date: ex.exam_date,
+        seat_revealed: true,
+      }));
+    void api
+      .get<ExamDesk>('/api/student/exam-desk')
+      .then((desk) => {
+        if (!desk?.seating?.length) {
+          setExamDesk({
+            seating: isStudentDemoModeEnabled() ? demoSeating() : [],
+          });
+        } else {
+          setExamDesk({ seating: desk.seating });
+        }
+      })
+      .catch(() =>
+        setExamDesk({
+          seating: isStudentDemoModeEnabled() ? demoSeating() : [],
+        }),
+      );
   }, [token, user?.user_id, api]);
 
   const downloadAdmitCard = async () => {
-    if (!token) return;
+    if (!token || downloadingAdmit) return;
+    setDownloadingAdmit(true);
+    setError(null);
 
     try {
       const res = await fetch(`${API_URL}/api/academics/exams/admit-card`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(token),
       });
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        throw new Error(text || `Download failed (${res.status})`);
+        throw new Error(
+          extractApiErrorMessage(text, res.status, '/api/academics/exams/admit-card'),
+        );
       }
 
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      if (!blob.size) throw new Error('Admit card PDF was empty. Please retry.');
+      const pdfBlob =
+        blob.type === 'application/pdf'
+          ? blob
+          : new Blob([blob], { type: 'application/pdf' });
+      const url = URL.createObjectURL(pdfBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'admit-card.pdf';
+      a.download = 'SGVU-Admit-Card.pdf';
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      toast.success('Admit card downloaded with full exam details');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to download admit card');
+      const message = e instanceof Error ? e.message : 'Failed to download admit card';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setDownloadingAdmit(false);
     }
   };
 
@@ -195,8 +286,6 @@ export default function StudentExamsPage() {
     { key: 'reeval', label: 'Backlogs & Re-evaluation', icon: RefreshCcw },
   ];
 
-  const hasUfm = (examDesk?.ufm_cases?.length ?? 0) > 0;
-
   if (loading && schedules.length === 0) {
     return <StudentLoadingState label="Loading examination data…" />;
   }
@@ -204,23 +293,9 @@ export default function StudentExamsPage() {
   return (
     <StudentPageShell>
       <StudentPageHeader
-        title="Exam Desk"
+        title="Exams"
         description="Admit card, seating plans, revaluation — blocked when dues or attendance fall below thresholds."
       />
-
-      {hasUfm && (
-        <Card className="border-destructive bg-destructive/10">
-          <CardContent className="p-4 text-sm">
-            <p className="font-bold text-destructive">UFM / Disciplinary notice — read only</p>
-            {examDesk!.ufm_cases.map((c, i) => (
-              <p key={i} className="mt-2">
-                {c.incident_type ?? 'UFM'}: {c.description}
-                {c.penalty_applied ? ` · Penalty: ${c.penalty_applied}` : ''}
-              </p>
-            ))}
-          </CardContent>
-        </Card>
-      )}
 
       {examDesk?.seating && examDesk.seating.length > 0 && (
         <Card>
@@ -276,7 +351,7 @@ export default function StudentExamsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Upcoming Exams</CardTitle>
-            <CardDescription>Dates, timings, venue, and seat details (when assigned)</CardDescription>
+            <CardDescription>Dates, timings, building, and room number</CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -286,65 +361,75 @@ export default function StudentExamsPage() {
             ) : (
               <>
                 <div className="space-y-3 md:hidden">
-                  {schedules.map((s) => (
-                    <div
-                      key={s.exam_schedule_id}
-                      className="rounded-xl border border-border/70 bg-muted/20 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="font-semibold text-sgvu-navy">{formatExamDate(s.exam_date)}</p>
-                          <p className="mt-0.5 text-sm text-muted-foreground">
-                            {formatTime(s.start_time)} – {formatTime(s.end_time)}
-                          </p>
+                  {schedules.map((s) => {
+                    const venue = parseVenue(s.venue);
+                    return (
+                      <div
+                        key={s.exam_schedule_id}
+                        className="rounded-xl border border-border/70 bg-muted/20 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-sgvu-navy">{formatExamDate(s.exam_date)}</p>
+                            <p className="mt-0.5 text-sm text-muted-foreground">
+                              {formatTime(s.start_time)} – {formatTime(s.end_time)}
+                            </p>
+                          </div>
+                          <ExamTypeBadge type={s.exam_type} />
                         </div>
-                        <ExamTypeBadge type={s.exam_type} />
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Building
+                            </p>
+                            <p className="mt-0.5 text-sm font-medium leading-snug text-sgvu-navy">
+                              {venue.building}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Room
+                            </p>
+                            <p className="mt-0.5 text-sm font-medium leading-snug text-sgvu-navy">
+                              {venue.room}
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            Venue
-                          </p>
-                          <p className="mt-0.5 text-sm font-medium leading-snug text-sgvu-navy">{s.venue}</p>
-                        </div>
-                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            Seat
-                          </p>
-                          <p className="mt-0.5 text-sm font-medium text-sgvu-navy">
-                            {s.seat_no ?? 'Not assigned'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="hidden overflow-x-auto md:block">
-                  <table className="w-full text-sm">
+                  <table className="w-full table-fixed text-sm">
                     <thead>
                       <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                        <th className="py-2 pr-3">Date</th>
-                        <th className="py-2 pr-3">Time</th>
-                        <th className="py-2 pr-3">Type</th>
-                        <th className="py-2 pr-3">Venue</th>
-                        <th className="py-2">Seat</th>
+                        <th className="w-[22%] py-2 pr-3">Date</th>
+                        <th className="w-[18%] py-2 pr-3">Time</th>
+                        <th className="w-[16%] py-2 pr-3">Type</th>
+                        <th className="w-[22%] py-2 pr-3">Building</th>
+                        <th className="w-[22%] py-2">Room</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {schedules.map((s) => (
-                        <tr key={s.exam_schedule_id} className="border-b last:border-0">
-                          <td className="py-3 pr-3 font-medium text-sgvu-navy">{formatExamDate(s.exam_date)}</td>
-                          <td className="whitespace-nowrap py-3 pr-3">
-                            {formatTime(s.start_time)} – {formatTime(s.end_time)}
-                          </td>
-                          <td className="py-3 pr-3">
-                            <ExamTypeBadge type={s.exam_type} />
-                          </td>
-                          <td className="py-3 pr-3">{s.venue}</td>
-                          <td className="py-3">{s.seat_no ?? '—'}</td>
-                        </tr>
-                      ))}
+                      {schedules.map((s) => {
+                        const venue = parseVenue(s.venue);
+                        return (
+                          <tr key={s.exam_schedule_id} className="border-b last:border-0">
+                            <td className="py-3 pr-3 align-middle font-medium text-sgvu-navy">
+                              {formatExamDate(s.exam_date)}
+                            </td>
+                            <td className="whitespace-nowrap py-3 pr-3 align-middle">
+                              {formatTime(s.start_time)} – {formatTime(s.end_time)}
+                            </td>
+                            <td className="py-3 pr-3 align-middle">
+                              <ExamTypeBadge type={s.exam_type} />
+                            </td>
+                            <td className="py-3 pr-3 align-middle text-sgvu-navy">{venue.building}</td>
+                            <td className="py-3 align-middle text-sgvu-navy">{venue.room}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -403,11 +488,16 @@ export default function StudentExamsPage() {
             <Button
               className="w-full"
               size="lg"
-              disabled={loading || !eligibility || !eligibility.eligible}
-              onClick={downloadAdmitCard}
+              disabled={
+                loading ||
+                downloadingAdmit ||
+                !eligibility ||
+                !eligibility.eligible
+              }
+              onClick={() => void downloadAdmitCard()}
             >
               <FileDown className="h-4 w-4" />
-              Download Admit Card (PDF)
+              {downloadingAdmit ? 'Preparing PDF…' : 'Download Admit Card (PDF)'}
             </Button>
           </CardContent>
         </Card>

@@ -24,11 +24,11 @@ export function StudentSectionCard({
   action?: ReactNode;
 }) {
   const toneStyles = {
-    default: 'border-border/80 bg-card shadow-sm',
-    success: 'border-emerald-200/70 bg-emerald-50/40 shadow-sm shadow-emerald-100/40',
-    warning: 'border-amber-200/70 bg-amber-50/40 shadow-sm shadow-amber-100/40',
-    danger: 'border-destructive/30 bg-destructive/5 shadow-sm',
-    gold: 'border-sgvu-gold/30 bg-gradient-to-b from-sgvu-gold/10 to-white shadow-sm',
+    default: 'border-sgvu-navy/10 bg-white shadow-sm',
+    success: 'border-sgvu-navy/10 bg-white shadow-sm',
+    warning: 'border-sgvu-navy/10 bg-white shadow-sm',
+    danger: 'border-sgvu-navy/10 bg-white shadow-sm',
+    gold: 'border-sgvu-navy/10 bg-white shadow-sm',
   };
 
   const iconTone = {
@@ -40,24 +40,28 @@ export function StudentSectionCard({
   };
 
   return (
-    <Card className={cn('overflow-hidden', toneStyles[tone], className)}>
-      <CardHeader className={cn('pb-4', headerClassName)}>
+    <Card className={cn('min-w-0 overflow-hidden', toneStyles[tone], className)}>
+      <CardHeader className={cn('space-y-0 p-4 pb-3 sm:p-6 sm:pb-4', headerClassName)}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             {Icon ? (
-              <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl', iconTone[tone])}>
+              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl sm:h-11 sm:w-11', iconTone[tone])}>
                 <Icon className="h-5 w-5" />
               </div>
             ) : null}
             <div className="min-w-0">
-              <CardTitle className="text-base">{title}</CardTitle>
-              {description ? <CardDescription className="mt-1">{description}</CardDescription> : null}
+              <CardTitle className="text-sm sm:text-base">{title}</CardTitle>
+              {description ? <CardDescription className="mt-1 text-xs sm:text-sm">{description}</CardDescription> : null}
             </div>
           </div>
-          {action ? <div className="w-full shrink-0 sm:w-auto">{action}</div> : null}
+          {action ? (
+            <div className="w-full shrink-0 sm:w-auto [&_button]:w-full sm:[&_button]:w-auto">
+              {action}
+            </div>
+          ) : null}
         </div>
       </CardHeader>
-      <CardContent className={contentClassName}>{children}</CardContent>
+      <CardContent className={cn('p-4 pt-0 sm:p-6 sm:pt-0', contentClassName)}>{children}</CardContent>
     </Card>
   );
 }

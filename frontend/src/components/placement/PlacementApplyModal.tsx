@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileUp, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -15,8 +15,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { PlacementDrive } from '@/lib/placement';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const DEMO_RESUME_PATH = 'demo://resumes/Aarav_Sharma_Resume.pdf';
 
 type Props = {
   drive: PlacementDrive | null;
@@ -27,18 +29,39 @@ type Props = {
 
 export function PlacementApplyModal({ drive, open, onClose, applyFn }: Props) {
   const { token } = useAuth();
+  const demoOn = isStudentDemoModeEnabled();
   const [uploading, setUploading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [resumePath, setResumePath] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!open) {
+      setResumePath(null);
+      setFileName(null);
+      setUploading(false);
+      setApplying(false);
+    }
+  }, [open]);
+
   async function handleUpload(file: File) {
-    if (!token) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Please upload a PDF resume');
+      return;
+    }
+
+    if (demoOn || !token) {
+      setResumePath(`demo://resumes/${file.name}`);
+      setFileName(file.name);
+      toast.success('Resume attached');
+      return;
+    }
+
     setUploading(true);
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch(`${API_URL}/uploads/single`, {
+      const res = await fetch(`${getApiBaseUrl()}/uploads/single`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -49,14 +72,27 @@ export function PlacementApplyModal({ drive, open, onClose, applyFn }: Props) {
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as { url?: string; path?: string; key?: string };
       const path = data.url ?? data.path ?? data.key ?? null;
+      if (!path) throw new Error('Upload succeeded but no file path was returned');
       setResumePath(path);
       setFileName(file.name);
       toast.success('Resume uploaded securely');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Upload failed');
+      if (demoOn) {
+        setResumePath(`demo://resumes/${file.name}`);
+        setFileName(file.name);
+        toast.success('Resume attached (offline)');
+      } else {
+        toast.error(e instanceof Error ? e.message : 'Upload failed');
+      }
     } finally {
       setUploading(false);
     }
+  }
+
+  function useSavedResume() {
+    setResumePath(DEMO_RESUME_PATH);
+    setFileName('Aarav_Sharma_Resume.pdf');
+    toast.success('Using saved profile resume');
   }
 
   async function handleApply() {
@@ -67,7 +103,7 @@ export function PlacementApplyModal({ drive, open, onClose, applyFn }: Props) {
     setApplying(true);
     try {
       await applyFn(drive.drive_id, resumePath);
-      toast.success('Application submitted!');
+      toast.success('Application submitted');
       setResumePath(null);
       setFileName(null);
       onClose();
@@ -104,24 +140,39 @@ export function PlacementApplyModal({ drive, open, onClose, applyFn }: Props) {
 
         <div className="space-y-3 text-sm">
           <p className="text-muted-foreground">
-            Upload your resume (PDF) to continue. A resume is required before you can submit your application.
+            Attach a PDF resume to submit your application. You can track progress under My applications.
           </p>
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 px-6 py-8 transition hover:border-sgvu-gold/50">
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 px-6 py-8 transition hover:border-sgvu-navy/40">
             <FileUp className="h-8 w-8 text-sgvu-navy/60" />
             <span className="font-medium text-sgvu-navy">
-              {fileName ?? 'Upload resume (PDF) *'}
+              {fileName ?? (uploading ? 'Uploading…' : 'Upload resume (PDF)')}
             </span>
+            {fileName ? (
+              <span className="text-xs text-emerald-700">Ready to submit</span>
+            ) : null}
             <input
               type="file"
-              accept="application/pdf"
+              accept="application/pdf,.pdf"
               className="hidden"
-              disabled={uploading}
+              disabled={uploading || applying}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) void handleUpload(file);
+                e.target.value = '';
               }}
             />
           </label>
+          {demoOn ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-sgvu-navy/20 text-sgvu-navy"
+              disabled={uploading || applying}
+              onClick={useSavedResume}
+            >
+              Use saved profile resume
+            </Button>
+          ) : null}
         </div>
 
         <DialogFooter>
@@ -129,7 +180,7 @@ export function PlacementApplyModal({ drive, open, onClose, applyFn }: Props) {
             Cancel
           </Button>
           <Button
-            className="bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold/90"
+            className="bg-sgvu-navy text-white hover:bg-[#123A6D]"
             disabled={
               eligibility?.eligible === false ||
               eligibility?.already_applied ||
