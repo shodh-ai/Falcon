@@ -14,6 +14,7 @@ import { AUTH_PROVIDER } from './interfaces/auth-provider.interface';
 import { LocalAuthProvider } from './providers/local-auth.provider';
 import { KeycloakAuthProvider } from './providers/keycloak-auth.provider';
 import { AuthTenantCookieMiddleware } from './middleware/auth-tenant-cookie.middleware';
+import { resolveJwtSecret } from '../common/config/jwt-secret';
 import { HrModule } from '../modules/hr/hr.module';
 
 const authProviderFactory = {
@@ -33,7 +34,7 @@ const authProviderFactory = {
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        secret: configService.get('JWT_SECRET') || 'default-secret-key',
+        secret: resolveJwtSecret(configService),
         signOptions: {
           expiresIn: configService.get('JWT_EXPIRATION') || '7d',
         },

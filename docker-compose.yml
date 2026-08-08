@@ -1,23 +1,27 @@
 # Local development stack for Falcon SaaS (stateless backend dependencies)
 # Usage: docker compose up -d
+# Override defaults via environment variables or a root .env file.
+#
+# NOT for internet-facing production. Default passwords (postgres/minioadmin/admin)
+# are intentionally weak for local smoke only — rotate or use a managed stack in prod.
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: university_governance
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-university_governance}
     ports:
       # 5433 avoids conflict with a local Windows PostgreSQL service on 5432
-      - '5433:5432'
+      - '${POSTGRES_HOST_PORT:-5433}:5432'
     volumes:
       - falcon_pg_data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
-      - '6379:6379'
+      - '${REDIS_HOST_PORT:-6379}:6379'
     volumes:
       - falcon_redis_data:/data
 
@@ -25,11 +29,11 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - '9000:9000'
-      - '9001:9001' 
+      - '${MINIO_API_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
     volumes:
       - falcon_minio_data:/data
 
@@ -37,7 +41,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.54.1
     ports:
-      - '9090:9090'
+      - '${PROMETHEUS_HOST_PORT:-9090}:9090'
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     extra_hosts:
@@ -46,10 +50,10 @@ services:
   grafana:
     image: grafana/grafana:11.2.0
     ports:
-      - '3001:3000'
+      - '${GRAFANA_HOST_PORT:-3001}:3000'
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
       - falcon_grafana_data:/var/lib/grafana
     depends_on:

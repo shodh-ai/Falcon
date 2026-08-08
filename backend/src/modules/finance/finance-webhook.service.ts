@@ -1,6 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
 import { Transaction } from '../../entities/transaction.entity';
 import { FeeDemand } from '../../entities/fee-demand.entity';
@@ -25,6 +30,41 @@ export class FinanceWebhookService {
     private readonly campusWallet: CampusWalletService,
   ) {}
 
+  private assertWebhookSignature(
+    provider: 'razorpay' | 'payu',
+    dto: GatewayWebhookDto,
+  ) {
+    const secret =
+      provider === 'razorpay'
+        ? (process.env.RAZORPAY_WEBHOOK_SECRET ?? '').trim()
+        : (process.env.PAYU_MERCHANT_SALT ?? process.env.PAYU_WEBHOOK_SECRET ?? '').trim();
+
+    if (!secret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new UnauthorizedException(
+          `${provider} webhook secret is not configured`,
+        );
+      }
+      this.logger.warn(
+        `${provider} webhook secret missing — skipping signature verification in non-production`,
+      );
+      return;
+    }
+
+    const provided = (dto.signature ?? '').trim();
+    if (!provided) {
+      throw new UnauthorizedException('Webhook signature required');
+    }
+
+    const body = JSON.stringify(dto.payload ?? {});
+    const expected = createHmac('sha256', secret).update(body).digest('hex');
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(provided, 'utf8');
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+  }
+
   /**
    * Idempotent payment webhook — duplicate SUCCESS events are ignored.
    */
@@ -32,6 +72,7 @@ export class FinanceWebhookService {
     provider: 'razorpay' | 'payu',
     dto: GatewayWebhookDto,
   ) {
+    this.assertWebhookSignature(provider, dto);
     this.logger.log(`Webhook ${provider} event=${dto.event}`);
 
     if (dto.event !== 'payment.captured' && dto.event !== 'payment.success') {
@@ -45,8 +86,9 @@ export class FinanceWebhookService {
       paymentEntity?.id ?? paymentEntity?.payment_id ?? '',
     );
     const orderId = String(paymentEntity?.order_id ?? '');
+    // Razorpay amounts are always in the smallest currency unit (paise for INR).
     const amountPaise = Number(paymentEntity?.amount ?? 0);
-    const amount = amountPaise > 1000 ? amountPaise / 100 : amountPaise;
+    const amount = Number.isFinite(amountPaise) ? amountPaise / 100 : 0;
     const notes = (paymentEntity?.notes as Record<string, unknown>) ?? {};
     const studentUserId = String(
       notes.student_user_id ?? notes.studentUserId ?? '',

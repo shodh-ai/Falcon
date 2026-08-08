@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../auth.service';
+import { resolveJwtSecret } from '../../common/config/jwt-secret';
 import { normalizeOnboardingStatusForWizard } from '../../modules/student-onboarding/onboarding-portal.util';
 import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
 
@@ -13,9 +14,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private authService: AuthService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        // Intentionally no query-string token — leaks via logs/Referer.
+        (req: { cookies?: { falcon_auth_token?: string } }) =>
+          req?.cookies?.falcon_auth_token ?? null,
+      ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get('JWT_SECRET') || 'default-secret-key',
+      secretOrKey: resolveJwtSecret(configService),
     });
   }
 

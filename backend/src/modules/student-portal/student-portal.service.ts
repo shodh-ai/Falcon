@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -21,6 +23,7 @@ import { WorkflowNotificationService } from '../../core/workflow/workflow-notifi
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { resolvePlacementSchema } from '../placement/placement-schema';
 import { FinanceReceiptService } from '../finance/finance-receipt.service';
+import { GatewayPaymentService } from '../finance/gateway-payment.service';
 import { StudentEnrollmentSyncService } from '../academics/student-enrollment-sync.service';
 import { StudentMentorSyncService } from '../academics/student-mentor-sync.service';
 
@@ -43,6 +46,7 @@ export class StudentPortalService {
     private readonly workflowNotify: WorkflowNotificationService,
     private readonly objectStorage: ObjectStorageService,
     private readonly financeReceipts: FinanceReceiptService,
+    private readonly gatewayPayments: GatewayPaymentService,
     private readonly enrollmentSync: StudentEnrollmentSyncService,
     private readonly mentorSync: StudentMentorSyncService,
   ) {}
@@ -72,7 +76,18 @@ export class StudentPortalService {
               sp.blood_group, sp.abc_id,
               d.dept_name AS department,
               COALESCE(
-                (SELECT MAX(e.semester) FROM student_course_enrollments e WHERE e.student_user_id = u.user_id),
+                sp.current_semester,
+                (
+                  SELECT MAX(e.semester)
+                  FROM student_course_enrollments e
+                  WHERE e.student_user_id = u.user_id
+                    AND e.status = 'ENROLLED'
+                ),
+                (
+                  SELECT MAX(e.semester)
+                  FROM student_course_enrollments e
+                  WHERE e.student_user_id = u.user_id
+                ),
                 1
               ) AS current_semester,
               COALESCE(
@@ -159,7 +174,11 @@ export class StudentPortalService {
       ),
       admission_type: row.admission_type,
       admission_status: row.admission_status,
-      profile_photo_url: this.displayProfilePhotoUrl(row.profile_photo_url),
+      profile_photo_url: await this.resolveDisplayProfilePhotoUrl(
+        tenantId,
+        userId,
+        row.profile_photo_url,
+      ),
       bank_details: row.bank_details,
       onboarding_status: row.onboarding_status,
       onboarding_documents: row.onboarding_documents ?? [],
@@ -297,6 +316,18 @@ export class StudentPortalService {
     if (stored.startsWith('data:')) return stored;
     if (stored.startsWith('/api/student/profile/photo')) return stored;
     return '/api/student/profile/photo';
+  }
+
+  /** Prefer stored URL; also expose photo when only onboarding PHOTO doc exists. */
+  private async resolveDisplayProfilePhotoUrl(
+    tenantId: string,
+    userId: string,
+    stored: string | null,
+  ): Promise<string | null> {
+    const fromColumn = this.displayProfilePhotoUrl(stored);
+    if (fromColumn) return fromColumn;
+    const path = await this.getProfilePhotoPath(tenantId, userId);
+    return path ? '/api/student/profile/photo' : null;
   }
 
   private async getProfilePhotoPath(
@@ -443,6 +474,50 @@ export class StudentPortalService {
     };
   }
 
+  /** Student self-upload for admission / supporting certificates (pending verification). */
+  async uploadAdmissionDocument(
+    tenantId: string,
+    userId: string,
+    dto: { title: string; issuer?: string },
+    file?: Express.Multer.File,
+  ) {
+    const title = dto.title?.trim();
+    if (!title) throw new BadRequestException('Document title is required');
+    if (!file) throw new BadRequestException('Document file is required');
+    if (!EXTRA_CERT_MIME.includes(file.mimetype)) {
+      throw new BadRequestException('Only PDF, JPG, and PNG files are allowed');
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('File must be 5 MB or smaller');
+    }
+
+    const filePath = await this.persistExtracurricularFile(tenantId, file);
+    const issuer = (dto.issuer?.trim() || 'Student upload').slice(0, 255);
+
+    const rows = await this.dataSource.query(
+      `INSERT INTO student_certificates (
+         tenant_id, student_user_id, title, issuer, file_path,
+         original_filename, mime_type, file_size, verification_status
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDING')
+       RETURNING certificate_id, title, issuer, verification_status, file_path, uploaded_at`,
+      [
+        tenantId,
+        userId,
+        title.slice(0, 255),
+        issuer,
+        filePath,
+        file.originalname?.slice(0, 255) ?? null,
+        file.mimetype,
+        file.size,
+      ],
+    );
+
+    return {
+      certificate: rows[0],
+      message: 'Document uploaded — pending verification',
+    };
+  }
+
   async getRegistration(tenantId: string, userId: string) {
     await this.enrollmentSync.syncStudent(tenantId, userId);
     await this.mentorSync.syncStudent(tenantId, userId);
@@ -519,8 +594,9 @@ export class StudentPortalService {
   }
 
   async getAttendance(tenantId: string, userId: string) {
-    const subjectWise = await this.dataSource.query(
-      `SELECT c.course_code,
+    const [subjectWise, semesterRows] = await Promise.all([
+      this.dataSource.query(
+        `SELECT c.course_code,
               c.course_name,
               e.semester,
               e.attendance_percent,
@@ -550,8 +626,29 @@ export class StudentPortalService {
        ) stats ON true
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
        ORDER BY e.semester, c.course_code`,
-      [userId, tenantId],
-    );
+        [userId, tenantId],
+      ),
+      this.dataSource.query(
+        `SELECT sp.current_semester,
+                (
+                  SELECT MAX(e.semester)
+                  FROM student_course_enrollments e
+                  WHERE e.student_user_id = sp.user_id
+                    AND e.tenant_id = sp.tenant_id
+                    AND e.status = 'ENROLLED'
+                ) AS enrolled_semester,
+                (
+                  SELECT MAX(e.semester)
+                  FROM student_course_enrollments e
+                  WHERE e.student_user_id = sp.user_id
+                    AND e.tenant_id = sp.tenant_id
+                ) AS max_enrollment_semester
+         FROM student_profiles sp
+         WHERE sp.user_id = $1 AND sp.tenant_id = $2
+         LIMIT 1`,
+        [userId, tenantId],
+      ),
+    ]);
 
     const avg =
       subjectWise.length > 0
@@ -566,26 +663,45 @@ export class StudentPortalService {
           )
         : 0;
 
+    const semesterMeta = semesterRows[0] as
+      | {
+          current_semester: number | null;
+          enrolled_semester: number | null;
+          max_enrollment_semester: number | null;
+        }
+      | undefined;
+
+    const currentSemester = Math.min(
+      8,
+      Math.max(
+        1,
+        Number(
+          semesterMeta?.current_semester ??
+            semesterMeta?.enrolled_semester ??
+            semesterMeta?.max_enrollment_semester ??
+            1,
+        ) || 1,
+      ),
+    );
+
     const semesters = Array.from({ length: 8 }, (_, i) => {
       const sem = i + 1;
       const rows = subjectWise.filter(
         (r: { semester: number }) => Number(r.semester) === sem,
       );
-      const completed =
-        rows.length > 0 &&
-        rows.every((r: { status: string }) => r.status === 'COMPLETED');
-      const inProgress = rows.some(
-        (r: { status: string }) => r.status === 'ENROLLED',
-      );
+
+      let status: 'COMPLETED' | 'IN_PROGRESS' | 'UPCOMING';
+      if (sem < currentSemester) {
+        status = 'COMPLETED';
+      } else if (sem === currentSemester) {
+        status = 'IN_PROGRESS';
+      } else {
+        status = 'UPCOMING';
+      }
+
       return {
         semester: sem,
-        status: completed
-          ? 'COMPLETED'
-          : inProgress
-            ? 'IN_PROGRESS'
-            : rows.length
-              ? 'PARTIAL'
-              : 'UPCOMING',
+        status,
         courses_count: rows.length,
       };
     });
@@ -593,6 +709,7 @@ export class StudentPortalService {
     return {
       overall_percent: avg,
       subject_wise: subjectWise,
+      current_semester: currentSemester,
       progression: semesters,
     };
   }
@@ -870,13 +987,62 @@ export class StudentPortalService {
       .catch(() => []);
 
     const c = clearance[0] ?? {};
+    const hostelApplicableRows = await this.dataSource
+      .query<Array<{ has_hostel: boolean }>>(
+        `SELECT EXISTS (
+           SELECT 1 FROM hostel_allocations a
+           WHERE a.student_user_id = $1 AND a.status = 'ACTIVE'
+         ) AS has_hostel`,
+        [userId],
+      )
+      .catch(() => [{ has_hostel: false }]);
+    const hostelApplicable = Boolean(hostelApplicableRows[0]?.has_hostel);
+
     const steps = [
-      { key: 'library', label: 'Library', cleared: c.library_cleared },
-      { key: 'finance', label: 'Finance', cleared: c.finance_cleared },
-      { key: 'hostel', label: 'Hostel', cleared: c.hostel_cleared },
-      { key: 'dept', label: 'Department', cleared: c.dept_cleared },
+      {
+        key: 'library',
+        label: 'Library',
+        cleared: Boolean(c.library_cleared),
+        not_applicable: false,
+      },
+      {
+        key: 'finance',
+        label: 'Finance',
+        cleared: Boolean(c.finance_cleared),
+        not_applicable: false,
+      },
+      {
+        key: 'hostel',
+        label: hostelApplicable ? 'Hostel' : 'Hostel (not applicable)',
+        cleared: hostelApplicable ? Boolean(c.hostel_cleared) : true,
+        not_applicable: !hostelApplicable,
+      },
+      {
+        key: 'dept',
+        label: 'Department',
+        cleared: Boolean(c.dept_cleared),
+        not_applicable: false,
+      },
     ];
-    const clearedCount = steps.filter((s) => s.cleared).length;
+    const clearedCount = steps.filter((s) => s.cleared || s.not_applicable).length;
+
+    const [pendingAlumni] = await this.dataSource
+      .query<
+        Array<{
+          verification_status: string;
+          linkedin_url: string | null;
+          current_organization: string | null;
+          profile_updated_at: Date | string | null;
+        }>
+      >(
+        `SELECT verification_status, linkedin_url, current_organization, profile_updated_at
+         FROM alumni_profiles
+         WHERE tenant_id = $1 AND student_user_id = $2
+         ORDER BY profile_updated_at DESC NULLS LAST
+         LIMIT 1`,
+        [tenantId, userId],
+      )
+      .catch(() => []);
 
     return {
       no_dues: steps,
@@ -886,8 +1052,18 @@ export class StudentPortalService {
       final_result: profile[0]?.final_result,
       alumni_converted:
         c.alumni_converted ?? profile[0]?.alumni_conversion_flag,
-      linkedin_url: c.linkedin_url,
-      placement_organization: c.placement_organization,
+      linkedin_url: c.linkedin_url ?? pendingAlumni?.linkedin_url ?? null,
+      placement_organization:
+        c.placement_organization ?? pendingAlumni?.current_organization ?? null,
+      conversion_requested_at: c.conversion_requested_at ?? null,
+      alumni_request: pendingAlumni
+        ? {
+            verification_status: pendingAlumni.verification_status,
+            linkedin_url: pendingAlumni.linkedin_url,
+            organization: pendingAlumni.current_organization,
+            updated_at: pendingAlumni.profile_updated_at,
+          }
+        : null,
       clearance_tasks: tasks,
       alumni_eligibility: await this.alumniConversion.getConversionEligibility(
         tenantId,
@@ -1057,6 +1233,27 @@ export class StudentPortalService {
       )
       .catch(() => []);
 
+    const active_loans = await this.dataSource
+      .query(
+        `SELECT t.transaction_id AS loan_id, c.title, c.author,
+                ic.accession_number AS accession_no,
+                t.issued_at::date::text AS issue_date,
+                t.due_date::date::text AS due_date,
+                COALESCE(t.fine_amount, 0)::float AS fine_amount,
+                COALESCE(t.renewed_count, 0)::int AS renewed_count,
+                CASE
+                  WHEN t.due_date::date < CURRENT_DATE THEN 'OVERDUE'
+                  ELSE 'ISSUED'
+                END AS status
+         FROM lib_circulation t
+         JOIN lib_inventory_copies ic ON ic.copy_id = t.copy_id
+         JOIN lib_catalog c ON c.catalog_id = ic.catalog_id
+         WHERE t.tenant_id = $1 AND t.user_id = $2 AND t.returned_at IS NULL
+         ORDER BY t.due_date`,
+        [tenantId, userId],
+      )
+      .catch(() => []);
+
     const exit = await this.dataSource.query(
       `SELECT library_cleared FROM student_exit_clearances
        WHERE tenant_id = $1 AND student_user_id = $2`,
@@ -1064,7 +1261,7 @@ export class StudentPortalService {
     );
 
     return {
-      active_loans: [],
+      active_loans,
       catalog_sample: books,
       library_dues: dues,
       library_cleared: exit[0]?.library_cleared ?? false,
@@ -1152,31 +1349,115 @@ export class StudentPortalService {
     return { open_jobs: drives, my_applications: applications };
   }
 
-  async getFinanceLedger(userId: string) {
-    const pending_demands = await this.dataSource.query(
-      `SELECT demand_id, fee_head, academic_year, semester, total_amount, paid_amount, due_date, status, fee_breakup
-       FROM finance_fee_demands
-       WHERE student_user_id = $1 AND status NOT IN ('PAID', 'WAIVED')
-       ORDER BY due_date ASC`,
-      [userId],
+  private buildFeeStructureRow(row: {
+    demand_id: string;
+    fee_head: string;
+    academic_year: string;
+    semester: number | null;
+    total_amount: string | number;
+    paid_amount: string | number;
+    due_date: string | null;
+    status: string;
+    fee_breakup: Record<string, unknown> | null;
+  }) {
+    const breakup = row.fee_breakup ?? {};
+    const totalAmount = Number(row.total_amount ?? 0);
+    const paidAmount = Number(row.paid_amount ?? 0);
+
+    const scholarshipExplicit = Number(
+      breakup.scholarship ?? breakup.scholarship_amount ?? 0,
+    );
+    const discountExplicit = Number(breakup.discount ?? breakup.discount_amount ?? 0);
+    const creditExplicit = Number(breakup.credit ?? breakup.credit_amount ?? 0);
+    const originalFromBreakup = Number(breakup.original_total_amount ?? 0);
+    const percent = Number(breakup.scholarship_discount_percent ?? 0);
+
+    let scholarship = scholarshipExplicit;
+    if (!scholarship && percent > 0 && originalFromBreakup > 0) {
+      scholarship = Number(((originalFromBreakup * percent) / 100).toFixed(2));
+    }
+
+    const breakupParts = [
+      Number(breakup.tuition ?? breakup.tuition_fee ?? 0),
+      Number(breakup.development_fee ?? 0),
+      Number(breakup.exam ?? breakup.exam_fee ?? 0),
+      Number(breakup.library ?? breakup.library_fee ?? 0),
+      Number(breakup.hostel ?? breakup.hostel_fee ?? 0),
+    ].filter((n) => n > 0);
+    const breakupSum = breakupParts.reduce((s, n) => s + n, 0);
+
+    const concession = scholarship + discountExplicit + creditExplicit;
+    const amount =
+      originalFromBreakup > 0
+        ? originalFromBreakup
+        : breakupSum > 0
+          ? breakupSum
+          : totalAmount + concession;
+
+    return {
+      demand_id: row.demand_id,
+      fee_head: row.fee_head,
+      academic_year: row.academic_year,
+      semester: row.semester != null ? Number(row.semester) : null,
+      amount,
+      fee_concession: concession,
+      scholarship,
+      discount: discountExplicit,
+      credit: creditExplicit,
+      paid_amount: paidAmount,
+      payable_amount: Math.max(0, totalAmount - paidAmount),
+      due_date: row.due_date,
+      status: row.status,
+      fee_breakup: breakup,
+    };
+  }
+
+  async getFinanceLedger(userId: string, tenantId?: string) {
+    const allDemands = await this.dataSource.query(
+      `SELECT d.demand_id, d.fee_head, d.academic_year, d.semester, d.total_amount, d.paid_amount, d.due_date, d.status, d.fee_breakup
+       FROM finance_fee_demands d
+       JOIN users u ON u.user_id = d.student_user_id
+       WHERE d.student_user_id = $1
+         AND ($2::uuid IS NULL OR u.tenant_id = $2::uuid)
+       ORDER BY COALESCE(d.semester, 99) ASC, d.due_date ASC NULLS LAST, d.created_at ASC`,
+      [userId, tenantId ?? null],
+    );
+
+    const fee_structure = (
+      allDemands as Array<{
+        demand_id: string;
+        fee_head: string;
+        academic_year: string;
+        semester: number | null;
+        total_amount: string | number;
+        paid_amount: string | number;
+        due_date: string | null;
+        status: string;
+        fee_breakup: Record<string, unknown> | null;
+      }>
+    ).map((row) => this.buildFeeStructureRow(row));
+
+    const pending_demands = fee_structure.filter(
+      (row) =>
+        !['PAID', 'WAIVED'].includes(String(row.status).toUpperCase()) &&
+        row.payable_amount > 0,
     );
 
     const payment_history = await this.dataSource.query(
       `SELECT t.transaction_id, t.amount, t.status, t.payment_mode, t.receipt_url, t.created_at,
-              t.gateway_payment_id, t.demand_id, d.fee_head
+              t.gateway_payment_id, t.demand_id, d.fee_head, d.semester
        FROM finance_transactions t
        LEFT JOIN finance_fee_demands d ON d.demand_id = t.demand_id
-       WHERE t.student_user_id = $1 AND t.status = 'SUCCESS'
+       JOIN users u ON u.user_id = t.student_user_id
+       WHERE t.student_user_id = $1
+         AND t.status = 'SUCCESS'
+         AND ($2::uuid IS NULL OR u.tenant_id = $2::uuid)
        ORDER BY t.created_at DESC`,
-      [userId],
+      [userId, tenantId ?? null],
     );
 
-    const total_outstanding = (
-      pending_demands as Array<{ total_amount: string; paid_amount: string }>
-    ).reduce(
-      (sum, row) =>
-        sum +
-        Math.max(0, Number(row.total_amount) - Number(row.paid_amount ?? 0)),
+    const total_outstanding = pending_demands.reduce(
+      (sum, row) => sum + row.payable_amount,
       0,
     );
 
@@ -1192,6 +1473,7 @@ export class StudentPortalService {
     const hostelFineCount = Number(hostelFinesPending[0]?.count ?? 0);
 
     return {
+      fee_structure,
       pending_demands,
       payment_history,
       total_outstanding,
@@ -1206,11 +1488,136 @@ export class StudentPortalService {
     };
   }
 
-  async createPaymentOrder(userId: string, demandId: string) {
+  async createPaymentOrder(
+    userId: string,
+    demandId: string,
+    tenantId: string,
+  ) {
     const rows = await this.dataSource.query(
-      `SELECT demand_id, fee_head, total_amount, paid_amount, status
-       FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
-      [demandId, userId],
+      `SELECT d.demand_id, d.fee_head, d.total_amount, d.paid_amount, d.status, u.tenant_id
+       FROM finance_fee_demands d
+       JOIN users u ON u.user_id = d.student_user_id
+       WHERE d.demand_id = $1 AND d.student_user_id = $2 AND u.tenant_id = $3`,
+      [demandId, userId, tenantId],
+    );
+    const demand = rows[0] as
+      | {
+          demand_id: string;
+          fee_head: string;
+          total_amount: string;
+          paid_amount: string;
+          status: string;
+          tenant_id: string;
+        }
+      | undefined;
+    if (!demand) throw new NotFoundException('Fee demand not found');
+    if (demand.status === 'PAID') {
+      throw new ConflictException('This demand is already paid');
+    }
+
+    const outstanding = Math.max(
+      0,
+      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
+    );
+    if (outstanding <= 0) {
+      throw new BadRequestException('Nothing due on this demand');
+    }
+
+    const order = await this.gatewayPayments.createOrder({
+      amountInr: outstanding,
+      receipt: `fee_${demandId.replace(/-/g, '').slice(0, 20)}`,
+      notes: {
+        demand_id: demandId,
+        student_user_id: userId,
+        tenant_id: tenantId,
+        fee_head: demand.fee_head,
+      },
+    });
+
+    // Persist INITIATED intent — settlement happens only after gateway verification.
+    await this.dataSource.query(
+      `INSERT INTO finance_transactions (
+         student_user_id, demand_id, gateway, gateway_order_id, gateway_reference,
+         amount, status, payment_mode, direction, txn_kind, ledger_category, gateway_payload
+       ) VALUES ($1, $2, 'RAZORPAY', $3, $3, $4, 'INITIATED', NULL, 'IN', $5, 'TUITION_GENERAL', $6::jsonb)
+       ON CONFLICT (gateway_order_id) DO UPDATE SET
+         amount = EXCLUDED.amount,
+         status = 'INITIATED',
+         gateway_payload = EXCLUDED.gateway_payload`,
+      [
+        userId,
+        demandId,
+        order.order_id,
+        outstanding,
+        `FEE_${demand.fee_head}`,
+        JSON.stringify({
+          demand_id: demandId,
+          student_user_id: userId,
+          tenant_id: tenantId,
+          fee_head: demand.fee_head,
+          mock: order.mock,
+        }),
+      ],
+    );
+
+    return {
+      order_id: order.order_id,
+      demand_id: demandId,
+      amount_inr: outstanding,
+      amount_paise: order.amount_paise,
+      currency: 'INR' as const,
+      fee_head: demand.fee_head,
+      razorpay_key: order.razorpay_key,
+      mock: order.mock,
+    };
+  }
+
+  /**
+   * Confirm a student fee payment only after gateway verification.
+   * Keeps route `/api/student/finance/pay` for frontend compatibility.
+   */
+  async confirmVerifiedPayment(
+    userId: string,
+    tenantId: string,
+    input: {
+      demand_id: string;
+      payment_id: string;
+      order_id?: string;
+      signature?: string;
+    },
+  ) {
+    const demandId = input.demand_id;
+    const paymentId = input.payment_id?.trim();
+    if (!paymentId) {
+      throw new BadRequestException('payment_id is required');
+    }
+
+    const existingSuccess = await this.dataSource.query(
+      `SELECT transaction_id, demand_id, receipt_url, amount
+       FROM finance_transactions
+       WHERE gateway_payment_id = $1 AND status = 'SUCCESS'
+       LIMIT 1`,
+      [paymentId],
+    );
+    if (existingSuccess[0]) {
+      const ledger = await this.getFinanceLedger(userId, tenantId);
+      return {
+        success: true,
+        already_paid: true,
+        demand_id: existingSuccess[0].demand_id ?? demandId,
+        transaction: existingSuccess[0],
+        receipt_url: existingSuccess[0].receipt_url,
+        message: 'Payment already recorded',
+        gates: ledger.gates,
+      };
+    }
+
+    const rows = await this.dataSource.query(
+      `SELECT d.demand_id, d.fee_head, d.total_amount, d.paid_amount, d.status, u.tenant_id
+       FROM finance_fee_demands d
+       JOIN users u ON u.user_id = d.student_user_id
+       WHERE d.demand_id = $1 AND d.student_user_id = $2 AND u.tenant_id = $3`,
+      [demandId, userId, tenantId],
     );
     const demand = rows[0] as
       | {
@@ -1221,49 +1628,8 @@ export class StudentPortalService {
           status: string;
         }
       | undefined;
-    if (!demand) throw new NotFoundException('Fee demand not found');
-    if (demand.status === 'PAID')
-      throw new BadRequestException('This demand is already paid');
-
-    const outstanding = Math.max(
-      0,
-      Number(demand.total_amount) - Number(demand.paid_amount ?? 0),
-    );
-    if (outstanding <= 0)
-      throw new BadRequestException('Nothing due on this demand');
-
-    const orderId = `order_${demandId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
-    return {
-      order_id: orderId,
-      demand_id: demandId,
-      amount_inr: outstanding,
-      amount_paise: Math.round(outstanding * 100),
-      currency: 'INR',
-      fee_head: demand.fee_head,
-      razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
-      mock: true,
-    };
-  }
-
-  async payDemandMock(
-    userId: string,
-    demandId: string,
-    gatewayPaymentId?: string,
-  ) {
-    const rows = await this.dataSource.query(
-      `SELECT * FROM finance_fee_demands WHERE demand_id = $1 AND student_user_id = $2`,
-      [demandId, userId],
-    );
-    const demand = rows[0] as
-      | {
-          demand_id: string;
-          total_amount: string;
-          paid_amount: string;
-          status: string;
-        }
-      | undefined;
     if (!demand) {
-      throw new BadRequestException('Fee demand not found');
+      throw new NotFoundException('Fee demand not found');
     }
     if (demand.status === 'PAID') {
       return { already_paid: true, demand_id: demandId };
@@ -1277,105 +1643,201 @@ export class StudentPortalService {
       throw new BadRequestException('Nothing due on this demand');
     }
 
-    const paymentId = gatewayPaymentId ?? `pay_${Date.now()}`;
-    const demandMeta = await this.dataSource.query<
-      Array<{ fee_head: string; tenant_id: string }>
-    >(
-      `SELECT d.fee_head, u.tenant_id FROM finance_fee_demands d
-       JOIN users u ON u.user_id = d.student_user_id
-       WHERE d.demand_id = $1`,
-      [demandId],
-    );
-    const feeHead = demandMeta[0]?.fee_head ?? 'FEE';
-    const tenantId =
-      demandMeta[0]?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
-    const receiptNumber = `RCP-${paymentId.replace(/\W/g, '').slice(-12).toUpperCase()}`;
-
-    const txnRows = await this.dataSource.query(
-      `INSERT INTO finance_transactions (
-         student_user_id, demand_id, gateway, gateway_payment_id, gateway_reference,
-         amount, status, payment_mode, receipt_url
-       ) VALUES ($1, $2, 'RAZORPAY', $3, $3, $4, 'SUCCESS', 'UPI', $5)
-       RETURNING *`,
-      [userId, demandId, paymentId, outstanding, `/receipts/${paymentId}.pdf`],
-    );
-    const transactionId = txnRows[0]?.transaction_id as string;
-
-    let receiptUrl = txnRows[0]?.receipt_url as string;
-    try {
-      receiptUrl = await this.financeReceipts.generateAndStore({
-        tenantId,
-        transactionId,
-        receiptNumber,
-        studentUserId: userId,
-        amount: outstanding,
-        paymentMode: 'UPI',
-        feeHead,
-      });
-      await this.dataSource.query(
-        `UPDATE finance_transactions SET receipt_url = $2 WHERE transaction_id = $1`,
-        [transactionId, receiptUrl],
+    let pendingOrderId = input.order_id?.trim() || null;
+    if (!pendingOrderId) {
+      const pending = await this.dataSource.query(
+        `SELECT gateway_order_id FROM finance_transactions
+         WHERE student_user_id = $1 AND demand_id = $2 AND status = 'INITIATED'
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId, demandId],
       );
-      await this.dataSource.query(
-        `INSERT INTO student_documents (tenant_id, student_user_id, category, title, file_url, source_transaction_id)
-         VALUES ($1, $2, 'FEE_RECEIPTS', $3, $4, $5)`,
-        [
-          tenantId,
-          userId,
-          `${feeHead} Receipt — ${receiptNumber}`,
-          receiptUrl,
-          transactionId,
-        ],
-      );
-    } catch (err) {
-      // Receipt generation is best-effort; payment still recorded
+      pendingOrderId = pending[0]?.gateway_order_id ?? null;
     }
 
-    await this.dataSource.query(
-      `UPDATE finance_fee_demands
-       SET paid_amount = total_amount, status = 'PAID'
-       WHERE demand_id = $1`,
-      [demandId],
-    );
-
-    await this.dataSource
-      .query(
-        `UPDATE operations_hostel_fines SET status = 'PAID'
-       WHERE finance_demand_id = $1 AND student_user_id = $2`,
-        [demandId, userId],
-      )
-      .catch(() => undefined);
-
-    await this.dataSource
-      .query(
-        `UPDATE student_profiles SET no_dues_status = 'CLEARED'
-       WHERE user_id = $1
-         AND NOT EXISTS (
-           SELECT 1 FROM finance_fee_demands fd
-           WHERE fd.student_user_id = $1 AND fd.status NOT IN ('PAID', 'WAIVED')
-         )`,
-        [userId],
-      )
-      .catch(() => undefined);
-
-    this.events.emit('finance.demand_paid', {
-      tenantId,
-      studentUserId: userId,
-      demandId,
-      amount: outstanding,
-      feeHead,
+    const verified = await this.gatewayPayments.verifyPayment({
+      paymentId,
+      expectedAmountPaise: Math.round(outstanding * 100),
+      expectedOrderId: pendingOrderId,
+      expectedDemandId: demandId,
+      expectedStudentUserId: userId,
+      signature: input.signature,
     });
 
-    const ledger = await this.getFinanceLedger(userId);
+    const feeHead = demand.fee_head ?? 'FEE';
+    const receiptNumber = `RCP-${paymentId.replace(/\W/g, '').slice(-12).toUpperCase()}`;
+    const paymentMode = verified.method ?? 'UPI';
 
-    return {
-      success: true,
-      transaction: txnRows[0],
-      receipt_url: receiptUrl,
-      document_vault_added: true,
-      message: `Payment of ₹${outstanding} recorded successfully`,
-      gates: ledger.gates,
-    };
+    return this.dataSource.transaction(async (manager) => {
+      const locked = await manager.query(
+        `SELECT demand_id, total_amount, paid_amount, status
+         FROM finance_fee_demands
+         WHERE demand_id = $1 AND student_user_id = $2
+         FOR UPDATE`,
+        [demandId, userId],
+      );
+      if (!locked[0]) throw new NotFoundException('Fee demand not found');
+      if (locked[0].status === 'PAID') {
+        return { already_paid: true, demand_id: demandId };
+      }
+
+      const dup = await manager.query(
+        `SELECT transaction_id FROM finance_transactions
+         WHERE gateway_payment_id = $1 AND status = 'SUCCESS' LIMIT 1`,
+        [verified.payment_id],
+      );
+      if (dup[0]) {
+        throw new ConflictException('Payment already settled');
+      }
+
+      let txnRows: Array<Record<string, unknown>>;
+      if (pendingOrderId) {
+        txnRows = await manager.query(
+          `UPDATE finance_transactions
+           SET gateway_payment_id = $2,
+               gateway_reference = $2,
+               status = 'SUCCESS',
+               payment_mode = $3,
+               amount = $4,
+               gateway_payload = COALESCE(gateway_payload, '{}'::jsonb) || $5::jsonb
+           WHERE gateway_order_id = $1
+             AND student_user_id = $6
+             AND demand_id = $7
+             AND status = 'INITIATED'
+           RETURNING *`,
+          [
+            pendingOrderId,
+            verified.payment_id,
+            paymentMode,
+            outstanding,
+            JSON.stringify({ verified_at: new Date().toISOString(), mock: verified.mock }),
+            userId,
+            demandId,
+          ],
+        );
+      } else {
+        txnRows = [];
+      }
+
+      if (!txnRows[0]) {
+        txnRows = await manager.query(
+          `INSERT INTO finance_transactions (
+             student_user_id, demand_id, gateway, gateway_payment_id, gateway_order_id,
+             gateway_reference, amount, status, payment_mode, direction, txn_kind,
+             ledger_category, gateway_payload
+           ) VALUES ($1, $2, 'RAZORPAY', $3, $4, $3, $5, 'SUCCESS', $6, 'IN', $7, 'TUITION_GENERAL', $8::jsonb)
+           RETURNING *`,
+          [
+            userId,
+            demandId,
+            verified.payment_id,
+            verified.order_id,
+            outstanding,
+            paymentMode,
+            `FEE_${feeHead}`,
+            JSON.stringify({ verified_at: new Date().toISOString(), mock: verified.mock }),
+          ],
+        );
+      }
+
+      const transactionId = txnRows[0]?.transaction_id as string;
+      let receiptUrl = (txnRows[0]?.receipt_url as string) ?? null;
+
+      try {
+        receiptUrl = await this.financeReceipts.generateAndStore({
+          tenantId,
+          transactionId,
+          receiptNumber,
+          studentUserId: userId,
+          amount: outstanding,
+          paymentMode,
+          feeHead,
+        });
+        await manager.query(
+          `UPDATE finance_transactions SET receipt_url = $2 WHERE transaction_id = $1`,
+          [transactionId, receiptUrl],
+        );
+        await manager.query(
+          `INSERT INTO student_documents (tenant_id, student_user_id, category, title, file_url, source_transaction_id)
+           VALUES ($1, $2, 'FEE_RECEIPTS', $3, $4, $5)`,
+          [
+            tenantId,
+            userId,
+            `${feeHead} Receipt — ${receiptNumber}`,
+            receiptUrl,
+            transactionId,
+          ],
+        );
+      } catch {
+        // Receipt generation is best-effort; verified settlement still stands.
+      }
+
+      await manager.query(
+        `UPDATE finance_fee_demands
+         SET paid_amount = total_amount, status = 'PAID', updated_at = NOW()
+         WHERE demand_id = $1 AND student_user_id = $2`,
+        [demandId, userId],
+      );
+
+      await manager
+        .query(
+          `UPDATE operations_hostel_fines SET status = 'PAID'
+           WHERE finance_demand_id = $1 AND student_user_id = $2`,
+          [demandId, userId],
+        )
+        .catch(() => undefined);
+
+      await manager
+        .query(
+          `UPDATE student_profiles SET no_dues_status = 'CLEARED'
+           WHERE user_id = $1
+             AND NOT EXISTS (
+               SELECT 1 FROM finance_fee_demands fd
+               WHERE fd.student_user_id = $1 AND fd.status NOT IN ('PAID', 'WAIVED')
+             )`,
+          [userId],
+        )
+        .catch(() => undefined);
+
+      this.events.emit('finance.demand_paid', {
+        tenantId,
+        studentUserId: userId,
+        demandId,
+        amount: outstanding,
+        feeHead,
+      });
+
+      const ledger = await this.getFinanceLedger(userId, tenantId);
+
+      return {
+        success: true,
+        transaction: txnRows[0],
+        receipt_url: receiptUrl,
+        document_vault_added: Boolean(receiptUrl),
+        message: `Payment of ₹${outstanding} recorded successfully`,
+        gates: ledger.gates,
+      };
+    });
+  }
+
+  /** @deprecated Use confirmVerifiedPayment — retained name for internal callers */
+  async payDemandMock(
+    userId: string,
+    demandId: string,
+    gatewayPaymentId?: string,
+    tenantId?: string,
+  ) {
+    if (!gatewayPaymentId) {
+      throw new BadRequestException(
+        'payment_id is required. Payments cannot be marked paid without gateway verification.',
+      );
+    }
+    if (!tenantId) {
+      throw new UnauthorizedException('Tenant context required');
+    }
+    return this.confirmVerifiedPayment(userId, tenantId, {
+      demand_id: demandId,
+      payment_id: gatewayPaymentId,
+    });
   }
 
   async getDocumentVault(tenantId: string, userId: string) {
@@ -1413,6 +1875,15 @@ export class StudentPortalService {
     policyId: string,
     vote?: 'YES' | 'NO',
   ) {
+    const policies = await this.dataSource.query(
+      `SELECT policy_id FROM university_policies
+       WHERE policy_id = $1 AND tenant_id = $2 AND status = 'ACTIVE'`,
+      [policyId, tenantId],
+    );
+    if (!policies[0]) {
+      throw new NotFoundException('Policy not found');
+    }
+
     await this.dataSource.query(
       `INSERT INTO student_policy_acknowledgements (tenant_id, student_user_id, policy_id, vote)
        VALUES ($1, $2, $3, $4)
@@ -1422,5 +1893,314 @@ export class StudentPortalService {
       [tenantId, userId, policyId, vote || null],
     );
     return { success: true };
+  }
+
+  /**
+   * Student-facing academic calendar (read-only).
+   * Merges optional DB sources with a curated academic-year seed so the UI
+   * always has realistic events for demos and empty tenants.
+   */
+  async getAcademicCalendar(
+    tenantId: string,
+    _userId: string,
+    from?: string,
+    to?: string,
+  ) {
+    type CalendarEvent = {
+      event_id: string;
+      title: string;
+      category: string;
+      date: string;
+      end_date: string | null;
+      start_time: string | null;
+      end_time: string | null;
+      description: string;
+      department: string;
+      venue: string | null;
+      organizer: string;
+      attachment_url: string | null;
+      academic_year: string;
+    };
+
+    // Curated seed is for non-production empty tenants only — never invent events in production.
+    const allowSeed =
+      process.env.NODE_ENV !== 'production' ||
+      process.env.ALLOW_ACADEMIC_CALENDAR_SEED === 'true';
+    const seed = allowSeed ? this.buildAcademicCalendarSeed() : [];
+    const merged = new Map<string, CalendarEvent>(
+      seed.map((e) => [e.event_id, e]),
+    );
+
+    const examEvents = await this.dataSource
+      .query(
+        `SELECT event_id::text AS event_id,
+                title,
+                event_date::text AS date,
+                COALESCE(end_date::text, event_date::text) AS end_date,
+                start_time::text AS start_time,
+                end_time::text AS end_time,
+                description,
+                department
+         FROM exam_calendar_events
+         WHERE tenant_id = $1
+         ORDER BY event_date ASC`,
+        [tenantId],
+      )
+      .catch(() => []);
+
+    for (const row of examEvents as Array<Record<string, unknown>>) {
+      const id = `exam-${row.event_id}`;
+      merged.set(id, {
+        event_id: id,
+        title: String(row.title ?? 'Examination'),
+        category: 'EXAMINATION',
+        date: String(row.date).slice(0, 10),
+        end_date: row.end_date ? String(row.end_date).slice(0, 10) : null,
+        start_time: row.start_time ? String(row.start_time).slice(0, 5) : null,
+        end_time: row.end_time ? String(row.end_time).slice(0, 5) : null,
+        description: String(row.description ?? 'Examination event'),
+        department: row.department ? String(row.department) : 'Exam Cell',
+        venue: null,
+        organizer: 'Exam Cell',
+        attachment_url: null,
+        academic_year: '',
+      });
+    }
+
+    const holidays = await this.dataSource
+      .query(
+        `SELECT holiday_id::text AS holiday_id, title, date::text AS date, description, type
+         FROM hr_holidays
+         ORDER BY date ASC`,
+      )
+      .catch(() => []);
+
+    for (const row of holidays as Array<Record<string, unknown>>) {
+      const id = `holiday-${row.holiday_id}`;
+      merged.set(id, {
+        event_id: id,
+        title: String(row.title ?? 'Holiday'),
+        category: 'HOLIDAYS',
+        date: String(row.date).slice(0, 10),
+        end_date: null,
+        start_time: null,
+        end_time: null,
+        description: String(row.description ?? 'University / national holiday'),
+        department: 'University',
+        venue: null,
+        organizer: 'Administration',
+        attachment_url: null,
+        academic_year: '',
+      });
+    }
+
+    let events = [...merged.values()].sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+
+    if (from) {
+      events = events.filter(
+        (e) => (e.end_date || e.date) >= from.slice(0, 10),
+      );
+    }
+    if (to) {
+      events = events.filter((e) => e.date <= to.slice(0, 10));
+    }
+
+    return {
+      events,
+      permissions: {
+        can_view: true,
+        can_search: true,
+        can_filter: true,
+        can_download: true,
+        can_create: false,
+        can_edit: false,
+        can_delete: false,
+      },
+    };
+  }
+
+  private buildAcademicCalendarSeed(): Array<{
+    event_id: string;
+    title: string;
+    category: string;
+    date: string;
+    end_date: string | null;
+    start_time: string | null;
+    end_time: string | null;
+    description: string;
+    department: string;
+    venue: string | null;
+    organizer: string;
+    attachment_url: string | null;
+    academic_year: string;
+  }> {
+    const now = new Date();
+    const year = now.getFullYear();
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const add = (days: number) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() + days);
+      return iso(d);
+    };
+    const academicYear =
+      now.getMonth() >= 6
+        ? `${year}-${String(year + 1).slice(-2)}`
+        : `${year - 1}-${String(year).slice(-2)}`;
+
+    return [
+      {
+        event_id: 'seed-registration',
+        title: 'Course Registration',
+        category: 'ACADEMIC',
+        date: add(4),
+        end_date: add(10),
+        start_time: '00:00',
+        end_time: '23:59',
+        description:
+          'CBCS course registration window for enrolled students.',
+        department: 'Academics',
+        venue: 'Student Portal',
+        organizer: 'Registrar',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-mid-exam',
+        title: 'Mid Semester Exams',
+        category: 'EXAMINATION',
+        date: add(8),
+        end_date: add(14),
+        start_time: '09:30',
+        end_time: '12:30',
+        description: 'Mid-semester theory examinations.',
+        department: 'Exam Cell',
+        venue: 'As per seating plan',
+        organizer: 'Controller of Examinations',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-fee-due',
+        title: 'Fee Due Date',
+        category: 'FEES',
+        date: add(20),
+        end_date: null,
+        start_time: null,
+        end_time: '23:59',
+        description: 'Last date to clear semester fees without late charges.',
+        department: 'Finance',
+        venue: 'Student Finance Portal',
+        organizer: 'Finance Office',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-placement',
+        title: 'Placement Drive',
+        category: 'PLACEMENT',
+        date: add(9),
+        end_date: null,
+        start_time: '09:00',
+        end_time: '18:00',
+        description: 'Campus placement drive for eligible students.',
+        department: 'Training & Placement',
+        venue: 'Placement Cell',
+        organizer: 'T&P Cell',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-independence',
+        title: 'Independence Day',
+        category: 'HOLIDAYS',
+        date: `${year}-08-15`,
+        end_date: null,
+        start_time: null,
+        end_time: null,
+        description: 'National holiday. University remains closed.',
+        department: 'University',
+        venue: null,
+        organizer: 'Administration',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-orientation',
+        title: 'Orientation Program',
+        category: 'ADMISSIONS',
+        date: add(2),
+        end_date: null,
+        start_time: '10:00',
+        end_time: '13:00',
+        description: 'Orientation for newly admitted students.',
+        department: 'Admissions',
+        venue: 'Main Auditorium',
+        organizer: 'Dean Student Welfare',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-club-fest',
+        title: 'Falcon Tech Fest Kickoff',
+        category: 'CLUBS',
+        date: add(13),
+        end_date: null,
+        start_time: '16:00',
+        end_time: '20:00',
+        description: 'Opening ceremony and club stalls.',
+        department: 'Student Affairs',
+        venue: 'Central Lawn',
+        organizer: 'Student Council',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-add-drop',
+        title: 'Add/Drop Courses',
+        category: 'ACADEMIC',
+        date: add(12),
+        end_date: add(16),
+        start_time: null,
+        end_time: null,
+        description: 'Add or drop registered courses with mentor approval.',
+        department: 'Academics',
+        venue: 'Student Portal',
+        organizer: 'Department Office',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-resume',
+        title: 'Resume Workshop',
+        category: 'PLACEMENT',
+        date: add(5),
+        end_date: null,
+        start_time: '14:00',
+        end_time: '16:00',
+        description: 'Hands-on resume and LinkedIn workshop.',
+        department: 'Training & Placement',
+        venue: 'Career Lab',
+        organizer: 'Placement Coordinator',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+      {
+        event_id: 'seed-late-fee',
+        title: 'Late Fee Deadline',
+        category: 'FEES',
+        date: add(30),
+        end_date: null,
+        start_time: null,
+        end_time: null,
+        description: 'Final fee deadline including late charges.',
+        department: 'Finance',
+        venue: 'Student Finance Portal',
+        organizer: 'Finance Office',
+        attachment_url: null,
+        academic_year: academicYear,
+      },
+    ];
   }
 }
