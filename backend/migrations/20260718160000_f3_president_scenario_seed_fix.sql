@@ -76,7 +76,7 @@ BEGIN
     INSERT INTO cert_events
       (event_id, tenant_id, event_name, application_start_date, application_end_date, base_fee, is_active)
     VALUES
-      (v_event_id, v_tenant, 'Convocation 2026 — F.3 Simulation',
+      (v_event_id, v_tenant, 'Convocation 2026',
        CURRENT_DATE - 30, CURRENT_DATE + 60, 1500, true);
   END IF;
 

@@ -38,12 +38,16 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
-          className={cn('h-10 shrink-0 gap-2 inline-flex', HEADER_CONTROL_CLASS)}
+          className={cn(
+            'inline-flex h-11 w-11 shrink-0 items-center justify-center gap-2 px-0 sm:h-10 sm:w-auto sm:px-3',
+            HEADER_CONTROL_CLASS,
+          )}
           title={triggerTitle}
+          aria-label={triggerTitle}
         >
           <BriefcaseBusiness className="h-4 w-4 shrink-0 text-sgvu-gold" />
-          <span className="whitespace-nowrap">{triggerShortLabel}</span>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="hidden whitespace-nowrap sm:inline">{triggerShortLabel}</span>
+          <ChevronsUpDown className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:inline" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">

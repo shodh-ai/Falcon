@@ -79,19 +79,6 @@ export class StudentSafetyService {
       );
     }
 
-    const open = await this.db.query(
-      `SELECT 1 FROM student_safety_concerns
-       WHERE tenant_id = $1 AND reporter_user_id = $2
-         AND status = ANY($3::text[])
-       LIMIT 1`,
-      [tenantId, reporterUserId, ACTIVE_STATUSES],
-    );
-    if (open.length > 0) {
-      throw new BadRequestException(
-        'You already have an active safety concern under review.',
-      );
-    }
-
     if (dto.accused_user_id) {
       await this.validateAccusedUser(
         tenantId,

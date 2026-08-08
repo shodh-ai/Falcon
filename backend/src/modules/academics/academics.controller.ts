@@ -15,6 +15,7 @@ import {
   UseGuards,
   UseInterceptors,
   BadRequestException,
+  ForbiddenException,
   StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -110,6 +111,36 @@ export class AcademicsController {
             : undefined,
       },
     );
+  }
+
+  @Get('faculty/dashboard')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async getFacultyDashboard(@Req() req: { user: AuthUser }) {
+    const tenantId = this.resolveTenantId(req.user);
+    const deptId = await this.resolveFacultyDeptId(req);
+    const [todayTimetable, todayClasses, teachingDepartments, missingAttendance] =
+      await Promise.all([
+        this.facultyAcademics.getFacultyAcademicTimetableToday(
+          req.user.user_id,
+          tenantId,
+          deptId,
+        ),
+        this.facultyAcademics.getFacultyTodayClasses(req.user.user_id),
+        this.teachingDepartments.getTeachingDepartments(
+          req.user.user_id,
+          tenantId,
+        ),
+        this.facultyAcademics.getMissingAttendanceAlerts(
+          req.user.user_id,
+          tenantId,
+        ),
+      ]);
+    return {
+      today_timetable: todayTimetable,
+      today_classes: todayClasses,
+      teaching_departments: teachingDepartments,
+      missing_attendance: missingAttendance,
+    };
   }
 
   @Get('faculty/teaching-departments')
@@ -434,7 +465,43 @@ export class AcademicsController {
   }
 
   @Get('results/student/:userId')
-  studentResults(@Param('userId') userId: string) {
+  @Roles(
+    'Student',
+    'Applicant',
+    'Faculty',
+    'HOD',
+    'Dean',
+    'Registrar',
+    'ExamCell',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
+  studentResults(
+    @Param('userId') userId: string,
+    @Req()
+    req: {
+      user: AuthUser & { roles?: string[] };
+    },
+  ) {
+    const isSelf = req.user.user_id === userId;
+    const userRoles = [
+      ...(Array.isArray(req.user.roles) ? req.user.roles : []),
+      ...(req.user.role ? [req.user.role] : []),
+    ].map((r) => String(r).toLowerCase());
+    const staffRoles = new Set([
+      'faculty',
+      'hod',
+      'dean',
+      'registrar',
+      'examcell',
+      'exam_cell',
+      'superadmin',
+      'campusadmin',
+    ]);
+    const isStaff = userRoles.some((r) => staffRoles.has(r));
+    if (!isSelf && !isStaff) {
+      throw new ForbiddenException('You can only view your own results');
+    }
     return this.academics.listResultsForStudent(userId);
   }
 

@@ -199,8 +199,14 @@ export class LibraryAdminController {
     return this.library.gateStats(this.tenant(req));
   }
 
+  @Get('dashboard')
+  @Roles('Librarian', 'SuperAdmin', 'CampusAdmin')
+  dashboard(@Req() req: { user: AuthUser }) {
+    return this.library.getDashboardMetrics(this.tenant(req));
+  }
+
   @Get('dashboard/metrics')
-  @Roles('Librarian', 'SuperAdmin')
+  @Roles('Librarian', 'SuperAdmin', 'CampusAdmin')
   dashboardMetrics(@Req() req: { user: AuthUser }) {
     return this.library.getDashboardMetrics(this.tenant(req));
   }

@@ -42,11 +42,15 @@ const AUTH_COOKIE = 'falcon_auth_token';
 
 function writeAuthCookie(token: string | null) {
   if (typeof document === 'undefined') return;
+  // Still readable by JS (middleware gate) — not HttpOnly. Prefer short TTL + HTTPS Secure.
+  // Full HttpOnly cookie sessions need a backend Set-Cookie login path.
+  const secure =
+    typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : '';
+  const maxAgeSeconds = 60 * 60 * 8; // 8h — align JWT_EXPIRATION in production
   if (token) {
-    // Readable by Next middleware for portal route protection (same-site).
-    document.cookie = `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
+    document.cookie = `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
   } else {
-    document.cookie = `${AUTH_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0`;
+    document.cookie = `${AUTH_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0${secure}`;
   }
 }
 

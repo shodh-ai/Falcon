@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Users } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
+import { StudentAiAssistantFab } from '@/components/student/StudentAiAssistant';
+import { StudentDemoModeBanner } from '@/components/student/StudentDemoModeBanner';
 import { studentPortal } from '@/lib/navigation';
 import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi } from '@/lib/api/api.campus-events';
@@ -27,10 +29,10 @@ export function StudentShell({ children }: { children: ReactNode }) {
   const config: PortalConfig = useMemo(() => {
     if (!isCoordinator) return studentPortal;
     const clubItem = {
-      label: 'Club Management',
+      label: 'My Clubs',
       href: '/student/club-management',
       icon: Users,
-      keywords: ['events', 'club', 'coordinator'],
+      keywords: ['events', 'club', 'coordinator', 'club management'],
     };
     return {
       ...studentPortal,
@@ -43,7 +45,9 @@ export function StudentShell({ children }: { children: ReactNode }) {
 
   return (
     <AppShell config={config} profileHref="/student/profile">
+      <StudentDemoModeBanner />
       {children}
+      <StudentAiAssistantFab />
     </AppShell>
   );
 }

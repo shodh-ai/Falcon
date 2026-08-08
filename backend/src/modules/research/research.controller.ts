@@ -22,7 +22,16 @@ export class ResearchController {
   constructor(private readonly research: ResearchService) {}
 
   @Get('scholars')
-  @Roles('SuperAdmin', 'Faculty', 'HOD', 'Dean', 'DeanOfResearch', 'IQAC', 'Chairman')
+  @Roles(
+    'SuperAdmin',
+    'CampusAdmin',
+    'Registrar',
+    'Faculty',
+    'HOD',
+    'Dean',
+    'IQAC',
+    'Chairman',
+  )
   scholars(@Req() req: { user: AuthUser }) {
     return this.research.listScholars(req.user.tenant_id);
   }

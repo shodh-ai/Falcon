@@ -54,7 +54,7 @@ function ApplicationTracker({ app }: { app: RndApplication }) {
           This application was rejected. Check notifications for remarks from the review committee.
         </p>
       ) : (
-        <ol className="grid gap-3 sm:grid-cols-4">
+        <ol className="grid grid-cols-2 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
           {RND_TRACKER_STEPS.map((step, idx) => {
             const done = idx <= activeIdx;
             const current = idx === activeIdx;
@@ -152,7 +152,7 @@ export default function StudentResearchPage() {
   return (
     <StudentPageShell width="4xl">
       <StudentPageHeader
-        title="Student Research Grants"
+        title="Research"
         description="Apply for undergraduate research funding — distinct from E-Cell startup incubation."
       />
 

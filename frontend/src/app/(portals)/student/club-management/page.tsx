@@ -163,7 +163,7 @@ export default function ClubManagementPage() {
   if (clubs.length === 0) {
     return (
       <StudentPageShell>
-        <StudentPageHeader title="Club Management" description="Coordinator access only." />
+        <StudentPageHeader title="My Clubs" description="Coordinator access only." />
         <StudentEmptyState title="Access restricted" description="You are not assigned as a club coordinator." />
       </StudentPageShell>
     );
@@ -174,7 +174,7 @@ export default function ClubManagementPage() {
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
-        title="Club Management"
+        title="My Clubs"
         description="Propose events, track approvals, and scan tickets on event day."
       />
 

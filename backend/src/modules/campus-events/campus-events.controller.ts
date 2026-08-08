@@ -19,6 +19,7 @@ import { RejectEventDto } from './dto/reject-event.dto';
 import { UpsertMasterCalendarDto } from './dto/master-calendar.dto';
 import { EstateApproveDto } from './dto/estate-approve.dto';
 import { FundTransferDto } from './dto/fund-transfer.dto';
+import { ConfirmEventRegistrationDto } from './dto/confirm-registration.dto';
 
 type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
 
@@ -131,7 +132,7 @@ export class CampusEventsController {
   @Roles('Student')
   confirm(
     @Req() req: { user: AuthUser },
-    @Body() dto: { registration_id: string; payment_ref: string },
+    @Body() dto: ConfirmEventRegistrationDto,
   ) {
     return this.events.confirmPaidRegistration(
       this.tenant(req),

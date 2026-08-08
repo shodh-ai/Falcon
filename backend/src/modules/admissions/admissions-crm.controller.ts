@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -96,8 +97,8 @@ export class AdmissionsCrmController {
   }
 
   @Get('leads/:id/timeline')
-  timeline(@Param('id') id: string) {
-    return this.admissions.getLeadTimeline(id);
+  timeline(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.admissions.getLeadTimeline(id, this.tenant(req));
   }
 
   @Post('leads')
@@ -106,8 +107,12 @@ export class AdmissionsCrmController {
   }
 
   @Patch('leads/:id/stage')
-  updateStage(@Param('id') id: string, @Body() dto: UpdateLeadStageDto) {
-    return this.admissions.updateLeadStage(id, dto);
+  updateStage(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: UpdateLeadStageDto,
+  ) {
+    return this.admissions.updateLeadStage(id, dto, this.tenant(req));
   }
 
   @Post('leads/:id/activities')
@@ -202,7 +207,10 @@ export class AdmissionsCrmController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    if (!req.user.tenant_id) {
+      throw new BadRequestException('Tenant context required');
+    }
+    return req.user.tenant_id;
   }
 
   private resolveRoles(user: AuthUser): string[] {

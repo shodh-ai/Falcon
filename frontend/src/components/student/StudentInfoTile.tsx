@@ -23,7 +23,7 @@ export function StudentInfoTile({
   return (
     <div
       className={cn(
-        'group flex h-full flex-col rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-sgvu-gold/50 hover:shadow-md',
+        'group flex h-full min-w-0 flex-col rounded-2xl border border-sgvu-navy/10 bg-white p-3.5 shadow-sm transition hover:-translate-y-0.5 hover:border-sgvu-gold/50 hover:shadow-md sm:p-4',
         className,
       )}
     >

@@ -61,13 +61,7 @@ import { MasterDataModule } from './modules/master-data/master-data.module';
 import { AcademicRndModule } from './modules/academic-rnd/academic-rnd.module';
 import { CertificateAutomationModule } from './modules/certificate-automation/certificate-automation.module';
 import { WeeklyTestsModule } from './modules/weekly-tests/weekly-tests.module';
-import { LabsModule } from './modules/labs/labs.module';
-import { MoonshotsModule } from './modules/moonshots/moonshots.module';
-import { CompetitionsModule } from './modules/competitions/competitions.module';
-import { SpecialProgramsModule } from './modules/special-programs/special-programs.module';
-import { CooOpsModule } from './modules/coo-ops/coo-ops.module';
-import { UosGovernanceModule } from './modules/uos-governance/uos-governance.module';
-import { DofaEngineModule } from './modules/dofa-engine/dofa-engine.module';
+import { RegistrarModule } from './modules/registrar/registrar.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -193,13 +187,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     AcademicRndModule,
     CertificateAutomationModule,
     WeeklyTestsModule,
-    LabsModule,
-    MoonshotsModule,
-    CompetitionsModule,
-    SpecialProgramsModule,
-    CooOpsModule,
-    UosGovernanceModule,
-    DofaEngineModule,
+    RegistrarModule,
   ],
   controllers: [AppController],
   providers: [

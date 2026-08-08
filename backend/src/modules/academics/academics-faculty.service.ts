@@ -87,18 +87,19 @@ export class AcademicsFacultyService {
   ): Promise<FacultyTodayClassDto[]> {
     const dayOfWeek = DAY_NAMES[new Date().getDay()];
 
-    const rows: Array<{
-      class_id: number;
-      timetable_entry_id: number;
-      subject_name: string;
-      room_number: string;
-      start_time: string;
-      end_time: string;
-      batch_id: number;
-      subject_id: number;
-      student_count: string;
-    }> = await this.dataSource.query(
-      `
+    try {
+      const rows: Array<{
+        class_id: number;
+        timetable_entry_id: number;
+        subject_name: string;
+        room_number: string;
+        start_time: string;
+        end_time: string;
+        batch_id: number;
+        subject_id: number;
+        student_count: string;
+      }> = await this.dataSource.query(
+        `
       SELECT
         co.course_offering_id AS class_id,
         te.timetable_entry_id,
@@ -125,25 +126,30 @@ export class AcademicsFacultyService {
         AND LOWER(TRIM(ts.day_of_week)) = LOWER(TRIM($2))
       ORDER BY ts.start_time ASC
       `,
-      [facultyUserId, dayOfWeek],
-    );
+        [facultyUserId, dayOfWeek],
+      );
 
-    return rows.map((row) => {
-      const start = this.formatTime12h(row.start_time);
-      const end = this.formatTime12h(row.end_time);
-      return {
-        classId: Number(row.class_id),
-        timetableEntryId: Number(row.timetable_entry_id),
-        subjectName: row.subject_name,
-        roomNumber: row.room_number,
-        time: `${start} – ${end}`,
-        startTime: start,
-        endTime: end,
-        batchId: Number(row.batch_id),
-        subjectId: Number(row.subject_id),
-        studentCount: Number(row.student_count ?? 0),
-      };
-    });
+      return rows.map((row) => {
+        const start = this.formatTime12h(row.start_time);
+        const end = this.formatTime12h(row.end_time);
+        return {
+          classId: Number(row.class_id),
+          timetableEntryId: Number(row.timetable_entry_id),
+          subjectName: row.subject_name,
+          roomNumber: row.room_number,
+          time: `${start} – ${end}`,
+          startTime: start,
+          endTime: end,
+          batchId: Number(row.batch_id),
+          subjectId: Number(row.subject_id),
+          studentCount: Number(row.student_count ?? 0),
+        };
+      });
+    } catch {
+      // Legacy timetable_entries schema is absent on some tenants; callers use
+      // getFacultyAcademicTimetableToday as the primary today view.
+      return [];
+    }
   }
 
   async getClassStudents(classId: number): Promise<ClassStudentDto[]> {

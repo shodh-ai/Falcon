@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
+import { DEMO_STUDENT, DEMO_SUBJECTS } from '@/lib/mock/student-portal-demo';
+import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
 
 export type StudentCourse = {
   course_id: string;
@@ -13,7 +15,18 @@ export type StudentCourse = {
   course_type: string;
 };
 
-type EnrollmentRow = {
+function demoCourses(): StudentCourse[] {
+  return DEMO_SUBJECTS.map((s) => ({
+    course_id: s.course_id,
+    course_code: s.course_code,
+    course_name: s.course_name,
+    credits: s.credits,
+    semester: s.semester,
+    course_type: s.course_type,
+  }));
+}
+
+type EnrollmentResponse = Array<{
   enrollment_id: string;
   semester: number;
   status: string;
@@ -93,27 +106,41 @@ export function useStudentCourses() {
           parseEnrollmentResponse(payload);
 
         if (!cancelled) {
-          setCurrentSemester(semester);
-          setCourses(
-            rows.map((row) => ({
-              course_id: row.course.course_id,
-              course_code: row.course.course_code,
-              course_name: row.course.course_name,
-              credits: Number(row.course.credits) || 0,
-              semester: Number(row.semester),
-              course_type: row.course.is_elective ? 'ELECTIVE' : 'CORE',
-            })),
-          );
-          setError(
-            rows.length === 0
-              ? 'No subjects enrolled for this semester yet.'
-              : null,
-          );
+          if (enrolled.length === 0) {
+            if (isStudentDemoModeEnabled()) {
+              setCurrentSemester(DEMO_STUDENT.semester);
+              setCourses(demoCourses());
+              setError(null);
+            } else {
+              setCurrentSemester(null);
+              setCourses([]);
+              setError('No subjects enrolled for this semester yet.');
+            }
+          } else {
+            setCurrentSemester(semester);
+            setCourses(
+              enrolled.map((row) => ({
+                course_id: row.course.course_id,
+                course_code: row.course.course_code,
+                course_name: row.course.course_name,
+                credits: Number(row.course.credits) || 0,
+                semester: Number(row.semester),
+                course_type: row.course.is_elective ? 'ELECTIVE' : 'CORE',
+              })),
+            );
+            setError(null);
+          }
         }
       } catch (e) {
         if (!cancelled) {
-          setCourses([]);
-          setError(e instanceof Error ? e.message : 'Failed to load courses');
+          if (isStudentDemoModeEnabled()) {
+            setCurrentSemester(DEMO_STUDENT.semester);
+            setCourses(demoCourses());
+            setError(null);
+          } else {
+            setCourses([]);
+            setError(e instanceof Error ? e.message : 'Failed to load courses');
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);

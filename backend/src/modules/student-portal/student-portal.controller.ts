@@ -10,7 +10,10 @@ import {
   UseGuards,
   UseInterceptors,
   BadRequestException,
+  ForbiddenException,
   Param,
+  Query,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -20,8 +23,19 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { StudentPortalService } from './student-portal.service';
 import { OfficialTranscriptService } from '../exam-cell/official-transcript.service';
+import {
+  AcademicCalendarQueryDto,
+  AcknowledgePolicyDto,
+  AlumniRegisterDto,
+  ConfirmStudentPaymentDto,
+  CreateStudentPayOrderDto,
+  LogExtracurricularDto,
+  ProfileUpdateRequestDto,
+  UpdateStudentProfileDto,
+  UploadAdmissionDocumentDto,
+} from './dto/student-portal.dto';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
 
 @Controller('api/student')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -32,6 +46,25 @@ export class StudentPortalController {
     private readonly officialTranscripts: OfficialTranscriptService,
   ) {}
 
+  @Get('dashboard')
+  async dashboard(@Req() req: { user: AuthUser }) {
+    const tenantId = this.tenant(req);
+    const userId = req.user.user_id;
+    const [profile, attendance, marks, registration] = await Promise.all([
+      this.portal.getMasterProfile(tenantId, userId),
+      this.portal.getAttendance(tenantId, userId),
+      this.portal.getMarks(tenantId, userId),
+      this.portal.getRegistration(tenantId, userId),
+    ]);
+    return { profile, attendance, marks, registration };
+  }
+
+  /** Alias used by some clients — same payload as marks / results desk */
+  @Get('results')
+  results(@Req() req: { user: AuthUser }) {
+    return this.portal.getMarks(this.tenant(req), req.user.user_id);
+  }
+
   @Get('profile')
   profile(@Req() req: { user: AuthUser }) {
     return this.portal.getMasterProfile(this.tenant(req), req.user.user_id);
@@ -40,13 +73,7 @@ export class StudentPortalController {
   @Patch('profile')
   updateProfile(
     @Req() req: { user: AuthUser },
-    @Body()
-    body: {
-      profile_photo_url?: string;
-      bank_details?: Record<string, any>;
-      parent_details?: Record<string, any>;
-      address?: { permanent?: string; current?: string };
-    },
+    @Body() body: UpdateStudentProfileDto,
   ) {
     return this.portal.updateProfile(this.tenant(req), req.user.user_id, body);
   }
@@ -105,6 +132,29 @@ export class StudentPortalController {
     return this.portal.getAdmissionVault(this.tenant(req), req.user.user_id);
   }
 
+  @Post('admission-documents')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadAdmissionDocument(
+    @Req() req: { user: AuthUser },
+    @Body() body: UploadAdmissionDocumentDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.portal.uploadAdmissionDocument(
+      this.tenant(req),
+      req.user.user_id,
+      {
+        title: body.title ?? '',
+        issuer: body.issuer,
+      },
+      file,
+    );
+  }
+
   @Get('registration')
   registration(@Req() req: { user: AuthUser }) {
     return this.portal.getRegistration(this.tenant(req), req.user.user_id);
@@ -115,9 +165,18 @@ export class StudentPortalController {
     return this.portal.getAttendance(this.tenant(req), req.user.user_id);
   }
 
-  @Post('portal-bootstrap')
-  portalBootstrap(@Req() req: { user: AuthUser }) {
-    return this.portal.bootstrapPortal(this.tenant(req), req.user.user_id);
+  /** Read-only academic calendar for students (view / search / filter / export). */
+  @Get('academic-calendar')
+  academicCalendar(
+    @Req() req: { user: AuthUser },
+    @Query() query: AcademicCalendarQueryDto,
+  ) {
+    return this.portal.getAcademicCalendar(
+      this.tenant(req),
+      req.user.user_id,
+      query.from,
+      query.to,
+    );
   }
 
   @Get('marks')
@@ -127,7 +186,10 @@ export class StudentPortalController {
 
   @Get('transcripts')
   transcripts(@Req() req: { user: AuthUser }) {
-    return this.officialTranscripts.listForStudent(this.tenant(req), req.user.user_id);
+    return this.officialTranscripts.listForStudent(
+      this.tenant(req),
+      req.user.user_id,
+    );
   }
 
   @Get('exam-desk')
@@ -149,8 +211,7 @@ export class StudentPortalController {
   )
   logExtracurricular(
     @Req() req: { user: AuthUser },
-    @Body()
-    body: { activity_type?: string; description?: string; event_date?: string },
+    @Body() body: LogExtracurricularDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.portal.logExtracurricular(
@@ -192,26 +253,37 @@ export class StudentPortalController {
 
   @Get('finance')
   finance(@Req() req: { user: AuthUser }) {
-    return this.portal.getFinanceLedger(req.user.user_id);
+    return this.portal.getFinanceLedger(req.user.user_id, this.tenant(req));
   }
 
   @Post('finance/pay/order')
+  @Roles('Student')
   createPayOrder(
     @Req() req: { user: AuthUser },
-    @Body() body: { demand_id: string },
+    @Body() body: CreateStudentPayOrderDto,
   ) {
-    return this.portal.createPaymentOrder(req.user.user_id, body.demand_id);
+    return this.portal.createPaymentOrder(
+      req.user.user_id,
+      body.demand_id,
+      this.tenant(req),
+    );
   }
 
   @Post('finance/pay')
+  @Roles('Student')
   payFee(
     @Req() req: { user: AuthUser },
-    @Body() body: { demand_id: string; payment_id?: string },
+    @Body() body: ConfirmStudentPaymentDto,
   ) {
-    return this.portal.payDemandMock(
+    return this.portal.confirmVerifiedPayment(
       req.user.user_id,
-      body.demand_id,
-      body.payment_id,
+      this.tenant(req),
+      {
+        demand_id: body.demand_id,
+        payment_id: body.payment_id,
+        order_id: body.order_id,
+        signature: body.signature,
+      },
     );
   }
 
@@ -223,12 +295,7 @@ export class StudentPortalController {
   @Post('profile/update-request')
   profileUpdateRequest(
     @Req() req: { user: AuthUser },
-    @Body()
-    body: {
-      subject?: string;
-      description?: string;
-      fields_requested?: string[];
-    },
+    @Body() body: ProfileUpdateRequestDto,
   ) {
     return this.portal.requestProfileUpdate(
       this.tenant(req),
@@ -244,7 +311,7 @@ export class StudentPortalController {
   @Post('exit/alumni-register')
   alumniRegister(
     @Req() req: { user: AuthUser },
-    @Body() body: { linkedin_url?: string; placement_organization?: string },
+    @Body() body: AlumniRegisterDto,
   ) {
     return this.portal.registerAlumni(this.tenant(req), req.user.user_id, body);
   }
@@ -257,8 +324,8 @@ export class StudentPortalController {
   @Post('policies/:id/acknowledge')
   acknowledgePolicy(
     @Req() req: { user: AuthUser },
-    @Param('id') id: string,
-    @Body() body: { vote?: 'YES' | 'NO' },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AcknowledgePolicyDto,
   ) {
     return this.portal.acknowledgePolicy(
       this.tenant(req),
@@ -269,6 +336,10 @@ export class StudentPortalController {
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    const tenantId = req.user.tenant_id?.trim();
+    if (!tenantId) {
+      throw new ForbiddenException('Tenant context required');
+    }
+    return tenantId;
   }
 }

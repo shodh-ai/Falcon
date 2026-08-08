@@ -135,6 +135,33 @@ export class PlacementService {
     };
   }
 
+  async dashboard(tenantId?: string) {
+    const tid = this.tenant(tenantId);
+    const companies = await this.db.query(
+      `SELECT COUNT(*)::int AS count FROM placement_companies WHERE tenant_id = $1`,
+      [tid],
+    );
+    let driveCount = 0;
+    let jobCount = 0;
+    try {
+      const drives = await this.drives(tid, false, { limit: 1, offset: 0 });
+      driveCount = Number(drives.total ?? 0);
+    } catch {
+      driveCount = 0;
+    }
+    try {
+      const jobs = await this.jobs(tid);
+      jobCount = Array.isArray(jobs) ? jobs.length : 0;
+    } catch {
+      jobCount = 0;
+    }
+    return {
+      companies: Number(companies[0]?.count ?? 0),
+      drives: driveCount,
+      jobs: jobCount,
+    };
+  }
+
   companies(tenantId?: string) {
     return this.db.query(
       `SELECT * FROM placement_companies WHERE tenant_id = $1 ORDER BY created_at DESC`,

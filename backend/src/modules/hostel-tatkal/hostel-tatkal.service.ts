@@ -13,6 +13,7 @@ import {
   BED_LOCK_TTL_SEC,
 } from '../../common/constants/hostel-tatkal.constants';
 import { RedisService } from '../../core/redis/redis.service';
+import { GatewayPaymentService } from '../finance/gateway-payment.service';
 import { HostelTatkalGateway } from './hostel-tatkal.gateway';
 
 const HOSTEL_BOOKING_FEE_INR = 5000;
@@ -25,6 +26,7 @@ export class HostelTatkalService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly redis: RedisService,
     private readonly gateway: HostelTatkalGateway,
+    private readonly gatewayPayments: GatewayPaymentService,
   ) {}
 
   private broadcastBed(tenantId: string, bedId: string, status: string) {
@@ -257,21 +259,30 @@ export class HostelTatkalService {
       );
     }
 
-    const orderId = `hostel_${holdId.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+    const order = await this.gatewayPayments.createOrder({
+      amountInr: HOSTEL_BOOKING_FEE_INR,
+      receipt: `hostel_${holdId.replace(/-/g, '').slice(0, 20)}`,
+      notes: {
+        hold_id: holdId,
+        fee_head: 'HOSTEL_BOOKING',
+        student_user_id: studentUserId,
+        tenant_id: tenantId,
+      },
+    });
     await this.dataSource.query(
       `UPDATE hostel_booking_holds SET gateway_order_id = $2 WHERE hold_id = $1`,
-      [holdId, orderId],
+      [holdId, order.order_id],
     );
 
     return {
-      order_id: orderId,
+      order_id: order.order_id,
       hold_id: holdId,
       amount_inr: HOSTEL_BOOKING_FEE_INR,
-      amount_paise: HOSTEL_BOOKING_FEE_INR * 100,
+      amount_paise: order.amount_paise,
       currency: 'INR',
       fee_head: 'HOSTEL_BOOKING',
-      razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
-      mock: true,
+      razorpay_key: order.razorpay_key,
+      mock: order.mock,
       notes: {
         hold_id: holdId,
         fee_head: 'HOSTEL_BOOKING',
@@ -376,6 +387,13 @@ export class HostelTatkalService {
     holdId: string,
     paymentRef: string,
   ) {
+    const hold = await this.getHold(tenantId, studentUserId, holdId);
+    await this.gatewayPayments.verifyPayment({
+      paymentId: paymentRef,
+      expectedAmountPaise: HOSTEL_BOOKING_FEE_INR * 100,
+      expectedOrderId: hold.gateway_order_id ?? null,
+      expectedStudentUserId: studentUserId,
+    });
     return this.finalizeBooking(tenantId, studentUserId, holdId, paymentRef);
   }
 
@@ -386,6 +404,7 @@ export class HostelTatkalService {
     holdId: string,
     paymentId: string,
   ) {
+    // Webhook path already authenticated via HMAC.
     return this.finalizeBooking(tenantId, studentUserId, holdId, paymentId);
   }
 

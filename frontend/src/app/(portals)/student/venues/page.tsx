@@ -165,7 +165,7 @@ export default function StudentVenuesPage() {
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
-        title="Venue Booking"
+        title="Book Venue"
         description="Book GD rooms, classrooms, and seminar halls for academic group work. Slots are locked on approval."
       />
 

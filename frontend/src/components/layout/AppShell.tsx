@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -65,6 +65,11 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const mobileItems = launchConfig.mobileNavItems ?? launchConfig.commandItems.slice(0, 4);
   const mobileHrefs = mobileItems.map((item) => item.href);
 
+  // Close the mobile drawer after route changes (sidebar Link navigation).
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
   const sidebar = (
     <AppSidebar
       personaLabel={launchConfig.personaLabel}
@@ -76,14 +81,14 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   );
 
   return (
-    <div className="bg-sgvu-surface">
+    <div className="min-w-0 overflow-x-hidden bg-sgvu-surface">
       <div className="fixed inset-y-0 left-0 z-30 hidden h-svh min-h-0 overflow-hidden lg:block">
         {sidebar}
       </div>
 
       <div
         className={cn(
-          'flex h-svh flex-col overflow-hidden transition-[padding] duration-200',
+          'flex h-svh min-w-0 flex-col overflow-hidden transition-[padding] duration-200',
           collapsed ? 'lg:pl-[var(--sidebar-width-collapsed)]' : 'lg:pl-[var(--sidebar-width)]',
         )}
       >
@@ -99,8 +104,8 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
 
         {/* Below lg the bottom padding clears the fixed mobile nav; at lg+ the wrapper's own
             py already provides ~20px, so only a small extra keeps total trailing space ≈32px. */}
-        <main className="min-h-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-3">
-          <div className={cn('mx-auto w-full px-3 py-4 sm:px-6 sm:py-5', contentMaxWidthClass)}>
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-3">
+          <div className={cn('mx-auto w-full min-w-0 px-3 py-3 sm:px-5 sm:py-5 lg:px-6', contentMaxWidthClass)}>
             {children}
           </div>
         </main>
@@ -120,7 +125,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
                 <Link
                   href={item.href}
                   className={cn(
-                    'flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-2 text-[10px] font-semibold touch-target transition-colors',
+                    'flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-2 text-[10px] font-semibold touch-target transition-colors',
                     active
                       ? 'bg-sgvu-navy/8 text-sgvu-navy'
                       : 'text-muted-foreground hover:text-sgvu-navy',

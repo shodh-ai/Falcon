@@ -71,14 +71,19 @@ export function RazorpayCheckout({
   onSuccess,
 }: RazorpayCheckoutProps) {
   const [processing, setProcessing] = useState(false);
-  const [mode, setMode] = useState<'loading' | 'native' | 'sandbox'>('loading');
+  const [mode, setMode] = useState<'loading' | 'native' | 'sandbox' | 'error'>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const attempted = useRef(false);
 
   const isSandboxKey = !order.razorpay_key || order.razorpay_key.startsWith('sandbox_');
 
   const openNativeCheckout = useCallback(() => {
     const Razorpay = (window as unknown as { Razorpay: new (opts: Record<string, unknown>) => { open: () => void } }).Razorpay;
-    if (!Razorpay) { setMode('sandbox'); return; }
+    if (!Razorpay) {
+      setErrorMessage('Payment gateway script failed to initialize. Close and try again.');
+      setMode('error');
+      return;
+    }
 
     const options = {
       key: order.razorpay_key,
@@ -119,14 +124,22 @@ export function RazorpayCheckout({
         setMode('native');
         openNativeCheckout();
       } else {
-        setMode('sandbox');
+        // Never fall back to sandbox when a live key was issued — that would forge pay_sandbox_* ids.
+        setErrorMessage(
+          'Could not load the payment gateway. Check your network, then close and try again.',
+        );
+        setMode('error');
       }
     });
   }, [open, isSandboxKey, openNativeCheckout]);
 
   // Reset on close
   useEffect(() => {
-    if (!open) { attempted.current = false; setMode('loading'); }
+    if (!open) {
+      attempted.current = false;
+      setMode('loading');
+      setErrorMessage(null);
+    }
   }, [open]);
 
   if (!open) return null;
@@ -148,7 +161,30 @@ export function RazorpayCheckout({
     );
   }
 
-  // ── Sandbox fallback ──
+  if (mode === 'error') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-sgvu-navy/40 p-4 backdrop-blur-sm">
+        <Card className="w-full max-w-md shadow-2xl">
+          <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+            <CardTitle className="text-lg text-sgvu-navy">Payment unavailable</CardTitle>
+            <button type="button" onClick={onClose} className="rounded-full p-1 hover:bg-muted">
+              <X className="h-4 w-4" />
+            </button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {errorMessage ?? 'Could not start checkout.'}
+            </p>
+            <Button type="button" className="w-full bg-sgvu-navy" onClick={onClose}>
+              Close
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── Sandbox (only when backend issued a sandbox_* key via ALLOW_MOCK_PAYMENTS) ──
   async function sandboxPay() {
     setProcessing(true);
     try {

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
-export default function StudentGatePassRedirect() {
-  redirect('/student/hostel');
+export default function GatePassRedirectPage() {
+  redirect('/student/campus-life');
 }

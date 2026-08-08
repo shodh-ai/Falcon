@@ -752,7 +752,23 @@ export function canRoleAccessPath(
     .sort((a, b) => b.length - a.length)
     .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
-  if (!portal) return true;
+  // Shared authenticated surfaces (not portal-prefixed). Deny unknown roots.
+  if (!portal) {
+    const sharedAllow = [
+      '/notifications',
+      '/directory',
+      '/account',
+      '/ess',
+      '/campus-admin',
+      '/super-admin',
+    ];
+    return (
+      roles.length > 0 &&
+      sharedAllow.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+      )
+    );
+  }
   if (portal === '/hr') {
     const inPortalRoles = roles.some((role) => portalRoles[portal].includes(role));
     if (!inPortalRoles && !hasAnyHrCapability(hrCapabilities) && !permissions?.length) return false;
