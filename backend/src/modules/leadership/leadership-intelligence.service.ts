@@ -355,7 +355,8 @@ export class LeadershipIntelligenceService {
     const rows = await this.db.query(
       `SELECT brief_date, bullets, generated_at
        FROM owner_daily_briefs
-       WHERE tenant_id = $1 AND brief_date = $2::date
+       WHERE tenant_id = $1
+       ORDER BY (brief_date = $2::date) DESC, brief_date DESC
        LIMIT 1`,
       [tid, today],
     );

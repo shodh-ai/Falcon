@@ -91,6 +91,7 @@ export default function StudentEcellPage() {
   const [founderTab, setFounderTab] = useState<FounderTab>('dashboard');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [applyingFilter, setApplyingFilter] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [projects, setProjects] = useState<EcellProject[]>([]);
   const [founderStatus, setFounderStatus] = useState<EcellFounderStatus | null>(null);
@@ -180,6 +181,21 @@ export default function StudentEcellPage() {
     }
   }
 
+  async function applyHackerFilter() {
+    setApplyingFilter(true);
+    try {
+      await ecellApi.applyFellowship({
+        linked_project_id: projects[0]?.project_id,
+        paid_stipend_inr: 25000,
+      });
+      toast.success('Hacker Filter trial started (30 days)');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start trial');
+    } finally {
+      setApplyingFilter(false);
+    }
+  }
+
   if (loading) return <StudentLoadingState label="Loading E-Cell hub…" />;
 
   if (founderUnlocked && founderProject) {
@@ -227,6 +243,15 @@ export default function StudentEcellPage() {
       <StudentPageHeader
         title="Innovation Hub"
         description="Pitch your startup idea, track multi-tier approvals, and receive grant funding through Falcon ERP."
+        actions={
+          <Button
+            variant="outline"
+            disabled={applyingFilter}
+            onClick={() => void applyHackerFilter()}
+          >
+            {applyingFilter ? 'Starting…' : 'Apply Hacker Filter (30-day)'}
+          </Button>
+        }
       />
 
       <StudentTabBar

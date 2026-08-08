@@ -66,6 +66,7 @@ function EnrollmentCard({ enrollment, registered }: { enrollment: EnrollmentRow;
 export default function StudentRegistrationPage() {
   const api = useAuthedApi();
   const [data, setData] = useState<RegistrationData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedElectives, setSelectedElectives] = useState<string[]>([]);
   const [registering, setRegistering] = useState(false);
   const [loading, setLoading] = useState(true);

@@ -28,6 +28,18 @@ type AuthUser = {
   roles?: string[];
 };
 
+const FINANCE_RND_BUDGET_ROLES = [
+  'Accountant',
+  'CFO',
+  'APManager',
+  'APClerk',
+  'FinanceController',
+  'Dean',
+  'SuperAdmin',
+  'CampusAdmin',
+  'IQAC',
+] as const;
+
 @Controller('api/academic-rnd')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AcademicRndController {
@@ -38,7 +50,7 @@ export class AcademicRndController {
   }
 
   @Get('config/active')
-  @Roles('Student', 'Faculty', 'IQAC', 'Dean', 'SuperAdmin', 'Accountant')
+  @Roles('Student', 'Faculty', 'IQAC', 'Dean', 'SuperAdmin', ...FINANCE_RND_BUDGET_ROLES)
   activeConfig(@Req() req: { user: AuthUser }) {
     return this.rnd.getActiveConfig(this.tenant(req));
   }
@@ -108,13 +120,13 @@ export class AcademicRndController {
   }
 
   @Get('approvals/budget/pending')
-  @Roles('Accountant', 'Dean', 'SuperAdmin', 'IQAC')
+  @Roles(...FINANCE_RND_BUDGET_ROLES)
   budgetQueue(@Req() req: { user: AuthUser }) {
     return this.rnd.listBudgetQueue(this.tenant(req));
   }
 
   @Post('approvals/budget/:id/approve')
-  @Roles('Accountant', 'Dean', 'SuperAdmin')
+  @Roles(...FINANCE_RND_BUDGET_ROLES)
   approveBudget(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
@@ -124,7 +136,7 @@ export class AcademicRndController {
   }
 
   @Post('approvals/budget/:id/reject')
-  @Roles('Accountant', 'Dean', 'SuperAdmin')
+  @Roles(...FINANCE_RND_BUDGET_ROLES)
   rejectBudget(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,

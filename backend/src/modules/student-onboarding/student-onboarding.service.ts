@@ -12,6 +12,7 @@ import { OnboardingVerificationNotifyService } from '../../core/notifications/on
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import {
   getDashboardPathForRoleName,
+  getOnboardingResubmitPathForRoleName,
   getRequiredDocTypes,
   resolveOnboardingPortalKind,
   type OnboardingPortalKind,
@@ -671,7 +672,7 @@ export class StudentOnboardingService {
         studentName: user.name,
         officialEmail: user.official_email,
         remarks: reason,
-        dashboardPath: getDashboardPathForRoleName(user.role_name),
+        dashboardPath: getOnboardingResubmitPathForRoleName(user.role_name),
       });
 
       if (actor?.userId) {

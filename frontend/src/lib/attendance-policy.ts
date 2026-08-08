@@ -6,6 +6,7 @@ export const EXEMPTION_REASONS = [
   { value: 'ACCIDENT', label: 'Accident' },
   { value: 'INTERNSHIP', label: 'Internship' },
   { value: 'BEREAVEMENT', label: 'Bereavement' },
+  { value: 'ELITE_FELLOW', label: 'Elite Fellow (UROP waiver)' },
   { value: 'OTHER', label: 'Other' },
 ] as const;
 

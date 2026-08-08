@@ -23,6 +23,17 @@ import { ConfirmEventRegistrationDto } from './dto/confirm-registration.dto';
 
 type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
 
+/** Finance desk — club event fund transfers after Dean sign-off. */
+const FINANCE_EVENT_FUNDING_ROLES = [
+  'Accountant',
+  'CFO',
+  'APManager',
+  'APClerk',
+  'FinanceController',
+  'SuperAdmin',
+  'CampusAdmin',
+] as const;
+
 @Controller('api/campus-events')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class CampusEventsController {
@@ -373,19 +384,19 @@ export class CampusEventsController {
   }
 
   @Get('finance-approvals/pending')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(...FINANCE_EVENT_FUNDING_ROLES)
   financePending(@Req() req: { user: AuthUser }) {
     return this.events.listFinancePending(this.tenant(req));
   }
 
   @Get('funding/pending')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(...FINANCE_EVENT_FUNDING_ROLES)
   fundingPending(@Req() req: { user: AuthUser }) {
     return this.events.listFinancePending(this.tenant(req));
   }
 
   @Post('finance-approvals/:id/approve')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(...FINANCE_EVENT_FUNDING_ROLES)
   financeApprove(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
@@ -400,7 +411,7 @@ export class CampusEventsController {
   }
 
   @Post('funding/:id/transfer')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(...FINANCE_EVENT_FUNDING_ROLES)
   fundingTransfer(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
@@ -415,7 +426,7 @@ export class CampusEventsController {
   }
 
   @Post('finance-approvals/:id/reject')
-  @Roles('Accountant', 'SuperAdmin')
+  @Roles(...FINANCE_EVENT_FUNDING_ROLES)
   financeReject(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,

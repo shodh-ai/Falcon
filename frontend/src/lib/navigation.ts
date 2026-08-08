@@ -85,7 +85,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
-import { rolesMatchForAccess } from '@/lib/campus-admin.roles';
+import { rolesIncludeAny, rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
 export type HrModuleKey =
@@ -113,6 +113,22 @@ export interface NavItem {
   /** Shorter label for mobile bottom nav */
   shortLabel?: string;
 }
+
+/** Cross-portal nav — Blueprint Track 3 (Deep-Tech R&D Moonshots). */
+export const moonshotsNavItem: NavItem = {
+  label: 'Deep-Tech Moonshots',
+  href: '/research/moonshots',
+  icon: Rocket,
+  keywords: [
+    'zero-day',
+    'programmable matter',
+    'quantum',
+    'microfluidics',
+    'moonshots',
+    'deep-tech',
+    'rnd',
+  ],
+};
 
 export interface NavGroup {
   title: string;
@@ -213,6 +229,62 @@ export function withAccountSettingsNav(config: PortalConfig): PortalConfig {
     ...config,
     navGroups: [...config.navGroups, { title: 'Account', items: [settingsItem] }],
     commandItems: commandHasSettings ? config.commandItems : [...config.commandItems, settingsItem],
+  };
+}
+
+export function portalHasDofaInboxLink(config: PortalConfig): boolean {
+  const items = [
+    ...config.navGroups.flatMap((group) => group.items),
+    ...config.commandItems,
+    ...(config.mobileNavItems ?? []),
+  ];
+  return items.some(
+    (item) =>
+      item.href.includes('/dofa-inbox') ||
+      /dofa inbox \(universal\)/i.test(item.label),
+  );
+}
+
+/** Inject universal DOFA inbox link when this portal lacks one but the user can approve. */
+export function withRoleAwareDofaInboxNav(
+  config: PortalConfig,
+  inboxHref: string | null,
+): PortalConfig {
+  if (!inboxHref || portalHasDofaInboxLink(config)) return config;
+
+  const inboxItem: NavItem = {
+    label: 'DOFA Inbox (Universal)',
+    href: inboxHref,
+    icon: Inbox,
+    keywords: ['write-off', 'grade change', 'hire', 'approve', 'asset', 'dofa'],
+    shortLabel: 'DOFA',
+  };
+
+  const navGroups = config.navGroups.map((group, index) =>
+    index === 0
+      ? {
+          ...group,
+          items: [inboxItem, ...group.items.filter((item) => item.href !== inboxHref)],
+        }
+      : group,
+  );
+
+  const commandItems = [
+    inboxItem,
+    ...config.commandItems.filter((item) => item.href !== inboxHref),
+  ];
+
+  const mobileNavItems = (
+    config.mobileNavItems ?? config.commandItems.slice(0, 4)
+  )
+    .filter((item) => item.href !== inboxHref);
+  mobileNavItems.unshift(inboxItem);
+
+  return {
+    ...config,
+    navGroups,
+    commandItems,
+    mobileNavItems: mobileNavItems.slice(0, 4),
   };
 }
 
@@ -525,6 +597,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Weekly Tests Configuration', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
+        { label: 'Grade Change DOFA', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
 
       ],
@@ -547,12 +620,14 @@ export const facultyPortal: PortalConfig = {
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
         { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
         { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
+        moonshotsNavItem,
       ],
     },
     {
       title: 'Administration',
       items: [
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave'] },
+        { label: 'DOFA Inbox (Universal)', href: '/faculty/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals'] },
         { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
         { label: 'Placement Coordinator', href: '/faculty/placement-coordinator', icon: Briefcase, keywords: ['placement', 'drives', 'coordinator', 'attendance'] },
@@ -574,6 +649,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
         { label: 'Weekly Tests Configuration', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
+        { label: 'Grade Change DOFA', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe'] },
         { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
 
       ],
@@ -596,6 +672,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
         { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
         { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
+        moonshotsNavItem,
       ],
     },
     {
@@ -633,6 +710,7 @@ export const hrPortal: PortalConfig = {
       items: [
         { label: 'Attendance & Biometrics', href: '/hr/attendance', icon: Timer, keywords: ['matrix', 'punch', 'late', 'half day'], hrModule: 'attendance' },
         { label: 'Pending on Me', href: '/hr/inbox', icon: Inbox, keywords: ['approve', 'inbox', 'pending', 'workflow'], roles: ['HR', 'HRAdmin', 'Faculty', 'HOD', 'Dean', 'SuperAdmin'] },
+        { label: 'DOFA Inbox (Universal)', href: '/hr/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'headcount', 'hire'] },
         { label: 'Meetings', href: '/hr/meetings', icon: CalendarClock, keywords: ['schedule', 'minutes', 'agenda'] },
         { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, keywords: ['cl', 'sl', 'el', 'maternity', 'approval', 'balances'], hrModule: 'leaves' },
       ],
@@ -769,6 +847,10 @@ export const hodPortal: PortalConfig = {
         { label: 'Department Analytics', href: '/hod/reports', icon: LineChart, keywords: ['analytics', 'reports', 'trends', 'departmental'] },
       ],
     },
+    {
+      title: 'Research & Innovation',
+      items: [moonshotsNavItem],
+    },
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
@@ -874,6 +956,8 @@ export const deanPortal: PortalConfig = {
       title: 'Approvals',
       items: [
         { label: 'Dean Inbox', href: '/dean/inbox', icon: Inbox, keywords: ['approve', 'escalation'] },
+        { label: 'DOFA Purchase Approvals', href: '/dean/approvals/dofa', icon: Scale, keywords: ['p2p', 'dofa', 'procurement', 'dean'] },
+        { label: 'Universal DOFA Inbox', href: '/dean/approvals/dofa-inbox', icon: Inbox, keywords: ['grade change', 'hire', 'cross department'] },
         { label: 'Attendance Policy', href: '/dean/attendance-policy', icon: Scale, keywords: ['threshold', '75', '70', '65', 'relax', 'minimum attendance'] },
         { label: 'Event Approvals', href: '/dean/events', icon: PartyPopper, keywords: ['club', 'campus events'] },
         { label: 'Meetings', href: '/dean/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'faculty', 'minutes'] },
@@ -886,6 +970,7 @@ export const deanPortal: PortalConfig = {
         { label: 'Faculty Leaderboard', href: '/dean/faculty/leaderboard', icon: Medal, keywords: ['performance', 'ranking', 'api'] },
         { label: 'Placement Dashboard', href: '/dean/placement', icon: Briefcase, keywords: ['placement', 'offers', 'companies'] },
         { label: 'Research Dashboard', href: '/dean/research', icon: Microscope, keywords: ['publications', 'grants', 'projects'] },
+        moonshotsNavItem,
         { label: 'Budget Monitoring', href: '/dean/budget', icon: Wallet, keywords: ['budget', 'spend', 'allocation'] },
         { label: 'Executive Reports', href: '/dean/reports', icon: FileText, keywords: ['export', 'pdf', 'excel', 'csv'] },
         { label: 'Global Search', href: '/dean/search', icon: Search, keywords: ['find', 'lookup', 'directory'] },
@@ -945,6 +1030,7 @@ export const deanPortal: PortalConfig = {
         { label: 'Faculty Leaderboard', href: '/dean/faculty/leaderboard', icon: Medal, keywords: ['leaderboard'] },
         { label: 'Placement Dashboard', href: '/dean/placement', icon: Briefcase, keywords: ['placement'] },
         { label: 'Research Dashboard', href: '/dean/research', icon: Microscope, keywords: ['research'] },
+        moonshotsNavItem,
         { label: 'Budget Monitoring', href: '/dean/budget', icon: Wallet, keywords: ['budget'] },
         { label: 'Executive Reports', href: '/dean/reports', icon: FileText, keywords: ['reports'] },
         { label: 'Global Search', href: '/dean/search', icon: Search, keywords: ['search'] },
@@ -1061,7 +1147,19 @@ export const incubationPortal: PortalConfig = {
           label: 'Mentor Network',
           href: '/incubation/mentors',
           icon: Handshake,
-          keywords: ['alumni', 'industry', 'experts'],
+          keywords: ['alumni', 'industry', 'experts', 'wrangler'],
+        },
+        {
+          label: 'Fellowships',
+          href: '/incubation/fellowships',
+          icon: Timer,
+          keywords: ['hacker filter', 'trial', 'elite fellow'],
+        },
+        {
+          label: 'IP Agreements',
+          href: '/incubation/ip',
+          icon: FileLock,
+          keywords: ['founder first', 'equity', 'reversion', 'patent'],
         },
       ],
     },
@@ -1090,6 +1188,8 @@ export const incubationPortal: PortalConfig = {
     { label: 'Active Portfolio', href: '/incubation/portfolio', icon: Briefcase },
     { label: 'Grant Management', href: '/incubation/grants', icon: DollarSign },
     { label: 'Mentor Network', href: '/incubation/mentors', icon: Handshake },
+    { label: 'Fellowships', href: '/incubation/fellowships', icon: Timer },
+    { label: 'IP Agreements', href: '/incubation/ip', icon: FileLock },
     { label: 'Cohort Settings', href: '/incubation/settings/cohort', icon: Settings },
     { label: 'NAAC / NIRF Export', href: '/incubation/reports', icon: FileSpreadsheet },
   ],
@@ -1097,6 +1197,15 @@ export const incubationPortal: PortalConfig = {
 
 /** @deprecated Use incubationPortal — legacy alias for redirects */
 export const ecellAdminPortal = incubationPortal;
+
+const FINANCE_DESK_ROLES = [...FINANCE_DESK_ROLE_NAMES];
+const PROCUREMENT_P2P_ROLES = [
+  'Procurement',
+  'ProcurementHead',
+  'ProcurementBuyer',
+  'SuperAdmin',
+  'CampusAdmin',
+] as const;
 
 export const financePortal: PortalConfig = {
   personaLabel: 'Finance Office',
@@ -1106,47 +1215,66 @@ export const financePortal: PortalConfig = {
     {
       title: 'Overview',
       items: [
-        { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, keywords: ['cash flow', 'collection', 'budget'] },
+        {
+          label: 'Finance Dashboard',
+          href: '/finance/dashboard',
+          icon: LayoutDashboard,
+          keywords: ['cash flow', 'collection', 'budget'],
+          roles: FINANCE_DESK_ROLES,
+        },
       ],
     },
     {
       title: 'Receivables (Student Revenue)',
       items: [
-        { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'] },
-        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'] },
-        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'] },
-        { label: 'Cheque Clearing', href: '/finance/cheque-clearing', icon: Banknote, keywords: ['cheque', 'bounce', 'deposit'] },
-        { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'] },
-        { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'] },
-        { label: 'R&D Grant Budget Review', href: '/finance/rnd-budget', icon: FlaskConical, keywords: ['research', 'grant', 'budget'] },
-        { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'] },
+        { label: 'Fee Structures & Demands', href: '/finance/fee-structures', icon: Wallet, keywords: ['template', 'batch', 'invoice'], roles: FINANCE_DESK_ROLES },
+        { label: 'Enrolled Students Payment status', href: '/finance/enrolled-students', icon: Users, keywords: ['receipts', 'fee', 'payment', 'students'], roles: FINANCE_DESK_ROLES },
+        { label: 'Grievance Escalations', href: '/finance/grievances', icon: LifeBuoy, keywords: ['finance', 'ticket', 'escalation'], roles: FINANCE_DESK_ROLES },
+        { label: 'Cheque Clearing', href: '/finance/cheque-clearing', icon: Banknote, keywords: ['cheque', 'bounce', 'deposit'], roles: FINANCE_DESK_ROLES },
+        { label: 'Club Event Fund Transfers', href: '/finance/events', icon: Ticket, keywords: ['events', 'clubs', 'transfer', 'funds'], roles: FINANCE_DESK_ROLES },
+        { label: 'Incubation Grant Payouts', href: '/finance/incubation-payouts', icon: Rocket, keywords: ['ecell', 'startup', 'disburse'], roles: FINANCE_DESK_ROLES },
+        { label: 'R&D Grant Budget Review', href: '/finance/rnd-budget', icon: FlaskConical, keywords: ['research', 'grant', 'budget'], roles: FINANCE_DESK_ROLES },
+        { label: 'Scholarships & Waivers', href: '/finance/scholarships', icon: Award, keywords: ['discount', 'waiver'], roles: FINANCE_DESK_ROLES },
       ],
     },
     {
       title: 'Payables & Expenses',
       items: [
-        { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'] },
-        { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'] },
-        { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'] },
-        { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'] },
+        { label: 'Vendor Master', href: '/finance/vendors', icon: Building2, keywords: ['gstin', 'tds', 'supplier'], roles: [...FINANCE_DESK_ROLES, 'ProcurementHead'] },
+        { label: 'Expense Heads & Bills', href: '/finance/expenses', icon: Receipt, keywords: ['gst', 'invoice', 'maintenance'], roles: FINANCE_DESK_ROLES },
+        { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'], roles: [...FINANCE_DESK_ROLES, ...PROCUREMENT_P2P_ROLES] },
+        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'requestor', 'maker', 'pr'], roles: ['LabAdmin', 'HOD', 'Faculty', 'Warden', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, keywords: ['sourcing', 'quotes', 'gst'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['hierarchy', 'joint committee'], roles: ['HOD', 'Dean', 'ProcurementHead', 'FinanceController', 'CFO', 'COO', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'LabAdmin', 'HOD', 'Faculty', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Goods Receipt (GRN)', href: '/finance/grn', icon: Archive, keywords: ['grn', 'stores', 'barcode'], roles: ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'AP Desk', href: '/finance/ap-desk', icon: Banknote, keywords: ['3-way', 'pay', 'neft'], roles: ['APManager', 'APClerk', 'CFO', 'Accountant', 'FinanceController', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'DOFA Inbox (Universal)', href: '/finance/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'cross domain'], roles: ['COO', 'CFO', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Digital DOFA', href: '/finance/dofa', icon: Scale, keywords: ['delegation', 'financial authority', 'limits'], roles: ['COO', 'CFO', 'Accountant', 'FinanceController', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin', 'HOD', 'Dean'] },
+        { label: 'Policy Vault (Dual-Key)', href: '/finance/dofa-policy-vault', icon: Shield, keywords: ['constitution', 'workflow engine', 'cfo unlock', 'audit'], roles: FINANCE_DESK_ROLES },
+        { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'invoice split', 'l2'], roles: ['COO', 'CFO', 'InternalAuditor', 'ProcurementHead', 'Chairman', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, keywords: ['project', 'funding', 'hod', 'faculty'], roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
+        { label: 'Salary Processing', href: '/finance/salary-processing', icon: Landmark, keywords: ['neft', 'rtgs', 'payroll'], roles: FINANCE_DESK_ROLES },
       ],
     },
     {
       title: 'Core Accounting',
       items: [
-        { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'] },
-        { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'] },
-        { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'] },
+        { label: 'Ledger Accounts', href: '/finance/ledger', icon: BookMarked, keywords: ['double entry', 'chart of accounts'], roles: FINANCE_DESK_ROLES },
+        { label: 'Budget Allocation', href: '/finance/budgets', icon: TrendingUp, keywords: ['department', 'utilization'], roles: FINANCE_DESK_ROLES },
+        { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, keywords: ['trial balance', 'gstr', 'day book'], roles: FINANCE_DESK_ROLES },
       ],
     },
   ],
   commandItems: [
-    { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard },
-    { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet },
-    { label: 'Collections', href: '/finance/collections', icon: Banknote },
-    { label: 'Vendors', href: '/finance/vendors', icon: Building2 },
-    { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt },
-    { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet },
+    { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, roles: [...PROCUREMENT_P2P_ROLES] },
+    { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, roles: [...PROCUREMENT_P2P_ROLES, 'LabAdmin', 'HOD', 'Faculty'] },
+    { label: 'Finance Dashboard', href: '/finance/dashboard', icon: LayoutDashboard, roles: FINANCE_DESK_ROLES },
+    { label: 'Fee Structures', href: '/finance/fee-structures', icon: Wallet, roles: FINANCE_DESK_ROLES },
+    { label: 'Collections', href: '/finance/collections', icon: Banknote, roles: FINANCE_DESK_ROLES },
+    { label: 'Vendors', href: '/finance/vendors', icon: Building2, roles: [...FINANCE_DESK_ROLES, 'ProcurementHead'] },
+    { label: 'Project Funding Requests', href: '/finance/funding-requests', icon: Receipt, roles: [...FINANCE_DESK_ROLES, 'HOD', 'Faculty'] },
+    { label: 'Audit Reports', href: '/finance/audit-reports', icon: FileSpreadsheet, roles: FINANCE_DESK_ROLES },
   ],
 };
 
@@ -1292,6 +1420,7 @@ export const researchPortal: PortalConfig = {
         { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText, keywords: ['thesis', 'viva', 'synopsis'], roles: ['RRC_MEMBER', 'SuperAdmin'] },
         { label: 'Adjudicator Reviews', href: '/research/adjudicator/reviews', icon: Scale, keywords: ['synopsis', 'thesis', 'evaluation'], roles: ['PHD_ADJUDICATOR', 'SuperAdmin'] },
         { label: 'Research Grants', href: '/research/grants', icon: FlaskConical, keywords: ['grants', 'funding'], roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Chairman'] },
+        { ...moonshotsNavItem, roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Dean', 'HOD', 'LabAdmin', 'Wrangler'] },
       ],
     },
   ],
@@ -1300,6 +1429,7 @@ export const researchPortal: PortalConfig = {
     { label: 'RAC Reviews', href: '/research/rac/reviews', icon: Users },
     { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText },
     { label: 'Scholar Pipeline', href: '/research/scholars', icon: GraduationCap },
+    moonshotsNavItem,
   ],
 };
 
@@ -1332,6 +1462,7 @@ export const examCellPortal: PortalConfig = {
         { label: 'Exam Centres & Rooms', href: '/exam-cell/exam-centres', icon: DoorOpen, keywords: ['building', 'hall', 'capacity'] },
         { label: 'Admit Card Engine', href: '/exam-cell/admit-cards', icon: Ticket, keywords: ['hall ticket', 'admit'] },
         { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck, keywords: ['exemption', 'low attendance'] },
+        { label: 'Product Viva Panel', href: '/exam-cell/product-viva', icon: Users, keywords: ['product viva', 'urop', 'industry', 'shodh'] },
         { label: 'Seating Planner', href: '/exam-cell/seating', icon: ClipboardList, keywords: ['seating', 'rooms', 'ai'] },
         { label: 'Published Seating Plans', href: '/exam-cell/seating-plans', icon: ClipboardList, keywords: ['published seating'] },
         { label: 'Resource Allocation', href: '/exam-cell/resource-allocation', icon: LayoutGrid, keywords: ['coordinator', 'room'] },
@@ -1348,11 +1479,13 @@ export const examCellPortal: PortalConfig = {
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
+        { label: 'Grade Change DOFA', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa', 'grade change', 'coe approval'] },
         { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
         { label: 'UFM Malpractice Desk', href: '/exam-cell/ufm-cases', icon: Shield, keywords: ['cheating', 'unfair means'] },
         { label: 'Degree & Transcripts', href: '/exam-cell/transcripts', icon: Award, keywords: ['digilocker', 'abc id'] },
+        { label: 'Portfolio Transcripts', href: '/exam-cell/portfolio-transcripts', icon: Briefcase, keywords: ['github', 'patents', 'hardware', 'portfolio degree'] },
         { label: 'Degree Eligibility Audit', href: '/exam-cell/degree-audit', icon: FileCheck2, keywords: ['credits', 'cgpa', 'clearance'] },
         { label: 'Examination Reports', href: '/exam-cell/reports', icon: BarChart3, keywords: ['pass percentage', 'rankers'] },
         { label: 'Advanced Analytics', href: '/exam-cell/analytics', icon: PieChart, keywords: ['management', 'charts', 'export'] },
@@ -1448,22 +1581,42 @@ export const leadershipPortal: PortalConfig = {
       title: 'Command Center',
       items: [
         { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard, keywords: ['morning briefing', 'overview', 'kpi', 'home'] },
+        { label: 'Org Chart', href: '/leadership/org-chart', icon: Network, keywords: ['pillars', 'reporting', 'cfo', 'coo', 'dofa'] },
+        { label: 'Exceptions', href: '/leadership/exceptions', icon: TriangleAlert, keywords: ['dofa', 'management by exception', 'sla', 'escalate'] },
+        {
+          label: 'DOFA Inbox (Universal)',
+          href: '/leadership/dofa-inbox',
+          icon: Inbox,
+          keywords: ['write-off', 'asset', 'grade change', 'hire', 'approve', 'pending'],
+        },
+        {
+          label: 'Fabless Work Orders',
+          href: '/operations/fabless-work-orders',
+          icon: Network,
+          keywords: ['ceeri', 'istem', 'mnit', 'tokamak', 'partner', 'labs'],
+          roles: ['COO', 'SuperAdmin', 'CampusAdmin'],
+        },
+        { label: 'DOFA Policy Vault', href: '/leadership/dofa-policy-vault', icon: Scale, keywords: ['constitution', 'dual-key', 'audit stone', 'who holds the pen'] },
+        { label: 'MOU Approvals', href: '/leadership/mou-approvals', icon: ScrollText, keywords: ['legal', 'mou', 'ceeri', 'vault'] },
         { label: 'Approvals', href: '/leadership/approvals', icon: CheckSquare, keywords: ['inbox', 'approve', 'reject', 'workflow', 'po', 'waiver'] },
         { label: 'Financials', href: '/leadership/financial-oversight', icon: Landmark, keywords: ['budget', 'treasury', 'cash', 'revenue', 'defaulters'] },
         { label: 'Academics', href: '/leadership/academics', icon: GraduationCap, keywords: ['attendance', 'naac', 'placements', 'admissions'] },
         { label: 'Reports', href: '/leadership/intelligence', icon: LineChart, keywords: ['analytics', 'versus', 'forecast', 'ai', 'insights'] },
+        { label: 'Action Center', href: '/leadership/action-center', icon: Target, keywords: ['tasks', 'memos', 'approvals', 'executive'] },
+        { label: 'Admissions Funnel', href: '/leadership/admissions-funnel', icon: TrendingUp, keywords: ['golden ticket', 'gladiator', 'leads', 'enrollment'] },
         { label: 'Vault', href: '/leadership/vault', icon: FileLock, keywords: ['documents', 'mou', 'legal', 'audit'] },
       ],
     },
   ],
   mobileNavItems: [
     { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard, shortLabel: 'Home' },
+    { label: 'DOFA Inbox', href: '/leadership/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
     { label: 'Approvals', href: '/leadership/approvals', icon: CheckSquare, shortLabel: 'Inbox' },
     { label: 'Financials', href: '/leadership/financial-oversight', icon: Landmark, shortLabel: 'Finance' },
-    { label: 'Academics', href: '/leadership/academics', icon: GraduationCap, shortLabel: 'Academic' },
   ],
   commandItems: [
     { label: 'Dashboard', href: '/leadership/overview', icon: LayoutDashboard },
+    { label: 'DOFA Inbox (Universal)', href: '/leadership/dofa-inbox', icon: Inbox },
     { label: 'Approvals Inbox', href: '/leadership/approvals', icon: CheckSquare },
     { label: 'Financial Oversight', href: '/leadership/financial-oversight', icon: Landmark },
     { label: 'Cash Flow', href: '/leadership/finance', icon: Wallet },
@@ -1476,8 +1629,11 @@ export const leadershipPortal: PortalConfig = {
     { label: 'Result Insights', href: '/leadership/insights', icon: PieChart },
     { label: 'HR Economics', href: '/leadership/hr-ops', icon: Users },
     { label: 'Alumni & Fundraising', href: '/leadership/alumni', icon: Heart },
-    { label: 'Infrastructure', href: '/leadership/infrastructure', icon: Building2 },
-    { label: 'Grievances', href: '/leadership/issues', icon: AlertTriangle },
+        { label: 'Infrastructure', href: '/leadership/infrastructure', icon: Building2 },
+        { label: 'COO Operations', href: '/operations/dashboard', icon: Target },
+        { label: 'Tokamak Labs', href: '/labs/dashboard', icon: Microscope },
+        { label: 'Challenges Funnel', href: '/competitions/funnel', icon: TrendingUp },
+        { label: 'Grievances', href: '/leadership/issues', icon: AlertTriangle },
     { label: 'Automated Insights', href: '/leadership/intelligence', icon: LineChart },
     { label: 'Versus Analytics', href: '/leadership/versus', icon: LineChart },
     { label: 'Strategy Forecast', href: '/leadership/forecasting', icon: TrendingUp },
@@ -1530,6 +1686,7 @@ export const adminOpsPortal: PortalConfig = {
       items: [
         { label: 'Dashboard', href: '/admin-ops/dashboard', icon: LayoutDashboard },
         { label: 'Inventory & Assets', href: '/admin-ops/assets', icon: Archive },
+        { label: 'Asset Lifecycle (ALM)', href: '/admin-ops/asset-lifecycle', icon: Archive, keywords: ['write-off', 'amc', 'calibration', 'dofa'] },
         { label: 'Fleet & Transport', href: '/admin-ops/fleet', icon: Bus },
         { label: 'Transport Hub', href: '/admin-ops/transport', icon: BusFront },
         { label: 'Master Academic Calendar', href: '/admin-ops/calendar', icon: Calendar },
@@ -1728,8 +1885,30 @@ export const adminPortal: PortalConfig = {
         { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },
         { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['CampusAdmin', 'SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
         { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['CampusAdmin', 'SuperAdmin'] },
+        { label: 'DOFA Policy Vault', href: '/admin/dofa-policy-vault', icon: Scale, roles: ['CampusAdmin', 'SuperAdmin'], keywords: ['constitution', 'dual-key', 'workflow'] },
         { label: 'University Directory', href: '/directory', icon: Contact, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'President'] },
         { label: 'Ph.D. Admissions & Awards', href: '/admin/phd/admissions', icon: GraduationCap, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
+        {
+          label: 'HS Direct Admissions',
+          href: '/special-programs/hs-direct',
+          icon: ScrollText,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'AdmissionsOfficer'],
+          keywords: ['hs direct', 'high school', '11th', '12th', 'bypass jee', 'mit-killer'],
+        },
+        {
+          label: 'Portfolio Degree',
+          href: '/special-programs/portfolio',
+          icon: BriefcaseBusiness,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'PoP'],
+          keywords: ['portfolio', 'github', 'transcript'],
+        },
+        {
+          label: 'Wetware Biotech',
+          href: '/special-programs/wetware',
+          icon: FlaskConical,
+          roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'PoP', 'Dean'],
+          keywords: ['wetware', 'biotech', 'biobricks'],
+        },
       ],
     },
   ],
@@ -1797,5 +1976,126 @@ export const adminPortal: PortalConfig = {
       roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
     },
     { label: 'Export Reports', href: '/reports', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'President', 'IQAC', 'Registrar'] },
+  ],
+};
+
+/** Tokamak Labs — LabAdmin workspace */
+export const labsPortal: PortalConfig = {
+  personaLabel: 'Tokamak Labs',
+  personaTitle: 'Hardware Foundry',
+  homeHref: '/labs/dashboard',
+  navGroups: [
+    {
+      title: 'Labs',
+      items: [
+        { label: 'Dashboard', href: '/labs/dashboard', icon: LayoutDashboard, keywords: ['tokamak', 'zones', 'utilization'] },
+        { label: 'Zones & Equipment', href: '/labs/equipment', icon: Microscope, keywords: ['optical', 'cnc', 'gpu', 'zone'] },
+        { label: 'Bookings & Checkout', href: '/labs/bookings', icon: CalendarDays, keywords: ['booking', 'checkout', 'safety'] },
+        { label: 'Tokamak Budget', href: '/labs/budget', icon: Wallet, keywords: ['2 lakh', 'rnd', 'fast path'] },
+        { label: 'Fabless Network', href: '/labs/partners', icon: Network, keywords: ['istem', 'ceeri', 'mnit', 'work order'] },
+        moonshotsNavItem,
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Labs Dashboard', href: '/labs/dashboard', icon: LayoutDashboard },
+    { label: 'Equipment', href: '/labs/equipment', icon: Microscope },
+    { label: 'Bookings', href: '/labs/bookings', icon: CalendarDays },
+    { label: 'Budget', href: '/labs/budget', icon: Wallet },
+    { label: 'Fabless Partners', href: '/labs/partners', icon: Network },
+    moonshotsNavItem,
+  ],
+};
+
+/** Tokamak Challenges — CompetitionAdmin */
+export const competitionsPortal: PortalConfig = {
+  personaLabel: 'Tokamak Challenges',
+  personaTitle: 'Gladiator Competitions',
+  homeHref: '/competitions/dashboard',
+  navGroups: [
+    {
+      title: 'Competitions',
+      items: [
+        { label: 'Dashboard', href: '/competitions/dashboard', icon: LayoutDashboard, keywords: ['gladiator', 'funnel'] },
+        { label: 'Active Challenges', href: '/competitions/challenges', icon: Target, keywords: ['sim-to-real', 'laser', 'junk physics'] },
+        { label: 'Funnel & Golden Tickets', href: '/competitions/funnel', icon: TrendingUp, keywords: ['whitepaper', 'top20', 'poach'] },
+        { label: 'Tokamak Network', href: '/competitions/network', icon: Network, keywords: ['community', 'channels', 'bounties'] },
+        { label: 'Bounties', href: '/competitions/bounties', icon: DollarSign, keywords: ['shodh', 'paid', 'tasks'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Competitions Dashboard', href: '/competitions/dashboard', icon: LayoutDashboard },
+    { label: 'Challenges', href: '/competitions/challenges', icon: Target },
+    { label: 'Funnel', href: '/competitions/funnel', icon: TrendingUp },
+    { label: 'Network', href: '/competitions/network', icon: Network },
+    { label: 'Bounties', href: '/competitions/bounties', icon: DollarSign },
+  ],
+};
+
+/** Wartime COO — operations isolation */
+export const operationsPortal: PortalConfig = {
+  personaLabel: 'COO Operations',
+  personaTitle: 'Wartime Command',
+  homeHref: '/operations/dashboard',
+  navGroups: [
+    {
+      title: 'Command',
+      items: [
+        { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, keywords: ['campus health', 'sla', 'dials'] },
+        { label: 'Fabless Work Orders', href: '/operations/fabless-work-orders', icon: Network, keywords: ['ceeri', 'istem', 'mnit', 'tokamak', 'partner'] },
+        { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'write-off', 'asset', 'exceptions'] },
+        { label: 'Org Pillars', href: '/leadership/org-chart', icon: Network, keywords: ['three pillar', 'reporting', 'anti-collusion'] },
+        { label: 'Space Calendar', href: '/operations/space-calendar', icon: CalendarDays, keywords: ['auditorium', 'venue', 'dofa', 'club'] },
+        { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, keywords: ['helpdesk', 'routing', 'queues'] },
+        { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode, keywords: ['physical', 'scan', 'location'] },
+        { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, keywords: ['dofa', 'grn', '3-way', 'penalties'] },
+        { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['quotes', 'l1', 'rfq'] },
+        { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['locked price'] },
+        { label: 'Procurement Intelligence', href: '/finance/procurement-intelligence', icon: TrendingUp, keywords: ['fraud', 'split'] },
+        { label: 'Vendor Penalties', href: '/operations/penalties', icon: Scale, keywords: ['sla', 'auto debit'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Ops Dashboard', href: '/operations/dashboard', icon: LayoutDashboard },
+    { label: 'Fabless Work Orders', href: '/operations/fabless-work-orders', icon: Network },
+    { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
+    { label: 'ESM Queues', href: '/operations/esm', icon: Ticket },
+    { label: 'QR Ticketing', href: '/operations/qr-tickets', icon: QrCode },
+    { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt },
+  ],
+  mobileNavItems: [
+    { label: 'Dashboard', href: '/operations/dashboard', icon: LayoutDashboard, shortLabel: 'Home' },
+    { label: 'Fabless WOs', href: '/operations/fabless-work-orders', icon: Network, shortLabel: 'Fabless' },
+    { label: 'DOFA Inbox (Universal)', href: '/operations/approvals/dofa-inbox', icon: Inbox, shortLabel: 'DOFA' },
+    { label: 'ESM Queues', href: '/operations/esm', icon: Ticket, shortLabel: 'ESM' },
+    { label: 'P2P Oversight', href: '/operations/p2p', icon: Receipt, shortLabel: 'P2P' },
+  ],
+};
+
+/** Special programs — Wetware / portfolio degree admin */
+export const specialProgramsPortal: PortalConfig = {
+  personaLabel: 'Special Programs',
+  personaTitle: 'MIT-Killer Tracks',
+  homeHref: '/special-programs/dashboard',
+  navGroups: [
+    {
+      title: 'Programs',
+      items: [
+        { label: 'Dashboard', href: '/special-programs/dashboard', icon: LayoutDashboard, keywords: ['wetware', 'portfolio', 'hs direct'] },
+        { label: 'Wetware Biotech', href: '/special-programs/wetware', icon: FlaskConical, keywords: ['bsl-1', 'biobricks', 'biology'] },
+        { label: 'Portfolio Degree', href: '/special-programs/portfolio', icon: Briefcase, keywords: ['github', 'patents', 'builds'] },
+        { label: 'HS Direct Admissions', href: '/special-programs/hs-direct', icon: GraduationCap, keywords: ['11th', '12th', 'bypass jee'] },
+        { label: 'Professors of Practice', href: '/special-programs/pop', icon: Users, keywords: ['equity', 'founders', 'isro'] },
+      ],
+    },
+  ],
+  commandItems: [
+    { label: 'Programs Dashboard', href: '/special-programs/dashboard', icon: LayoutDashboard },
+    { label: 'Wetware', href: '/special-programs/wetware', icon: FlaskConical },
+    { label: 'Portfolio Degree', href: '/special-programs/portfolio', icon: Briefcase },
+    { label: 'HS Direct', href: '/special-programs/hs-direct', icon: GraduationCap },
+    { label: 'PoP', href: '/special-programs/pop', icon: Users },
   ],
 };

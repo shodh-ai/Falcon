@@ -226,6 +226,19 @@ export class StudentEnrollmentSyncService {
       removed = deleteResult.length;
     }
 
+    const orphanSemesterDelete = await this.dataSource.query<
+      Array<{ enrollment_id: string }>
+    >(
+      `DELETE FROM student_course_enrollments
+       WHERE tenant_id = $1
+         AND student_user_id = $2
+         AND semester <> $3
+         AND status = 'ENROLLED'
+       RETURNING enrollment_id`,
+      [slot.tenantId, slot.studentUserId, slot.semester],
+    );
+    removed += orphanSemesterDelete.length;
+
     this.logger.debug(
       `Synced ${slot.studentUserId} sem ${slot.semester}${slot.sectionCode ? `-${slot.sectionCode}` : ''}: +${added} -${removed} =${kept}`,
     );

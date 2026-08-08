@@ -11,6 +11,7 @@ import { AuthService } from '../auth.service';
 import { TenantService } from '../../tenant/tenant.service';
 import { resolveTenantSubdomain } from '../../tenant/resolve-tenant-subdomain';
 import { resolveAllowedEmailDomains } from '../utils/resolve-allowed-domains';
+import { isStudentEnrollmentEmail } from '../utils/student-enrollment-email.util';
 import { getInitialOnboardingStatusForRole } from '../../modules/student-onboarding/onboarding-portal.util';
 
 @Injectable()
@@ -91,8 +92,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     if (!user) {
-      const isStudentEnrollmentEmail = /^[^@]*\.\d{5,}@/i.test(email);
-      const defaultRoleName = isStudentEnrollmentEmail ? 'Student' : 'Faculty';
+      const defaultRoleName = isStudentEnrollmentEmail(email) ? 'Student' : 'Faculty';
       const defaultRole = await this.roleRepository.findOne({
         where: { role_name: defaultRoleName },
       });
@@ -117,6 +117,14 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     } else if (!user.google_id) {
       user.google_id = id;
       await this.userRepository.save(user);
+    }
+
+    if (user) {
+      user =
+        (await this.authService.correctStudentRoleForEnrollmentEmail(
+          user,
+          tenant.tenant_id,
+        )) ?? user;
     }
 
     if (!user) {

@@ -8,6 +8,8 @@ import {
   adminOpsPortal,
   adminPortal,
   alumniPortal,
+  labsPortal,
+  operationsPortal,
   deanPortal,
   examCellPortal,
   facultyPortal,
@@ -21,6 +23,7 @@ import {
   parentPortal,
   placementPortal,
   presidentPortal,
+  researchPortal,
   studentPortal,
   type PortalConfig,
 } from '@/lib/navigation';
@@ -33,17 +36,31 @@ export function portalForRole(role: string): PortalConfig {
   if (r === 'dean') return deanPortal;
   if (r === 'hr' || r === 'hradmin') return hrPortal;
   if (r === 'warden') return hostelAdminPortal;
-  if (r === 'accountant') return financePortal;
+  if (r === 'accountant' || r === 'apmanager' || r === 'apclerk' || r === 'financecontroller') {
+    return financePortal;
+  }
+  if (r === 'cfo') return financePortal;
+  if (r === 'coo') return operationsPortal;
+  if (r === 'procurement' || r === 'procurementhead' || r === 'procurementbuyer') return financePortal;
+  if (r === 'stores' || r === 'receivingclerk') return financePortal;
+  if (r === 'internalauditor') return leadershipPortal;
+  if (r === 'legalofficer') return leadershipPortal;
+  if (r === 'deanofresearch') return researchPortal;
+  if (r === 'labadmin') return labsPortal;
+  if (r === 'estateofficer') return operationsPortal;
   if (r === 'iqac') return iqacPortal;
   if (r === 'librarian') return libraryPortal;
   if (r === 'president' || r === 'vice chancellor') return presidentPortal;
   if (r === 'chairman') return leadershipPortal;
   if (r === 'parent') return parentPortal;
   if (r === 'alumni') return alumniPortal;
-  if (r === 'examcell' || r === 'exam cell') return examCellPortal;
+  if (r === 'examcell' || r === 'exam cell' || r === 'deputycoe' || r === 'examadmin') {
+    return examCellPortal;
+  }
   if (r === 'placementcell' || r === 'placement cell') return placementPortal;
   if (r === 'transportofficer' || r === 'transport officer') return adminOpsPortal;
   if (r === 'registrar') return adminPortal;
+  if (r === 'campusadmin' || r === 'superadmin') return adminPortal;
   return adminPortal;
 }
 

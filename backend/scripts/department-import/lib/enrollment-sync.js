@@ -131,6 +131,17 @@ async function syncStudentSlot(client, slot, academicYear) {
     removed = deleted.rows.length;
   }
 
+  const orphanSemester = await client.query(
+    `DELETE FROM student_course_enrollments
+     WHERE tenant_id = $1
+       AND student_user_id = $2
+       AND semester <> $3
+       AND status = 'ENROLLED'
+     RETURNING enrollment_id`,
+    [slot.tenantId, slot.studentUserId, slot.semester],
+  );
+  removed += orphanSemester.rows.length;
+
   return { added, kept, removed, courses: courseIds.length };
 }
 

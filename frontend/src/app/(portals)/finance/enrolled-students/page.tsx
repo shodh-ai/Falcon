@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,26 +19,33 @@ export default function FinanceEnrolledStudentsPage() {
   const [q, setQ] = useState('');
   const [year, setYear] = useState('');
   const [branch, setBranch] = useState('');
+  const [loading, setLoading] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingTx, setUploadingTx] = useState<string | null>(null);
 
-  const loadStudents = () => {
+  const loadStudents = useCallback(() => {
+    setLoading(true);
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     if (year) params.set('year', year);
     if (branch) params.set('branch', branch);
-    
+
     void api
       .get<any[]>(`/api/admissions-crm/enrolled-students?${params.toString()}`)
       .then((rows) => {
-        setStudents(rows);
+        setStudents(Array.isArray(rows) ? rows : []);
         if (!branch) {
           setBranches((prev) =>
             mergeEnrolledStudentBranches(prev, deriveEnrolledStudentBranches(rows)),
           );
         }
-      });
-  };
+      })
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : 'Failed to load students');
+        setStudents([]);
+      })
+      .finally(() => setLoading(false));
+  }, [api, q, year, branch]);
 
   useEffect(() => {
     void api
@@ -53,7 +60,7 @@ export default function FinanceEnrolledStudentsPage() {
 
   useEffect(() => {
     loadStudents();
-  }, [api, q, year, branch]);
+  }, [loadStudents]);
 
   function handleUploadReceipt(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -138,12 +145,16 @@ export default function FinanceEnrolledStudentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {students.length === 0 && (
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-center text-muted-foreground">Loading…</td>
+                    </tr>
+                  ) : students.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-4 text-center text-muted-foreground">No students found.</td>
                     </tr>
-                  )}
-                  {students.map((s) => (
+                  ) : (
+                  students.map((s) => (
                     <tr key={s.user_id} className="border-b">
                       <td className="p-3">{s.name}</td>
                       <td className="p-3">{s.email}</td>
@@ -187,7 +198,8 @@ export default function FinanceEnrolledStudentsPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ))
+                  )}
                 </tbody>
               </table>
             </div>

@@ -145,6 +145,45 @@ export class LeadershipService {
       });
     }
 
+    const feedAlerts = await this.db
+      .query(
+        `SELECT label, metadata FROM leadership_feed_events
+         WHERE tenant_id = $1 AND event_type = 'ALERT'
+           AND created_at >= $2
+         ORDER BY created_at DESC
+         LIMIT 3`,
+        [tid, since],
+      )
+      .catch(() => []);
+
+    for (const alert of feedAlerts as Array<{ label: string; metadata?: { severity?: string } }>) {
+      const sev = alert.metadata?.severity === 'RED' ? 'red' : 'yellow';
+      flags.push({
+        severity: sev as 'red' | 'yellow',
+        message: alert.label,
+        pillar: 'operations',
+        href: '/leadership/intelligence',
+      });
+    }
+
+    const goldenPending = await this.db
+      .query(
+        `SELECT COUNT(*)::int AS cnt FROM admissions_leads
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND source = 'TOKAMAK_GOLDEN_TICKET' AND stage != 'ENROLLED'`,
+        [tid],
+      )
+      .catch(() => [{ cnt: 0 }]);
+    const gtPending = Number(goldenPending[0]?.cnt ?? 0);
+    if (gtPending > 0) {
+      flags.push({
+        severity: 'yellow',
+        message: `${gtPending} Gladiator golden ticket leads pending conversion`,
+        pillar: 'admissions',
+        href: '/leadership/admissions-funnel',
+      });
+    }
+
     return { period: p, since: since.toISOString(), flags };
   }
 
@@ -333,8 +372,9 @@ export class LeadershipService {
         .catch(() => [{ total: 0 }]),
       this.db
         .query(
-          `SELECT COUNT(*)::int AS total FROM admissions_applications
-             WHERE tenant_id = $1 AND deleted_at IS NULL AND created_at >= $2`,
+          `SELECT COUNT(*)::int AS total FROM admissions_applications a
+             JOIN admissions_leads l ON l.lead_id = a.lead_id
+             WHERE l.tenant_id = $1 AND a.deleted_at IS NULL AND a.created_at >= $2`,
           [tid, since],
         )
         .catch(() => [{ total: 0 }]),
@@ -410,6 +450,23 @@ export class LeadershipService {
       )
       .catch(() => []);
 
+    const goldenTickets = await this.db
+      .query(
+        `SELECT l.lead_id, l.full_name, l.email, l.stage, l.source,
+                e.golden_ticket_code, c.title AS competition_title, l.created_at
+         FROM admissions_leads l
+         LEFT JOIN competition_entries e ON e.admissions_lead_id = l.lead_id
+         LEFT JOIN competitions c ON c.competition_id = e.competition_id
+         WHERE l.tenant_id = $1
+           AND l.deleted_at IS NULL
+           AND l.source = 'TOKAMAK_GOLDEN_TICKET'
+           AND l.created_at >= $2
+         ORDER BY l.created_at DESC
+         LIMIT 25`,
+        [tid, since],
+      )
+      .catch(() => []);
+
     const inquiryCount = Number(leads[0]?.total ?? 0);
     const appCount = Number(applications[0]?.total ?? 0);
 
@@ -461,6 +518,24 @@ export class LeadershipService {
             : 0,
         };
       }),
+      golden_ticket_leads: (goldenTickets as Array<Record<string, unknown>>).map((r) => ({
+        lead_id: r.lead_id,
+        full_name: r.full_name,
+        email: r.email,
+        stage: r.stage,
+        golden_ticket_code: r.golden_ticket_code ?? null,
+        competition_title: r.competition_title ?? 'Gladiator Challenge',
+        created_at: r.created_at,
+      })),
+      golden_ticket_summary: {
+        total: goldenTickets.length,
+        enrolled: (goldenTickets as Array<{ stage?: string }>).filter(
+          (r) => r.stage === 'ENROLLED',
+        ).length,
+        pending_conversion: (goldenTickets as Array<{ stage?: string }>).filter(
+          (r) => r.stage !== 'ENROLLED',
+        ).length,
+      },
     };
   }
 

@@ -66,6 +66,17 @@ export class StudentPortalService {
     }
   }
 
+  /** Idempotent enrollment sync when the student portal loads (courses/timetable drift). */
+  async bootstrapPortal(tenantId: string, userId: string) {
+    const result = await this.enrollmentSync.syncStudent(tenantId, userId);
+    return {
+      synced: Boolean(result),
+      semester: result?.semester ?? null,
+      added: result?.added ?? 0,
+      removed: result?.removed ?? 0,
+    };
+  }
+
   async getMasterProfile(tenantId: string, userId: string) {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.onboarding_status,
@@ -625,6 +636,7 @@ export class StudentPortalService {
            AND entry->>'student_id' = e.student_user_id::text
        ) stats ON true
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
+         AND ($3::int IS NULL OR e.semester = $3)
        ORDER BY e.semester, c.course_code`,
         [userId, tenantId],
       ),

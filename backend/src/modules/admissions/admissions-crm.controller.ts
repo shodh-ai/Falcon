@@ -27,6 +27,19 @@ type AuthUser = {
   roles?: string[];
 };
 
+const FINANCE_ENROLLED_STUDENTS_ROLES = [
+  'Accountant',
+  'CFO',
+  'APManager',
+  'APClerk',
+  'FinanceController',
+  'FinanceManager',
+  'SuperAdmin',
+  'CampusAdmin',
+  'AdmissionsOfficer',
+  'Registrar',
+] as const;
+
 @Controller('api/admissions-crm')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar')
@@ -43,27 +56,13 @@ export class AdmissionsCrmController {
   }
 
   @Get('enrolled-students/branches')
-  @Roles(
-    'CampusAdmin',
-    'SuperAdmin',
-    'AdmissionsOfficer',
-    'Registrar',
-    'Accountant',
-    'FinanceManager',
-  )
+  @Roles(...FINANCE_ENROLLED_STUDENTS_ROLES)
   getEnrolledStudentBranches(@Req() req: { user: AuthUser }) {
     return this.admissions.getEnrolledStudentBranches(this.tenant(req));
   }
 
   @Get('enrolled-students')
-  @Roles(
-    'CampusAdmin',
-    'SuperAdmin',
-    'AdmissionsOfficer',
-    'Registrar',
-    'Accountant',
-    'FinanceManager',
-  )
+  @Roles(...FINANCE_ENROLLED_STUDENTS_ROLES)
   getEnrolledStudents(
     @Req() req: { user: AuthUser },
     @Query('q') q?: string,
@@ -79,13 +78,7 @@ export class AdmissionsCrmController {
   }
 
   @Patch('transactions/:id/receipt')
-  @Roles(
-    'SuperAdmin',
-    'AdmissionsOfficer',
-    'Registrar',
-    'Accountant',
-    'FinanceManager',
-  )
+  @Roles(...FINANCE_ENROLLED_STUDENTS_ROLES)
   uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
     return this.admissions.uploadTransactionReceipt(id, dto.receipt_url);
   }

@@ -7,6 +7,7 @@ import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { StudentStatCard } from '@/components/student/StudentStatCard';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
+import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import {
@@ -50,6 +51,8 @@ function courseCountLabel(count: number) {
 export default function StudentAttendancePage() {
   const api = useAuthedApi();
   const [data, setData] = useState<AttendanceData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void api
@@ -96,12 +99,20 @@ export default function StudentAttendancePage() {
   const overall = data?.overall_percent ?? (isStudentDemoModeEnabled() ? DEMO_ATTENDANCE_SUMMARY.overall_percent : 0);
   const overallTone = overall >= 75 ? 'success' : 'warning';
 
+  if (loading) {
+    return <StudentLoadingState label="Loading attendance…" />;
+  }
+
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
         title="Attendance"
         description="Course-wise attendance summary and semester progression from Sem 1 through Sem 8."
       />
+
+      {loadError ? (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{loadError}</p>
+      ) : null}
 
       <StudentStatCard
         label="Overall attendance"
@@ -117,7 +128,14 @@ export default function StudentAttendancePage() {
         icon={BookOpen}
       >
         {(data?.subject_wise ?? []).length === 0 ? (
-          <StudentEmptyState title="No subject records" description="Attendance data will appear once courses are active." />
+          <StudentEmptyState
+            title={loadError ? 'Attendance unavailable' : 'No subject records'}
+            description={
+              loadError
+                ? 'Try refreshing the page. If the problem persists, contact your department office.'
+                : 'Attendance data will appear once courses are active.'
+            }
+          />
         ) : (
           <>
             <div className="space-y-3 md:hidden">

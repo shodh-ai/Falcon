@@ -47,11 +47,11 @@ export function RoleGate({ children }: { children: React.ReactNode }) {
     }
   }, [allowed, isAuthenticated, isLoading, router, user]);
 
-  if (isLoading || !isAuthenticated) {
+  if (isLoading || !isAuthenticated || !user) {
     return <FalconLoader label="Switching Falcon workspace…" className="min-h-screen" />;
   }
 
-  if (user && !allowed) {
+  if (!allowed) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-sgvu-surface px-4">
         <div className="max-w-md rounded-2xl border bg-background p-6 text-center shadow-sm">

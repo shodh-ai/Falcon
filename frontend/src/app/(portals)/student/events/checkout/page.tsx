@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi, type RegisterResponse } from '@/lib/api/api.campus-events';
-import { RazorpayMockCheckout, type PaymentOrder } from '@/components/finance/RazorpayMockCheckout';
+import { RazorpayCheckout, type PaymentOrder } from '@/components/finance/RazorpayCheckout';
 
 function formatCountdown(totalSec: number) {
   const m = Math.floor(totalSec / 60);
@@ -147,7 +147,7 @@ export default function EventCheckoutPage() {
       </Button>
 
       {checkout && (
-        <RazorpayMockCheckout open order={checkout} onClose={() => setCheckout(null)} onSuccess={confirmPayment} />
+        <RazorpayCheckout open order={checkout} onClose={() => setCheckout(null)} onSuccess={confirmPayment} />
       )}
     </StudentPageShell>
   );

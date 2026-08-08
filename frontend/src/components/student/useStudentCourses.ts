@@ -37,7 +37,44 @@ type EnrollmentResponse = Array<{
     credits: number;
     is_elective?: boolean;
   };
-}>;
+};
+
+type EnrollmentResponse =
+  | EnrollmentRow[]
+  | {
+      current_semester: number;
+      enrollments: EnrollmentRow[];
+    };
+
+function parseEnrollmentResponse(payload: EnrollmentResponse | null | undefined): {
+  currentSemester: number | null;
+  rows: EnrollmentRow[];
+} {
+  if (!payload) return { currentSemester: null, rows: [] };
+
+  if (Array.isArray(payload)) {
+    const active = payload.filter(
+      (row) => row.status === 'ENROLLED' || row.status === 'COMPLETED',
+    );
+    const semester =
+      active.length > 0
+        ? Math.max(...active.map((row) => Number(row.semester)))
+        : null;
+    const rows =
+      semester == null
+        ? []
+        : active.filter((row) => Number(row.semester) === semester);
+    return { currentSemester: semester, rows };
+  }
+
+  const rows = (payload.enrollments ?? []).filter(
+    (row) => row.status === 'ENROLLED' || row.status === 'COMPLETED',
+  );
+  return {
+    currentSemester: Number(payload.current_semester) || null,
+    rows,
+  };
+}
 
 export function useStudentCourses() {
   const api = useAuthedApi();
@@ -62,20 +99,11 @@ export function useStudentCourses() {
 
     (async () => {
       try {
-        const rows = await api.get<EnrollmentResponse>(
+        const payload = await api.get<EnrollmentResponse>(
           '/api/academics/courses/my-enrollments',
         );
-        const active = (rows ?? []).filter(
-          (row) => row.status === 'ENROLLED' || row.status === 'COMPLETED',
-        );
-        const semester =
-          active.length > 0
-            ? Math.max(...active.map((row) => Number(row.semester)))
-            : null;
-        const enrolled =
-          semester == null
-            ? []
-            : active.filter((row) => Number(row.semester) === semester);
+        const { currentSemester: semester, rows } =
+          parseEnrollmentResponse(payload);
 
         if (!cancelled) {
           if (enrolled.length === 0) {
