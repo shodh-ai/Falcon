@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'crypto';
 import { DataSource } from 'typeorm';
 import { RedisService } from '../../core/redis/redis.service';
 import { FinanceService } from '../finance/finance.service';
+import { GatewayPaymentService } from '../finance/gateway-payment.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { TransportGateway } from './transport.gateway';
 
@@ -35,6 +36,7 @@ export class TransportService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly redis: RedisService,
     private readonly finance: FinanceService,
+    private readonly gatewayPayments: GatewayPaymentService,
     private readonly notify: NotificationEmitterService,
     private readonly gateway: TransportGateway,
   ) {}
@@ -234,8 +236,10 @@ export class TransportService {
     paymentRef: string,
   ) {
     const rows = await this.dataSource.query(
-      `SELECT * FROM transport_allocations
-       WHERE allocation_id = $1 AND tenant_id = $2 AND student_user_id = $3`,
+      `SELECT a.*, d.total_amount, d.paid_amount, d.status AS demand_status
+       FROM transport_allocations a
+       LEFT JOIN finance_fee_demands d ON d.demand_id = a.fee_demand_id
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.student_user_id = $3`,
       [allocationId, tenantId, studentUserId],
     );
     const alloc = rows[0];
@@ -243,12 +247,30 @@ export class TransportService {
     if (alloc.payment_status === 'PAID')
       return { allocation: alloc, already_paid: true };
 
+    const outstanding = Math.max(
+      0,
+      Number(alloc.total_amount ?? 0) - Number(alloc.paid_amount ?? 0),
+    );
+    const expectedPaise = Math.round(
+      (outstanding > 0 ? outstanding : Number(alloc.total_amount ?? 0)) * 100,
+    );
+    if (expectedPaise < 100) {
+      throw new BadRequestException('Invalid transport fee amount');
+    }
+
+    await this.gatewayPayments.verifyPayment({
+      paymentId: paymentRef,
+      expectedAmountPaise: expectedPaise,
+      expectedDemandId: alloc.fee_demand_id ?? null,
+      expectedStudentUserId: studentUserId,
+    });
+
     if (alloc.fee_demand_id) {
       await this.dataSource.query(
         `UPDATE finance_fee_demands
          SET paid_amount = total_amount, status = 'PAID'
-         WHERE demand_id = $1`,
-        [alloc.fee_demand_id],
+         WHERE demand_id = $1 AND student_user_id = $2`,
+        [alloc.fee_demand_id, studentUserId],
       );
     }
 

@@ -61,6 +61,7 @@ import { MasterDataModule } from './modules/master-data/master-data.module';
 import { AcademicRndModule } from './modules/academic-rnd/academic-rnd.module';
 import { CertificateAutomationModule } from './modules/certificate-automation/certificate-automation.module';
 import { WeeklyTestsModule } from './modules/weekly-tests/weekly-tests.module';
+import { RegistrarModule } from './modules/registrar/registrar.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -186,6 +187,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     AcademicRndModule,
     CertificateAutomationModule,
     WeeklyTestsModule,
+    RegistrarModule,
   ],
   controllers: [AppController],
   providers: [

@@ -42,20 +42,24 @@ export class AdmissionsController {
   }
 
   @Get('leads')
-  listLeads(@Query('stage') stage?: string) {
-    return this.admissions.listLeads(stage);
+  listLeads(@Req() req: { user: AuthUser }, @Query('stage') stage?: string) {
+    return this.admissions.listLeads(stage, this.tenant(req));
   }
 
   @Post('leads')
   @Roles('SuperAdmin', 'AdmissionsOfficer')
-  createLead(@Body() dto: CreateLeadDto) {
-    return this.admissions.createLead(dto);
+  createLead(@Req() req: { user: AuthUser }, @Body() dto: CreateLeadDto) {
+    return this.admissions.createLead(dto, this.tenant(req));
   }
 
   @Patch('leads/:id/stage')
   @Roles('SuperAdmin', 'AdmissionsOfficer')
-  updateStage(@Param('id') id: string, @Body() dto: UpdateLeadStageDto) {
-    return this.admissions.updateLeadStage(id, dto);
+  updateStage(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: UpdateLeadStageDto,
+  ) {
+    return this.admissions.updateLeadStage(id, dto, this.tenant(req));
   }
 
   @Get('applications')
@@ -69,7 +73,7 @@ export class AdmissionsController {
   }
 
   @Get('students/bulk-upload/template')
-  @Roles('SuperAdmin', 'Registrar', 'AdmissionsOfficer')
+  @Roles('SuperAdmin', 'CampusAdmin', 'Registrar', 'AdmissionsOfficer')
   async studentBulkTemplate(@Res({ passthrough: true }) res: Response) {
     const buffer = await this.studentBulk.buildTemplateBuffer();
     res.set({
@@ -82,7 +86,7 @@ export class AdmissionsController {
   }
 
   @Post('students/bulk-upload')
-  @Roles('SuperAdmin', 'Registrar', 'AdmissionsOfficer')
+  @Roles('SuperAdmin', 'CampusAdmin', 'Registrar', 'AdmissionsOfficer')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -118,19 +122,45 @@ export class AdmissionsController {
   }
 
   @Get('students/bulk-upload/history')
-  @Roles('SuperAdmin', 'Registrar', 'AdmissionsOfficer')
+  @Roles('SuperAdmin', 'CampusAdmin', 'Registrar', 'AdmissionsOfficer')
   bulkUploadHistory(@Req() req: { user: AuthUser }) {
     return this.studentBulk.listUploadRuns(this.tenant(req));
   }
 
   @Post('students/bulk-upload/:runId/rollback')
-  @Roles('SuperAdmin', 'Registrar')
+  @Roles('SuperAdmin', 'CampusAdmin', 'Registrar')
   bulkUploadRollback(
     @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
     @Param('runId') runId: string,
   ) {
     const forwarded = req.headers?.['x-forwarded-for'];
     return this.studentBulk.rollbackRun(
+      this.tenant(req),
+      runId,
+      req.user.user_id,
+      {
+        role: req.user.role,
+        ip:
+          req.ip ??
+          (typeof forwarded === 'string'
+            ? forwarded.split(',')[0]?.trim()
+            : undefined),
+        sessionId:
+          typeof req.headers?.['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+      },
+    );
+  }
+
+  @Post('students/bulk-upload/:runId/retry')
+  @Roles('SuperAdmin', 'CampusAdmin', 'Registrar', 'AdmissionsOfficer')
+  bulkUploadRetry(
+    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Param('runId') runId: string,
+  ) {
+    const forwarded = req.headers?.['x-forwarded-for'];
+    return this.studentBulk.retryFailedRows(
       this.tenant(req),
       runId,
       req.user.user_id,

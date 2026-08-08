@@ -18,6 +18,7 @@ import {
 import { RedisService } from '../../core/redis/redis.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { FinanceService } from '../finance/finance.service';
+import { GatewayPaymentService } from '../finance/gateway-payment.service';
 import { ProposeEventDto } from './dto/propose-event.dto';
 import { UpsertMasterCalendarDto } from './dto/master-calendar.dto';
 import { EstateApproveDto } from './dto/estate-approve.dto';
@@ -38,6 +39,7 @@ export class CampusEventsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly redis: RedisService,
     private readonly finance: FinanceService,
+    private readonly gatewayPayments: GatewayPaymentService,
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
   ) {}
@@ -1288,27 +1290,41 @@ export class CampusEventsService {
         tenantId,
       );
 
-      const orderId = `evt_${registration.registration_id.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+      const gatewayOrder = await this.gatewayPayments.createOrder({
+        amountInr: amount,
+        receipt: `evt_${registration.registration_id.replace(/-/g, '').slice(0, 20)}`,
+        notes: {
+          demand_id: demand.demand_id,
+          fee_head: 'EVENTS_CLUB',
+          event_id: event.event_id,
+          registration_id: registration.registration_id,
+          student_user_id: studentId,
+          tenant_id: tenantId,
+        },
+      });
       await this.dataSource.query(
         `UPDATE event_registrations SET gateway_order_id = $2 WHERE registration_id = $1`,
-        [registration.registration_id, orderId],
+        [registration.registration_id, gatewayOrder.order_id],
       );
 
       return {
-        registration: { ...registration, gateway_order_id: orderId },
+        registration: {
+          ...registration,
+          gateway_order_id: gatewayOrder.order_id,
+        },
         checkout_required: true,
         expires_at: expiresAt.toISOString(),
         server_now: serverNow.toISOString(),
         lock_ttl_seconds: BED_LOCK_TTL_SEC,
         order: {
-          order_id: orderId,
+          order_id: gatewayOrder.order_id,
           registration_id: registration.registration_id,
           amount_inr: amount,
-          amount_paise: Math.round(amount * 100),
+          amount_paise: gatewayOrder.amount_paise,
           currency: 'INR',
           fee_head: 'EVENTS_CLUB',
-          razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
-          mock: true,
+          razorpay_key: gatewayOrder.razorpay_key,
+          mock: gatewayOrder.mock,
           demand_id: demand.demand_id,
           notes: {
             demand_id: demand.demand_id,
@@ -1355,6 +1371,7 @@ export class CampusEventsService {
       : 0;
 
     const amount = Number(reg.ticket_price ?? 0);
+    const mockAllowed = this.gatewayPayments.mockPaymentsAllowed();
     const order =
       reg.status === 'PENDING_PAYMENT' && reg.gateway_order_id
         ? {
@@ -1364,9 +1381,10 @@ export class CampusEventsService {
             amount_paise: Math.round(amount * 100),
             currency: 'INR',
             fee_head: 'EVENTS_CLUB',
-            razorpay_key:
-              process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
-            mock: true,
+            razorpay_key: mockAllowed
+              ? (process.env.RAZORPAY_KEY_ID?.trim() || 'sandbox_falcon')
+              : (process.env.RAZORPAY_KEY_ID ?? ''),
+            mock: mockAllowed && !(process.env.RAZORPAY_KEY_SECRET ?? '').trim(),
             notes: {
               fee_head: 'EVENTS_CLUB',
               event_id: reg.event_id,
@@ -1407,9 +1425,10 @@ export class CampusEventsService {
     studentId: string,
     registrationId: string,
     paymentRef: string,
+    options?: { skipGatewayVerify?: boolean },
   ) {
     const rows = await this.dataSource.query(
-      `SELECT r.*, e.event_id, e.ticket_price
+      `SELECT r.*, e.event_id, e.ticket_price, r.gateway_order_id
        FROM event_registrations r
        JOIN campus_events e ON e.event_id = r.event_id
        WHERE r.registration_id = $1 AND r.student_user_id = $2 AND r.tenant_id = $3`,
@@ -1434,6 +1453,23 @@ export class CampusEventsService {
       );
     }
 
+    const ticketPaise = Math.round(Number(reg.ticket_price ?? 0) * 100);
+    const paymentId = (paymentRef ?? '').trim();
+    if (ticketPaise > 0) {
+      if (!paymentId) {
+        throw new BadRequestException('payment_ref is required');
+      }
+      // Webhook path already verified the gateway event.
+      if (!options?.skipGatewayVerify) {
+        await this.gatewayPayments.verifyPayment({
+          paymentId,
+          expectedAmountPaise: ticketPaise,
+          expectedOrderId: reg.gateway_order_id ?? null,
+          expectedStudentUserId: studentId,
+        });
+      }
+    }
+
     await this.dataSource.query('BEGIN');
     try {
       const slotRows = await this.dataSource.query(
@@ -1456,7 +1492,7 @@ export class CampusEventsService {
          SET status = 'PAID', payment_status = 'PAID', transaction_id = $2, qr_code = $3
          WHERE registration_id = $1
          RETURNING *`,
-        [registrationId, paymentRef, qr],
+        [registrationId, paymentId || paymentRef, qr],
       );
       await this.dataSource.query('COMMIT');
       await this.redis.releaseEventPayLock(reg.event_id, studentId);
@@ -1478,6 +1514,7 @@ export class CampusEventsService {
       studentUserId,
       registrationId,
       paymentId,
+      { skipGatewayVerify: true },
     );
   }
 

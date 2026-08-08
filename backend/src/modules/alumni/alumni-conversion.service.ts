@@ -22,6 +22,8 @@ const FINAL_SEMESTER = 8;
 export type ClearanceStatus = {
   library: boolean;
   hostel: boolean;
+  /** False for day scholars with no active hostel allocation — hostel clearance is N/A. */
+  hostel_applicable: boolean;
   dept: boolean;
   finance: boolean;
   all_cleared: boolean;
@@ -35,6 +37,8 @@ export type AlumniConversionEligibility = {
     finance: boolean;
     library: boolean;
     hostel: boolean;
+    hostel_applicable: boolean;
+    dept: boolean;
     all_cleared: boolean;
   };
   final_semester_results_published: boolean;
@@ -66,11 +70,16 @@ export class AlumniConversionService {
       finance: clearance.finance,
       library: clearance.library,
       hostel: clearance.hostel,
-      all_cleared: clearance.finance && clearance.library && clearance.hostel,
+      hostel_applicable: clearance.hostel_applicable,
+      dept: clearance.dept,
+      all_cleared: clearance.all_cleared,
     };
     if (!noDues.finance) blockers.push('Finance no-dues pending');
     if (!noDues.library) blockers.push('Library no-dues pending');
-    if (!noDues.hostel) blockers.push('Hostel no-dues pending');
+    if (noDues.hostel_applicable && !noDues.hostel) {
+      blockers.push('Hostel no-dues pending');
+    }
+    if (!noDues.dept) blockers.push('Department no-dues pending');
 
     const semRows = await this.dataSource.query<
       Array<{ max_semester: number; current_semester: number }>
@@ -138,14 +147,19 @@ export class AlumniConversionService {
     const statusRows = await this.dataSource.query<
       Array<{ alumni_converted: boolean; request_pending: boolean }>
     >(
-      `SELECT COALESCE(c.alumni_converted, false) AS alumni_converted,
-              EXISTS (
-                SELECT 1 FROM alumni_profiles p
-                WHERE p.tenant_id = $1 AND p.student_user_id = $2
-                  AND p.verification_status = 'PENDING'
-              ) AS request_pending
-       FROM student_exit_clearances c
-       WHERE c.tenant_id = $1 AND c.student_user_id = $2`,
+      `SELECT
+         COALESCE(
+           (SELECT c.alumni_converted
+            FROM student_exit_clearances c
+            WHERE c.tenant_id = $1 AND c.student_user_id = $2
+            LIMIT 1),
+           false
+         ) AS alumni_converted,
+         EXISTS (
+           SELECT 1 FROM alumni_profiles p
+           WHERE p.tenant_id = $1 AND p.student_user_id = $2
+             AND p.verification_status = 'PENDING'
+         ) AS request_pending`,
       [tenantId, studentUserId],
     );
     const alumniConverted = Boolean(statusRows[0]?.alumni_converted);
@@ -191,7 +205,22 @@ export class AlumniConversionService {
       tenantId,
       studentUserId,
     );
-    if (!eligibility.eligible) {
+
+    const existing = await this.dataSource.query(
+      `SELECT COALESCE(p.alumni_id, p.alumni_profile_id) AS row_id, p.verification_status
+       FROM alumni_profiles p
+       WHERE p.tenant_id = $1 AND p.student_user_id = $2`,
+      [tenantId, studentUserId],
+    );
+
+    const existingStatus = String(existing[0]?.verification_status ?? '').toUpperCase();
+    const updatingPending =
+      (eligibility.request_pending || existingStatus === 'PENDING') &&
+      existingStatus === 'PENDING';
+
+    // Allow profile updates while a request is already pending; block all other ineligible cases.
+    // REJECTED students may resubmit when eligible (existing row is updated back to PENDING).
+    if (!eligibility.eligible && !updatingPending) {
       throw new BadRequestException(
         eligibility.blockers[0] ??
           'You are not eligible for alumni conversion yet.',
@@ -225,12 +254,6 @@ export class AlumniConversionService {
 
     const batchYear = user.graduation_year ?? new Date().getFullYear();
     const higherEd = dto.higher_education_details ?? {};
-    const existing = await this.dataSource.query(
-      `SELECT COALESCE(p.alumni_id, p.alumni_profile_id) AS row_id, p.verification_status
-       FROM alumni_profiles p
-       WHERE p.tenant_id = $1 AND p.student_user_id = $2`,
-      [tenantId, studentUserId],
-    );
 
     if (existing[0]?.verification_status === 'VERIFIED') {
       throw new ConflictException('Alumni conversion is already complete.');
@@ -307,7 +330,11 @@ export class AlumniConversionService {
       enrollmentNo: user.enrollment_no,
     });
 
-    return { submitted: true, verification_status: 'PENDING' };
+    return {
+      submitted: true,
+      updated: Boolean(existing[0]),
+      verification_status: 'PENDING',
+    };
   }
 
   async getClearanceStatus(
@@ -327,14 +354,27 @@ export class AlumniConversionService {
        WHERE tenant_id = $1 AND student_user_id = $2`,
       [tenantId, studentUserId],
     );
+
+    const hostelApplicableRows = await this.dataSource
+      .query<Array<{ has_hostel: boolean }>>(
+        `SELECT EXISTS (
+           SELECT 1 FROM hostel_allocations a
+           WHERE a.student_user_id = $1 AND a.status = 'ACTIVE'
+         ) AS has_hostel`,
+        [studentUserId],
+      )
+      .catch(() => [{ has_hostel: false }]);
+
     const c = rows[0];
     const library = Boolean(c?.library_cleared);
-    const hostel = Boolean(c?.hostel_cleared);
+    const hostelApplicable = Boolean(hostelApplicableRows[0]?.has_hostel);
+    const hostel = hostelApplicable ? Boolean(c?.hostel_cleared) : true;
     const dept = Boolean(c?.dept_cleared);
     const finance = Boolean(c?.finance_cleared);
     return {
       library,
       hostel,
+      hostel_applicable: hostelApplicable,
       dept,
       finance,
       all_cleared: library && hostel && dept && finance,

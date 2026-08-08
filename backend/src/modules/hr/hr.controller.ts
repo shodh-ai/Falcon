@@ -356,6 +356,18 @@ export class HrController {
     );
   }
 
+  @Get('dashboard')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar')
+  @HrPermission('dashboard', 'read')
+  async dashboardHome(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.dashboard.getMasterDashboard(tenantId, entity);
+  }
+
   @Get('dashboard/metrics')
   @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar')
   @HrPermission('dashboard', 'read')

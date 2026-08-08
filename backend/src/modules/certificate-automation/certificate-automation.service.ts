@@ -213,35 +213,55 @@ export class CertificateAutomationService {
     }
 
     const dueDate = ev.application_end_date;
-    const demand = await this.finance.createDemand(
-      {
-        student_user_id: studentUserId,
-        fee_head: 'DEGREE_CERTIFICATE',
-        academic_year: new Date().getFullYear().toString(),
-        semester: 8,
-        total_amount: Number(ev.base_fee),
-        due_date: String(dueDate).slice(0, 10),
-        fee_breakup: {
-          event_id: eventId,
-          event_name: ev.event_name,
-          cert_type: 'DEGREE',
+    let demandId: string | null = null;
+    try {
+      const demand = await this.finance.createDemand(
+        {
+          student_user_id: studentUserId,
+          fee_head: 'DEGREE_CERTIFICATE',
+          academic_year: new Date().getFullYear().toString(),
+          semester: 8,
+          total_amount: Number(ev.base_fee),
+          due_date: String(dueDate).slice(0, 10),
+          fee_breakup: {
+            event_id: eventId,
+            event_name: ev.event_name,
+            cert_type: 'DEGREE',
+          },
         },
-      },
-      tid,
-    );
+        tid,
+      );
+      demandId = demand.demand_id ?? null;
+    } catch {
+      // Still accept the degree application if fee demand creation fails.
+      demandId = null;
+    }
+
+    const verificationStatus = demandId
+      ? 'PAYMENT_PENDING'
+      : 'PENDING_VERIFICATION';
 
     const rows = await this.db.query(
       `INSERT INTO cert_applications (
          tenant_id, event_id, student_user_id, finance_demand_id, verification_status
-       ) VALUES ($1, $2, $3, $4, 'PAYMENT_PENDING')
+       ) VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [tid, eventId, studentUserId, demand.demand_id],
+      [tid, eventId, studentUserId, demandId, verificationStatus],
+    );
+
+    await this.notifyStudent(
+      tid,
+      studentUserId,
+      'Degree Application Submitted',
+      demandId
+        ? 'Your degree application is recorded. Complete the fee payment to send it for registrar verification.'
+        : 'Your degree application is recorded and pending registrar verification.',
     );
 
     return {
       ...rows[0],
-      finance_demand_id: demand.demand_id,
-      payment_required: true,
+      finance_demand_id: demandId,
+      payment_required: Boolean(demandId),
     };
   }
 
