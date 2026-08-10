@@ -26,7 +26,7 @@ function demoCourses(): StudentCourse[] {
   }));
 }
 
-type EnrollmentResponse = Array<{
+type EnrollmentRow = {
   enrollment_id: string;
   semester: number;
   status: string;
@@ -106,20 +106,20 @@ export function useStudentCourses() {
           parseEnrollmentResponse(payload);
 
         if (!cancelled) {
-          if (enrolled.length === 0) {
+          if (rows.length === 0) {
             if (isStudentDemoModeEnabled()) {
               setCurrentSemester(DEMO_STUDENT.semester);
               setCourses(demoCourses());
               setError(null);
             } else {
-              setCurrentSemester(null);
+              setCurrentSemester(semester);
               setCourses([]);
               setError('No subjects enrolled for this semester yet.');
             }
           } else {
             setCurrentSemester(semester);
             setCourses(
-              enrolled.map((row) => ({
+              rows.map((row) => ({
                 course_id: row.course.course_id,
                 course_code: row.course.course_code,
                 course_name: row.course.course_name,

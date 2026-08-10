@@ -259,7 +259,12 @@ export default function StudentLibraryOpacPage() {
         )}
       </StudentSectionCard>
 
-      <LibraryOpacPanel />
+      <LibraryOpacPanel
+        basePath="/student/library"
+        title="Library OPAC"
+        description="Search the catalog, place holds, and manage digital resources."
+        embedded
+      />
     </StudentPageShell>
   );
 }

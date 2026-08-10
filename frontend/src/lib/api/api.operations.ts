@@ -20,8 +20,15 @@ export function createOperationsApi(api: AuthedApi) {
       api.post<any>('/api/operations/p2p/purchase-orders', body),
     grns: () => api.get<any[]>('/api/operations/p2p/grn'),
     vendors: () => api.get<any[]>('/api/operations/p2p/vendors'),
-    createGrn: (body: { po_id: string; notes?: string }) =>
-      api.post('/api/operations/p2p/grn', body),
+    createGrn: (body: {
+      po_id: string;
+      notes?: string;
+      qty_received?: number;
+      photo_path?: string;
+      challan_path?: string;
+      asset_barcode?: string;
+      received_at_gate?: boolean;
+    }) => api.post('/api/operations/p2p/grn', body),
     createInvoice: (poId: string) =>
       api.post(`/api/operations/p2p/purchase-orders/${poId}/invoice`, {}),
     threeWayMatch: (id: string) =>

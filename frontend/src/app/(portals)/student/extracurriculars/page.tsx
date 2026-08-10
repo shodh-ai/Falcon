@@ -46,7 +46,7 @@ export default function ExtracurricularsLogPage() {
   }
 
   return (
-    <StudentPageShell width="3xl">
+    <StudentPageShell width="4xl">
       <StudentPageHeader
         title="Log extracurricular activity"
         description="Upload NCC / NSS / SODECA certificates to earn activity points after verification."

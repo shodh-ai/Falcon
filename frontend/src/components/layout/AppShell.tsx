@@ -6,6 +6,9 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { AppTopBar } from '@/components/layout/AppTopBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
+import { useAuth } from '@/context/AuthContext';
+import { resolveUserRoleList } from '@/lib/available-workspaces';
+import { resolveDofaInboxPathForUser } from '@/lib/dofa-portal-routes';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
 import {
   collectNavHrefs,

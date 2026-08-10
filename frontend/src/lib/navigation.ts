@@ -84,7 +84,10 @@ import {
   BadgeCheck,
   Sparkles,
 } from 'lucide-react';
-import { getAccountSettingsHrefForPortal } from '@/lib/auth-routing';
+import {
+  FINANCE_DESK_ROLE_NAMES,
+  getAccountSettingsHrefForPortal,
+} from '@/lib/auth-routing';
 import { rolesIncludeAny, rolesMatchForAccess } from '@/lib/campus-admin.roles';
 import { selfServicePaths, type WorkspacePrefix } from '@/lib/workspace-self-service';
 
