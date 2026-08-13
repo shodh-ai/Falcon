@@ -537,7 +537,17 @@ export class HrController {
 
   @Get('entities')
   @SkipEntityScope()
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar', 'Faculty', 'HOD', 'Dean')
+  @Roles(
+    'HR',
+    'HRAdmin',
+    'SuperAdmin',
+    'President',
+    'CampusAdmin',
+    'Registrar',
+    'Faculty',
+    'HOD',
+    'Dean',
+  )
   listEntities(@Req() req: { user: AuthUser }) {
     const roles = req.user.roles?.length
       ? req.user.roles

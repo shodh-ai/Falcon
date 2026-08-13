@@ -89,7 +89,12 @@ export class AcademicsController {
   @Post('enrollments/assign-roll-numbers')
   @Roles('SuperAdmin', 'Registrar', 'HOD')
   assignRollNumbers(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Body()
     dto: { semester: number; course_id?: string; sort_by?: 'name' | 'merit' },
   ) {
@@ -118,23 +123,27 @@ export class AcademicsController {
   async getFacultyDashboard(@Req() req: { user: AuthUser }) {
     const tenantId = this.resolveTenantId(req.user);
     const deptId = await this.resolveFacultyDeptId(req);
-    const [todayTimetable, todayClasses, teachingDepartments, missingAttendance] =
-      await Promise.all([
-        this.facultyAcademics.getFacultyAcademicTimetableToday(
-          req.user.user_id,
-          tenantId,
-          deptId,
-        ),
-        this.facultyAcademics.getFacultyTodayClasses(req.user.user_id),
-        this.teachingDepartments.getTeachingDepartments(
-          req.user.user_id,
-          tenantId,
-        ),
-        this.facultyAcademics.getMissingAttendanceAlerts(
-          req.user.user_id,
-          tenantId,
-        ),
-      ]);
+    const [
+      todayTimetable,
+      todayClasses,
+      teachingDepartments,
+      missingAttendance,
+    ] = await Promise.all([
+      this.facultyAcademics.getFacultyAcademicTimetableToday(
+        req.user.user_id,
+        tenantId,
+        deptId,
+      ),
+      this.facultyAcademics.getFacultyTodayClasses(req.user.user_id),
+      this.teachingDepartments.getTeachingDepartments(
+        req.user.user_id,
+        tenantId,
+      ),
+      this.facultyAcademics.getMissingAttendanceAlerts(
+        req.user.user_id,
+        tenantId,
+      ),
+    ]);
     return {
       today_timetable: todayTimetable,
       today_classes: todayClasses,
@@ -327,6 +336,8 @@ export class AcademicsController {
       max_marks?: string;
       start_date?: string;
       due_date?: string;
+      semester?: string;
+      section_code?: string;
     },
     @UploadedFile() file?: Express.Multer.File,
   ) {
@@ -351,6 +362,8 @@ export class AcademicsController {
       max_marks?: string;
       start_date?: string;
       due_date?: string;
+      semester?: string;
+      section_code?: string;
     },
     @UploadedFile() file?: Express.Multer.File,
   ) {
@@ -2140,6 +2153,82 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/invigilation/:assignmentId/swap-partners')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listInvigilationSwapPartners(
+    @Req() req: { user: AuthUser },
+    @Param('assignmentId') assignmentId: string,
+  ) {
+    return this.facultyWorkspaces.listInvigilationSwapPartners(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+  }
+
+  @Get('faculty/workspaces/invigilation-swaps')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listInvigilationSwaps(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listInvigilationSwaps(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Post('faculty/workspaces/invigilation/:assignmentId/swap')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  requestInvigilationDutySwap(
+    @Req() req: { user: AuthUser },
+    @Param('assignmentId') assignmentId: string,
+    @Body()
+    body: { target_faculty_user_id?: string; reason?: string },
+  ) {
+    if (!body.target_faculty_user_id?.trim()) {
+      throw new BadRequestException('target_faculty_user_id is required');
+    }
+    if (!body.reason?.trim())
+      throw new BadRequestException('Reason is required');
+    return this.facultyWorkspaces.requestInvigilationDutySwap(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+      body.target_faculty_user_id,
+      body.reason,
+    );
+  }
+
+  @Post('faculty/workspaces/invigilation-swaps/:swapId/respond')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  respondInvigilationDutySwap(
+    @Req() req: { user: AuthUser },
+    @Param('swapId') swapId: string,
+    @Body() body: { accept?: boolean; comment?: string },
+  ) {
+    if (typeof body.accept !== 'boolean') {
+      throw new BadRequestException('accept (boolean) is required');
+    }
+    return this.facultyWorkspaces.respondInvigilationDutySwap(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      swapId,
+      body.accept,
+      body.comment,
+    );
+  }
+
+  @Post('faculty/workspaces/invigilation-swaps/:swapId/cancel')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  cancelInvigilationDutySwap(
+    @Req() req: { user: AuthUser },
+    @Param('swapId') swapId: string,
+  ) {
+    return this.facultyWorkspaces.cancelInvigilationDutySwap(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      swapId,
+    );
+  }
+
   @Post('faculty/workspaces/projects/assign')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   assignProjectGuide(
@@ -2423,6 +2512,96 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       courseId,
+    );
+  }
+
+  @Get('faculty/courses/:courseId/announcements')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listFacultyCourseAnnouncements(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.listAnnouncements(
+      this.resolveTenantId(req.user),
+      courseId,
+      { userId: req.user.user_id, role: 'faculty' },
+    );
+  }
+
+  @Post('faculty/courses/:courseId/announcements')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  createFacultyCourseAnnouncement(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { title?: string; body?: string },
+  ) {
+    return this.courseLms.createAnnouncement(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      body,
+    );
+  }
+
+  @Get('student/courses/:courseId/announcements')
+  @Roles('Student')
+  listStudentCourseAnnouncements(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.listAnnouncements(
+      this.resolveTenantId(req.user),
+      courseId,
+      { userId: req.user.user_id, role: 'student' },
+    );
+  }
+
+  @Get('faculty/question-bank')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listFacultyQuestionBank(
+    @Req() req: { user: AuthUser },
+    @Query('courseId') courseId?: string,
+  ) {
+    return this.courseLms.listQuestionBank(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+    );
+  }
+
+  @Post('faculty/question-bank')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  createFacultyQuestionBankItem(
+    @Req() req: { user: AuthUser },
+    @Body()
+    body: {
+      course_id?: string;
+      question_text?: string;
+      option_a?: string;
+      option_b?: string;
+      option_c?: string;
+      option_d?: string;
+      correct_option?: string;
+      tags?: string;
+    },
+  ) {
+    return this.courseLms.createQuestionBankItem(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body,
+    );
+  }
+
+  @Delete('faculty/question-bank/:questionId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  deleteFacultyQuestionBankItem(
+    @Param('questionId') questionId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.deleteQuestionBankItem(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      questionId,
     );
   }
 

@@ -1382,9 +1382,10 @@ export class CampusEventsService {
             currency: 'INR',
             fee_head: 'EVENTS_CLUB',
             razorpay_key: mockAllowed
-              ? (process.env.RAZORPAY_KEY_ID?.trim() || 'sandbox_falcon')
+              ? process.env.RAZORPAY_KEY_ID?.trim() || 'sandbox_falcon'
               : (process.env.RAZORPAY_KEY_ID ?? ''),
-            mock: mockAllowed && !(process.env.RAZORPAY_KEY_SECRET ?? '').trim(),
+            mock:
+              mockAllowed && !(process.env.RAZORPAY_KEY_SECRET ?? '').trim(),
             notes: {
               fee_head: 'EVENTS_CLUB',
               event_id: reg.event_id,

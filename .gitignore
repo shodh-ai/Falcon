@@ -76,3 +76,9 @@ backend/scripts/ee-ids-parsed.json
 
 # Generated login exports from department import (contain default passwords)
 backend/data/departments/**/import-credentials.csv
+
+# Local debug / generated artifacts (must not ship)
+backend/admit-card.pdf
+backend/admit-card-debug.log
+backend/app/uploads/
+frontend/faculty-responsive-audit-report.md

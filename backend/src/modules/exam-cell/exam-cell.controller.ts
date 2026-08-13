@@ -291,6 +291,43 @@ export class ExamCellController {
     );
   }
 
+  @Get('invigilation-swaps')
+  listInvigilationDutySwaps(@Req() req: { user: AuthUser }) {
+    return this.examCell.listInvigilationDutySwaps(this.tenant(req));
+  }
+
+  @Get('invigilation-swaps/:swapId/audits')
+  listInvigilationDutySwapAudits(
+    @Req() req: { user: AuthUser },
+    @Param('swapId') swapId: string,
+  ) {
+    return this.examCell.listInvigilationDutySwapAudits(
+      this.tenant(req),
+      swapId,
+    );
+  }
+
+  @Post('invigilation-swaps/:swapId/resolve')
+  resolveInvigilationDutySwap(
+    @Req() req: { user: AuthUser },
+    @Param('swapId') swapId: string,
+    @Body() dto: { status: 'APPROVED' | 'REJECTED'; comment: string },
+  ) {
+    this.requireAction(req, 'manage_sessions');
+    if (!dto.comment?.trim())
+      throw new BadRequestException('Comment is required');
+    if (dto.status !== 'APPROVED' && dto.status !== 'REJECTED') {
+      throw new BadRequestException('status must be APPROVED or REJECTED');
+    }
+    return this.examCell.resolveInvigilationDutySwap(
+      this.tenant(req),
+      swapId,
+      req.user.user_id,
+      dto.status,
+      dto.comment,
+    );
+  }
+
   @Get('faculty-roster')
   getFacultyRoster(
     @Req() req: { user: AuthUser },
@@ -532,7 +569,12 @@ export class ExamCellController {
 
   @Post('transcripts/generate')
   transcripts(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Body() dto: { semester: number },
   ) {
     this.requireAction(req, 'publish_results');
@@ -559,7 +601,12 @@ export class ExamCellController {
 
   @Post('transcripts/:id/approve')
   approveTranscript(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('id') id: string,
   ) {
     this.requireAction(req, 'publish_results');

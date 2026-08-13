@@ -18,10 +18,7 @@ import {
   POLICY_READ_ROLES,
   POLICY_UNLOCK_ROLES,
 } from './dofa-policy.constants';
-import {
-  DofaPolicyService,
-  type PolicyDomain,
-} from './dofa-policy.service';
+import { DofaPolicyService, type PolicyDomain } from './dofa-policy.service';
 
 type AuthUser = {
   tenant_id?: string;
@@ -36,10 +33,7 @@ export class DofaPolicyController {
   constructor(private readonly policy: DofaPolicyService) {}
 
   private role(user: AuthUser) {
-    const all = [
-      ...(user.roles ?? []),
-      ...(user.role ? [user.role] : []),
-    ];
+    const all = [...(user.roles ?? []), ...(user.role ? [user.role] : [])];
     const prefer = [
       'CFO',
       'CampusAdmin',
@@ -58,10 +52,7 @@ export class DofaPolicyController {
 
   @Get('graphs')
   @Roles(...POLICY_READ_ROLES)
-  list(
-    @Req() req: { user: AuthUser },
-    @Query('domain') domain?: string,
-  ) {
+  list(@Req() req: { user: AuthUser }, @Query('domain') domain?: string) {
     return this.policy.listGraphs(req.user.tenant_id, domain);
   }
 
@@ -109,8 +100,12 @@ export class DofaPolicyController {
     @Body()
     body: {
       title?: string;
-      graph_json?: Parameters<DofaPolicyService['updateDraft']>[4]['graph_json'];
-      compiled_matrix?: Parameters<DofaPolicyService['updateDraft']>[4]['compiled_matrix'];
+      graph_json?: Parameters<
+        DofaPolicyService['updateDraft']
+      >[4]['graph_json'];
+      compiled_matrix?: Parameters<
+        DofaPolicyService['updateDraft']
+      >[4]['compiled_matrix'];
       proposal_memo?: string;
       minutes_ref?: string;
     },
@@ -197,10 +192,7 @@ export class DofaPolicyController {
 
   @Get('audit')
   @Roles(...POLICY_AUDIT_ROLES)
-  audit(
-    @Req() req: { user: AuthUser },
-    @Query('graph_id') graphId?: string,
-  ) {
+  audit(@Req() req: { user: AuthUser }, @Query('graph_id') graphId?: string) {
     return this.policy.listAudit(req.user.tenant_id, graphId);
   }
 }

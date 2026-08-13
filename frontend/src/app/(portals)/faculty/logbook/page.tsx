@@ -15,6 +15,12 @@ import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import {
+  isEmptyArray,
+  isFacultyDemoEntityId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoLogbook } from '@/lib/mock/faculty-portal-demo';
 
 type LogEntry = {
   logbook_id: string;
@@ -42,11 +48,34 @@ export default function FacultyLogbookPage() {
   });
 
   useEffect(() => {
-    void api.get<LogEntry[]>('/api/academics/faculty/workspaces/logbook').then(setEntries);
+    void api
+      .get<LogEntry[]>('/api/academics/faculty/workspaces/logbook')
+      .then((rows) =>
+        setEntries(withFacultyDemoFallback(rows, facultyDemoLogbook() as LogEntry[], isEmptyArray)),
+      )
+      .catch(() =>
+        setEntries(withFacultyDemoFallback([], facultyDemoLogbook() as LogEntry[], isEmptyArray)),
+      );
   }, [api]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (isFacultyDemoEntityId(form.course_id)) {
+      const course = courses.find((c) => c.course_id === form.course_id);
+      setEntries((prev) => [
+        {
+          logbook_id: `lb-${Date.now()}`,
+          class_date: form.class_date || new Date().toISOString().slice(0, 10),
+          topic_summary: form.topic_summary,
+          course_code: course?.course_code ?? 'DEMO',
+          course_name: course?.course_name ?? 'Demo course',
+        },
+        ...prev,
+      ]);
+      toast.success('Class logbook entry saved (demo)');
+      setForm((f) => ({ ...f, topic_summary: '' }));
+      return;
+    }
     setSubmitting(true);
     try {
       await api.post('/api/academics/faculty/workspaces/logbook', form);
@@ -63,7 +92,8 @@ export default function FacultyLogbookPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="After attendance, record what was taught in that lecture (mandated by many universities)."
+        title="Class Logbook"
+        description="After attendance, record what was taught in that lecture."
         meta={
           <>
             <FacultyMetricChip label="Entries" value={entries.length} emphasis />
@@ -92,6 +122,7 @@ export default function FacultyLogbookPage() {
             <span className="mb-1.5 block font-medium text-sgvu-navy">Class date</span>
             <Input
               type="date"
+              required
               value={form.class_date}
               onChange={(e) => setForm({ ...form, class_date: e.target.value })}
             />

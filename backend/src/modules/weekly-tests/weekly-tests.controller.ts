@@ -22,7 +22,7 @@ export class WeeklyTestsController {
   constructor(private readonly testsService: WeeklyTestsService) {}
 
   @Post('faculty/create')
-  @Roles('Faculty', 'HOD', 'Dean', 'Admin')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin', 'Admin')
   createTest(
     @Req() req: { user: AuthUser },
     @Body()
@@ -43,7 +43,7 @@ export class WeeklyTestsController {
   }
 
   @Get('faculty')
-  @Roles('Faculty', 'HOD', 'Dean', 'Admin')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin', 'Admin')
   getFacultyTests(@Req() req: { user: AuthUser }) {
     return this.testsService.getFacultyTests(
       this.tenant(req),
@@ -51,8 +51,21 @@ export class WeeklyTestsController {
     );
   }
 
+  @Get('faculty/:testId/results')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin', 'Admin')
+  getFacultyTestResults(
+    @Req() req: { user: AuthUser },
+    @Param('testId') testId: string,
+  ) {
+    return this.testsService.getFacultyTestResults(
+      this.tenant(req),
+      req.user.user_id,
+      testId,
+    );
+  }
+
   @Delete('faculty/:testId')
-  @Roles('Faculty', 'HOD', 'Dean', 'Admin')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin', 'Admin')
   deleteTest(@Req() req: { user: AuthUser }, @Param('testId') testId: string) {
     return this.testsService.deleteTest(
       this.tenant(req),
@@ -62,7 +75,7 @@ export class WeeklyTestsController {
   }
 
   @Patch('faculty/:testId/toggle')
-  @Roles('Faculty', 'HOD', 'Dean', 'Admin')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin', 'Admin')
   toggleTestStatus(
     @Req() req: { user: AuthUser },
     @Param('testId') testId: string,

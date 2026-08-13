@@ -19,6 +19,7 @@ import type {
   MaterialPublishTargetsResponse,
 } from '@/lib/api/lms';
 import { postMultipart } from '@/lib/api/lms';
+import { isFacultyDemoEntityId, isFacultyDemoSmokeId } from '@/lib/faculty-demo-mode';
 
 type Props = {
   courseId: string;
@@ -129,6 +130,11 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   async function addModule(e: FormEvent) {
     e.preventDefault();
     if (!newModuleTitle.trim()) return;
+    if (isFacultyDemoEntityId(courseId)) {
+      toast.success('Module added (demo)');
+      setNewModuleTitle('');
+      return;
+    }
     setAddingModule(true);
     try {
       await api.post(`/api/academics/faculty/courses/${courseId}/modules`, {
@@ -147,6 +153,13 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
   async function submitMaterial(e: FormEvent) {
     e.preventDefault();
     if (!uploadModuleId || uploadFiles.length === 0 || !token) return;
+    if (isFacultyDemoSmokeId(uploadModuleId) || isFacultyDemoEntityId(courseId)) {
+      toast.success(
+        `${uploadFiles.length} material${uploadFiles.length === 1 ? '' : 's'} uploaded (demo)`,
+      );
+      closeUploadModal();
+      return;
+    }
     const form = new FormData();
     uploadFiles.forEach((file) => form.append('files', file));
     if (uploadTitle.trim() && uploadFiles.length === 1) {
@@ -175,6 +188,10 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
 
   async function deleteMaterial(materialId: string) {
     if (!confirm('Delete this file? Students will no longer be able to download it.')) return;
+    if (isFacultyDemoSmokeId(materialId)) {
+      toast.success('Material deleted (demo)');
+      return;
+    }
     setDeletingId(materialId);
     try {
       await api.del(`/api/academics/faculty/courses/materials/${materialId}`);
@@ -204,6 +221,11 @@ export function FacultyMaterialsTab({ courseId, workspace, onRefresh }: Props) {
 
   async function uploadSyllabus() {
     if (!token || !syllabusFile) return;
+    if (isFacultyDemoEntityId(courseId)) {
+      toast.success('Syllabus uploaded (demo)');
+      setSyllabusFile(null);
+      return;
+    }
     const form = new FormData();
     form.append('file', syllabusFile);
     form.append('title', 'Course Syllabus & Lesson Plan');

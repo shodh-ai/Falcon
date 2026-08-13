@@ -156,10 +156,13 @@ export class LeadershipService {
       )
       .catch(() => []);
 
-    for (const alert of feedAlerts as Array<{ label: string; metadata?: { severity?: string } }>) {
+    for (const alert of feedAlerts as Array<{
+      label: string;
+      metadata?: { severity?: string };
+    }>) {
       const sev = alert.metadata?.severity === 'RED' ? 'red' : 'yellow';
       flags.push({
-        severity: sev as 'red' | 'yellow',
+        severity: sev,
         message: alert.label,
         pillar: 'operations',
         href: '/leadership/intelligence',
@@ -518,7 +521,9 @@ export class LeadershipService {
             : 0,
         };
       }),
-      golden_ticket_leads: (goldenTickets as Array<Record<string, unknown>>).map((r) => ({
+      golden_ticket_leads: (
+        goldenTickets as Array<Record<string, unknown>>
+      ).map((r) => ({
         lead_id: r.lead_id,
         full_name: r.full_name,
         email: r.email,

@@ -42,17 +42,23 @@ export class EnterpriseAuditService {
       ],
     );
 
-    await this.db.query(
-      `INSERT INTO audit_log (user_id, action, entity_type, entity_id, details, created_at)
+    await this.db
+      .query(
+        `INSERT INTO audit_log (user_id, action, entity_type, entity_id, details, created_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, NOW())`,
-      [
-        ctx.userId,
-        ctx.action,
-        ctx.module,
-        ctx.recordId ?? null,
-        JSON.stringify({ ...meta, old_value: ctx.oldValue ?? null, new_value: ctx.newValue ?? null }),
-      ],
-    ).catch(() => undefined);
+        [
+          ctx.userId,
+          ctx.action,
+          ctx.module,
+          ctx.recordId ?? null,
+          JSON.stringify({
+            ...meta,
+            old_value: ctx.oldValue ?? null,
+            new_value: ctx.newValue ?? null,
+          }),
+        ],
+      )
+      .catch(() => undefined);
   }
 
   async listForTenant(

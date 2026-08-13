@@ -22,6 +22,18 @@ import {
   FacultyPageLoading,
   FacultyEmptyState,
 } from '@/components/faculty';
+import {
+  isEmptyArray,
+  isFacultyDemoEntityId,
+  isFacultyDemoModeEnabled,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoHolidays,
+  facultyDemoHrToday,
+  facultyDemoLeaveBalances,
+  facultyDemoLeaveRequests,
+} from '@/lib/mock/faculty-portal-demo';
 
 type TodayWidget = {
   shift: { start: string; end: string; progress_percent: number };
@@ -94,12 +106,37 @@ export default function FacultyHrHubPage() {
         api.get<{ mandatory: Holiday[]; restricted: Holiday[] }>('/api/hr/holidays'),
         api.get<WorkforceRequest[]>('/api/hr/workforce/my-requests'),
       ]);
-      setToday(widget);
-      setBalances(balanceData);
-      setHolidays(holidayData);
-      setRequests(reqData);
+      const hrDemo = facultyDemoHrToday();
+      setToday(
+        withFacultyDemoFallback(widget, {
+          shift: hrDemo.shift,
+          display: hrDemo.display,
+          status: hrDemo.status,
+        }),
+      );
+      setBalances(withFacultyDemoFallback(balanceData, facultyDemoLeaveBalances(), isEmptyArray));
+      setHolidays(
+        withFacultyDemoFallback(
+          holidayData,
+          facultyDemoHolidays(),
+          (v) => !v || ((v.mandatory?.length ?? 0) === 0 && (v.restricted?.length ?? 0) === 0),
+        ),
+      );
+      setRequests(withFacultyDemoFallback(reqData, facultyDemoLeaveRequests(), isEmptyArray));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load HR hub');
+      const hrDemo = facultyDemoHrToday();
+      const balances = withFacultyDemoFallback([], facultyDemoLeaveBalances(), isEmptyArray);
+      if (balances.length === 0) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load HR hub');
+      }
+      setToday({
+        shift: hrDemo.shift,
+        display: hrDemo.display,
+        status: hrDemo.status,
+      });
+      setBalances(balances);
+      setHolidays(facultyDemoHolidays());
+      setRequests(facultyDemoLeaveRequests());
     } finally {
       setLoading(false);
     }
@@ -112,6 +149,18 @@ export default function FacultyHrHubPage() {
   async function submitRequest(e: FormEvent) {
     e.preventDefault();
     if (!modal) return;
+    const demoOnlyRequests =
+      isFacultyDemoModeEnabled() &&
+      (requests.length === 0 || requests.every((r) => isFacultyDemoEntityId(r.leave_id)));
+    if (demoOnlyRequests) {
+      toast.success(
+        modal === 'GATE_PASS'
+          ? 'Gate pass submitted to your HOD (demo)'
+          : 'Request submitted to your reporting officer (demo)',
+      );
+      setModal(null);
+      return;
+    }
     setIsSubmitting(true);
     try {
       if (modal === 'GATE_PASS') {
@@ -160,14 +209,18 @@ export default function FacultyHrHubPage() {
     }
   }
 
-  const remaining = (b: Balance) => Math.max(0, Number(b.entitled) - Number(b.used));
+  const remaining = (b: Balance) => {
+    const entitled = Number(b.entitled);
+    const used = Number(b.used);
+    if (!Number.isFinite(entitled) || !Number.isFinite(used)) return 0;
+    return Math.max(0, entitled - used);
+  };
 
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        eyebrow="My HR & Operations"
-        title="HR & Employee Hub"
-        description="Biometric attendance (read-only), leave balances, holidays, and formal requests."
+        title="Work Calendar"
+        description="Biometric attendance, leave balances, holidays, and formal workforce requests."
       />
 
       {loading && <FacultyPageLoading label="Loading HR workspace…" branded />}
@@ -177,16 +230,16 @@ export default function FacultyHrHubPage() {
           <CardHeader>
             <CardTitle>Let&apos;s get to work</CardTitle>
             <CardDescription>
-              Shift {today.shift.start} – {today.shift.end} · Biometric sync (read-only)
+              Shift {today.shift?.start ?? '—'} – {today.shift?.end ?? '—'} · Biometric sync (read-only)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Progress value={today.shift.progress_percent} className="h-3" />
+            <Progress value={Number(today.shift?.progress_percent ?? 0)} className="h-3" />
             <p className="text-lg font-semibold text-sgvu-navy">
-              In: {today.display.in_time} | Out: {today.display.out_time} | Hours today:{' '}
-              {today.display.hours_worked_today}
+              In: {today.display?.in_time ?? '—'} | Out: {today.display?.out_time ?? '—'} | Hours today:{' '}
+              {today.display?.hours_worked_today ?? '—'}
             </p>
-            <Badge variant="outline">{today.status.replace('_', ' ')}</Badge>
+            <Badge variant="outline">{String(today.status ?? 'UNKNOWN').replace('_', ' ')}</Badge>
           </CardContent>
         </Card>
       )}

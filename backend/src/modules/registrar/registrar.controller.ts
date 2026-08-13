@@ -31,7 +31,8 @@ export class RegistrarController {
   constructor(private readonly registrar: RegistrarService) {}
 
   private tenant(req: { user: AuthUser }) {
-    if (!req.user.tenant_id) throw new BadRequestException('Tenant context required');
+    if (!req.user.tenant_id)
+      throw new BadRequestException('Tenant context required');
     return req.user.tenant_id;
   }
 
@@ -61,8 +62,15 @@ export class RegistrarController {
   }
 
   @Post('placement/assign')
-  assignPlacement(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
-    return this.registrar.assignPlacement(this.tenant(req), req.user.user_id, body as any);
+  assignPlacement(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.registrar.assignPlacement(
+      this.tenant(req),
+      req.user.user_id,
+      body as any,
+    );
   }
 
   @Post('placement/bulk')
@@ -73,7 +81,7 @@ export class RegistrarController {
     return this.registrar.bulkAssignPlacement(
       this.tenant(req),
       req.user.user_id,
-      (body.rows ?? []) as any,
+      body.rows ?? [],
     );
   }
 
@@ -132,7 +140,8 @@ export class RegistrarController {
   reviewRegistration(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
-    @Body() body: { status: 'APPROVED' | 'REJECTED' | 'SENT_BACK'; remarks?: string },
+    @Body()
+    body: { status: 'APPROVED' | 'REJECTED' | 'SENT_BACK'; remarks?: string },
   ) {
     return this.registrar.reviewSemesterRegistration(
       this.tenant(req),
@@ -151,13 +160,22 @@ export class RegistrarController {
     @Query('status') status?: string,
     @Query('q') q?: string,
   ) {
-    return this.registrar.listCertificates(this.tenant(req), { type, status, q });
+    return this.registrar.listCertificates(this.tenant(req), {
+      type,
+      status,
+      q,
+    });
   }
 
   @Post('certificates')
   createCertificate(
     @Req() req: { user: AuthUser },
-    @Body() body: { student_user_id: string; certificate_type: string; remarks?: string },
+    @Body()
+    body: {
+      student_user_id: string;
+      certificate_type: string;
+      remarks?: string;
+    },
   ) {
     return this.registrar.createCertificate(this.tenant(req), body);
   }
@@ -194,11 +212,10 @@ export class RegistrarController {
     @Query('format') format: string | undefined,
     @Res() res: Response,
   ) {
-    const normalized = String(format ?? 'csv').toLowerCase() === 'pdf' ? 'pdf' : 'csv';
-    const { buffer, filename, contentType } = await this.registrar.reportsExportBuffer(
-      this.tenant(req),
-      normalized,
-    );
+    const normalized =
+      String(format ?? 'csv').toLowerCase() === 'pdf' ? 'pdf' : 'csv';
+    const { buffer, filename, contentType } =
+      await this.registrar.reportsExportBuffer(this.tenant(req), normalized);
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', String(buffer.length));
@@ -223,8 +240,15 @@ export class RegistrarController {
   }
 
   @Post('legal/rti')
-  saveRti(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
-    return this.registrar.upsertRti(this.tenant(req), req.user.user_id, body as any);
+  saveRti(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.registrar.upsertRti(
+      this.tenant(req),
+      req.user.user_id,
+      body as any,
+    );
   }
 
   @Get('legal/court')
@@ -233,7 +257,10 @@ export class RegistrarController {
   }
 
   @Post('legal/court')
-  saveCourt(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  saveCourt(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.registrar.upsertCourt(this.tenant(req), body as any);
   }
 
@@ -243,7 +270,10 @@ export class RegistrarController {
   }
 
   @Post('legal/notices')
-  saveNotice(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  saveNotice(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.registrar.upsertNotice(this.tenant(req), body as any);
   }
 
@@ -253,7 +283,10 @@ export class RegistrarController {
   }
 
   @Post('legal/disciplinary')
-  saveDisciplinary(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  saveDisciplinary(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.registrar.upsertDisciplinary(this.tenant(req), body as any);
   }
 
@@ -269,7 +302,10 @@ export class RegistrarController {
   }
 
   @Post('appointments')
-  saveAppointment(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  saveAppointment(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.registrar.upsertAppointment(this.tenant(req), body as any);
   }
 
@@ -305,10 +341,8 @@ export class RegistrarController {
     @Param('id') id: string,
     @Res() res: Response,
   ) {
-    const { buffer, filename } = await this.registrar.getAppointmentLetterPdfBuffer(
-      this.tenant(req),
-      id,
-    );
+    const { buffer, filename } =
+      await this.registrar.getAppointmentLetterPdfBuffer(this.tenant(req), id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', String(buffer.length));
@@ -334,7 +368,7 @@ export class RegistrarController {
       this.tenant(req),
       req.user.user_id,
       userId,
-      body as Parameters<RegistrarService['updateStudentRecord']>[3],
+      body,
     );
   }
 
@@ -366,15 +400,23 @@ export class RegistrarController {
   }
 
   @Post('governance')
-  saveGovernance(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
-    return this.registrar.upsertGovernance(this.tenant(req), req.user.user_id, body as any);
+  saveGovernance(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.registrar.upsertGovernance(
+      this.tenant(req),
+      req.user.user_id,
+      body as any,
+    );
   }
 
   @Post('governance/:id/decide')
   decideGovernance(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
-    @Body() body: { status: 'APPROVED' | 'REJECTED'; decision_remarks?: string },
+    @Body()
+    body: { status: 'APPROVED' | 'REJECTED'; decision_remarks?: string },
   ) {
     return this.registrar.decideGovernance(
       this.tenant(req),
@@ -448,11 +490,17 @@ export class RegistrarController {
   @Post('dsc/bulk-sign')
   dscBulkSign(
     @Req() req: { user: AuthUser },
-    @Body() body: { queue?: 'certificates' | 'appointments' | 'all'; document_label?: string },
+    @Body()
+    body: {
+      queue?: 'certificates' | 'appointments' | 'all';
+      document_label?: string;
+    },
   ) {
     const queue =
       body.queue ??
-      (String(body.document_label ?? '').toLowerCase().includes('appointment')
+      (String(body.document_label ?? '')
+        .toLowerCase()
+        .includes('appointment')
         ? 'appointments'
         : 'certificates');
     return this.registrar.recordBulkSign(
@@ -479,19 +527,19 @@ export class RegistrarController {
   }
 
   @Post('enrollment/enroll')
-  enrollCandidate(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  enrollCandidate(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.registrar.enrollCandidate(
       this.tenant(req),
       req.user.user_id,
-      body as Parameters<RegistrarService['enrollCandidate']>[2],
+      body,
     );
   }
 
   @Get('enrollment/history')
-  enrollmentHistory(
-    @Req() req: { user: AuthUser },
-    @Query('q') q?: string,
-  ) {
+  enrollmentHistory(@Req() req: { user: AuthUser }, @Query('q') q?: string) {
     return this.registrar.listEnrollmentHistory(this.tenant(req), { q });
   }
 
@@ -507,7 +555,10 @@ export class RegistrarController {
   }
 
   @Post('petitions')
-  createPetition(@Req() req: { user: AuthUser }, @Body() body: Record<string, unknown>) {
+  createPetition(
+    @Req() req: { user: AuthUser },
+    @Body() body: Record<string, unknown>,
+  ) {
     return this.registrar.createPetition(
       this.tenant(req),
       req.user.user_id,
@@ -519,7 +570,8 @@ export class RegistrarController {
   decidePetition(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
-    @Body() body: { status: 'APPROVED' | 'REJECTED' | 'ISSUED'; remarks?: string },
+    @Body()
+    body: { status: 'APPROVED' | 'REJECTED' | 'ISSUED'; remarks?: string },
   ) {
     return this.registrar.decidePetition(
       this.tenant(req),
@@ -537,10 +589,7 @@ export class RegistrarController {
   }
 
   @Get('degree-eligibility')
-  degreeEligibility(
-    @Req() req: { user: AuthUser },
-    @Query('q') q?: string,
-  ) {
+  degreeEligibility(@Req() req: { user: AuthUser }, @Query('q') q?: string) {
     return this.registrar.listDegreeEligibility(this.tenant(req), q);
   }
 

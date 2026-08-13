@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -37,7 +33,11 @@ export class FinanceWebhookService {
     const secret =
       provider === 'razorpay'
         ? (process.env.RAZORPAY_WEBHOOK_SECRET ?? '').trim()
-        : (process.env.PAYU_MERCHANT_SALT ?? process.env.PAYU_WEBHOOK_SECRET ?? '').trim();
+        : (
+            process.env.PAYU_MERCHANT_SALT ??
+            process.env.PAYU_WEBHOOK_SECRET ??
+            ''
+          ).trim();
 
     if (!secret) {
       if (process.env.NODE_ENV === 'production') {

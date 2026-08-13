@@ -461,13 +461,25 @@ export class EcellController {
   }
 
   @Get('ip-agreements')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'SuperAdmin', 'Student')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'FellowshipAdmin',
+    'SuperAdmin',
+    'Student',
+  )
   listIp(@Req() req: { user: AuthUser }) {
     return this.urop.listIpAgreements(this.tenant(req));
   }
 
   @Post('ip-agreements')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'SuperAdmin', 'Student')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'FellowshipAdmin',
+    'SuperAdmin',
+    'Student',
+  )
   upsertIp(
     @Req() req: { user: AuthUser },
     @Body()
@@ -488,7 +500,14 @@ export class EcellController {
   }
 
   @Get('fellowships')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'Wrangler', 'SuperAdmin', 'Student')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'FellowshipAdmin',
+    'Wrangler',
+    'SuperAdmin',
+    'Student',
+  )
   listFellowships(@Req() req: { user: AuthUser }) {
     return this.urop.listFellowships(this.tenant(req));
   }
@@ -503,11 +522,18 @@ export class EcellController {
   }
 
   @Post('fellowships/:id/decide')
-  @Roles(INCUBATION_ADMIN, LEGACY_ECELL_ADMIN, 'FellowshipAdmin', 'Wrangler', 'SuperAdmin')
+  @Roles(
+    INCUBATION_ADMIN,
+    LEGACY_ECELL_ADMIN,
+    'FellowshipAdmin',
+    'Wrangler',
+    'SuperAdmin',
+  )
   decideFellowship(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
-    @Body() body: { decision: 'PASSED' | 'FAILED' | 'CONVERTED'; notes?: string },
+    @Body()
+    body: { decision: 'PASSED' | 'FAILED' | 'CONVERTED'; notes?: string },
   ) {
     return this.urop.decideFellowship(
       this.tenant(req),
@@ -532,7 +558,10 @@ export class EcellController {
     @Req() req: { user: AuthUser },
     @Query('course_offering_id') courseOfferingId?: string,
   ) {
-    return this.urop.listProductVivaPanelists(this.tenant(req), courseOfferingId);
+    return this.urop.listProductVivaPanelists(
+      this.tenant(req),
+      courseOfferingId,
+    );
   }
 
   @Post('product-viva/panelists')

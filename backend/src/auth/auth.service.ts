@@ -326,9 +326,7 @@ export class AuthService {
     const roleName = (user.role?.role_name ?? '').trim();
     if (roleName === 'Student' || roleName === 'Applicant') return user;
 
-    const profileRows = await this.dataSource.query<
-      Array<{ user_id: string }>
-    >(
+    const profileRows = await this.dataSource.query<Array<{ user_id: string }>>(
       `SELECT user_id FROM student_profiles
        WHERE user_id = $1 AND tenant_id = $2
        LIMIT 1`,

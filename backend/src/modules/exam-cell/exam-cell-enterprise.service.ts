@@ -618,7 +618,9 @@ export class ExamCellEnterpriseService {
   ) {
     const payload = String(qrPayload ?? '').trim();
     if (!payload) {
-      throw new BadRequestException('Enter an enrollment number or scan a hall ticket QR');
+      throw new BadRequestException(
+        'Enter an enrollment number or scan a hall ticket QR',
+      );
     }
 
     const studentMatch = payload.match(/student:([a-f0-9-]{36})/i);

@@ -52,7 +52,10 @@ export function resolveDofaLevel(
 ): DofaLevel {
   const sorted = [...levels].sort((a, b) => a.level_no - b.level_no);
   for (const level of sorted) {
-    if (level.max_amount_inr == null || amount <= Number(level.max_amount_inr)) {
+    if (
+      level.max_amount_inr == null ||
+      amount <= Number(level.max_amount_inr)
+    ) {
       return level;
     }
   }

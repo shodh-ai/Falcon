@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { evaluateThreeWayMatch } from './three-way-match.util';
@@ -24,51 +28,58 @@ export class CooOpsService {
       }
     };
 
-    const [slaBreaches, openPos, pendingGrn, penalties, labCheckouts, fellowships, funnel] =
-      await Promise.all([
-        safe(
-          `SELECT COUNT(*)::int AS count FROM helpdesk_tickets
+    const [
+      slaBreaches,
+      openPos,
+      pendingGrn,
+      penalties,
+      labCheckouts,
+      fellowships,
+      funnel,
+    ] = await Promise.all([
+      safe(
+        `SELECT COUNT(*)::int AS count FROM helpdesk_tickets
            WHERE tenant_id = $1 AND status NOT IN ('RESOLVED','CLOSED','REJECTED')
              AND sla_deadline IS NOT NULL AND sla_deadline < NOW()`,
-          [tid],
-        ),
-        safe(
-          `SELECT COUNT(*)::int AS count FROM fin_purchase_orders
+        [tid],
+      ),
+      safe(
+        `SELECT COUNT(*)::int AS count FROM fin_purchase_orders
            WHERE tenant_id = $1 AND deleted_at IS NULL AND status IN ('PENDING','APPROVED')`,
-          [tid],
-        ),
-        safe(
-          `SELECT COUNT(*)::int AS count FROM fin_purchase_orders po
+        [tid],
+      ),
+      safe(
+        `SELECT COUNT(*)::int AS count FROM fin_purchase_orders po
            WHERE po.tenant_id = $1 AND po.deleted_at IS NULL AND po.status = 'APPROVED'
              AND NOT EXISTS (SELECT 1 FROM fin_goods_receipts g WHERE g.po_id = po.po_id)`,
-          [tid],
-        ),
-        safe(
-          `SELECT COUNT(*)::int AS count, COALESCE(SUM(amount_inr),0) AS total
+        [tid],
+      ),
+      safe(
+        `SELECT COUNT(*)::int AS count, COALESCE(SUM(amount_inr),0) AS total
            FROM fin_vendor_penalties WHERE tenant_id = $1`,
-          [tid],
-        ),
-        safe(
-          `SELECT COUNT(*)::int AS count FROM lab_equipment_checkouts
+        [tid],
+      ),
+      safe(
+        `SELECT COUNT(*)::int AS count FROM lab_equipment_checkouts
            WHERE tenant_id = $1 AND returned_at IS NULL`,
-          [tid],
-        ),
-        safe(
-          `SELECT COUNT(*) FILTER (WHERE status = 'TRIAL')::int AS trial,
+        [tid],
+      ),
+      safe(
+        `SELECT COUNT(*) FILTER (WHERE status = 'TRIAL')::int AS trial,
                   COUNT(*) FILTER (WHERE status IN ('PASSED','CONVERTED'))::int AS passed
            FROM ecell_fellowship_trials WHERE tenant_id = $1`,
-          [tid],
-        ),
-        safe(
-          `SELECT COUNT(*) FILTER (WHERE stage = 'WHITEPAPER')::int AS whitepaper,
+        [tid],
+      ),
+      safe(
+        `SELECT COUNT(*) FILTER (WHERE stage = 'WHITEPAPER')::int AS whitepaper,
                   COUNT(*) FILTER (WHERE stage = 'TOP20_LOCKDOWN')::int AS top20,
                   COUNT(*) FILTER (WHERE stage = 'GOLDEN_TICKET')::int AS golden
            FROM competition_entries e
            JOIN competitions c ON c.competition_id = e.competition_id
            WHERE c.tenant_id = $1`,
-          [tid],
-        ),
-      ]);
+        [tid],
+      ),
+    ]);
 
     return {
       esm_sla_breaches: slaBreaches[0]?.count ?? 0,
@@ -157,7 +168,11 @@ export class CooOpsService {
     return ticket[0];
   }
 
-  async scanCloseTicket(tenantId: string | undefined, userId: string, ticketId: string) {
+  async scanCloseTicket(
+    tenantId: string | undefined,
+    userId: string,
+    ticketId: string,
+  ) {
     const tid = this.tenant(tenantId);
     const rows = await this.db.query(
       `UPDATE helpdesk_tickets
@@ -221,7 +236,12 @@ export class CooOpsService {
     tenantId: string | undefined,
     userId: string,
     roleName: string,
-    body: { description: string; amount: number; vendor_id?: string; program_id?: string },
+    body: {
+      description: string;
+      amount: number;
+      vendor_id?: string;
+      program_id?: string;
+    },
   ) {
     const tid = this.tenant(tenantId);
     if (!body.description || !(body.amount > 0)) {
@@ -387,7 +407,8 @@ export class CooOpsService {
 
     const poAmount = Number(po[0].amount);
     const invoiceAmount = invoices.reduce(
-      (sum: number, inv: { amt?: string | number }) => sum + Number(inv.amt ?? 0),
+      (sum: number, inv: { amt?: string | number }) =>
+        sum + Number(inv.amt ?? 0),
       0,
     );
     const evaluated = evaluateThreeWayMatch({
@@ -517,7 +538,9 @@ export class CooOpsService {
         [po[0].grant_id, tid],
       );
       if (grants[0]) {
-        const cat = String(po[0].grant_expense_category || 'EQUIPMENT').toUpperCase();
+        const cat = String(
+          po[0].grant_expense_category || 'EQUIPMENT',
+        ).toUpperCase();
         const check = assertGrantSpendAllowed({
           grantStatus: grants[0].status,
           availableAmount: Number(
@@ -530,7 +553,10 @@ export class CooOpsService {
           allowedCategories: grants[0].allowed_expense_categories || [],
         });
         if (!check.ok) {
-          throw new BadRequestException({ message: check.message, code: check.code });
+          throw new BadRequestException({
+            message: check.message,
+            code: check.code,
+          });
         }
         await this.db.query(
           `UPDATE research_grants
@@ -661,7 +687,10 @@ export class CooOpsService {
     );
   }
 
-  private async resolvePoVendorId(tenantId: string, po: { po_id: string; vendor_id?: string | null }) {
+  private async resolvePoVendorId(
+    tenantId: string,
+    po: { po_id: string; vendor_id?: string | null },
+  ) {
     if (po.vendor_id) return po.vendor_id;
     const existing = await this.db.query(
       `SELECT vendor_id FROM fin_vendors WHERE tenant_id = $1 AND is_active = true ORDER BY created_at LIMIT 1`,
@@ -677,7 +706,8 @@ export class CooOpsService {
       );
       vendorId = created[0]?.vendor_id;
     }
-    if (!vendorId) throw new BadRequestException('No vendor available for invoice');
+    if (!vendorId)
+      throw new BadRequestException('No vendor available for invoice');
     await this.db.query(
       `UPDATE fin_purchase_orders SET vendor_id = $1 WHERE po_id = $2`,
       [vendorId, po.po_id],
@@ -699,10 +729,11 @@ export class CooOpsService {
       [tid, poId],
     );
     if (existing[0]) {
-      return this.db.query(
-        `SELECT * FROM fin_vendor_invoices WHERE invoice_id = $1`,
-        [existing[0].invoice_id],
-      ).then((rows) => rows[0]);
+      return this.db
+        .query(`SELECT * FROM fin_vendor_invoices WHERE invoice_id = $1`, [
+          existing[0].invoice_id,
+        ])
+        .then((rows) => rows[0]);
     }
 
     const vendorId = await this.resolvePoVendorId(tid, po);

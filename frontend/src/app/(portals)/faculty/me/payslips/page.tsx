@@ -5,8 +5,8 @@ export default function FacultyPayslipsPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="My Payslips & Tax"
-        description="Request a salary certificate on official letterpad — download only after HR approval."
+        title="Salary & Tax"
+        description="View salary slips and tax information."
       />
       <MyPayslipsPanel />
     </FacultyPageShell>

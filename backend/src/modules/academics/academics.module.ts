@@ -11,6 +11,8 @@ import { StudentCourseEnrollment } from '../../entities/student-course-enrollmen
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
 import { AcademicAssignment } from '../../entities/academic-assignment.entity';
 import { AssignmentSubmission } from '../../entities/assignment-submission.entity';
+import { AssignmentNotificationAudit } from '../../entities/assignment-notification-audit.entity';
+import { FalconNotification } from '../../entities/falcon-notification.entity';
 import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity';
 import { CourseMaterial } from '../../entities/course-material.entity';
 import { CourseModule } from '../../entities/course-module.entity';
@@ -82,6 +84,8 @@ import { DeanAuditService } from './dean-audit.service';
       AcademicTimetable,
       AcademicAssignment,
       AssignmentSubmission,
+      AssignmentNotificationAudit,
+      FalconNotification,
       CourseAttendanceLog,
       CourseMaterial,
       CourseModule,

@@ -6,12 +6,14 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { DofaEngineService } from '../dofa-engine/dofa-engine.service';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 
 @Injectable()
 export class UosGovernanceService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly dofa: DofaEngineService,
+    private readonly notify: NotificationEmitterService,
   ) {}
 
   private tenant(id?: string) {
@@ -184,9 +186,15 @@ export class UosGovernanceService {
         code: 'DOFA_CASE_MISSING',
       });
     }
-    const decided = await this.dofa.decide(tid, userId, userRoles, cases[0].case_id, {
-      decision,
-    });
+    const decided = await this.dofa.decide(
+      tid,
+      userId,
+      userRoles,
+      cases[0].case_id,
+      {
+        decision,
+      },
+    );
     const out = await this.db.query(
       `SELECT * FROM asset_writeoff_requests WHERE writeoff_id = $1`,
       [writeoffId],
@@ -229,7 +237,30 @@ export class UosGovernanceService {
 
   // --- SIS ---
 
-  listGradeChanges(tenantId?: string) {
+  listGradeChanges(
+    tenantId?: string,
+    userId?: string,
+    userRoles?: string | string[],
+  ) {
+    const tid = this.tenant(tenantId);
+    const roles = (Array.isArray(userRoles) ? userRoles : [userRoles ?? ''])
+      .map((r) => String(r).toLowerCase())
+      .filter(Boolean);
+    const facultyOnly =
+      roles.includes('faculty') &&
+      !roles.some((r) =>
+        [
+          'hod',
+          'dean',
+          'examcell',
+          'examadmin',
+          'deputycoe',
+          'superadmin',
+          'campusadmin',
+          'labadmin',
+        ].includes(r),
+      );
+
     return this.db.query(
       `SELECT
          q.change_id, q.tenant_id, q.student_user_id, q.course_code, q.course_name,
@@ -266,10 +297,44 @@ export class UosGovernanceService {
           AND ds.step_no = dc.current_step
           AND ds.decision IS NULL
          WHERE g.tenant_id = $1
+           AND ($2::uuid IS NULL OR g.requested_by = $2::uuid)
        ) q
        ORDER BY q.created_at DESC`,
-      [this.tenant(tenantId)],
+      [tid, facultyOnly && userId ? userId : null],
     );
+  }
+
+  private async resolveGradeChangeNotifyTargets(
+    tenantId: string,
+    requesterId: string,
+  ) {
+    const requesterRows = await this.db.query(
+      `SELECT u.name AS requester_name, d.hod_user_id
+       FROM users u
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2
+       LIMIT 1`,
+      [requesterId, tenantId],
+    );
+    const requesterName = requesterRows[0]?.requester_name ?? 'Faculty';
+    const hodIds = new Set<string>();
+    if (requesterRows[0]?.hod_user_id) {
+      hodIds.add(String(requesterRows[0].hod_user_id));
+    }
+    if (hodIds.size === 0) {
+      const fallback = await this.db.query(
+        `SELECT DISTINCT u.user_id
+         FROM users u
+         JOIN user_roles ur ON ur.user_id = u.user_id
+         JOIN roles r ON r.role_id = ur.role_id
+         WHERE u.tenant_id = $1
+           AND u.is_active = true
+           AND lower(r.role_name) = 'hod'`,
+        [tenantId],
+      );
+      for (const row of fallback) hodIds.add(String(row.user_id));
+    }
+    return { requesterName, hodIds: [...hodIds] };
   }
 
   async createGradeChange(
@@ -286,7 +351,8 @@ export class UosGovernanceService {
   ) {
     if (body.student_user_id === userId) {
       throw new BadRequestException({
-        message: 'Cannot request grade change for self as student identity collision',
+        message:
+          'Cannot request grade change for self as student identity collision',
         code: 'SOD_VIOLATION',
       });
     }
@@ -342,6 +408,31 @@ export class UosGovernanceService {
       },
       rule_key: 'DEFAULT',
     });
+
+    const studentRows = await this.db.query(
+      `SELECT name FROM users WHERE user_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [body.student_user_id, tid],
+    );
+    const { requesterName, hodIds } =
+      await this.resolveGradeChangeNotifyTargets(tid, userId);
+    const notifyBase = {
+      changeId: String(row.change_id),
+      courseCode: body.course_code,
+      fromGrade: body.from_grade,
+      toGrade: body.to_grade,
+      requesterName,
+      studentName: studentRows[0]?.name ?? null,
+    };
+    for (const hodId of hodIds) {
+      if (hodId === userId) continue; // SoD: maker cannot approve own request
+      this.notify.gradeChangeHodPending({
+        tenantId: tid,
+        userId: hodId,
+        ...notifyBase,
+        actionLink: '/hod/approvals/grade-change',
+      });
+    }
+
     return { ...row, dofa_case_id: dofa.case_id, dofa };
   }
 
@@ -373,7 +464,13 @@ export class UosGovernanceService {
       { decision: 'APPROVED' },
     );
     if (decided.status === 'APPROVED') {
-      await this.recordEvidence(tid, 'SIS', changeId, 'Grade change applied via DOFA', {});
+      await this.recordEvidence(
+        tid,
+        'SIS',
+        changeId,
+        'Grade change applied via DOFA',
+        {},
+      );
     }
     const out = await this.db.query(
       `SELECT * FROM sis_grade_change_requests WHERE change_id = $1`,
@@ -438,7 +535,11 @@ export class UosGovernanceService {
     if (sigs.some((s: { user_id: string }) => s.user_id === userId)) {
       throw new BadRequestException('Already signed');
     }
-    sigs.push({ user_id: userId, role: roleName, at: new Date().toISOString() });
+    sigs.push({
+      user_id: userId,
+      role: roleName,
+      at: new Date().toISOString(),
+    });
     const nextStatus = sigs.length >= 2 ? 'PENDING_DEAN' : 'PENDING_BOS';
     const out = await this.db.query(
       `UPDATE sis_curriculum_proposals

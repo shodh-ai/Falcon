@@ -36,12 +36,18 @@ export function programsMatch(
   const prog = normalizeProgram(studentProgram);
   if (!prog || !alloc) return true;
   if (prog === alloc) return true;
-  if (alloc.includes('ME') && (prog.includes('MECHANICAL') || prog.includes('MECH'))) {
+  if (
+    alloc.includes('ME') &&
+    (prog.includes('MECHANICAL') || prog.includes('MECH'))
+  ) {
     return true;
   }
   if (alloc.includes('AGRI') && prog.includes('AGRI')) return true;
   if (alloc.includes('PHARM') && prog.includes('PHARM')) return true;
-  if (alloc.includes('CSE') && (prog.includes('COMPUTER') || prog.includes('CSE'))) {
+  if (
+    alloc.includes('CSE') &&
+    (prog.includes('COMPUTER') || prog.includes('CSE'))
+  ) {
     return true;
   }
   return false;

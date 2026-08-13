@@ -38,6 +38,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MyDocumentsPanel } from '@/components/self-service/MyDocumentsPanel';
 import { useAuth } from '@/context/AuthContext';
+import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { FACULTY_DEMO_PROFILE } from '@/lib/mock/faculty-portal-demo';
 import { useAuthedApi } from '@/lib/api';
 import { getSubdomainFromClient } from '@/lib/tenant';
 
@@ -430,8 +432,7 @@ export function FacultyProfilePage() {
   const [qualFile, setQualFile] = useState<File | null>(null);
   const [addingQual, setAddingQual] = useState(false);
 
-  const loadProfile = useCallback(async () => {
-    const data = await api.get<FacultyProfile>('/api/academics/faculty/profile');
+  const applyProfile = useCallback((data: FacultyProfile) => {
     setProfile(data);
     setPersonalForm({
       emergency_contact_name: data.personal.emergency_contact_name ?? '',
@@ -448,8 +449,29 @@ export function FacultyProfilePage() {
         : '',
       industry_experience_years: String(data.industry_experience_years ?? 0),
     });
-    return data;
-  }, [api]);
+  }, []);
+
+  const loadProfile = useCallback(async () => {
+    try {
+      const data = await api.get<FacultyProfile>('/api/academics/faculty/profile');
+      const resolved = withFacultyDemoFallback(
+        data,
+        FACULTY_DEMO_PROFILE() as unknown as FacultyProfile,
+      );
+      applyProfile(resolved);
+      return resolved;
+    } catch (e) {
+      const demo = withFacultyDemoFallback(
+        null,
+        FACULTY_DEMO_PROFILE() as unknown as FacultyProfile,
+      );
+      if (demo) {
+        applyProfile(demo);
+        return demo;
+      }
+      throw e;
+    }
+  }, [api, applyProfile]);
 
   useEffect(() => {
     const t = searchParams.get('tab');
@@ -587,6 +609,7 @@ export function FacultyProfilePage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
+        title="My Profile"
         description="NAAC-compliant master record — identity, qualifications, research identifiers, and workload."
         actions={
           <Badge variant="outline" className="gap-1.5 border-sgvu-gold/40 bg-sgvu-gold/10 text-sgvu-navy">

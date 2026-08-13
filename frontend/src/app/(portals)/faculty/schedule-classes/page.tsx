@@ -1,16 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Loader2, Save, X, GripVertical } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  CheckCircle2,
+  GripVertical,
+  Loader2,
+  Save,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   FacultyPageShell,
   FacultyPageHeader,
-  FacultyPanel,
+  FacultyEmptyState,
 } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
-import { Input } from '@/components/ui/input';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import {
@@ -19,6 +25,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { isEmptyArray, isFacultyDemoEntityId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoScheduleData } from '@/lib/mock/faculty-portal-demo';
+import { cn } from '@/lib/utils';
 
 type Allocation = {
   allocation_id: string;
@@ -54,6 +63,9 @@ const DAYS = [
 ];
 const HOURS = [9, 10, 11, 12, 13, 14, 15, 16];
 const LUNCH_HOUR = 13;
+
+const actionBtnClass =
+  'h-10 min-w-[9.5rem] flex-1 border-0 bg-sgvu-navy text-white shadow-sm hover:bg-[#123A6D] hover:text-white active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60 sm:flex-none';
 
 function formatTime(hour: number) {
   const h = hour > 12 ? hour - 12 : hour;
@@ -98,11 +110,15 @@ export default function FacultyScheduleClassesPage() {
   const [gridSlots, setGridSlots] = useState<TimetableSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
+
   const [roomModalOpen, setRoomModalOpen] = useState(false);
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
   const [availableRooms, setAvailableRooms] = useState<any[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
+
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [focusedSlotId, setFocusedSlotId] = useState<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -110,10 +126,16 @@ export default function FacultyScheduleClassesPage() {
       const data = await api.get<{ allocations: Allocation[]; timetables: any[]; faculty: any[] }>(
         withTeachingDeptId('/api/academics/faculty/workspaces/timetable/schedule-data', activeDeptId),
       );
-      setAllocations(data.allocations || []);
+      const demo = facultyDemoScheduleData();
+      const allocationsResolved = withFacultyDemoFallback(
+        data.allocations || [],
+        demo.allocations as Allocation[],
+        isEmptyArray,
+      );
+      setAllocations(allocationsResolved);
 
       const mappedTimetables: TimetableSlot[] = dedupeSlotsByCourse(
-        (data.timetables || []).map((t) => ({
+        withFacultyDemoFallback(data.timetables || [], demo.timetables, isEmptyArray).map((t) => ({
           timetable_id: t.timetable_id,
           course_id: t.course_id,
           faculty_user_id: t.faculty_user_id,
@@ -127,11 +149,55 @@ export default function FacultyScheduleClassesPage() {
           section: t.section,
         })),
       );
-      setGridSlots(mappedTimetables);
+      let nextSlots = mappedTimetables;
+      if (mappedTimetables.some((s) => isFacultyDemoEntityId(s.course_id))) {
+        try {
+          const raw = sessionStorage.getItem('faculty-demo-schedule-slots');
+          if (raw) {
+            const parsed = JSON.parse(raw) as TimetableSlot[];
+            if (Array.isArray(parsed) && parsed.length) {
+              nextSlots = dedupeSlotsByCourse(
+                parsed.map((t) => ({
+                  ...t,
+                  start_time: normalizeTime(t.start_time),
+                  end_time: normalizeTime(t.end_time),
+                })),
+              );
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      setGridSlots(nextSlots);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load schedule data');
-      setAllocations([]);
-      setGridSlots([]);
+      const demo = facultyDemoScheduleData();
+      const allocationsResolved = withFacultyDemoFallback(
+        [],
+        demo.allocations as Allocation[],
+        isEmptyArray,
+      );
+      setAllocations(allocationsResolved);
+      setGridSlots(
+        dedupeSlotsByCourse(
+          withFacultyDemoFallback([], demo.timetables, isEmptyArray).map((t) => ({
+            timetable_id: t.timetable_id,
+            course_id: t.course_id,
+            faculty_user_id: t.faculty_user_id,
+            course_code: t.course_code,
+            course_name: t.course_name,
+            faculty_name: t.faculty_name,
+            day_of_week: t.day_of_week,
+            start_time: normalizeTime(t.start_time),
+            end_time: normalizeTime(t.end_time),
+            room: t.room,
+            section: t.section,
+          })),
+        ),
+      );
+      if (allocationsResolved.length === 0) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load schedule data');
+      }
     } finally {
       setLoading(false);
     }
@@ -142,13 +208,62 @@ export default function FacultyScheduleClassesPage() {
     void load();
   }, [api, activeDeptId, deptLoading]);
 
-  function handleDragStart(e: React.DragEvent, sourceData: any) {
+  const uniqueAllocations = useMemo(() => dedupeAllocations(allocations), [allocations]);
+  const scheduledCourseIds = useMemo(
+    () => new Set(gridSlots.map((s) => s.course_id)),
+    [gridSlots],
+  );
+  const unscheduled = useMemo(
+    () => uniqueAllocations.filter((a) => !scheduledCourseIds.has(a.course_id)),
+    [uniqueAllocations, scheduledCourseIds],
+  );
+  const scheduledCount = dedupeSlotsByCourse(gridSlots).length;
+
+  function placeCourse(allocation: Allocation, dayOfWeek: number, hour: number) {
+    if (hour === LUNCH_HOUR) return;
+    const start_time = `${hour.toString().padStart(2, '0')}:00:00`;
+    const end_time = `${(hour + 1).toString().padStart(2, '0')}:00:00`;
+
+    if (gridSlots.some((s) => s.course_id === allocation.course_id)) {
+      toast.warning('Course already scheduled', {
+        description: `${allocation.course_code} already has a weekly slot. Move or remove it first.`,
+      });
+      return;
+    }
+    if (gridSlots.some((s) => slotHourKey(s) === `${dayOfWeek}|${start_time}`)) {
+      toast.warning('Time slot taken', {
+        description: 'You already have another class at this time.',
+      });
+      return;
+    }
+
+    const newSlot: TimetableSlot = {
+      timetable_id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      course_id: allocation.course_id,
+      faculty_user_id: allocation.faculty_user_id,
+      course_code: allocation.course_code,
+      course_name: allocation.course_name,
+      faculty_name: allocation.faculty_name,
+      day_of_week: dayOfWeek,
+      start_time,
+      end_time,
+      room: '',
+      section: 'A',
+    };
+    setGridSlots((prev) => [...prev, newSlot]);
+    setSelectedCourseId(null);
+    setFocusedSlotId(newSlot.timetable_id ?? null);
+    toast.success(`${allocation.course_code} placed on ${DOW[dayOfWeek]} ${formatTime(hour)}`);
+  }
+
+  function handleDragStart(e: React.DragEvent, sourceData: unknown) {
     e.dataTransfer.setData('application/json', JSON.stringify(sourceData));
     e.dataTransfer.effectAllowed = 'move';
   }
 
   function handleDrop(e: React.DragEvent, dayOfWeek: number, hour: number) {
     e.preventDefault();
+    setDragOverKey(null);
     if (hour === LUNCH_HOUR) return;
 
     try {
@@ -157,99 +272,98 @@ export default function FacultyScheduleClassesPage() {
       const end_time = `${(hour + 1).toString().padStart(2, '0')}:00:00`;
 
       if (data.type === 'NEW') {
-        if (gridSlots.some((s) => s.course_id === data.allocation.course_id)) {
-          toast.warning('Course already scheduled', {
-            description: `${data.allocation.course_code} already has a weekly slot. Move or remove it first.`,
-          });
-          return;
-        }
-        if (gridSlots.some((s) => slotHourKey(s) === `${dayOfWeek}|${start_time}`)) {
-          toast.warning('Time slot taken', {
-            description: 'You already have another class at this time.',
-          });
-          return;
-        }
-        const newSlot: TimetableSlot = {
-          timetable_id: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          course_id: data.allocation.course_id,
-          faculty_user_id: data.allocation.faculty_user_id,
-          course_code: data.allocation.course_code,
-          course_name: data.allocation.course_name,
-          faculty_name: data.allocation.faculty_name,
-          day_of_week: dayOfWeek,
-          start_time,
-          end_time,
-          room: '',
-          section: 'A',
-        };
-        setGridSlots(prev => [...prev, newSlot]);
+        placeCourse(data.allocation as Allocation, dayOfWeek, hour);
       } else if (data.type === 'MOVE') {
         const moving = data.slot as TimetableSlot;
         const targetKey = `${dayOfWeek}|${start_time}`;
-        if (
-          gridSlots.some(
-            (s) => s !== moving && slotHourKey(s) === targetKey,
-          )
-        ) {
+        if (gridSlots.some((s) => s !== moving && slotHourKey(s) === targetKey)) {
           toast.warning('Time slot taken', {
             description: 'You already have another class at this time.',
           });
           return;
         }
-        setGridSlots(prev => prev.map(s => {
-          if (s === data.slot || (s.day_of_week === data.slot.day_of_week && s.start_time === data.slot.start_time && s.course_id === data.slot.course_id)) {
-            return { ...s, day_of_week: dayOfWeek, start_time, end_time };
-          }
-          return s;
-        }));
+        setGridSlots((prev) =>
+          prev.map((s) => {
+            if (
+              s === data.slot ||
+              (s.day_of_week === data.slot.day_of_week &&
+                s.start_time === data.slot.start_time &&
+                s.course_id === data.slot.course_id)
+            ) {
+              return { ...s, day_of_week: dayOfWeek, start_time, end_time };
+            }
+            return s;
+          }),
+        );
+        setFocusedSlotId(moving.timetable_id ?? null);
       }
     } catch (err) {
       console.error('Drop error', err);
     }
   }
 
-  function handleDragOver(e: React.DragEvent) {
+  function handleCellClick(dayOfWeek: number, hour: number) {
+    if (hour === LUNCH_HOUR || !selectedCourseId) return;
+    const allocation = uniqueAllocations.find((a) => a.course_id === selectedCourseId);
+    if (!allocation) return;
+    placeCourse(allocation, dayOfWeek, hour);
+  }
+
+  function handleDragOver(e: React.DragEvent, key: string) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    setDragOverKey(key);
   }
 
   function removeSlot(slotToRemove: TimetableSlot) {
-    setGridSlots(prev => prev.filter(s => s !== slotToRemove));
+    setGridSlots((prev) => prev.filter((s) => s !== slotToRemove));
+    if (focusedSlotId && focusedSlotId === slotToRemove.timetable_id) {
+      setFocusedSlotId(null);
+    }
   }
-  
+
   function updateRoom(slotId: string | undefined, room: string) {
-    if(!slotId) return;
-    setGridSlots(prev => prev.map(s => s.timetable_id === slotId ? { ...s, room } : s));
+    if (!slotId) return;
+    setGridSlots((prev) => prev.map((s) => (s.timetable_id === slotId ? { ...s, room } : s)));
   }
 
   function updateSection(slotId: string | undefined, section: string) {
-    if(!slotId) return;
-    setGridSlots(prev => prev.map(s => s.timetable_id === slotId ? { ...s, section } : s));
+    if (!slotId) return;
+    setGridSlots((prev) =>
+      prev.map((s) => (s.timetable_id === slotId ? { ...s, section } : s)),
+    );
   }
 
   async function openRoomModal(slot: TimetableSlot) {
     if (!slot.timetable_id) return;
     setActiveSlotId(slot.timetable_id);
+    setFocusedSlotId(slot.timetable_id);
     setRoomModalOpen(true);
     setLoadingRooms(true);
     try {
       const data = await api.get<any[]>(
-        `/api/academics/faculty/workspaces/timetable/rooms/availability?day=${slot.day_of_week}&startTime=${slot.start_time}&endTime=${slot.end_time}`
-      );
-      
-      const localOccupied = new Set(
-        gridSlots
-          .filter(s => s.timetable_id !== slot.timetable_id && s.day_of_week === slot.day_of_week && s.start_time === slot.start_time && s.room)
-          .map(s => s.room)
+        `/api/academics/faculty/workspaces/timetable/rooms/availability?day=${slot.day_of_week}&startTime=${slot.start_time}&endTime=${slot.end_time}`,
       );
 
-      const processedData = data.map(r => ({
+      const localOccupied = new Set(
+        gridSlots
+          .filter(
+            (s) =>
+              s.timetable_id !== slot.timetable_id &&
+              s.day_of_week === slot.day_of_week &&
+              s.start_time === slot.start_time &&
+              s.room,
+          )
+          .map((s) => s.room),
+      );
+
+      const processedData = data.map((r) => ({
         ...r,
-        available: r.available && !localOccupied.has(r.roomName)
+        available: r.available && !localOccupied.has(r.roomName),
       }));
 
       setAvailableRooms(processedData);
-    } catch (e) {
+    } catch {
       toast.error('Failed to load available rooms');
     } finally {
       setLoadingRooms(false);
@@ -262,7 +376,11 @@ export default function FacultyScheduleClassesPage() {
   }
 
   async function handleBatchSave() {
-    const slots = dedupeSlotsByCourse(gridSlots);
+    const slots = dedupeSlotsByCourse(gridSlots).map((s) => ({
+      ...s,
+      start_time: normalizeTime(s.start_time),
+      end_time: normalizeTime(s.end_time),
+    }));
     const seenTimes = new Set<string>();
     for (const slot of slots) {
       const key = slotHourKey(slot);
@@ -275,10 +393,21 @@ export default function FacultyScheduleClassesPage() {
       seenTimes.add(key);
     }
 
+    if (slots.some((s) => isFacultyDemoEntityId(s.course_id))) {
+      try {
+        sessionStorage.setItem('faculty-demo-schedule-slots', JSON.stringify(slots));
+      } catch {
+        // ignore
+      }
+      setGridSlots(slots);
+      toast.success('Timetable saved locally (demo courses)');
+      return;
+    }
+
     setSaving(true);
     try {
       await api.post('/api/academics/faculty/workspaces/timetable/slots', {
-        slots: slots.map(s => ({
+        slots: slots.map((s) => ({
           course_id: s.course_id,
           faculty_user_id: s.faculty_user_id,
           day_of_week: s.day_of_week,
@@ -297,12 +426,10 @@ export default function FacultyScheduleClassesPage() {
     }
   }
 
-  const uniqueAllocations = dedupeAllocations(allocations);
-
   if (loading) {
     return (
       <FacultyPageShell>
-        <FacultyPageHeader title="Schedule Classes" description="Loading timetable data..." meta={null} />
+        <FacultyPageHeader title="Class Schedule" description="Loading timetable data…" meta={null} />
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-sgvu-navy" />
         </div>
@@ -313,23 +440,19 @@ export default function FacultyScheduleClassesPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Schedule Classes"
-        description="Select your preferred time slots for your allocated courses. First come, first serve."
+        title="Class Schedule"
+        description="Build your weekly timetable in two steps: pick a course, then place it on a free slot. You can also drag and drop."
         meta={
-          <div className="flex items-center gap-3">
-            <div className="bg-slate-100 px-3 py-1.5 rounded-lg border flex gap-2 items-center text-sm">
-              <span className="font-semibold text-sgvu-navy">Courses:</span>
-              <span>{uniqueAllocations.length}</span>
+          <div className="flex w-full flex-wrap items-stretch gap-2 sm:w-auto">
+            <div className={cn('inline-flex items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold', actionBtnClass)}>
+              <span>Courses</span>
+              <span className="tabular-nums">{uniqueAllocations.length}</span>
             </div>
-            <div className="bg-slate-100 px-3 py-1.5 rounded-lg border flex gap-2 items-center text-sm">
-              <span className="font-semibold text-sgvu-navy">Scheduled Slots:</span>
-              <span>{dedupeSlotsByCourse(gridSlots).length}</span>
+            <div className={cn('inline-flex items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold', actionBtnClass)}>
+              <span>Scheduled</span>
+              <span className="tabular-nums">{scheduledCount}</span>
             </div>
-            <Button
-              onClick={handleBatchSave}
-              disabled={saving}
-              className="ml-2 bg-sgvu-gold text-sgvu-navy hover:bg-sgvu-gold-hover hover:shadow-md"
-            >
+            <Button onClick={handleBatchSave} disabled={saving} className={actionBtnClass}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Save Timetable
             </Button>
@@ -337,131 +460,304 @@ export default function FacultyScheduleClassesPage() {
         }
       />
 
-      <div className="mt-4 flex flex-col xl:flex-row gap-4 mb-8 max-w-full overflow-hidden">
-        {/* Left Side: Compact Timetable Grid */}
-        <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto min-h-[600px]">
-          <table className="w-full min-w-[600px] border-collapse">
-            <thead>
-              <tr>
-                <th className="p-2 border-b border-r bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider w-16 text-center">Time</th>
-                {DAYS.map(day => (
-                  <th key={day.val} className="p-2 border-b border-r bg-slate-50 text-[10px] font-bold text-sgvu-navy uppercase tracking-wider text-center w-32">
-                    {day.label}
+      {selectedCourseId ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sgvu-gold/40 bg-sgvu-gold/10 px-3 py-2.5 text-sm text-sgvu-navy">
+          <p className="flex items-center gap-2 font-medium">
+            <Sparkles className="h-4 w-4 text-sgvu-gold" />
+            Course selected — tap any free timetable cell to place it.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setSelectedCourseId(null)}
+            className="border-sgvu-navy/20"
+          >
+            Cancel selection
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex flex-col gap-4 xl:flex-row">
+        {/* Timetable */}
+        <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-border/70 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-slate-50/80 px-4 py-3">
+            <div>
+              <h2 className="text-sm font-bold text-sgvu-navy">Weekly grid</h2>
+              <p className="text-[11px] text-muted-foreground">
+                {selectedCourseId
+                  ? 'Days down, times across — tap a free cell to place your course'
+                  : 'Days as rows, times as columns — drag or select a course first'}
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            {/* Days as rows (vertical), times as columns (horizontal) */}
+            <table className="w-full min-w-[900px] border-collapse">
+              <thead>
+                <tr>
+                  <th className="sticky left-0 z-10 w-16 border-b border-r bg-slate-50 p-2 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Day
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {HOURS.map(hour => {
-                const isLunch = hour === LUNCH_HOUR;
-                const timeStr = `${hour.toString().padStart(2, '0')}:00:00`;
-                return (
-                  <tr key={hour}>
-                    <td className="p-1 border-b border-r bg-slate-50 text-[10px] font-semibold text-slate-500 text-center whitespace-nowrap align-middle">
-                      {formatTime(hour)}
+                  {HOURS.map((hour) => (
+                    <th
+                      key={hour}
+                      className={cn(
+                        'border-b border-r p-2 text-center text-[10px] font-bold uppercase tracking-wider',
+                        hour === LUNCH_HOUR
+                          ? 'bg-slate-100 text-slate-400'
+                          : 'bg-slate-50 text-sgvu-navy',
+                      )}
+                    >
+                      {hour === LUNCH_HOUR ? 'Lunch' : formatTime(hour)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {DAYS.map((day) => (
+                  <tr key={day.val}>
+                    <td className="sticky left-0 z-10 border-b border-r bg-slate-50 p-2 text-center align-middle text-xs font-bold text-sgvu-navy">
+                      {day.label}
                     </td>
-                    {isLunch ? (
-                      <td colSpan={6} className="p-1 border-b bg-slate-100 text-center text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">
-                        Lunch
-                      </td>
-                    ) : (
-                      DAYS.map(day => {
-                        const slotsInCell = gridSlots.filter(
-                          (s) =>
-                            s.day_of_week === day.val &&
-                            normalizeTime(s.start_time) === timeStr,
-                        );
+                    {HOURS.map((hour) => {
+                      const isLunch = hour === LUNCH_HOUR;
+                      const timeStr = `${hour.toString().padStart(2, '0')}:00:00`;
+                      const cellKey = `${day.val}-${hour}`;
+
+                      if (isLunch) {
                         return (
                           <td
-                            key={`${day.val}-${hour}`}
-                            className="p-1 border-b border-r h-20 align-top relative min-w-[120px]"
-                            onDragOver={handleDragOver}
-                            onDrop={(e) => handleDrop(e, day.val, hour)}
+                            key={cellKey}
+                            className="border-b border-r bg-slate-100/80 p-1 text-center align-middle text-[9px] font-bold uppercase tracking-wider text-slate-400"
                           >
-                            <div className="absolute inset-0 z-0 p-0.5">
-                              <div className="w-full h-full border hover:border-sgvu-gold/50 rounded transition-colors" />
-                            </div>
-                            <div className="relative z-10 flex flex-col gap-1 w-full h-full">
-                              {slotsInCell.map((slot, i) => (
-                                <div
-                                  key={i}
-                                  draggable
-                                  onDragStart={(e) => handleDragStart(e, { type: 'MOVE', slot })}
-                                  className="group bg-sgvu-navy text-white text-[10px] rounded p-1.5 shadow-sm cursor-grab active:cursor-grabbing border-l-2 border-sgvu-gold hover:shadow-md transition-all relative flex flex-col leading-tight"
-                                >
-                                  <button
-                                    onClick={() => removeSlot(slot)}
-                                    className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 rounded-full text-white"
-                                    title="Remove slot"
-                                  >
-                                    <X className="h-3 w-3 p-0.5" />
-                                  </button>
-                                  <span className="font-bold truncate pr-4">{slot.course_code}</span>
-                                  <div className="flex gap-1 mt-1">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        updateSection(slot.timetable_id, slot.section === 'A' ? 'B' : 'A');
-                                      }}
-                                      className="w-5 h-5 flex-shrink-0 bg-white/10 border border-white/20 hover:bg-white/30 rounded text-[10px] font-bold transition-colors flex items-center justify-center cursor-pointer"
-                                      title="Toggle Section (Click to change)"
-                                    >
-                                      {slot.section || 'A'}
-                                    </button>
-                                    <button 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openRoomModal(slot);
-                                      }}
-                                      className="flex-1 h-5 min-w-0 bg-white/10 border border-white/20 hover:bg-white/30 rounded px-1.5 text-[9px] font-medium truncate transition-colors flex items-center justify-center cursor-pointer"
-                                      title={slot.room || 'Select Room'}
-                                    >
-                                      {slot.room || '+ Room'}
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                            —
                           </td>
                         );
-                      })
-                    )}
+                      }
+
+                      const slotsInCell = gridSlots.filter(
+                        (s) =>
+                          s.day_of_week === day.val && normalizeTime(s.start_time) === timeStr,
+                      );
+                      const isEmpty = slotsInCell.length === 0;
+                      const isOver = dragOverKey === cellKey;
+
+                      return (
+                        <td
+                          key={cellKey}
+                          className={cn(
+                            'relative h-[5rem] min-w-[6.5rem] border-b border-r p-1 align-top transition',
+                            isEmpty && 'cursor-pointer',
+                            isOver && 'bg-sgvu-gold/15',
+                            selectedCourseId && isEmpty && 'hover:bg-sgvu-navy/5',
+                          )}
+                          onDragOver={(e) => handleDragOver(e, cellKey)}
+                          onDragLeave={() => setDragOverKey((k) => (k === cellKey ? null : k))}
+                          onDrop={(e) => handleDrop(e, day.val, hour)}
+                          onClick={() => handleCellClick(day.val, hour)}
+                        >
+                          {isEmpty ? (
+                            <div
+                              className={cn(
+                                'flex h-full min-h-[4.5rem] items-center justify-center rounded-lg border border-dashed text-[10px] font-medium transition',
+                                isOver || selectedCourseId
+                                  ? 'border-sgvu-gold bg-sgvu-gold/10 text-sgvu-navy'
+                                  : 'border-transparent text-transparent hover:border-sgvu-navy/20 hover:text-muted-foreground',
+                              )}
+                            >
+                              {selectedCourseId || isOver ? 'Drop / tap' : '·'}
+                            </div>
+                          ) : (
+                            <div className="flex h-full flex-col gap-1">
+                              {slotsInCell.map((slot) => {
+                                const focused = focusedSlotId === slot.timetable_id;
+                                return (
+                                  <div
+                                    key={
+                                      slot.timetable_id ??
+                                      `${slot.course_id}-${slot.day_of_week}-${slot.start_time}`
+                                    }
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.stopPropagation();
+                                      handleDragStart(e, { type: 'MOVE', slot });
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setFocusedSlotId(slot.timetable_id ?? null);
+                                    }}
+                                    className={cn(
+                                      'group relative flex h-[4.5rem] flex-col justify-between rounded-lg p-1.5 text-[10px] leading-tight shadow-sm transition',
+                                      'cursor-grab active:cursor-grabbing',
+                                      focused
+                                        ? 'bg-sgvu-gold text-sgvu-navy ring-2 ring-sgvu-gold/60'
+                                        : 'bg-sgvu-navy text-white hover:bg-[#123A6D] active:bg-sgvu-gold active:text-sgvu-navy',
+                                    )}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeSlot(slot);
+                                      }}
+                                      className={cn(
+                                        'absolute right-1 top-1 rounded-full p-0.5 opacity-0 transition group-hover:opacity-100',
+                                        focused ? 'bg-sgvu-navy/10 text-sgvu-navy' : 'bg-white/15 text-white',
+                                      )}
+                                      title="Remove slot"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                    <div className="pr-4">
+                                      <p className="truncate font-bold">{slot.course_code}</p>
+                                      <p className="truncate opacity-80">{slot.course_name}</p>
+                                    </div>
+                                    <div className="flex gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateSection(
+                                            slot.timetable_id,
+                                            slot.section === 'A' ? 'B' : slot.section === 'B' ? 'C' : 'A',
+                                          );
+                                        }}
+                                        className={cn(
+                                          'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold transition',
+                                          focused
+                                            ? 'bg-sgvu-navy/10 hover:bg-sgvu-navy/20'
+                                            : 'bg-white/10 hover:bg-white/25',
+                                        )}
+                                        title="Cycle section A → B → C"
+                                      >
+                                        {slot.section || 'A'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          void openRoomModal(slot);
+                                        }}
+                                        className={cn(
+                                          'h-6 min-w-0 flex-1 truncate rounded-md px-1.5 text-[9px] font-medium transition',
+                                          focused
+                                            ? 'bg-sgvu-navy/10 hover:bg-sgvu-navy/20'
+                                            : 'bg-white/10 hover:bg-white/25',
+                                        )}
+                                        title={slot.room || 'Select room'}
+                                      >
+                                        {slot.room || '+ Room'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* Right Side: Unassigned Pool */}
-        <div className="w-full xl:w-64 flex-shrink-0 flex flex-col max-h-[400px]">
-          <div className="bg-slate-50 border border-gray-200 rounded-xl flex flex-col h-full overflow-hidden shadow-sm">
-            <div className="p-3 border-b bg-white">
-              <h3 className="font-bold text-sgvu-navy text-sm">My Courses</h3>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Drag into the timetable slots.</p>
+        {/* Course pool */}
+        <aside className="flex w-full shrink-0 flex-col gap-3 xl:w-72">
+          <div className="flex max-h-[520px] flex-col overflow-hidden rounded-xl border border-border/70 bg-white shadow-sm">
+            <div className="border-b border-border/50 bg-slate-50/80 px-4 py-3">
+              <h3 className="text-sm font-bold text-sgvu-navy">My Courses</h3>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Tap to select, then tap a free cell — or drag into the grid.
+              </p>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            <div className="flex-1 space-y-2 overflow-y-auto p-3">
+              {unscheduled.length === 0 && uniqueAllocations.length > 0 ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-4 text-center">
+                  <CheckCircle2 className="mx-auto h-5 w-5 text-emerald-600" />
+                  <p className="mt-2 text-sm font-semibold text-emerald-900">All courses placed</p>
+                  <p className="mt-1 text-[11px] text-emerald-800/90">
+                    Assign rooms on each card, then save.
+                  </p>
+                </div>
+              ) : null}
               {uniqueAllocations.length === 0 ? (
-                <div className="text-center text-xs text-muted-foreground mt-4">No allocated courses.</div>
+                <FacultyEmptyState
+                  title="No allocated courses"
+                  description="Ask your HOD to allocate courses before scheduling."
+                />
               ) : (
-                uniqueAllocations.map(alloc => (
-                  <div
-                    key={alloc.allocation_id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, { type: 'NEW', allocation: alloc })}
-                    className="bg-white border border-gray-200 rounded-lg p-2 shadow-sm hover:shadow-md hover:border-sgvu-gold transition-all cursor-grab active:cursor-grabbing flex gap-1.5 items-center"
-                  >
-                    <GripVertical className="h-4 w-4 text-slate-300 flex-shrink-0" />
-                    <div className="flex flex-col overflow-hidden w-full">
-                      <span className="font-bold text-sgvu-navy text-sm truncate">{alloc.course_code}</span>
-                      <span className="text-[10px] text-slate-500 truncate mt-0.5">{alloc.course_name}</span>
-                    </div>
-                  </div>
-                ))
+                <>
+                  {unscheduled.length > 0 ? (
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                      Needs a slot ({unscheduled.length})
+                    </p>
+                  ) : null}
+                  {unscheduled.map((alloc) => {
+                    const selected = selectedCourseId === alloc.course_id;
+                    return (
+                      <button
+                        key={alloc.allocation_id}
+                        type="button"
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, { type: 'NEW', allocation: alloc })}
+                        onClick={() =>
+                          setSelectedCourseId((id) => (id === alloc.course_id ? null : alloc.course_id))
+                        }
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded-xl border p-2.5 text-left shadow-sm transition',
+                          'cursor-grab active:cursor-grabbing',
+                          selected
+                            ? 'border-sgvu-gold bg-sgvu-gold text-sgvu-navy ring-2 ring-sgvu-gold/50'
+                            : 'border-border/60 bg-white hover:border-sgvu-navy/30 hover:bg-sgvu-navy/[0.03] active:bg-sgvu-gold active:text-sgvu-navy',
+                        )}
+                      >
+                        <GripVertical
+                          className={cn('h-4 w-4 shrink-0', selected ? 'text-sgvu-navy/50' : 'text-slate-300')}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold">{alloc.course_code}</p>
+                          <p className={cn('truncate text-[11px]', selected ? 'opacity-80' : 'text-muted-foreground')}>
+                            {alloc.course_name}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  {scheduledCount > 0 ? (
+                    <>
+                      <p className="pt-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Already scheduled ({scheduledCount})
+                      </p>
+                      {uniqueAllocations
+                        .filter((a) => scheduledCourseIds.has(a.course_id))
+                        .map((alloc) => {
+                          const slot = gridSlots.find((s) => s.course_id === alloc.course_id);
+                          return (
+                            <div
+                              key={alloc.allocation_id}
+                              className="rounded-xl border border-emerald-200/70 bg-emerald-50/50 px-3 py-2"
+                            >
+                              <p className="truncate text-sm font-bold text-sgvu-navy">{alloc.course_code}</p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {slot
+                                  ? `${DOW[slot.day_of_week]} · ${formatTime(Number(String(slot.start_time).slice(0, 2)))}`
+                                  : 'Scheduled'}
+                                {slot?.room ? ` · ${slot.room}` : ''}
+                              </p>
+                            </div>
+                          );
+                        })}
+                    </>
+                  ) : null}
+                </>
               )}
             </div>
           </div>
-        </div>
+        </aside>
       </div>
 
       <Dialog open={roomModalOpen} onOpenChange={setRoomModalOpen}>
@@ -469,17 +765,19 @@ export default function FacultyScheduleClassesPage() {
           <DialogHeader>
             <DialogTitle>Select Room</DialogTitle>
           </DialogHeader>
-          <div className="max-h-[500px] overflow-y-auto">
+          <div className="max-h-[500px] min-w-0 overflow-x-auto overflow-y-auto">
             {loadingRooms ? (
-              <div className="flex justify-center p-8"><Loader2 className="animate-spin h-6 w-6 text-sgvu-navy" /></div>
+              <div className="flex justify-center p-8">
+                <Loader2 className="h-6 w-6 animate-spin text-sgvu-navy" />
+              </div>
             ) : (
-              <table className="w-full border-collapse">
-                <thead className="bg-slate-50 sticky top-0">
+              <table className="w-full min-w-[480px] border-collapse">
+                <thead className="sticky top-0 bg-slate-50">
                   <tr>
-                    <th className="p-2 text-left text-sm font-semibold border-b">Room Name</th>
-                    <th className="p-2 text-left text-sm font-semibold border-b">Capacity</th>
-                    <th className="p-2 text-left text-sm font-semibold border-b">Status</th>
-                    <th className="p-2 text-right text-sm font-semibold border-b">Action</th>
+                    <th className="border-b p-2 text-left text-sm font-semibold">Room Name</th>
+                    <th className="border-b p-2 text-left text-sm font-semibold">Capacity</th>
+                    <th className="border-b p-2 text-left text-sm font-semibold">Status</th>
+                    <th className="border-b p-2 text-right text-sm font-semibold">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -489,16 +787,20 @@ export default function FacultyScheduleClassesPage() {
                       <td className="p-2 text-sm text-slate-500">{r.capacity || 'N/A'}</td>
                       <td className="p-2 text-sm">
                         {r.available ? (
-                          <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full text-xs font-semibold">Available</span>
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-600">
+                            Available
+                          </span>
                         ) : (
-                          <span className="text-red-600 bg-red-50 px-2 py-0.5 rounded-full text-xs font-semibold">Unavailable</span>
+                          <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600">
+                            Unavailable
+                          </span>
                         )}
                       </td>
                       <td className="p-2 text-right">
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
+                        <Button
+                          size="sm"
                           disabled={!r.available}
+                          className={actionBtnClass}
                           onClick={() => selectRoom(r.roomName)}
                         >
                           Select
@@ -506,11 +808,13 @@ export default function FacultyScheduleClassesPage() {
                       </td>
                     </tr>
                   ))}
-                  {availableRooms.length === 0 && !loadingRooms && (
+                  {availableRooms.length === 0 && !loadingRooms ? (
                     <tr>
-                      <td colSpan={4} className="p-8 text-center text-slate-500">No rooms configured.</td>
+                      <td colSpan={4} className="p-8 text-center text-slate-500">
+                        No rooms configured.
+                      </td>
                     </tr>
-                  )}
+                  ) : null}
                 </tbody>
               </table>
             )}

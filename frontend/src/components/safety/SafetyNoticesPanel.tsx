@@ -1,13 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Bell, Loader2, Shield } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { AlertTriangle, Loader2, Shield } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { useAuthedApi } from '@/lib/api';
 import { concernStatusLabel, concernTypeLabel } from '@/lib/student-safety';
 import { cn } from '@/lib/utils';
+import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoSafetyNotices } from '@/lib/mock/faculty-portal-demo';
 
 type Notice = {
   concern_id: string;
@@ -49,6 +52,8 @@ export function SafetyNoticesPanel({
   embedded?: boolean;
 }) {
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const facultySmoke = pathname?.startsWith('/faculty');
   const [rows, setRows] = useState<Notice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,14 +63,29 @@ export function SafetyNoticesPanel({
     setError(null);
     try {
       const data = await api.get<Notice[]>('/api/student-safety/accused/notices');
-      setRows(Array.isArray(data) ? data : []);
+      const live = Array.isArray(data) ? data : [];
+      setRows(
+        facultySmoke
+          ? withFacultyDemoFallback(live, facultyDemoSafetyNotices() as Notice[], isEmptyArray)
+          : live,
+      );
     } catch (e) {
-      setRows([]);
-      setError(e instanceof Error ? e.message : 'Could not load safety notices');
+      if (facultySmoke) {
+        const demo = withFacultyDemoFallback(
+          [],
+          facultyDemoSafetyNotices() as Notice[],
+          isEmptyArray,
+        );
+        setRows(demo);
+        setError(demo.length ? null : e instanceof Error ? e.message : 'Could not load safety notices');
+      } else {
+        setRows([]);
+        setError(e instanceof Error ? e.message : 'Could not load safety notices');
+      }
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, facultySmoke]);
 
   useEffect(() => {
     void load();
@@ -78,21 +98,7 @@ export function SafetyNoticesPanel({
           <h1 className="text-2xl font-bold text-sgvu-navy">{title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         </div>
-      ) : (
-        <div className="rounded-2xl border border-sgvu-navy/10 bg-white p-5 shadow-sm">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy">
-              <Bell className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-sgvu-navy">{title}</h2>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                {description}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      ) : null}
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 rounded-2xl border border-sgvu-navy/10 bg-white py-16 text-sm text-muted-foreground shadow-sm">

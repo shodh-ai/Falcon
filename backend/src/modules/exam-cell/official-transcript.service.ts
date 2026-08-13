@@ -25,7 +25,10 @@ export class OfficialTranscriptService {
     private readonly notify: NotificationEmitterService,
   ) {}
 
-  async listForTenant(tenantId: string, filters?: { status?: string; semester?: number }) {
+  async listForTenant(
+    tenantId: string,
+    filters?: { status?: string; semester?: number },
+  ) {
     const params: unknown[] = [tenantId];
     let where = 't.tenant_id = $1';
     if (filters?.status) {
@@ -141,7 +144,11 @@ export class OfficialTranscriptService {
     return { semester, requested: created.length, transcript_ids: created };
   }
 
-  async approve(tenantId: string, transcriptId: string, actor: TranscriptActor) {
+  async approve(
+    tenantId: string,
+    transcriptId: string,
+    actor: TranscriptActor,
+  ) {
     const rows = await this.db.query(
       `UPDATE official_transcripts
        SET status = 'APPROVED', approved_at = NOW(), approved_by_user_id = $3, updated_at = NOW()
@@ -169,17 +176,26 @@ export class OfficialTranscriptService {
     return this.generatePdf(tenantId, transcriptId, actor);
   }
 
-  async generatePdf(tenantId: string, transcriptId: string, actor: TranscriptActor) {
+  async generatePdf(
+    tenantId: string,
+    transcriptId: string,
+    actor: TranscriptActor,
+  ) {
     const before = await this.db.query(
       `SELECT status FROM official_transcripts WHERE transcript_id = $1 AND tenant_id = $2`,
       [transcriptId, tenantId],
     );
     if (!before[0]) throw new NotFoundException('Transcript not found');
     if (!['APPROVED', 'GENERATED'].includes(before[0].status)) {
-      throw new BadRequestException('Transcript must be approved before PDF generation');
+      throw new BadRequestException(
+        'Transcript must be approved before PDF generation',
+      );
     }
 
-    const { verificationCode, url } = await this.pdf.generate(tenantId, transcriptId);
+    const { verificationCode, url } = await this.pdf.generate(
+      tenantId,
+      transcriptId,
+    );
 
     const updated = await this.db.query(
       `UPDATE official_transcripts
@@ -216,7 +232,11 @@ export class OfficialTranscriptService {
       action: 'TRANSCRIPT_GENERATED',
       recordId: transcriptId,
       oldValue: { status: before[0].status },
-      newValue: { status: 'ARCHIVED', verification_code: verificationCode, pdf_url: url },
+      newValue: {
+        status: 'ARCHIVED',
+        verification_code: verificationCode,
+        pdf_url: url,
+      },
       ip: actor.ip,
       sessionId: actor.sessionId,
     });
@@ -243,7 +263,9 @@ export class OfficialTranscriptService {
       [verificationCode.toUpperCase()],
     );
     if (!rows[0]) {
-      throw new NotFoundException('Transcript verification code not found or invalid');
+      throw new NotFoundException(
+        'Transcript verification code not found or invalid',
+      );
     }
     return {
       valid: true,

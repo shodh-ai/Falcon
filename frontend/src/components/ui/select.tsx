@@ -64,6 +64,7 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
         ...Array.from(uniqueByValue.entries()).map(([value, label]) => ({ value, label })),
       ];
 
+      const EMPTY_SENTINEL = '__falcon_select_empty__';
       const activeValue = value !== undefined && value !== null ? String(value) : undefined;
       const activeDefaultValue =
         props.defaultValue !== undefined && props.defaultValue !== null
@@ -71,20 +72,32 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           : undefined;
       const { defaultValue: _ignoredDefaultValue, ...rootProps } = props;
       const isControlled = activeValue !== undefined;
-      const radixValue =
-        isControlled && activeValue !== '' ? activeValue : undefined;
+      // Radix forbids empty-string item values; map '' ↔ sentinel so controlled
+      // selects never flip between undefined and a real value.
+      const radixValue = isControlled
+        ? activeValue === ''
+          ? EMPTY_SENTINEL
+          : activeValue
+        : undefined;
       const selectableOptions = dedupedOptions.filter((opt) => opt.value !== '');
+      const placeholderLabel = placeholderOption?.label ?? placeholder ?? 'Select...';
 
       return (
         <SelectPrimitive.Root
-          value={isControlled ? radixValue : undefined}
-          defaultValue={isControlled ? undefined : activeDefaultValue === '' ? undefined : activeDefaultValue}
+          value={radixValue}
+          defaultValue={
+            isControlled
+              ? undefined
+              : activeDefaultValue === '' || activeDefaultValue === undefined
+                ? undefined
+                : activeDefaultValue
+          }
           disabled={disabled}
           onValueChange={(val) => {
             if (onChange) {
               onChange({
                 target: {
-                  value: val,
+                  value: val === EMPTY_SENTINEL ? '' : val,
                   name: name,
                 },
               });
@@ -93,9 +106,14 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           {...rootProps}
         >
           <SelectTrigger ref={ref} className={className} id={id}>
-            <SelectValue placeholder={placeholderOption?.label ?? placeholder ?? 'Select...'} />
+            <SelectValue placeholder={placeholderLabel} />
           </SelectTrigger>
           <SelectContent>
+            {isControlled ? (
+              <SelectItem value={EMPTY_SENTINEL} className="text-muted-foreground">
+                {placeholderLabel}
+              </SelectItem>
+            ) : null}
             {selectableOptions.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
@@ -106,8 +124,13 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
       );
     }
 
+    const rootValue =
+      value === undefined || value === null || value === ''
+        ? undefined
+        : value;
+
     return (
-      <SelectPrimitive.Root value={value} disabled={disabled} {...props}>
+      <SelectPrimitive.Root value={rootValue} disabled={disabled} {...props}>
         {children}
       </SelectPrimitive.Root>
     );

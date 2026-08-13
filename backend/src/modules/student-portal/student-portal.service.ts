@@ -1036,7 +1036,9 @@ export class StudentPortalService {
         not_applicable: false,
       },
     ];
-    const clearedCount = steps.filter((s) => s.cleared || s.not_applicable).length;
+    const clearedCount = steps.filter(
+      (s) => s.cleared || s.not_applicable,
+    ).length;
 
     const [pendingAlumni] = await this.dataSource
       .query<
@@ -1379,7 +1381,9 @@ export class StudentPortalService {
     const scholarshipExplicit = Number(
       breakup.scholarship ?? breakup.scholarship_amount ?? 0,
     );
-    const discountExplicit = Number(breakup.discount ?? breakup.discount_amount ?? 0);
+    const discountExplicit = Number(
+      breakup.discount ?? breakup.discount_amount ?? 0,
+    );
     const creditExplicit = Number(breakup.credit ?? breakup.credit_amount ?? 0);
     const originalFromBreakup = Number(breakup.original_total_amount ?? 0);
     const percent = Number(breakup.scholarship_discount_percent ?? 0);
@@ -1500,11 +1504,7 @@ export class StudentPortalService {
     };
   }
 
-  async createPaymentOrder(
-    userId: string,
-    demandId: string,
-    tenantId: string,
-  ) {
+  async createPaymentOrder(userId: string, demandId: string, tenantId: string) {
     const rows = await this.dataSource.query(
       `SELECT d.demand_id, d.fee_head, d.total_amount, d.paid_amount, d.status, u.tenant_id
        FROM finance_fee_demands d
@@ -1721,7 +1721,10 @@ export class StudentPortalService {
             verified.payment_id,
             paymentMode,
             outstanding,
-            JSON.stringify({ verified_at: new Date().toISOString(), mock: verified.mock }),
+            JSON.stringify({
+              verified_at: new Date().toISOString(),
+              mock: verified.mock,
+            }),
             userId,
             demandId,
           ],
@@ -1746,7 +1749,10 @@ export class StudentPortalService {
             outstanding,
             paymentMode,
             `FEE_${feeHead}`,
-            JSON.stringify({ verified_at: new Date().toISOString(), mock: verified.mock }),
+            JSON.stringify({
+              verified_at: new Date().toISOString(),
+              mock: verified.mock,
+            }),
           ],
         );
       }
@@ -2070,8 +2076,7 @@ export class StudentPortalService {
         end_date: add(10),
         start_time: '00:00',
         end_time: '23:59',
-        description:
-          'CBCS course registration window for enrolled students.',
+        description: 'CBCS course registration window for enrolled students.',
         department: 'Academics',
         venue: 'Student Portal',
         organizer: 'Registrar',

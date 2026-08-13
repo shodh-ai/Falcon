@@ -301,7 +301,9 @@ export class LabsService {
     const tid = this.tenant(tenantId);
     const wo = await this.getWorkOrder(tid, workOrderId);
     if (wo.status !== 'REQUESTED') {
-      throw new BadRequestException('Only REQUESTED work orders can be accepted');
+      throw new BadRequestException(
+        'Only REQUESTED work orders can be accepted',
+      );
     }
     await this.db.query(
       `UPDATE lab_partner_work_orders
@@ -371,7 +373,9 @@ export class LabsService {
     const tid = this.tenant(tenantId);
     const wo = await this.getWorkOrder(tid, workOrderId);
     if (wo.status === 'DONE' || wo.status === 'CANCELLED') {
-      throw new BadRequestException('Closed work orders cannot spawn procurement');
+      throw new BadRequestException(
+        'Closed work orders cannot spawn procurement',
+      );
     }
     if (wo.pr_id) {
       throw new BadRequestException('Purchase requisition already linked');

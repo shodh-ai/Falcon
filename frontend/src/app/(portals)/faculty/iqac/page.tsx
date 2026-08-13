@@ -19,6 +19,12 @@ import {
   FacultyMetricChip,
 } from '@/components/faculty';
 import { cn } from '@/lib/utils';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoIqacTasks } from '@/lib/mock/faculty-portal-demo';
 
 type Assignment = {
   assignment_id: string;
@@ -50,11 +56,24 @@ export default function FacultyIqacPage() {
     setLoading(true);
     try {
       const data = await api.get<Assignment[]>('/tasks/assignments/my');
-      setAssignments(Array.isArray(data) ? data : []);
-      setSelectedAssignmentId((current) => current || data[0]?.assignment_id || '');
+      const resolved = withFacultyDemoFallback(
+        Array.isArray(data) ? data : [],
+        facultyDemoIqacTasks() as Assignment[],
+        isEmptyArray,
+      );
+      setAssignments(resolved);
+      setSelectedAssignmentId((current) => current || resolved[0]?.assignment_id || '');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load IQAC tasks');
-      setAssignments([]);
+      const resolved = withFacultyDemoFallback(
+        [],
+        facultyDemoIqacTasks() as Assignment[],
+        isEmptyArray,
+      );
+      setAssignments(resolved);
+      setSelectedAssignmentId(resolved[0]?.assignment_id || '');
+      if (resolved.length === 0) {
+        toast.error(error instanceof Error ? error.message : 'Failed to load IQAC tasks');
+      }
     } finally {
       setLoading(false);
     }
@@ -67,6 +86,11 @@ export default function FacultyIqacPage() {
   async function uploadEvidence() {
     if (!token || !file || !selectedAssignmentId) {
       toast.error('Select a task and file first');
+      return;
+    }
+    if (isFacultyDemoSmokeId(selectedAssignmentId)) {
+      toast.success('Evidence uploaded for AI audit (demo)');
+      setFile(null);
       return;
     }
     const formData = new FormData();
@@ -105,7 +129,8 @@ export default function FacultyIqacPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Upload evidence and track AI audit status from your faculty workspace."
+        title="IQAC Tasks"
+        description="Upload evidence and track AI audit status for your assigned compliance duties."
         meta={
           !loading ? (
             <>

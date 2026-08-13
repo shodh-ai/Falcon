@@ -98,7 +98,10 @@ export class EcellUropService {
     return this.firstRow(rows);
   }
 
-  async assertSignedIpBeforeFund(tenantId: string | undefined, projectId: string) {
+  async assertSignedIpBeforeFund(
+    tenantId: string | undefined,
+    projectId: string,
+  ) {
     const agreement = await this.getIpAgreement(tenantId, projectId);
     if (!agreement || agreement.status !== 'SIGNED') {
       throw new BadRequestException(
@@ -176,7 +179,9 @@ export class EcellUropService {
       [tid, studentUserId],
     );
     if (existing[0]) {
-      throw new BadRequestException('Active Hacker Filter trial already exists');
+      throw new BadRequestException(
+        'Active Hacker Filter trial already exists',
+      );
     }
     const rows = await this.db.query(
       `INSERT INTO ecell_fellowship_trials (
@@ -214,9 +219,12 @@ export class EcellUropService {
       student_user_id: string;
       [key: string]: unknown;
     }>(rows);
-    if (!trial) throw new NotFoundException('Trial not found or already decided');
+    if (!trial)
+      throw new NotFoundException('Trial not found or already decided');
     if (!trial.student_user_id) {
-      throw new BadRequestException('Fellowship trial is missing student_user_id');
+      throw new BadRequestException(
+        'Fellowship trial is missing student_user_id',
+      );
     }
 
     if (decision === 'PASSED' || decision === 'CONVERTED') {

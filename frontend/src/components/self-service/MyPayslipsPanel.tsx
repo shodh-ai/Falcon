@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { Download, Loader2, Send } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,8 @@ import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { getSubdomainFromClient } from '@/lib/tenant';
+import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoPayslips } from '@/lib/mock/faculty-portal-demo';
 
 type PublishedMonth = {
   payslip_id: string;
@@ -46,6 +49,8 @@ function statusBadge(status: DownloadRequest['status']) {
 export function MyPayslipsPanel() {
   const api = useAuthedApi();
   const { token } = useAuth();
+  const pathname = usePathname();
+  const facultySmoke = pathname?.startsWith('/faculty');
   const [published, setPublished] = useState<PublishedMonth[]>([]);
   const [requests, setRequests] = useState<DownloadRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,15 +91,40 @@ export function MyPayslipsPanel() {
         api.get<PublishedMonth[]>('/api/hr/payslips/my-payslips'),
         api.get<DownloadRequest[]>('/api/hr/payslips/download-requests/mine'),
       ]);
-      setPublished(months);
+      const resolvedMonths = facultySmoke
+        ? withFacultyDemoFallback(
+            months,
+            facultyDemoPayslips() as PublishedMonth[],
+            isEmptyArray,
+          )
+        : months;
+      setPublished(resolvedMonths);
       setRequests(reqs);
-      if (months.length && !periodFrom) {
-        const keys = months.map((m) => m.period_key).sort();
-        setPeriodFrom(keys[keys.length - 1]);
-        setPeriodTo(keys[keys.length - 1]);
+      if (resolvedMonths.length && !periodFrom) {
+        const keys = resolvedMonths.map((m) => m.period_key).sort();
+        setPeriodFrom(keys[keys.length - 1]!);
+        setPeriodTo(keys[keys.length - 1]!);
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load payslips');
+      if (facultySmoke) {
+        const demo = withFacultyDemoFallback(
+          [],
+          facultyDemoPayslips() as PublishedMonth[],
+          isEmptyArray,
+        );
+        setPublished(demo);
+        setRequests([]);
+        if (demo.length && !periodFrom) {
+          const keys = demo.map((m) => m.period_key).sort();
+          setPeriodFrom(keys[keys.length - 1]!);
+          setPeriodTo(keys[keys.length - 1]!);
+        }
+        if (demo.length === 0) {
+          toast.error(e instanceof Error ? e.message : 'Failed to load payslips');
+        }
+      } else {
+        toast.error(e instanceof Error ? e.message : 'Failed to load payslips');
+      }
     } finally {
       setLoading(false);
     }

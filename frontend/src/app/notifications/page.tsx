@@ -17,6 +17,7 @@ import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
 import { notificationSummary } from '@/lib/notifications/notification-display';
 import { isDemoNotificationId } from '@/lib/mock/student-portal-demo';
+import { getDashboardPathForRole } from '@/lib/auth-routing';
 import { NotificationFilterBar } from '@/components/notifications/NotificationFilterBar';
 import {
   NotificationEmptyState,
@@ -34,6 +35,12 @@ export default function NotificationsPage() {
   const [category, setCategory] = useState('ALL');
 
   const items = useMemo(() => notifications.map(toAppNotification), [notifications]);
+  const backHref = useMemo(
+    () =>
+      getDashboardPathForRole(user?.primaryRole || user?.role) ||
+      '/faculty/dashboard',
+    [user?.primaryRole, user?.role],
+  );
 
   const categoryFilters = useMemo(() => {
     const role = user?.role?.trim().toLowerCase() || user?.primaryRole?.trim().toLowerCase();
@@ -128,7 +135,7 @@ export default function NotificationsPage() {
     <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8">
       <div className="mb-6">
         <Button variant="ghost" size="sm" asChild className="mb-4 -ml-2 text-muted-foreground">
-          <Link href="/">
+          <Link href={backHref}>
             <ArrowLeft className="mr-1 h-4 w-4" />
             Back to portal
           </Link>

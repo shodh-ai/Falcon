@@ -15,6 +15,16 @@ import {
   FacultyPageLoading,
   FacultyPageShell,
 } from '@/components/faculty';
+import {
+  isEmptyArray,
+  isFacultyDemoModeEnabled,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoDisciplineHistory,
+  facultyDemoDisciplineOptions,
+} from '@/lib/mock/faculty-portal-demo';
 
 type StudentOption = {
   user_id: string;
@@ -75,8 +85,24 @@ export default function FacultyDisciplineIncidentsPage() {
   });
 
   const refreshHistory = useCallback(async () => {
-    const rows = await api.get<DemeritIncident[]>('/api/demerits/faculty/history');
-    setHistory(rows ?? []);
+    try {
+      const rows = await api.get<DemeritIncident[]>('/api/demerits/faculty/history');
+      setHistory(
+        withFacultyDemoFallback(
+          rows ?? [],
+          facultyDemoDisciplineHistory() as DemeritIncident[],
+          isEmptyArray,
+        ),
+      );
+    } catch {
+      setHistory(
+        withFacultyDemoFallback(
+          [],
+          facultyDemoDisciplineHistory() as DemeritIncident[],
+          isEmptyArray,
+        ),
+      );
+    }
   }, [api]);
 
   useEffect(() => {
@@ -90,11 +116,34 @@ export default function FacultyDisciplineIncidentsPage() {
           api.get<DemeritIncident[]>('/api/demerits/faculty/history'),
         ]);
         if (cancelled) return;
-        setStudents(options.students ?? []);
-        setCourses(options.courses ?? []);
-        setHistory(rows ?? []);
+        const demoOptions = facultyDemoDisciplineOptions();
+        setStudents(
+          withFacultyDemoFallback(options.students ?? [], demoOptions.students, isEmptyArray),
+        );
+        setCourses(
+          withFacultyDemoFallback(options.courses ?? [], demoOptions.courses, isEmptyArray),
+        );
+        setHistory(
+          withFacultyDemoFallback(
+            rows ?? [],
+            facultyDemoDisciplineHistory() as DemeritIncident[],
+            isEmptyArray,
+          ),
+        );
       } catch {
-        if (!cancelled) toast.error('Could not load disciplinary form');
+        if (!cancelled) {
+          const demoOptions = facultyDemoDisciplineOptions();
+          setStudents(withFacultyDemoFallback([], demoOptions.students, isEmptyArray));
+          setCourses(withFacultyDemoFallback([], demoOptions.courses, isEmptyArray));
+          setHistory(
+            withFacultyDemoFallback(
+              [],
+              facultyDemoDisciplineHistory() as DemeritIncident[],
+              isEmptyArray,
+            ),
+          );
+          if (!isFacultyDemoModeEnabled()) toast.error('Could not load disciplinary form');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -150,6 +199,19 @@ export default function FacultyDisciplineIncidentsPage() {
       toast.error('Enter incident description');
       return;
     }
+    if (isFacultyDemoSmokeId(studentRef) || isFacultyDemoSmokeId(form.subject_id)) {
+      toast.success('Incident submitted to Disciplinary Committee (demo)');
+      setForm({
+        student_pick: '',
+        student_ref: '',
+        subject_id: '',
+        category: 'BEHAVIORAL',
+        points: '1',
+        description: '',
+        evidence_urls: [],
+      });
+      return;
+    }
     setBusy(true);
     try {
       await api.post('/api/demerits/submit', {
@@ -185,8 +247,8 @@ export default function FacultyDisciplineIncidentsPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Log Disciplinary Incident"
-        description="Faculty can report incidents only. Demerit points are applied only after DC approval."
+        title="Discipline Reports"
+        description="Report disciplinary incidents. Demerit points apply only after DC approval."
       />
 
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">

@@ -25,10 +25,11 @@ export default function FacultyCoursesIndexPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
+        title="Courses"
         description={
           isMultiDepartment && activeDepartment
-            ? `Courses in ${activeDepartment.dept_name}. Open a subject to plan syllabus modules, track coverage, upload materials, and manage digital assignments.`
-            : 'Open a subject to plan syllabus modules, track coverage, upload materials, and manage digital assignments.'
+            ? `Courses in ${activeDepartment.dept_name}. Manage course materials, assignments, and announcements.`
+            : 'Manage course materials, assignments, and announcements.'
         }
         meta={
           !loading && courses.length > 0 ? (

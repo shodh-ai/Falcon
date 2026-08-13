@@ -81,7 +81,12 @@ export class CertificateAutomationController {
   @Post('applications/:id/verify')
   @Roles('SuperAdmin', 'Registrar')
   verify(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('id') id: string,
     @Body() body: { action: 'approve' | 'reject' },
   ) {

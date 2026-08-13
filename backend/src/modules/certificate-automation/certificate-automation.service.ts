@@ -397,7 +397,8 @@ export class CertificateAutomationService {
       userId: adminUserId,
       role: actorMeta?.role,
       module: 'cert_applications',
-      action: action === 'approve' ? 'DEGREE_VERIFY_APPROVE' : 'DEGREE_VERIFY_REJECT',
+      action:
+        action === 'approve' ? 'DEGREE_VERIFY_APPROVE' : 'DEGREE_VERIFY_REJECT',
       recordId: applicationId,
       oldValue: { verification_status: row.verification_status },
       newValue: { verification_status: newStatus },
@@ -500,10 +501,16 @@ export class CertificateAutomationService {
       president_ratification_status: string;
     };
     if (app.verification_status !== 'VERIFIED') {
-      throw new BadRequestException('Application must be verified before certificate release');
+      throw new BadRequestException(
+        'Application must be verified before certificate release',
+      );
     }
-    if (!['RATIFIED', 'NOT_REQUIRED'].includes(app.president_ratification_status)) {
-      throw new BadRequestException('President ratification required before certificate release');
+    if (
+      !['RATIFIED', 'NOT_REQUIRED'].includes(app.president_ratification_status)
+    ) {
+      throw new BadRequestException(
+        'President ratification required before certificate release',
+      );
     }
 
     const generated = await this.generateOneCertificate(

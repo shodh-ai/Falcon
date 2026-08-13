@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { isFacultyDemoSmokeId } from '@/lib/faculty-demo-mode';
 
 export type PendingLeaveRequest = {
   interaction_id: string;
@@ -40,6 +41,13 @@ export function PendingLeaveRequests({ requests, onUpdated }: Props) {
     }
     setSubmitting(true);
     try {
+      if (isFacultyDemoSmokeId(interactionId)) {
+        toast.success(status === 'APPROVED' ? 'Leave request approved (demo)' : 'Leave request declined (demo)');
+        setActiveId(null);
+        setRemarks('');
+        onUpdated();
+        return;
+      }
       await api.post(`/api/academics/proctor/leave-requests/${interactionId}/respond`, {
         status,
         remarks: remarks.trim() || undefined,

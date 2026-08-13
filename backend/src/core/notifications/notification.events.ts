@@ -10,7 +10,10 @@ export const NotificationEvents = {
   ACADEMICS_TIMETABLE_CHANGED: 'academics.timetable_changed',
   ACADEMICS_MARKS_PUBLISHED: 'academics.marks_published',
   ACADEMICS_COURSE_MATERIAL_ADDED: 'academics.course_material_added',
+  ACADEMICS_ASSIGNMENT_PUBLISHED: 'academics.assignment_published',
+  ACADEMICS_WEEKLY_TEST_PUBLISHED: 'academics.weekly_test_published',
   ACADEMICS_LIVE_CLASS_SCHEDULED: 'academics.live_class_scheduled',
+  ACADEMICS_COURSE_ANNOUNCEMENT: 'academics.course_announcement',
   OPERATIONS_GATE_PASS_UPDATED: 'operations.gate_pass_updated',
   HR_LEAVE_APPROVED: 'hr.leave_approved',
   HR_PENALTY_APPLIED: 'hr.penalty_applied',
@@ -55,6 +58,13 @@ export const NotificationEvents = {
   VENUE_BOOKING_REJECTED: 'venue.booking_rejected',
   ACADEMIC_RND_STATUS_UPDATED: 'academic_rnd.status_updated',
   CERTIFICATE_STATUS_UPDATED: 'certificate.status_updated',
+  EXAM_DUTY_SWAP_PEER_REQUEST: 'exam.duty_swap_peer_request',
+  EXAM_DUTY_SWAP_PEER_REJECTED: 'exam.duty_swap_peer_rejected',
+  EXAM_DUTY_SWAP_EXAM_CELL_PENDING: 'exam.duty_swap_exam_cell_pending',
+  EXAM_DUTY_SWAP_RESOLVED: 'exam.duty_swap_resolved',
+  GRADE_CHANGE_HOD_PENDING: 'sis.grade_change_hod_pending',
+  GRADE_CHANGE_COE_PENDING: 'sis.grade_change_coe_pending',
+  GRADE_CHANGE_RESOLVED: 'sis.grade_change_resolved',
 } as const;
 
 export type NotificationEventName =
@@ -111,12 +121,44 @@ export type CourseMaterialAddedPayload = BaseNotificationPayload & {
   materialTitle: string;
 };
 
+export type AssignmentPublishedPayload = BaseNotificationPayload & {
+  assignmentId: string;
+  courseId: string;
+  courseName: string;
+  courseCode?: string;
+  assignmentTitle: string;
+  facultyName: string;
+  dueDate: string;
+  maxMarks: number;
+  semester?: number | null;
+  sectionCode?: string | null;
+};
+
 export type LiveClassScheduledPayload = BaseNotificationPayload & {
   courseId: string;
   courseName: string;
   courseCode?: string;
   liveClassTitle: string;
   startsAt: string;
+};
+
+export type WeeklyTestPublishedPayload = BaseNotificationPayload & {
+  testId: string;
+  courseId: string;
+  courseName: string;
+  courseCode?: string;
+  testType: string;
+  startTime: string;
+  endTime: string;
+};
+
+export type CourseAnnouncementPayload = BaseNotificationPayload & {
+  courseId: string;
+  courseName: string;
+  courseCode?: string;
+  announcementId: string;
+  title: string;
+  bodyPreview: string;
 };
 
 export type GatePassUpdatedPayload = BaseNotificationPayload & {
@@ -326,3 +368,25 @@ export type VenueBookingPayload = BaseNotificationPayload & {
 export type AcademicRndStatusUpdatedPayload = BaseNotificationPayload;
 
 export type CertificateStatusUpdatedPayload = BaseNotificationPayload;
+
+export type ExamDutySwapPayload = BaseNotificationPayload & {
+  swapId: string;
+  assignmentId: string;
+  requesterName: string;
+  targetName?: string;
+  examDate: string;
+  room: string;
+  sessionLabel?: string | null;
+  decision?: 'APPROVED' | 'REJECTED';
+  comment?: string | null;
+};
+
+export type GradeChangePayload = BaseNotificationPayload & {
+  changeId: string;
+  courseCode: string;
+  fromGrade: string;
+  toGrade: string;
+  requesterName: string;
+  studentName?: string | null;
+  decision?: 'APPLIED' | 'REJECTED';
+};

@@ -95,7 +95,12 @@ export class AdmissionsController {
   )
   async studentBulkUpload(
     @UploadedFile() file: Express.Multer.File,
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Query('rule_id') ruleId?: string,
   ) {
     if (!file) throw new BadRequestException('No file uploaded');
@@ -130,7 +135,12 @@ export class AdmissionsController {
   @Post('students/bulk-upload/:runId/rollback')
   @Roles('SuperAdmin', 'CampusAdmin', 'Registrar')
   bulkUploadRollback(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('runId') runId: string,
   ) {
     const forwarded = req.headers?.['x-forwarded-for'];
@@ -156,7 +166,12 @@ export class AdmissionsController {
   @Post('students/bulk-upload/:runId/retry')
   @Roles('SuperAdmin', 'CampusAdmin', 'Registrar', 'AdmissionsOfficer')
   bulkUploadRetry(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('runId') runId: string,
   ) {
     const forwarded = req.headers?.['x-forwarded-for'];

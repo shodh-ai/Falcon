@@ -81,6 +81,8 @@ Set API URL via environment:
 | `NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN` | Tenant fallback | `sgvu` |
 | `NEXT_PUBLIC_SAAS_BASE_DOMAIN` | Subdomain parsing | — |
 | `NEXT_PUBLIC_EXAM_CELL_DEV_FALLBACK` | Exam Cell mock data | `'true'` in dev only |
+| `NEXT_PUBLIC_STUDENT_DEMO_MODE` | Student Portal empty-API smoke data | off (`true`/`1`/`on` to enable) |
+| `NEXT_PUBLIC_FACULTY_DEMO_MODE` | Faculty Portal empty-API smoke data | on in `development` by default; `false`/`0`/`off` to disable; `true`/`1`/`on` to force on |
 
 Implementation: `frontend/src/lib/api-base-url.ts`, `frontend/src/middleware.ts`.
 

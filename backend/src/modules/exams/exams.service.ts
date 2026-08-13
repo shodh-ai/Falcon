@@ -404,20 +404,15 @@ export class ExamsService {
     return {
       user_id: studentUserId,
       name: row.name || (demoFill ? 'Aarav Sharma' : 'Student'),
-      email:
-        row.email ||
-        (demoFill ? 'aarav.sharma@mygyanvihar.com' : ''),
-      enrollment_no:
-        enrollment ||
-        (demoFill ? 'SGVU/CSE/2023/0142' : null),
+      email: row.email || (demoFill ? 'aarav.sharma@mygyanvihar.com' : ''),
+      enrollment_no: enrollment || (demoFill ? 'SGVU/CSE/2023/0142' : null),
       program:
         row.department ||
         (demoFill
           ? 'B.Tech Computer Science & Engineering'
           : 'Undergraduate Program'),
       department:
-        row.department ||
-        (demoFill ? 'Computer Science & Engineering' : null),
+        row.department || (demoFill ? 'Computer Science & Engineering' : null),
       semester:
         row.current_semester != null
           ? Number(row.current_semester)

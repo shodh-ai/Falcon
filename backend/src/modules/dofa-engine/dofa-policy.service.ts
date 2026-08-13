@@ -79,7 +79,9 @@ export class DofaPolicyService {
   /** Compile React Flow band nodes into matrix rows. */
   compileGraph(domain: string, graph: GraphJson | string): CompiledBand[] {
     const parsed: GraphJson =
-      typeof graph === 'string' ? (JSON.parse(graph) as GraphJson) : graph ?? {};
+      typeof graph === 'string'
+        ? (JSON.parse(graph) as GraphJson)
+        : (graph ?? {});
     const bands = (parsed.nodes ?? [])
       .filter((n) => (n.type ?? 'band') === 'band' || n.type === 'condition')
       .map((n, idx) => {
@@ -115,7 +117,7 @@ export class DofaPolicyService {
               rawMax === undefined || rawMax === null ? null : Number(rawMax),
             required_roles: roles,
             required_signatures: sigs,
-          } as CompiledBand;
+          };
         }
         return {
           rule_key: String(d.rule_key ?? `BAND_${idx + 1}`),
@@ -132,7 +134,7 @@ export class DofaPolicyService {
           exception_escalate_role: String(
             d.exception_escalate_role ?? 'Chairman',
           ),
-        } as CompiledBand;
+        };
       });
 
     if (!bands.length) {
@@ -240,10 +242,9 @@ export class DofaPolicyService {
     }
 
     const tid = this.tenant(tenantId);
-    const compiled =
-      body.compiled_matrix?.length
-        ? body.compiled_matrix
-        : this.compileGraph(body.domain, body.graph_json ?? { nodes: [] });
+    const compiled = body.compiled_matrix?.length
+      ? body.compiled_matrix
+      : this.compileGraph(body.domain, body.graph_json ?? { nodes: [] });
 
     const verRows = await this.db.query(
       `SELECT COALESCE(MAX(version), 0) + 1 AS next_v
@@ -317,7 +318,10 @@ export class DofaPolicyService {
         code: 'POLICY_FROZEN',
       });
     }
-    if (String(g.proposed_by) !== userId && !this.roleOk(userRole, ['SuperAdmin'])) {
+    if (
+      String(g.proposed_by) !== userId &&
+      !this.roleOk(userRole, ['SuperAdmin'])
+    ) {
       throw new ForbiddenException({
         message: 'Only the proposer (or SuperAdmin) may edit this draft',
         code: 'POLICY_NOT_OWNER',
@@ -325,10 +329,9 @@ export class DofaPolicyService {
     }
 
     const graphJson = (body.graph_json ?? g.graph_json) as GraphJson;
-    const compiled =
-      body.compiled_matrix?.length
-        ? body.compiled_matrix
-        : this.compileGraph(String(g.domain), graphJson);
+    const compiled = body.compiled_matrix?.length
+      ? body.compiled_matrix
+      : this.compileGraph(String(g.domain), graphJson);
 
     const rows = await this.db.query(
       `UPDATE dofa_policy_graphs SET
@@ -605,7 +608,9 @@ export class DofaPolicyService {
       for (const band of compiled) {
         const levelNo = Number(band.level_no);
         if (!levelNo || levelNo < 1 || levelNo > 5) {
-          throw new BadRequestException(`Invalid P2P level_no ${band.level_no}`);
+          throw new BadRequestException(
+            `Invalid P2P level_no ${band.level_no}`,
+          );
         }
         const roles = band.required_roles;
         await tx.query(

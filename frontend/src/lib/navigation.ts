@@ -299,7 +299,7 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
     title: 'My HR & Operations',
     items: [
       {
-        label: 'My Profile & Documents',
+        label: 'My Profile',
         href: prefix === 'hr' ? p.documents : p.profile,
         icon: UserCog,
         keywords: [
@@ -317,31 +317,41 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
         ],
       },
       {
-        label: 'Attendance Calendar',
+        label: 'Work Calendar',
         href: prefix === 'hr' ? '/hr/me/attendance-holidays' : p.workforce,
         icon: CalendarDays,
         keywords: ['leave', 'cl', 'sl', 'attendance', 'calendar', 'holidays', 'regularize'],
       },
+      ...(prefix === 'faculty'
+        ? [
+            {
+              label: 'Leave Management',
+              href: '/faculty/leaves',
+              icon: CalendarRange,
+              keywords: ['leave', 'cl', 'sl', 'el', 'apply leave', 'balances'],
+            } as NavItem,
+          ]
+        : []),
       {
-        label: 'My Payslips & Tax',
+        label: 'Salary & Tax',
         href: p.payslips,
         icon: Banknote,
         keywords: ['payslip', 'salary', 'form 16', 'tax'],
       },
       {
-        label: 'Company Policies',
+        label: 'University Policies',
         href: p.policies,
         icon: FileText,
-        keywords: ['policies', 'posh', 'leave policy', 'cms', 'vote'],
+        keywords: ['policies', 'posh', 'leave policy', 'cms', 'vote', 'company'],
       },
       {
-        label: 'My Helpdesk Tickets',
+        label: 'Help Desk',
         href: p.tickets,
         icon: Ticket,
-        keywords: ['it', 'ticket', 'support', 'grievance'],
+        keywords: ['it', 'ticket', 'support', 'grievance', 'helpdesk'],
       },
       {
-        label: 'Account Settings',
+        label: 'Settings',
         href: p.settings,
         icon: Settings,
         keywords: ['password', 'security', 'notifications', 'email', 'account', 'phone', 'contact', 'address', 'profile'],
@@ -589,28 +599,47 @@ export const facultyPortal: PortalConfig = {
   navGroups: [
     {
       title: 'Home',
-      items: [{ label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard }],
+      items: [
+        { label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard },
+        {
+          label: 'AI Assistant',
+          href: '/faculty/ai-assistant',
+          icon: Sparkles,
+          keywords: ['ai', 'copilot', 'gemini', 'lesson plan', 'quiz', 'chatbot', 'faculty ai'],
+        },
+        {
+          label: 'Notifications',
+          href: '/faculty/notifications',
+          icon: Bell,
+          keywords: ['alerts', 'inbox', 'unread', 'notification center'],
+        },
+      ],
     },
     {
       title: 'Academics & Teaching',
       items: [
-        { label: 'Schedule Classes', href: '/faculty/schedule-classes', icon: CalendarClock, keywords: ['timetable', 'slots', 'drag and drop'] },
+        { label: 'Schedule Classes', href: '/faculty/schedule-classes', icon: CalendarClock, keywords: ['timetable', 'slots', 'drag and drop', 'class schedule'] },
         { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
-        { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
-        { label: 'Weekly Tests Configuration', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test'] },
-        { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
-        { label: 'Grade Change DOFA', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe'] },
-        { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
-
+        { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
+        { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
+        { label: 'Study Materials', href: '/faculty/materials', icon: BookMarked, keywords: ['notes', 'ppt', 'syllabus', 'upload', 'modules'] },
+        { label: 'Announcements', href: '/faculty/announcements', icon: Megaphone, keywords: ['notify students', 'course announcement'] },
+        { label: 'Tests & Quizzes', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test', 'quiz'] },
+        { label: 'Question Bank', href: '/faculty/question-bank', icon: ListTodo, keywords: ['mcq', 'question bank', 'quiz bank'] },
+        { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz', 'exams', 'grades'] },
+        { label: 'Grade Requests', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe', 'grade requests'] },
+        { label: 'Student Performance', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance', 'analytics', 'performance'] },
+        { label: 'At-Risk Students', href: '/faculty/at-risk', icon: AlertTriangle, keywords: ['early warning', 'intervention', 'at risk'] },
+        { label: 'Reports', href: '/faculty/reports', icon: FileSpreadsheet, keywords: ['export', 'csv', 'attendance', 'assignments'] },
       ],
     },
     {
       title: 'Students & Mentoring',
       items: [
-        { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
-        { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
-        { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
+        { label: 'Mentorship', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates', 'approvals'] },
+        { label: 'Projects & Labs', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide', 'lab'] },
+        { label: 'Discipline Reports', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct', 'incident'] },
         { label: 'Safety Notices', href: '/faculty/safety-notices', icon: Shield, keywords: ['ragging', 'harassment', 'concern', 'notice'] },
       ],
     },
@@ -618,20 +647,20 @@ export const facultyPortal: PortalConfig = {
       title: 'Research & Duties',
       items: [
         { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
-        { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
-        { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
-        { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
-        { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
-        { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
-        moonshotsNavItem,
+        { label: 'Exam Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor', 'invigilation'] },
+        { label: 'Re-evaluation', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
+        { label: 'Research', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms', 'publications'] },
+        { label: 'Research Grants', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
+        { label: 'PhD Students', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
+        { ...moonshotsNavItem, href: '/faculty/moonshots' },
       ],
     },
     {
       title: 'Administration',
       items: [
         { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave'] },
-        { label: 'DOFA Inbox (Universal)', href: '/faculty/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals'] },
-        { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
+        { label: 'DOFA Requests', href: '/faculty/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals', 'dofa'] },
+        { label: 'IQAC Tasks', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
         { label: 'Placement Coordinator', href: '/faculty/placement-coordinator', icon: Briefcase, keywords: ['placement', 'drives', 'coordinator', 'attendance'] },
         { label: 'Meetings', href: '/faculty/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'minutes', 'agenda'] },
@@ -642,27 +671,47 @@ export const facultyPortal: PortalConfig = {
   commandItems: flattenNavToCommandItems([
     {
       title: 'Home',
-      items: [{ label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard }],
+      items: [
+        { label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard },
+        {
+          label: 'AI Assistant',
+          href: '/faculty/ai-assistant',
+          icon: Sparkles,
+          keywords: ['ai', 'copilot', 'gemini', 'lesson plan', 'quiz', 'chatbot', 'faculty ai'],
+        },
+        {
+          label: 'Notifications',
+          href: '/faculty/notifications',
+          icon: Bell,
+          keywords: ['alerts', 'inbox', 'unread', 'notification center'],
+        },
+      ],
     },
     {
       title: 'Academics & Teaching',
       items: [
+        { label: 'Schedule Classes', href: '/faculty/schedule-classes', icon: CalendarClock, keywords: ['timetable', 'slots', 'drag and drop', 'class schedule'] },
         { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp', 'extra'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
-        { label: 'Course Page & DA', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'materials', 'ppt', 'da', 'digital assignment', 'submission', 'deadline'] },
-        { label: 'Weekly Tests Configuration', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test'] },
-        { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz'] },
-        { label: 'Grade Change DOFA', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe'] },
-        { label: 'Student Analytics', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance'] },
-
+        { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
+        { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
+        { label: 'Study Materials', href: '/faculty/materials', icon: BookMarked, keywords: ['notes', 'ppt', 'syllabus', 'upload', 'modules'] },
+        { label: 'Announcements', href: '/faculty/announcements', icon: Megaphone, keywords: ['notify students', 'course announcement'] },
+        { label: 'Tests & Quizzes', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test', 'quiz'] },
+        { label: 'Question Bank', href: '/faculty/question-bank', icon: ListTodo, keywords: ['mcq', 'question bank', 'quiz bank'] },
+        { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz', 'exams', 'grades'] },
+        { label: 'Grade Requests', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe', 'grade requests'] },
+        { label: 'Student Performance', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance', 'analytics', 'performance'] },
+        { label: 'At-Risk Students', href: '/faculty/at-risk', icon: AlertTriangle, keywords: ['early warning', 'intervention', 'at risk'] },
+        { label: 'Reports', href: '/faculty/reports', icon: FileSpreadsheet, keywords: ['export', 'csv', 'attendance', 'assignments'] },
       ],
     },
     {
       title: 'Students & Mentoring',
       items: [
-        { label: 'Mentorship & Approvals', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates'] },
-        { label: 'Project & Lab Guides', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide'] },
-        { label: 'Log Disciplinary Incident', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct'] },
+        { label: 'Mentorship', href: '/faculty/mentorship', icon: Handshake, keywords: ['mentor', 'mentee', 'certificates', 'approvals'] },
+        { label: 'Projects & Labs', href: '/faculty/projects', icon: Microscope, keywords: ['b.tech', 'mba', 'weekly report', 'guide', 'lab'] },
+        { label: 'Discipline Reports', href: '/faculty/discipline/incidents', icon: Scale, keywords: ['demerit', 'discipline', 'dc', 'misconduct', 'incident'] },
         { label: 'Safety Notices', href: '/faculty/safety-notices', icon: Shield, keywords: ['ragging', 'harassment', 'concern', 'notice'] },
       ],
     },
@@ -670,19 +719,20 @@ export const facultyPortal: PortalConfig = {
       title: 'Research & Duties',
       items: [
         { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
-        { label: 'Exam Invigilation Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor'] },
-        { label: 'Re-evaluation Reassessment', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
-        { label: 'Research & Publications', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms'] },
-        { label: 'R&D Grant Approvals', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
-        { label: 'Ph.D. Scholars', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
-        moonshotsNavItem,
+        { label: 'Exam Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor', 'invigilation'] },
+        { label: 'Re-evaluation', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
+        { label: 'Research', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms', 'publications'] },
+        { label: 'Research Grants', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
+        { label: 'PhD Students', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
+        { ...moonshotsNavItem, href: '/faculty/moonshots' },
       ],
     },
     {
       title: 'Administration',
       items: [
-        { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team'] },
-        { label: 'Falcon Core Tasks (IQAC)', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks'] },
+        { label: 'Pending Approvals (Inbox)', href: '/faculty/inbox', icon: Inbox, keywords: ['approve', 'hod', 'pending on me', 'team', 'leave', 'dofa', 'inbox'] },
+        { label: 'DOFA Requests', href: '/faculty/approvals/dofa-inbox', icon: Scale, keywords: ['nervous system', 'grade change', 'approvals', 'dofa'] },
+        { label: 'IQAC Tasks', href: '/faculty/iqac', icon: ListChecks, keywords: ['iqac', 'upload', 'tasks', 'falcon core'] },
         { label: 'Event Approvals', href: '/faculty/event-approvals', icon: ClipboardPen, keywords: ['club', 'events', 'coordinator'] },
         { label: 'Placement Coordinator', href: '/faculty/placement-coordinator', icon: Briefcase, keywords: ['placement', 'drives', 'coordinator'] },
         { label: 'Meetings', href: '/faculty/meetings', icon: CalendarClock, keywords: ['schedule', 'hod', 'minutes'] },
@@ -836,6 +886,8 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
+        { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'dofa', 'coe', 'approve'] },
+        { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'grade change', 'approvals'] },
       ],
     },
     {
@@ -900,6 +952,8 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
+        { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['grade change', 'dofa'] },
+        { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa inbox'] },
       ],
     },
     {
@@ -1482,7 +1536,8 @@ export const examCellPortal: PortalConfig = {
       items: [
         { label: 'Result Control Centre', href: '/exam-cell/results', icon: TrendingUp, keywords: ['publish', 'bell curve', 'declare', 'marks entry'] },
         { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal, keywords: ['marksheet', 'grade cards', 'cgpa', 'sgpa', 'top students', 'merit'] },
-        { label: 'Grade Change DOFA', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa', 'grade change', 'coe approval'] },
+        { label: 'Grade Change DOFA', href: '/exam-cell/approvals/grade-change', icon: PenLine, keywords: ['dofa', 'grade change', 'coe approval', 'apply'] },
+        { label: 'DOFA Inbox (Universal)', href: '/exam-cell/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'approvals'] },
         { label: 'Course Grades', href: '/exam-cell/course-grades', icon: GraduationCap, keywords: ['grades', 'aggregate'] },
         { label: 'Backlog & Supplementary', href: '/exam-cell/backlog-exams', icon: ArrowUpCircle, keywords: ['back paper', 'supplementary'] },
         { label: 'Re-evaluations', href: '/exam-cell/re-evaluations', icon: FileText, keywords: ['recheck', 'backlog'] },
@@ -1503,6 +1558,7 @@ export const examCellPortal: PortalConfig = {
     { label: 'Attendance Exemptions', href: '/exam-cell/attendance-exemptions', icon: ClipboardCheck },
     { label: 'Publish Results', href: '/exam-cell/results', icon: TrendingUp },
     { label: 'Grade Cards & Merit', href: '/exam-cell/grade-cards', icon: Medal },
+    { label: 'Grade Change DOFA', href: '/exam-cell/approvals/grade-change', icon: PenLine },
     { label: 'UFM Desk', href: '/exam-cell/ufm-cases', icon: Shield },
   ],
 };

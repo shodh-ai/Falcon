@@ -24,6 +24,11 @@ import {
 } from '@/lib/workforce-dates';
 import { useShowMoreList, ShowMoreButton } from '@/components/self-service/ShowMoreList';
 import { ProxyTeachingDialog } from '@/components/faculty/ProxyTeachingDialog';
+import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoLeaveBalances,
+  facultyDemoLeaveRequests,
+} from '@/lib/mock/faculty-portal-demo';
 
 type Balance = { leave_type: string; entitled: string | number; used: string | number };
 type Request = {
@@ -58,12 +63,21 @@ export function MyLeavesPanel() {
 
   async function load() {
     if (!user?.user_id) return;
-    const [b, r] = await Promise.all([
-      api.get<Balance[]>('/api/hr/leaves/my-balances'),
-      api.get<Request[]>('/api/hr/workforce/my-requests'),
-    ]);
-    setBalances(b);
-    setRequests(r);
+    try {
+      const [b, r] = await Promise.all([
+        api.get<Balance[]>('/api/hr/leaves/my-balances'),
+        api.get<Request[]>('/api/hr/workforce/my-requests'),
+      ]);
+      setBalances(withFacultyDemoFallback(b, facultyDemoLeaveBalances() as Balance[], isEmptyArray));
+      setRequests(withFacultyDemoFallback(r, facultyDemoLeaveRequests() as Request[], isEmptyArray));
+    } catch {
+      setBalances(
+        withFacultyDemoFallback([], facultyDemoLeaveBalances() as Balance[], isEmptyArray),
+      );
+      setRequests(
+        withFacultyDemoFallback([], facultyDemoLeaveRequests() as Request[], isEmptyArray),
+      );
+    }
   }
 
   useEffect(() => {

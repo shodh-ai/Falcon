@@ -9,7 +9,13 @@ import { AcademicsModule } from '../academics/academics.module';
 import { ExamCellModule } from '../exam-cell/exam-cell.module';
 
 @Module({
-  imports: [AlumniModule, HelpdeskModule, FinanceModule, AcademicsModule, ExamCellModule],
+  imports: [
+    AlumniModule,
+    HelpdeskModule,
+    FinanceModule,
+    AcademicsModule,
+    ExamCellModule,
+  ],
   controllers: [StudentPortalController],
   providers: [StudentPortalService, HrFieldEncryptionService],
 })

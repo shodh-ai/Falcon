@@ -14,10 +14,58 @@ import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { AssignmentRosterRow, FacultyAssignment } from '@/lib/api/lms';
 import { downloadWithAuth, patchMultipart, postMultipart } from '@/lib/api/lms';
+import {
+  isEmptyArray,
+  isFacultyDemoEntityId,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoAssignments,
+  getFacultyPortalDemoPack,
+  studentsForCourse,
+} from '@/lib/mock/faculty-portal-demo';
 
 type Props = {
   courseId: string;
 };
+
+function buildDemoAssignmentRoster(
+  assignmentId: string,
+  courseId: string,
+  maxMarks: number,
+): AssignmentRosterRow[] {
+  const pack = getFacultyPortalDemoPack();
+  const subs = pack.submissions.filter((s) => s.assignment_id === assignmentId);
+  if (subs.length > 0) {
+    return subs.map((s) => ({
+      student_user_id: s.student_id,
+      student_name: s.student_name,
+      submitted: s.status !== 'PENDING',
+      submission_id: s.submission_id,
+      marks_awarded: s.marks != null ? String(s.marks) : null,
+      status:
+        s.status === 'GRADED'
+          ? 'GRADED'
+          : s.status === 'RETURNED'
+            ? 'RETURNED_FOR_REVISION'
+            : s.status === 'PENDING'
+              ? 'NOT_SUBMITTED'
+              : 'SUBMITTED',
+      faculty_remarks: s.feedback,
+    }));
+  }
+  return studentsForCourse(courseId)
+    .slice(0, 24)
+    .map((s, i) => ({
+      student_user_id: s.user_id,
+      student_name: s.name,
+      submitted: i % 5 !== 0,
+      submission_id: i % 5 !== 0 ? `demo-sub-${assignmentId}-${i}` : null,
+      marks_awarded: i % 5 !== 0 ? String(Math.round((s.assignment_score / 100) * maxMarks)) : null,
+      status: i % 5 === 0 ? 'NOT_SUBMITTED' : i % 3 === 0 ? 'GRADED' : 'SUBMITTED',
+    }));
+}
 
 export function FacultyAssignmentsTab({ courseId }: Props) {
   const api = useAuthedApi();
@@ -32,6 +80,9 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   const [publishAt, setPublishAt] = useState('');
   const [dueAt, setDueAt] = useState('');
   const [daTitle, setDaTitle] = useState('');
+  const [daDescription, setDaDescription] = useState('');
+  const [semester, setSemester] = useState('');
+  const [sectionCode, setSectionCode] = useState('');
   const [refFile, setRefFile] = useState<File | null>(null);
   const [editing, setEditing] = useState<FacultyAssignment | null>(null);
   const [editStartAt, setEditStartAt] = useState('');
@@ -44,7 +95,24 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   function loadAssignments() {
     void api
       .get<FacultyAssignment[]>(`/api/academics/faculty/assignments?courseId=${courseId}`)
-      .then(setAssignments);
+      .then((rows) =>
+        setAssignments(
+          withFacultyDemoFallback(
+            rows,
+            facultyDemoAssignments(courseId) as unknown as FacultyAssignment[],
+            isEmptyArray,
+          ),
+        ),
+      )
+      .catch(() =>
+        setAssignments(
+          withFacultyDemoFallback(
+            [],
+            facultyDemoAssignments(courseId) as unknown as FacultyAssignment[],
+            isEmptyArray,
+          ),
+        ),
+      );
   }
 
   useEffect(() => {
@@ -55,33 +123,78 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     setSelectedId(assignmentId);
     setSelectedTitle(title);
     setSelectedMaxMarks(maxMarks);
-    const data = await api.get<{ roster: AssignmentRosterRow[] }>(
-      `/api/academics/faculty/assignments/${assignmentId}/roster`,
-    );
-    setRoster(data.roster);
-    const marks: Record<string, string> = {};
-    data.roster.forEach((r) => {
-      if (r.marks_awarded) marks[r.submission_id ?? ''] = String(r.marks_awarded);
-    });
-    setGradeMarks(marks);
+    try {
+      const data = await api.get<{ roster: AssignmentRosterRow[] }>(
+        `/api/academics/faculty/assignments/${assignmentId}/roster`,
+      );
+      const demoRoster = buildDemoAssignmentRoster(assignmentId, courseId, maxMarks);
+      const rosterResolved = withFacultyDemoFallback(data.roster, demoRoster, isEmptyArray);
+      setRoster(rosterResolved);
+      const marks: Record<string, string> = {};
+      rosterResolved.forEach((r) => {
+        if (r.marks_awarded) marks[r.submission_id ?? ''] = String(r.marks_awarded);
+      });
+      setGradeMarks(marks);
+    } catch {
+      const demoRoster = buildDemoAssignmentRoster(assignmentId, courseId, maxMarks);
+      setRoster(withFacultyDemoFallback([], demoRoster, isEmptyArray));
+      const marks: Record<string, string> = {};
+      demoRoster.forEach((r) => {
+        if (r.marks_awarded) marks[r.submission_id ?? ''] = String(r.marks_awarded);
+      });
+      setGradeMarks(marks);
+    }
   }
 
   async function createDa(e: FormEvent) {
     e.preventDefault();
     if (!token || !daTitle.trim() || !dueAt) return;
+    if (isFacultyDemoEntityId(courseId)) {
+      toast.success('Assignment published successfully (demo)');
+      setCreateOpen(false);
+      setDaTitle('');
+      setDaDescription('');
+      setSemester('');
+      setSectionCode('');
+      setPublishAt('');
+      setDueAt('');
+      setRefFile(null);
+      return;
+    }
     const form = new FormData();
     form.append('course_id', courseId);
     form.append('title', daTitle.trim());
+    if (daDescription.trim()) form.append('description', daDescription.trim());
     form.append('max_marks', maxMarks);
     form.append('start_date', publishAt ? new Date(publishAt).toISOString() : new Date().toISOString());
     form.append('due_date', new Date(dueAt).toISOString());
+    if (semester.trim()) form.append('semester', semester.trim());
+    if (sectionCode.trim()) form.append('section_code', sectionCode.trim().toUpperCase());
     if (refFile) form.append('file', refFile);
     try {
-      await postMultipart('/api/academics/faculty/assignments', token, form);
-      toast.success('Digital assignment created');
+      const created = (await postMultipart(
+        '/api/academics/faculty/assignments',
+        token,
+        form,
+      )) as { notified_count?: number } | null;
+      const notified = Number(created?.notified_count ?? 0);
+      const publishImmediate = !publishAt || new Date(publishAt).getTime() <= Date.now();
+      if (publishImmediate) {
+        toast.success(
+          `Assignment published successfully. Notifications sent to ${notified} student${notified === 1 ? '' : 's'}.`,
+        );
+      } else {
+        toast.success(
+          'Assignment scheduled. Students will be notified when it becomes visible.',
+        );
+      }
       setCreateOpen(false);
       setDaTitle('');
+      setDaDescription('');
+      setSemester('');
+      setSectionCode('');
       setPublishAt('');
+      setDueAt('');
       setRefFile(null);
       loadAssignments();
     } catch (err) {
@@ -93,6 +206,10 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     const raw = gradeMarks[submissionId];
     if (raw === undefined || raw === '') {
       toast.error('Enter marks first');
+      return;
+    }
+    if (isFacultyDemoSmokeId(submissionId)) {
+      toast.success('Marks saved (demo)');
       return;
     }
     try {
@@ -110,6 +227,10 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     const remarks = returnRemarks[submissionId]?.trim();
     if (!remarks) {
       toast.error('Enter remarks explaining what the student must fix');
+      return;
+    }
+    if (isFacultyDemoSmokeId(submissionId)) {
+      toast.success('Returned to student for revision (demo)');
       return;
     }
     setReturningId(submissionId);
@@ -144,6 +265,11 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   async function saveEdit(e: FormEvent) {
     e.preventDefault();
     if (!token || !editing) return;
+    if (isFacultyDemoSmokeId(editing.assignment_id)) {
+      toast.success('Assignment updated (demo)');
+      setEditing(null);
+      return;
+    }
     const form = new FormData();
     form.append('start_date', new Date(editStartAt).toISOString());
     form.append('due_date', new Date(editDueAt).toISOString());
@@ -391,16 +517,49 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
             </div>
             <form onSubmit={createDa} className="space-y-4 p-5">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Title</label>
+                <label className="text-xs font-medium text-muted-foreground">Assignment title</label>
                 <Input
-                  placeholder="e.g. DA-1: Thermodynamics"
+                  placeholder="e.g. Linked List Implementation"
                   value={daTitle}
                   onChange={(e) => setDaTitle(e.target.value)}
                   required
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Max marks</label>
+                <label className="text-xs font-medium text-muted-foreground">Description / instructions</label>
+                <textarea
+                  className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="Instructions for students (optional)"
+                  value={daDescription}
+                  onChange={(e) => setDaDescription(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Semester (optional)</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 3"
+                    value={semester}
+                    onChange={(e) => setSemester(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Section (optional)</label>
+                  <Input
+                    placeholder="e.g. A"
+                    value={sectionCode}
+                    onChange={(e) => setSectionCode(e.target.value)}
+                    maxLength={10}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave semester/section blank to notify all students enrolled in this course.
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Total marks</label>
                 <Input
                   type="number"
                   min={1}
@@ -411,7 +570,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Publish Date (Visible to Students)</label>
+                <label className="text-xs font-medium text-muted-foreground">Publish date (visible to students)</label>
                 <Input
                   type="datetime-local"
                   value={publishAt}
@@ -419,7 +578,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Strict deadline</label>
+                <label className="text-xs font-medium text-muted-foreground">Due date</label>
                 <Input
                   type="datetime-local"
                   value={dueAt}
@@ -428,7 +587,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Question paper (optional)</label>
+                <label className="text-xs font-medium text-muted-foreground">Attachment (optional PDF)</label>
                 <Input
                   type="file"
                   accept=".pdf,application/pdf"
@@ -437,7 +596,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
               </div>
               <div className="flex gap-2 pt-1">
-                <Button type="submit">Create</Button>
+                <Button type="submit">Publish Assignment</Button>
                 <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
                   Cancel
                 </Button>

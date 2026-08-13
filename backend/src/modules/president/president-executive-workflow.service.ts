@@ -79,7 +79,9 @@ export class PresidentExecutiveWorkflowService {
         tenantId: actor.tenantId,
         userId: String(row.requested_by),
         category: 'OPERATIONS',
-        title: approve ? 'HR request approved by President' : 'HR request rejected by President',
+        title: approve
+          ? 'HR request approved by President'
+          : 'HR request rejected by President',
         message: `${String(row.title ?? 'HR request')} was ${approve ? 'approved' : 'rejected'} by the President.`,
         actionLink: '/hr/dashboard',
         severity: approve ? 'info' : 'warning',
@@ -99,7 +101,10 @@ export class PresidentExecutiveWorkflowService {
       module: 'executive_hr_approval_requests',
       action: approve ? 'PRESIDENT_HR_APPROVED' : 'PRESIDENT_HR_REJECTED',
       recordId: requestId,
-      newValue: { status: approve ? 'APPROVED' : 'REJECTED', note: note ?? null },
+      newValue: {
+        status: approve ? 'APPROVED' : 'REJECTED',
+        note: note ?? null,
+      },
       ip: actor.ip,
       sessionId: actor.sessionId,
     });
@@ -153,13 +158,7 @@ export class PresidentExecutiveWorkflowService {
              (tenant_id, title, description, priority, status, assigned_to, assigned_by, due_at)
            VALUES ($1, $2, $3, 'HIGH', 'OPEN', $4, $5, NOW() + INTERVAL '7 days')
            RETURNING task_id`,
-          [
-            actor.tenantId,
-            dto.subject,
-            dto.body,
-            assignee,
-            actor.userId,
-          ],
+          [actor.tenantId, dto.subject, dto.body, assignee, actor.userId],
         )
       : [];
 
@@ -371,10 +370,18 @@ export class PresidentExecutiveWorkflowService {
     const app = rows[0] as Record<string, unknown>;
 
     if (app.verification_status !== 'VERIFIED') {
-      throw new BadRequestException('Application must be Registrar-verified before ratification');
+      throw new BadRequestException(
+        'Application must be Registrar-verified before ratification',
+      );
     }
-    if (!['PENDING', 'NOT_REQUIRED'].includes(String(app.president_ratification_status))) {
-      throw new BadRequestException('Application is not pending President ratification');
+    if (
+      !['PENDING', 'NOT_REQUIRED'].includes(
+        String(app.president_ratification_status),
+      )
+    ) {
+      throw new BadRequestException(
+        'Application is not pending President ratification',
+      );
     }
 
     const newStatus = approve ? 'RATIFIED' : 'REJECTED';
@@ -389,7 +396,9 @@ export class PresidentExecutiveWorkflowService {
       [applicationId, actor.tenantId, newStatus, actor.userId],
     );
     if (!updated[0]) {
-      throw new NotFoundException('Application not found for ratification update');
+      throw new NotFoundException(
+        'Application not found for ratification update',
+      );
     }
 
     if (updated[0]?.student_user_id) {
@@ -397,10 +406,13 @@ export class PresidentExecutiveWorkflowService {
         tenantId: actor.tenantId,
         userId: String(updated[0].student_user_id),
         category: 'OPERATIONS',
-        title: approve ? 'Convocation ratified by President' : 'Convocation ratification declined',
+        title: approve
+          ? 'Convocation ratified by President'
+          : 'Convocation ratification declined',
         message: approve
           ? 'Your degree application has received final executive ratification.'
-          : note || 'Your convocation application requires Registrar follow-up.',
+          : note ||
+            'Your convocation application requires Registrar follow-up.',
         actionLink: '/student/certificates',
         severity: approve ? 'info' : 'warning',
         intent: 'status_update',
@@ -413,9 +425,14 @@ export class PresidentExecutiveWorkflowService {
       userId: actor.userId,
       role: actor.role,
       module: 'cert_applications',
-      action: approve ? 'PRESIDENT_CONVOCATION_RATIFIED' : 'PRESIDENT_CONVOCATION_REJECTED',
+      action: approve
+        ? 'PRESIDENT_CONVOCATION_RATIFIED'
+        : 'PRESIDENT_CONVOCATION_REJECTED',
       recordId: applicationId,
-      newValue: { president_ratification_status: newStatus, note: note ?? null },
+      newValue: {
+        president_ratification_status: newStatus,
+        note: note ?? null,
+      },
       ip: actor.ip,
       sessionId: actor.sessionId,
     });
@@ -434,7 +451,11 @@ export class PresidentExecutiveWorkflowService {
   async complianceAction(
     actor: ExecutiveActor,
     assignmentId: string,
-    action: 'ASSIGN_INVESTIGATION' | 'ESCALATE_DEPARTMENT' | 'REQUEST_REPORT' | 'MARK_REVIEWED',
+    action:
+      | 'ASSIGN_INVESTIGATION'
+      | 'ESCALATE_DEPARTMENT'
+      | 'REQUEST_REPORT'
+      | 'MARK_REVIEWED',
     note?: string,
   ) {
     const rows = await this.db.query(
@@ -446,7 +467,8 @@ export class PresidentExecutiveWorkflowService {
        WHERE ta.assignment_id = $1`,
       [assignmentId],
     );
-    if (!rows[0]) throw new NotFoundException('Compliance assignment not found');
+    if (!rows[0])
+      throw new NotFoundException('Compliance assignment not found');
     const row = rows[0] as Record<string, unknown>;
 
     let newStatus = String(row.status);
@@ -472,7 +494,8 @@ export class PresidentExecutiveWorkflowService {
       userId: String(notifyUser),
       category: 'OPERATIONS',
       title: `President compliance action: ${action.replace(/_/g, ' ')}`,
-      message: note || String(row.task_name ?? 'Compliance task requires attention'),
+      message:
+        note || String(row.task_name ?? 'Compliance task requires attention'),
       actionLink: '/iqac/dashboard',
       severity: 'warning',
       intent: 'action_required',
@@ -497,7 +520,11 @@ export class PresidentExecutiveWorkflowService {
   async createMeetingActionItems(
     actor: ExecutiveActor,
     meetingId: string,
-    items: Array<{ title: string; assigned_to_user_id: string; due_at?: string }>,
+    items: Array<{
+      title: string;
+      assigned_to_user_id: string;
+      due_at?: string;
+    }>,
   ) {
     const created: string[] = [];
     for (const item of items) {

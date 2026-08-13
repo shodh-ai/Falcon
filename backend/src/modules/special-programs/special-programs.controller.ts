@@ -1,11 +1,24 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { rolesIntersect } from '../../common/config/campus-admin.roles';
 import { SpecialProgramsService } from './special-programs.service';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller('api/special-programs')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -17,9 +30,15 @@ export class SpecialProgramsController {
   }
 
   /** Students see only their artifacts; staff see all tenant artifacts unless filtered. */
-  private artifactScopeUserId(user: AuthUser, studentUserId?: string): string | undefined {
+  private artifactScopeUserId(
+    user: AuthUser,
+    studentUserId?: string,
+  ): string | undefined {
     if (studentUserId) return studentUserId;
-    const userRoles = [...(user.roles ?? []), ...(user.role ? [user.role] : [])];
+    const userRoles = [
+      ...(user.roles ?? []),
+      ...(user.role ? [user.role] : []),
+    ];
     const canListAll = rolesIntersect(userRoles, [
       'ExamCell',
       'Dean',
@@ -32,7 +51,19 @@ export class SpecialProgramsController {
   }
 
   @Get()
-  @Roles('Student', 'PoP', 'Dean', 'Registrar', 'HR', 'HRAdmin', 'SuperAdmin', 'CampusAdmin', 'COO', 'Chairman', 'President')
+  @Roles(
+    'Student',
+    'PoP',
+    'Dean',
+    'Registrar',
+    'HR',
+    'HRAdmin',
+    'SuperAdmin',
+    'CampusAdmin',
+    'COO',
+    'Chairman',
+    'President',
+  )
   list(@Req() req: { user: AuthUser }) {
     return this.programs.listPrograms(this.tenant(req));
   }
@@ -47,7 +78,12 @@ export class SpecialProgramsController {
   @Roles('Student', 'Dean', 'Registrar', 'SuperAdmin')
   enroll(
     @Req() req: { user: AuthUser },
-    @Body() body: { program_id: string; student_user_id?: string; metadata?: Record<string, unknown> },
+    @Body()
+    body: {
+      program_id: string;
+      student_user_id?: string;
+      metadata?: Record<string, unknown>;
+    },
   ) {
     return this.programs.enroll(
       this.tenant(req),
@@ -80,8 +116,19 @@ export class SpecialProgramsController {
   }
 
   @Get('portfolio/artifacts')
-  @Roles('Student', 'ExamCell', 'Dean', 'Registrar', 'PoP', 'SuperAdmin', 'CampusAdmin')
-  artifacts(@Req() req: { user: AuthUser }, @Query('student_user_id') studentUserId?: string) {
+  @Roles(
+    'Student',
+    'ExamCell',
+    'Dean',
+    'Registrar',
+    'PoP',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
+  artifacts(
+    @Req() req: { user: AuthUser },
+    @Query('student_user_id') studentUserId?: string,
+  ) {
     return this.programs.listArtifacts(
       this.tenant(req),
       this.artifactScopeUserId(req.user, studentUserId),
@@ -122,7 +169,14 @@ export class SpecialProgramsController {
   }
 
   @Get('hs-direct')
-  @Roles('AdmissionsOfficer', 'Registrar', 'Dean', 'SuperAdmin', 'CampusAdmin', 'PoP')
+  @Roles(
+    'AdmissionsOfficer',
+    'Registrar',
+    'Dean',
+    'SuperAdmin',
+    'CampusAdmin',
+    'PoP',
+  )
   hsDirect(@Req() req: { user: AuthUser }) {
     return this.programs.listHsDirect(this.tenant(req));
   }

@@ -10,6 +10,7 @@ import {
   useNotificationHistory,
   toAppNotification,
 } from '@/hooks/useNotifications';
+import { useNotificationRealtime } from '@/hooks/useNotificationRealtime';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
 import { areInAppAlertsEnabled } from '@/lib/notifications/account-prefs';
@@ -17,6 +18,7 @@ import { areInAppAlertsEnabled } from '@/lib/notifications/account-prefs';
 export function LiveNotificationBell() {
   const router = useRouter();
   const { token } = useAuth();
+  useNotificationRealtime();
   const { refresh: refreshCount } = useNotificationUnreadCount();
   const { notifications, isLoading, refresh: refreshList } = useNotificationHistory();
   const [inAppEnabled, setInAppEnabled] = useState(true);

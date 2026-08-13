@@ -12,6 +12,7 @@ import {
 import { FacultyPlacementCoordinatorPanel } from '@/components/faculty/FacultyPlacementCoordinatorPanel';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { isFacultyDemoModeEnabled } from '@/lib/faculty-demo-mode';
 
 export default function FacultyPlacementCoordinatorPage() {
   const api = useAuthedApi();
@@ -21,8 +22,8 @@ export default function FacultyPlacementCoordinatorPage() {
   useEffect(() => {
     void api
       .get<{ is_coordinator: boolean }>('/api/academics/faculty/placement/coordinator-status')
-      .then((res) => setIsCoordinator(res.is_coordinator))
-      .catch(() => setIsCoordinator(false))
+      .then((res) => setIsCoordinator(Boolean(res.is_coordinator) || isFacultyDemoModeEnabled()))
+      .catch(() => setIsCoordinator(isFacultyDemoModeEnabled()))
       .finally(() => setLoading(false));
   }, [api]);
 

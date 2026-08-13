@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { DOFA_DECISION, DOFA_STATUS } from './dofa.constants';
 
 export type DofaDomain =
@@ -30,7 +31,10 @@ type MatrixRow = {
 
 @Injectable()
 export class DofaEngineService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly notify: NotificationEmitterService,
+  ) {}
 
   private tenant(id?: string) {
     return id ?? 'a0000000-0000-4000-8000-000000000001';
@@ -289,12 +293,14 @@ export class DofaEngineService {
       });
     }
 
-    const step = (c.steps as Array<{
-      step_no: number;
-      required_role: string;
-      decision: string | null;
-      step_id: string;
-    }>).find((s) => s.step_no === Number(c.current_step));
+    const step = (
+      c.steps as Array<{
+        step_no: number;
+        required_role: string;
+        decision: string | null;
+        step_id: string;
+      }>
+    ).find((s) => s.step_no === Number(c.current_step));
     if (!step || step.decision) {
       throw new BadRequestException('No open step');
     }
@@ -317,7 +323,12 @@ export class DofaEngineService {
         `UPDATE dofa_cases SET status = $2, updated_at = NOW() WHERE case_id = $1`,
         [caseId, DOFA_STATUS.REJECTED],
       );
-      await this.applyDomainCallback(tid, caseId, DOFA_DECISION.REJECTED, userId);
+      await this.applyDomainCallback(
+        tid,
+        caseId,
+        DOFA_DECISION.REJECTED,
+        userId,
+      );
       return this.getCase(tid, caseId);
     }
 
@@ -331,7 +342,12 @@ export class DofaEngineService {
          WHERE case_id = $1`,
         [caseId, nextStep, DOFA_STATUS.APPROVED],
       );
-      await this.applyDomainCallback(tid, caseId, DOFA_DECISION.APPROVED, userId);
+      await this.applyDomainCallback(
+        tid,
+        caseId,
+        DOFA_DECISION.APPROVED,
+        userId,
+      );
     } else {
       await this.db.query(
         `UPDATE dofa_cases SET current_step = $2, status = $3, updated_at = NOW()
@@ -362,7 +378,103 @@ export class DofaEngineService {
          WHERE change_id = $1 AND tenant_id = $3`,
         [sourceId, userId, tenantId],
       );
+      await this.notifyGradeChangeAwaitingCoe(tenantId, sourceId);
     }
+  }
+
+  private async loadGradeChangeNotifyRow(tenantId: string, changeId: string) {
+    const rows = await this.db.query(
+      `SELECT g.change_id, g.course_code, g.from_grade, g.to_grade,
+              g.requested_by, g.student_user_id,
+              req.name AS requester_name, stu.name AS student_name
+       FROM sis_grade_change_requests g
+       LEFT JOIN users req ON req.user_id = g.requested_by
+       LEFT JOIN users stu ON stu.user_id = g.student_user_id
+       WHERE g.change_id = $1 AND g.tenant_id = $2
+       LIMIT 1`,
+      [changeId, tenantId],
+    );
+    return rows[0] as
+      | {
+          change_id: string;
+          course_code: string;
+          from_grade: string;
+          to_grade: string;
+          requested_by: string;
+          student_user_id: string;
+          requester_name?: string | null;
+          student_name?: string | null;
+        }
+      | undefined;
+  }
+
+  private async notifyGradeChangeAwaitingCoe(
+    tenantId: string,
+    changeId: string,
+  ) {
+    const row = await this.loadGradeChangeNotifyRow(tenantId, changeId);
+    if (!row) return;
+
+    const base = {
+      changeId: String(row.change_id),
+      courseCode: row.course_code,
+      fromGrade: row.from_grade,
+      toGrade: row.to_grade,
+      requesterName: row.requester_name ?? 'Faculty',
+      studentName: row.student_name ?? null,
+    };
+
+    const officers = await this.db.query(
+      `SELECT DISTINCT u.user_id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.user_id
+       JOIN roles r ON r.role_id = ur.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND lower(r.role_name) IN ('examcell', 'examadmin', 'deputycoe', 'superadmin')`,
+      [tenantId],
+    );
+    for (const officer of officers) {
+      if (String(officer.user_id) === String(row.requested_by)) continue;
+      this.notify.gradeChangeCoePending({
+        tenantId,
+        userId: String(officer.user_id),
+        ...base,
+        actionLink: '/exam-cell/approvals/grade-change',
+      });
+    }
+
+    if (row.requested_by) {
+      this.notify.gradeChangeCoePending({
+        tenantId,
+        userId: String(row.requested_by),
+        ...base,
+        title: 'Grade change sent to Exam Cell',
+        message: `HOD approved ${row.course_code}: ${row.from_grade}→${row.to_grade}. Exam Cell (COE) will apply the change.`,
+        actionLink: '/faculty/grade-change',
+      });
+    }
+  }
+
+  private async notifyGradeChangeResolved(
+    tenantId: string,
+    changeId: string,
+    decision: 'APPLIED' | 'REJECTED',
+  ) {
+    const row = await this.loadGradeChangeNotifyRow(tenantId, changeId);
+    if (!row?.requested_by) return;
+    this.notify.gradeChangeResolved({
+      tenantId,
+      userId: String(row.requested_by),
+      changeId: String(row.change_id),
+      courseCode: row.course_code,
+      fromGrade: row.from_grade,
+      toGrade: row.to_grade,
+      requesterName: row.requester_name ?? 'Faculty',
+      studentName: row.student_name ?? null,
+      decision,
+      actionLink: '/faculty/grade-change',
+    });
   }
 
   /** Domain side-effects when case reaches terminal state */
@@ -411,6 +523,7 @@ export class DofaEngineService {
             [sourceId, tenantId],
           );
         }
+        await this.notifyGradeChangeResolved(tenantId, sourceId, 'APPLIED');
       } else {
         await this.db.query(
           `UPDATE sis_grade_change_requests
@@ -418,6 +531,7 @@ export class DofaEngineService {
            WHERE change_id = $1 AND tenant_id = $2`,
           [sourceId, tenantId],
         );
+        await this.notifyGradeChangeResolved(tenantId, sourceId, 'REJECTED');
       }
     }
 

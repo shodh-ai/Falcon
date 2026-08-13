@@ -53,17 +53,21 @@ export class GstVerificationService {
     const base = process.env.GST_API_BASE_URL!.replace(/\/$/, '');
     const key = process.env.GST_API_KEY!;
     const path =
-      process.env.GST_API_VERIFY_PATH?.trim() || `/gstin/${encodeURIComponent(gstin)}`;
+      process.env.GST_API_VERIFY_PATH?.trim() ||
+      `/gstin/${encodeURIComponent(gstin)}`;
 
     try {
-      const res = await fetch(`${base}${path.startsWith('/') ? path : `/${path}`}`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'x-api-key': key,
-          Accept: 'application/json',
+      const res = await fetch(
+        `${base}${path.startsWith('/') ? path : `/${path}`}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'x-api-key': key,
+            Accept: 'application/json',
+          },
         },
-      });
+      );
 
       if (!res.ok) {
         this.logger.warn(`GST API HTTP ${res.status} for ${gstin}`);
@@ -81,9 +85,10 @@ export class GstVerificationService {
       const active =
         body.active === true ||
         String(body.status ?? body.sts ?? '').toUpperCase() === 'ACTIVE';
-      const legalName = String(
-        body.legalName ?? body.lgnm ?? body.tradeNam ?? body.legal_name ?? '',
-      ).trim() || null;
+      const legalName =
+        String(
+          body.legalName ?? body.lgnm ?? body.tradeNam ?? body.legal_name ?? '',
+        ).trim() || null;
 
       return {
         gstin,

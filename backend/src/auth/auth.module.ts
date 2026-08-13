@@ -51,7 +51,7 @@ const authProviderFactory = {
     GoogleStrategy,
     JwtStrategy,
   ],
-  exports: [AuthService, AUTH_PROVIDER],
+  exports: [AuthService, AUTH_PROVIDER, JwtModule],
 })
 export class AuthModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

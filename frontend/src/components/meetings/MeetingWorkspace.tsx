@@ -22,6 +22,17 @@ import { Badge } from '@/components/ui/badge';
 import { FalconLoader } from '@/components/brand/FalconLoader';
 import { LeadershipPageHeader } from '@/components/leadership/LeadershipSectionCard';
 import { EXECUTIVE_SPACING } from '@/components/leadership/executive/design-tokens';
+import {
+  isEmptyArray,
+  isFacultyDemoEntityId,
+  isFacultyDemoModeEnabled,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoEligibleParticipants,
+  facultyDemoMeetings,
+} from '@/lib/mock/faculty-portal-demo';
 
 function toLocalInputValue(iso: string) {
   const d = new Date(iso);
@@ -99,10 +110,13 @@ export function MeetingWorkspace({
   workspaceLabel = 'Meetings',
   description = 'Schedule meetings with people in your scope, request time with seniors, and publish minutes.',
   syncExecutiveActionItems = false,
+  hidePageHeader = false,
 }: {
   workspaceLabel?: string;
   description?: string;
   syncExecutiveActionItems?: boolean;
+  /** When true, omit LeadershipPageHeader (parent portal already renders chrome). */
+  hidePageHeader?: boolean;
 }) {
   return (
     <Suspense fallback={<p className="p-6 text-sm text-muted-foreground">Loading meetings…</p>}>
@@ -110,6 +124,7 @@ export function MeetingWorkspace({
         workspaceLabel={workspaceLabel}
         description={description}
         syncExecutiveActionItems={syncExecutiveActionItems}
+        hidePageHeader={hidePageHeader}
       />
     </Suspense>
   );
@@ -119,10 +134,12 @@ function MeetingWorkspaceInner({
   workspaceLabel = 'Meetings',
   description = 'Schedule meetings with people in your scope, request time with seniors, and publish minutes.',
   syncExecutiveActionItems = false,
+  hidePageHeader = false,
 }: {
   workspaceLabel?: string;
   description?: string;
   syncExecutiveActionItems?: boolean;
+  hidePageHeader?: boolean;
 }) {
   const api = useAuthedApi();
   const presidentApi = usePresidentApi();
@@ -176,19 +193,30 @@ function MeetingWorkspaceInner({
     (myParticipant.participant_role === 'INVITEE' ||
       (myParticipant.participant_role === 'ORGANIZER' && selected?.meeting_mode === 'REQUESTED'));
 
+  const facultyDemo = workspaceLabel === 'Faculty Portal' && isFacultyDemoModeEnabled();
+
   const load = useCallback(async () => {
     const rows = await meetingsApi.list();
-    setMeetings(rows);
-    return rows;
-  }, [meetingsApi]);
+    const resolved = facultyDemo
+      ? withFacultyDemoFallback(rows, facultyDemoMeetings(user?.user_id), isEmptyArray)
+      : rows;
+    setMeetings(resolved);
+    return resolved;
+  }, [meetingsApi, facultyDemo, user?.user_id]);
 
   useEffect(() => {
     // Fetching on mount intentionally populates meeting state asynchronously.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
-      .catch(() => toast.error('Could not load meetings'))
+      .catch(() => {
+        if (facultyDemo) {
+          setMeetings(facultyDemoMeetings(user?.user_id));
+        } else {
+          toast.error('Could not load meetings');
+        }
+      })
       .finally(() => setLoading(false));
-  }, [load]);
+  }, [load, facultyDemo, user?.user_id]);
 
   useEffect(() => {
     // Draft editors mirror the newly selected record.
@@ -207,9 +235,22 @@ function MeetingWorkspaceInner({
     if (tab !== 'schedule') return;
     void meetingsApi
       .eligible('schedule')
-      .then((res) => setScheduleEligible(res.participants))
-      .catch(() => toast.error('Could not load invitees'));
-  }, [tab, meetingsApi]);
+      .then((res) =>
+        setScheduleEligible(
+          facultyDemo
+            ? withFacultyDemoFallback(
+                res.participants,
+                facultyDemoEligibleParticipants(),
+                isEmptyArray,
+              )
+            : res.participants,
+        ),
+      )
+      .catch(() => {
+        if (facultyDemo) setScheduleEligible(facultyDemoEligibleParticipants());
+        else toast.error('Could not load invitees');
+      });
+  }, [tab, meetingsApi, facultyDemo]);
 
   useEffect(() => {
     if (tab !== 'request') return;
@@ -292,6 +333,15 @@ function MeetingWorkspaceInner({
       toast.error('Choose a future date and time');
       return;
     }
+    if (
+      isFacultyDemoModeEnabled() &&
+      scheduleInvitees.some((id) => isFacultyDemoEntityId(id))
+    ) {
+      toast.success('Meeting scheduled and invitations sent (demo)');
+      setTab('list');
+      setScheduleInvitees([]);
+      return;
+    }
     setBusy(true);
     try {
       await meetingsApi.schedule({
@@ -323,6 +373,11 @@ function MeetingWorkspaceInner({
       toast.error('Choose a future date and time');
       return;
     }
+    if (isFacultyDemoSmokeId(requestForm.recipient_user_id)) {
+      toast.success('Meeting request sent (demo)');
+      setTab('list');
+      return;
+    }
     setBusy(true);
     try {
       await meetingsApi.request({
@@ -344,6 +399,10 @@ function MeetingWorkspaceInner({
   }
 
   async function respond(meetingId: string, response: 'ACCEPTED' | 'DECLINED') {
+    if (isFacultyDemoSmokeId(meetingId)) {
+      toast.success(response === 'ACCEPTED' ? 'Meeting accepted (demo)' : 'Meeting declined (demo)');
+      return;
+    }
     setBusy(true);
     try {
       await meetingsApi.respond(meetingId, { response });
@@ -359,6 +418,10 @@ function MeetingWorkspaceInner({
 
   async function saveAgenda() {
     if (!selected) return;
+    if (isFacultyDemoSmokeId(selected.meeting_id)) {
+      toast.success('Agenda updated (demo)');
+      return;
+    }
     setBusy(true);
     try {
       await meetingsApi.updateAgenda(selected.meeting_id, agendaDraft);
@@ -373,6 +436,10 @@ function MeetingWorkspaceInner({
 
   async function publishMinutes() {
     if (!selected) return;
+    if (isFacultyDemoSmokeId(selected.meeting_id)) {
+      toast.success('Minutes published (demo)');
+      return;
+    }
     setBusy(true);
     try {
       await meetingsApi.publishMinutes(selected.meeting_id, minutesDraft);
@@ -410,46 +477,52 @@ function MeetingWorkspaceInner({
     return <FalconLoader label="Loading meetings…" />;
   }
 
+  const tabActions = (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        variant={tab === 'list' ? 'default' : 'outline'}
+        size="sm"
+        aria-pressed={tab === 'list'}
+        className={tab === 'list' ? NAVY_BTN : OUTLINE_NAVY_BTN}
+        onClick={() => setTab('list')}
+      >
+        My meetings
+      </Button>
+      <Button
+        variant={tab === 'schedule' ? 'default' : 'outline'}
+        size="sm"
+        aria-pressed={tab === 'schedule'}
+        className={tab === 'schedule' ? NAVY_BTN : OUTLINE_NAVY_BTN}
+        onClick={() => setTab('schedule')}
+      >
+        <Plus className="mr-1 h-4 w-4" />
+        Schedule
+      </Button>
+      <Button
+        variant={tab === 'request' ? 'default' : 'outline'}
+        size="sm"
+        aria-pressed={tab === 'request'}
+        className={tab === 'request' ? NAVY_BTN : OUTLINE_NAVY_BTN}
+        onClick={() => setTab('request')}
+      >
+        <Send className="mr-1 h-4 w-4" />
+        Request
+      </Button>
+    </div>
+  );
+
   return (
-    <div className={EXECUTIVE_SPACING.page}>
-      <LeadershipPageHeader
-        eyebrow={workspaceLabel}
-        title="Meetings"
-        description={description}
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={tab === 'list' ? 'default' : 'outline'}
-              size="sm"
-              aria-pressed={tab === 'list'}
-              className={tab === 'list' ? NAVY_BTN : OUTLINE_NAVY_BTN}
-              onClick={() => setTab('list')}
-            >
-              My meetings
-            </Button>
-            <Button
-              variant={tab === 'schedule' ? 'default' : 'outline'}
-              size="sm"
-              aria-pressed={tab === 'schedule'}
-              className={tab === 'schedule' ? NAVY_BTN : OUTLINE_NAVY_BTN}
-              onClick={() => setTab('schedule')}
-            >
-              <Plus className="mr-1 h-4 w-4" />
-              Schedule
-            </Button>
-            <Button
-              variant={tab === 'request' ? 'default' : 'outline'}
-              size="sm"
-              aria-pressed={tab === 'request'}
-              className={tab === 'request' ? NAVY_BTN : OUTLINE_NAVY_BTN}
-              onClick={() => setTab('request')}
-            >
-              <Send className="mr-1 h-4 w-4" />
-              Request
-            </Button>
-          </div>
-        }
-      />
+    <div className={hidePageHeader ? 'space-y-4' : EXECUTIVE_SPACING.page}>
+      {hidePageHeader ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">{tabActions}</div>
+      ) : (
+        <LeadershipPageHeader
+          eyebrow={workspaceLabel}
+          title="Meetings"
+          description={description}
+          action={tabActions}
+        />
+      )}
 
       {tab === 'schedule' ? (
         <Card>

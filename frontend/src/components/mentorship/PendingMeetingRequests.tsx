@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuthedApi } from '@/lib/api';
+import { isFacultyDemoSmokeId } from '@/lib/faculty-demo-mode';
 
 export type PendingMeeting = {
   meeting_id: string;
@@ -47,6 +48,14 @@ export function PendingMeetingRequests({ meetings, onUpdated }: Props) {
     }
     setSubmitting(true);
     try {
+      if (isFacultyDemoSmokeId(target.meeting_id)) {
+        toast.success(status === 'APPROVED' ? 'Meeting approved (demo)' : 'Meeting declined (demo)');
+        setApproveTarget(null);
+        setDeclineTarget(null);
+        setRemarks('');
+        onUpdated();
+        return;
+      }
       await api.post(`/api/academics/proctor/meetings/${target.meeting_id}/respond`, {
         status,
         remarks: remarks.trim() || undefined,

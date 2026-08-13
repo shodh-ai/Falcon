@@ -39,9 +39,12 @@ export class IntegrationsService {
     )
       .replace(/^models\//, '')
       .trim();
-    return [configured, 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-1.5-flash'].filter(
-      (m, i, arr) => !!m && arr.indexOf(m) === i,
-    );
+    return [
+      configured,
+      'gemini-2.0-flash',
+      'gemini-flash-latest',
+      'gemini-1.5-flash',
+    ].filter((m, i, arr) => !!m && arr.indexOf(m) === i);
   }
 
   jobs() {
@@ -153,9 +156,14 @@ export class IntegrationsService {
           .catch(() => [{ outstanding: 0 }]),
       ]);
 
-      const grades = gradeRows as Array<{ semester: number; cgpa: string | number | null }>;
+      const grades = gradeRows as Array<{
+        semester: number;
+        cgpa: string | number | null;
+      }>;
       const latestSgpa =
-        grades.length && grades[0]?.cgpa != null ? Number(grades[0].cgpa) : null;
+        grades.length && grades[0]?.cgpa != null
+          ? Number(grades[0].cgpa)
+          : null;
       const cgpaValues = grades
         .map((g) => (g.cgpa == null ? null : Number(g.cgpa)))
         .filter((n): n is number => n != null && !Number.isNaN(n));
@@ -180,7 +188,9 @@ export class IntegrationsService {
       const name = profile.name || 'Student';
       const enrollment = profile.enrollment || 'N/A';
       const semester =
-        profile.current_semester != null ? Number(profile.current_semester) : null;
+        profile.current_semester != null
+          ? Number(profile.current_semester)
+          : null;
 
       const text = [
         `Student facts (authoritative — use these numbers in answers):`,
@@ -309,7 +319,9 @@ export class IntegrationsService {
     // Conversational intents (no Gemini required).
     const lower = trimmed.toLowerCase();
     if (
-      /^(hi|hello|hey|good\s*(morning|afternoon|evening)|namaste)\b/.test(lower) ||
+      /^(hi|hello|hey|good\s*(morning|afternoon|evening)|namaste)\b/.test(
+        lower,
+      ) ||
       lower === 'help' ||
       lower === 'help me'
     ) {

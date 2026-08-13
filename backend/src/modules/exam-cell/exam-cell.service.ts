@@ -1263,6 +1263,175 @@ export class ExamCellService {
     return updated[0];
   }
 
+  async listInvigilationDutySwaps(tenantId: string) {
+    return this.queryOrEmpty(
+      `SELECT s.*,
+              a.exam_date, a.room, a.session_label, a.block_name, a.exam_schedule_id,
+              req.name AS requester_name,
+              tgt.name AS target_name,
+              ec.name AS exam_cell_name
+       FROM invigilation_duty_swaps s
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id
+       JOIN users req ON req.user_id = s.requester_faculty_user_id
+       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id
+       LEFT JOIN users ec ON ec.user_id = s.exam_cell_user_id
+       WHERE s.tenant_id = $1 AND s.deleted_at IS NULL
+       ORDER BY CASE WHEN s.status = 'PENDING_EXAM_CELL' THEN 1 ELSE 2 END,
+                s.created_at DESC`,
+      [tenantId],
+    );
+  }
+
+  async listInvigilationDutySwapAudits(tenantId: string, swapId: string) {
+    return this.queryOrEmpty(
+      `SELECT a.*, u.name AS actor_name
+       FROM invigilation_duty_swap_audits a
+       LEFT JOIN users u ON u.user_id = a.actor_user_id
+       WHERE a.tenant_id = $1 AND a.swap_id = $2
+       ORDER BY a.created_at ASC`,
+      [tenantId, swapId],
+    );
+  }
+
+  async resolveInvigilationDutySwap(
+    tenantId: string,
+    swapId: string,
+    actorUserId: string,
+    status: 'APPROVED' | 'REJECTED',
+    comment: string,
+  ) {
+    if (!comment?.trim()) {
+      throw new BadRequestException('Comment is required');
+    }
+
+    const rows = await this.db.query(
+      `SELECT s.*,
+              a.exam_date, a.room, a.session_label, a.exam_schedule_id, a.block_name,
+              a.faculty_user_id AS current_faculty_user_id,
+              req.name AS requester_name,
+              tgt.name AS target_name
+       FROM invigilation_duty_swaps s
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id
+       JOIN users req ON req.user_id = s.requester_faculty_user_id
+       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id
+       WHERE s.swap_id = $1 AND s.tenant_id = $2 AND s.deleted_at IS NULL`,
+      [swapId, tenantId],
+    );
+    const swap = rows[0];
+    if (!swap) throw new NotFoundException('Swap request not found');
+    if (swap.status !== 'PENDING_EXAM_CELL') {
+      throw new BadRequestException('Swap is not awaiting Exam Cell approval');
+    }
+    if (swap.current_faculty_user_id !== swap.requester_faculty_user_id) {
+      throw new BadRequestException(
+        'Duty ownership changed; cancel and re-request the swap',
+      );
+    }
+
+    const nextStatus =
+      status === 'APPROVED' ? 'APPROVED' : 'REJECTED_BY_EXAM_CELL';
+
+    if (status === 'APPROVED') {
+      const conflict = await this.db.query(
+        `SELECT 1 FROM faculty_invigilation_assignments
+         WHERE tenant_id = $1
+           AND faculty_user_id = $2
+           AND exam_date = $3::date
+           AND COALESCE(session_label, '') = COALESCE($4, '')
+           AND assignment_id <> $5
+         LIMIT 1`,
+        [
+          tenantId,
+          swap.target_faculty_user_id,
+          swap.exam_date,
+          swap.session_label ?? null,
+          swap.assignment_id,
+        ],
+      );
+      if (conflict[0]) {
+        throw new BadRequestException(
+          'Target faculty already has a conflicting duty in this session',
+        );
+      }
+
+      await this.db.query(
+        `UPDATE faculty_invigilation_assignments
+         SET faculty_user_id = $1
+         WHERE assignment_id = $2 AND tenant_id = $3`,
+        [swap.target_faculty_user_id, swap.assignment_id, tenantId],
+      );
+
+      if (swap.exam_schedule_id) {
+        await this.db.query(
+          `UPDATE exam_invigilation_duties
+           SET faculty_user_id = $1
+           WHERE tenant_id = $2
+             AND exam_schedule_id = $3
+             AND room = $4
+             AND faculty_user_id = $5`,
+          [
+            swap.target_faculty_user_id,
+            tenantId,
+            swap.exam_schedule_id,
+            swap.room,
+            swap.requester_faculty_user_id,
+          ],
+        );
+      }
+    }
+
+    const updated = await this.db.query(
+      `UPDATE invigilation_duty_swaps
+       SET status = $1,
+           exam_cell_user_id = $2,
+           exam_cell_comment = $3,
+           exam_cell_resolved_at = NOW(),
+           updated_at = NOW()
+       WHERE swap_id = $4
+       RETURNING *`,
+      [nextStatus, actorUserId, comment.trim(), swapId],
+    );
+
+    await this.db.query(
+      `INSERT INTO invigilation_duty_swap_audits
+         (tenant_id, swap_id, actor_user_id, action, from_status, to_status, details)
+       VALUES ($1, $2, $3, $4, 'PENDING_EXAM_CELL', $5, $6::jsonb)`,
+      [
+        tenantId,
+        swapId,
+        actorUserId,
+        status === 'APPROVED' ? 'EXAM_CELL_APPROVED' : 'EXAM_CELL_REJECTED',
+        nextStatus,
+        JSON.stringify({ comment: comment.trim() }),
+      ],
+    );
+
+    const notifyBase = {
+      swapId: swap.swap_id,
+      assignmentId: swap.assignment_id,
+      requesterName: swap.requester_name,
+      targetName: swap.target_name,
+      examDate: String(swap.exam_date).slice(0, 10),
+      room: swap.room,
+      sessionLabel: swap.session_label,
+      decision: status,
+      comment: comment.trim(),
+    };
+
+    for (const userId of [
+      swap.requester_faculty_user_id,
+      swap.target_faculty_user_id,
+    ]) {
+      this.notify.examDutySwapResolved({
+        tenantId,
+        userId,
+        ...notifyBase,
+      });
+    }
+
+    return updated[0];
+  }
+
   listPendingCoeMarks(tenantId: string) {
     return this.db.query(
       `SELECT m.*, u.name AS student_name, c.course_code, c.course_name,

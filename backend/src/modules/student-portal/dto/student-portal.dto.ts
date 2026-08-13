@@ -121,7 +121,10 @@ export class ProfileUpdateRequestDto {
 export class AlumniRegisterDto {
   @IsOptional()
   @ValidateIf((_, v) => typeof v === 'string' && v.length > 0)
-  @IsUrl({ require_protocol: true }, { message: 'linkedin_url must be a valid URL' })
+  @IsUrl(
+    { require_protocol: true },
+    { message: 'linkedin_url must be a valid URL' },
+  )
   @MaxLength(500)
   linkedin_url?: string;
 

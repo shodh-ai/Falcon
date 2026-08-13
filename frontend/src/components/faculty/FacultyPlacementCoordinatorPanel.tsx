@@ -18,6 +18,14 @@ import { PlacementDriveResponsesSection } from '@/components/hod/PlacementDriveR
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { downloadAuthedFile } from '@/lib/hod-download';
+import {
+  isEmptyArray,
+  isFacultyDemoEntityId,
+  isFacultyDemoModeEnabled,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoPlacementDrives } from '@/lib/mock/faculty-portal-demo';
 
 type Drive = {
   drive_id: string;
@@ -88,9 +96,11 @@ export function FacultyPlacementCoordinatorPanel() {
     setLoading(true);
     try {
       const d = await api.get<Drive[]>('/api/academics/hod/placement/drives');
-      setDrives(d);
+      setDrives(withFacultyDemoFallback(d, facultyDemoPlacementDrives() as Drive[], isEmptyArray));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load drives');
+      const demo = withFacultyDemoFallback([], facultyDemoPlacementDrives() as Drive[], isEmptyArray);
+      setDrives(demo);
+      if (demo.length === 0) toast.error(e instanceof Error ? e.message : 'Failed to load drives');
     } finally {
       setLoading(false);
     }
@@ -125,6 +135,14 @@ export function FacultyPlacementCoordinatorPanel() {
   async function createDrive() {
     if (!form.company_name.trim()) {
       toast.error('Company name is required');
+      return;
+    }
+    const demoOnly =
+      isFacultyDemoModeEnabled() &&
+      (drives.length === 0 || drives.every((d) => isFacultyDemoEntityId(d.drive_id)));
+    if (demoOnly) {
+      toast.success('Drive published (demo)');
+      setForm(EMPTY_FORM);
       return;
     }
     setCreating(true);
@@ -166,6 +184,11 @@ export function FacultyPlacementCoordinatorPanel() {
 
   async function saveEdit() {
     if (!editDrive) return;
+    if (isFacultyDemoSmokeId(editDrive.drive_id)) {
+      toast.success('Drive updated (demo)');
+      setEditDrive(null);
+      return;
+    }
     setSavingEdit(true);
     try {
       await api.patch(`/api/academics/hod/placement/drives/${editDrive.drive_id}`, {
@@ -190,6 +213,11 @@ export function FacultyPlacementCoordinatorPanel() {
   }
 
   async function deleteDrive(driveId: string) {
+    if (isFacultyDemoSmokeId(driveId)) {
+      toast.success('Drive deleted (demo)');
+      if (selectedDriveId === driveId) setSelectedDriveId(null);
+      return;
+    }
     try {
       await api.del(`/api/academics/hod/placement/drives/${driveId}`);
       toast.success('Drive deleted');
