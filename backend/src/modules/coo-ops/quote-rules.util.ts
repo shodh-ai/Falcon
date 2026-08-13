@@ -7,8 +7,18 @@ export type QuoteRule = {
 
 /** Defaults when fin_quote_rules has no row for tenant */
 export const DEFAULT_QUOTE_RULES: QuoteRule[] = [
-  { min_amount_inr: 0, max_amount_inr: 49999.99, min_quotes: 1, require_gst_verify: true },
-  { min_amount_inr: 50000, max_amount_inr: 500000, min_quotes: 3, require_gst_verify: true },
+  {
+    min_amount_inr: 0,
+    max_amount_inr: 49999.99,
+    min_quotes: 1,
+    require_gst_verify: true,
+  },
+  {
+    min_amount_inr: 50000,
+    max_amount_inr: 500000,
+    min_quotes: 3,
+    require_gst_verify: true,
+  },
   {
     min_amount_inr: 500000.01,
     max_amount_inr: null,
@@ -31,7 +41,10 @@ export function resolveQuoteRule(
       return rule;
     }
   }
-  return sorted[sorted.length - 1] ?? DEFAULT_QUOTE_RULES[DEFAULT_QUOTE_RULES.length - 1];
+  return (
+    sorted[sorted.length - 1] ??
+    DEFAULT_QUOTE_RULES[DEFAULT_QUOTE_RULES.length - 1]
+  );
 }
 
 export type QuoteAmount = { quote_id: string; amount_inr: number };

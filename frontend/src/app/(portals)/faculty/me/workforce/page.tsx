@@ -4,7 +4,10 @@ import { FacultyPageHeader, FacultyPageShell } from '@/components/faculty';
 export default function FacultyWorkforcePage() {
   return (
     <FacultyPageShell>
-      <FacultyPageHeader description="Attendance calendar, leave balances, and workforce self-service." />
+      <FacultyPageHeader
+        title="Work Calendar"
+        description="View attendance, leave balances, and workforce self-service."
+      />
       <WorkforceHubPage embedded />
     </FacultyPageShell>
   );

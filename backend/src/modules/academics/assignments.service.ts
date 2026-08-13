@@ -2,18 +2,24 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { basename, extname, resolve } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { Repository } from 'typeorm';
 import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
+import { assignmentPublishedMessage } from '../../core/notifications/notification-message.catalog';
 import { AcademicAssignment } from '../../entities/academic-assignment.entity';
+import { AssignmentNotificationAudit } from '../../entities/assignment-notification-audit.entity';
 import { AssignmentSubmission } from '../../entities/assignment-submission.entity';
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
+import { FalconNotification } from '../../entities/falcon-notification.entity';
 import { StudentCourseEnrollment } from '../../entities/student-course-enrollment.entity';
+import { User } from '../../entities/user.entity';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { assertPdfUpload } from './lms-upload.config';
 
@@ -24,6 +30,8 @@ export type AssignmentSubmissionStatus =
 
 @Injectable()
 export class AssignmentsService {
+  private readonly logger = new Logger(AssignmentsService.name);
+
   constructor(
     @InjectRepository(AcademicAssignment)
     private readonly assignments: Repository<AcademicAssignment>,
@@ -33,6 +41,12 @@ export class AssignmentsService {
     private readonly timetable: Repository<AcademicTimetable>,
     @InjectRepository(StudentCourseEnrollment)
     private readonly enrollments: Repository<StudentCourseEnrollment>,
+    @InjectRepository(AssignmentNotificationAudit)
+    private readonly notificationAudits: Repository<AssignmentNotificationAudit>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
+    @InjectRepository(FalconNotification)
+    private readonly falconNotifications: Repository<FalconNotification>,
     private readonly objectStorage: ObjectStorageService,
     private readonly notifyDispatch: NotificationDispatchService,
   ) {}
@@ -80,6 +94,8 @@ export class AssignmentsService {
       max_marks?: string | number;
       start_date?: string;
       due_date?: string;
+      semester?: string | number;
+      section_code?: string;
     },
     file?: Express.Multer.File,
   ) {
@@ -112,6 +128,8 @@ export class AssignmentsService {
           file,
         )
       : null;
+    const semester = this.parseOptionalSemester(dto.semester);
+    const sectionCode = this.parseOptionalSection(dto.section_code);
     const row = this.assignments.create({
       tenant_id: tenantId,
       course_id: dto.course_id,
@@ -123,9 +141,17 @@ export class AssignmentsService {
       max_marks: Number(dto.max_marks),
       start_date: startDate,
       due_date: dueDate,
+      semester,
+      section_code: sectionCode,
     });
 
-    return this.assignments.save(row);
+    const saved = await this.assignments.save(row);
+    const notified_count = await this.notifyStudentsOfPublishedAssignment(
+      saved,
+      facultyUserId,
+      tenantId,
+    );
+    return { ...saved, notified_count };
   }
 
   async updateFacultyAssignment(
@@ -138,6 +164,8 @@ export class AssignmentsService {
       max_marks?: string | number;
       start_date?: string;
       due_date?: string;
+      semester?: string | number;
+      section_code?: string;
     },
     file?: Express.Multer.File,
   ) {
@@ -161,6 +189,12 @@ export class AssignmentsService {
     }
     if (dto.start_date) assignment.start_date = new Date(dto.start_date);
     if (dto.due_date) assignment.due_date = new Date(dto.due_date);
+    if (dto.semester !== undefined) {
+      assignment.semester = this.parseOptionalSemester(dto.semester);
+    }
+    if (dto.section_code !== undefined) {
+      assignment.section_code = this.parseOptionalSection(dto.section_code);
+    }
     if (assignment.start_date > assignment.due_date) {
       throw new BadRequestException('Publish date must be before the deadline');
     }
@@ -175,7 +209,35 @@ export class AssignmentsService {
       assignment.reference_file_key = stored.fileKey;
     }
 
-    return this.assignments.save(assignment);
+    const saved = await this.assignments.save(assignment);
+    const notified_count = await this.notifyStudentsOfPublishedAssignment(
+      saved,
+      facultyUserId,
+      tenantId,
+    );
+    return { ...saved, notified_count };
+  }
+
+  /** Future-dated assignments: notify once start_date is reached. */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async notifyDueScheduledAssignments(): Promise<number> {
+    const due = await this.assignments
+      .createQueryBuilder('a')
+      .where('a.start_date <= NOW()')
+      .andWhere('a.notifications_sent_at IS NULL')
+      .orderBy('a.start_date', 'ASC')
+      .take(100)
+      .getMany();
+
+    let total = 0;
+    for (const assignment of due) {
+      total += await this.notifyStudentsOfPublishedAssignment(
+        assignment,
+        assignment.faculty_user_id,
+        assignment.tenant_id,
+      );
+    }
+    return total;
   }
 
   async listAssignmentRoster(
@@ -400,6 +462,10 @@ export class AssignmentsService {
     const courseIds = enrolled.map((row) => row.course_id);
     if (courseIds.length === 0) return [];
 
+    const enrollmentByCourse = new Map(
+      enrolled.map((row) => [row.course_id, row]),
+    );
+
     const assignments = await this.assignments
       .createQueryBuilder('assignment')
       .leftJoinAndSelect('assignment.course', 'course')
@@ -409,9 +475,25 @@ export class AssignmentsService {
       .getMany();
 
     const nowMs = Date.now();
-    const visibleAssignments = assignments.filter(
-      (assignment) => new Date(assignment.start_date).getTime() <= nowMs,
-    );
+    const visibleAssignments = assignments.filter((assignment) => {
+      if (new Date(assignment.start_date).getTime() > nowMs) return false;
+      const enrollment = enrollmentByCourse.get(assignment.course_id);
+      if (!enrollment) return false;
+      if (
+        assignment.semester != null &&
+        enrollment.semester !== assignment.semester
+      ) {
+        return false;
+      }
+      if (
+        assignment.section_code &&
+        (enrollment.section_code ?? '').toUpperCase() !==
+          assignment.section_code.toUpperCase()
+      ) {
+        return false;
+      }
+      return true;
+    });
 
     const submissions = await this.submissions.find({
       where: { tenant_id: tenantId, student_user_id: studentUserId },
@@ -480,6 +562,7 @@ export class AssignmentsService {
     });
     if (!enrollment)
       throw new ForbiddenException('You are not enrolled in this course');
+    this.assertEnrollmentMatchesAssignment(assignment, enrollment);
 
     const stored = await this.persistAssignmentFile(
       tenantId,
@@ -583,6 +666,7 @@ export class AssignmentsService {
     });
     if (!enrollment)
       throw new ForbiddenException('You are not enrolled in this course');
+    this.assertEnrollmentMatchesAssignment(assignment, enrollment);
 
     if (!assignment.reference_file_path) {
       throw new NotFoundException('No reference file attached');
@@ -616,6 +700,345 @@ export class AssignmentsService {
       filename: basename(resolved),
       mimeType: 'application/pdf',
     };
+  }
+
+  private assertEnrollmentMatchesAssignment(
+    assignment: AcademicAssignment,
+    enrollment: StudentCourseEnrollment,
+  ) {
+    if (
+      assignment.semester != null &&
+      enrollment.semester !== assignment.semester
+    ) {
+      throw new ForbiddenException(
+        'This assignment is not assigned to your semester',
+      );
+    }
+    if (
+      assignment.section_code &&
+      (enrollment.section_code ?? '').toUpperCase() !==
+        assignment.section_code.toUpperCase()
+    ) {
+      throw new ForbiddenException(
+        'This assignment is not assigned to your section',
+      );
+    }
+  }
+
+  private parseOptionalSemester(value?: string | number | null): number | null {
+    if (value === undefined || value === null || value === '') return null;
+    const n = Number(value);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new BadRequestException('Invalid semester');
+    }
+    return n;
+  }
+
+  private parseOptionalSection(value?: string | null): string | null {
+    if (value === undefined || value === null) return null;
+    const trimmed = value.trim().toUpperCase();
+    return trimmed || null;
+  }
+
+  /**
+   * Notify enrolled students when an assignment is visible (start_date <= now).
+   * Never throws — assignment save must succeed even if delivery fails.
+   */
+  private async notifyStudentsOfPublishedAssignment(
+    assignment: AcademicAssignment,
+    facultyUserId: string,
+    tenantId: string,
+  ): Promise<number> {
+    try {
+      if (new Date(assignment.start_date).getTime() > Date.now()) {
+        await this.upsertNotificationAudit({
+          tenantId,
+          assignmentId: assignment.assignment_id,
+          facultyUserId,
+          studentsTargeted: 0,
+          studentsNotified: 0,
+          deliveryStatus: 'SKIPPED_SCHEDULED',
+          failedUserIds: [],
+          errorSummary: 'Assignment publish date is in the future',
+        });
+        return 0;
+      }
+
+      if (assignment.notifications_sent_at) {
+        return 0;
+      }
+
+      const existingAudit = await this.notificationAudits.findOne({
+        where: {
+          tenant_id: tenantId,
+          assignment_id: assignment.assignment_id,
+        },
+      });
+      if (
+        existingAudit?.delivery_status === 'SENT' ||
+        existingAudit?.delivery_status === 'SKIPPED_DUPLICATE'
+      ) {
+        if (!assignment.notifications_sent_at) {
+          await this.assignments.update(
+            { assignment_id: assignment.assignment_id, tenant_id: tenantId },
+            { notifications_sent_at: new Date() },
+          );
+        }
+        return existingAudit.students_notified;
+      }
+
+      const qb = this.enrollments
+        .createQueryBuilder('e')
+        .where('e.tenant_id = :tenantId', { tenantId })
+        .andWhere('e.course_id = :courseId', {
+          courseId: assignment.course_id,
+        })
+        .andWhere('e.status = :status', { status: 'ENROLLED' });
+
+      if (assignment.semester != null) {
+        qb.andWhere('e.semester = :semester', {
+          semester: assignment.semester,
+        });
+      }
+      if (assignment.section_code) {
+        qb.andWhere('UPPER(e.section_code) = :section', {
+          section: assignment.section_code.toUpperCase(),
+        });
+      }
+
+      const enrolled = await qb.getMany();
+      const studentIds = [...new Set(enrolled.map((e) => e.student_user_id))];
+
+      if (studentIds.length === 0) {
+        await this.upsertNotificationAudit({
+          tenantId,
+          assignmentId: assignment.assignment_id,
+          facultyUserId,
+          studentsTargeted: 0,
+          studentsNotified: 0,
+          deliveryStatus: 'SENT',
+          failedUserIds: [],
+          errorSummary: 'No enrolled students matched filters',
+        });
+        await this.assignments.update(
+          { assignment_id: assignment.assignment_id, tenant_id: tenantId },
+          { notifications_sent_at: new Date() },
+        );
+        return 0;
+      }
+
+      const [faculty, courseRows] = await Promise.all([
+        this.users.findOne({ where: { user_id: facultyUserId } }),
+        this.timetable.query(
+          `SELECT course_code, course_name FROM academic_courses
+           WHERE tenant_id = $1 AND course_id = $2 LIMIT 1`,
+          [tenantId, assignment.course_id],
+        ),
+      ]);
+
+      const course = courseRows[0];
+      const facultyName = faculty?.name?.trim() || 'Faculty';
+      const courseName = course?.course_name ?? 'Course';
+      const courseCode = course?.course_code;
+
+      const alreadyNotified = await this.falconNotifications
+        .createQueryBuilder('n')
+        .select('n.user_id', 'user_id')
+        .where('n.tenant_id = :tenantId', { tenantId })
+        .andWhere('n.user_id IN (:...studentIds)', { studentIds })
+        .andWhere('n.deleted_at IS NULL')
+        .andWhere(`n.metadata->>'assignmentId' = :assignmentId`, {
+          assignmentId: assignment.assignment_id,
+        })
+        .getRawMany<{ user_id: string }>();
+
+      const alreadySet = new Set(alreadyNotified.map((r) => r.user_id));
+      const toNotify = studentIds.filter((id) => !alreadySet.has(id));
+
+      if (toNotify.length === 0) {
+        await this.upsertNotificationAudit({
+          tenantId,
+          assignmentId: assignment.assignment_id,
+          facultyUserId,
+          studentsTargeted: studentIds.length,
+          studentsNotified: studentIds.length,
+          deliveryStatus: 'SKIPPED_DUPLICATE',
+          failedUserIds: [],
+          errorSummary: 'Students already notified for this assignment',
+        });
+        await this.assignments.update(
+          { assignment_id: assignment.assignment_id, tenant_id: tenantId },
+          { notifications_sent_at: new Date() },
+        );
+        return studentIds.length;
+      }
+
+      const failedUserIds: string[] = [];
+      let notified = 0;
+
+      for (const userId of toNotify) {
+        const ok = await this.emitAssignmentNotificationWithRetry({
+          tenantId,
+          userId,
+          assignment,
+          facultyName,
+          courseName,
+          courseCode,
+        });
+        if (ok) notified += 1;
+        else failedUserIds.push(userId);
+      }
+
+      const deliveryStatus =
+        failedUserIds.length === 0
+          ? 'SENT'
+          : notified === 0
+            ? 'FAILED'
+            : 'PARTIAL';
+
+      await this.upsertNotificationAudit({
+        tenantId,
+        assignmentId: assignment.assignment_id,
+        facultyUserId,
+        studentsTargeted: studentIds.length,
+        studentsNotified: notified + alreadySet.size,
+        deliveryStatus,
+        failedUserIds,
+        errorSummary:
+          failedUserIds.length > 0
+            ? `Failed for ${failedUserIds.length} student(s)`
+            : null,
+      });
+
+      // Only mark complete when every targeted student was notified.
+      // PARTIAL/FAILED stay eligible for the 5-minute retry cron.
+      if (deliveryStatus === 'SENT') {
+        await this.assignments.update(
+          { assignment_id: assignment.assignment_id, tenant_id: tenantId },
+          { notifications_sent_at: new Date() },
+        );
+      }
+
+      return notified + alreadySet.size;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Assignment notification failed for ${assignment.assignment_id}: ${message}`,
+      );
+      try {
+        await this.upsertNotificationAudit({
+          tenantId,
+          assignmentId: assignment.assignment_id,
+          facultyUserId,
+          studentsTargeted: 0,
+          studentsNotified: 0,
+          deliveryStatus: 'FAILED',
+          failedUserIds: [],
+          errorSummary: message.slice(0, 1000),
+        });
+      } catch (auditErr) {
+        this.logger.error(
+          `Failed to write assignment notification audit: ${
+            auditErr instanceof Error ? auditErr.message : String(auditErr)
+          }`,
+        );
+      }
+      return 0;
+    }
+  }
+
+  private async emitAssignmentNotificationWithRetry(input: {
+    tenantId: string;
+    userId: string;
+    assignment: AcademicAssignment;
+    facultyName: string;
+    courseName: string;
+    courseCode?: string;
+  }): Promise<boolean> {
+    const payload = {
+      tenantId: input.tenantId,
+      userId: input.userId,
+      assignmentId: input.assignment.assignment_id,
+      courseId: input.assignment.course_id,
+      courseName: input.courseName,
+      courseCode: input.courseCode,
+      assignmentTitle: input.assignment.title,
+      facultyName: input.facultyName,
+      dueDate: new Date(input.assignment.due_date).toISOString(),
+      maxMarks: input.assignment.max_marks,
+      semester: input.assignment.semester,
+      sectionCode: input.assignment.section_code,
+    };
+    const msg = assignmentPublishedMessage(payload);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.notifyDispatch.dispatch({
+          tenantId: input.tenantId,
+          userId: input.userId,
+          ...msg,
+        });
+        return true;
+      } catch (err) {
+        this.logger.warn(
+          `Notify attempt ${attempt + 1} failed for student ${input.userId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 75));
+        }
+      }
+    }
+    return false;
+  }
+
+  private async upsertNotificationAudit(input: {
+    tenantId: string;
+    assignmentId: string;
+    facultyUserId: string;
+    studentsTargeted: number;
+    studentsNotified: number;
+    deliveryStatus:
+      | 'PENDING'
+      | 'SENT'
+      | 'PARTIAL'
+      | 'FAILED'
+      | 'SKIPPED_SCHEDULED'
+      | 'SKIPPED_DUPLICATE';
+    failedUserIds: string[];
+    errorSummary: string | null;
+  }) {
+    const existing = await this.notificationAudits.findOne({
+      where: {
+        tenant_id: input.tenantId,
+        assignment_id: input.assignmentId,
+      },
+    });
+
+    if (existing) {
+      existing.faculty_user_id = input.facultyUserId;
+      existing.students_targeted = input.studentsTargeted;
+      existing.students_notified = input.studentsNotified;
+      existing.delivery_status = input.deliveryStatus;
+      existing.failed_user_ids = input.failedUserIds;
+      existing.error_summary = input.errorSummary;
+      await this.notificationAudits.save(existing);
+      return;
+    }
+
+    await this.notificationAudits.save(
+      this.notificationAudits.create({
+        tenant_id: input.tenantId,
+        assignment_id: input.assignmentId,
+        faculty_user_id: input.facultyUserId,
+        students_targeted: input.studentsTargeted,
+        students_notified: input.studentsNotified,
+        delivery_status: input.deliveryStatus,
+        failed_user_ids: input.failedUserIds,
+        error_summary: input.errorSummary,
+      }),
+    );
   }
 
   private async assertFacultyTeachesCourse(

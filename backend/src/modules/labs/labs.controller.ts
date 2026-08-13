@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -16,13 +25,29 @@ export class LabsController {
   }
 
   @Get('zones')
-  @Roles('LabAdmin', 'Student', 'Faculty', 'Wrangler', 'COO', 'SuperAdmin', 'CampusAdmin')
+  @Roles(
+    'LabAdmin',
+    'Student',
+    'Faculty',
+    'Wrangler',
+    'COO',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   zones(@Req() req: { user: AuthUser }) {
     return this.labs.listZones(this.tenant(req));
   }
 
   @Get('equipment')
-  @Roles('LabAdmin', 'Student', 'Faculty', 'Wrangler', 'COO', 'SuperAdmin', 'CampusAdmin')
+  @Roles(
+    'LabAdmin',
+    'Student',
+    'Faculty',
+    'Wrangler',
+    'COO',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   equipment(@Req() req: { user: AuthUser }, @Query('zone_id') zoneId?: string) {
     return this.labs.listEquipment(this.tenant(req), zoneId);
   }
@@ -135,7 +160,14 @@ export class LabsController {
   }
 
   @Get('budget')
-  @Roles('LabAdmin', 'COO', 'Accountant', 'SuperAdmin', 'CampusAdmin', 'Chairman')
+  @Roles(
+    'LabAdmin',
+    'COO',
+    'Accountant',
+    'SuperAdmin',
+    'CampusAdmin',
+    'Chairman',
+  )
   budget(@Req() req: { user: AuthUser }) {
     return this.labs.budgetSummary(this.tenant(req));
   }

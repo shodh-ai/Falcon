@@ -4,16 +4,18 @@ import { Select } from '@/components/ui/select';
 import { useEffect, useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { toast } from '@/lib/notifications/falcon-toast';
-import { Loader2, Plus, Upload, CheckCircle2, Trash2, Clock, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Plus, Upload, CheckCircle2, Trash2, Clock, Eye, EyeOff, BarChart3 } from 'lucide-react';
 import {
   FacultyPageHeader,
   FacultyPageShell,
   FacultyPanel,
 } from '@/components/faculty';
+import { FacultyQuestionBankPanel } from '@/components/faculty/FacultyQuestionBankPanel';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import Link from 'next/link';
 import {
   Dialog,
   DialogContent,
@@ -23,6 +25,9 @@ import {
   DialogFooter,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { isEmptyArray, isFacultyDemoEntityId, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoWeeklyTests } from '@/lib/mock/faculty-portal-demo';
+import { cn } from '@/lib/utils';
 
 const TEST_TYPES = ['WT1', 'WT2'] as const;
 
@@ -117,13 +122,26 @@ export default function FacultyWeeklyTestsPage() {
   // My tests state
   const [myTests, setMyTests] = useState<any[]>([]);
   const [loadingTests, setLoadingTests] = useState(true);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [results, setResults] = useState<{
+    test: { course_code?: string; course_name?: string; test_type?: string };
+    responses: Array<{
+      student_name: string;
+      student_email?: string;
+      score: number;
+      submitted_at?: string;
+      violation_count?: number;
+    }>;
+  } | null>(null);
 
   const fetchMyTests = async () => {
     try {
       const data = await api.get<any[]>('/api/weekly-tests/faculty');
-      setMyTests(data);
+      setMyTests(withFacultyDemoFallback(data, facultyDemoWeeklyTests(), isEmptyArray));
     } catch (e) {
       console.error(e);
+      setMyTests(withFacultyDemoFallback([], facultyDemoWeeklyTests(), isEmptyArray));
     } finally {
       setLoadingTests(false);
     }
@@ -133,8 +151,36 @@ export default function FacultyWeeklyTestsPage() {
     fetchMyTests();
   }, []);
 
+  async function openResults(testId: string) {
+    setResultsOpen(true);
+    setResultsLoading(true);
+    try {
+      const data = await api.get<{
+        test: { course_code?: string; course_name?: string; test_type?: string };
+        responses: Array<{
+          student_name: string;
+          student_email?: string;
+          score: number;
+          submitted_at?: string;
+          violation_count?: number;
+        }>;
+      }>(`/api/weekly-tests/faculty/${testId}/results`);
+      setResults(data);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to load results');
+      setResults(null);
+    } finally {
+      setResultsLoading(false);
+    }
+  }
+
   const handleDeleteTest = async (testId: string) => {
     if (!confirm('Are you sure you want to delete this test? It will be permanently removed for all students.')) return;
+    if (isFacultyDemoSmokeId(testId)) {
+      setMyTests((prev) => prev.filter((t) => t.test_id !== testId));
+      toast.success('Test deleted successfully (demo)');
+      return;
+    }
     try {
       await api.del(`/api/weekly-tests/faculty/${testId}`);
       toast.success('Test deleted successfully');
@@ -145,6 +191,13 @@ export default function FacultyWeeklyTestsPage() {
   };
 
   const handleToggleTest = async (testId: string, isActive: boolean) => {
+    if (isFacultyDemoSmokeId(testId)) {
+      setMyTests((prev) =>
+        prev.map((t) => (t.test_id === testId ? { ...t, is_active: !isActive } : t)),
+      );
+      toast.success(`Test ${!isActive ? 'activated' : 'deactivated'} successfully (demo)`);
+      return;
+    }
     try {
       await api.patch(`/api/weekly-tests/faculty/${testId}/toggle`, { is_active: !isActive });
       toast.success(`Test ${!isActive ? 'activated' : 'deactivated'} successfully`);
@@ -166,6 +219,10 @@ export default function FacultyWeeklyTestsPage() {
 
   async function handleSchedule() {
     if (!courseId) return toast.error('Please select a course.');
+    if (isFacultyDemoEntityId(courseId)) {
+      toast.success('Weekly test scheduled (demo)');
+      return;
+    }
     if (!startTime || !endTime) return toast.error('Please select start and end times.');
     if (new Date(startTime) >= new Date(endTime)) return toast.error('End time must be after start time.');
     if (!file) return toast.error('Please upload a PDF question paper.');
@@ -177,7 +234,7 @@ export default function FacultyWeeklyTestsPage() {
       const paperUrl = await handleFileUpload(file);
 
       toast.info('Scheduling test...');
-      await api.post('/api/weekly-tests/faculty/create', {
+      const created = await api.post<{ notified_count?: number }>('/api/weekly-tests/faculty/create', {
         course_id: courseId,
         test_type: testType,
         question_paper_url: paperUrl,
@@ -186,7 +243,10 @@ export default function FacultyWeeklyTestsPage() {
         end_time: new Date(endTime).toISOString(),
       });
 
-      toast.success('Weekly test scheduled successfully!');
+      const notified = Number(created?.notified_count ?? 0);
+      toast.success(
+        `Weekly test scheduled successfully. Notifications sent to ${notified} student${notified === 1 ? '' : 's'}.`,
+      );
 
       // Reset form
       setCourseId('');
@@ -258,12 +318,13 @@ export default function FacultyWeeklyTestsPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Schedule Weekly Tests (WT1, WT2) with automated grading. Tests open securely in full-screen for students."
+        title="Weekly Tests"
+        description="Schedule weekly tests and manage automated grading for your courses."
         meta={null}
       />
 
-      <div className="max-w-4xl mx-auto space-y-6">
-        <FacultyPanel title="Schedule New Test" description="Configure details and upload the paper">
+      <div className="w-full space-y-6">
+        <FacultyPanel title="Schedule New Test" description="Configure details and upload the paper" className="w-full">
           <div className="grid gap-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm">
@@ -392,7 +453,7 @@ export default function FacultyWeeklyTestsPage() {
           </div>
         </FacultyPanel>
 
-        <FacultyPanel title="Manage Scheduled Tests" description="View and delete upcoming tests you have scheduled">
+        <FacultyPanel title="Manage Scheduled Tests" description="View and delete upcoming tests you have scheduled" className="w-full">
           {loadingTests ? (
             <div className="flex justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -402,7 +463,7 @@ export default function FacultyWeeklyTestsPage() {
               You haven't scheduled any tests yet.
             </div>
           ) : (
-            <div className="grid gap-4 mt-4">
+            <div className="mt-4 grid w-full grid-cols-1 gap-4">
               {myTests.map((test) => {
                 const now = new Date();
                 const startTime = new Date(test.start_time);
@@ -411,46 +472,93 @@ export default function FacultyWeeklyTestsPage() {
                 const isUpcoming = now < startTime;
                 const isCompleted = now > endTime;
                 const isActiveTest = now >= startTime && now <= endTime;
-                
-                let cardStyle = "border";
-                if (isCompleted) cardStyle = "border-2 border-green-500 bg-green-50/50";
-                else if (isActiveTest) cardStyle = "border-2 border-yellow-500 bg-yellow-50/50";
-                else if (isUpcoming) cardStyle = "border-2 border-red-500 bg-red-50/50";
+
+                // Always border-2 so every card keeps the same outer width
+                let cardStyle = 'border-2 border-border bg-background';
+                if (isCompleted) cardStyle = 'border-2 border-green-500 bg-green-50/50';
+                else if (isActiveTest) cardStyle = 'border-2 border-yellow-500 bg-yellow-50/50';
+                else if (isUpcoming) cardStyle = 'border-2 border-red-500 bg-red-50/50';
 
                 return (
-                  <div key={test.test_id} className={`rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${cardStyle}`}>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
+                  <div
+                    key={test.test_id}
+                    className={cn(
+                      'box-border grid w-full min-h-[8.5rem] max-w-full gap-3 rounded-xl p-4',
+                      'sm:grid-cols-[minmax(0,1fr)_16.5rem] sm:items-center',
+                      cardStyle,
+                    )}
+                  >
+                    <div className="min-w-0 w-full">
+                      <div className="mb-1 flex items-center gap-2">
                         <span className="font-semibold text-sgvu-navy">{test.course_code}</span>
-                        <span className="text-xs bg-muted px-2 py-0.5 rounded border">{test.test_type}</span>
+                        <span className="rounded border bg-muted px-2 py-0.5 text-xs">{test.test_type}</span>
                       </div>
-                      <p className="text-sm font-medium text-sgvu-navy">{test.course_name}</p>
-                      <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>Starts: {new Date(test.start_time).toLocaleString()}</span>
+                      <p className="truncate text-sm font-medium text-sgvu-navy">{test.course_name}</p>
+                      <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">Starts: {new Date(test.start_time).toLocaleString()}</span>
                       </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Responses: {test.response_count ?? 0}
+                        {test.avg_score != null ? ` · Avg score: ${test.avg_score}` : ''}
+                      </p>
                     </div>
-                    <div className="flex gap-2">
-                      {!isCompleted && (
-                        <Button 
-                          variant={test.is_active ? "outline" : "secondary"} 
-                          size="sm" 
-                          onClick={() => handleToggleTest(test.test_id, test.is_active)}
-                          className={!test.is_active ? "text-orange-600 bg-orange-50 border-orange-200" : ""}
+
+                    {/* Fixed-width action column — identical on every card */}
+                    <div className="grid h-full w-full shrink-0 grid-rows-[auto_auto] content-center gap-2 sm:w-[16.5rem]">
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 w-full justify-center"
+                          onClick={() => void openResults(test.test_id)}
                         >
-                          {test.is_active ? <EyeOff className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
-                          {test.is_active ? 'Deactivate' : 'Activate'}
+                          <BarChart3 className="mr-1.5 h-4 w-4" />
+                          Results
                         </Button>
-                      )}
+                        {!isCompleted ? (
+                          <Button
+                            variant={test.is_active ? 'outline' : 'secondary'}
+                            size="sm"
+                            className={cn(
+                              'h-9 w-full justify-center',
+                              !test.is_active && 'border-orange-200 bg-orange-50 text-orange-600',
+                            )}
+                            onClick={() => handleToggleTest(test.test_id, test.is_active)}
+                          >
+                            {test.is_active ? (
+                              <EyeOff className="mr-1.5 h-4 w-4" />
+                            ) : (
+                              <Eye className="mr-1.5 h-4 w-4" />
+                            )}
+                            {test.is_active ? 'Deactivate' : 'Activate'}
+                          </Button>
+                        ) : (
+                          <div className="h-9" aria-hidden />
+                        )}
+                      </div>
+
                       {isUpcoming ? (
-                        <Button variant="destructive" size="sm" onClick={() => handleDeleteTest(test.test_id)}>
-                          <Trash2 className="w-4 h-4 mr-2" />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-9 w-full justify-center"
+                          onClick={() => handleDeleteTest(test.test_id)}
+                        >
+                          <Trash2 className="mr-1.5 h-4 w-4" />
                           Delete Test
                         </Button>
-                      ) : isActiveTest ? (
-                        <span className="text-xs text-yellow-700 font-semibold italic px-2 flex items-center border border-yellow-200 bg-yellow-100 rounded-md">Currently Active</span>
                       ) : (
-                        <span className="text-xs text-green-700 font-semibold italic px-2 flex items-center border border-green-200 bg-green-100 rounded-md">Completed</span>
+                        <span
+                          className={cn(
+                            'flex h-9 w-full items-center justify-center rounded-md border text-xs font-semibold',
+                            isActiveTest
+                              ? 'border-yellow-200 bg-yellow-100 text-yellow-700'
+                              : 'border-green-200 bg-green-100 text-green-700',
+                          )}
+                        >
+                          {isActiveTest ? 'Currently Active' : 'Completed'}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -459,7 +567,68 @@ export default function FacultyWeeklyTestsPage() {
             </div>
           )}
         </FacultyPanel>
+
+        <div className="w-full space-y-3">
+          <div className="flex justify-end">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/faculty/question-bank">Open full Question Bank</Link>
+            </Button>
+          </div>
+          <FacultyQuestionBankPanel compact />
+        </div>
       </div>
+
+      <Dialog open={resultsOpen} onOpenChange={setResultsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Test results</DialogTitle>
+            <DialogDescription>
+              {results?.test
+                ? `${results.test.course_code ?? ''} ${results.test.test_type ?? ''} — ${results.test.course_name ?? ''}`
+                : 'Student submissions and scores'}
+            </DialogDescription>
+          </DialogHeader>
+          {resultsLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : !results?.responses?.length ? (
+            <p className="text-sm text-muted-foreground">No submissions yet.</p>
+          ) : (
+            <div className="max-h-[50vh] overflow-auto">
+              <div className="min-w-0 overflow-x-auto">
+              <table className="w-full min-w-[480px] text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-2 pr-2">Student</th>
+                    <th className="py-2 pr-2">Score</th>
+                    <th className="py-2 pr-2">Submitted</th>
+                    <th className="py-2">Violations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.responses.map((row, idx) => (
+                    <tr key={`${row.student_name}-${idx}`} className="border-b border-border/40">
+                      <td className="py-2 pr-2">
+                        <p className="font-medium text-sgvu-navy">{row.student_name}</p>
+                        {row.student_email ? (
+                          <p className="text-xs text-muted-foreground">{row.student_email}</p>
+                        ) : null}
+                      </td>
+                      <td className="py-2 pr-2">{row.score}</td>
+                      <td className="py-2 pr-2">
+                        {row.submitted_at ? new Date(row.submitted_at).toLocaleString('en-IN') : '—'}
+                      </td>
+                      <td className="py-2">{row.violation_count ?? 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </FacultyPageShell>
   );
 }

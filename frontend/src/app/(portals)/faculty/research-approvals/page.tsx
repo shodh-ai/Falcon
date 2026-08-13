@@ -1,13 +1,20 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlaskConical, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
 import { createAcademicRndApi, type RndApplication } from '@/lib/api/api.academic-rnd';
+import { FacultyPageHeader, FacultyPageShell } from '@/components/faculty';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoResearchApprovals } from '@/lib/mock/faculty-portal-demo';
 
 export default function FacultyResearchApprovalsPage() {
   const api = useAuthedApi();
@@ -17,7 +24,24 @@ export default function FacultyResearchApprovalsPage() {
   const [remarks, setRemarks] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
-    setQueue(await rndApi.guideQueue());
+    try {
+      const rows = await rndApi.guideQueue();
+      setQueue(
+        withFacultyDemoFallback(
+          rows,
+          facultyDemoResearchApprovals() as RndApplication[],
+          isEmptyArray,
+        ),
+      );
+    } catch {
+      setQueue(
+        withFacultyDemoFallback(
+          [],
+          facultyDemoResearchApprovals() as RndApplication[],
+          isEmptyArray,
+        ),
+      );
+    }
   }, [rndApi]);
 
   useEffect(() => {
@@ -25,6 +49,11 @@ export default function FacultyResearchApprovalsPage() {
   }, [load]);
 
   async function approve(id: string) {
+    if (isFacultyDemoSmokeId(id)) {
+      setQueue((prev) => prev.filter((row) => row.application_id !== id));
+      toast.success('Technical review approved — forwarded to Finance (demo)');
+      return;
+    }
     try {
       await rndApi.approveGuide(id, remarks[id]);
       toast.success('Technical review approved — forwarded to Finance');
@@ -40,6 +69,11 @@ export default function FacultyResearchApprovalsPage() {
       toast.error('Remarks required for rejection');
       return;
     }
+    if (isFacultyDemoSmokeId(id)) {
+      setQueue((prev) => prev.filter((row) => row.application_id !== id));
+      toast.success('Application rejected — student notified (demo)');
+      return;
+    }
     try {
       await rndApi.rejectGuide(id, text);
       toast.success('Application rejected — student notified');
@@ -51,23 +85,24 @@ export default function FacultyResearchApprovalsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" />
-      </div>
+      <FacultyPageShell>
+        <FacultyPageHeader
+          title="Research Grants"
+          description="Review student research grant proposals awaiting your guide approval."
+        />
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" />
+        </div>
+      </FacultyPageShell>
     );
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-sgvu-navy">
-          <FlaskConical className="h-7 w-7" />
-          R&D Grant — Guide Review
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Step 1: Verify technical validity of student research proposals.
-        </p>
-      </div>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        title="Research Grants"
+        description="Verify technical validity of student research proposals before Finance review."
+      />
 
       <Card>
         <CardHeader>
@@ -99,6 +134,6 @@ export default function FacultyResearchApprovalsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </FacultyPageShell>
   );
 }

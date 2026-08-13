@@ -13,11 +13,14 @@ import {
 } from '@/components/faculty';
 import { FacultyMaterialsTab } from '@/components/lms/FacultyMaterialsTab';
 import { FacultyAssignmentsTab } from '@/components/lms/FacultyAssignmentsTab';
+import { FacultyAnnouncementsTab } from '@/components/lms/FacultyAnnouncementsTab';
 import { LmsExtendedTabs } from '@/components/lms/LmsExtendedTabs';
 import { useAuthedApi } from '@/lib/api';
 import type { FacultyWorkspace } from '@/lib/api/lms';
+import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoCourseWorkspace } from '@/lib/mock/faculty-portal-demo';
 
-type WorkspaceTab = 'materials' | 'assignments' | 'live';
+type WorkspaceTab = 'materials' | 'assignments' | 'announcements' | 'live';
 
 export default function FacultyCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
@@ -28,12 +31,24 @@ export default function FacultyCourseWorkspacePage() {
 
   useEffect(() => {
     const t = searchParams.get('tab');
+    if (t === 'materials') setTab('materials');
     if (t === 'assignments' || t === 'da') setTab('assignments');
+    if (t === 'announcements') setTab('announcements');
+    if (t === 'live') setTab('live');
   }, [searchParams]);
 
   const load = useCallback(() => {
     if (!courseId) return;
-    void api.get<FacultyWorkspace>(`/api/academics/faculty/courses/${courseId}/workspace`).then(setWorkspace);
+    void api
+      .get<FacultyWorkspace>(`/api/academics/faculty/courses/${courseId}/workspace`)
+      .then((data) =>
+        setWorkspace(
+          withFacultyDemoFallback(data, facultyDemoCourseWorkspace(courseId), (v) => !v?.modules?.length),
+        ),
+      )
+      .catch(() =>
+        setWorkspace(withFacultyDemoFallback(null, facultyDemoCourseWorkspace(courseId))),
+      );
   }, [api, courseId]);
 
   useEffect(() => {
@@ -44,12 +59,16 @@ export default function FacultyCourseWorkspacePage() {
     return <FacultyPageLoading label="Loading course workspace…" branded />;
   }
 
-  const materialsCount = workspace.modules.reduce((sum, m) => sum + m.materials.length, 0);
+  const materialsCount = (workspace.modules ?? []).reduce(
+    (sum, m) => sum + (m.materials?.length ?? 0),
+    0,
+  );
 
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description={`${workspace.course.course_name} — reference materials (notes/PPT) and digital assignments (DA).`}
+        title="Courses"
+        description={`${workspace.course.course_name} — manage materials, assignments, and announcements.`}
         meta={
           <>
             <FacultyMetricChip label="Course" value={workspace.course.course_code} emphasis />
@@ -75,6 +94,7 @@ export default function FacultyCourseWorkspacePage() {
         tabs={[
           { id: 'materials', label: 'Reference materials' },
           { id: 'assignments', label: 'Digital assignments (DA)' },
+          { id: 'announcements', label: 'Announcements' },
           { id: 'live', label: 'Live & forum' },
         ]}
       />
@@ -83,6 +103,8 @@ export default function FacultyCourseWorkspacePage() {
         <FacultyMaterialsTab courseId={courseId!} workspace={workspace} onRefresh={load} />
       ) : tab === 'assignments' ? (
         <FacultyAssignmentsTab courseId={courseId!} />
+      ) : tab === 'announcements' ? (
+        <FacultyAnnouncementsTab courseId={courseId!} />
       ) : (
         <LmsExtendedTabs courseId={courseId!} mode="faculty" />
       )}

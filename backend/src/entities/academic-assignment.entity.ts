@@ -52,6 +52,17 @@ export class AcademicAssignment extends BaseTenantEntity {
   @Column({ type: 'timestamptz' })
   due_date: Date;
 
+  /** Optional enrollment filter — notify only this semester when set. */
+  @Column({ type: 'int', nullable: true })
+  semester: number | null;
+
+  /** Optional enrollment filter — notify only this section when set. */
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  section_code: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  notifications_sent_at: Date | null;
+
   @CreateDateColumn()
   created_at: Date;
 }

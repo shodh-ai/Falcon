@@ -73,15 +73,22 @@ function SettingsSection({
   description,
   icon: Icon,
   children,
+  className,
 }: {
   title: string;
   description?: string;
   icon: typeof User;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="rounded-2xl border border-sgvu-navy/10 bg-white p-5 shadow-sm md:p-6">
-      <div className="mb-4 flex items-start gap-3">
+    <section
+      className={cn(
+        'flex h-full min-h-[22rem] flex-col rounded-2xl border border-sgvu-navy/10 bg-white p-5 shadow-sm md:p-6',
+        className,
+      )}
+    >
+      <div className="mb-4 flex shrink-0 items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sgvu-navy/10 text-sgvu-navy">
           <Icon className="h-5 w-5" aria-hidden />
         </div>
@@ -92,7 +99,7 @@ function SettingsSection({
           ) : null}
         </div>
       </div>
-      {children}
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
   );
 }
@@ -248,7 +255,12 @@ function AccountSkeleton() {
   );
 }
 
-export function AccountSettingsPage() {
+export function AccountSettingsPage({
+  hidePageHeader = false,
+}: {
+  /** When parent portal already renders FacultyPageHeader / equivalent. */
+  hidePageHeader?: boolean;
+} = {}) {
   const api = useAuthedApi();
   const { user, refreshUser, logout, isLoading } = useAuth();
   const pathname = usePathname();
@@ -350,233 +362,250 @@ export function AccountSettingsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-5 p-4 md:p-6">
-      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="p-5 md:p-6">
-          <p className="text-sm font-semibold text-sgvu-gold">Falcon Workspace</p>
-          <h1 className="text-2xl font-bold text-sgvu-navy">Settings</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Manage your account, contact details, security, and workspace preferences.
-          </p>
-        </CardContent>
-      </Card>
+    <div
+      className={cn(
+        'mx-auto w-full max-w-5xl space-y-5',
+        hidePageHeader ? 'p-0' : 'p-4 md:p-6',
+      )}
+    >
+      {!hidePageHeader ? (
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardContent className="p-5 md:p-6">
+            <p className="text-sm font-semibold text-sgvu-gold">Falcon Workspace</p>
+            <h1 className="text-2xl font-bold text-sgvu-navy">Settings</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Manage your account, contact details, security, and workspace preferences.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {showFacultyProfileEditor ? (
         <FacultyDetailsSettingsSection profileHref={profileHref} />
       ) : null}
-
-      <SettingsSection
-        title="Account"
-        description="Your workspace identity and sign-in email."
-        icon={User}
-      >
-        {isLoading && !user ? (
-          <AccountSkeleton />
-        ) : (
-          <dl className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <dt className={labelClass}>Name</dt>
-              <dd className="mt-1.5 font-medium text-sgvu-navy">{user?.name ?? '—'}</dd>
-            </div>
-            <div>
-              <dt className={labelClass}>Email</dt>
-              <dd className="mt-1.5 flex min-w-0 items-center gap-2 font-medium text-sgvu-navy">
-                <Mail className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="truncate">{user?.email ?? '—'}</span>
-              </dd>
-            </div>
-            <div>
-              <dt className={labelClass}>Workspace</dt>
-              <dd className="mt-1.5">
-                <Badge variant="secondary">{getWorkspaceLabelForRole(workspaceRole)}</Badge>
-              </dd>
-            </div>
-            {profileHref !== pathname ? (
-              <div>
-                <dt className={labelClass}>Profile</dt>
-                <dd className="mt-1.5">
-                  <Link
-                    href={profileHref}
-                    className="text-sm font-semibold text-sgvu-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/40"
-                  >
-                    Open full profile
-                  </Link>
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        )}
-      </SettingsSection>
 
       {showDigitalSignature ? (
         <SettingsSection
           title="Digital Signature & Credentials"
           description="Manage your official university digital signature, DSC status, and document signing."
           icon={FileSignature}
+          className="min-h-0"
         >
           <p className="mb-4 text-sm text-muted-foreground">
             Upload your signature image, monitor certificate expiry, digitally sign degree certificates,
             transcripts, appointment letters, and other approved documents.
           </p>
-          <Button asChild variant="outline" className={btnIdle}>
-            <Link href={digitalSignatureHref}>Open Digital Signature &amp; Credentials</Link>
-          </Button>
+          <div className="mt-auto">
+            <Button asChild variant="outline" className={btnIdle}>
+              <Link href={digitalSignatureHref}>Open Digital Signature &amp; Credentials</Link>
+            </Button>
+          </div>
         </SettingsSection>
       ) : null}
 
-      <SettingsSection
-        title="Password & security"
-        description="Update your password. You will stay signed in on this device."
-        icon={KeyRound}
-      >
-        <form className="space-y-4" onSubmit={(e) => void handleChangePassword(e)} noValidate>
-          <PasswordField
-            id="current-password"
-            label="Current password"
-            value={currentPassword}
-            onChange={(v) => {
-              setCurrentPassword(v);
-              setFormError(null);
-            }}
-            autoComplete="current-password"
-            disabled={submitting}
-            invalid={Boolean(formError)}
-          />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <PasswordField
-              id="new-password"
-              label="New password"
-              value={newPassword}
-              onChange={(v) => {
-                setNewPassword(v);
-                setFormError(null);
-              }}
-              autoComplete="new-password"
-              disabled={submitting}
-              describedBy="password-hint password-strength"
-              invalid={Boolean(formError || mismatchHint)}
-            />
-            <PasswordField
-              id="confirm-password"
-              label="Confirm new password"
-              value={confirmPassword}
-              onChange={(v) => {
-                setConfirmPassword(v);
-                setFormError(null);
-              }}
-              autoComplete="new-password"
-              disabled={submitting}
-              invalid={Boolean(mismatchHint || formError)}
-            />
-          </div>
-          {newPassword ? (
-            <div id="password-strength" className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Password strength</span>
-                <span className="font-semibold text-sgvu-navy">{strength.label}</span>
+      {/* Equal-size settings cards */}
+      <div className="grid items-stretch gap-5 md:grid-cols-2">
+        <SettingsSection
+          title="Account"
+          description="Your workspace identity and sign-in email."
+          icon={User}
+        >
+          {isLoading && !user ? (
+            <AccountSkeleton />
+          ) : (
+            <dl className="grid flex-1 content-start gap-4 sm:grid-cols-2">
+              <div>
+                <dt className={labelClass}>Name</dt>
+                <dd className="mt-1.5 font-medium text-sgvu-navy">{user?.name ?? '—'}</dd>
               </div>
-              <div className="flex gap-1" aria-hidden>
-                {[1, 2, 3, 4, 5].map((step) => (
-                  <div
-                    key={step}
-                    className={cn(
-                      'h-1.5 flex-1 rounded-full',
-                      step <= strength.score ? strength.color : 'bg-sgvu-navy/10',
-                    )}
-                  />
-                ))}
+              <div>
+                <dt className={labelClass}>Email</dt>
+                <dd className="mt-1.5 flex min-w-0 items-center gap-2 font-medium text-sgvu-navy">
+                  <Mail className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="truncate">{user?.email ?? '—'}</span>
+                </dd>
               </div>
-            </div>
-          ) : null}
-          <p id="password-hint" className="text-xs text-muted-foreground">
-            Use at least 8 characters (max {MAX_PASSWORD_LENGTH}). Mix letters, numbers, and symbols.
-            Avoid common defaults like password123.
-          </p>
-          {mismatchHint || formError ? (
-            <p className="text-sm font-medium text-destructive" role="alert">
-              {mismatchHint ?? formError}
+              <div>
+                <dt className={labelClass}>Workspace</dt>
+                <dd className="mt-1.5">
+                  <Badge variant="secondary">{getWorkspaceLabelForRole(workspaceRole)}</Badge>
+                </dd>
+              </div>
+              {profileHref !== pathname ? (
+                <div>
+                  <dt className={labelClass}>Profile</dt>
+                  <dd className="mt-1.5">
+                    <Link
+                      href={profileHref}
+                      className="text-sm font-semibold text-sgvu-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/40"
+                    >
+                      Open full profile
+                    </Link>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          )}
+        </SettingsSection>
+
+        <SettingsSection
+          title="Notifications"
+          description="Device preferences for alerts. Institution email digests are managed separately."
+          icon={Bell}
+        >
+          <div className="flex flex-1 flex-col space-y-3">
+            <PrefToggle
+              id="pref-in-app"
+              label="In-app alerts"
+              description="Show alerts in the top-bar notification bell on this device."
+              checked={notifPrefs.inAppAlerts}
+              onChange={(v) => updateNotifPref('inAppAlerts', v)}
+              disabled={!prefsReady}
+            />
+            <PrefToggle
+              id="pref-exam"
+              label="Exam workflow reminders"
+              description="Highlight examination deadlines and result actions on this device."
+              checked={notifPrefs.examReminders}
+              onChange={(v) => updateNotifPref('examReminders', v)}
+              disabled={!prefsReady}
+            />
+            <PrefToggle
+              id="pref-desktop"
+              label="Browser desktop notifications"
+              description="Allow this browser to show desktop notifications when permitted."
+              checked={notifPrefs.browserDesktop}
+              onChange={(v) => void handleDesktopToggle(v)}
+              disabled={!prefsReady}
+            />
+            <p className="mt-auto pt-2 text-xs text-muted-foreground">
+              These preferences are stored on this device only. Server-side channel routing is controlled by
+              your institution.
             </p>
-          ) : null}
-          <div className="flex justify-center border-t border-sgvu-navy/10 pt-4">
-            <Button
-              type="submit"
-              variant="outline"
-              className={submitting ? btnBusy : btnIdle}
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          title="Password & security"
+          description="Update your password. You will stay signed in on this device."
+          icon={KeyRound}
+        >
+          <form
+            className="flex flex-1 flex-col space-y-4"
+            onSubmit={(e) => void handleChangePassword(e)}
+            noValidate
+          >
+            <PasswordField
+              id="current-password"
+              label="Current password"
+              value={currentPassword}
+              onChange={(v) => {
+                setCurrentPassword(v);
+                setFormError(null);
+              }}
+              autoComplete="current-password"
               disabled={submitting}
-              aria-busy={submitting}
+              invalid={Boolean(formError)}
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PasswordField
+                id="new-password"
+                label="New password"
+                value={newPassword}
+                onChange={(v) => {
+                  setNewPassword(v);
+                  setFormError(null);
+                }}
+                autoComplete="new-password"
+                disabled={submitting}
+                describedBy="password-hint password-strength"
+                invalid={Boolean(formError || mismatchHint)}
+              />
+              <PasswordField
+                id="confirm-password"
+                label="Confirm new password"
+                value={confirmPassword}
+                onChange={(v) => {
+                  setConfirmPassword(v);
+                  setFormError(null);
+                }}
+                autoComplete="new-password"
+                disabled={submitting}
+                invalid={Boolean(mismatchHint || formError)}
+              />
+            </div>
+            {newPassword ? (
+              <div id="password-strength" className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Password strength</span>
+                  <span className="font-semibold text-sgvu-navy">{strength.label}</span>
+                </div>
+                <div className="flex gap-1" aria-hidden>
+                  {[1, 2, 3, 4, 5].map((step) => (
+                    <div
+                      key={step}
+                      className={cn(
+                        'h-1.5 flex-1 rounded-full',
+                        step <= strength.score ? strength.color : 'bg-sgvu-navy/10',
+                      )}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <p id="password-hint" className="text-xs text-muted-foreground">
+              Use at least 8 characters (max {MAX_PASSWORD_LENGTH}). Mix letters, numbers, and symbols.
+              Avoid common defaults like password123.
+            </p>
+            {mismatchHint || formError ? (
+              <p className="text-sm font-medium text-destructive" role="alert">
+                {mismatchHint ?? formError}
+              </p>
+            ) : null}
+            <div className="mt-auto flex justify-center border-t border-sgvu-navy/10 pt-4">
+              <Button
+                type="submit"
+                variant="outline"
+                className={submitting ? btnBusy : btnIdle}
+                disabled={submitting}
+                aria-busy={submitting}
+              >
+                {submitting ? 'Updating…' : 'Update password'}
+              </Button>
+            </div>
+          </form>
+        </SettingsSection>
+
+        <SettingsSection
+          title="Privacy & access"
+          description="Session and access controls for your Falcon account."
+          icon={Shield}
+        >
+          <ul className="mb-4 list-inside list-disc space-y-2 text-sm text-muted-foreground">
+            <li>Sign in with your official university email.</li>
+            <li>Your role controls which portals and modules you can access.</li>
+            <li>Contact HR or IT if you need access changes or account deactivation.</li>
+          </ul>
+          <div className="mt-auto flex flex-wrap gap-3 border-t border-sgvu-navy/10 pt-4">
+            {profileHref !== pathname ? (
+              <Button asChild variant="outline" className={btnOutline}>
+                <Link href={profileHref}>View profile</Link>
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              className={btnOutline}
+              onClick={() => {
+                logout();
+                toast.success('Signed out of this device');
+              }}
             >
-              {submitting ? 'Updating…' : 'Update password'}
+              Sign out
             </Button>
           </div>
-        </form>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Notifications"
-        description="Device preferences for alerts. Institution email digests are managed separately."
-        icon={Bell}
-      >
-        <div className="space-y-3">
-          <PrefToggle
-            id="pref-in-app"
-            label="In-app alerts"
-            description="Show alerts in the top-bar notification bell on this device."
-            checked={notifPrefs.inAppAlerts}
-            onChange={(v) => updateNotifPref('inAppAlerts', v)}
-            disabled={!prefsReady}
-          />
-          <PrefToggle
-            id="pref-exam"
-            label="Exam workflow reminders"
-            description="Highlight examination deadlines and result actions on this device."
-            checked={notifPrefs.examReminders}
-            onChange={(v) => updateNotifPref('examReminders', v)}
-            disabled={!prefsReady}
-          />
-          <PrefToggle
-            id="pref-desktop"
-            label="Browser desktop notifications"
-            description="Allow this browser to show desktop notifications when permitted."
-            checked={notifPrefs.browserDesktop}
-            onChange={(v) => void handleDesktopToggle(v)}
-            disabled={!prefsReady}
-          />
-          <p className="text-xs text-muted-foreground">
-            These preferences are stored on this device only. Server-side channel routing is controlled by
-            your institution.
-          </p>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Privacy & access"
-        description="Session and access controls for your Falcon account."
-        icon={Shield}
-      >
-        <ul className="mb-4 list-inside list-disc space-y-2 text-sm text-muted-foreground">
-          <li>Sign in with your official university email.</li>
-          <li>Your role controls which portals and modules you can access.</li>
-          <li>Contact HR or IT if you need access changes or account deactivation.</li>
-        </ul>
-        <div className="flex flex-wrap gap-3 border-t border-sgvu-navy/10 pt-4">
-          {profileHref !== pathname ? (
-            <Button asChild variant="outline" className={btnOutline}>
-              <Link href={profileHref}>View profile</Link>
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            className={btnOutline}
-            onClick={() => {
-              logout();
-              toast.success('Signed out of this device');
-            }}
-          >
-            Sign out
-          </Button>
-        </div>
-      </SettingsSection>
+        </SettingsSection>
+      </div>
     </div>
   );
 }

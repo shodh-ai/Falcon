@@ -50,10 +50,14 @@ const UNIVERSAL_ENTITY_ROLES = new Set([
 ]);
 
 function roleSetHas(set: Set<string>, roles: string[]): boolean {
-  const normalized = new Set(
-    [...set].map((r) => r.trim().toLowerCase()),
+  const normalized = new Set([...set].map((r) => r.trim().toLowerCase()));
+  return roles.some((r) =>
+    normalized.has(
+      String(r ?? '')
+        .trim()
+        .toLowerCase(),
+    ),
   );
-  return roles.some((r) => normalized.has(String(r ?? '').trim().toLowerCase()));
 }
 
 export type AllowedEntity = { id: number; name: string; code: string };

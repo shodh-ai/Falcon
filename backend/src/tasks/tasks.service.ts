@@ -267,7 +267,9 @@ export class TasksService {
     // Update assignment status to Completed
     await this.updateAssignmentStatus(assignmentId, 'Completed');
 
-    const user = await this.userRepository.findOne({ where: { user_id: userId } });
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+    });
     await this.enterpriseAudit.log({
       tenantId: user?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001',
       userId,

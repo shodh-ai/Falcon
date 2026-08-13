@@ -1055,7 +1055,9 @@ export class HrService {
     if (user.role_id) {
       const roleRows = await this.users.manager.query<
         Array<{ role_name: string }>
-      >(`SELECT role_name FROM roles WHERE role_id = $1 LIMIT 1`, [user.role_id]);
+      >(`SELECT role_name FROM roles WHERE role_id = $1 LIMIT 1`, [
+        user.role_id,
+      ]);
       subjectRole = roleRows[0]?.role_name ?? subjectRole;
     }
 

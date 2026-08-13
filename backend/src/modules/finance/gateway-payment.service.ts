@@ -46,10 +46,7 @@ export class GatewayPaymentService {
     const keySecret = (process.env.RAZORPAY_KEY_SECRET ?? '').trim();
     if (!keyId || !keySecret) return null;
     // Reject known placeholder / sandbox fake keys for live verification
-    if (
-      keyId === 'rzp_test_FALCON_CAMPUS' ||
-      keyId.startsWith('sandbox_')
-    ) {
+    if (keyId === 'rzp_test_FALCON_CAMPUS' || keyId.startsWith('sandbox_')) {
       return null;
     }
     return { keyId, keySecret };

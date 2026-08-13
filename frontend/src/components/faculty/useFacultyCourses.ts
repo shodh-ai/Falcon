@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 import { useOptionalTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
+import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoCourses } from '@/lib/mock/faculty-portal-demo';
 
 export type FacultyCourse = {
   allocation_id?: string | null;
@@ -50,14 +52,21 @@ export function useFacultyCourses() {
               uniqueMap.set(c.course_id, c);
             }
           }
-          const uniqueData = Array.from(uniqueMap.values());
+          const uniqueData = withFacultyDemoFallback(
+            Array.from(uniqueMap.values()),
+            facultyDemoCourses(),
+            isEmptyArray,
+          );
           setCourses(uniqueData);
           setError(uniqueData.length === 0 ? 'No courses allocated to your timetable yet.' : null);
         }
       } catch (e) {
         if (!cancelled) {
-          setCourses([]);
-          setError(e instanceof Error ? e.message : 'Failed to load courses');
+          const demo = withFacultyDemoFallback([], facultyDemoCourses(), isEmptyArray);
+          setCourses(demo);
+          setError(
+            demo.length > 0 ? null : e instanceof Error ? e.message : 'Failed to load courses',
+          );
         }
       } finally {
         if (!cancelled) setLoading(false);

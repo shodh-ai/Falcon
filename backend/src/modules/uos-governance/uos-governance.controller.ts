@@ -33,13 +33,24 @@ export class UosGovernanceController {
   }
 
   private userRoles(user: AuthUser): string[] {
-    const merged = [...(user.roles ?? []), ...(user.role ? [user.role] : [])].filter(Boolean);
+    const merged = [
+      ...(user.roles ?? []),
+      ...(user.role ? [user.role] : []),
+    ].filter(Boolean);
     return Array.from(new Set(merged));
   }
 
   // ALM
   @Get('assets/amc')
-  @Roles('SuperAdmin', 'CampusAdmin', 'EstateOfficer', 'COO', 'Accountant', 'LabAdmin', 'Stores')
+  @Roles(
+    'SuperAdmin',
+    'CampusAdmin',
+    'EstateOfficer',
+    'COO',
+    'Accountant',
+    'LabAdmin',
+    'Stores',
+  )
   listAmc(@Req() req: { user: AuthUser }) {
     return this.uos.listAmc(this.tenant(req));
   }
@@ -148,7 +159,11 @@ export class UosGovernanceController {
     'LabAdmin',
   )
   listGrade(@Req() req: { user: AuthUser }) {
-    return this.uos.listGradeChanges(this.tenant(req));
+    return this.uos.listGradeChanges(
+      this.tenant(req),
+      req.user.user_id,
+      this.userRoles(req.user),
+    );
   }
 
   @Post('sis/grade-changes')
@@ -169,7 +184,15 @@ export class UosGovernanceController {
   }
 
   @Post('sis/grade-changes/:id/advance')
-  @Roles('HOD', 'Dean', 'ExamCell', 'ExamAdmin', 'DeputyCoE', 'CampusAdmin', 'SuperAdmin')
+  @Roles(
+    'HOD',
+    'Dean',
+    'ExamCell',
+    'ExamAdmin',
+    'DeputyCoE',
+    'CampusAdmin',
+    'SuperAdmin',
+  )
   advanceGrade(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     return this.uos.advanceGradeChange(
       this.tenant(req),
@@ -180,7 +203,15 @@ export class UosGovernanceController {
   }
 
   @Get('sis/curriculum')
-  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin', 'CampusAdmin', 'IQAC', 'LabAdmin')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'CampusAdmin',
+    'IQAC',
+    'LabAdmin',
+  )
   listCurriculum(@Req() req: { user: AuthUser }) {
     return this.uos.listCurriculum(this.tenant(req));
   }

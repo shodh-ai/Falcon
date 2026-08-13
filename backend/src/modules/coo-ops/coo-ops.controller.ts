@@ -1,11 +1,26 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CooOpsService } from './coo-ops.service';
 import { ProcurementService } from './procurement.service';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 /** Requestor — raise PR only */
 const REQUESTOR = [
@@ -27,7 +42,13 @@ const PROCUREMENT = [
 ] as const;
 
 /** Stores gatekeepers (+ admin override for UAT) */
-const STORES = ['Stores', 'Security', 'ReceivingClerk', 'SuperAdmin', 'CampusAdmin'] as const;
+const STORES = [
+  'Stores',
+  'Security',
+  'ReceivingClerk',
+  'SuperAdmin',
+  'CampusAdmin',
+] as const;
 
 /** Finance AP — 3-way match + pay (AP Manager primary; CFO / Accountant compat) */
 const FINANCE_AP = [
@@ -97,7 +118,15 @@ export class CooOpsController {
   }
 
   @Get('dashboard')
-  @Roles('COO', 'EstateOfficer', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin', 'CFO')
+  @Roles(
+    'COO',
+    'EstateOfficer',
+    'Chairman',
+    'President',
+    'SuperAdmin',
+    'CampusAdmin',
+    'CFO',
+  )
   dashboard(@Req() req: { user: AuthUser }) {
     return this.ops.dashboard(this.tenant(req));
   }
@@ -115,13 +144,27 @@ export class CooOpsController {
   }
 
   @Get('esm/locations')
-  @Roles('COO', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin', 'Student', 'Faculty')
+  @Roles(
+    'COO',
+    'EstateOfficer',
+    'SuperAdmin',
+    'CampusAdmin',
+    'Student',
+    'Faculty',
+  )
   locations(@Req() req: { user: AuthUser }) {
     return this.ops.listLocations(this.tenant(req));
   }
 
   @Post('esm/from-qr')
-  @Roles('COO', 'EstateOfficer', 'Student', 'Faculty', 'SuperAdmin', 'CampusAdmin')
+  @Roles(
+    'COO',
+    'EstateOfficer',
+    'Student',
+    'Faculty',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   fromQr(
     @Req() req: { user: AuthUser },
     @Body() body: { qr_code: string; subject?: string },
@@ -141,7 +184,14 @@ export class CooOpsController {
   }
 
   @Get('esm/tickets')
-  @Roles('COO', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin', 'Chairman', 'President')
+  @Roles(
+    'COO',
+    'EstateOfficer',
+    'SuperAdmin',
+    'CampusAdmin',
+    'Chairman',
+    'President',
+  )
   tickets(@Req() req: { user: AuthUser }) {
     return this.ops.listOpenTickets(this.tenant(req));
   }
@@ -169,7 +219,13 @@ export class CooOpsController {
   @Roles(...PROCUREMENT)
   createPo(
     @Req() req: { user: AuthUser },
-    @Body() body: { description: string; amount: number; vendor_id?: string; program_id?: string },
+    @Body()
+    body: {
+      description: string;
+      amount: number;
+      vendor_id?: string;
+      program_id?: string;
+    },
   ) {
     return this.ops.createPoWithDofa(
       this.tenant(req),
@@ -180,7 +236,14 @@ export class CooOpsController {
   }
 
   @Get('p2p/grn')
-  @Roles(...STORES, ...FINANCE_AP, 'COO', 'Chairman', 'President', 'CampusAdmin')
+  @Roles(
+    ...STORES,
+    ...FINANCE_AP,
+    'COO',
+    'Chairman',
+    'President',
+    'CampusAdmin',
+  )
   grns(@Req() req: { user: AuthUser }) {
     return this.ops.listGrns(this.tenant(req));
   }
@@ -246,10 +309,7 @@ export class CooOpsController {
 
   @Get('p2p/requisitions')
   @Roles(...P2P_READ)
-  listPr(
-    @Req() req: { user: AuthUser },
-    @Query('status') status?: string,
-  ) {
+  listPr(@Req() req: { user: AuthUser }, @Query('status') status?: string) {
     return this.procurement.listRequisitions(this.tenant(req), status);
   }
 
@@ -455,7 +515,14 @@ export class CooOpsController {
   }
 
   @Post('p2p/analytics/invoice-split-scan')
-  @Roles(...FINANCE_AP, 'COO', 'Chairman', 'President', 'SuperAdmin', 'ProcurementHead')
+  @Roles(
+    ...FINANCE_AP,
+    'COO',
+    'Chairman',
+    'President',
+    'SuperAdmin',
+    'ProcurementHead',
+  )
   splitScan(@Req() req: { user: AuthUser }) {
     return this.procurement.runNightlyInvoiceSplitScan(this.tenant(req));
   }

@@ -13,6 +13,8 @@ import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { HodGatePassApprovalsPanel } from '@/components/hod/HodGatePassApprovalsPanel';
+import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoTeamRequests } from '@/lib/mock/faculty-portal-demo-modules';
 
 function leaveDocHref(path: string): string {
   if (path.startsWith('http')) return path;
@@ -230,11 +232,49 @@ function RequestsContent({ defaultScope }: Props) {
         const res = await api.get<RequestsPayload>(
           `/api/hr/ess/team/requests?scope=${scope}&tab=${active}`,
         );
-        setData(res);
+        const demoItems = facultyDemoTeamRequests()
+          .filter((r) => r.request_type === active)
+          .map((r) => ({
+            id: r.id,
+            leave_id: r.leave_id,
+            request_type: r.request_type,
+            leave_type: r.leave_type,
+            applied_date: r.applied_date,
+            raised_on: r.raised_on,
+            reason: r.reason,
+            status: r.status,
+            employee: {
+              name: r.employee?.name ?? 'Employee',
+              email: r.employee?.email,
+              employee_id: r.employee?.employee_id,
+            },
+          }));
+        const items = withFacultyDemoFallback(res.items, demoItems, isEmptyArray);
+        setData({ ...res, count: items.length, items });
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load requests');
-      setData({ count: 0, tab: active, items: [] });
+      const demoItems = facultyDemoTeamRequests()
+        .filter((r) => r.request_type === active)
+        .map((r) => ({
+          id: r.id,
+          leave_id: r.leave_id,
+          request_type: r.request_type,
+          leave_type: r.leave_type,
+          applied_date: r.applied_date,
+          raised_on: r.raised_on,
+          reason: r.reason,
+          status: r.status,
+          employee: {
+            name: r.employee?.name ?? 'Employee',
+            email: r.employee?.email,
+            employee_id: r.employee?.employee_id,
+          },
+        }));
+      const items = withFacultyDemoFallback([], demoItems, isEmptyArray);
+      setData({ count: items.length, tab: active, items });
+      if (!items.length) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load requests');
+      }
     } finally {
       setLoading(false);
     }
@@ -438,7 +478,10 @@ function RequestsContent({ defaultScope }: Props) {
                     />
                   </td>
                   <td className="px-3 py-3">
-                    <HrPersonCell name={row.employee.name} subtitle={row.employee.employee_id ?? undefined} />
+                    <HrPersonCell
+                      name={row.employee?.name ?? 'Employee'}
+                      subtitle={row.employee?.employee_id ?? undefined}
+                    />
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-medium">{row.leave_type ?? row.request_type}</span>

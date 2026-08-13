@@ -7,6 +7,8 @@
  */
 
 export function isStudentDemoModeEnabled(): boolean {
+  // Never bake student demo into production clients.
+  if (process.env.NODE_ENV === 'production') return false;
   const flag = process.env.NEXT_PUBLIC_STUDENT_DEMO_MODE?.trim().toLowerCase();
   if (flag === 'true' || flag === '1' || flag === 'on') return true;
   return false;

@@ -15,11 +15,7 @@ export const PROCUREMENT_ROLES = new Set([
   'ProcurementBuyer',
 ]);
 
-export const STORES_ROLES = new Set([
-  'Stores',
-  'Security',
-  'ReceivingClerk',
-]);
+export const STORES_ROLES = new Set(['Stores', 'Security', 'ReceivingClerk']);
 
 export const OPERATIONS_PILLAR_ROLES = new Set([
   'COO',
@@ -42,11 +38,15 @@ export type PillarViolation =
   | { code: 'AUDITOR_MUST_REPORT_TO_CHAIRMAN'; message: string }
   | { code: 'CROSS_PILLAR_DUAL_ROLE'; message: string };
 
-export function pillarOfRole(roleName: string | null | undefined): 'ACADEMIC' | 'OPERATIONS' | 'FINANCE' | 'OTHER' {
+export function pillarOfRole(
+  roleName: string | null | undefined,
+): 'ACADEMIC' | 'OPERATIONS' | 'FINANCE' | 'OTHER' {
   const r = String(roleName ?? '');
   if (FINANCE_PILLAR_ROLES.has(r)) return 'FINANCE';
   if (OPERATIONS_PILLAR_ROLES.has(r)) return 'OPERATIONS';
-  if (['President', 'Dean', 'HOD', 'LabAdmin', 'Faculty', 'Warden'].includes(r)) {
+  if (
+    ['President', 'Dean', 'HOD', 'LabAdmin', 'Faculty', 'Warden'].includes(r)
+  ) {
     return 'ACADEMIC';
   }
   return 'OTHER';
@@ -71,7 +71,9 @@ export function procurementStoresShareManager(
     return peersUnderSameManager.some((p) => STORES_ROLES.has(p.role_name));
   }
   if (STORES_ROLES.has(subjectRole)) {
-    return peersUnderSameManager.some((p) => PROCUREMENT_ROLES.has(p.role_name));
+    return peersUnderSameManager.some((p) =>
+      PROCUREMENT_ROLES.has(p.role_name),
+    );
   }
   return false;
 }
@@ -81,8 +83,10 @@ export function procurementReportsToStoresOrViceVersa(
   officerRole: string | null,
 ): boolean {
   if (!officerRole) return false;
-  if (PROCUREMENT_ROLES.has(subjectRole) && STORES_ROLES.has(officerRole)) return true;
-  if (STORES_ROLES.has(subjectRole) && PROCUREMENT_ROLES.has(officerRole)) return true;
+  if (PROCUREMENT_ROLES.has(subjectRole) && STORES_ROLES.has(officerRole))
+    return true;
+  if (STORES_ROLES.has(subjectRole) && PROCUREMENT_ROLES.has(officerRole))
+    return true;
   return false;
 }
 
@@ -114,7 +118,8 @@ export function validatePillarReporting(input: {
   if (financeReportsToCoo(subjectRole, officerChainRoles)) {
     return {
       code: 'FINANCE_REPORTS_TO_COO',
-      message: 'Finance pillar staff cannot report (directly or indirectly) to the COO',
+      message:
+        'Finance pillar staff cannot report (directly or indirectly) to the COO',
     };
   }
   if (procurementReportsToStoresOrViceVersa(subjectRole, officerRole)) {

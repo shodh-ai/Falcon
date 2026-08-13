@@ -2,9 +2,7 @@ import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { Request, Response, NextFunction } from 'express';
 import { TenantService } from '../tenant.service';
 import { TenantContextService } from '../tenant-context.service';
-import {
-  resolveTenantFromHost,
-} from '../resolve-tenant-subdomain';
+import { resolveTenantFromHost } from '../resolve-tenant-subdomain';
 
 @Injectable()
 export class TenantResolutionMiddleware implements NestMiddleware {

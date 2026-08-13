@@ -213,7 +213,9 @@ export class AlumniConversionService {
       [tenantId, studentUserId],
     );
 
-    const existingStatus = String(existing[0]?.verification_status ?? '').toUpperCase();
+    const existingStatus = String(
+      existing[0]?.verification_status ?? '',
+    ).toUpperCase();
     const updatingPending =
       (eligibility.request_pending || existingStatus === 'PENDING') &&
       existingStatus === 'PENDING';

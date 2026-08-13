@@ -5,7 +5,7 @@ export default function FacultyTicketsPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="My Helpdesk Tickets"
+        title="Help Desk"
         description="Raise and track IT, HR, and facilities requests."
       />
       <MyHelpdeskPanel />

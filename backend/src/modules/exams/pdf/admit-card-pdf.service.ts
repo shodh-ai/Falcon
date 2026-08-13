@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  type PDFFont,
+  type PDFPage,
+} from 'pdf-lib';
 import type { ExamSchedule } from '../../../entities/exam-schedule.entity';
 
 export type AdmitCardExamRow = {
@@ -99,7 +105,12 @@ function academicYearLabel(now = new Date()): string {
   return `${start}-${String(start + 1).slice(-2)}`;
 }
 
-function fitText(text: string, font: PDFFont, size: number, maxWidth: number): string {
+function fitText(
+  text: string,
+  font: PDFFont,
+  size: number,
+  maxWidth: number,
+): string {
   const clean = ascii(text) || '-';
   if (font.widthOfTextAtSize(clean, size) <= maxWidth) return clean;
   let lo = 0;
@@ -178,7 +189,12 @@ export class AdmitCardPdfService {
           this.drawFooter(page, font);
           page = pdfDoc.addPage([PAGE_W, PAGE_H]);
           y = PAGE_H - 56;
-          y = this.drawSectionTitle(page, 'Examination Timetable (continued)', y, bold);
+          y = this.drawSectionTitle(
+            page,
+            'Examination Timetable (continued)',
+            y,
+            bold,
+          );
           y -= 4;
           y = drawTableHeader(page, y);
         }

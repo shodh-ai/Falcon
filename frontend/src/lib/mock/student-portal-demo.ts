@@ -1380,5 +1380,8 @@ export function demoNotificationsAsFalcon(userId = 'demo-student') {
 }
 
 export function isDemoNotificationId(id: string) {
-  return id.startsWith('n') && /^n\d+$/.test(id);
+  if (!id) return false;
+  if (id.startsWith('n') && /^n\d+$/.test(id)) return true;
+  // Faculty / cross-portal smoke notification IDs
+  return /^(notif-fac-|notif-demo-|demo-notif-)/i.test(id);
 }

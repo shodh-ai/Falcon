@@ -15,6 +15,8 @@ import {
   FacultyPageLoading,
   FacultyEmptyState,
 } from '@/components/faculty';
+import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoEventApprovals } from '@/lib/mock/faculty-portal-demo';
 
 function registrationBadge(ev: CampusEvent) {
   return ev.is_paid ? `Paid registration — ₹${ev.ticket_price}` : 'Free registration';
@@ -35,19 +37,38 @@ export default function FacultyEventApprovalsPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const rows = await eventsApi.facultyPending();
-    setPending(rows);
+    try {
+      const rows = await eventsApi.facultyPending();
+      setPending(
+        withFacultyDemoFallback(
+          rows,
+          facultyDemoEventApprovals() as CampusEvent[],
+          isEmptyArray,
+        ),
+      );
+    } catch {
+      const demo = withFacultyDemoFallback(
+        [],
+        facultyDemoEventApprovals() as CampusEvent[],
+        isEmptyArray,
+      );
+      setPending(demo);
+      if (demo.length === 0) toast.error('Could not load approvals');
+    }
   }, [eventsApi]);
 
   useEffect(() => {
-    void load()
-      .catch(() => toast.error('Could not load approvals'))
-      .finally(() => setLoading(false));
+    void load().finally(() => setLoading(false));
   }, [load]);
 
   async function approve(eventId: string) {
     setBusy(eventId);
     try {
+      if (isFacultyDemoSmokeId(eventId)) {
+        setPending((prev) => prev.filter((ev) => ev.event_id !== eventId));
+        toast.success('Approved — sent to HOD for review (demo)');
+        return;
+      }
       await eventsApi.approveAdvisor(eventId);
       toast.success('Approved — sent to HOD for review');
       await load();
@@ -65,6 +86,13 @@ export default function FacultyEventApprovalsPage() {
     }
     setBusy(eventId);
     try {
+      if (isFacultyDemoSmokeId(eventId)) {
+        setPending((prev) => prev.filter((ev) => ev.event_id !== eventId));
+        toast.success('Event rejected (demo)');
+        setRejectId(null);
+        setComment('');
+        return;
+      }
       await eventsApi.rejectAdvisor(eventId, comment.trim());
       toast.success('Event rejected');
       setRejectId(null);
@@ -85,7 +113,7 @@ export default function FacultyEventApprovalsPage() {
     <FacultyPageShell>
       <FacultyPageHeader
         title="Event Approvals"
-        description="Faculty coordinator — review club proposals before HOD and Dean sign-off."
+        description="Review club event proposals before HOD and Dean sign-off."
       />
 
       {pending.length === 0 ? (

@@ -195,7 +195,11 @@ export class HelpdeskEscalationService {
   ) {
     try {
       if (level === 1) {
-        if (category === 'FACILITIES' || category === 'HOSTEL' || category === 'IT') {
+        if (
+          category === 'FACILITIES' ||
+          category === 'HOSTEL' ||
+          category === 'IT'
+        ) {
           return (
             (await this.resolveByRole(tenantId, 'EstateOfficer')) ??
             (await this.resolveByRole(tenantId, 'COO')) ??

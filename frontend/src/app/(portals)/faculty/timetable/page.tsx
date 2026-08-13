@@ -32,6 +32,22 @@ import {
 import { useAuthedApi } from '@/lib/api';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoAdjustments,
+  facultyDemoTimetable,
+  facultyDemoTimetableStats,
+} from '@/lib/mock/faculty-portal-demo';
+
+/** Build a complete datetime value (browser rejects date-only / incomplete time). */
+function toDateTimeLocalValue(datePart: string, timePart: string) {
+  if (!datePart || !timePart) return '';
+  return `${datePart}T${timePart}`;
+}
 
 const WEEK_DAYS = [
   { val: 1, label: 'Mon' },
@@ -123,27 +139,35 @@ export default function FacultyTimetablePage() {
   const [form, setForm] = useState({
     course_id: '',
     adjustment_type: 'EXTRA_CLASS',
-    new_date: '',
+    date_part: '',
+    time_part: '09:00',
     reason: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewAdjustment, setViewAdjustment] = useState<Adjustment | null>(null);
+  const formDateTime = toDateTimeLocalValue(form.date_part, form.time_part);
 
   const loadPageData = useCallback(async () => {
-    const [scheduleData, statsData, adjustmentData] = await Promise.all([
-      api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
-      api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
-      api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
-    ]);
-    setSchedule(scheduleData);
-    setStats(statsData);
-    setAdjustments(adjustmentData);
+    try {
+      const [scheduleData, statsData, adjustmentData] = await Promise.all([
+        api.get<TimetableRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable', activeDeptId)),
+        api.get<TimetableStats>(withTeachingDeptId('/api/academics/faculty/workspaces/timetable/stats', activeDeptId)),
+        api.get<Adjustment[]>('/api/academics/faculty/workspaces/adjustments'),
+      ]);
+      setSchedule(withFacultyDemoFallback(scheduleData, facultyDemoTimetable(), isEmptyArray));
+      setStats(withFacultyDemoFallback(statsData, facultyDemoTimetableStats()));
+      setAdjustments(withFacultyDemoFallback(adjustmentData, facultyDemoAdjustments(), isEmptyArray));
+    } catch {
+      setSchedule(withFacultyDemoFallback([], facultyDemoTimetable(), isEmptyArray));
+      setStats(withFacultyDemoFallback(null, facultyDemoTimetableStats()));
+      setAdjustments(withFacultyDemoFallback([], facultyDemoAdjustments(), isEmptyArray));
+    }
   }, [api, activeDeptId]);
 
   useEffect(() => {
     if (deptLoading) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadPageData().catch(() => undefined);
+    void loadPageData();
   }, [loadPageData, deptLoading]);
 
   const pendingAdjustments = useMemo(
@@ -171,17 +195,69 @@ export default function FacultyTimetablePage() {
 
   async function submitAdjustment(e: FormEvent) {
     e.preventDefault();
+    if (!form.course_id) {
+      toast.error('Select a course first');
+      return;
+    }
+    if (!form.date_part || !form.time_part) {
+      toast.error('Enter both date and time for the schedule change');
+      return;
+    }
+    const new_date = toDateTimeLocalValue(form.date_part, form.time_part);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(new_date)) {
+      toast.error('Please enter a valid date and time');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await api.post('/api/academics/faculty/workspaces/adjustments', form);
-      toast.success(
-        'Schedule change submitted',
-        {
+      const payload = {
+        course_id: form.course_id,
+        adjustment_type: form.adjustment_type,
+        new_date,
+        reason: form.reason.trim() || undefined,
+      };
+
+      // Smoke course IDs are not in Postgres — keep the request local and still show HoD flow.
+      if (isFacultyDemoSmokeId(form.course_id)) {
+        const course = courseOptions.find((c) => c.course_id === form.course_id);
+        const demoRow: Adjustment = {
+          adjustment_id: `adj-local-${Date.now()}`,
+          adjustment_type: form.adjustment_type,
+          status: 'PENDING_HOD_APPROVAL',
+          course_code: course?.course_code ?? 'COURSE',
+          course_name: course?.course_name ?? 'Course',
+          original_date: null,
+          new_date,
+          reason: form.reason.trim() || null,
+        };
+        setAdjustments((prev) => [demoRow, ...prev]);
+        toast.success('Schedule change submitted', {
           description:
-            'Your request was sent to the HoD for approval. Students will be notified automatically once it is approved.',
-        },
-      );
-      setForm({ course_id: '', adjustment_type: 'EXTRA_CLASS', new_date: '', reason: '' });
+            'Your request was sent to the department HoD for approval. Students will be notified automatically once it is approved.',
+        });
+        setForm({
+          course_id: '',
+          adjustment_type: 'EXTRA_CLASS',
+          date_part: '',
+          time_part: '09:00',
+          reason: '',
+        });
+        return;
+      }
+
+      await api.post('/api/academics/faculty/workspaces/adjustments', payload);
+      toast.success('Schedule change submitted', {
+        description:
+          'Your request was sent to the department HoD for approval. Students will be notified automatically once it is approved.',
+      });
+      setForm({
+        course_id: '',
+        adjustment_type: 'EXTRA_CLASS',
+        date_part: '',
+        time_part: '09:00',
+        reason: '',
+      });
       await loadPageData();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Request failed';
@@ -206,7 +282,7 @@ export default function FacultyTimetablePage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Timetable & Extra Classes"
+        title="Timetable"
         description="Weekly L-T-P schedule, teaching progress, and schedule change requests."
       />
 
@@ -363,11 +439,35 @@ export default function FacultyTimetablePage() {
               <option value="SUSPENSION">Lecture suspension (day)</option>
               <option value="SUBSTITUTE">Substitute faculty</option>
             </Select>
-            <Input
-              type="datetime-local"
-              value={form.new_date}
-              onChange={(e) => setForm({ ...form, new_date: e.target.value })}
-            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-medium text-sgvu-navy">Date</span>
+                <Input
+                  type="date"
+                  required
+                  value={form.date_part}
+                  onChange={(e) => setForm({ ...form, date_part: e.target.value })}
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-medium text-sgvu-navy">Time</span>
+                <Input
+                  type="time"
+                  required
+                  value={form.time_part}
+                  onChange={(e) => setForm({ ...form, time_part: e.target.value })}
+                />
+              </label>
+            </div>
+            {formDateTime ? (
+              <p className="text-xs text-muted-foreground">
+                Scheduled for {new Date(formDateTime).toLocaleString('en-IN')}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Select both date and time — incomplete values are rejected by the browser.
+              </p>
+            )}
             <Input
               placeholder="Reason"
               value={form.reason}

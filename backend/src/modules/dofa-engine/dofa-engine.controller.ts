@@ -121,7 +121,17 @@ export class DofaEngineController {
   }
 
   @Get('headcount')
-  @Roles('HOD', 'Dean', 'HR', 'HRAdmin', 'CFO', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin')
+  @Roles(
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+    'CFO',
+    'Chairman',
+    'President',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   listHeadcount(@Req() req: { user: AuthUser }) {
     return this.dofa.listHeadcount(req.user.tenant_id);
   }

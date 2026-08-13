@@ -322,7 +322,9 @@ export class StudentBulkService {
       [runId],
     );
     const done = new Set(
-      (already as Array<{ email: string }>).map((r) => String(r.email).toLowerCase()),
+      (already as Array<{ email: string }>).map((r) =>
+        String(r.email).toLowerCase(),
+      ),
     );
     const enrollmentRuleId = await this.resolveEnrollmentRuleId(tenantId);
     const entityId = await this.resolveDefaultEntityId(tenantId);
@@ -373,11 +375,7 @@ export class StudentBulkService {
 
     const imported = Number(run[0].rows_imported ?? 0) + created.length;
     const status =
-      errors.length === 0
-        ? 'COMPLETED'
-        : imported === 0
-          ? 'FAILED'
-          : 'PARTIAL';
+      errors.length === 0 ? 'COMPLETED' : imported === 0 ? 'FAILED' : 'PARTIAL';
 
     await this.dataSource.query(
       `UPDATE student_bulk_upload_runs
@@ -439,7 +437,9 @@ export class StudentBulkService {
     );
     if (!run[0]) throw new BadRequestException('Upload run not found');
     if (!run[0].rollback_available || run[0].rolled_back_at) {
-      throw new BadRequestException('Rollback is not available for this upload');
+      throw new BadRequestException(
+        'Rollback is not available for this upload',
+      );
     }
 
     const users = await this.dataSource.query(
@@ -534,7 +534,12 @@ export class StudentBulkService {
     entityId: number,
     row: StudentRowInput,
     enrollmentRuleId: string,
-  ): Promise<{ user_id: string; email: string; temp_password: string; prn: string }> {
+  ): Promise<{
+    user_id: string;
+    email: string;
+    temp_password: string;
+    prn: string;
+  }> {
     const email = row.email.toLowerCase();
 
     const existing = await qr.query(

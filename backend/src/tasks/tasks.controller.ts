@@ -31,16 +31,19 @@ export class TasksController {
   }
 
   @Get()
+  @Roles('IQAC', 'HR', 'President', 'SuperAdmin', 'Dean')
   findAllTasks() {
     return this.tasksService.findAllTasks();
   }
 
   @Get('month/:month')
+  @Roles('IQAC', 'HR', 'President', 'SuperAdmin', 'Dean')
   findTasksByMonth(@Param('month') month: string) {
     return this.tasksService.findTasksByMonth(month);
   }
 
   @Get('role/:roleId')
+  @Roles('IQAC', 'HR', 'President', 'SuperAdmin', 'Dean')
   findTasksByRole(@Param('roleId') roleId: string) {
     return this.tasksService.findTasksByRole(parseInt(roleId));
   }
@@ -68,6 +71,17 @@ export class TasksController {
   }
 
   @Get('assignments/my')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'IQAC',
+    'HR',
+    'President',
+    'Admin',
+    'Registrar',
+  )
   getMyAssignments(@Req() req: any, @Query('status') status?: string) {
     return this.tasksService.findUserAssignments(req.user.user_id, status);
   }
@@ -82,6 +96,17 @@ export class TasksController {
   }
 
   @Put('assignments/:assignmentId/status')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'IQAC',
+    'HR',
+    'President',
+    'Admin',
+    'Registrar',
+  )
   updateAssignmentStatus(
     @Param('assignmentId') assignmentId: string,
     @Body('status') status: string,
@@ -97,6 +122,17 @@ export class TasksController {
   }
 
   @Post('submissions/:assignmentId')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'IQAC',
+    'HR',
+    'President',
+    'Admin',
+    'Registrar',
+  )
   createSubmission(
     @Param('assignmentId') assignmentId: string,
     @Body() createSubmissionDto: CreateSubmissionDto,
@@ -110,11 +146,23 @@ export class TasksController {
   }
 
   @Get('submissions/assignment/:assignmentId')
+  @Roles('IQAC', 'HR', 'President', 'SuperAdmin', 'Dean')
   findSubmissionsByAssignment(@Param('assignmentId') assignmentId: string) {
     return this.tasksService.findSubmissionsByAssignment(assignmentId);
   }
 
   @Get('submissions/my')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'IQAC',
+    'HR',
+    'President',
+    'Admin',
+    'Registrar',
+  )
   getMySubmissions(@Req() req: any) {
     return this.tasksService.findSubmissionsByUser(req.user.user_id);
   }
@@ -134,6 +182,17 @@ export class TasksController {
   }
 
   @Get(':id')
+  @Roles(
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'IQAC',
+    'HR',
+    'President',
+    'Admin',
+    'Registrar',
+  )
   findOneTask(@Param('id') id: string) {
     return this.tasksService.findOneTask(parseInt(id));
   }

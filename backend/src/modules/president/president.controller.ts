@@ -36,7 +36,9 @@ function actorFromReq(req: {
     role: req.user.role ?? req.user.role_name,
     ip:
       req.ip ??
-      (typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined),
+      (typeof forwarded === 'string'
+        ? forwarded.split(',')[0]?.trim()
+        : undefined),
     sessionId:
       typeof req.headers?.['x-session-id'] === 'string'
         ? req.headers['x-session-id']

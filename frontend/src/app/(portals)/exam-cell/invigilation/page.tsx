@@ -38,6 +38,25 @@ type Request = {
   exam_cell_comment: string | null;
 };
 
+type DutySwap = {
+  swap_id: string;
+  requester_name: string;
+  target_name: string;
+  room: string;
+  exam_date: string;
+  session_label: string | null;
+  reason: string;
+  status:
+    | 'PENDING_TARGET'
+    | 'REJECTED_BY_TARGET'
+    | 'PENDING_EXAM_CELL'
+    | 'APPROVED'
+    | 'REJECTED_BY_EXAM_CELL'
+    | 'CANCELLED';
+  target_comment: string | null;
+  exam_cell_comment: string | null;
+};
+
 type BlockHall = { block: string; halls: { name: string; capacity: number }[] };
 
 export default function ExamCellInvigilationPage() {
@@ -46,6 +65,7 @@ export default function ExamCellInvigilationPage() {
   const [faculty, setFaculty] = useState<Faculty[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
+  const [swaps, setSwaps] = useState<DutySwap[]>([]);
   const [blocksHalls, setBlocksHalls] = useState<BlockHall[]>([]);
 
   const [examId, setExamId] = useState('');
@@ -57,12 +77,18 @@ export default function ExamCellInvigilationPage() {
 
   const [resolvingRequest, setResolvingRequest] = useState<{ req: Request, action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [resolveComment, setResolveComment] = useState('');
+  const [resolvingSwap, setResolvingSwap] = useState<{ swap: DutySwap; action: 'APPROVED' | 'REJECTED' } | null>(null);
+  const [swapResolveComment, setSwapResolveComment] = useState('');
   const [reassignDuty, setReassignDuty] = useState<Duty | null>(null);
   const [reassignFacultyId, setReassignFacultyId] = useState('');
 
   const load = useCallback(() => {
     void api.get<Duty[]>('/api/exam-cell/invigilation').then(setDuties);
     void api.get<Request[]>('/api/exam-cell/invigilation-requests').then(setRequests);
+    void api
+      .get<DutySwap[]>('/api/exam-cell/invigilation-swaps')
+      .then((rows) => setSwaps(Array.isArray(rows) ? rows : []))
+      .catch(() => setSwaps([]));
   }, [api]);
 
   useEffect(() => {
@@ -157,6 +183,35 @@ export default function ExamCellInvigilationPage() {
     }
   }
 
+  async function submitSwapResolution() {
+    if (!resolvingSwap) return;
+    if (!swapResolveComment.trim()) {
+      toast.error('Comment is required');
+      return;
+    }
+    try {
+      await api.post(`/api/exam-cell/invigilation-swaps/${resolvingSwap.swap.swap_id}/resolve`, {
+        status: resolvingSwap.action,
+        comment: swapResolveComment.trim(),
+      });
+      toast.success(
+        resolvingSwap.action === 'APPROVED'
+          ? 'Duty swap approved — roster updated'
+          : 'Duty swap rejected',
+      );
+      setResolvingSwap(null);
+      setSwapResolveComment('');
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to resolve swap');
+    }
+  }
+
+  const pendingSwaps = useMemo(
+    () => swaps.filter((s) => s.status === 'PENDING_EXAM_CELL'),
+    [swaps],
+  );
+
   const selectedBlockHalls = blocksHalls.find((b) => b.block === block)?.halls || [];
 
   const dutiesByBlock = useMemo(() => {
@@ -240,7 +295,7 @@ export default function ExamCellInvigilationPage() {
       </Card>
 
       <Tabs defaultValue="roster" className="space-y-4">
-        <TabsList className="h-auto w-full justify-start gap-1 rounded-xl border border-sgvu-navy/10 bg-white p-1 shadow-sm sm:w-auto">
+        <TabsList className="h-auto w-full max-w-full justify-start gap-1 overflow-x-auto rounded-xl border border-sgvu-navy/10 bg-white p-1 shadow-sm sm:w-auto">
           <TabsTrigger
             value="roster"
             className="rounded-lg px-4 py-2 text-sm font-semibold data-[state=active]:bg-[#0B2447] data-[state=active]:text-white"
@@ -255,6 +310,17 @@ export default function ExamCellInvigilationPage() {
             {requests.filter((r) => r.status === 'PENDING').length > 0 ? (
               <Badge variant="destructive" className="ml-2 px-1.5 py-0.5 text-[10px]">
                 {requests.filter((r) => r.status === 'PENDING').length}
+              </Badge>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger
+            value="swaps"
+            className="rounded-lg px-4 py-2 text-sm font-semibold data-[state=active]:bg-[#0B2447] data-[state=active]:text-white"
+          >
+            Duty Swaps
+            {pendingSwaps.length > 0 ? (
+              <Badge variant="destructive" className="ml-2 px-1.5 py-0.5 text-[10px]">
+                {pendingSwaps.length}
               </Badge>
             ) : null}
           </TabsTrigger>
@@ -578,6 +644,91 @@ export default function ExamCellInvigilationPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="swaps" className="space-y-4">
+          <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+            <CardContent className="space-y-4 p-5 md:p-6">
+              <div>
+                <h2 className="text-lg font-bold text-sgvu-navy">Duty swap approvals</h2>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Peer-accepted swaps await Exam Cell approval before the roster updates.
+                </p>
+              </div>
+
+              {swaps.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-sgvu-navy/20 px-6 py-12 text-center">
+                  <p className="text-sm font-semibold text-sgvu-navy">No duty swap requests</p>
+                </div>
+              ) : (
+                <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                  {swaps.map((s) => (
+                    <article key={s.swap_id} className="min-w-0 rounded-xl border border-sgvu-navy/10 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="truncate font-bold text-sgvu-navy">
+                            {s.requester_name} → {s.target_name}
+                          </h3>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {s.session_label ?? 'Invigilation'} · Room {s.room}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(s.exam_date).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={
+                            s.status === 'APPROVED'
+                              ? 'default'
+                              : s.status === 'PENDING_EXAM_CELL'
+                                ? 'secondary'
+                                : s.status.includes('REJECT')
+                                  ? 'destructive'
+                                  : 'outline'
+                          }
+                        >
+                          {s.status.replaceAll('_', ' ')}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 rounded-lg bg-sgvu-navy/[0.03] px-3 py-2.5 text-sm">
+                        <p className="text-[11px] font-bold uppercase tracking-wide text-sgvu-navy/50">
+                          Reason
+                        </p>
+                        <p className="mt-1 break-words text-sgvu-navy/80">{s.reason}</p>
+                        {s.target_comment ? (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Peer note: {s.target_comment}
+                          </p>
+                        ) : null}
+                      </div>
+                      {s.status === 'PENDING_EXAM_CELL' ? (
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                          <Button
+                            variant="outline"
+                            className="h-10 flex-1 border-red-600/30 font-semibold text-red-700 hover:bg-red-50"
+                            onClick={() => setResolvingSwap({ swap: s, action: 'REJECTED' })}
+                          >
+                            Reject
+                          </Button>
+                          <Button
+                            className={`flex-1 ${btnPrimary}`}
+                            onClick={() => setResolvingSwap({ swap: s, action: 'APPROVED' })}
+                          >
+                            Approve swap
+                          </Button>
+                        </div>
+                      ) : s.exam_cell_comment ? (
+                        <p className="mt-3 border-t border-sgvu-navy/10 pt-3 text-sm text-muted-foreground">
+                          <span className="font-semibold text-sgvu-navy">Comment:</span>{' '}
+                          {s.exam_cell_comment}
+                        </p>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       <Dialog open={!!resolvingRequest} onOpenChange={(open) => !open && setResolvingRequest(null)}>
@@ -618,6 +769,43 @@ export default function ExamCellInvigilationPage() {
               disabled={!resolveComment.trim()}
             >
               Confirm {resolvingRequest?.action === 'APPROVED' ? 'Approval' : 'Rejection'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!resolvingSwap} onOpenChange={(open) => !open && setResolvingSwap(null)}>
+        <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {resolvingSwap?.action === 'APPROVED' ? 'Approve duty swap' : 'Reject duty swap'}
+            </DialogTitle>
+            <DialogDescription>
+              {resolvingSwap?.action === 'APPROVED'
+                ? 'Approving transfers the invigilation duty to the accepting faculty and notifies both parties.'
+                : 'Rejecting keeps the original faculty assignment and notifies both parties.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1 py-2">
+            <label className={labelClass}>Comment</label>
+            <textarea
+              className="min-h-[100px] w-full min-w-0 rounded-lg border border-sgvu-navy/20 p-3 text-sm focus:border-sgvu-gold focus:outline-none focus:ring-2 focus:ring-sgvu-gold/25"
+              value={swapResolveComment}
+              onChange={(e) => setSwapResolveComment(e.target.value)}
+              placeholder="Decision rationale for audit trail"
+            />
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button variant="outline" className={btnOutline} onClick={() => setResolvingSwap(null)}>
+              Cancel
+            </Button>
+            <Button
+              className={resolvingSwap?.action === 'APPROVED' ? btnPrimary : undefined}
+              variant={resolvingSwap?.action === 'APPROVED' ? 'default' : 'destructive'}
+              onClick={() => void submitSwapResolution()}
+              disabled={!swapResolveComment.trim()}
+            >
+              Confirm {resolvingSwap?.action === 'APPROVED' ? 'Approval' : 'Rejection'}
             </Button>
           </DialogFooter>
         </DialogContent>

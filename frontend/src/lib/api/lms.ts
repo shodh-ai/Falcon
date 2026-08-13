@@ -78,7 +78,10 @@ export type FacultyAssignment = {
   start_date: string;
   due_date: string;
   description?: string | null;
+  semester?: number | null;
+  section_code?: string | null;
   submission_count?: number;
+  notified_count?: number;
 };
 
 export type AssignmentRosterRow = {

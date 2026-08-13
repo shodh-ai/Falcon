@@ -69,11 +69,15 @@ export class ResearchController {
   }
 
   @Get('proposals')
-  @Roles('SuperAdmin', 'Faculty', 'HOD', 'DeanOfResearch', 'LabAdmin', 'Chairman')
-  proposals(
-    @Req() req: { user: AuthUser },
-    @Query('status') status?: string,
-  ) {
+  @Roles(
+    'SuperAdmin',
+    'Faculty',
+    'HOD',
+    'DeanOfResearch',
+    'LabAdmin',
+    'Chairman',
+  )
+  proposals(@Req() req: { user: AuthUser }, @Query('status') status?: string) {
     return this.research.listProposals(req.user.tenant_id, status);
   }
 
@@ -90,13 +94,21 @@ export class ResearchController {
       allowed_expense_categories?: string[];
     },
   ) {
-    return this.research.createProposal(req.user.tenant_id, req.user.user_id, body);
+    return this.research.createProposal(
+      req.user.tenant_id,
+      req.user.user_id,
+      body,
+    );
   }
 
   @Post('proposals/:id/submit')
   @Roles('SuperAdmin', 'Faculty', 'HOD', 'LabAdmin')
   submitProposal(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.research.submitProposal(req.user.tenant_id, req.user.user_id, id);
+    return this.research.submitProposal(
+      req.user.tenant_id,
+      req.user.user_id,
+      id,
+    );
   }
 
   @Post('proposals/:id/decide')
@@ -115,7 +127,15 @@ export class ResearchController {
   }
 
   @Get('ip')
-  @Roles('SuperAdmin', 'Faculty', 'HOD', 'DeanOfResearch', 'IQAC', 'Chairman', 'LabAdmin')
+  @Roles(
+    'SuperAdmin',
+    'Faculty',
+    'HOD',
+    'DeanOfResearch',
+    'IQAC',
+    'Chairman',
+    'LabAdmin',
+  )
   listIp(@Req() req: { user: AuthUser }) {
     return this.research.listIp(req.user.tenant_id);
   }

@@ -59,7 +59,8 @@ export class ProcurementService {
         require_gst_verify: boolean;
       }) => ({
         min_amount_inr: Number(r.min_amount_inr),
-        max_amount_inr: r.max_amount_inr == null ? null : Number(r.max_amount_inr),
+        max_amount_inr:
+          r.max_amount_inr == null ? null : Number(r.max_amount_inr),
         min_quotes: Number(r.min_quotes),
         require_gst_verify: Boolean(r.require_gst_verify),
       }),
@@ -84,7 +85,8 @@ export class ProcurementService {
       }) => ({
         level_no: Number(r.level_no),
         label: r.label,
-        max_amount_inr: r.max_amount_inr == null ? null : Number(r.max_amount_inr),
+        max_amount_inr:
+          r.max_amount_inr == null ? null : Number(r.max_amount_inr),
         required_roles: r.required_roles,
         required_signatures: Number(r.required_signatures),
       }),
@@ -249,7 +251,8 @@ export class ProcurementService {
       });
     }
 
-    let grantExpenseCategory = body.grant_expense_category?.toUpperCase() ?? null;
+    let grantExpenseCategory =
+      body.grant_expense_category?.toUpperCase() ?? null;
     if (body.grant_id) {
       grantExpenseCategory = grantExpenseCategory || 'EQUIPMENT';
       const grants = await this.db.query(
@@ -269,7 +272,10 @@ export class ProcurementService {
         allowedCategories: g.allowed_expense_categories || [],
       });
       if (!check.ok) {
-        throw new BadRequestException({ message: check.message, code: check.code });
+        throw new BadRequestException({
+          message: check.message,
+          code: check.code,
+        });
       }
     }
 
@@ -337,12 +343,19 @@ export class ProcurementService {
     const pr = await this.getRequisition(tid, prId);
     if (!['SOURCING', 'QUOTED'].includes(String(pr.status))) {
       throw new BadRequestException({
-        message: 'PR must be claimed by Procurement before quotes (status SOURCING)',
+        message:
+          'PR must be claimed by Procurement before quotes (status SOURCING)',
         code: 'NOT_IN_SOURCING',
       });
     }
-    if (!body.vendor_name?.trim() || !(body.amount_inr > 0) || !body.pdf_path?.trim()) {
-      throw new BadRequestException('vendor_name, amount_inr, and pdf_path required');
+    if (
+      !body.vendor_name?.trim() ||
+      !(body.amount_inr > 0) ||
+      !body.pdf_path?.trim()
+    ) {
+      throw new BadRequestException(
+        'vendor_name, amount_inr, and pdf_path required',
+      );
     }
     const gstin = normalizeGstin(body.gstin);
     if (!isValidGstinFormat(gstin)) {
@@ -360,7 +373,8 @@ export class ProcurementService {
       existing.some((q: { gstin: string }) => normalizeGstin(q.gstin) === gstin)
     ) {
       throw new BadRequestException({
-        message: 'Duplicate GSTIN on this PR — quotes must be from distinct vendors',
+        message:
+          'Duplicate GSTIN on this PR — quotes must be from distinct vendors',
         code: 'DUPLICATE_GSTIN',
       });
     }
@@ -376,7 +390,10 @@ export class ProcurementService {
       });
     }
 
-    const hash = relatedPartyHash(verify.pan, verify.legalName ?? body.vendor_name);
+    const hash = relatedPartyHash(
+      verify.pan,
+      verify.legalName ?? body.vendor_name,
+    );
 
     const rows = await this.db.query(
       `INSERT INTO fin_quotations (
@@ -428,7 +445,9 @@ export class ProcurementService {
     const tid = this.tenant(tenantId);
     const pr = await this.getRequisition(tid, prId);
     if (!['SOURCING', 'QUOTED'].includes(String(pr.status))) {
-      throw new BadRequestException('PR must be in sourcing/quoted before DOFA submit');
+      throw new BadRequestException(
+        'PR must be in sourcing/quoted before DOFA submit',
+      );
     }
     if (pr.catalog_item_id) {
       throw new BadRequestException('Use catalog order path for catalog PRs');
@@ -476,7 +495,8 @@ export class ProcurementService {
 
     const lowestId = await this.refreshLowestQuote(prId);
     const selected = quotes.find((q) => q.quote_id === body.selected_quote_id);
-    if (!selected) throw new BadRequestException('selected_quote_id not on this PR');
+    if (!selected)
+      throw new BadRequestException('selected_quote_id not on this PR');
 
     let nonLowest = false;
     if (selected.quote_id !== lowestId) {
@@ -771,8 +791,15 @@ export class ProcurementService {
     },
   ) {
     const tid = this.tenant(tenantId);
-    if (!body.sku || !body.name || !(body.locked_unit_price > 0) || !body.vendor_id) {
-      throw new BadRequestException('sku, name, locked_unit_price, vendor_id required');
+    if (
+      !body.sku ||
+      !body.name ||
+      !(body.locked_unit_price > 0) ||
+      !body.vendor_id
+    ) {
+      throw new BadRequestException(
+        'sku, name, locked_unit_price, vendor_id required',
+      );
     }
     if (body.catalog_item_id) {
       const rows = await this.db.query(

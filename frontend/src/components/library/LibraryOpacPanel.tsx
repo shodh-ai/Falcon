@@ -14,6 +14,12 @@ import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
+import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoDigitalResources,
+  facultyDemoLibraryAccount,
+  facultyDemoLibraryCatalog,
+} from '@/lib/mock/faculty-portal-demo';
 
 type CatalogHit = {
   catalog_id: string;
@@ -74,14 +80,14 @@ function BookCover({ title, coverUrl }: { title: string; coverUrl: string | null
 }
 
 export function LibraryOpacPanel({
-  basePath,
-  title,
-  description,
+  basePath = '/student/library',
+  title = 'Library OPAC',
+  description = 'Search the catalog, manage loans, and open digital resources.',
   embedded = false,
 }: {
-  basePath: '/student/library' | '/faculty/library';
-  title: string;
-  description: string;
+  basePath?: '/student/library' | '/faculty/library';
+  title?: string;
+  description?: string;
   /** Hide inner page title when parent already renders a portal header */
   embedded?: boolean;
 }) {
@@ -93,26 +99,96 @@ export function LibraryOpacPanel({
   const [digital, setDigital] = useState<DigitalResource[]>([]);
   const [searching, setSearching] = useState(false);
 
+  const facultySmoke = basePath === '/faculty/library';
+
   const runSearch = useCallback(
     async (q: string) => {
       setSearching(true);
       try {
         const hits = await api.get<CatalogHit[]>(`/api/library/search?q=${encodeURIComponent(q)}`);
-        setResults(hits);
+        setResults(
+          facultySmoke
+            ? withFacultyDemoFallback(hits, facultyDemoLibraryCatalog() as CatalogHit[], isEmptyArray)
+            : hits,
+        );
+      } catch {
+        setResults(
+          facultySmoke
+            ? withFacultyDemoFallback([], facultyDemoLibraryCatalog() as CatalogHit[], isEmptyArray)
+            : [],
+        );
       } finally {
         setSearching(false);
       }
     },
-    [api],
+    [api, facultySmoke],
   );
 
   useEffect(() => {
     void runSearch('');
-    void api.get<MyAccount>('/api/library/my-account').then(setAccount);
-    void api.get<DigitalResource[]>('/api/library/digital-resources').then(setDigital);
-  }, [api, runSearch]);
+    void api
+      .get<MyAccount>('/api/library/my-account')
+      .then((account) =>
+        setAccount(
+          facultySmoke
+            ? withFacultyDemoFallback(
+                account,
+                facultyDemoLibraryAccount() as MyAccount,
+                (v) => !v?.active_loans?.length && !v?.holds?.length,
+              )
+            : account,
+        ),
+      )
+      .catch(() => {
+        if (facultySmoke) {
+          setAccount(withFacultyDemoFallback(null, facultyDemoLibraryAccount() as MyAccount));
+        }
+      });
+    void api
+      .get<DigitalResource[]>('/api/library/digital-resources')
+      .then((rows) =>
+        setDigital(
+          facultySmoke
+            ? withFacultyDemoFallback(
+                rows,
+                facultyDemoDigitalResources() as DigitalResource[],
+                isEmptyArray,
+              )
+            : rows,
+        ),
+      )
+      .catch(() => {
+        if (facultySmoke) {
+          setDigital(
+            withFacultyDemoFallback(
+              [],
+              facultyDemoDigitalResources() as DigitalResource[],
+              isEmptyArray,
+            ),
+          );
+        }
+      });
+  }, [api, facultySmoke, runSearch]);
 
   async function renew(transactionId: string) {
+    if (isFacultyDemoSmokeId(transactionId)) {
+      toast.success('Loan renewed for +7 days (demo)');
+      setAccount((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          active_loans: prev.active_loans.map((loan) =>
+            loan.transaction_id === transactionId
+              ? {
+                  ...loan,
+                  due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+                }
+              : loan,
+          ),
+        };
+      });
+      return;
+    }
     try {
       const res = await api.post<{ message: string }>(`/api/library/renew/${transactionId}`);
       toast.success(res.message);
@@ -138,13 +214,6 @@ export function LibraryOpacPanel({
         <div>
           <h1 className="text-2xl font-black text-sgvu-navy">{title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-        </div>
-      )}
-
-      {embedded && (
-        <div className="rounded-2xl border border-sgvu-gold/20 bg-gradient-to-r from-sgvu-gold/10 to-white px-4 py-3">
-          <p className="text-sm font-semibold text-sgvu-navy">{title}</p>
-          <p className="text-xs text-muted-foreground">{description}</p>
         </div>
       )}
 

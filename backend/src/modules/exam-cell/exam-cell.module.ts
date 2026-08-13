@@ -27,7 +27,11 @@ import { OfficialTranscriptPdfService } from './official-transcript-pdf.service'
     AttendancePolicyModule,
     StorageModule,
   ],
-  controllers: [ExamCellController, FacultyReEvaluationsController, TranscriptVerifyController],
+  controllers: [
+    ExamCellController,
+    FacultyReEvaluationsController,
+    TranscriptVerifyController,
+  ],
   providers: [
     ExamCellService,
     ResultControlService,

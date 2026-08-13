@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle, BookOpen, Check, Send, X } from 'lucide-react';
+import { BookOpen, Check, Send, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 import {
@@ -21,6 +21,62 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoAttendanceAnalytics,
+  facultyDemoAttendanceState,
+  facultyDemoCourseStudents,
+  facultyDemoTodayClasses,
+} from '@/lib/mock/faculty-portal-demo';
+
+type UiStatus = 'PRESENT' | 'ABSENT';
+
+function demoAttendanceStorageKey(
+  courseId: string,
+  date: string,
+  timetableId: string | null | undefined,
+) {
+  return `falcon-faculty-demo-attendance:${courseId}:${date}:${timetableId ?? 'none'}`;
+}
+
+function readDemoAttendance(
+  courseId: string,
+  date: string,
+  timetableId: string | null | undefined,
+): { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(demoAttendanceStorageKey(courseId, date, timetableId));
+    if (!raw) return null;
+    return JSON.parse(raw) as {
+      locked: boolean;
+      attendance_data: { student_id: string; status: UiStatus }[];
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeDemoAttendance(
+  courseId: string,
+  date: string,
+  timetableId: string | null | undefined,
+  payload: { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] },
+) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(
+      demoAttendanceStorageKey(courseId, date, timetableId),
+      JSON.stringify(payload),
+    );
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
 type FacultyClass = {
   timetable_id: string;
@@ -37,16 +93,6 @@ type Student = {
   student_id: string;
   name: string;
   roll_number: string;
-};
-
-type MissingAttendanceAlert = {
-  timetable_id: string;
-  course_id: string;
-  course_code: string;
-  course_name: string;
-  start_time: string;
-  end_time: string;
-  student_count: number;
 };
 
 type AttendanceAnalytics = {
@@ -69,8 +115,6 @@ type AttendanceAnalytics = {
   }[];
 };
 
-type UiStatus = 'PRESENT' | 'ABSENT';
-
 function todayIso() {
   const d = new Date();
   const y = d.getFullYear();
@@ -85,7 +129,6 @@ function MarkAttendanceContent() {
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
   const [classes, setClasses] = useState<FacultyClass[]>([]);
-  const [missingAlerts, setMissingAlerts] = useState<MissingAttendanceAlert[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(initialCourseId);
   const [selectedTimetableId, setSelectedTimetableId] = useState<string | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -127,26 +170,27 @@ function MarkAttendanceContent() {
     if (deptLoading) return;
     void api
       .get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId))
-      .then(async (data) => {
-        const missing = await api
-          .get<MissingAttendanceAlert[]>(
-            withTeachingDeptId('/api/academics/faculty/attendance/missing', activeDeptId),
-          )
-          .catch(() => []);
-        const assignedCourseIds = new Set(data.map((c) => c.course_id));
-        const relevantMissing = missing.filter((alert) => assignedCourseIds.has(alert.course_id));
-        setClasses(data);
-        setMissingAlerts(relevantMissing);
-        if (data.length === 0) {
+      .then((data) => {
+        const classesResolved = withFacultyDemoFallback(data, facultyDemoTodayClasses(), isEmptyArray);
+        setClasses(classesResolved);
+        if (classesResolved.length === 0) {
           setSelectedCourseId(null);
           return;
         }
         const fromUrl = initialCourseId
-          ? data.find((c) => c.course_id === initialCourseId)
+          ? classesResolved.find((c) => c.course_id === initialCourseId)
           : undefined;
-        const pick = fromUrl ?? data[0];
+        const pick = fromUrl ?? classesResolved[0]!;
         setSelectedCourseId(pick.course_id);
         setSelectedTimetableId(pick.timetable_id);
+      })
+      .catch(() => {
+        const classesResolved = withFacultyDemoFallback([], facultyDemoTodayClasses(), isEmptyArray);
+        setClasses(classesResolved);
+        if (classesResolved[0]) {
+          setSelectedCourseId(classesResolved[0].course_id);
+          setSelectedTimetableId(classesResolved[0].timetable_id);
+        }
       })
       .finally(() => setLoading(false));
   }, [api, initialCourseId, activeDeptId, deptLoading]);
@@ -156,7 +200,40 @@ function MarkAttendanceContent() {
     let cancelled = false;
     setRosterLoading(true);
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
+
+    function applyRoster(
+      rosterResolved: Student[],
+      stateResolved: { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null },
+      analyticsResolved: AttendanceAnalytics | null,
+    ) {
+      if (cancelled) return;
+      setStudents(rosterResolved);
+      setAnalytics(analyticsResolved);
+      setLocked(Boolean(stateResolved.locked));
+      const map: Record<string, UiStatus> = {};
+      for (const s of rosterResolved) map[s.student_id] = 'PRESENT';
+      for (const row of stateResolved.attendance_data ?? []) {
+        if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
+      }
+      setAttendance(map);
+      setSearchQuery('');
+    }
+
     (async () => {
+      // Smoke course IDs are not in Postgres — never call the API (avoids 500 noise).
+      if (isFacultyDemoSmokeId(selectedCourseId)) {
+        const rosterResolved = facultyDemoCourseStudents(selectedCourseId);
+        const stored = readDemoAttendance(selectedCourseId, selectedDate, timetableId);
+        const stateResolved = stored ?? facultyDemoAttendanceState(selectedCourseId);
+        applyRoster(
+          rosterResolved,
+          stateResolved,
+          facultyDemoAttendanceAnalytics(selectedCourseId),
+        );
+        if (!cancelled) setRosterLoading(false);
+        return;
+      }
+
       try {
         const timetableQuery = timetableId ? `&timetableId=${timetableId}` : '';
         const [roster, state] = await Promise.all([
@@ -170,20 +247,38 @@ function MarkAttendanceContent() {
             `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
           )
           .catch(() => null);
-        if (cancelled) return;
-        setStudents(roster);
-        setAnalytics(courseAnalytics);
-        setLocked(state.locked);
-        const map: Record<string, UiStatus> = {};
-        for (const s of roster) map[s.student_id] = 'PRESENT';
-        for (const row of state.attendance_data ?? []) {
-          if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
-        }
-        setAttendance(map);
-        setSearchQuery('');
+        const rosterResolved = withFacultyDemoFallback(
+          roster,
+          facultyDemoCourseStudents(selectedCourseId),
+          isEmptyArray,
+        );
+        const stateResolved = withFacultyDemoFallback(
+          state,
+          facultyDemoAttendanceState(selectedCourseId),
+          (v) => !v?.attendance_data?.length,
+        );
+        applyRoster(
+          rosterResolved,
+          stateResolved,
+          withFacultyDemoFallback(
+            courseAnalytics,
+            facultyDemoAttendanceAnalytics(selectedCourseId),
+          ),
+        );
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load roster');
-        setStudents([]);
+        const rosterResolved = withFacultyDemoFallback(
+          [],
+          facultyDemoCourseStudents(selectedCourseId),
+          isEmptyArray,
+        );
+        if (rosterResolved.length === 0) {
+          toast.error(e instanceof Error ? e.message : 'Failed to load roster');
+        }
+        applyRoster(
+          rosterResolved,
+          facultyDemoAttendanceState(selectedCourseId),
+          facultyDemoAttendanceAnalytics(selectedCourseId),
+        );
       } finally {
         if (!cancelled) setRosterLoading(false);
       }
@@ -195,6 +290,17 @@ function MarkAttendanceContent() {
 
   async function copyPreviousAttendance() {
     if (!selectedCourseId || !selectedTimetableId || locked) return;
+
+    if (isFacultyDemoSmokeId(selectedCourseId)) {
+      const map: Record<string, UiStatus> = {};
+      students.forEach((s, i) => {
+        map[s.student_id] = i % 6 === 0 ? 'ABSENT' : 'PRESENT';
+      });
+      setAttendance(map);
+      toast.success('Copied attendance from previous hour (demo)');
+      return;
+    }
+
     try {
       const prev = await api.get<{ attendance_data: { student_id: string; status: UiStatus }[] | null }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/previous-session?date=${selectedDate}&timetableId=${selectedTimetableId}`,
@@ -227,19 +333,38 @@ function MarkAttendanceContent() {
       toast.error('No students on the roster — cannot save attendance.');
       return;
     }
-    const payload = Object.entries(attendance).map(([student_id, status]) => ({ student_id, status }));
+    const payload = Object.entries(attendance).map(([student_id, status]) => ({
+      student_id,
+      status,
+    })) as { student_id: string; status: UiStatus }[];
     if (payload.length === 0) {
       toast.error('Mark at least one student before saving.');
       return;
     }
     setSaving(true);
     try {
+      const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
+
+      // Demo smoke courses must not hit the backend (IDs are not in the database).
+      if (isFacultyDemoSmokeId(selectedCourseId)) {
+        writeDemoAttendance(selectedCourseId, selectedDate, timetableId, {
+          locked: true,
+          attendance_data: payload,
+        });
+        setLocked(true);
+        setAnalytics(facultyDemoAttendanceAnalytics(selectedCourseId));
+        toast.success(
+          `Attendance saved · ${payload.length} student${payload.length === 1 ? '' : 's'} synced (demo)`,
+        );
+        return;
+      }
+
       const result = await api.post<{ saved: number; attendance_updated?: { attendance_percent: string }[] }>(
         '/api/academics/faculty/attendance',
         {
           course_id: selectedCourseId,
           date: selectedDate,
-          timetable_id: selectedTimetableId ?? selectedClass?.timetable_id,
+          timetable_id: timetableId,
           attendance_data: payload,
         },
       );
@@ -253,7 +378,6 @@ function MarkAttendanceContent() {
       } else {
         toast.success(`Attendance saved · ${synced} student${synced === 1 ? '' : 's'} synced to enrollment %`);
       }
-      setMissingAlerts((prev) => prev.filter((row) => row.course_id !== selectedCourseId));
       const courseAnalytics = await api
         .get<AttendanceAnalytics>(
           `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
@@ -269,6 +393,14 @@ function MarkAttendanceContent() {
 
   async function sendWarnings() {
     if (!selectedCourseId || !analytics?.defaulters.length) return;
+
+    if (isFacultyDemoSmokeId(selectedCourseId)) {
+      toast.success(
+        `Warning sent to ${analytics.defaulters.length} student${analytics.defaulters.length === 1 ? '' : 's'} and linked parents (demo)`,
+      );
+      return;
+    }
+
     try {
       const result = await api.post<{ notified: number }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/warnings`,
@@ -287,7 +419,8 @@ function MarkAttendanceContent() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Select today's class, mark present or absent, then log the lecture in your class logbook."
+        title="Attendance"
+        description="Mark and review student attendance records."
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/faculty/logbook">
@@ -297,34 +430,6 @@ function MarkAttendanceContent() {
           </Button>
         }
       />
-
-      {missingAlerts.length > 0 ? (
-        <div className="sticky top-3 z-20 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-red-950 shadow-lg">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex gap-3">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-700" />
-              <div>
-                <p className="font-bold">ACTION REQUIRED: Unmarked attendance</p>
-                <p className="text-sm">
-                  You have unmarked attendance for {missingAlerts[0].course_code} from{' '}
-                  {String(missingAlerts[0].start_time).slice(0, 5)} today.
-                </p>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => {
-                setSelectedCourseId(missingAlerts[0].course_id);
-                setSelectedTimetableId(missingAlerts[0].timetable_id);
-                setSelectedDate(todayIso());
-              }}
-            >
-              Click here to mark now
-            </Button>
-          </div>
-        </div>
-      ) : null}
 
       {classes.length === 0 ? (
         <FacultyEmptyState
@@ -374,84 +479,6 @@ function MarkAttendanceContent() {
               <FacultyInlineLoading label="Loading roster…" />
             ) : (
               <div className="space-y-4">
-                {analytics ? (
-                  <div className="space-y-4">
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <FacultyMetricChip
-                        label="Sessions scheduled"
-                        value={`${analytics.health.scheduled_classes}`}
-                      />
-                      <FacultyMetricChip
-                        label="Attendance marked"
-                        value={`${analytics.health.conducted_classes}`}
-                        emphasis
-                      />
-                      <FacultyMetricChip
-                        label="Avg attendance"
-                        value={`${analytics.health.average_attendance_percent}%`}
-                      />
-                    </div>
-
-                    <div className="grid gap-4 xl:grid-cols-2">
-                      <div className="rounded-xl border border-red-200 bg-red-50/80 p-3">
-                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-bold text-red-950">Danger Zone: Below 75%</p>
-                            <p className="text-xs text-red-900/80">Pre-filtered defaulters list</p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            disabled={analytics.defaulters.length === 0}
-                            onClick={() => void sendWarnings()}
-                            className="gap-1.5"
-                          >
-                            <Send className="h-3.5 w-3.5" />
-                            Send Warning Alert
-                          </Button>
-                        </div>
-                        {analytics.defaulters.length === 0 ? (
-                          <p className="text-sm text-red-900/80">No student is below 75%.</p>
-                        ) : (
-                          <div className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-background">
-                            <table className="w-full text-xs">
-                              <tbody>
-                                {analytics.defaulters.map((row) => (
-                                  <tr key={row.student_user_id} className="border-b last:border-0">
-                                    <td className="px-2 py-1.5 font-medium text-sgvu-navy">{row.name}</td>
-                                    <td className="px-2 py-1.5 text-muted-foreground">{row.roll_number}</td>
-                                    <td className="px-2 py-1.5 text-right font-bold text-red-700">
-                                      {Number(row.attendance_percent).toFixed(2)}%
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
-                        <p className="text-sm font-bold text-amber-950">Habitual Absentees</p>
-                        <p className="mb-2 text-xs text-amber-900/80">Missed the last 3 consecutive classes</p>
-                        {analytics.habitual_absentees.length === 0 ? (
-                          <p className="text-sm text-amber-900/80">No habitual absentees in the last 3 classes.</p>
-                        ) : (
-                          <ul className="space-y-1 text-sm">
-                            {analytics.habitual_absentees.map((row) => (
-                              <li key={row.student_user_id} className="rounded-lg border bg-background px-3 py-2">
-                                <span className="font-medium text-sgvu-navy">{row.name}</span>
-                                <span className="ml-2 text-xs text-muted-foreground">{row.roll_number}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <input
                     type="date"
@@ -545,6 +572,66 @@ function MarkAttendanceContent() {
                     {saving ? 'Saving…' : 'Save attendance'}
                   </Button>
                 </div>
+
+                {analytics ? (
+                  <div className="grid gap-4 border-t border-border/50 pt-4 xl:grid-cols-2">
+                    <div className="rounded-xl border border-red-200 bg-red-50/80 p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold text-red-950">Danger Zone: Below 75%</p>
+                          <p className="text-xs text-red-900/80">Pre-filtered defaulters list</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          disabled={analytics.defaulters.length === 0}
+                          onClick={() => void sendWarnings()}
+                          className="gap-1.5"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Send Warning Alert
+                        </Button>
+                      </div>
+                      {analytics.defaulters.length === 0 ? (
+                        <p className="text-sm text-red-900/80">No student is below 75%.</p>
+                      ) : (
+                        <div className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-background">
+                          <table className="w-full text-xs">
+                            <tbody>
+                              {analytics.defaulters.map((row) => (
+                                <tr key={row.student_user_id} className="border-b last:border-0">
+                                  <td className="px-2 py-1.5 font-medium text-sgvu-navy">{row.name}</td>
+                                  <td className="px-2 py-1.5 text-muted-foreground">{row.roll_number}</td>
+                                  <td className="px-2 py-1.5 text-right font-bold text-red-700">
+                                    {Number(row.attendance_percent).toFixed(2)}%
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+                      <p className="text-sm font-bold text-amber-950">Habitual Absentees</p>
+                      <p className="mb-2 text-xs text-amber-900/80">Missed the last 3 consecutive classes</p>
+                      {analytics.habitual_absentees.length === 0 ? (
+                        <p className="text-sm text-amber-900/80">No habitual absentees in the last 3 classes.</p>
+                      ) : (
+                        <ul className="space-y-1 text-sm">
+                          {analytics.habitual_absentees.map((row) => (
+                            <li key={row.student_user_id} className="rounded-lg border bg-background px-3 py-2">
+                              <span className="font-medium text-sgvu-navy">{row.name}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">{row.roll_number}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </FacultyPanel>

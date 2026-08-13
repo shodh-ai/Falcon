@@ -207,6 +207,22 @@ export class FacultyWorkspacesService {
     tenantId: string,
     dto: { slots: Array<any> },
   ) {
+    const isUuid = (value: unknown) =>
+      typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.trim(),
+      );
+
+    const normalizeTime = (value: unknown) => {
+      const raw = String(value ?? '').trim();
+      const parts = raw.split(':');
+      if (parts.length < 2) return raw;
+      const hour = (parts[0] ?? '00').padStart(2, '0');
+      const minute = (parts[1] ?? '00').padStart(2, '0');
+      const second = (parts[2] ?? '00').padStart(2, '0').slice(0, 2);
+      return `${hour}:${minute}:${second}`;
+    };
+
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
@@ -214,9 +230,42 @@ export class FacultyWorkspacesService {
     try {
       const deduped = new Map<string, any>();
       for (const slot of dto.slots ?? []) {
-        if (slot?.course_id) deduped.set(slot.course_id, slot);
+        if (!slot?.course_id) continue;
+        // Keep one preferred slot per course (matches faculty schedule UI).
+        deduped.set(String(slot.course_id), {
+          ...slot,
+          course_id: String(slot.course_id).trim(),
+          day_of_week: Number(slot.day_of_week),
+          start_time: normalizeTime(slot.start_time),
+          end_time: normalizeTime(slot.end_time),
+          room: slot.room ? String(slot.room).trim() : null,
+          section: slot.section ? String(slot.section).trim() || 'A' : 'A',
+        });
       }
       const slots = [...deduped.values()];
+
+      for (const slot of slots) {
+        if (!isUuid(slot.course_id)) {
+          throw new BadRequestException(
+            `Invalid course id "${slot.course_id}". Demo/sample courses cannot be saved to the live timetable.`,
+          );
+        }
+        if (
+          !Number.isInteger(slot.day_of_week) ||
+          slot.day_of_week < 1 ||
+          slot.day_of_week > 7
+        ) {
+          throw new BadRequestException(
+            `Invalid day_of_week for course ${slot.course_id}`,
+          );
+        }
+        if (!slot.start_time || !slot.end_time) {
+          throw new BadRequestException('Start time and end time are required');
+        }
+        if (slot.start_time >= slot.end_time) {
+          throw new BadRequestException('Start time must be before end time');
+        }
+      }
 
       const facultySlotKeys = new Set<string>();
       for (const slot of slots) {
@@ -229,25 +278,48 @@ export class FacultyWorkspacesService {
         facultySlotKeys.add(key);
       }
 
-      // 1. Delete all existing slots for this faculty
+      // Soft-delete existing slots (zero-deletion policy + safer with FKs).
       await runner.query(
-        `DELETE FROM academic_timetables
-         WHERE tenant_id = $1 AND faculty_user_id = $2`,
+        `UPDATE academic_timetables
+         SET deleted_at = NOW()
+         WHERE tenant_id = $1
+           AND faculty_user_id = $2
+           AND deleted_at IS NULL`,
         [tenantId, facultyUserId],
       );
 
-      // 2. Insert new slots and check for conflicts
       for (const slot of slots) {
-        if (
-          !slot.course_id ||
-          !slot.day_of_week ||
-          !slot.start_time ||
-          !slot.end_time
-        ) {
-          throw new BadRequestException('Invalid slot data');
-        }
-        if (slot.start_time >= slot.end_time) {
-          throw new BadRequestException('Start time must be before end time');
+        // Ensure the course exists and is allocated to this faculty (or already taught by them).
+        const allowed = await runner.query(
+          `SELECT 1
+           FROM academic_courses c
+           WHERE c.tenant_id = $1
+             AND c.course_id = $2::uuid
+             AND c.deleted_at IS NULL
+             AND (
+               EXISTS (
+                 SELECT 1
+                 FROM academic_course_allocations a
+                 WHERE a.tenant_id = c.tenant_id
+                   AND a.course_id = c.course_id
+                   AND a.faculty_user_id = $3
+                   AND a.status = 'ACTIVE'
+               )
+               OR EXISTS (
+                 SELECT 1
+                 FROM academic_timetables t
+                 WHERE t.tenant_id = c.tenant_id
+                   AND t.course_id = c.course_id
+                   AND t.faculty_user_id = $3
+               )
+             )
+           LIMIT 1`,
+          [tenantId, slot.course_id, facultyUserId],
+        );
+        if (!allowed.length) {
+          throw new BadRequestException(
+            `Course ${slot.course_id} is not allocated to you, so it cannot be scheduled.`,
+          );
         }
 
         const params: any[] = [
@@ -274,7 +346,7 @@ export class FacultyWorkspacesService {
                 FROM academic_course_allocations alloc_existing
                 INNER JOIN academic_course_allocations alloc_new
                   ON alloc_new.tenant_id = alloc_existing.tenant_id
-                 AND alloc_new.course_id = $6
+                 AND alloc_new.course_id = $6::uuid
                  AND alloc_new.faculty_user_id = $5
                  AND alloc_new.status = 'ACTIVE'
                 WHERE alloc_existing.tenant_id = t.tenant_id
@@ -295,13 +367,16 @@ export class FacultyWorkspacesService {
         const conflicts = await runner.query(conflictQuery, params);
         if (conflicts.length > 0) {
           throw new BadRequestException(
-            `Slot conflict detected for ${slot.start_time} - ${slot.end_time} on day ${slot.day_of_week}`,
+            `Slot conflict detected for ${String(slot.start_time).slice(0, 5)} - ${String(slot.end_time).slice(0, 5)} on day ${slot.day_of_week}. Choose another time or room.`,
           );
         }
 
         await runner.query(
-          `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id, section)
-           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)`,
+          `INSERT INTO academic_timetables (
+             timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id, section, deleted_at
+           ) VALUES (
+             gen_random_uuid(), $1, $2::uuid, $3, $4::time, $5::time, $6, $7, $8, NULL
+           )`,
           [
             tenantId,
             slot.course_id,
@@ -316,9 +391,20 @@ export class FacultyWorkspacesService {
       }
 
       await runner.commitTransaction();
-      return { success: true };
+      return { success: true, saved: slots.length };
     } catch (error) {
       await runner.rollbackTransaction();
+      if (error instanceof BadRequestException) throw error;
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Failed to save timetable slots';
+      // Surface common Postgres errors as 400 instead of opaque 500s.
+      if (/uuid|foreign key|violates|invalid input/i.test(message)) {
+        throw new BadRequestException(
+          'Could not save timetable. Use allocated live courses (not demo sample IDs) and resolve any conflicts.',
+        );
+      }
       throw error;
     } finally {
       await runner.release();
@@ -864,10 +950,26 @@ export class FacultyWorkspacesService {
         'No draft marks found to submit. Save draft marks first for this course and exam type.',
       );
     }
+
+    let notified_count = 0;
+    if (targetStatus === 'PUBLISHED') {
+      notified_count = await this.notifyMarksPublishedToStudents(
+        tenantId,
+        courseId,
+        courseName,
+        examType,
+      );
+    }
+
     return {
       published: publishedCount,
-      status: 'PENDING_COE',
+      status: targetStatus,
       course_name: courseName,
+      notified_count,
+      message:
+        targetStatus === 'PENDING_COE'
+          ? 'Marks submitted to Exam Cell (PENDING_COE). Students are notified after COE publishes.'
+          : 'Marks published to students.',
     };
   }
 
@@ -884,20 +986,44 @@ export class FacultyWorkspacesService {
        SET status = 'PUBLISHED', published_at = NOW(), updated_at = NOW()
        WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
          AND status IN ('DRAFT', 'PENDING_COE')
-       RETURNING mark_id`,
+       RETURNING mark_id, exam_type`,
       [tenantId, courseId, facultyUserId],
     );
 
-    const publishedCount =
-      Array.isArray(result) &&
-      result.length === 2 &&
-      typeof result[1] === 'number'
-        ? result[1]
-        : result.length;
+    const rows = Array.isArray(result)
+      ? ((Array.isArray(result[0]) ? result[0] : result) as Array<{
+          mark_id: string;
+          exam_type: string;
+        }>)
+      : [];
+    const publishedCount = rows.length;
+
+    const courseRows = await this.dataSource.query<
+      Array<{ course_name: string }>
+    >(
+      `SELECT course_name FROM academic_courses WHERE course_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [courseId, tenantId],
+    );
+    const courseName = courseRows[0]?.course_name ?? 'your course';
+    const examTypes = [
+      ...new Set(rows.map((r) => r.exam_type).filter(Boolean)),
+    ];
+
+    let notified_count = 0;
+    for (const examType of examTypes) {
+      notified_count += await this.notifyMarksPublishedToStudents(
+        tenantId,
+        courseId,
+        courseName,
+        examType,
+      );
+    }
 
     return {
       published: publishedCount,
       status: 'PUBLISHED',
+      notified_count,
+      course_name: courseName,
     };
   }
 
@@ -1101,6 +1227,12 @@ export class FacultyWorkspacesService {
       'You already have a pending schedule change for this course. Wait for HoD approval on the existing request, or cancel it before submitting another.',
     );
 
+    if (!dto.new_date?.trim()) {
+      throw new BadRequestException(
+        'Please provide a valid date and time for the schedule change',
+      );
+    }
+
     const rows = await this.dataSource.query(
       `INSERT INTO class_adjustments (
          tenant_id, course_id, faculty_user_id, adjustment_type, original_date, new_date,
@@ -1118,6 +1250,45 @@ export class FacultyWorkspacesService {
         dto.substitute_faculty_user_id ?? null,
       ],
     );
+
+    // Notify department HoD so the request appears in Extra Class Approvals inbox.
+    const metaRows = await this.dataSource.query<
+      Array<{
+        hod_user_id: string | null;
+        faculty_name: string | null;
+        course_code: string | null;
+        dept_name: string | null;
+      }>
+    >(
+      `SELECT d.hod_user_id,
+              u.name AS faculty_name,
+              c.course_code,
+              d.dept_name
+       FROM users u
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       INNER JOIN academic_courses c ON c.course_id = $3 AND c.tenant_id = $2
+       WHERE u.user_id = $1 AND u.tenant_id = $2
+       LIMIT 1`,
+      [facultyUserId, tenantId, dto.course_id],
+    );
+
+    const meta = metaRows[0];
+    if (meta?.hod_user_id) {
+      const typeLabel = String(
+        dto.adjustment_type || 'SCHEDULE_CHANGE',
+      ).replace(/_/g, ' ');
+      this.notify.approvalRequired({
+        tenantId,
+        userId: meta.hod_user_id,
+        category: 'ACADEMICS',
+        requestType: 'Schedule Change',
+        requesterName: meta.faculty_name || 'Faculty',
+        title: `Schedule change pending — ${meta.course_code ?? 'course'}`,
+        message: `${meta.faculty_name || 'A faculty member'} submitted a ${typeLabel} request for ${meta.course_code ?? 'a course'}${meta.dept_name ? ` (${meta.dept_name})` : ''}. Open Extra Class Approvals to review.`,
+        actionLink: '/hod/approvals/extra-classes',
+      });
+    }
+
     return rows[0];
   }
 
@@ -1302,6 +1473,352 @@ export class FacultyWorkspacesService {
       [tenantId, assignmentId, facultyUserId, reason],
     );
     return rows[0];
+  }
+
+  private async writeDutySwapAudit(
+    tenantId: string,
+    swapId: string,
+    actorUserId: string | null,
+    action: string,
+    fromStatus: string | null,
+    toStatus: string | null,
+    details: Record<string, unknown> = {},
+  ) {
+    await this.dataSource.query(
+      `INSERT INTO invigilation_duty_swap_audits
+         (tenant_id, swap_id, actor_user_id, action, from_status, to_status, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [
+        tenantId,
+        swapId,
+        actorUserId,
+        action,
+        fromStatus,
+        toStatus,
+        JSON.stringify(details),
+      ],
+    );
+  }
+
+  private dutySwapNotifyBase(row: {
+    swap_id: string;
+    assignment_id: string;
+    requester_name?: string;
+    target_name?: string;
+    exam_date: string | Date;
+    room: string;
+    session_label?: string | null;
+  }) {
+    return {
+      swapId: row.swap_id,
+      assignmentId: row.assignment_id,
+      requesterName: row.requester_name ?? 'Faculty',
+      targetName: row.target_name,
+      examDate: String(row.exam_date).slice(0, 10),
+      room: row.room,
+      sessionLabel: row.session_label ?? null,
+    };
+  }
+
+  async listInvigilationSwapPartners(
+    facultyUserId: string,
+    tenantId: string,
+    assignmentId: string,
+  ) {
+    const assignmentRows = await this.dataSource.query(
+      `SELECT * FROM faculty_invigilation_assignments
+       WHERE assignment_id = $1 AND faculty_user_id = $2 AND tenant_id = $3`,
+      [assignmentId, facultyUserId, tenantId],
+    );
+    if (!assignmentRows[0]) throw new NotFoundException('Assignment not found');
+    const assignment = assignmentRows[0];
+
+    return this.dataSource.query(
+      `SELECT DISTINCT u.user_id, u.name, u.official_email
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.user_id
+       JOIN roles r ON r.role_id = ur.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND u.user_id <> $2
+         AND lower(r.role_name) IN ('faculty', 'hod', 'dean')
+         AND NOT EXISTS (
+           SELECT 1 FROM faculty_invigilation_assignments a
+           WHERE a.tenant_id = $1
+             AND a.faculty_user_id = u.user_id
+             AND a.exam_date = $3::date
+             AND COALESCE(a.session_label, '') = COALESCE($4, '')
+         )
+       ORDER BY u.name ASC
+       LIMIT 200`,
+      [
+        tenantId,
+        facultyUserId,
+        assignment.exam_date,
+        assignment.session_label ?? null,
+      ],
+    );
+  }
+
+  async listInvigilationSwaps(facultyUserId: string, tenantId: string) {
+    return this.dataSource.query(
+      `SELECT s.*,
+              a.exam_date, a.room, a.session_label, a.block_name,
+              req.name AS requester_name,
+              tgt.name AS target_name
+       FROM invigilation_duty_swaps s
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id
+       JOIN users req ON req.user_id = s.requester_faculty_user_id
+       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id
+       WHERE s.tenant_id = $1
+         AND s.deleted_at IS NULL
+         AND (s.requester_faculty_user_id = $2 OR s.target_faculty_user_id = $2)
+       ORDER BY s.created_at DESC`,
+      [tenantId, facultyUserId],
+    );
+  }
+
+  async requestInvigilationDutySwap(
+    facultyUserId: string,
+    tenantId: string,
+    assignmentId: string,
+    targetFacultyUserId: string,
+    reason: string,
+  ) {
+    if (!reason?.trim()) throw new BadRequestException('Reason is required');
+    if (!targetFacultyUserId)
+      throw new BadRequestException('Target faculty is required');
+    if (targetFacultyUserId === facultyUserId) {
+      throw new BadRequestException('Cannot swap a duty with yourself');
+    }
+
+    const assignmentRows = await this.dataSource.query(
+      `SELECT a.*, u.name AS requester_name
+       FROM faculty_invigilation_assignments a
+       JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.assignment_id = $1 AND a.faculty_user_id = $2 AND a.tenant_id = $3`,
+      [assignmentId, facultyUserId, tenantId],
+    );
+    const assignment = assignmentRows[0];
+    if (!assignment) throw new NotFoundException('Assignment not found');
+
+    const targetRows = await this.dataSource.query(
+      `SELECT u.user_id, u.name
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.user_id
+       JOIN roles r ON r.role_id = ur.role_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true
+         AND lower(r.role_name) IN ('faculty', 'hod', 'dean')
+       LIMIT 1`,
+      [targetFacultyUserId, tenantId],
+    );
+    if (!targetRows[0]) {
+      throw new BadRequestException('Target faculty is not eligible for swap');
+    }
+
+    const conflict = await this.dataSource.query(
+      `SELECT 1 FROM faculty_invigilation_assignments
+       WHERE tenant_id = $1 AND faculty_user_id = $2
+         AND exam_date = $3::date
+         AND COALESCE(session_label, '') = COALESCE($4, '')
+       LIMIT 1`,
+      [
+        tenantId,
+        targetFacultyUserId,
+        assignment.exam_date,
+        assignment.session_label ?? null,
+      ],
+    );
+    if (conflict[0]) {
+      throw new BadRequestException(
+        'Target faculty already has a duty in the same session',
+      );
+    }
+
+    const open = await this.dataSource.query(
+      `SELECT swap_id FROM invigilation_duty_swaps
+       WHERE tenant_id = $1 AND assignment_id = $2 AND deleted_at IS NULL
+         AND status IN ('PENDING_TARGET', 'PENDING_EXAM_CELL')
+       LIMIT 1`,
+      [tenantId, assignmentId],
+    );
+    if (open[0]) {
+      throw new BadRequestException(
+        'An open swap request already exists for this duty',
+      );
+    }
+
+    const inserted = await this.dataSource.query(
+      `INSERT INTO invigilation_duty_swaps
+         (tenant_id, assignment_id, requester_faculty_user_id, target_faculty_user_id, reason, status)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING_TARGET')
+       RETURNING *`,
+      [
+        tenantId,
+        assignmentId,
+        facultyUserId,
+        targetFacultyUserId,
+        reason.trim(),
+      ],
+    );
+    const swap = inserted[0];
+    await this.writeDutySwapAudit(
+      tenantId,
+      swap.swap_id,
+      facultyUserId,
+      'REQUESTED',
+      null,
+      'PENDING_TARGET',
+      { target_faculty_user_id: targetFacultyUserId, reason: reason.trim() },
+    );
+
+    this.notify.examDutySwapPeerRequest({
+      tenantId,
+      userId: targetFacultyUserId,
+      ...this.dutySwapNotifyBase({
+        ...swap,
+        requester_name: assignment.requester_name,
+        target_name: targetRows[0].name,
+        exam_date: assignment.exam_date,
+        room: assignment.room,
+        session_label: assignment.session_label,
+      }),
+    });
+
+    return {
+      ...swap,
+      exam_date: assignment.exam_date,
+      room: assignment.room,
+      session_label: assignment.session_label,
+      requester_name: assignment.requester_name,
+      target_name: targetRows[0].name,
+    };
+  }
+
+  async respondInvigilationDutySwap(
+    facultyUserId: string,
+    tenantId: string,
+    swapId: string,
+    accept: boolean,
+    comment?: string,
+  ) {
+    const rows = await this.dataSource.query(
+      `SELECT s.*,
+              a.exam_date, a.room, a.session_label,
+              req.name AS requester_name,
+              tgt.name AS target_name
+       FROM invigilation_duty_swaps s
+       JOIN faculty_invigilation_assignments a ON a.assignment_id = s.assignment_id
+       JOIN users req ON req.user_id = s.requester_faculty_user_id
+       JOIN users tgt ON tgt.user_id = s.target_faculty_user_id
+       WHERE s.swap_id = $1 AND s.tenant_id = $2 AND s.deleted_at IS NULL`,
+      [swapId, tenantId],
+    );
+    const swap = rows[0];
+    if (!swap) throw new NotFoundException('Swap request not found');
+    if (swap.target_faculty_user_id !== facultyUserId) {
+      throw new ForbiddenException('Only the requested faculty can respond');
+    }
+    if (swap.status !== 'PENDING_TARGET') {
+      throw new BadRequestException('Swap request is no longer awaiting you');
+    }
+
+    const nextStatus = accept ? 'PENDING_EXAM_CELL' : 'REJECTED_BY_TARGET';
+    const updated = await this.dataSource.query(
+      `UPDATE invigilation_duty_swaps
+       SET status = $1,
+           target_comment = $2,
+           target_responded_at = NOW(),
+           updated_at = NOW()
+       WHERE swap_id = $3
+       RETURNING *`,
+      [nextStatus, comment?.trim() || null, swapId],
+    );
+
+    await this.writeDutySwapAudit(
+      tenantId,
+      swapId,
+      facultyUserId,
+      accept ? 'TARGET_ACCEPTED' : 'TARGET_REJECTED',
+      'PENDING_TARGET',
+      nextStatus,
+      { comment: comment?.trim() || null },
+    );
+
+    const base = this.dutySwapNotifyBase(swap);
+    if (!accept) {
+      this.notify.examDutySwapPeerRejected({
+        tenantId,
+        userId: swap.requester_faculty_user_id,
+        ...base,
+        comment: comment?.trim() || null,
+      });
+    } else {
+      const officers = await this.dataSource.query<Array<{ user_id: string }>>(
+        `SELECT DISTINCT u.user_id
+         FROM users u
+         JOIN user_roles ur ON ur.user_id = u.user_id
+         JOIN roles r ON r.role_id = ur.role_id
+         WHERE u.tenant_id = $1
+           AND u.is_active = true
+           AND lower(r.role_name) IN ('examcell', 'examadmin', 'deputycoe', 'superadmin')`,
+        [tenantId],
+      );
+      for (const officer of officers) {
+        this.notify.examDutySwapExamCellPending({
+          tenantId,
+          userId: officer.user_id,
+          ...base,
+        });
+      }
+      this.notify.examDutySwapExamCellPending({
+        tenantId,
+        userId: swap.requester_faculty_user_id,
+        ...base,
+        title: 'Duty swap sent to Exam Cell',
+        message: `${swap.target_name} accepted your swap. Exam Cell approval is pending.`,
+        actionLink: '/faculty/invigilation',
+      });
+    }
+
+    return { ...updated[0], ...base, target_name: swap.target_name };
+  }
+
+  async cancelInvigilationDutySwap(
+    facultyUserId: string,
+    tenantId: string,
+    swapId: string,
+  ) {
+    const rows = await this.dataSource.query(
+      `SELECT * FROM invigilation_duty_swaps
+       WHERE swap_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [swapId, tenantId],
+    );
+    const swap = rows[0];
+    if (!swap) throw new NotFoundException('Swap request not found');
+    if (swap.requester_faculty_user_id !== facultyUserId) {
+      throw new ForbiddenException('Only the requester can cancel this swap');
+    }
+    if (!['PENDING_TARGET', 'PENDING_EXAM_CELL'].includes(swap.status)) {
+      throw new BadRequestException('Swap request cannot be cancelled');
+    }
+
+    const updated = await this.dataSource.query(
+      `UPDATE invigilation_duty_swaps
+       SET status = 'CANCELLED', updated_at = NOW()
+       WHERE swap_id = $1
+       RETURNING *`,
+      [swapId],
+    );
+    await this.writeDutySwapAudit(
+      tenantId,
+      swapId,
+      facultyUserId,
+      'CANCELLED',
+      swap.status,
+      'CANCELLED',
+    );
+    return updated[0];
   }
 
   async assignProjectGuide(
@@ -1783,6 +2300,16 @@ export class FacultyWorkspacesService {
     query?: string,
     limit = 25,
   ) {
+    const isUuid = (value: unknown) =>
+      typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.trim(),
+      );
+
+    if (!isUuid(courseId)) {
+      throw new BadRequestException('Invalid courseId');
+    }
+
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
     const params: unknown[] = [tenantId, facultyUserId, courseId];
@@ -1848,6 +2375,21 @@ export class FacultyWorkspacesService {
     courseId: string,
     studentUserId: string,
   ) {
+    const isUuid = (value: unknown) =>
+      typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.trim(),
+      );
+
+    if (!isUuid(courseId)) {
+      throw new BadRequestException('Invalid courseId');
+    }
+    if (!isUuid(studentUserId)) {
+      throw new BadRequestException(
+        'Invalid studentUserId — demo/smoke student IDs cannot be loaded from the database',
+      );
+    }
+
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
 
     const [
@@ -2396,6 +2938,34 @@ export class FacultyWorkspacesService {
       ],
     );
     return rows[0];
+  }
+
+  private async notifyMarksPublishedToStudents(
+    tenantId: string,
+    courseId: string,
+    courseName: string,
+    examType: string,
+  ): Promise<number> {
+    try {
+      const enrolled = await this.dataSource.query(
+        `SELECT student_user_id FROM student_course_enrollments
+         WHERE tenant_id = $1 AND course_id = $2 AND status = 'ENROLLED'`,
+        [tenantId, courseId],
+      );
+      let count = 0;
+      for (const row of enrolled as Array<{ student_user_id: string }>) {
+        this.notify.marksPublished({
+          tenantId,
+          userId: row.student_user_id,
+          courseName,
+          examType,
+        });
+        count += 1;
+      }
+      return count;
+    } catch {
+      return 0;
+    }
   }
 
   private async assertFacultyOwnsCourse(

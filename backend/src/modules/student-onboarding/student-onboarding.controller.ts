@@ -30,7 +30,12 @@ import {
   STUDENT_ONBOARDING_DOC_TYPES,
 } from './onboarding-portal.util';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string; role_name?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  role_name?: string;
+};
 
 function auditActor(req: {
   user: AuthUser;
@@ -371,15 +376,29 @@ export class StudentVerificationAdminController {
 
   @Post(':targetUserId/approve')
   approve(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
   ) {
-    return this.onboarding.approve(this.tenant(req), targetUserId, auditActor(req));
+    return this.onboarding.approve(
+      this.tenant(req),
+      targetUserId,
+      auditActor(req),
+    );
   }
 
   @Post(':targetUserId/reject')
   reject(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
     @Body() body: { remarks: string },
   ) {

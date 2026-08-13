@@ -75,6 +75,9 @@ export class FalconNotification extends BaseSoftDeleteEntity {
   @Column({ type: 'boolean', default: false })
   is_read: boolean;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  read_at: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 }

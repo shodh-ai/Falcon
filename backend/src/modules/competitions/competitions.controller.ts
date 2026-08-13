@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -16,19 +25,36 @@ export class CompetitionsController {
   }
 
   @Get()
-  @Roles('Student', 'CompetitionAdmin', 'COO', 'SuperAdmin', 'CampusAdmin', 'Incubation_Admin')
+  @Roles(
+    'Student',
+    'CompetitionAdmin',
+    'COO',
+    'SuperAdmin',
+    'CampusAdmin',
+    'Incubation_Admin',
+  )
   list(@Req() req: { user: AuthUser }) {
     return this.competitions.listCompetitions(this.tenant(req));
   }
 
   @Get('entries')
   @Roles('CompetitionAdmin', 'COO', 'SuperAdmin', 'CampusAdmin', 'Student')
-  entries(@Req() req: { user: AuthUser }, @Query('competition_id') competitionId?: string) {
+  entries(
+    @Req() req: { user: AuthUser },
+    @Query('competition_id') competitionId?: string,
+  ) {
     return this.competitions.listEntries(this.tenant(req), competitionId);
   }
 
   @Get('funnel')
-  @Roles('CompetitionAdmin', 'COO', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin')
+  @Roles(
+    'CompetitionAdmin',
+    'COO',
+    'Chairman',
+    'President',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   funnel(@Req() req: { user: AuthUser }) {
     return this.competitions.funnelStats(this.tenant(req));
   }
@@ -45,7 +71,11 @@ export class CompetitionsController {
       whitepaper_url?: string;
     },
   ) {
-    return this.competitions.submitEntry(this.tenant(req), req.user.user_id, body);
+    return this.competitions.submitEntry(
+      this.tenant(req),
+      req.user.user_id,
+      body,
+    );
   }
 
   @Post('entries/:id/advance')
@@ -55,7 +85,12 @@ export class CompetitionsController {
     @Param('id') id: string,
     @Body() body: { stage: string; status?: string },
   ) {
-    return this.competitions.advanceEntry(this.tenant(req), id, body.stage, body.status);
+    return this.competitions.advanceEntry(
+      this.tenant(req),
+      id,
+      body.stage,
+      body.status,
+    );
   }
 
   @Post('entries/:id/golden-ticket')
@@ -86,7 +121,14 @@ export class CompetitionsController {
   }
 
   @Get('bounties')
-  @Roles('Student', 'CompetitionAdmin', 'Accountant', 'COO', 'SuperAdmin', 'CampusAdmin')
+  @Roles(
+    'Student',
+    'CompetitionAdmin',
+    'Accountant',
+    'COO',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
   bounties(@Req() req: { user: AuthUser }) {
     return this.competitions.listBounties(this.tenant(req));
   }
@@ -94,7 +136,11 @@ export class CompetitionsController {
   @Post('bounties/:id/claim')
   @Roles('Student', 'SuperAdmin')
   claim(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.competitions.claimBounty(this.tenant(req), id, req.user.user_id);
+    return this.competitions.claimBounty(
+      this.tenant(req),
+      id,
+      req.user.user_id,
+    );
   }
 
   @Post('bounties/:id/pay')

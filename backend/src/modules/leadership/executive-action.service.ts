@@ -183,7 +183,8 @@ export class ExecutiveActionService {
          WHERE tenant_id = $1 AND request_id = $2`,
         [tid, dto.id],
       );
-      if (!existing[0]) throw new NotFoundException('Budget expansion request not found');
+      if (!existing[0])
+        throw new NotFoundException('Budget expansion request not found');
 
       await this.db.query(
         `UPDATE fin_budget_expansion_requests
@@ -203,7 +204,9 @@ export class ExecutiveActionService {
           tenantId: tid,
           userId: String(row.requested_by),
           ...this.execNotify(
-            dto.approve ? 'Budget expansion approved' : 'Budget expansion rejected',
+            dto.approve
+              ? 'Budget expansion approved'
+              : 'Budget expansion rejected',
             `${row.reason ?? 'Budget request'} was ${status.toLowerCase()} by executive review.`,
             '/finance/dashboard',
           ),
@@ -236,7 +239,9 @@ export class ExecutiveActionService {
         tenantId: tid,
         userId: reviewerId,
         module: 'fin_budget_expansion_requests',
-        action: dto.approve ? 'PRESIDENT_BUDGET_APPROVED' : 'PRESIDENT_BUDGET_REJECTED',
+        action: dto.approve
+          ? 'PRESIDENT_BUDGET_APPROVED'
+          : 'PRESIDENT_BUDGET_REJECTED',
         recordId: dto.id,
         newValue: { status, note: dto.note ?? null },
       });

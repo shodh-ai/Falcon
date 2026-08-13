@@ -684,7 +684,10 @@ export class StudentOnboardingService {
           action: 'VERIFY_REJECT',
           recordId: targetUserId,
           oldValue: { onboarding_status: status },
-          newValue: { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason },
+          newValue: {
+            onboarding_status: 'PENDING_DOCUMENTS',
+            admin_remarks: reason,
+          },
           ip: actor.ip,
           sessionId: actor.sessionId,
         });

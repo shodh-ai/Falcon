@@ -97,10 +97,9 @@ export class ResearchService {
     if (!body.title?.trim() || !(body.requested_amount > 0)) {
       throw new BadRequestException('title and requested_amount required');
     }
-    const cats =
-      body.allowed_expense_categories?.length
-        ? body.allowed_expense_categories.map((c) => c.toUpperCase())
-        : ['EQUIPMENT', 'CONSUMABLES', 'TRAVEL', 'MANPOWER', 'CONTINGENCY'];
+    const cats = body.allowed_expense_categories?.length
+      ? body.allowed_expense_categories.map((c) => c.toUpperCase())
+      : ['EQUIPMENT', 'CONSUMABLES', 'TRAVEL', 'MANPOWER', 'CONTINGENCY'];
     const rows = await this.db.query(
       `INSERT INTO research_grant_proposals (
          tenant_id, pi_user_id, title, agency, requested_amount, abstract,
@@ -120,7 +119,11 @@ export class ResearchService {
     return rows[0];
   }
 
-  async submitProposal(tenantId: string | undefined, userId: string, proposalId: string) {
+  async submitProposal(
+    tenantId: string | undefined,
+    userId: string,
+    proposalId: string,
+  ) {
     const tid = this.tenant(tenantId);
     const rows = await this.db.query(
       `UPDATE research_grant_proposals
@@ -258,14 +261,18 @@ export class ResearchService {
     const check = assertGrantSpendAllowed({
       grantStatus: g.status,
       availableAmount: Number(
-        g.available_amount ?? Number(g.sanctioned_amount) - Number(g.utilized_amount),
+        g.available_amount ??
+          Number(g.sanctioned_amount) - Number(g.utilized_amount),
       ),
       requestedAmount: amount,
       expenseCategory,
       allowedCategories: g.allowed_expense_categories || [],
     });
     if (!check.ok) {
-      throw new BadRequestException({ message: check.message, code: check.code });
+      throw new BadRequestException({
+        message: check.message,
+        code: check.code,
+      });
     }
     return g;
   }

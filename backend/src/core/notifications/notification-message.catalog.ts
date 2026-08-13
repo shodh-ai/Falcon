@@ -3,8 +3,11 @@ import type {
   AlumniConversionRequestedPayload,
   OnboardingVerificationRequestedPayload,
   AttendanceWarningPayload,
+  AssignmentPublishedPayload,
+  CourseAnnouncementPayload,
   CourseMaterialAddedPayload,
   LiveClassScheduledPayload,
+  WeeklyTestPublishedPayload,
   EventProposedPayload,
   EventTierPayload,
   EventRejectedPayload,
@@ -30,6 +33,8 @@ import type {
   TransportBusApproachingPayload,
   WorkflowApprovalRequiredPayload,
   VenueBookingPayload,
+  ExamDutySwapPayload,
+  GradeChangePayload,
 } from './notification.events';
 import {
   applyNotificationOverrides,
@@ -137,6 +142,116 @@ export function courseMaterialAddedMessage(
       metadata: {
         courseId: payload.courseId,
         materialTitle: payload.materialTitle,
+      },
+    },
+    overrides,
+  );
+}
+
+export function assignmentPublishedMessage(
+  payload: AssignmentPublishedPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const due = new Date(payload.dueDate);
+  const dueLabel = Number.isNaN(due.getTime())
+    ? payload.dueDate
+    : due.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+  const subject = payload.courseCode
+    ? `${payload.courseCode} — ${payload.courseName}`
+    : payload.courseName;
+
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: 'New Assignment Uploaded',
+      message: [
+        'Your faculty has uploaded a new assignment.',
+        '',
+        `Subject: ${subject}`,
+        `Faculty: ${payload.facultyName}`,
+        `Assignment: ${payload.assignmentTitle}`,
+        `Due Date: ${dueLabel}`,
+        `Marks: ${payload.maxMarks}`,
+        '',
+        'Click to view assignment.',
+      ].join('\n'),
+      actionLink:
+        payload.actionLink ??
+        `/student/courses/${payload.courseId}?tab=assignments`,
+      actionLabel: 'View assignment',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: {
+        assignmentId: payload.assignmentId,
+        courseId: payload.courseId,
+        assignmentTitle: payload.assignmentTitle,
+        dueDate: payload.dueDate,
+        maxMarks: payload.maxMarks,
+        facultyName: payload.facultyName,
+      },
+    },
+    overrides,
+  );
+}
+
+export function weeklyTestPublishedMessage(
+  payload: WeeklyTestPublishedPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const start = new Date(payload.startTime);
+  const when = Number.isNaN(start.getTime())
+    ? payload.startTime
+    : start.toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
+  const subject = payload.courseCode
+    ? `${payload.courseCode} — ${payload.courseName}`
+    : payload.courseName;
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: `Weekly test scheduled — ${payload.testType}`,
+      message: `${payload.testType} for ${subject} opens at ${when}. Attempt it from your Weekly Tests page before the deadline.`,
+      actionLink: payload.actionLink ?? '/student/weekly-tests',
+      actionLabel: 'Open weekly tests',
+      severity: 'info',
+      intent: 'action_required',
+      metadata: {
+        testId: payload.testId,
+        courseId: payload.courseId,
+        testType: payload.testType,
+        startTime: payload.startTime,
+        endTime: payload.endTime,
+      },
+    },
+    overrides,
+  );
+}
+
+export function courseAnnouncementMessage(
+  payload: CourseAnnouncementPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: `Course announcement — ${payload.courseCode ?? payload.courseName}`,
+      message: `${payload.title}\n\n${payload.bodyPreview}`,
+      actionLink:
+        payload.actionLink ??
+        `/student/courses/${payload.courseId}?tab=announcements`,
+      actionLabel: 'View announcement',
+      severity: 'info',
+      intent: 'info',
+      metadata: {
+        announcementId: payload.announcementId,
+        courseId: payload.courseId,
+        title: payload.title,
       },
     },
     overrides,
@@ -1234,6 +1349,171 @@ export function certificateStatusUpdatedMessage(
       actionLabel: 'View certificates',
       severity: 'info',
       intent: 'status_update',
+    },
+    overrides,
+  );
+}
+
+function examDutySwapMeta(payload: ExamDutySwapPayload) {
+  return {
+    swapId: payload.swapId,
+    assignmentId: payload.assignmentId,
+    examDate: payload.examDate,
+    room: payload.room,
+    sessionLabel: payload.sessionLabel,
+    decision: payload.decision,
+  };
+}
+
+export function examDutySwapPeerRequestMessage(
+  payload: ExamDutySwapPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const session = payload.sessionLabel ? ` (${payload.sessionLabel})` : '';
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: 'Exam duty swap request',
+      message: `${payload.requesterName} asked you to take their invigilation duty on ${payload.examDate} in room ${payload.room}${session}. Accept or reject in Exam Duty.`,
+      actionLink: '/faculty/invigilation',
+      actionLabel: 'Review swap',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: examDutySwapMeta(payload),
+    },
+    overrides,
+  );
+}
+
+export function examDutySwapPeerRejectedMessage(
+  payload: ExamDutySwapPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: 'Duty swap declined by peer',
+      message: `${payload.targetName ?? 'The requested faculty'} declined your duty swap for ${payload.examDate} · Room ${payload.room}.`,
+      actionLink: '/faculty/invigilation',
+      actionLabel: 'View duties',
+      severity: 'info',
+      intent: 'status_update',
+      metadata: examDutySwapMeta(payload),
+    },
+    overrides,
+  );
+}
+
+export function examDutySwapExamCellPendingMessage(
+  payload: ExamDutySwapPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: 'Duty swap awaiting Exam Cell',
+      message: `${payload.requesterName} and ${payload.targetName ?? 'a faculty member'} agreed to swap invigilation on ${payload.examDate} · Room ${payload.room}. Approve or reject in Invigilation.`,
+      actionLink: '/exam-cell/invigilation',
+      actionLabel: 'Review swap',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: examDutySwapMeta(payload),
+    },
+    overrides,
+  );
+}
+
+export function examDutySwapResolvedMessage(
+  payload: ExamDutySwapPayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const approved = payload.decision === 'APPROVED';
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: approved
+        ? 'Duty swap approved'
+        : 'Duty swap rejected by Exam Cell',
+      message: approved
+        ? `Exam Cell approved the invigilation swap for ${payload.examDate} · Room ${payload.room}. Your duty roster has been updated.`
+        : `Exam Cell rejected the invigilation swap for ${payload.examDate} · Room ${payload.room}${payload.comment ? `: ${payload.comment}` : '.'}`,
+      actionLink: '/faculty/invigilation',
+      actionLabel: 'View duties',
+      severity: approved ? 'success' : 'warning',
+      intent: 'status_update',
+      metadata: examDutySwapMeta(payload),
+    },
+    overrides,
+  );
+}
+
+function gradeChangeMeta(payload: GradeChangePayload) {
+  return {
+    changeId: payload.changeId,
+    courseCode: payload.courseCode,
+    fromGrade: payload.fromGrade,
+    toGrade: payload.toGrade,
+    decision: payload.decision,
+  };
+}
+
+export function gradeChangeHodPendingMessage(
+  payload: GradeChangePayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const student = payload.studentName ? ` for ${payload.studentName}` : '';
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: 'Grade change awaiting HOD',
+      message: `${payload.requesterName} requested ${payload.courseCode}: ${payload.fromGrade}→${payload.toGrade}${student}. Approve or reject in Grade Change DOFA.`,
+      actionLink: '/hod/approvals/grade-change',
+      actionLabel: 'Review request',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: gradeChangeMeta(payload),
+    },
+    overrides,
+  );
+}
+
+export function gradeChangeCoePendingMessage(
+  payload: GradeChangePayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const student = payload.studentName ? ` for ${payload.studentName}` : '';
+  return applyNotificationOverrides(
+    {
+      category: 'EXAMS',
+      title: 'Grade change awaiting Exam Cell',
+      message: `HOD approved ${payload.courseCode}: ${payload.fromGrade}→${payload.toGrade}${student} (from ${payload.requesterName}). Apply or reject in Grade Change DOFA.`,
+      actionLink: '/exam-cell/approvals/grade-change',
+      actionLabel: 'Apply grade',
+      severity: 'warning',
+      intent: 'action_required',
+      metadata: gradeChangeMeta(payload),
+    },
+    overrides,
+  );
+}
+
+export function gradeChangeResolvedMessage(
+  payload: GradeChangePayload,
+  overrides?: NotificationMessageOverrides,
+): NotificationMessage {
+  const applied = payload.decision === 'APPLIED';
+  return applyNotificationOverrides(
+    {
+      category: 'ACADEMICS',
+      title: applied ? 'Grade change applied' : 'Grade change rejected',
+      message: applied
+        ? `Exam Cell applied ${payload.courseCode}: ${payload.fromGrade}→${payload.toGrade}.`
+        : `Your grade change for ${payload.courseCode}: ${payload.fromGrade}→${payload.toGrade} was rejected.`,
+      actionLink: '/faculty/grade-change',
+      actionLabel: 'View requests',
+      severity: applied ? 'success' : 'warning',
+      intent: 'status_update',
+      metadata: gradeChangeMeta(payload),
     },
     overrides,
   );

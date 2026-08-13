@@ -50,7 +50,14 @@ export class AcademicRndController {
   }
 
   @Get('config/active')
-  @Roles('Student', 'Faculty', 'IQAC', 'Dean', 'SuperAdmin', ...FINANCE_RND_BUDGET_ROLES)
+  @Roles(
+    'Student',
+    'Faculty',
+    'IQAC',
+    'Dean',
+    'SuperAdmin',
+    ...FINANCE_RND_BUDGET_ROLES,
+  )
   activeConfig(@Req() req: { user: AuthUser }) {
     return this.rnd.getActiveConfig(this.tenant(req));
   }

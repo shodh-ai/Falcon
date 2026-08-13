@@ -9,6 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { useAuthedApi } from '@/lib/api';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoChatMentees, getFacultyPortalDemoPack } from '@/lib/mock/faculty-portal-demo';
 
 type MenteeSummary = {
   student_user_id: string;
@@ -41,10 +47,32 @@ export function MentorshipChatMessenger() {
     setLoadingList(true);
     try {
       const data = await api.get<MenteeSummary[]>('/api/academics/proctor/chat/mentees');
-      setMentees(data);
-      setSelectedId((current) => current ?? data[0]?.student_user_id ?? null);
+      const resolved = withFacultyDemoFallback(
+        data,
+        facultyDemoChatMentees().map((m) => ({
+          ...m,
+          last_message_at: null,
+          last_message_preview: null,
+        })),
+        isEmptyArray,
+      );
+      setMentees(resolved);
+      setSelectedId((current) => current ?? resolved[0]?.student_user_id ?? null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load mentees');
+      const resolved = withFacultyDemoFallback(
+        [],
+        facultyDemoChatMentees().map((m) => ({
+          ...m,
+          last_message_at: null,
+          last_message_preview: null,
+        })),
+        isEmptyArray,
+      );
+      setMentees(resolved);
+      setSelectedId((current) => current ?? resolved[0]?.student_user_id ?? null);
+      if (resolved.length === 0) {
+        toast.error(err instanceof Error ? err.message : 'Failed to load mentees');
+      }
     } finally {
       setLoadingList(false);
     }
@@ -57,11 +85,28 @@ export function MentorshipChatMessenger() {
         const data = await api.get<ChatMessage[]>(
           `/api/academics/proctor/chat/thread/${encodeURIComponent(studentUserId)}`,
         );
-        setMessages(data);
+        const demoThread =
+          getFacultyPortalDemoPack().messages[1]?.messages.map((m, i) => ({
+            message_id: m.message_id || `demo-chat-${i}`,
+            sender_type: (m.sender === 'self' ? 'FACULTY' : 'STUDENT') as 'STUDENT' | 'FACULTY',
+            message_text: m.body,
+            sent_at: m.sent_at,
+          })) ?? [];
+        setMessages(withFacultyDemoFallback(data, demoThread, isEmptyArray));
         void loadMentees();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to load chat');
-        setMessages([]);
+        const demoThread =
+          getFacultyPortalDemoPack().messages[1]?.messages.map((m, i) => ({
+            message_id: m.message_id || `demo-chat-${i}`,
+            sender_type: (m.sender === 'self' ? 'FACULTY' : 'STUDENT') as 'STUDENT' | 'FACULTY',
+            message_text: m.body,
+            sent_at: m.sent_at,
+          })) ?? [];
+        const resolved = withFacultyDemoFallback([], demoThread, isEmptyArray);
+        setMessages(resolved);
+        if (resolved.length === 0) {
+          toast.error(err instanceof Error ? err.message : 'Failed to load chat');
+        }
       } finally {
         setLoadingThread(false);
       }
@@ -84,6 +129,20 @@ export function MentorshipChatMessenger() {
   async function sendMessage() {
     const text = draft.trim();
     if (!text || !selectedId) return;
+    if (isFacultyDemoSmokeId(selectedId)) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          message_id: `msg-demo-${Date.now()}`,
+          sender_type: 'FACULTY',
+          message_text: text,
+          sent_at: new Date().toISOString(),
+        },
+      ]);
+      setDraft('');
+      toast.success('Message sent (demo)');
+      return;
+    }
     setSending(true);
     try {
       await api.post('/api/academics/proctor/chat', {

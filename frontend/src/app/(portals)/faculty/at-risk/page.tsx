@@ -13,6 +13,8 @@ import {
   FacultyPageLoading,
   FacultyMetricChip,
 } from '@/components/faculty';
+import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoAtRiskStudents } from '@/lib/mock/faculty-portal-demo';
 
 type AtRiskStudent = {
   user_id: string;
@@ -38,13 +40,29 @@ export default function FacultyAtRiskPage() {
   useEffect(() => {
     api
       .get<AtRiskStudent[]>('/api/academics/early-warning/dashboard')
-      .then(setStudents)
-      .catch((e) => toast.error(e.message || 'Failed to load at-risk students'))
+      .then((rows) =>
+        setStudents(
+          withFacultyDemoFallback(rows, facultyDemoAtRiskStudents() as AtRiskStudent[], isEmptyArray),
+        ),
+      )
+      .catch((e) => {
+        const demo = withFacultyDemoFallback(
+          [],
+          facultyDemoAtRiskStudents() as AtRiskStudent[],
+          isEmptyArray,
+        );
+        setStudents(demo);
+        if (demo.length === 0) toast.error(e.message || 'Failed to load at-risk students');
+      })
       .finally(() => setLoading(false));
   }, [api]);
 
   const handleScheduleMeeting = async (student: AtRiskStudent) => {
     try {
+      if (isFacultyDemoSmokeId(student.user_id)) {
+        toast.success(`Meeting request sent to ${student.name} (demo)`);
+        return;
+      }
       await api.post(`/api/academics/early-warning/${student.user_id}/intervention`);
       toast.success(`Meeting request sent to ${student.name}`);
     } catch (error: unknown) {
@@ -63,7 +81,7 @@ export default function FacultyAtRiskPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="At-Risk Students Early Warning"
+        title="Student Analytics"
         description="Students below 75% attendance or failing in assessments across your active batches."
         meta={
           <>
@@ -111,7 +129,7 @@ export default function FacultyAtRiskPage() {
             header: 'Risk Factors',
             render: (r) => (
               <div className="flex flex-wrap gap-1">
-                {r.risk_factors.map((f, i) => (
+                {(r.risk_factors ?? []).map((f, i) => (
                   <span
                     key={i}
                     className="rounded border border-red-100 bg-red-50 px-2 py-1 text-xs text-red-700"
@@ -119,6 +137,9 @@ export default function FacultyAtRiskPage() {
                     {f}
                   </span>
                 ))}
+                {(r.risk_factors ?? []).length === 0 ? (
+                  <span className="text-xs text-muted-foreground">—</span>
+                ) : null}
               </div>
             ),
           },

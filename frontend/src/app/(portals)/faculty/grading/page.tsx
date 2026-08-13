@@ -25,6 +25,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuthedApi } from '@/lib/api';
+import { isEmptyArray, isFacultyDemoEntityId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoUnifiedMarks } from '@/lib/mock/faculty-portal-demo';
 import {
   GRADING_COMPONENT_CATALOG,
   GRADING_COMPONENT_GROUPS,
@@ -137,10 +139,26 @@ export default function FacultyGradingPage() {
 
   const reloadMarks = useCallback(async () => {
     if (!courseId) return;
-    const data = await api.get<UnifiedMarkRow[]>(
-      `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
-    );
-    setRows(data);
+    try {
+      const data = await api.get<UnifiedMarkRow[]>(
+        `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
+      );
+      setRows(
+        withFacultyDemoFallback(
+          data,
+          facultyDemoUnifiedMarks(courseId) as UnifiedMarkRow[],
+          isEmptyArray,
+        ),
+      );
+    } catch {
+      setRows(
+        withFacultyDemoFallback(
+          [],
+          facultyDemoUnifiedMarks(courseId) as UnifiedMarkRow[],
+          isEmptyArray,
+        ),
+      );
+    }
   }, [api, courseId]);
 
   useEffect(() => {
@@ -158,14 +176,27 @@ export default function FacultyGradingPage() {
           `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/unified-marks`,
         );
         if (!cancelled) {
-          setRows(data);
+          setRows(
+            withFacultyDemoFallback(
+              data,
+              facultyDemoUnifiedMarks(courseId) as UnifiedMarkRow[],
+              isEmptyArray,
+            ),
+          );
         }
       } catch (e) {
         if (!cancelled) {
-          const msg = e instanceof Error ? e.message : 'Failed to load marks';
-          setRosterError(msg);
-          setRows([]);
-          toast.error(msg);
+          const demo = withFacultyDemoFallback(
+            [],
+            facultyDemoUnifiedMarks(courseId) as UnifiedMarkRow[],
+            isEmptyArray,
+          );
+          setRows(demo);
+          if (demo.length === 0) {
+            const msg = e instanceof Error ? e.message : 'Failed to load marks';
+            setRosterError(msg);
+            toast.error(msg);
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -220,6 +251,10 @@ export default function FacultyGradingPage() {
 
   async function saveDraft(options?: { silent?: boolean }): Promise<boolean> {
     if (!courseId) return false;
+    if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
+      if (!options?.silent) toast.success('Draft saved successfully (demo)');
+      return true;
+    }
 
     const manualColumns = activeColumns.filter((col) => !col.readOnly);
     const entriesByExamType: Record<
@@ -281,18 +316,30 @@ export default function FacultyGradingPage() {
 
   async function publishAll() {
     if (!courseId) return;
+    if (isFacultyDemoEntityId(courseId) || rows.some((r) => isFacultyDemoEntityId(r.student_user_id))) {
+      toast.success('Marks published to students (demo)');
+      return;
+    }
     setSaving(true);
     try {
       await saveDraft({ silent: true });
 
-      const result = await api.post<{ published: number }>(
+      const result = await api.post<{
+        published: number;
+        notified_count?: number;
+        status?: string;
+        message?: string;
+      }>(
         `/api/academics/faculty/workspaces/course/${encodeURIComponent(courseId)}/publish-all`,
       );
 
       if ((result.published ?? 0) === 0) {
         toast.warning('No marks were published.');
       } else {
-        toast.success('Published marks for course successfully.');
+        const notified = Number(result.notified_count ?? 0);
+        toast.success(
+          `Published marks for course successfully. Notifications sent to ${notified} student${notified === 1 ? '' : 's'}.`,
+        );
       }
 
       await reloadMarks();
@@ -313,7 +360,8 @@ export default function FacultyGradingPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Select a course and grading components, then enter marks for manual assessments."
+        title="Exams & Grades"
+        description="Conduct examinations and publish grades."
         meta={
           courseId ? (
             <>

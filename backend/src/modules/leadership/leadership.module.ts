@@ -49,4 +49,3 @@ import { OwnerAccessGuard } from '../../common/guards/owner-access.guard';
   ],
 })
 export class LeadershipModule {}
-

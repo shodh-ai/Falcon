@@ -189,14 +189,7 @@ export const STUDENT_CAMPUS_KNOWLEDGE: CampusKnowledgeArticle[] = [
   },
   {
     id: 'safety',
-    keywords: [
-      'ragging',
-      'harassment',
-      'posh',
-      'safety',
-      'bullying',
-      'sexual',
-    ],
+    keywords: ['ragging', 'harassment', 'posh', 'safety', 'bullying', 'sexual'],
     href: '/student/safety-concerns',
     answer:
       'For ragging, POSH, or safety concerns, use Safety Concerns (not the general helpdesk). Reports escalate to the designated committee. You can also contact campus security / anti-ragging helpline listed in University Policies.',
@@ -273,9 +266,21 @@ export function matchCampusKnowledge(
 
   // Soft phrase boosts for common natural-language questions
   const phraseBoosts: Array<{ re: RegExp; id: string; pts: number }> = [
-    { re: /minimum\s+attendance|attendance\s+required|how\s+much\s+attendance/, id: 'attendance', pts: 4 },
-    { re: /sgpa|cgpa|grade\s*point|difference\s+between\s+s/, id: 'grades', pts: 4 },
-    { re: /pay\s+(my\s+)?fee|fee\s+payment|how\s+to\s+pay/, id: 'fees', pts: 4 },
+    {
+      re: /minimum\s+attendance|attendance\s+required|how\s+much\s+attendance/,
+      id: 'attendance',
+      pts: 4,
+    },
+    {
+      re: /sgpa|cgpa|grade\s*point|difference\s+between\s+s/,
+      id: 'grades',
+      pts: 4,
+    },
+    {
+      re: /pay\s+(my\s+)?fee|fee\s+payment|how\s+to\s+pay/,
+      id: 'fees',
+      pts: 4,
+    },
     { re: /admit\s*card|hall\s*ticket/, id: 'exams', pts: 4 },
     { re: /register\s+for|cbcs|elective/, id: 'registration', pts: 3 },
     { re: /raise\s+a?\s*ticket|help\s*desk|complaint/, id: 'helpdesk', pts: 3 },

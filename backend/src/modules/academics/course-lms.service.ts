@@ -1179,4 +1179,186 @@ export class CourseLmsService {
     );
     return material;
   }
+
+  async listAnnouncements(
+    tenantId: string,
+    courseId: string,
+    viewer: { userId: string; role: 'faculty' | 'student' },
+  ) {
+    if (viewer.role === 'faculty') {
+      await this.assertFacultyTeaches(courseId, viewer.userId, tenantId);
+    } else {
+      const enrollment = await this.enrollments.findOne({
+        where: {
+          tenant_id: tenantId,
+          course_id: courseId,
+          student_user_id: viewer.userId,
+          status: 'ENROLLED',
+        },
+      });
+      if (!enrollment) {
+        throw new ForbiddenException('You are not enrolled in this course');
+      }
+    }
+
+    return this.dataSource.query(
+      `SELECT a.announcement_id, a.course_id, a.faculty_user_id, a.title, a.body, a.created_at,
+              u.name AS faculty_name
+       FROM course_announcements a
+       JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1 AND a.course_id = $2 AND a.deleted_at IS NULL
+       ORDER BY a.created_at DESC`,
+      [tenantId, courseId],
+    );
+  }
+
+  async createAnnouncement(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    dto: { title?: string; body?: string },
+  ) {
+    await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    const title = dto.title?.trim();
+    const body = dto.body?.trim();
+    if (!title || !body) {
+      throw new BadRequestException('Title and body are required');
+    }
+
+    const rows = await this.dataSource.query(
+      `INSERT INTO course_announcements (tenant_id, course_id, faculty_user_id, title, body)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING announcement_id, course_id, faculty_user_id, title, body, created_at`,
+      [tenantId, courseId, facultyUserId, title, body],
+    );
+    const announcement = rows[0] as {
+      announcement_id: string;
+      title: string;
+      body: string;
+    };
+
+    const course = await this.courses.findOne({
+      where: { tenant_id: tenantId, course_id: courseId },
+    });
+    const enrolled = await this.enrollments.find({
+      where: { tenant_id: tenantId, course_id: courseId, status: 'ENROLLED' },
+      select: ['student_user_id'],
+    });
+    const preview =
+      body.length > 240 ? `${body.slice(0, 237).trimEnd()}...` : body;
+
+    for (const row of enrolled) {
+      this.notificationEmitter.courseAnnouncement({
+        tenantId,
+        userId: row.student_user_id,
+        courseId,
+        courseName: course?.course_name ?? 'Course',
+        courseCode: course?.course_code,
+        announcementId: announcement.announcement_id,
+        title: announcement.title,
+        bodyPreview: preview,
+      });
+    }
+
+    return { ...announcement, notified_count: enrolled.length };
+  }
+
+  async listQuestionBank(
+    facultyUserId: string,
+    tenantId: string,
+    courseId?: string,
+  ) {
+    if (courseId) {
+      await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    }
+    if (courseId) {
+      return this.dataSource.query(
+        `SELECT * FROM faculty_question_bank
+         WHERE tenant_id = $1 AND faculty_user_id = $2 AND deleted_at IS NULL
+           AND (course_id = $3 OR course_id IS NULL)
+         ORDER BY created_at DESC`,
+        [tenantId, facultyUserId, courseId],
+      );
+    }
+    return this.dataSource.query(
+      `SELECT * FROM faculty_question_bank
+       WHERE tenant_id = $1 AND faculty_user_id = $2 AND deleted_at IS NULL
+       ORDER BY created_at DESC`,
+      [tenantId, facultyUserId],
+    );
+  }
+
+  async createQuestionBankItem(
+    facultyUserId: string,
+    tenantId: string,
+    dto: {
+      course_id?: string;
+      question_text?: string;
+      option_a?: string;
+      option_b?: string;
+      option_c?: string;
+      option_d?: string;
+      correct_option?: string;
+      tags?: string;
+    },
+  ) {
+    if (dto.course_id) {
+      await this.assertFacultyTeaches(dto.course_id, facultyUserId, tenantId);
+    }
+    const questionText = dto.question_text?.trim();
+    const optionA = dto.option_a?.trim();
+    const optionB = dto.option_b?.trim();
+    const optionC = dto.option_c?.trim();
+    const optionD = dto.option_d?.trim();
+    const correct = (dto.correct_option ?? '').trim().toUpperCase();
+    if (
+      !questionText ||
+      !optionA ||
+      !optionB ||
+      !optionC ||
+      !optionD ||
+      !['A', 'B', 'C', 'D'].includes(correct)
+    ) {
+      throw new BadRequestException(
+        'Question, options A–D, and correct option (A–D) are required',
+      );
+    }
+
+    const rows = await this.dataSource.query(
+      `INSERT INTO faculty_question_bank (
+         tenant_id, faculty_user_id, course_id, question_text,
+         option_a, option_b, option_c, option_d, correct_option, tags
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [
+        tenantId,
+        facultyUserId,
+        dto.course_id ?? null,
+        questionText,
+        optionA,
+        optionB,
+        optionC,
+        optionD,
+        correct,
+        dto.tags?.trim() || null,
+      ],
+    );
+    return rows[0];
+  }
+
+  async deleteQuestionBankItem(
+    facultyUserId: string,
+    tenantId: string,
+    questionId: string,
+  ) {
+    const result = await this.dataSource.query(
+      `UPDATE faculty_question_bank
+       SET deleted_at = NOW()
+       WHERE question_id = $1 AND tenant_id = $2 AND faculty_user_id = $3 AND deleted_at IS NULL
+       RETURNING question_id`,
+      [questionId, tenantId, facultyUserId],
+    );
+    if (!result.length) throw new NotFoundException('Question not found');
+    return { deleted: true };
+  }
 }

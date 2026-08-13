@@ -6,6 +6,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { isFacultyDemoSmokeId } from '@/lib/faculty-demo-mode';
 
 type Lecture = {
   timetable_id: string;
@@ -60,11 +61,22 @@ export function ProxyTeachingDialog({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    const selected = lectures.filter(
+      (lec) => selections[`${lec.timetable_id}-${lec.lecture_date}`],
+    );
+    if (!selected.length) {
+      toast.error('Select at least one proxy faculty for a lecture before submitting.');
+      return;
+    }
+    if (selected.some((lec) => isFacultyDemoSmokeId(lec.timetable_id))) {
+      toast.success('Alternate teaching arrangements submitted for HOD approval (demo)');
+      onDone?.();
+      return;
+    }
     setSaving(true);
     try {
-      for (const lec of lectures) {
+      for (const lec of selected) {
         const proxyId = selections[`${lec.timetable_id}-${lec.lecture_date}`];
-        if (!proxyId) continue;
         await api.post('/api/academics/faculty/proxy-requests', {
           timetable_id: lec.timetable_id,
           proxy_faculty_id: proxyId,

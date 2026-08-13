@@ -544,7 +544,24 @@ export function StudentEnterpriseDashboard() {
   const feeClear =
     Boolean(ledger?.gates?.finance_clear) ||
     (!ledger?.gates?.admit_card_locked && pendingFee <= 0);
-  const pendingAssignments = assignments.filter((a) => a.status !== 'Submitted').length;
+  const pendingAssignments = assignments.filter((a) => a.status !== 'Submitted');
+  const pendingAssignmentCount = pendingAssignments.length;
+  const dueTodayCount = pendingAssignments.filter((a) => {
+    const due = new Date(a.dueAt);
+    if (Number.isNaN(due.getTime())) return false;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return due >= start && due < end;
+  }).length;
+  const overdueCount = pendingAssignments.filter((a) => {
+    const due = new Date(a.dueAt);
+    if (Number.isNaN(due.getTime())) return false;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return due < start;
+  }).length;
   const upcomingExams = (examDesk?.upcoming_exams ?? []).slice(0, 4);
   const examCards =
     upcomingExams.length > 0
@@ -736,10 +753,19 @@ export function StudentEnterpriseDashboard() {
           },
           {
             label: 'Pending Assignments',
-            value: String(pendingAssignments),
-            helper: 'Due this week',
+            value: String(pendingAssignmentCount),
+            helper:
+              overdueCount > 0
+                ? `${dueTodayCount} due today · ${overdueCount} overdue`
+                : dueTodayCount > 0
+                  ? `${dueTodayCount} due today`
+                  : 'No overdue work',
             icon: ClipboardList,
-            tone: (pendingAssignments > 0 ? 'warning' : 'success') as 'warning' | 'success',
+            tone: (overdueCount > 0
+              ? 'danger'
+              : pendingAssignmentCount > 0
+                ? 'warning'
+                : 'success') as 'danger' | 'warning' | 'success',
             href: '/student/courses',
             delay: 'delay-200',
           },

@@ -14,6 +14,12 @@ import {
 } from '@/lib/workforce-dates';
 import { cn } from '@/lib/utils';
 import { useShowMoreList, ShowMoreButton } from '@/components/self-service/ShowMoreList';
+import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoHolidays,
+  facultyDemoHrToday,
+  facultyDemoLeaveRequests,
+} from '@/lib/mock/faculty-portal-demo';
 
 type CalendarData = {
   month: string;
@@ -37,9 +43,47 @@ export function MyCalendarPanel() {
 
   useEffect(() => {
     setMetaLoading(true);
+    const demoCalendar = (): CalendarData => {
+      const hr = facultyDemoHrToday() as {
+        shift?: { shift_name?: string; start?: string; end?: string; start_time?: string; end_time?: string };
+      };
+      const holidayPack = facultyDemoHolidays() as {
+        mandatory?: Array<{ title: string; date: string; type?: string }>;
+        restricted?: Array<{ title: string; date: string; type?: string }>;
+      };
+      const holidays = [...(holidayPack.mandatory ?? []), ...(holidayPack.restricted ?? [])]
+        .filter((h) => String(h.date).startsWith(month))
+        .map((h) => ({ title: h.title, date: h.date, type: h.type ?? 'HOLIDAY' }));
+      const leaves = facultyDemoLeaveRequests().map((r) => ({
+        leave_type: r.leave_type,
+        start_date: r.start_date,
+        end_date: r.end_date,
+        status: r.status,
+      }));
+      return {
+        month,
+        shift: {
+          shift_name: hr.shift?.shift_name ?? 'General',
+          start_time: hr.shift?.start_time ?? hr.shift?.start ?? '09:00',
+          end_time: hr.shift?.end_time ?? hr.shift?.end ?? '17:00',
+        },
+        holidays,
+        leaves,
+      };
+    };
+
     void api
       .get<CalendarData>(`/api/hr/ess/calendar?month=${month}`)
-      .then(setData)
+      .then((live) =>
+        setData(
+          withFacultyDemoFallback(
+            live,
+            demoCalendar(),
+            (v) => !v || ((v.holidays?.length ?? 0) === 0 && (v.leaves?.length ?? 0) === 0),
+          ),
+        ),
+      )
+      .catch(() => setData(withFacultyDemoFallback(null, demoCalendar())))
       .finally(() => setMetaLoading(false));
   }, [api, month]);
 

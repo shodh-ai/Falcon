@@ -5,14 +5,16 @@ import { FacultyPageHeader, FacultyPageShell, FacultyEmptyState } from '@/compon
 import { defaultTeamScopeForPrefix } from '@/lib/workspace-self-service';
 import { useAuth } from '@/context/AuthContext';
 import { canSeeFacultyTeamApprovals } from '@/lib/faculty-manager-access';
+import { isFacultyDemoModeEnabled } from '@/lib/faculty-demo-mode';
 
 export default function FacultyInboxPage() {
   const { user } = useAuth();
-  const canManageTeam = canSeeFacultyTeamApprovals(user);
+  const canManageTeam = canSeeFacultyTeamApprovals(user) || isFacultyDemoModeEnabled();
 
   return (
     <FacultyPageShell>
       <FacultyPageHeader
+        title="DOFA Requests"
         description="Leaves, regularisation, on-duty, comp-off, and document approvals awaiting your action."
       />
       {canManageTeam ? (

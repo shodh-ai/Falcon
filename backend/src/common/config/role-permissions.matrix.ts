@@ -76,7 +76,15 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
     approve: ['*'],
   },
   COO: {
-    view: ['operations', 'helpdesk', 'esm', 'finance', 'labs', 'competitions', 'fellowship'],
+    view: [
+      'operations',
+      'helpdesk',
+      'esm',
+      'finance',
+      'labs',
+      'competitions',
+      'fellowship',
+    ],
     edit: ['operations', 'helpdesk', 'esm'],
     approve: ['operations_escalations', 'vendor_penalties'],
   },

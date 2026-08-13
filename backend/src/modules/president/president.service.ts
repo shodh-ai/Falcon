@@ -40,46 +40,62 @@ export class PresidentService {
 
   async getExecutiveSummary(tenantId?: string) {
     const tid = this.tenantId(tenantId);
-    const [students, staff, demands, pendingVerifications, pendingGovernance, pendingHr, pendingOrders, pendingRatify] =
-      await Promise.all([
-        this.countUsersByRole('Student', tid),
+    const [
+      students,
+      staff,
+      demands,
+      pendingVerifications,
+      pendingGovernance,
+      pendingHr,
+      pendingOrders,
+      pendingRatify,
+    ] = await Promise.all([
+      this.countUsersByRole('Student', tid),
       this.users
         .createQueryBuilder('user')
         .leftJoin('user.role', 'role')
         .where('user.is_active = true')
-          .andWhere('user.tenant_id = :tid', { tid })
+        .andWhere('user.tenant_id = :tid', { tid })
         .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
         .getCount(),
-        this.fetchTenantDemands(tid),
-        this.db
-          .query(
-            `SELECT COUNT(*)::int AS total FROM users
+      this.fetchTenantDemands(tid),
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM users
              WHERE tenant_id = $1 AND onboarding_status = 'PENDING_ADMIN_APPROVAL'`,
-            [tid],
-          )
-          .then((r) => Number(r[0]?.total ?? 0)),
-        this.taskAssignments
-          .createQueryBuilder('ta')
-          .innerJoin('ta.assigned_user', 'u')
-          .where('ta.status = :status', { status: 'Pending' })
-          .andWhere('u.tenant_id = :tid', { tid })
-          .getCount(),
-        this.db.query(
+          [tid],
+        )
+        .then((r) => Number(r[0]?.total ?? 0)),
+      this.taskAssignments
+        .createQueryBuilder('ta')
+        .innerJoin('ta.assigned_user', 'u')
+        .where('ta.status = :status', { status: 'Pending' })
+        .andWhere('u.tenant_id = :tid', { tid })
+        .getCount(),
+      this.db
+        .query(
           `SELECT COUNT(*)::int AS c FROM executive_hr_approval_requests
            WHERE tenant_id = $1 AND status = 'PENDING'`,
           [tid],
-        ).then((r) => Number(r[0]?.c ?? 0)),
-        this.db.query(
+        )
+        .then((r) => Number(r[0]?.c ?? 0)),
+      this.db
+        .query(
           `SELECT COUNT(*)::int AS c FROM leadership_executive_orders
            WHERE tenant_id = $1 AND status IN ('ISSUED', 'IN_PROGRESS', 'ACKNOWLEDGED')`,
           [tid],
-        ).catch(() => [{ c: 0 }]).then((r) => Number(r[0]?.c ?? 0)),
-        this.db.query(
+        )
+        .catch(() => [{ c: 0 }])
+        .then((r) => Number(r[0]?.c ?? 0)),
+      this.db
+        .query(
           `SELECT COUNT(*)::int AS c FROM cert_applications
            WHERE tenant_id = $1 AND verification_status = 'VERIFIED'
              AND president_ratification_status = 'PENDING' AND certificate_generated = false`,
           [tid],
-        ).catch(() => [{ c: 0 }]).then((r) => Number(r[0]?.c ?? 0)),
+        )
+        .catch(() => [{ c: 0 }])
+        .then((r) => Number(r[0]?.c ?? 0)),
     ]);
 
     return {
@@ -205,13 +221,13 @@ export class PresidentService {
       await Promise.all([
         this.countUsersByRole('Student', tid),
         this.countUsersByRole('Faculty', tid),
-      this.users
-        .createQueryBuilder('user')
-        .leftJoin('user.role', 'role')
-        .where('user.is_active = true')
+        this.users
+          .createQueryBuilder('user')
+          .leftJoin('user.role', 'role')
+          .where('user.is_active = true')
           .andWhere('user.tenant_id = :tid', { tid })
-        .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
-        .getCount(),
+          .andWhere("role.role_name NOT IN ('Student', 'Applicant')")
+          .getCount(),
         this.payslips.find({
           where: { tenant_id: tid },
           order: { generated_at: 'DESC' },
@@ -223,9 +239,9 @@ export class PresidentService {
           .where('user.is_active = true')
           .andWhere('user.tenant_id = :tid', { tid })
           .andWhere('role.role_name = :roleName', { roleName: 'Faculty' })
-          .andWhere('user.created_at <= NOW() - INTERVAL \'1 year\'')
+          .andWhere("user.created_at <= NOW() - INTERVAL '1 year'")
           .getCount(),
-    ]);
+      ]);
     const payrollExpense = currentPayslips.reduce(
       (sum, row) => sum + Number(row.net_pay ?? 0),
       0,
@@ -261,39 +277,41 @@ export class PresidentService {
 
   async getFinanceBudgetaryControl(tenantId?: string) {
     const tid = this.tenantId(tenantId);
-    const budgets = await this.db.query(
-      `SELECT d.dept_name AS department, b.allocated_amount, b.utilized_amount
+    const budgets = await this.db
+      .query(
+        `SELECT d.dept_name AS department, b.allocated_amount, b.utilized_amount
        FROM fin_dept_budgets b
        LEFT JOIN departments d ON d.dept_id = b.department_id
        WHERE b.tenant_id = $1 AND b.deleted_at IS NULL
        ORDER BY b.allocated_amount DESC NULLS LAST LIMIT 20`,
-      [tid],
-    ).catch(async () =>
-      this.db.query(
-        `SELECT d.dept_name AS department, b.allocated_amount, b.utilized_amount
+        [tid],
+      )
+      .catch(async () =>
+        this.db.query(
+          `SELECT d.dept_name AS department, b.allocated_amount, b.utilized_amount
          FROM fin_budgets b
          LEFT JOIN departments d ON d.dept_id = b.department_id
          WHERE b.tenant_id = $1 AND b.deleted_at IS NULL
          ORDER BY b.allocated_amount DESC NULLS LAST LIMIT 20`,
-        [tid],
-      ),
-    );
+          [tid],
+        ),
+      );
 
     let totalAllocated = 0;
     let totalUtilized = 0;
 
     const department_budgets = (budgets as Array<Record<string, unknown>>).map(
       (b) => {
-      const allocated = Number(b.allocated_amount || 0);
-      const utilized = Number(b.utilized_amount || 0);
-      totalAllocated += allocated;
-      totalUtilized += utilized;
-      return {
+        const allocated = Number(b.allocated_amount || 0);
+        const utilized = Number(b.utilized_amount || 0);
+        totalAllocated += allocated;
+        totalUtilized += utilized;
+        return {
           department: (b.department as string) || 'Central',
-        allocated,
-        utilized,
-        status: utilized > allocated * 0.9 ? 'Critical' : 'Healthy',
-      };
+          allocated,
+          utilized,
+          status: utilized > allocated * 0.9 ? 'Critical' : 'Healthy',
+        };
       },
     );
 
@@ -303,18 +321,22 @@ export class PresidentService {
          WHERE tenant_id = $1 AND status = 'PENDING'`,
         [tid],
       ),
-      this.db.query(
-        `SELECT COUNT(*)::int AS total FROM fin_budget_expansion_requests
+      this.db
+        .query(
+          `SELECT COUNT(*)::int AS total FROM fin_budget_expansion_requests
          WHERE tenant_id = $1 AND status = 'PENDING'`,
-        [tid],
-      ).catch(() => [{ total: 0 }]),
+          [tid],
+        )
+        .catch(() => [{ total: 0 }]),
     ]);
 
-    const grantRows = await this.db.query(
-      `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+    const grantRows = await this.db
+      .query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS total
        FROM fin_budget_reappropriations WHERE tenant_id = $1`,
-      [tid],
-    ).catch(() => [{ total: 0 }]);
+        [tid],
+      )
+      .catch(() => [{ total: 0 }]);
 
     return {
       department_budgets,
@@ -358,11 +380,13 @@ export class PresidentService {
       0,
     );
 
-    const patentCount = await this.db.query(
-      `SELECT COUNT(*)::int AS c FROM academic_rnd_applications
+    const patentCount = await this.db
+      .query(
+        `SELECT COUNT(*)::int AS c FROM academic_rnd_applications
        WHERE tenant_id = $1 AND application_type ILIKE '%patent%'`,
-      [tid],
-    ).catch(() => [{ c: 0 }]);
+        [tid],
+      )
+      .catch(() => [{ c: 0 }]);
 
     return {
       active_projects: Number(counts[0]?.active ?? 0),

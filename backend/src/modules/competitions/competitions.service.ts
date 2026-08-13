@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { randomBytes } from 'crypto';
@@ -156,10 +160,7 @@ export class CompetitionsService {
     );
   }
 
-  async createPost(
-    userId: string,
-    body: { channel_id: string; body: string },
-  ) {
+  async createPost(userId: string, body: { channel_id: string; body: string }) {
     if (!body.body?.trim()) throw new BadRequestException('body required');
     const rows = await this.db.query(
       `INSERT INTO tokamak_network_posts (channel_id, author_user_id, body)
@@ -181,14 +182,20 @@ export class CompetitionsService {
   }
 
   /** TypeORM/pg can nest RETURNING rows; empty [] is truthy and must not pass validation. */
-  private firstQueryRow<T extends { bounty_id?: string }>(rows: unknown): T | undefined {
+  private firstQueryRow<T extends { bounty_id?: string }>(
+    rows: unknown,
+  ): T | undefined {
     if (!Array.isArray(rows) || rows.length === 0) return undefined;
     const head = rows[0];
     const row = Array.isArray(head) ? head[0] : head;
     return row?.bounty_id ? (row as T) : undefined;
   }
 
-  async claimBounty(tenantId: string | undefined, bountyId: string, userId: string) {
+  async claimBounty(
+    tenantId: string | undefined,
+    bountyId: string,
+    userId: string,
+  ) {
     const rows = await this.db.query(
       `UPDATE bounty_tasks
        SET status = 'CLAIMED', claimed_by = $3
@@ -209,7 +216,10 @@ export class CompetitionsService {
       [bountyId, this.tenant(tenantId)],
     );
     const row = this.firstQueryRow(rows);
-    if (!row) throw new BadRequestException('Bounty must be claimed before marking paid');
+    if (!row)
+      throw new BadRequestException(
+        'Bounty must be claimed before marking paid',
+      );
     return row;
   }
 

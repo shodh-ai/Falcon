@@ -85,19 +85,17 @@ export class RegistrarService {
       );
       await Promise.all(
         (users as Array<{ user_id: string }>).map((u) =>
-          this.falconNotify!
-            .create({
-              tenantId,
-              userId: u.user_id,
-              category: 'OPERATIONS',
-              title: input.title,
-              message: input.message,
-              actionLink: input.actionLink,
-              severity: input.severity ?? 'info',
-              intent: input.intent ?? 'status_update',
-              actionLabel: 'Open',
-            })
-            .catch(() => null),
+          this.falconNotify!.create({
+            tenantId,
+            userId: u.user_id,
+            category: 'OPERATIONS',
+            title: input.title,
+            message: input.message,
+            actionLink: input.actionLink,
+            severity: input.severity ?? 'info',
+            intent: input.intent ?? 'status_update',
+            actionLabel: 'Open',
+          }).catch(() => null),
         ),
       );
     } catch {
@@ -217,10 +215,10 @@ export class RegistrarService {
         [dto.department_name.trim()],
       );
       if (depts[0]?.dept_id) {
-        await this.db.query(`UPDATE users SET dept_id = $2 WHERE user_id = $1`, [
-          studentId,
-          depts[0].dept_id,
-        ]);
+        await this.db.query(
+          `UPDATE users SET dept_id = $2 WHERE user_id = $1`,
+          [studentId, depts[0].dept_id],
+        );
       }
     }
 
@@ -369,7 +367,9 @@ export class RegistrarService {
   ) {
     const normalized = toStatus.trim().toUpperCase().replace(/\s+/g, '_');
     if (!LIFECYCLE.includes(normalized as LifecycleStatus)) {
-      throw new BadRequestException(`Invalid status. Allowed: ${LIFECYCLE.join(', ')}`);
+      throw new BadRequestException(
+        `Invalid status. Allowed: ${LIFECYCLE.join(', ')}`,
+      );
     }
 
     const current = await this.db.query(
@@ -420,7 +420,14 @@ export class RegistrarService {
       `INSERT INTO registrar_lifecycle_history
         (tenant_id, student_user_id, from_status, to_status, remarks, changed_by)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [tenantId, studentUserId, fromStatus, normalized, remarks ?? null, actorUserId],
+      [
+        tenantId,
+        studentUserId,
+        fromStatus,
+        normalized,
+        remarks ?? null,
+        actorUserId,
+      ],
     );
     return row;
   }
@@ -484,7 +491,9 @@ export class RegistrarService {
       return await this.db.query(sql, params);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new BadRequestException(`Failed to list semester registrations: ${message}`);
+      throw new BadRequestException(
+        `Failed to list semester registrations: ${message}`,
+      );
     }
   }
 
@@ -508,7 +517,12 @@ export class RegistrarService {
       title: `Semester registration ${status.toLowerCase().replace('_', ' ')}`,
       message: `Registration ${registrationId.slice(0, 8)}… marked ${status}${remarks ? ` — ${remarks}` : ''}.`,
       actionLink: '/admin/semester-registrations',
-      severity: status === 'APPROVED' ? 'success' : status === 'REJECTED' ? 'warning' : 'info',
+      severity:
+        status === 'APPROVED'
+          ? 'success'
+          : status === 'REJECTED'
+            ? 'warning'
+            : 'info',
       intent: 'status_update',
     });
     return row;
@@ -545,13 +559,22 @@ export class RegistrarService {
 
   async createCertificate(
     tenantId: string,
-    dto: { student_user_id: string; certificate_type: string; remarks?: string },
+    dto: {
+      student_user_id: string;
+      certificate_type: string;
+      remarks?: string;
+    },
   ) {
     const [row] = await this.db.query(
       `INSERT INTO registrar_certificate_requests
         (tenant_id, student_user_id, certificate_type, status, remarks)
        VALUES ($1,$2,$3,'DRAFT',$4) RETURNING *`,
-      [tenantId, dto.student_user_id, dto.certificate_type, dto.remarks ?? null],
+      [
+        tenantId,
+        dto.student_user_id,
+        dto.certificate_type,
+        dto.remarks ?? null,
+      ],
     );
     return row;
   }
@@ -571,7 +594,8 @@ export class RegistrarService {
 
     const currentStatus = String(current.status).toUpperCase();
     const certType = String(current.certificate_type).toUpperCase();
-    const isDegreeDoc = certType === 'DEGREE' || certType === 'DUPLICATE_DEGREE';
+    const isDegreeDoc =
+      certType === 'DEGREE' || certType === 'DUPLICATE_DEGREE';
     const allowed: Record<string, string[]> = {
       GENERATE: ['DRAFT', 'REJECTED'],
       SIGN: ['GENERATED'],
@@ -586,12 +610,17 @@ export class RegistrarService {
 
     let status = currentStatus;
     let verificationCode: string | null = current.verification_code ?? null;
-    const patch: Record<string, unknown> = { remarks: remarks ?? current.remarks };
+    const patch: Record<string, unknown> = {
+      remarks: remarks ?? current.remarks,
+    };
     if (action === 'GENERATE') {
       status = 'GENERATED';
       patch.pdf_url = `/api/admin/registrar-desk/certificates/${requestId}/pdf`;
     } else if (action === 'SIGN') {
-      const attestation = await this.assertSignatureAttestation(tenantId, actorUserId);
+      const attestation = await this.assertSignatureAttestation(
+        tenantId,
+        actorUserId,
+      );
       if (isDegreeDoc && !attestation.configured) {
         throw new BadRequestException(
           'Degree certificates require IT-configured DSC metadata (serial/CA/expiry) and a signature image before signing.',
@@ -613,7 +642,10 @@ export class RegistrarService {
       );
     } else if (action === 'ISSUE') {
       if (isDegreeDoc) {
-        await this.assertDegreeIssuanceAllowed(tenantId, current.student_user_id);
+        await this.assertDegreeIssuanceAllowed(
+          tenantId,
+          current.student_user_id,
+        );
       }
       status = 'ISSUED';
       patch.issued_at = new Date();
@@ -656,11 +688,18 @@ export class RegistrarService {
         verificationCode,
       ],
     );
-    await this.audit(tenantId, actorUserId, `CERT_${action}`, requestId, {
-      status,
-      certificate_type: certType,
-      verification_code: verificationCode,
-    }, { status: currentStatus });
+    await this.audit(
+      tenantId,
+      actorUserId,
+      `CERT_${action}`,
+      requestId,
+      {
+        status,
+        certificate_type: certType,
+        verification_code: verificationCode,
+      },
+      { status: currentStatus },
+    );
     return row;
   }
 
@@ -668,7 +707,8 @@ export class RegistrarService {
     const normalized = String(code ?? '')
       .trim()
       .toUpperCase();
-    if (!normalized) throw new BadRequestException('Verification code is required');
+    if (!normalized)
+      throw new BadRequestException('Verification code is required');
     const [row] = await this.db.query(
       `SELECT c.request_id, c.certificate_type, c.status, c.issued_at, c.verification_code,
               u.name AS student_name, sp.enrollment_no, sp.program_name, sp.degree_name,
@@ -681,7 +721,10 @@ export class RegistrarService {
        LIMIT 1`,
       [normalized],
     );
-    if (!row) throw new NotFoundException('Certificate verification code not found or invalid');
+    if (!row)
+      throw new NotFoundException(
+        'Certificate verification code not found or invalid',
+      );
     return {
       valid: true,
       verification_code: row.verification_code,
@@ -768,7 +811,13 @@ export class RegistrarService {
       const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
       const navy = rgb(0.043, 0.141, 0.278);
       let y = 800;
-      page.drawText('Registrar Reports Summary', { x: 50, y, size: 16, font: bold, color: navy });
+      page.drawText('Registrar Reports Summary', {
+        x: 50,
+        y,
+        size: 16,
+        font: bold,
+        color: navy,
+      });
       y -= 28;
       const lines = [
         `Enrollment active: ${summary.enrollment_active}`,
@@ -776,18 +825,29 @@ export class RegistrarService {
         `Pending registrations: ${summary.pending_registrations}`,
         '',
         'Lifecycle status',
-        ...(summary.status_breakdown as Array<{ status: string; count: number }>).map(
-          (r) => `  ${r.status}: ${r.count}`,
-        ),
+        ...(
+          summary.status_breakdown as Array<{ status: string; count: number }>
+        ).map((r) => `  ${r.status}: ${r.count}`),
         '',
         'Departments',
-        ...(summary.department_stats as Array<{ department: string; count: number }>)
+        ...(
+          summary.department_stats as Array<{
+            department: string;
+            count: number;
+          }>
+        )
           .slice(0, 15)
           .map((r) => `  ${r.department}: ${r.count}`),
       ];
       for (const line of lines) {
         if (y < 50) break;
-        page.drawText(line.slice(0, 90), { x: 50, y, size: 10, font, color: navy });
+        page.drawText(line.slice(0, 90), {
+          x: 50,
+          y,
+          size: 10,
+          font,
+          color: navy,
+        });
         y -= 14;
       }
       const bytes = await pdfDoc.save();
@@ -805,21 +865,23 @@ export class RegistrarService {
       `Pending Approvals,${summary.pending_registrations}`,
       '',
       'Status,Count',
-      ...(summary.status_breakdown as Array<{ status: string; count: number }>).map(
-        (r) => `${r.status},${r.count}`,
-      ),
+      ...(
+        summary.status_breakdown as Array<{ status: string; count: number }>
+      ).map((r) => `${r.status},${r.count}`),
       '',
       'Department,Count',
-      ...(summary.department_stats as Array<{ department: string; count: number }>).map(
-        (r) => `"${String(r.department).replace(/"/g, '""')}",${r.count}`,
-      ),
+      ...(
+        summary.department_stats as Array<{ department: string; count: number }>
+      ).map((r) => `"${String(r.department).replace(/"/g, '""')}",${r.count}`),
       '',
       'Certificate Type,Status,Count',
-      ...(summary.certificate_stats as Array<{
-        certificate_type: string;
-        status: string;
-        count: number;
-      }>).map((r) => `${r.certificate_type},${r.status},${r.count}`),
+      ...(
+        summary.certificate_stats as Array<{
+          certificate_type: string;
+          status: string;
+          count: number;
+        }>
+      ).map((r) => `${r.certificate_type},${r.status},${r.count}`),
     ];
     return {
       buffer: Buffer.from(lines.join('\n'), 'utf8'),
@@ -829,8 +891,9 @@ export class RegistrarService {
   }
 
   async listRecentActivity(tenantId: string, limit = 25) {
-    const rows = await this.db.query(
-      `(
+    const rows = await this.db
+      .query(
+        `(
          SELECT 'certificate' AS kind, c.request_id::text AS id,
                 (c.certificate_type || ' — ' || c.status) AS title,
                 u.name AS actor_name, c.updated_at AS occurred_at
@@ -857,8 +920,9 @@ export class RegistrarService {
        )
        ORDER BY occurred_at DESC NULLS LAST
        LIMIT $2`,
-      [tenantId, Math.min(limit, 50)],
-    ).catch(() => []);
+        [tenantId, Math.min(limit, 50)],
+      )
+      .catch(() => []);
     return rows;
   }
 
@@ -1125,7 +1189,12 @@ export class RegistrarService {
 
   async upsertAppointment(
     tenantId: string,
-    dto: Record<string, unknown> & { appointment_id?: string; employee_id: string; candidate_name: string; position: string },
+    dto: Record<string, unknown> & {
+      appointment_id?: string;
+      employee_id: string;
+      candidate_name: string;
+      position: string;
+    },
   ) {
     if (dto.appointment_id) {
       const [row] = await this.db.query(
@@ -1185,7 +1254,12 @@ export class RegistrarService {
         dto.remarks ?? null,
       ],
     );
-    await this.logAppointmentActivity(tenantId, row.appointment_id, 'Appointment created', 'Registrar');
+    await this.logAppointmentActivity(
+      tenantId,
+      row.appointment_id,
+      'Appointment created',
+      'Registrar',
+    );
     return row;
   }
 
@@ -1210,7 +1284,10 @@ export class RegistrarService {
       patch = { verification_status: 'Verified', workflow_stage: 'Registrar' };
       event = 'Documents verified';
     } else if (action === 'APPROVE') {
-      patch = { recruitment_status: 'Offer Extended', workflow_stage: 'Registrar' };
+      patch = {
+        recruitment_status: 'Offer Extended',
+        workflow_stage: 'Registrar',
+      };
       event = 'Appointment approved';
     } else if (action === 'REJECT') {
       patch = {
@@ -1286,7 +1363,12 @@ export class RegistrarService {
         letterPdfUrl,
       ],
     );
-    await this.logAppointmentActivity(tenantId, appointmentId, event, actorName);
+    await this.logAppointmentActivity(
+      tenantId,
+      appointmentId,
+      event,
+      actorName,
+    );
     return row;
   }
 
@@ -1366,7 +1448,14 @@ export class RegistrarService {
     } catch {
       signedBy = null;
     }
-    await this.embedSignatureImage(pdfDoc, page, tenantId, signedBy, width - 250, 95);
+    await this.embedSignatureImage(
+      pdfDoc,
+      page,
+      tenantId,
+      signedBy,
+      width - 250,
+      95,
+    );
 
     page.drawText('Registrar', {
       x: width - 250,
@@ -1397,7 +1486,13 @@ export class RegistrarService {
     const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
     const navy = rgb(0.043, 0.141, 0.278);
     if (!ownerUserId) {
-      page.drawText('_________________________', { x, y, size: 10, font, color: navy });
+      page.drawText('_________________________', {
+        x,
+        y,
+        size: 10,
+        font,
+        color: navy,
+      });
       return;
     }
     try {
@@ -1409,7 +1504,13 @@ export class RegistrarService {
       const dataUrl = String(dsc?.signature_image_url ?? '');
       const match = dataUrl.match(/^data:image\/(png|jpe?g);base64,(.+)$/i);
       if (!match) {
-        page.drawText('_________________________', { x, y, size: 10, font, color: navy });
+        page.drawText('_________________________', {
+          x,
+          y,
+          size: 10,
+          font,
+          color: navy,
+        });
         return;
       }
       const imgBytes = Buffer.from(match[2], 'base64');
@@ -1421,7 +1522,13 @@ export class RegistrarService {
       const imgH = Math.min((embedded.height / embedded.width) * imgW, 48);
       page.drawImage(embedded, { x, y, width: imgW, height: imgH });
     } catch {
-      page.drawText('_________________________', { x, y, size: 10, font, color: navy });
+      page.drawText('_________________________', {
+        x,
+        y,
+        size: 10,
+        font,
+        color: navy,
+      });
     }
   }
 
@@ -1575,7 +1682,10 @@ export class RegistrarService {
   }): string {
     const raw = String(row.status ?? 'NOT_CONFIGURED').toUpperCase();
     if (raw === 'RENEWAL_REQUESTED') return raw;
-    if (!row.expiry_date && !['CONNECTED', 'EXPIRING', 'EXPIRED'].includes(raw)) {
+    if (
+      !row.expiry_date &&
+      !['CONNECTED', 'EXPIRING', 'EXPIRED'].includes(raw)
+    ) {
       return 'NOT_CONFIGURED';
     }
     if (row.expiry_date) {
@@ -1611,7 +1721,8 @@ export class RegistrarService {
         'DSC certificate has expired. Request renewal before signing documents.',
       );
     }
-    const configured = ['CONNECTED', 'EXPIRING'].includes(status) && !!dsc.serial_number;
+    const configured =
+      ['CONNECTED', 'EXPIRING'].includes(status) && !!dsc.serial_number;
     return {
       configured,
       actionLabel: configured
@@ -1656,7 +1767,11 @@ export class RegistrarService {
       owner_name?: string;
     },
   ) {
-    if (!dto.certificate_name?.trim() || !dto.serial_number?.trim() || !dto.expiry_date) {
+    if (
+      !dto.certificate_name?.trim() ||
+      !dto.serial_number?.trim() ||
+      !dto.expiry_date
+    ) {
       throw new BadRequestException(
         'certificate_name, serial_number, and expiry_date are required',
       );
@@ -1696,7 +1811,11 @@ export class RegistrarService {
     return { ...row, status: this.normalizeDscStatus(row) };
   }
 
-  async requestDscRenewal(tenantId: string, ownerUserId: string, notes: string) {
+  async requestDscRenewal(
+    tenantId: string,
+    ownerUserId: string,
+    notes: string,
+  ) {
     const [existing] = await this.db.query(
       `SELECT credential_id FROM registrar_dsc_credentials WHERE tenant_id=$1 AND owner_user_id=$2`,
       [tenantId, ownerUserId],
@@ -1718,7 +1837,8 @@ export class RegistrarService {
     );
     await this.notifyRegistrars(tenantId, {
       title: 'DSC renewal requested',
-      message: notes?.trim() || 'Registrar requested DSC certificate renewal from IT.',
+      message:
+        notes?.trim() || 'Registrar requested DSC certificate renewal from IT.',
       actionLink: '/admin/account/settings/digital-signature',
       severity: 'warning',
       intent: 'action_required',
@@ -1778,7 +1898,12 @@ export class RegistrarService {
       );
       for (const row of pending as Array<{ request_id: string }>) {
         try {
-          await this.transitionCertificate(tenantId, actorUserId, row.request_id, 'SIGN');
+          await this.transitionCertificate(
+            tenantId,
+            actorUserId,
+            row.request_id,
+            'SIGN',
+          );
           signed.push({ kind: 'certificate', id: row.request_id });
         } catch (err) {
           errors.push({
@@ -1849,7 +1974,12 @@ export class RegistrarService {
       signed_count: signed.length,
       error_count: errors.length,
     });
-    return { signed, errors, signed_count: signed.length, error_count: errors.length };
+    return {
+      signed,
+      errors,
+      signed_count: signed.length,
+      error_count: errors.length,
+    };
   }
 
   // ── Enrollment queue & petitions ─────────────────────────────────────────
@@ -1980,10 +2110,11 @@ export class RegistrarService {
           [deptName],
         );
         if (depts[0]?.dept_name) {
-          deptCode = String(depts[0].dept_name)
-            .replace(/[^A-Za-z0-9]/g, '')
-            .slice(0, 6)
-            .toUpperCase() || 'XX';
+          deptCode =
+            String(depts[0].dept_name)
+              .replace(/[^A-Za-z0-9]/g, '')
+              .slice(0, 6)
+              .toUpperCase() || 'XX';
         }
       }
       const generated = await this.masterData.generateEnrollmentId(
@@ -2057,7 +2188,7 @@ export class RegistrarService {
     }
 
     const lead = leadRow as unknown as Lead;
-    const metadata = (lead.metadata ?? {}) as Record<string, unknown>;
+    const metadata = lead.metadata ?? {};
     const stage = String(lead.stage ?? '').toUpperCase();
 
     if (dto.require_fee_paid !== false) {
@@ -2072,7 +2203,11 @@ export class RegistrarService {
       }
     }
 
-    const enrollmentNo = await this.resolveEnrollmentNumber(tenantId, dto, lead);
+    const enrollmentNo = await this.resolveEnrollmentNumber(
+      tenantId,
+      dto,
+      lead,
+    );
     let studentUserId =
       typeof metadata.student_user_id === 'string'
         ? metadata.student_user_id
@@ -2321,7 +2456,10 @@ export class RegistrarService {
     );
     if (!current) throw new NotFoundException('Petition not found');
 
-    const normalized = status.toUpperCase() as 'APPROVED' | 'REJECTED' | 'ISSUED';
+    const normalized = status.toUpperCase() as
+      | 'APPROVED'
+      | 'REJECTED'
+      | 'ISSUED';
     if (!['APPROVED', 'REJECTED', 'ISSUED'].includes(normalized)) {
       throw new BadRequestException('Invalid petition decision status');
     }
@@ -2348,13 +2486,19 @@ export class RegistrarService {
       (current.certificate_request_id as string | null) ?? null;
 
     if (finalStatus === 'APPROVED' || finalStatus === 'ISSUED') {
-      if (current.petition_type === 'NAME_CORRECTION' && current.student_user_id) {
+      if (
+        current.petition_type === 'NAME_CORRECTION' &&
+        current.student_user_id
+      ) {
         await this.db.query(
           `UPDATE users SET name = $2, updated_at = NOW() WHERE user_id = $1 AND tenant_id = $3`,
           [current.student_user_id, current.requested_value, tenantId],
         );
       }
-      if (current.petition_type === 'COURSE_CHANGE' && current.student_user_id) {
+      if (
+        current.petition_type === 'COURSE_CHANGE' &&
+        current.student_user_id
+      ) {
         await this.db.query(
           `UPDATE student_profiles
            SET program_name = $2,
@@ -2555,7 +2699,8 @@ export class RegistrarService {
       pendingGovernance +
       pendingCertificates;
     const verificationRequests = verifications?.count ?? 0;
-    const documentsPending = (bulkDocs?.count ?? 0) + (petitionDocs?.count ?? 0);
+    const documentsPending =
+      (bulkDocs?.count ?? 0) + (petitionDocs?.count ?? 0);
 
     return {
       total_students: students?.count ?? 0,
@@ -2625,7 +2770,9 @@ export class RegistrarService {
         'Degree issuance blocked: Exam Cell final status must be ELIGIBLE.',
       );
     }
-    if (String(audit.registrar_decision ?? 'PENDING').toUpperCase() !== 'APPROVED') {
+    if (
+      String(audit.registrar_decision ?? 'PENDING').toUpperCase() !== 'APPROVED'
+    ) {
       throw new BadRequestException(
         'Degree issuance blocked: Registrar must approve degree eligibility before issue.',
       );
@@ -2639,7 +2786,9 @@ export class RegistrarService {
     decision: 'APPROVED' | 'REJECTED',
     remarks?: string,
   ) {
-    const normalized = String(decision ?? '').toUpperCase() as 'APPROVED' | 'REJECTED';
+    const normalized = String(decision ?? '').toUpperCase() as
+      | 'APPROVED'
+      | 'REJECTED';
     if (!['APPROVED', 'REJECTED'].includes(normalized)) {
       throw new BadRequestException('Decision must be APPROVED or REJECTED');
     }
@@ -2647,7 +2796,8 @@ export class RegistrarService {
       `SELECT * FROM degree_eligibility_audits WHERE tenant_id = $1 AND audit_id = $2`,
       [tenantId, auditId],
     );
-    if (!audit) throw new NotFoundException('Degree eligibility audit not found');
+    if (!audit)
+      throw new NotFoundException('Degree eligibility audit not found');
 
     if (
       normalized === 'APPROVED' &&
@@ -2735,12 +2885,13 @@ export class RegistrarService {
     const enrollmentNo = String(cert.enrollment_no ?? cert.prn_number ?? '—');
     const certType = String(cert.certificate_type).replace(/_/g, ' ');
     const studentName = String(cert.student_name ?? 'Student');
-    const verification = String(cert.verification_code ?? '').trim()
-      || createHash('sha256')
-          .update(`${requestId}:${cert.student_user_id}:${cert.status}`)
-          .digest('hex')
-          .slice(0, 16)
-          .toUpperCase();
+    const verification =
+      String(cert.verification_code ?? '').trim() ||
+      createHash('sha256')
+        .update(`${requestId}:${cert.student_user_id}:${cert.status}`)
+        .digest('hex')
+        .slice(0, 16)
+        .toUpperCase();
 
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([595.28, 841.89]); // A4 portrait
@@ -2834,13 +2985,16 @@ export class RegistrarService {
       font,
       color: muted,
     });
-    page.drawText(`Verify at /api/verify/registrar-certificate/${verification}`, {
-      x: 90,
-      y: 146,
-      size: 8,
-      font,
-      color: muted,
-    });
+    page.drawText(
+      `Verify at /api/verify/registrar-certificate/${verification}`,
+      {
+        x: 90,
+        y: 146,
+        size: 8,
+        font,
+        color: muted,
+      },
+    );
     page.drawText(`Request ID: ${requestId}`, {
       x: 90,
       y: 132,
@@ -2869,9 +3023,7 @@ export class RegistrarService {
           [tenantId, cert.signed_by],
         );
         const dataUrl = String(dsc?.signature_image_url ?? '');
-        const match = dataUrl.match(
-          /^data:image\/(png|jpe?g);base64,(.+)$/i,
-        );
+        const match = dataUrl.match(/^data:image\/(png|jpe?g);base64,(.+)$/i);
         if (match) {
           const imgBytes = Buffer.from(match[2], 'base64');
           const embedded =
@@ -2922,7 +3074,9 @@ export class RegistrarService {
     });
 
     const bytes = await pdfDoc.save();
-    const safeType = String(cert.certificate_type).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const safeType = String(cert.certificate_type)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-');
     return {
       buffer: Buffer.from(bytes),
       filename: `${safeType}-${enrollmentNo.replace(/[^\w-]+/g, '_') || requestId.slice(0, 8)}.pdf`,
@@ -3007,9 +3161,9 @@ export class RegistrarService {
           detail: feePaid ? 'Verified' : 'Pending',
         },
         enrollment: {
-          completed: ['ENROLLED', 'ACTIVE', 'GRADUATED', 'ALUMNI'].includes(
-            lifecycle,
-          ) || leadStage === 'ENROLLED',
+          completed:
+            ['ENROLLED', 'ACTIVE', 'GRADUATED', 'ALUMNI'].includes(lifecycle) ||
+            leadStage === 'ENROLLED',
           label: 'Enrollment',
           detail: profile?.enrollment_no ?? 'Pending',
         },

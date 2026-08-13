@@ -32,7 +32,10 @@ export class BudgetFpaService {
       [poId, tid],
     );
     if (!poRows[0]) {
-      throw new NotFoundException({ message: 'PO not found', code: 'PO_NOT_FOUND' });
+      throw new NotFoundException({
+        message: 'PO not found',
+        code: 'PO_NOT_FOUND',
+      });
     }
     const grn = await this.db.query(
       `SELECT grn_id FROM fin_goods_receipts WHERE po_id = $1 AND tenant_id = $2 LIMIT 1`,
@@ -45,10 +48,9 @@ export class BudgetFpaService {
       [poId, tid],
     );
     const poAmount = Number(poRows[0].amount);
-    const invoiceAmount = (invoices as Array<{ amount: string | number }>).reduce(
-      (sum, inv) => sum + Number(inv.amount ?? 0),
-      0,
-    );
+    const invoiceAmount = (
+      invoices as Array<{ amount: string | number }>
+    ).reduce((sum, inv) => sum + Number(inv.amount ?? 0), 0);
     const evaluated = evaluateThreeWayMatch({
       poStatus: String(poRows[0].status),
       poAmount,
@@ -582,7 +584,8 @@ export class BudgetFpaService {
       if (!match.can_pay) {
         throw new ForbiddenException({
           statusCode: 403,
-          message: '3-way match failed — cannot pay PO until GRN and invoice align',
+          message:
+            '3-way match failed — cannot pay PO until GRN and invoice align',
           code: 'THREE_WAY_MISMATCH',
           po_id: dto.po_id,
           match,

@@ -15,6 +15,12 @@ import {
   type PhdCandidate,
 } from '@/lib/phd-lifecycle';
 import { PhdPipeline } from './PhdPipeline';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoPhdScholars } from '@/lib/mock/faculty-portal-demo';
 
 type GuideOption = { user_id: string; name: string; official_email?: string | null; dept_name?: string | null };
 
@@ -37,7 +43,7 @@ export function PhdReviewQueue({
 }) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<PhdCandidate[]>(initialRows ?? []);
-  const [loading, setLoading] = useState(!embedded);
+  const [loading, setLoading] = useState(Boolean(listPath) && !initialRows?.length);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
   const [guidePick, setGuidePick] = useState<Record<string, string>>({});
@@ -58,17 +64,26 @@ export function PhdReviewQueue({
   }, [rows, deptFilter]);
 
   const load = useCallback(async () => {
-    if (embedded || !listPath) return;
+    if (!listPath) return;
     setLoading(true);
     try {
       const data = await api.get<PhdCandidate[]>(listPath);
-      setRows(Array.isArray(data) ? data : []);
+      const live = Array.isArray(data) ? data : [];
+      setRows(
+        role === 'Faculty'
+          ? withFacultyDemoFallback(live, facultyDemoPhdScholars() as PhdCandidate[], isEmptyArray)
+          : live,
+      );
     } catch {
-      setRows([]);
+      setRows(
+        role === 'Faculty'
+          ? withFacultyDemoFallback([], facultyDemoPhdScholars() as PhdCandidate[], isEmptyArray)
+          : [],
+      );
     } finally {
       setLoading(false);
     }
-  }, [api, embedded, listPath]);
+  }, [api, listPath, role]);
 
   useEffect(() => {
     void load();
@@ -89,6 +104,10 @@ export function PhdReviewQueue({
   async function act(candidateId: string, action: string, success: string, needsGuidePick = false) {
     if (needsGuidePick && !guidePick[candidateId]?.trim()) {
       toast.error('Please select a research guide from the dropdown first.');
+      return;
+    }
+    if (isFacultyDemoSmokeId(candidateId)) {
+      toast.success(`${success} (demo)`);
       return;
     }
     setBusyId(candidateId);

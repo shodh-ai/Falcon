@@ -69,7 +69,12 @@ export class RegistrarIntegrationController {
 
   @Post('transcripts/generate')
   generateTranscripts(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Body() body: { semester: number },
   ) {
     return this.transcripts.requestForSemester(
@@ -82,7 +87,12 @@ export class RegistrarIntegrationController {
 
   @Post('transcripts/:id/approve')
   approveTranscript(
-    @Req() req: { user: AuthUser; ip?: string; headers?: Record<string, string | string[] | undefined> },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('id') id: string,
   ) {
     return this.transcripts.approve(this.tenant(req), id, auditActor(req));
