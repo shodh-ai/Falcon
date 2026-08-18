@@ -158,11 +158,14 @@ export interface PortalConfig {
  */
 const NAV_ACTIVE_ALIASES: Record<string, string[]> = {
   '/admin/admissions': ['/admissions-crm'],
-  '/campus-admin/admissions/pipeline': ['/admissions-crm/pipeline'],
+  '/campus-admin/admissions/pipeline': ['/admissions-crm/pipeline', '/campus-admin/admissions/kanban'],
+  '/campus-admin/admissions/kanban': ['/admissions-crm/pipeline', '/campus-admin/admissions/pipeline'],
   '/campus-admin/admissions/verifications': ['/admissions-crm/verifications'],
   '/campus-admin/admissions/enrolled-students': ['/admissions-crm/enrolled-students'],
-  '/campus-admin/admissions/counseling': ['/admissions-crm/counseling'],
-  '/campus-admin/admissions/leaves': ['/admissions-crm/leaves'],
+  '/campus-admin/admissions/counseling': ['/admissions-crm/counseling', '/campus-admin/admissions/counselling'],
+  '/campus-admin/admissions/counselling': ['/admissions-crm/counseling', '/campus-admin/admissions/counseling'],
+  '/campus-admin/admissions/leaves': ['/admissions-crm/leaves', '/campus-admin/my-leave'],
+  '/campus-admin/my-leave': ['/admissions-crm/leaves', '/campus-admin/admissions/leaves'],
 };
 
 function pathnameMatchesNavHref(pathname: string, href: string): boolean {
@@ -1917,6 +1920,13 @@ export const adminPortal: PortalConfig = {
       items: [
         { label: 'IAM & Hierarchy', href: '/admin/iam', icon: Shield, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
         {
+          label: 'Departments',
+          href: '/admin/departments',
+          icon: Building2,
+          roles: ['SuperAdmin', 'Registrar'],
+          keywords: ['department', 'hod', 'school', 'academic structure'],
+        },
+        {
           label: 'Admissions CRM',
           href: '/admin/admissions',
           icon: Kanban,
@@ -1944,7 +1954,7 @@ export const adminPortal: PortalConfig = {
         { label: 'IQAC & Placements', href: '/admin/iqac', icon: BarChart3, roles: ['CampusAdmin', 'SuperAdmin', 'IQAC', 'PlacementCell', 'President'] },
         { label: 'Operations', href: '/admin/operations', icon: Bus, roles: ['CampusAdmin', 'SuperAdmin', 'Warden', 'Librarian', 'TransportOfficer'] },
         { label: 'Settings & IT', href: '/admin/settings', icon: Settings, roles: ['CampusAdmin', 'SuperAdmin'] },
-        { label: 'DOFA Policy Vault', href: '/admin/dofa-policy-vault', icon: Scale, roles: ['CampusAdmin', 'SuperAdmin'], keywords: ['constitution', 'dual-key', 'workflow'] },
+        { label: 'DOFA Policy Vault', href: '/admin/dofa-policy-vault', icon: Scale, roles: ['SuperAdmin'], keywords: ['constitution', 'dual-key', 'workflow'] },
         { label: 'University Directory', href: '/directory', icon: Contact, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar', 'President'] },
         { label: 'Ph.D. Admissions & Awards', href: '/admin/phd/admissions', icon: GraduationCap, roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'] },
         {
@@ -2008,6 +2018,12 @@ export const adminPortal: PortalConfig = {
       href: '/admin/academic-placement',
       icon: MapPin,
       roles: ['CampusAdmin', 'SuperAdmin', 'Registrar'],
+    },
+    {
+      label: 'Departments',
+      href: '/admin/departments',
+      icon: Building2,
+      roles: ['SuperAdmin', 'Registrar'],
     },
     {
       label: 'Certificate Desk',

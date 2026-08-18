@@ -11,8 +11,6 @@ import {
   campusAdminRoutes,
   expandCampusAdminRoles,
 } from '@/lib/campus-admin.roles';
-import { CAMPUS_ADMIN_LOGIN_EMAIL } from '@/lib/campus-admin.roles';
-
 export function getDashboardPathForRole(role: string | undefined | null): string {
   const r = (role ?? '').trim().toLowerCase();
 
@@ -152,8 +150,12 @@ export function getDashboardPathForRole(role: string | undefined | null): string
     return '/admin-ops/fleet';
   }
 
-  if (r === 'campusadmin' || r === 'superadmin') {
+  if (r === 'campusadmin') {
     return campusAdminRoutes.dashboard;
+  }
+
+  if (r === 'superadmin') {
+    return '/super-admin/dashboard';
   }
 
   if (r === 'registrar') {
@@ -161,7 +163,7 @@ export function getDashboardPathForRole(role: string | undefined | null): string
   }
 
   if (r.includes('admission')) {
-    return campusAdminRoutes.admissionsPipeline;
+    return '/admissions-crm/pipeline';
   }
 
   return '/dashboard';
@@ -195,7 +197,8 @@ export function getWorkspaceLabelForRole(role: string): string {
   if (r === 'competitionadmin') return 'Tokamak Challenges';
   if (r === 'pop') return 'Special Programs';
   if (r === 'wrangler') return 'Wrangler Mentorship';
-  if (r === 'campusadmin' || r === 'superadmin') return 'Campus Admin Workspace';
+  if (r === 'campusadmin') return 'Campus Admin Workspace';
+  if (r === 'superadmin') return 'Super Admin Workspace';
   if (r.includes('admission')) return 'Campus Admin Workspace';
   return `${role} Workspace`;
 }
@@ -219,7 +222,8 @@ export function getWorkspaceShortLabelForRole(role: string): string {
   if (r === 'examcell' || r === 'exam cell') return 'Exam Cell';
   if (r === 'dc_member' || r === 'dc member') return 'DC';
   if (r === 'incubation_admin' || r === 'ecelladmin') return 'Incubation';
-  if (r === 'campusadmin' || r === 'superadmin') return 'Campus Admin';
+  if (r === 'campusadmin') return 'Campus Admin';
+  if (r === 'superadmin') return 'Super Admin';
   if (r.includes('admission')) return 'Campus Admin';
   return role;
 }
@@ -471,8 +475,8 @@ const portalRoles: Record<string, string[]> = {
   '/documents': ['student', 'faculty', 'registrar', 'superadmin', 'campusadmin', 'parent'],
   '/reports': ['registrar', 'superadmin', 'campusadmin', 'president', 'accountant'],
   '/admin': ['superadmin', 'campusadmin', 'registrar'],
-  '/campus-admin': ['campusadmin', 'superadmin', 'admissionsofficer'],
-  '/super-admin': ['campusadmin', 'superadmin', 'admissionsofficer'],
+  '/campus-admin': ['campusadmin', 'admissionsofficer'],
+  '/super-admin': ['superadmin'],
   '/admissions-crm': ['campusadmin', 'superadmin', 'admissionsofficer', 'registrar'],
   '/clinic-admin': ['registrar', 'superadmin', 'campusadmin'],
   '/directory': [
@@ -509,7 +513,7 @@ export function getActiveWorkspaceRoleFromPath(
   return match ? userRoles[normalized.indexOf(match)] ?? match : null;
 }
 
-const ENTITY_CREATOR_EMAIL = CAMPUS_ADMIN_LOGIN_EMAIL;
+const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
 
 /** Full finance desk — receivables, payables settlement, core accounting */
 export const FINANCE_DESK_ROLE_NAMES = [
@@ -694,11 +698,10 @@ export function canRoleAccessPath(
   permissions?: string[],
   email?: string,
 ): boolean {
-  const roles = expandCampusAdminRoles(
-    (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles])
-      .filter((role): role is string => Boolean(role))
-      .map((role) => role.trim().toLowerCase()),
-  );
+  const rawRoles = (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles])
+    .filter((role): role is string => Boolean(role))
+    .map((role) => role.trim().toLowerCase());
+  const roles = expandCampusAdminRoles(rawRoles);
 
   if (
     pathname === '/campus-admin/entities' ||
@@ -707,9 +710,61 @@ export function canRoleAccessPath(
     pathname.startsWith('/super-admin/entities/')
   ) {
     return (
-      roles.includes('superadmin') &&
+      rawRoles.includes('superadmin') &&
       (email ?? '').trim().toLowerCase() === ENTITY_CREATOR_EMAIL
     );
+  }
+
+  // Keep Super Admin and Campus Admin portals as separate workspaces (do not
+  // let expandCampusAdminRoles cross-admit users across these two prefixes).
+  if (pathname === '/super-admin' || pathname.startsWith('/super-admin/')) {
+    return rawRoles.includes('superadmin');
+  }
+  if (pathname === '/campus-admin' || pathname.startsWith('/campus-admin/')) {
+    if (
+      pathname === '/campus-admin/impersonation' ||
+      pathname.startsWith('/campus-admin/impersonation/') ||
+      pathname === '/campus-admin/settings' ||
+      pathname.startsWith('/campus-admin/settings/') ||
+      pathname === '/campus-admin/entities' ||
+      pathname.startsWith('/campus-admin/entities/') ||
+      pathname === '/campus-admin/override-logs' ||
+      pathname.startsWith('/campus-admin/override-logs/')
+    ) {
+      return false;
+    }
+    if (rawRoles.includes('admissionsofficer') && !rawRoles.includes('campusadmin')) {
+      return (
+        pathname === '/campus-admin/dashboard' ||
+        pathname.startsWith('/campus-admin/admissions/') ||
+        pathname === '/campus-admin/my-leave' ||
+        pathname.startsWith('/campus-admin/account/')
+      );
+    }
+    return rawRoles.includes('campusadmin');
+  }
+
+  if (
+    pathname === '/admin/dofa-policy-vault' ||
+    pathname.startsWith('/admin/dofa-policy-vault/')
+  ) {
+    if (rawRoles.includes('campusadmin') && !rawRoles.includes('superadmin')) {
+      return false;
+    }
+  }
+
+  if (
+    pathname === '/admin/departments' ||
+    pathname.startsWith('/admin/departments/')
+  ) {
+    if (
+      rawRoles.includes('campusadmin') &&
+      !rawRoles.includes('registrar') &&
+      !rawRoles.includes('superadmin')
+    ) {
+      return false;
+    }
+    return rawRoles.includes('registrar') || rawRoles.includes('superadmin');
   }
 
   if (pathname === '/directory' || pathname === '/directory/') {
@@ -818,7 +873,7 @@ const EXPLICIT_PORTAL_SETTINGS_PATHS: Record<string, string> = {
   '/hr': '/hr/me/settings',
   '/hostel-admin': '/hostel-admin/account/settings',
   '/campus-admin': campusAdminRoutes.accountSettings,
-  '/super-admin': campusAdminRoutes.accountSettings,
+  '/super-admin': '/super-admin/account/settings',
   '/ecell-admin': '/ecell-admin/account/settings',
   '/incubation': '/incubation/account/settings',
   '/admin': '/admin/account/settings',
