@@ -29,11 +29,14 @@ const FINANCE_PATH_PREFIXES = [
   '/hod/funding-approvals',
 ];
 
-function matchesPathPrefix(pathname: string, prefix: string): boolean {
+function matchesPathPrefix(pathname: string | null | undefined, prefix: string): boolean {
+  if (!pathname || !prefix) return false;
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
-export function isPathHiddenForLaunch(pathname: string): boolean {
+export function isPathHiddenForLaunch(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+
   if (
     !isLaunchModuleEnabled('library') &&
     LIBRARY_PATH_PREFIXES.some((prefix) => matchesPathPrefix(pathname, prefix))
@@ -65,7 +68,7 @@ export function isRoleWorkspaceEnabled(role: string | undefined | null): boolean
   return true;
 }
 
-type LaunchNavItem = { href: string };
+type LaunchNavItem = { href?: string | null };
 
 type LaunchPortalConfig = {
   navGroups: { items: LaunchNavItem[] }[];
@@ -73,8 +76,12 @@ type LaunchPortalConfig = {
   mobileNavItems?: LaunchNavItem[];
 };
 
-function filterNavItems<T extends LaunchNavItem>(items: T[]): T[] {
-  return items.filter((item) => !isPathHiddenForLaunch(item.href));
+function filterNavItems<T extends LaunchNavItem>(items: T[] | null | undefined): T[] {
+  if (!items?.length) return [];
+  return items.filter((item) => {
+    if (!item?.href) return false;
+    return !isPathHiddenForLaunch(item.href);
+  });
 }
 
 export function filterPortalConfigForLaunchModules<T extends LaunchPortalConfig>(config: T): T {
