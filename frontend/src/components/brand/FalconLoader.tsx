@@ -16,7 +16,9 @@ export function FalconLoader({
           <FalconLogo size={72} />
         </div>
       </div>
-      <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      <p suppressHydrationWarning className="text-sm font-medium text-muted-foreground">
+        {label}
+      </p>
     </div>
   );
 }

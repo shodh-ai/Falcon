@@ -16,7 +16,12 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 import { AddTicketMessageDto } from './dto/add-ticket-message.dto';
 
-type AuthUser = { user_id: string; role?: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  role?: string;
+  roles?: string[];
+  tenant_id?: string;
+};
 
 /** Users who can raise tickets and list tickets they filed (ESS / student helpdesk). */
 const HELPDESK_REQUESTER_ROLES = [
@@ -28,6 +33,7 @@ const HELPDESK_REQUESTER_ROLES = [
   'HRAdmin',
   'SuperAdmin',
   'AdmissionsOfficer',
+  'CampusAdmin',
   'Registrar',
   'Accountant',
   'Warden',
@@ -37,6 +43,18 @@ const HELPDESK_REQUESTER_ROLES = [
   'PlacementCell',
   'TransportOfficer',
   'DC_MEMBER',
+] as const;
+
+/** Finance desk — grievance queue and ticket actions. */
+const FINANCE_HELPDESK_ROLES = [
+  'Accountant',
+  'CFO',
+  'APManager',
+  'APClerk',
+  'FinanceController',
+  'SuperAdmin',
+  'CampusAdmin',
+  'Registrar',
 ] as const;
 
 @Controller('api/helpdesk/tickets')
@@ -66,7 +84,7 @@ export class TicketController {
   @Roles(
     'SuperAdmin',
     'Registrar',
-    'Accountant',
+    ...FINANCE_HELPDESK_ROLES,
     'Warden',
     'HOD',
     'Dean',
@@ -74,6 +92,12 @@ export class TicketController {
   )
   listAssigned(@Req() req: { user: AuthUser }) {
     return this.tickets.listTicketsForAssignee(req.user.user_id);
+  }
+
+  @Get('finance-grievances')
+  @Roles(...FINANCE_HELPDESK_ROLES)
+  listFinanceGrievances(@Req() req: { user: AuthUser }) {
+    return this.tickets.listFinanceGrievances(this.tenant(req), req.user);
   }
 
   @Get('ref/:ticketRef')
@@ -87,6 +111,7 @@ export class TicketController {
       req.user.user_id,
       req.user.role ?? 'UNKNOWN',
       this.tenant(req),
+      req.user,
     );
   }
 
@@ -106,9 +131,27 @@ export class TicketController {
   }
 
   @Get('profile-corrections')
-  @Roles('SuperAdmin', 'Registrar', 'HOD', 'Dean', 'Admin')
-  listProfileCorrections(@Req() req: { user: AuthUser }) {
-    return this.tickets.listProfileCorrectionTickets(this.tenant(req));
+  @Roles(
+    'CampusAdmin',
+    'SuperAdmin',
+    'AdmissionsOfficer',
+    'Registrar',
+    'HOD',
+    'Dean',
+    'Admin',
+  )
+  async listProfileCorrections(@Req() req: { user: AuthUser }) {
+    const tenantId = this.tenant(req);
+    const hodDeptIds = await this.tickets.resolveHodDepartmentIds(
+      req.user.user_id,
+    );
+    const deptIds = hodDeptIds.length ? hodDeptIds : undefined;
+    return this.tickets.listProfileCorrectionTickets(
+      tenantId,
+      100,
+      deptIds,
+      req.user,
+    );
   }
 
   @Get(':ticketId')
@@ -122,6 +165,7 @@ export class TicketController {
       req.user.user_id,
       req.user.role ?? 'UNKNOWN',
       this.tenant(req),
+      req.user,
     );
   }
 
@@ -131,9 +175,11 @@ export class TicketController {
 
   @Patch(':ticketId/status')
   @Roles(
+    'CampusAdmin',
     'SuperAdmin',
+    'AdmissionsOfficer',
     'Registrar',
-    'Accountant',
+    ...FINANCE_HELPDESK_ROLES,
     'Warden',
     'HOD',
     'Dean',
@@ -143,8 +189,14 @@ export class TicketController {
   updateStatus(
     @Param('ticketId') ticketId: string,
     @Body() dto: UpdateTicketStatusDto,
+    @Req() req: { user: AuthUser },
   ) {
-    return this.tickets.updateStatus(ticketId, dto);
+    return this.tickets.updateStatus(ticketId, dto, {
+      userId: req.user.user_id,
+      role: req.user.role ?? 'UNKNOWN',
+      roles: req.user.roles,
+      tenantId: this.tenant(req),
+    });
   }
 
   @Post(':ticketId/messages')
@@ -158,6 +210,20 @@ export class TicketController {
       req.user.user_id,
       req.user.role ?? 'UNKNOWN',
       dto.message,
+    );
+  }
+
+  @Post(':ticketId/escalate')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  escalate(
+    @Param('ticketId') ticketId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.tickets.escalateTicket(
+      ticketId,
+      req.user.user_id,
+      req.user.role ?? 'UNKNOWN',
+      this.tenant(req),
     );
   }
 }

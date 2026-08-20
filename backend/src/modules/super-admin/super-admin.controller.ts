@@ -1,23 +1,16 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   Req,
-  Res,
-  StreamableFile,
-  UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
-import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { EntityCreatorGuard } from '../../common/guards/entity-creator.guard';
@@ -29,28 +22,27 @@ import { ImpersonationService } from './impersonation.service';
 import { OrgEntityService } from './org-entity.service';
 import { CreateOrgEntityDto } from './dto/create-org-entity.dto';
 import { GrantEntityAccessDto } from './dto/grant-entity-access.dto';
-import {
-  CourseAllocationBulkService,
-  type CourseAllocationRowInput,
-} from '../academics/course-allocation-bulk.service';
+import { CampusScopeService } from '../../common/campus-scope/campus-scope.service';
 
 type AuthUser = {
   user_id: string;
   tenant_id?: string;
   tenant_schema?: string;
+  role?: string;
+  roles?: string[];
   impersonator_user_id?: string;
   impersonation_session_id?: string;
 };
 
 @Controller('api/super-admin')
 @UseGuards(JwtAuthGuard, RolesGuard, EntityCreatorGuard)
-@Roles('SuperAdmin')
+@Roles('CampusAdmin', 'SuperAdmin')
 export class SuperAdminController {
   constructor(
     private readonly superAdmin: SuperAdminService,
     private readonly impersonation: ImpersonationService,
     private readonly orgEntities: OrgEntityService,
-    private readonly courseAllocationBulk: CourseAllocationBulkService,
+    private readonly campusScope: CampusScopeService,
   ) {}
 
   @Get('entities')
@@ -113,25 +105,15 @@ export class SuperAdminController {
   }
 
   @Get('hierarchy')
-  hierarchy(@Req() req: { user: AuthUser }) {
-    return this.superAdmin.getHierarchyTree(this.tenant(req));
-  }
-
-  @Post('sections')
-  createSection(
-    @Req() req: { user: AuthUser },
-    @Body()
-    dto: {
-      section_name: string;
-      batch_id?: string;
-      program_id?: number;
-      capacity?: number;
-    },
-  ) {
-    return this.superAdmin.createSection(this.tenant(req), dto);
+  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
+  async hierarchy(@Req() req: { user: AuthUser }) {
+    const tree = await this.superAdmin.getHierarchyTree(this.tenant(req));
+    const campusIds = await this.campusScope.resolveCampusIds(req.user);
+    return this.campusScope.filterHierarchy(tree, campusIds);
   }
 
   @Get('hierarchy/assignable-users')
+  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
   hierarchyAssignableUsers(
     @Req() req: { user: AuthUser },
     @Query('q') q?: string,
@@ -140,7 +122,8 @@ export class SuperAdminController {
   }
 
   @Post('assignments')
-  assign(
+  @Roles('CampusAdmin', 'SuperAdmin')
+  async assign(
     @Req() req: { user: AuthUser },
     @Body()
     dto: {
@@ -150,6 +133,14 @@ export class SuperAdminController {
       entity_id: string;
     },
   ) {
+    const campusIds = await this.campusScope.resolveCampusIds(req.user);
+    if (campusIds) {
+      await this.campusScope.assertHierarchyTargetAllowed(
+        campusIds,
+        dto.entity_type,
+        dto.entity_id,
+      );
+    }
     return this.superAdmin.assignEntity(
       this.tenant(req),
       req.user.user_id,
@@ -157,22 +148,51 @@ export class SuperAdminController {
     );
   }
 
-  @Post('sections/bulk-assign')
-  bulkAssign(
+  @Get('assignments')
+  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
+  listAssignments(@Req() req: { user: AuthUser }) {
+    return this.superAdmin.listAssignments(this.tenant(req));
+  }
+
+  @Delete('assignments/:assignmentId')
+  @Roles('CampusAdmin', 'SuperAdmin')
+  revokeAssignment(
     @Req() req: { user: AuthUser },
-    @Body() dto: { section_id: string; student_user_ids: string[] },
+    @Param('assignmentId') assignmentId: string,
   ) {
-    return this.superAdmin.bulkAssignSection(
+    return this.superAdmin.revokeAssignment(
       this.tenant(req),
       req.user.user_id,
-      dto.section_id,
-      dto.student_user_ids,
+      assignmentId,
     );
   }
 
-  @Get('assignments')
-  listAssignments(@Req() req: { user: AuthUser }) {
-    return this.superAdmin.listAssignments(this.tenant(req));
+  @Patch('departments/:deptId/school')
+  @Roles('CampusAdmin', 'SuperAdmin')
+  async linkDepartmentToSchool(
+    @Req() req: { user: AuthUser },
+    @Param('deptId', ParseIntPipe) deptId: number,
+    @Body() dto: { school_id: number },
+  ) {
+    const campusIds = await this.campusScope.resolveCampusIds(req.user);
+    if (campusIds) {
+      await this.campusScope.assertHierarchyTargetAllowed(
+        campusIds,
+        'DEPARTMENT',
+        String(deptId),
+      );
+      await this.campusScope.assertHierarchyTargetAllowed(
+        campusIds,
+        'SCHOOL',
+        String(dto.school_id),
+      );
+    }
+    return this.superAdmin.linkDepartmentToSchool(
+      this.tenant(req),
+      req.user.user_id,
+      deptId,
+      dto.school_id,
+    );
   }
 
   @Get('impersonation/logs')
@@ -211,49 +231,5 @@ export class SuperAdminController {
   @Get('override-logs')
   listOverrideLogs(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listHrOverrideLogs(this.tenant(req));
-  }
-
-  @Get('academics/course-mapper/template')
-  async courseMapperTemplate(@Res({ passthrough: true }) res: Response) {
-    const buffer = await this.courseAllocationBulk.buildTemplateBuffer();
-    res.set({
-      'Content-Type':
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition':
-        'attachment; filename="course-allocation-matrix-template.xlsx"',
-    });
-    return new StreamableFile(buffer);
-  }
-
-  @Post('academics/course-mapper/preview')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
-    }),
-  )
-  async courseMapperPreview(
-    @UploadedFile() file: Express.Multer.File,
-    @Req() req: { user: AuthUser },
-  ) {
-    if (!file) throw new BadRequestException('No file uploaded');
-    const rows = await this.courseAllocationBulk.parseUploadFile(
-      file.buffer,
-      file.originalname,
-    );
-    return this.courseAllocationBulk.buildPreview(this.tenant(req), rows);
-  }
-
-  @Post('academics/course-mapper/execute')
-  executeCourseMapper(
-    @Req() req: { user: AuthUser },
-    @Body()
-    dto: { academic_year: string; rows: CourseAllocationRowInput[] },
-  ) {
-    return this.courseAllocationBulk.executeBulkMap(
-      this.tenant(req),
-      dto.academic_year,
-      dto.rows,
-    );
   }
 }

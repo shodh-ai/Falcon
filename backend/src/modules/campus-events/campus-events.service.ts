@@ -22,6 +22,10 @@ import { ProposeEventDto } from './dto/propose-event.dto';
 import { UpsertMasterCalendarDto } from './dto/master-calendar.dto';
 import { EstateApproveDto } from './dto/estate-approve.dto';
 import { FundTransferDto } from './dto/fund-transfer.dto';
+import {
+  CampusScopeService,
+  type ScopedAuthUser,
+} from '../../common/campus-scope/campus-scope.service';
 
 const HELD_VENUE_STATUSES = [
   'PENDING_HOD',
@@ -40,7 +44,20 @@ export class CampusEventsService {
     private readonly finance: FinanceService,
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
+    private readonly campusScope: CampusScopeService,
   ) {}
+
+  private assertCalendarWritable(user?: ScopedAuthUser) {
+    if (!user) return;
+    if (
+      this.campusScope.isCampusAdmin(user) &&
+      !this.campusScope.isUnrestricted(user)
+    ) {
+      throw new ForbiddenException(
+        'Campus Admin cannot modify the university academic calendar',
+      );
+    }
+  }
 
   private qrCode(registrationId: string) {
     return `FALCON-EVT-${registrationId.replace(/-/g, '').slice(0, 16).toUpperCase()}`;
@@ -89,7 +106,9 @@ export class CampusEventsService {
   async upsertMasterCalendarEntry(
     tenantId: string,
     dto: UpsertMasterCalendarDto,
+    actor?: ScopedAuthUser,
   ) {
+    this.assertCalendarWritable(actor);
     const rows = await this.dataSource.query(
       `INSERT INTO campus_master_calendar (tenant_id, date, title, description, is_blocked_for_events, academic_year)
        VALUES ($1, $2::date, $3, $4, COALESCE($5, true), $6)
@@ -111,7 +130,12 @@ export class CampusEventsService {
     return rows[0];
   }
 
-  async deleteMasterCalendarEntry(tenantId: string, calendarId: string) {
+  async deleteMasterCalendarEntry(
+    tenantId: string,
+    calendarId: string,
+    actor?: ScopedAuthUser,
+  ) {
+    this.assertCalendarWritable(actor);
     const rows = await this.dataSource.query(
       `DELETE FROM campus_master_calendar WHERE calendar_id = $1 AND tenant_id = $2 RETURNING calendar_id`,
       [calendarId, tenantId],

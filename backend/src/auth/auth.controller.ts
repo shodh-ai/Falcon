@@ -10,6 +10,7 @@ import {
   Res,
   UnauthorizedException,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,9 +20,16 @@ import { User } from '../entities/user.entity';
 import { Public } from '../common/decorators/roles.decorator';
 import { AuthService } from './auth.service';
 import { TenantService } from '../tenant/tenant.service';
+import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
+import { CampusScopeService } from '../common/campus-scope/campus-scope.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { LocalLoginDto } from './dto/local-login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import {
+  ForgotPasswordDto,
+  ResetPasswordWithTokenDto,
+} from './dto/forgot-password.dto';
 
 type AuthProfileUser = {
   user_id: string;
@@ -39,6 +47,7 @@ export class AuthController {
     private authService: AuthService,
     private tenantService: TenantService,
     private hrEntityCtx: HrEntityContextService,
+    private campusScope: CampusScopeService,
   ) {}
 
   @Get('google')
@@ -81,7 +90,39 @@ export class AuthController {
     };
   }
 
+  @Post('change-password')
+  @UseGuards(AuthGuard('jwt'))
+  async changePassword(
+    @Req() req: Request & { user: AuthProfileUser },
+    @Body() body: ChangePasswordDto,
+  ) {
+    if (body.new_password !== body.confirm_password) {
+      throw new BadRequestException('Passwords do not match');
+    }
+    return this.authService.changePassword(
+      req.user.user_id,
+      req.user.tenant_id,
+      body.current_password,
+      body.new_password,
+    );
+  }
+
   private async buildProfilePayload(user: AuthProfileUser) {
+    const syncedUser =
+      user.user_id && user.tenant_id
+        ? await this.authService.loadUserWithSyncedWorkspaceRoles(
+            user.user_id,
+            user.tenant_id,
+          )
+        : null;
+    const roleClaims = syncedUser
+      ? this.authService.getRoleClaims(syncedUser)
+      : {
+          roles: user.roles?.length ? user.roles : user.role ? [user.role] : [],
+          primaryRole: user.primaryRole ?? user.role,
+        };
+    const roles = roleClaims.roles;
+    const primaryRole = roleClaims.primaryRole ?? roles[0];
     const dbUser = await this.userRepository.findOne({
       where: { user_id: user.user_id },
       select: ['onboarding_status'],
@@ -90,11 +131,6 @@ export class AuthController {
       ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
       : null;
     const permissions = this.hrEntityCtx.capabilitiesToPermissionList(caps);
-    const roles = user.roles?.length
-      ? user.roles
-      : user.role
-        ? [user.role]
-        : [];
     const allowedRows = user.tenant_id
       ? await this.hrEntityCtx.listAllowedEntities(
           user.tenant_id,
@@ -102,7 +138,6 @@ export class AuthController {
           roles,
         )
       : [];
-    const primaryRole = user.role ?? roles[0];
     const hasDirectReports = user.tenant_id
       ? (await this.userRepository.count({
           where: {
@@ -112,8 +147,21 @@ export class AuthController {
           },
         })) > 0
       : false;
+    const isDepartmentHod = await this.authService.isDepartmentHod(
+      user.user_id,
+    );
+    const campusIds = await this.campusScope.resolveCampusIds({
+      user_id: user.user_id,
+      tenant_id: user.tenant_id,
+      role: primaryRole,
+      roles,
+    });
     return {
       ...user,
+      role: primaryRole,
+      roles,
+      primaryRole,
+      campus_ids: campusIds,
       onboarding_status: normalizeOnboardingStatusForWizard(
         dbUser?.onboarding_status,
         primaryRole,
@@ -122,6 +170,7 @@ export class AuthController {
       permissions,
       allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
       has_direct_reports: hasDirectReports,
+      is_department_hod: isDepartmentHod,
     };
   }
 
@@ -139,6 +188,21 @@ export class AuthController {
   }
 
   @Public()
+  @Post('forgot-password')
+  forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+    @Headers('x-tenant-subdomain') tenantSubdomain: string | undefined,
+  ) {
+    return this.authService.forgotPassword(dto.email, tenantSubdomain);
+  }
+
+  @Public()
+  @Post('reset-password')
+  resetPasswordWithToken(@Body() dto: ResetPasswordWithTokenDto) {
+    return this.authService.resetPasswordWithToken(dto.token, dto.new_password);
+  }
+
+  @Public()
   @Get('dev-login/:email')
   async devLogin(
     @Param('email') email: string,
@@ -149,8 +213,7 @@ export class AuthController {
       throw new UnauthorizedException('Dev login is disabled in production');
     }
 
-    const subdomain =
-      tenantSubdomain ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? 'sgvu';
+    const subdomain = resolveTenantSubdomain(tenantSubdomain);
     const tenant = await this.tenantService.findBySubdomain(subdomain);
 
     const user = await this.userRepository.findOne({
@@ -169,7 +232,8 @@ export class AuthController {
     }
 
     await this.authService.ensurePrimaryRoleMapping(user);
-    const refreshed = await this.authService.findById(
+    await this.authService.syncMultiHatWorkspaceRoles(user.user_id);
+    const refreshed = await this.authService.loadUserWithSyncedWorkspaceRoles(
       user.user_id,
       tenant.tenant_id,
     );

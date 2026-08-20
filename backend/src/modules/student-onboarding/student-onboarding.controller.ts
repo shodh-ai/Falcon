@@ -22,6 +22,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { StudentOnboardingService } from './student-onboarding.service';
 import {
   getRequiredDocTypes,
@@ -29,7 +30,35 @@ import {
   STUDENT_ONBOARDING_DOC_TYPES,
 } from './onboarding-portal.util';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+  role_name?: string;
+};
+
+function auditActor(req: {
+  user: AuthUser;
+  ip?: string;
+  headers?: Record<string, string | string[] | undefined>;
+}) {
+  const forwarded = req.headers?.['x-forwarded-for'];
+  const ip =
+    req.ip ??
+    (typeof forwarded === 'string'
+      ? forwarded.split(',')[0]?.trim()
+      : undefined);
+  return {
+    userId: req.user.user_id,
+    role: req.user.role ?? req.user.role_name,
+    ip,
+    sessionId:
+      typeof req.headers?.['x-session-id'] === 'string'
+        ? req.headers['x-session-id']
+        : undefined,
+  };
+}
 
 type ProfileBody = {
   blood_group?: string;
@@ -293,11 +322,19 @@ export class StaffOnboardingController extends BaseOnboardingController {
 
 @Controller('api/admin/student-verifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'HR', 'HRAdmin')
+@Roles(
+  'CampusAdmin',
+  'SuperAdmin',
+  'AdmissionsOfficer',
+  'Registrar',
+  'HR',
+  'HRAdmin',
+)
 export class StudentVerificationAdminController {
   constructor(
     private readonly onboarding: StudentOnboardingService,
     private readonly objectStorage: ObjectStorageService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   private tenant(req: { user: AuthUser }) {
@@ -312,7 +349,20 @@ export class StudentVerificationAdminController {
     return this.onboarding.getVerificationQueue(
       this.tenant(req),
       portalKind ?? 'all',
+      req.user,
     );
+  }
+
+  @Get('audit/recent')
+  auditRecent(
+    @Req() req: { user: AuthUser },
+    @Query('module') module?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.enterpriseAudit.listForTenant(this.tenant(req), {
+      module,
+      limit: limit ? Number(limit) : 50,
+    });
   }
 
   @Get(':targetUserId')
@@ -323,24 +373,46 @@ export class StudentVerificationAdminController {
     return this.onboarding.getVerificationDetail(
       this.tenant(req),
       targetUserId,
+      req.user,
     );
   }
 
   @Post(':targetUserId/approve')
   approve(
-    @Req() req: { user: AuthUser },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
   ) {
-    return this.onboarding.approve(this.tenant(req), targetUserId);
+    return this.onboarding.approve(
+      this.tenant(req),
+      targetUserId,
+      auditActor(req),
+      req.user,
+    );
   }
 
   @Post(':targetUserId/reject')
   reject(
-    @Req() req: { user: AuthUser },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
     @Body() body: { remarks: string },
   ) {
-    return this.onboarding.reject(this.tenant(req), targetUserId, body.remarks);
+    return this.onboarding.reject(
+      this.tenant(req),
+      targetUserId,
+      body.remarks,
+      auditActor(req),
+      req.user,
+    );
   }
 
   @Get(':targetUserId/documents/:docType/preview')
@@ -354,6 +426,7 @@ export class StudentVerificationAdminController {
       this.tenant(req),
       targetUserId,
       docType.toUpperCase().replace(/-/g, '_'),
+      req.user,
     );
 
     if (filePath.startsWith('http')) {

@@ -19,6 +19,7 @@ type AuthUser = {
   tenant_id?: string;
   user_id?: string;
   role?: string;
+  roles?: string[];
   dept_id?: number;
 };
 
@@ -81,13 +82,13 @@ export class AdminOpsController {
   }
 
   @Get('events')
-  @Roles('SuperAdmin', 'Registrar')
+  @Roles('SuperAdmin', 'Registrar', 'CampusAdmin')
   events(@Req() req: { user: AuthUser }) {
     return this.adminOps.listEvents(this.tenant(req));
   }
 
   @Post('events')
-  @Roles('SuperAdmin', 'Registrar')
+  @Roles('SuperAdmin', 'Registrar', 'CampusAdmin')
   createEvent(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -96,7 +97,7 @@ export class AdminOpsController {
   }
 
   @Get('timetable')
-  @Roles('SuperAdmin', 'Registrar', 'ExamCell')
+  @Roles('SuperAdmin', 'Registrar', 'ExamCell', 'CampusAdmin')
   timetable(
     @Req() req: { user: AuthUser },
     @Query('academic_year') academicYear?: string,
@@ -105,7 +106,7 @@ export class AdminOpsController {
   }
 
   @Post('timetable')
-  @Roles('SuperAdmin', 'Registrar')
+  @Roles('SuperAdmin', 'Registrar', 'CampusAdmin')
   timetableSlot(
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
@@ -120,18 +121,34 @@ export class AdminOpsController {
   }
 
   @Get('announcements')
-  @Roles('SuperAdmin', 'Registrar', 'President')
+  @Roles('SuperAdmin', 'Registrar', 'President', 'CampusAdmin')
   listAnnouncements(@Req() req: { user: AuthUser }) {
-    return this.announcements.listForAdmin(this.tenant(req));
+    return this.announcements.listForAdmin(this.tenant(req), req.user);
   }
 
   @Post('announcements')
-  @Roles('SuperAdmin', 'Registrar', 'President')
+  @Roles('SuperAdmin', 'Registrar', 'President', 'CampusAdmin')
   createAnnouncement(
     @Req() req: { user: AuthUser & { user_id: string } },
-    @Body() body: { title: string; body_html: string },
+    @Body()
+    body: {
+      title: string;
+      body_html: string;
+      target_dept_ids?: number[];
+      campus_id?: unknown;
+    },
   ) {
-    return this.announcements.create(this.tenant(req), req.user.user_id, body);
+    void body.campus_id;
+    return this.announcements.create(
+      this.tenant(req),
+      req.user.user_id,
+      {
+        title: body.title,
+        body_html: body.body_html,
+        target_dept_ids: body.target_dept_ids,
+      },
+      req.user,
+    );
   }
 
   @Get('announcements/feed')
@@ -145,6 +162,6 @@ export class AdminOpsController {
     'President',
   )
   announcementFeed(@Req() req: { user: AuthUser }) {
-    return this.announcements.listForUser(this.tenant(req));
+    return this.announcements.listForUser(this.tenant(req), req.user);
   }
 }

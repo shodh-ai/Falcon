@@ -43,6 +43,8 @@ import { StudentPortalModule } from './modules/student-portal/student-portal.mod
 import { StudentOnboardingModule } from './modules/student-onboarding/student-onboarding.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
+import { CampusAdminModule } from './modules/campus-admin/campus-admin.module';
+import { CampusScopeModule } from './common/campus-scope/campus-scope.module';
 import { LmsExtendedModule } from './modules/lms-extended/lms-extended.module';
 import { HostelTatkalModule } from './modules/hostel-tatkal/hostel-tatkal.module';
 import { CampusWalletModule } from './modules/campus-wallet/campus-wallet.module';
@@ -61,6 +63,9 @@ import { MasterDataModule } from './modules/master-data/master-data.module';
 import { AcademicRndModule } from './modules/academic-rnd/academic-rnd.module';
 import { CertificateAutomationModule } from './modules/certificate-automation/certificate-automation.module';
 import { WeeklyTestsModule } from './modules/weekly-tests/weekly-tests.module';
+import { FacultyAiModule } from './modules/faculty-ai/faculty-ai.module';
+import { RegistrarModule } from './modules/registrar/registrar.module';
+import { AdminControlModule } from './modules/admin-control/admin-control.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -168,6 +173,8 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     StudentOnboardingModule,
     ReportsModule,
     SuperAdminModule,
+    CampusAdminModule,
+    CampusScopeModule,
     LmsExtendedModule,
     HostelTatkalModule,
     CampusWalletModule,
@@ -186,6 +193,9 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     AcademicRndModule,
     CertificateAutomationModule,
     WeeklyTestsModule,
+    FacultyAiModule,
+    RegistrarModule,
+    AdminControlModule,
   ],
   controllers: [AppController],
   providers: [

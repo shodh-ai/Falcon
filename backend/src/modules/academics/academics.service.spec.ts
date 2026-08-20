@@ -19,6 +19,8 @@ import { ExamResult } from '../../entities/exam-result.entity';
 import { AttendanceRecord } from '../../entities/attendance-record.entity';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
+import { DeanAuditService } from './dean-audit.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 
 describe('AcademicsService', () => {
   let service: AcademicsService;
@@ -117,6 +119,14 @@ describe('AcademicsService', () => {
           useValue: mockEnrollmentSync,
         },
         { provide: StudentMentorSyncService, useValue: mockMentorSync },
+        {
+          provide: DeanAuditService,
+          useValue: { logAction: jest.fn(), recentActions: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: EnterpriseAuditService,
+          useValue: { logAction: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -141,8 +151,11 @@ describe('AcademicsService', () => {
             school_code: 'SOET',
           },
         ])
-        .mockResolvedValueOnce([{ dept_id: 10 }, { dept_id: 11 }]);
-      mockUsers.findOne.mockResolvedValue(null);
+        .mockResolvedValueOnce([{ dept_id: 10 }, { dept_id: 11 }])
+        // HOD dept query (3rd raw query in resolveDeanScope)
+        .mockResolvedValueOnce([])
+        // user dept_id fallback query (4th)
+        .mockResolvedValueOnce([{ dept_id: null }]);
 
       const scope = await (service as any).resolveDeanScope('dean-user-id');
 
@@ -154,13 +167,11 @@ describe('AcademicsService', () => {
     });
 
     it('falls back to dean dept_id when no school programs are linked', async () => {
+      // schoolIds empty → deptRows query is skipped; only 3 queries: schoolRows, hodDeptRows, deanRow
       mockUsers.manager.query
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([]);
-      mockUsers.findOne.mockResolvedValue({
-        user_id: 'dean-user-id',
-        dept_id: 5,
-      });
+        .mockResolvedValueOnce([])  // schoolRows
+        .mockResolvedValueOnce([])  // hodDeptRows
+        .mockResolvedValueOnce([{ dept_id: 5 }]);  // deanRow
 
       const scope = await (service as any).resolveDeanScope('dean-user-id');
 

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -26,9 +27,22 @@ type AuthUser = {
   roles?: string[];
 };
 
+const FINANCE_ENROLLED_STUDENTS_ROLES = [
+  'Accountant',
+  'CFO',
+  'APManager',
+  'APClerk',
+  'FinanceController',
+  'FinanceManager',
+  'SuperAdmin',
+  'CampusAdmin',
+  'AdmissionsOfficer',
+  'Registrar',
+] as const;
+
 @Controller('api/admissions-crm')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar')
+@Roles('CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar')
 export class AdmissionsCrmController {
   constructor(
     private readonly admissions: AdmissionsService,
@@ -38,17 +52,17 @@ export class AdmissionsCrmController {
 
   @Get('kanban')
   kanban(@Req() req: { user: AuthUser }) {
-    return this.admissions.kanbanBoard(this.tenant(req));
+    return this.admissions.kanbanBoard(this.tenant(req), req.user);
+  }
+
+  @Get('enrolled-students/branches')
+  @Roles(...FINANCE_ENROLLED_STUDENTS_ROLES)
+  getEnrolledStudentBranches(@Req() req: { user: AuthUser }) {
+    return this.admissions.getEnrolledStudentBranches(this.tenant(req), req.user);
   }
 
   @Get('enrolled-students')
-  @Roles(
-    'SuperAdmin',
-    'AdmissionsOfficer',
-    'Registrar',
-    'Accountant',
-    'FinanceManager',
-  )
+  @Roles(...FINANCE_ENROLLED_STUDENTS_ROLES)
   getEnrolledStudents(
     @Req() req: { user: AuthUser },
     @Query('q') q?: string,
@@ -60,19 +74,22 @@ export class AdmissionsCrmController {
       q,
       year,
       branch,
+      req.user,
     );
   }
 
   @Patch('transactions/:id/receipt')
-  @Roles(
-    'SuperAdmin',
-    'AdmissionsOfficer',
-    'Registrar',
-    'Accountant',
-    'FinanceManager',
-  )
-  uploadReceipt(@Param('id') id: string, @Body() dto: { receipt_url: string }) {
-    return this.admissions.uploadTransactionReceipt(id, dto.receipt_url);
+  @Roles(...FINANCE_ENROLLED_STUDENTS_ROLES)
+  uploadReceipt(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: { receipt_url: string },
+  ) {
+    return this.admissions.uploadTransactionReceipt(
+      id,
+      dto.receipt_url,
+      req.user,
+    );
   }
 
   @Post('enrolled-students/:id/documents')
@@ -85,22 +102,27 @@ export class AdmissionsCrmController {
       this.tenant(req),
       id,
       dto,
+      req.user,
     );
   }
 
   @Get('leads/:id/timeline')
-  timeline(@Param('id') id: string) {
-    return this.admissions.getLeadTimeline(id);
+  timeline(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.admissions.getLeadTimeline(id, this.tenant(req), req.user);
   }
 
   @Post('leads')
   createLead(@Req() req: { user: AuthUser }, @Body() dto: CreateLeadDto) {
-    return this.admissions.createLead(dto, this.tenant(req));
+    return this.admissions.createLead(dto, this.tenant(req), req.user);
   }
 
   @Patch('leads/:id/stage')
-  updateStage(@Param('id') id: string, @Body() dto: UpdateLeadStageDto) {
-    return this.admissions.updateLeadStage(id, dto);
+  updateStage(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body() dto: UpdateLeadStageDto,
+  ) {
+    return this.admissions.updateLeadStage(id, dto, this.tenant(req), req.user);
   }
 
   @Post('leads/:id/activities')
@@ -116,7 +138,7 @@ export class AdmissionsCrmController {
       metadata?: Record<string, unknown>;
     },
   ) {
-    return this.admissions.logLeadActivity(this.tenant(req), id, dto);
+    return this.admissions.logLeadActivity(this.tenant(req), id, dto, req.user);
   }
 
   @Post('leads/:id/documents')
@@ -125,12 +147,17 @@ export class AdmissionsCrmController {
     @Param('id') id: string,
     @Body() dto: { title: string; file_path: string },
   ) {
-    return this.admissions.uploadLeadDocument(this.tenant(req), id, dto);
+    return this.admissions.uploadLeadDocument(
+      this.tenant(req),
+      id,
+      dto,
+      req.user,
+    );
   }
 
   @Get('counseling/seats')
   seatMatrix(@Req() req: { user: AuthUser }) {
-    return this.counseling.getSeatMatrix(this.tenant(req));
+    return this.counseling.getSeatMatrix(this.tenant(req), undefined, req.user);
   }
 
   @Post('counseling/seats/:programCode/allot')
@@ -138,12 +165,17 @@ export class AdmissionsCrmController {
     @Req() req: { user: AuthUser },
     @Param('programCode') programCode: string,
   ) {
-    return this.counseling.allotSeat(this.tenant(req), programCode);
+    return this.counseling.allotSeat(
+      this.tenant(req),
+      programCode,
+      undefined,
+      req.user,
+    );
   }
 
   @Get('counseling/merit-list')
   meritList(@Req() req: { user: AuthUser }) {
-    return this.counseling.listMeritRanks(this.tenant(req));
+    return this.counseling.listMeritRanks(this.tenant(req), undefined, req.user);
   }
 
   /** Admissions/registrar self-service leave — avoids HR portal role gates on legacy deploys. */
@@ -191,11 +223,15 @@ export class AdmissionsCrmController {
       this.tenant(req),
       body.academic_year,
       body,
+      req.user,
     );
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    if (!req.user.tenant_id) {
+      throw new BadRequestException('Tenant context required');
+    }
+    return req.user.tenant_id;
   }
 
   private resolveRoles(user: AuthUser): string[] {
