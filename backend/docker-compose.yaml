@@ -4,11 +4,13 @@
 # updates and fails with "Bind for 0.0.0.0:4000 failed: port is already allocated"
 # when the previous container still holds the port.
 #
-# Coolify settings:
-# - Build Pack: Docker Compose (Base Directory = backend)
-# - Ports Exposes: 4000  (proxy only — leave "Ports Mappings" empty)
+# Coolify settings (required):
+# - Build Pack: Docker Compose
+# - Base Directory: backend
+# - Ports Exposes: 4000
+# - Ports Mappings: LEAVE EMPTY (host 4000 bind caused the production failure)
 # - Set DB_*/REDIS_*/JWT_* as Runtime-only env vars
-# - Keep NODE_ENV=production as Runtime-only (build stage forces development itself)
+# - Keep NODE_ENV=production as Runtime-only (Dockerfile build stage forces development)
 
 services:
   falcon-api:
