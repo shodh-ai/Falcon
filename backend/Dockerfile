@@ -33,4 +33,5 @@ RUN mkdir -p /app/uploads
 
 EXPOSE 4000
 
-CMD ["node", "dist/main"]
+# Explicit .js — Nest emit path; avoids MODULE_NOT_FOUND on dist/main
+CMD ["node", "dist/main.js"]
