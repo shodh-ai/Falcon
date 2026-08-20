@@ -47,6 +47,11 @@ function portalForRole(role: string): PortalConfig {
   return adminPortal;
 }
 
+/** True when the role uses the Management adminPortal sidebar (shared with /admin/*). */
+export function usesManagementAdminSidebar(role: string | undefined | null): boolean {
+  return portalForRole(role ?? '') === adminPortal;
+}
+
 export function RoleAwareShell({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const role = user?.primaryRole ?? user?.role ?? 'Faculty';
