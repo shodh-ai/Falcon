@@ -11,7 +11,10 @@ import {
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
+  type AssignmentPublishedPayload,
+  type CourseAnnouncementPayload,
   type CourseMaterialAddedPayload,
+  type WeeklyTestPublishedPayload,
   type ExamResultsPublishedPayload,
   type ExamRevaluationPayload,
   type MarksPublishedPayload,
@@ -35,6 +38,9 @@ import {
   type AlumniWelcomeEmailPayload,
   type AlumniConversionApprovedPayload,
   type StudentOnboardingApprovedPayload,
+  type StudentOnboardingRejectedPayload,
+  type TranscriptGeneratedPayload,
+  type OnboardingVerificationRequestedPayload,
   type EcellStatusUpdatedPayload,
   type EcellMentorMeetingRequestedPayload,
   type EcellMentorMeetingRespondedPayload,
@@ -42,6 +48,8 @@ import {
   type VenueBookingPayload,
   type AcademicRndStatusUpdatedPayload,
   type CertificateStatusUpdatedPayload,
+  type ExamDutySwapPayload,
+  type GradeChangePayload,
 } from './notification.events';
 
 /** Thin facade so feature modules emit events without importing the listener. */
@@ -96,8 +104,29 @@ export class NotificationEmitterService {
     );
   }
 
+  assignmentPublished(payload: AssignmentPublishedPayload) {
+    this.events.emit(
+      NotificationEvents.ACADEMICS_ASSIGNMENT_PUBLISHED,
+      payload,
+    );
+  }
+
   liveClassScheduled(payload: LiveClassScheduledPayload) {
-    this.events.emit(NotificationEvents.ACADEMICS_LIVE_CLASS_SCHEDULED, payload);
+    this.events.emit(
+      NotificationEvents.ACADEMICS_LIVE_CLASS_SCHEDULED,
+      payload,
+    );
+  }
+
+  weeklyTestPublished(payload: WeeklyTestPublishedPayload) {
+    this.events.emit(
+      NotificationEvents.ACADEMICS_WEEKLY_TEST_PUBLISHED,
+      payload,
+    );
+  }
+
+  courseAnnouncement(payload: CourseAnnouncementPayload) {
+    this.events.emit(NotificationEvents.ACADEMICS_COURSE_ANNOUNCEMENT, payload);
   }
 
   gatePassUpdated(payload: GatePassUpdatedPayload) {
@@ -234,6 +263,23 @@ export class NotificationEmitterService {
     this.events.emit(NotificationEvents.STUDENT_ONBOARDING_APPROVED, payload);
   }
 
+  studentOnboardingRejected(payload: StudentOnboardingRejectedPayload) {
+    this.events.emit(NotificationEvents.STUDENT_ONBOARDING_REJECTED, payload);
+  }
+
+  transcriptGenerated(payload: TranscriptGeneratedPayload) {
+    this.events.emit(NotificationEvents.TRANSCRIPT_GENERATED, payload);
+  }
+
+  onboardingVerificationRequested(
+    payload: OnboardingVerificationRequestedPayload,
+  ) {
+    this.events.emit(
+      NotificationEvents.ONBOARDING_VERIFICATION_REQUESTED,
+      payload,
+    );
+  }
+
   ecellStatusUpdated(payload: EcellStatusUpdatedPayload) {
     this.events.emit(NotificationEvents.ECELL_STATUS_UPDATED, payload);
   }
@@ -280,5 +326,36 @@ export class NotificationEmitterService {
 
   certificateStatusUpdated(payload: CertificateStatusUpdatedPayload) {
     this.events.emit(NotificationEvents.CERTIFICATE_STATUS_UPDATED, payload);
+  }
+
+  examDutySwapPeerRequest(payload: ExamDutySwapPayload) {
+    this.events.emit(NotificationEvents.EXAM_DUTY_SWAP_PEER_REQUEST, payload);
+  }
+
+  examDutySwapPeerRejected(payload: ExamDutySwapPayload) {
+    this.events.emit(NotificationEvents.EXAM_DUTY_SWAP_PEER_REJECTED, payload);
+  }
+
+  examDutySwapExamCellPending(payload: ExamDutySwapPayload) {
+    this.events.emit(
+      NotificationEvents.EXAM_DUTY_SWAP_EXAM_CELL_PENDING,
+      payload,
+    );
+  }
+
+  examDutySwapResolved(payload: ExamDutySwapPayload) {
+    this.events.emit(NotificationEvents.EXAM_DUTY_SWAP_RESOLVED, payload);
+  }
+
+  gradeChangeHodPending(payload: GradeChangePayload) {
+    this.events.emit(NotificationEvents.GRADE_CHANGE_HOD_PENDING, payload);
+  }
+
+  gradeChangeCoePending(payload: GradeChangePayload) {
+    this.events.emit(NotificationEvents.GRADE_CHANGE_COE_PENDING, payload);
+  }
+
+  gradeChangeResolved(payload: GradeChangePayload) {
+    this.events.emit(NotificationEvents.GRADE_CHANGE_RESOLVED, payload);
   }
 }

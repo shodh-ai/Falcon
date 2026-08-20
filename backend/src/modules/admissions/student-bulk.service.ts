@@ -5,6 +5,7 @@ import * as ExcelJS from 'exceljs';
 import { randomBytes } from 'crypto';
 import { DataSource, QueryRunner } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { MasterDataService } from '../master-data/master-data.service';
 import { getInitialOnboardingStatusForRole } from '../student-onboarding/onboarding-portal.util';
 
@@ -31,6 +32,7 @@ export class StudentBulkService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly masterData: MasterDataService,
     private readonly notify: NotificationEmitterService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   async buildTemplateBuffer(): Promise<Buffer> {
@@ -145,6 +147,7 @@ export class StudentBulkService {
     buffer: Buffer,
     filename: string,
     ruleId?: string,
+    actorMeta?: { role?: string; ip?: string; sessionId?: string },
   ) {
     const rows = await this.parseUploadFile(buffer, filename);
     const enrollmentRuleId = await this.resolveEnrollmentRuleId(
@@ -153,47 +156,325 @@ export class StudentBulkService {
     );
     const entityId = await this.resolveDefaultEntityId(tenantId);
 
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
+    const runRows = await this.dataSource.query(
+      `INSERT INTO student_bulk_upload_runs (
+         tenant_id, actor_user_id, filename, rows_total, status, source_file
+       ) VALUES ($1, $2, $3, $4, 'PROCESSING', $5)
+       RETURNING run_id`,
+      [tenantId, actorUserId, filename, rows.length, buffer],
+    );
+    const runId = runRows[0].run_id as string;
+
     const created: Array<{
       user_id: string;
       email: string;
       temp_password: string;
+      prn?: string;
     }> = [];
-    try {
-      for (let i = 0; i < rows.length; i++) {
-        const line = i + 2;
-        try {
-          const result = await this.createStudentInPipeline(
-            qr,
-            tenantId,
-            entityId,
-            rows[i],
-            enrollmentRuleId,
-          );
-          created.push(result);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          throw new BadRequestException({ line, message: msg });
-        }
+    const errors: Array<{ line: number; message: string }> = [];
+    let duplicateRows = 0;
+    const seenEmails = new Set<string>();
+
+    for (let i = 0; i < rows.length; i++) {
+      const line = i + 2;
+      const emailKey = rows[i].email.toLowerCase();
+      if (seenEmails.has(emailKey)) {
+        duplicateRows += 1;
+        errors.push({ line, message: `Duplicate email in file: ${emailKey}` });
+        continue;
       }
-      await qr.commitTransaction();
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
-    } finally {
-      await qr.release();
+      seenEmails.add(emailKey);
+
+      const qr = this.dataSource.createQueryRunner();
+      await qr.connect();
+      await qr.startTransaction();
+      try {
+        const result = await this.createStudentInPipeline(
+          qr,
+          tenantId,
+          entityId,
+          rows[i],
+          enrollmentRuleId,
+        );
+        await qr.commitTransaction();
+        created.push(result);
+        await this.dataSource.query(
+          `INSERT INTO student_bulk_upload_run_users (run_id, user_id, email, prn)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT DO NOTHING`,
+          [runId, result.user_id, result.email, result.prn ?? null],
+        );
+      } catch (err) {
+        await qr.rollbackTransaction();
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('already exists')) duplicateRows += 1;
+        errors.push({ line, message: msg });
+      } finally {
+        await qr.release();
+      }
     }
+
+    const status =
+      created.length === 0
+        ? 'FAILED'
+        : errors.length > 0
+          ? 'PARTIAL'
+          : 'COMPLETED';
+
+    await this.dataSource.query(
+      `UPDATE student_bulk_upload_runs
+       SET rows_imported = $2, rows_failed = $3, duplicate_rows = $4,
+           status = $5, error_details = $6::jsonb,
+           rollback_available = $7,
+           retry_available = $8
+       WHERE run_id = $1`,
+      [
+        runId,
+        created.length,
+        errors.length,
+        duplicateRows,
+        status,
+        JSON.stringify(errors.slice(0, 100)),
+        created.length > 0,
+        errors.length > 0,
+      ],
+    );
 
     for (const student of created) {
       this.emitCredentials(tenantId, student);
     }
 
+    await this.enterpriseAudit.log({
+      tenantId,
+      userId: actorUserId,
+      role: actorMeta?.role,
+      module: 'student_bulk_upload',
+      action: 'BULK_UPLOAD',
+      recordId: runId,
+      newValue: {
+        filename,
+        rows_total: rows.length,
+        rows_imported: created.length,
+        rows_failed: errors.length,
+        duplicate_rows: duplicateRows,
+        status,
+      },
+      ip: actorMeta?.ip,
+      sessionId: actorMeta?.sessionId,
+    });
+
     return {
+      run_id: runId,
       created: created.length,
+      rows_failed: errors.length,
+      duplicate_rows: duplicateRows,
+      status,
+      errors: errors.slice(0, 20),
       students: created.map((s) => ({ user_id: s.user_id, email: s.email })),
     };
+  }
+
+  async listUploadRuns(tenantId: string, limit = 50) {
+    return this.dataSource.query(
+      `SELECT r.run_id, r.tenant_id, r.actor_user_id, r.filename, r.rows_total,
+              r.rows_imported, r.rows_failed, r.duplicate_rows, r.status,
+              r.error_details, r.rollback_available, r.rolled_back_at, r.rolled_back_by,
+              r.created_at, r.retry_available,
+              (r.source_file IS NOT NULL) AS has_source_file,
+              u.name AS uploader_name, d.dept_name AS department_name
+       FROM student_bulk_upload_runs r
+       JOIN users u ON u.user_id = r.actor_user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE r.tenant_id = $1
+       ORDER BY r.created_at DESC
+       LIMIT $2`,
+      [tenantId, limit],
+    );
+  }
+
+  async retryFailedRows(
+    tenantId: string,
+    runId: string,
+    actorUserId: string,
+    actorMeta?: { role?: string; ip?: string; sessionId?: string },
+  ) {
+    const run = await this.dataSource.query(
+      `SELECT * FROM student_bulk_upload_runs
+       WHERE run_id = $1 AND tenant_id = $2`,
+      [runId, tenantId],
+    );
+    if (!run[0]) throw new BadRequestException('Upload run not found');
+    if (!run[0].retry_available && !(run[0].rows_failed > 0)) {
+      throw new BadRequestException('Retry is not available for this upload');
+    }
+    if (!run[0].source_file) {
+      throw new BadRequestException(
+        'Original upload file was not retained. Start a new upload instead.',
+      );
+    }
+
+    const buffer = Buffer.isBuffer(run[0].source_file)
+      ? run[0].source_file
+      : Buffer.from(run[0].source_file);
+    const rows = await this.parseUploadFile(buffer, run[0].filename);
+    const already = await this.dataSource.query(
+      `SELECT lower(email) AS email FROM student_bulk_upload_run_users WHERE run_id = $1`,
+      [runId],
+    );
+    const done = new Set(
+      (already as Array<{ email: string }>).map((r) =>
+        String(r.email).toLowerCase(),
+      ),
+    );
+    const enrollmentRuleId = await this.resolveEnrollmentRuleId(tenantId);
+    const entityId = await this.resolveDefaultEntityId(tenantId);
+
+    const created: Array<{
+      user_id: string;
+      email: string;
+      temp_password: string;
+      prn?: string;
+    }> = [];
+    const errors: Array<{ line: number; message: string }> = [];
+    let duplicateRows = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const line = i + 2;
+      const emailKey = rows[i].email.toLowerCase();
+      if (done.has(emailKey)) continue;
+
+      const qr = this.dataSource.createQueryRunner();
+      await qr.connect();
+      await qr.startTransaction();
+      try {
+        const result = await this.createStudentInPipeline(
+          qr,
+          tenantId,
+          entityId,
+          rows[i],
+          enrollmentRuleId,
+        );
+        await qr.commitTransaction();
+        created.push(result);
+        done.add(emailKey);
+        await this.dataSource.query(
+          `INSERT INTO student_bulk_upload_run_users (run_id, user_id, email, prn)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT DO NOTHING`,
+          [runId, result.user_id, result.email, result.prn ?? null],
+        );
+      } catch (err) {
+        await qr.rollbackTransaction();
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('already exists')) duplicateRows += 1;
+        errors.push({ line, message: msg });
+      } finally {
+        await qr.release();
+      }
+    }
+
+    const imported = Number(run[0].rows_imported ?? 0) + created.length;
+    const status =
+      errors.length === 0 ? 'COMPLETED' : imported === 0 ? 'FAILED' : 'PARTIAL';
+
+    await this.dataSource.query(
+      `UPDATE student_bulk_upload_runs
+       SET rows_imported = $2, rows_failed = $3, duplicate_rows = COALESCE(duplicate_rows,0) + $4,
+           status = $5, error_details = $6::jsonb,
+           rollback_available = $7, retry_available = $8
+       WHERE run_id = $1`,
+      [
+        runId,
+        imported,
+        errors.length,
+        duplicateRows,
+        status,
+        JSON.stringify(errors.slice(0, 100)),
+        imported > 0,
+        errors.length > 0,
+      ],
+    );
+
+    for (const student of created) {
+      this.emitCredentials(tenantId, student);
+    }
+
+    await this.enterpriseAudit.log({
+      tenantId,
+      userId: actorUserId,
+      role: actorMeta?.role,
+      module: 'student_bulk_upload',
+      action: 'BULK_UPLOAD_RETRY',
+      recordId: runId,
+      newValue: {
+        retried: created.length,
+        rows_failed: errors.length,
+        status,
+      },
+      ip: actorMeta?.ip,
+      sessionId: actorMeta?.sessionId,
+    });
+
+    return {
+      run_id: runId,
+      created: created.length,
+      rows_failed: errors.length,
+      status,
+      errors: errors.slice(0, 20),
+    };
+  }
+
+  async rollbackRun(
+    tenantId: string,
+    runId: string,
+    actorUserId: string,
+    actorMeta?: { role?: string; ip?: string; sessionId?: string },
+  ) {
+    const run = await this.dataSource.query(
+      `SELECT * FROM student_bulk_upload_runs
+       WHERE run_id = $1 AND tenant_id = $2`,
+      [runId, tenantId],
+    );
+    if (!run[0]) throw new BadRequestException('Upload run not found');
+    if (!run[0].rollback_available || run[0].rolled_back_at) {
+      throw new BadRequestException(
+        'Rollback is not available for this upload',
+      );
+    }
+
+    const users = await this.dataSource.query(
+      `SELECT user_id FROM student_bulk_upload_run_users WHERE run_id = $1`,
+      [runId],
+    );
+
+    for (const row of users as { user_id: string }[]) {
+      await this.dataSource.query(
+        `UPDATE users SET is_active = false, updated_at = NOW()
+         WHERE user_id = $1 AND tenant_id = $2`,
+        [row.user_id, tenantId],
+      );
+    }
+
+    await this.dataSource.query(
+      `UPDATE student_bulk_upload_runs
+       SET rollback_available = false, rolled_back_at = NOW(), rolled_back_by = $2
+       WHERE run_id = $1`,
+      [runId, actorUserId],
+    );
+
+    await this.enterpriseAudit.log({
+      tenantId,
+      userId: actorUserId,
+      role: actorMeta?.role,
+      module: 'student_bulk_upload',
+      action: 'BULK_UPLOAD_ROLLBACK',
+      recordId: runId,
+      newValue: { deactivated_users: users.length },
+      ip: actorMeta?.ip,
+      sessionId: actorMeta?.sessionId,
+    });
+
+    return { run_id: runId, deactivated_users: users.length };
   }
 
   private emitCredentials(
@@ -253,7 +534,12 @@ export class StudentBulkService {
     entityId: number,
     row: StudentRowInput,
     enrollmentRuleId: string,
-  ): Promise<{ user_id: string; email: string; temp_password: string }> {
+  ): Promise<{
+    user_id: string;
+    email: string;
+    temp_password: string;
+    prn: string;
+  }> {
     const email = row.email.toLowerCase();
 
     const existing = await qr.query(
@@ -328,6 +614,6 @@ export class StudentBulkService {
       ],
     );
 
-    return { user_id: userId, email, temp_password: tempPassword };
+    return { user_id: userId, email, temp_password: tempPassword, prn };
   }
 }

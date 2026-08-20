@@ -97,3 +97,6 @@ export { PortalMeetingParticipant } from './portal-meeting-participant.entity';
 export { PortalMeetingMinutes } from './portal-meeting-minutes.entity';
 export { ExamResultSession } from './exam-result-session.entity';
 export { StudentExamReport } from './student-exam-report.entity';
+export { FacultyAiConversation } from './faculty-ai-conversation.entity';
+export { FacultyAiMessage } from './faculty-ai-message.entity';
+export type { FacultyAiMessageRole } from './faculty-ai-message.entity';
