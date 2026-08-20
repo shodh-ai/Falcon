@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'crypto';
 import { User } from '../entities/user.entity';
 import { UserRole } from '../entities/user-role.entity';
 import {
@@ -185,8 +186,21 @@ export class AuthService {
 
     const valid = await bcrypt.compare(password, credential.password_hash);
     if (!valid) {
+      await this.recordLoginAttempt(
+        tenant.tenant_id,
+        credential.user_id,
+        email,
+        false,
+      );
       throw new UnauthorizedException('Invalid email or password');
     }
+
+    await this.recordLoginAttempt(
+      tenant.tenant_id,
+      credential.user_id,
+      email,
+      true,
+    );
 
     // Raw SQL only — TypeORM findById joins soft-delete columns on roles /
     // departments / user_roles and 500s when those migrations are missing in prod.
@@ -274,8 +288,107 @@ export class AuthService {
         ),
         has_direct_reports: directReports,
         is_department_hod: isDepartmentHod,
+        last_login_at: new Date().toISOString(),
       },
     };
+  }
+
+  private async recordLoginAttempt(
+    tenantId: string,
+    userId: string,
+    email: string,
+    success: boolean,
+  ) {
+    try {
+      if (success) {
+        await this.dataSource.query(
+          `UPDATE users
+           SET last_login_at = NOW(), account_status = COALESCE(NULLIF(account_status, ''), 'ACTIVE')
+           WHERE user_id = $1 AND tenant_id = $2`,
+          [userId, tenantId],
+        );
+      }
+      await this.dataSource.query(
+        `INSERT INTO admin_login_history (tenant_id, user_id, email, success)
+         VALUES ($1, $2, $3, $4)`,
+        [tenantId, userId, email.toLowerCase(), success],
+      );
+      if (success) {
+        await this.dataSource.query(
+          `INSERT INTO admin_control_audit
+             (tenant_id, actor_user_id, action, resource_type, resource_id, details)
+           VALUES ($1, $2, 'LOGIN', 'session', $2, '{"source":"local-login"}'::jsonb)`,
+          [tenantId, userId],
+        );
+      }
+    } catch {
+      // Login history tables may be missing until migration; never block auth.
+    }
+  }
+
+  async forgotPassword(
+    email: string,
+    tenantSubdomain?: string,
+  ): Promise<{ sent: true; reset_token?: string }> {
+    const subdomain = resolveTenantSubdomain(tenantSubdomain);
+    const tenant = await this.tenantService.findBySubdomain(subdomain);
+    const [user] = await this.dataSource.query<
+      Array<{ user_id: string; is_active: boolean }>
+    >(
+      `SELECT user_id, is_active FROM users
+       WHERE tenant_id = $1 AND lower(official_email) = lower($2)
+       LIMIT 1`,
+      [tenant.tenant_id, email.trim()],
+    );
+    if (!user?.is_active) {
+      return { sent: true };
+    }
+    const raw = randomBytes(24).toString('hex');
+    const tokenHash = createHash('sha256').update(raw).digest('hex');
+    try {
+      await this.dataSource.query(
+        `INSERT INTO admin_password_reset_tokens
+           (tenant_id, user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour')`,
+        [tenant.tenant_id, user.user_id, tokenHash],
+      );
+    } catch {
+      return { sent: true };
+    }
+    return process.env.NODE_ENV === 'production'
+      ? { sent: true }
+      : { sent: true, reset_token: raw };
+  }
+
+  async resetPasswordWithToken(
+    token: string,
+    newPassword: string,
+  ): Promise<{ success: true }> {
+    if (!token || newPassword.length < 8) {
+      throw new BadRequestException('Invalid token or password');
+    }
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const [row] = await this.dataSource.query<
+      Array<{ token_id: string; user_id: string; tenant_id: string }>
+    >(
+      `SELECT token_id, user_id, tenant_id
+       FROM admin_password_reset_tokens
+       WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+       LIMIT 1`,
+      [tokenHash],
+    );
+    if (!row) throw new BadRequestException('Reset link expired or invalid');
+    const hash = await bcrypt.hash(newPassword, 10);
+    await this.dataSource.query(
+      `UPDATE users SET password_hash = $1, onboarding_status = 'COMPLETED', updated_at = NOW()
+       WHERE user_id = $2 AND tenant_id = $3`,
+      [hash, row.user_id, row.tenant_id],
+    );
+    await this.dataSource.query(
+      `UPDATE admin_password_reset_tokens SET used_at = NOW() WHERE token_id = $1`,
+      [row.token_id],
+    );
+    return { success: true };
   }
 
   async isDepartmentHod(userId: string): Promise<boolean> {

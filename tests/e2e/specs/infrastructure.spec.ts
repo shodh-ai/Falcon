@@ -10,6 +10,6 @@ test.describe('Playwright infrastructure', () => {
   });
 
   test('baseURL is configured', async () => {
-    expect(process.env.FALCON_WEB_URL ?? 'http://localhost:3000').toContain('http');
+    expect(process.env.FALCON_WEB_URL ?? 'http://localhost:3100').toContain('http');
   });
 });

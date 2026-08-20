@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   formatRelative,
+  FUNNEL_STAGE_KEYS,
   leadMeta,
   leadPriority,
   STAGE_LABELS,
@@ -18,14 +19,19 @@ export function useAdmissionsKanban() {
   const api = useAuthedApi();
   const [kanbanRaw, setKanbanRaw] = useState<KanbanPayload>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [creatingLead, setCreatingLead] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
+    setError(null);
     void api
       .get<KanbanPayload>('/api/admissions-crm/kanban')
-      .then(setKanbanRaw)
-      .catch(() => setKanbanRaw([]))
+      .then((data) => setKanbanRaw(Array.isArray(data) ? data : []))
+      .catch(() => {
+        setKanbanRaw([]);
+        setError('Unable to load the lead pipeline.');
+      })
       .finally(() => setLoading(false));
   }, [api]);
 
@@ -43,12 +49,14 @@ export function useAdmissionsKanban() {
 
   const useDemo = allLeads.length === 0;
 
-  const columns: KanbanColumn[] = useMemo(
-    () =>
-      kanbanRaw.map((column) => ({
-        id: column.stage,
-        title: STAGE_LABELS[column.stage] ?? column.stage,
-        cards: column.leads.map((lead) => ({
+  const columns: KanbanColumn[] = useMemo(() => {
+    const byStage = new Map(kanbanRaw.map((column) => [column.stage, column.leads]));
+    return FUNNEL_STAGE_KEYS.map((stage) => {
+      const leads = byStage.get(stage) ?? [];
+      return {
+        id: stage,
+        title: STAGE_LABELS[stage] ?? stage,
+        cards: leads.map((lead) => ({
           id: lead.lead_id,
           title: lead.full_name,
           subtitle: lead.email ?? lead.phone ?? undefined,
@@ -60,9 +68,9 @@ export function useAdmissionsKanban() {
           meta: `Score: ${lead.lead_score}`,
         })),
         emptyMessage: 'No leads in this stage',
-      })),
-    [kanbanRaw],
-  );
+      };
+    });
+  }, [kanbanRaw]);
 
   const leadsById = useMemo(() => {
     const map = new Map<string, CrmLead>();
@@ -134,6 +142,7 @@ export function useAdmissionsKanban() {
     columns,
     leadsById,
     loading,
+    error,
     creatingLead,
     load,
     onMove,

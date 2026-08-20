@@ -32,8 +32,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { usePathname } from 'next/navigation';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
+import { campusAdminRoutes } from '@/lib/campus-admin.roles';
 import { cn } from '@/lib/utils';
 
 type TimelineEntry = {
@@ -66,6 +68,11 @@ function matchesSearch(lead: CrmLead, query: string): boolean {
 }
 
 export function AdmissionsCrmPipelineWorkspace() {
+  const pathname = usePathname();
+  const isCampusAdminWorkspace = pathname?.startsWith('/campus-admin') ?? false;
+  const dashboardHref = isCampusAdminWorkspace
+    ? campusAdminRoutes.dashboard
+    : ADMISSIONS_CRM_DASHBOARD_HREF;
   const api = useAuthedApi();
   const { allLeads, columns, leadsById, loading, creatingLead, load, onMove, addLead, useDemo } =
     useAdmissionsKanban();
@@ -188,7 +195,7 @@ export function AdmissionsCrmPipelineWorkspace() {
           <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 space-y-2">
               <Link
-                href={ADMISSIONS_CRM_DASHBOARD_HREF}
+                href={dashboardHref}
                 className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-sgvu-gold hover:text-sgvu-navy"
               >
                 <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
@@ -209,6 +216,7 @@ export function AdmissionsCrmPipelineWorkspace() {
               >
                 {creatingLead ? 'Adding…' : 'Add Lead'}
               </button>
+              {isCampusAdminWorkspace ? null : (
               <Link
                 href="/admin/students/bulk-upload"
                 className={cn('inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold', BRAND_BTN)}
@@ -216,6 +224,7 @@ export function AdmissionsCrmPipelineWorkspace() {
                 <FileSpreadsheet className="h-4 w-4" aria-hidden />
                 Import Excel
               </Link>
+              )}
               <Button type="button" size="sm" className={cn('h-10', BRAND_BTN)} onClick={load} disabled={loading}>
                 {loading ? 'Refreshing…' : 'Refresh'}
               </Button>

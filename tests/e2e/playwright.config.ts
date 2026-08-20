@@ -7,14 +7,15 @@ function loadWebBase(): string {
   if (fs.existsSync(envPath)) {
     for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
       if (line.startsWith('FALCON_WEB_URL=')) {
-        return line.split('=')[1]?.trim() ?? 'http://localhost:3000';
+        return line.split('=')[1]?.trim() ?? 'http://localhost:3100';
       }
     }
   }
-  return process.env.FALCON_WEB_URL ?? 'http://localhost:3000';
+  return process.env.FALCON_WEB_URL ?? 'http://localhost:3100';
 }
 
 const baseURL = loadWebBase();
+const webPort = new URL(baseURL).port || (baseURL.startsWith('https:') ? '443' : '80');
 
 export default defineConfig({
   testDir: './specs',
@@ -32,7 +33,9 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: process.env.CI ? 'npm run start' : 'npm run dev',
+    command: process.env.CI
+      ? `npm run start -- --port ${webPort}`
+      : `npm run dev -- --port ${webPort}`,
     cwd: path.join(__dirname, '..', '..', 'frontend'),
     url: baseURL,
     timeout: 120_000,

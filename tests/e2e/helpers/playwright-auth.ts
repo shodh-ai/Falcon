@@ -2,6 +2,8 @@ import type { Page } from '@playwright/test';
 import { TEST_USERS } from '../../helpers/test-users';
 
 export type MockPortalUser = {
+  user_id?: string;
+  name?: string;
   role: string;
   roles?: string[];
   primaryRole?: string;
@@ -12,6 +14,8 @@ export type MockPortalUser = {
 export async function mockAuthenticatedSession(page: Page, user: MockPortalUser): Promise<void> {
   const token = user.token ?? `e2e-mock-token-${user.role}`;
   const payload = {
+    user_id: user.user_id ?? `e2e-${user.role.toLowerCase()}`,
+    name: user.name ?? `E2E ${user.role}`,
     role: user.role,
     roles: user.roles ?? [user.role],
     primaryRole: user.primaryRole ?? user.role,
@@ -34,6 +38,17 @@ export async function mockAuthenticatedSession(page: Page, user: MockPortalUser)
       body: JSON.stringify({ permissions: [] }),
     });
   });
+
+  // Next middleware runs before client-side localStorage hydration, so portal
+  // navigation also needs the same cookie written by AuthContext in real use.
+  await page.context().addCookies([
+    {
+      name: 'falcon_auth_token',
+      value: token,
+      url: process.env.FALCON_WEB_URL ?? 'http://localhost:3100',
+      sameSite: 'Lax',
+    },
+  ]);
 
   await page.addInitScript(
     ([t, u]) => {

@@ -11,6 +11,10 @@ import { NotificationEmitterService } from '../../core/notifications/notificatio
 import { OnboardingVerificationNotifyService } from '../../core/notifications/onboarding-verification-notify.service';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import {
+  CampusScopeService,
+  type ScopedAuthUser,
+} from '../../common/campus-scope/campus-scope.service';
+import {
   getDashboardPathForRoleName,
   getOnboardingResubmitPathForRoleName,
   getRequiredDocTypes,
@@ -118,6 +122,7 @@ export class StudentOnboardingService {
     private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
     private readonly crypto: HrFieldEncryptionService,
     private readonly enterpriseAudit: EnterpriseAuditService,
+    private readonly campusScope: CampusScopeService,
   ) {}
 
   resolveTenantId(tenantId?: string | null) {
@@ -409,11 +414,29 @@ export class StudentOnboardingService {
   async getVerificationQueue(
     tenantId: string,
     portalKind?: OnboardingPortalKind | 'all',
+    actor?: ScopedAuthUser,
   ) {
     const tenant = this.resolveTenantId(tenantId);
     await this.onboardingVerificationNotify
       .syncPendingVerificationNotifications(tenant)
       .catch(() => undefined);
+
+    const campusIds = actor
+      ? await this.campusScope.resolveCampusIds(actor)
+      : null;
+    if (campusIds && !campusIds.length) return [];
+
+    const campusSql = campusIds
+      ? `AND EXISTS (
+           SELECT 1
+           FROM departments d
+           JOIN schools s ON s.school_id = d.school_id AND s.deleted_at IS NULL
+           WHERE d.dept_id = u.dept_id
+             AND d.deleted_at IS NULL
+             AND s.campus_id = ANY($2::int[])
+         )`
+      : '';
+    const params = campusIds ? [tenant, campusIds] : [tenant];
 
     const rows = await this.dataSource.query<
       Array<{
@@ -444,16 +467,32 @@ export class StudentOnboardingService {
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.onboarding_status = 'PENDING_ADMIN_APPROVAL'
+         ${campusSql}
        ORDER BY submitted_at DESC NULLS LAST, u.name ASC`,
-      [tenant],
+      params,
     );
 
     if (!portalKind || portalKind === 'all') return rows;
     return rows.filter((row) => row.portal_kind === portalKind);
   }
 
-  async getVerificationDetail(tenantId: string, targetUserId: string) {
+  private async assertVerificationCampus(
+    actor: ScopedAuthUser | undefined,
+    targetUserId: string,
+  ) {
+    await this.campusScope.assertActorCampusAccess(
+      actor,
+      await this.campusScope.campusIdForUserDept(targetUserId),
+    );
+  }
+
+  async getVerificationDetail(
+    tenantId: string,
+    targetUserId: string,
+    actor?: ScopedAuthUser,
+  ) {
     const tenant = this.resolveTenantId(tenantId);
+    await this.assertVerificationCampus(actor, targetUserId);
     const user = await this.getUserRow(tenant, targetUserId);
     const kind = resolveOnboardingPortalKind(user.role_name);
     const profile = await this.getStep2Profile(tenant, targetUserId);
@@ -488,7 +527,9 @@ export class StudentOnboardingService {
     tenantId: string,
     targetUserId: string,
     actor?: OnboardingAuditActor,
+    scopeUser?: ScopedAuthUser,
   ) {
+    await this.assertVerificationCampus(scopeUser, targetUserId);
     const tenant = this.resolveTenantId(tenantId);
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -595,7 +636,9 @@ export class StudentOnboardingService {
     targetUserId: string,
     remarks: string,
     actor?: OnboardingAuditActor,
+    scopeUser?: ScopedAuthUser,
   ) {
+    await this.assertVerificationCampus(scopeUser, targetUserId);
     const reason = remarks?.trim();
     if (!reason) throw new BadRequestException('Rejection reason is required');
 
@@ -706,7 +749,9 @@ export class StudentOnboardingService {
     tenantId: string,
     targetUserId: string,
     docType: string,
+    actor?: ScopedAuthUser,
   ) {
+    await this.assertVerificationCampus(actor, targetUserId);
     const user = await this.getUserRow(tenantId, targetUserId);
     const kind = resolveOnboardingPortalKind(user.role_name);
 

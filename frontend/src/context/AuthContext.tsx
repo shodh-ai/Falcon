@@ -29,7 +29,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (token: string, user: User) => void;
+  login: (token: string, user: User, rememberMe?: boolean) => void;
   refreshUser: () => Promise<User | null>;
   logout: () => void;
   isAuthenticated: boolean;
@@ -40,13 +40,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const AUTH_COOKIE = 'falcon_auth_token';
 
-function writeAuthCookie(token: string | null) {
+function writeAuthCookie(token: string | null, rememberMe = false) {
   if (typeof document === 'undefined') return;
   // Still readable by JS (middleware gate) — not HttpOnly. Prefer short TTL + HTTPS Secure.
   // Full HttpOnly cookie sessions need a backend Set-Cookie login path.
   const secure =
     typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : '';
-  const maxAgeSeconds = 60 * 60 * 8; // 8h — align JWT_EXPIRATION in production
+  const maxAgeSeconds = rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 8;
   if (token) {
     document.cookie = `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
   } else {
@@ -99,12 +99,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void load();
   }, []);
 
-  const login = useCallback((newToken: string, newUser: User) => {
+  const login = useCallback((newToken: string, newUser: User, rememberMe = false) => {
     setToken(newToken);
     setUser(newUser);
     localStorage.setItem('token', newToken);
     localStorage.setItem('user', JSON.stringify(newUser));
-    writeAuthCookie(newToken);
+    writeAuthCookie(newToken, rememberMe);
   }, []);
 
   const logout = useCallback(() => {

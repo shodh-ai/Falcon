@@ -22,6 +22,10 @@ import {
 import { WorkflowNotificationService } from '../../core/workflow/workflow-notification.service';
 import { User } from '../../entities/user.entity';
 import { assertNoPendingRow } from '../../common/validators/pending-request.util';
+import {
+  CampusScopeService,
+  type ScopedAuthUser,
+} from '../../common/campus-scope/campus-scope.service';
 
 const TICKET_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -39,6 +43,7 @@ export class TicketService {
     private readonly workflowRouting: WorkflowRoutingService,
     private readonly workflowNotify: WorkflowNotificationService,
     @InjectRepository(User) private readonly users: Repository<User>,
+    private readonly campusScope: CampusScopeService,
   ) {}
 
   async createTicket(studentUserId: string, dto: CreateTicketDto) {
@@ -190,6 +195,7 @@ export class TicketService {
     actorUserId: string,
     actorRole: string,
     tenantId: string,
+    actor?: ScopedAuthUser,
   ) {
     const rows = await this.tickets.manager.query<
       Array<Record<string, unknown>>
@@ -209,6 +215,7 @@ export class TicketService {
     if (!rows.length) throw new NotFoundException('Ticket not found');
 
     const t = rows[0];
+    await this.assertTicketCampus(actor, t.student_user_id);
     return this.finalizeTicketRead(t, actorUserId, actorRole, tenantId);
   }
 
@@ -218,13 +225,20 @@ export class TicketService {
     actorUserId: string,
     actorRole: string,
     tenantId: string,
+    actor?: ScopedAuthUser,
   ) {
     const trimmed = ticketId.trim();
     if (!trimmed || trimmed === 'undefined' || trimmed === 'null') {
       throw new NotFoundException('Ticket not found');
     }
     if (TICKET_REF_RE.test(trimmed)) {
-      return this.getTicketByRef(trimmed, actorUserId, actorRole, tenantId);
+      return this.getTicketByRef(
+        trimmed,
+        actorUserId,
+        actorRole,
+        tenantId,
+        actor,
+      );
     }
     if (!TICKET_UUID_RE.test(trimmed)) {
       throw new NotFoundException('Ticket not found');
@@ -249,7 +263,18 @@ export class TicketService {
     if (!rows.length) throw new NotFoundException('Ticket not found');
 
     const t = rows[0];
+    await this.assertTicketCampus(actor, t.student_user_id);
     return this.finalizeTicketRead(t, actorUserId, actorRole, tenantId);
+  }
+
+  private async assertTicketCampus(
+    actor: ScopedAuthUser | undefined,
+    studentUserId: unknown,
+  ) {
+    await this.campusScope.assertActorCampusAccess(
+      actor,
+      await this.campusScope.campusIdForUserDept(String(studentUserId ?? '')),
+    );
   }
 
   private async finalizeTicketRead(
@@ -337,7 +362,17 @@ export class TicketService {
   }
 
   /** List FINANCE category helpdesk tickets for the finance desk. */
-  async listFinanceGrievances(tenantId: string) {
+  async listFinanceGrievances(tenantId: string, actor?: ScopedAuthUser) {
+    const campusIds = actor
+      ? await this.campusScope.resolveCampusIds(actor)
+      : null;
+    if (campusIds && !campusIds.length) return [];
+    const campusJoin = campusIds
+      ? `JOIN departments d ON d.dept_id = u.dept_id AND d.deleted_at IS NULL
+         JOIN schools s ON s.school_id = d.school_id AND s.deleted_at IS NULL`
+      : '';
+    const campusWhere = campusIds ? `AND s.campus_id = ANY($2::int[])` : '';
+    const params = campusIds ? [tenantId, campusIds] : [tenantId];
     return this.dataSource.query(
       `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description,
               t.status, t.escalation_level, t.created_at, t.sla_deadline, t.resolved_at,
@@ -351,12 +386,14 @@ export class TicketService {
        JOIN users u ON u.user_id = t.student_user_id
        LEFT JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN users au ON au.user_id = t.assigned_to_user_id
+       ${campusJoin}
        WHERE t.category = 'FINANCE'
          AND COALESCE(t.tenant_id, u.tenant_id) = $1
          AND t.deleted_at IS NULL
          AND t.status IN ('PENDING', 'IN_PROGRESS')
+         ${campusWhere}
        ORDER BY t.created_at DESC`,
-      [tenantId],
+      params,
     );
   }
 
@@ -401,7 +438,23 @@ export class TicketService {
     tenantId: string,
     limit = 20,
     deptIds?: number[],
+    actor?: ScopedAuthUser,
   ) {
+    const campusIds = actor
+      ? await this.campusScope.resolveCampusIds(actor)
+      : null;
+    if (campusIds && !campusIds.length) return [];
+    let scopedDeptIds = deptIds;
+    if (campusIds) {
+      const campusDeptIds =
+        await this.campusScope.departmentIdsForCampuses(campusIds);
+      if (!campusDeptIds.length) return [];
+      scopedDeptIds = scopedDeptIds?.length
+        ? scopedDeptIds.filter((id) => campusDeptIds.includes(id))
+        : campusDeptIds;
+      if (!scopedDeptIds.length) return [];
+    }
+
     const qb = this.tickets
       .createQueryBuilder('t')
       .innerJoin('users', 'u', 'u.user_id = t.student_user_id')
@@ -412,8 +465,8 @@ export class TicketService {
         { profileHint: '%profile%' },
       );
 
-    if (deptIds?.length) {
-      qb.andWhere('u.dept_id IN (:...deptIds)', { deptIds });
+    if (scopedDeptIds?.length) {
+      qb.andWhere('u.dept_id IN (:...deptIds)', { deptIds: scopedDeptIds });
     }
 
     return qb.orderBy('t.created_at', 'DESC').take(limit).getMany();
@@ -422,7 +475,7 @@ export class TicketService {
   async updateStatus(
     ticketId: string,
     dto: UpdateTicketStatusDto,
-    actor?: { userId: string; role: string; tenantId: string },
+    actor?: { userId: string; role: string; tenantId: string; roles?: string[] },
   ) {
     if (dto.status === 'REJECTED' && !dto.rejection_reason?.trim()) {
       throw new BadRequestException(
@@ -436,6 +489,15 @@ export class TicketService {
     if (!ticket) throw new NotFoundException('Ticket not found');
 
     if (actor) {
+      await this.assertTicketCampus(
+        {
+          user_id: actor.userId,
+          role: actor.role,
+          roles: actor.roles,
+          tenant_id: actor.tenantId,
+        },
+        ticket.student_user_id,
+      );
       await this.assertTicketActorScope(ticket, actor);
     }
 

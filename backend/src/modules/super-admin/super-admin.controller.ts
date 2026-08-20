@@ -22,11 +22,14 @@ import { ImpersonationService } from './impersonation.service';
 import { OrgEntityService } from './org-entity.service';
 import { CreateOrgEntityDto } from './dto/create-org-entity.dto';
 import { GrantEntityAccessDto } from './dto/grant-entity-access.dto';
+import { CampusScopeService } from '../../common/campus-scope/campus-scope.service';
 
 type AuthUser = {
   user_id: string;
   tenant_id?: string;
   tenant_schema?: string;
+  role?: string;
+  roles?: string[];
   impersonator_user_id?: string;
   impersonation_session_id?: string;
 };
@@ -39,6 +42,7 @@ export class SuperAdminController {
     private readonly superAdmin: SuperAdminService,
     private readonly impersonation: ImpersonationService,
     private readonly orgEntities: OrgEntityService,
+    private readonly campusScope: CampusScopeService,
   ) {}
 
   @Get('entities')
@@ -102,8 +106,10 @@ export class SuperAdminController {
 
   @Get('hierarchy')
   @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
-  hierarchy(@Req() req: { user: AuthUser }) {
-    return this.superAdmin.getHierarchyTree(this.tenant(req));
+  async hierarchy(@Req() req: { user: AuthUser }) {
+    const tree = await this.superAdmin.getHierarchyTree(this.tenant(req));
+    const campusIds = await this.campusScope.resolveCampusIds(req.user);
+    return this.campusScope.filterHierarchy(tree, campusIds);
   }
 
   @Get('hierarchy/assignable-users')
@@ -117,7 +123,7 @@ export class SuperAdminController {
 
   @Post('assignments')
   @Roles('CampusAdmin', 'SuperAdmin')
-  assign(
+  async assign(
     @Req() req: { user: AuthUser },
     @Body()
     dto: {
@@ -127,6 +133,14 @@ export class SuperAdminController {
       entity_id: string;
     },
   ) {
+    const campusIds = await this.campusScope.resolveCampusIds(req.user);
+    if (campusIds) {
+      await this.campusScope.assertHierarchyTargetAllowed(
+        campusIds,
+        dto.entity_type,
+        dto.entity_id,
+      );
+    }
     return this.superAdmin.assignEntity(
       this.tenant(req),
       req.user.user_id,
@@ -155,11 +169,24 @@ export class SuperAdminController {
 
   @Patch('departments/:deptId/school')
   @Roles('CampusAdmin', 'SuperAdmin')
-  linkDepartmentToSchool(
+  async linkDepartmentToSchool(
     @Req() req: { user: AuthUser },
     @Param('deptId', ParseIntPipe) deptId: number,
     @Body() dto: { school_id: number },
   ) {
+    const campusIds = await this.campusScope.resolveCampusIds(req.user);
+    if (campusIds) {
+      await this.campusScope.assertHierarchyTargetAllowed(
+        campusIds,
+        'DEPARTMENT',
+        String(deptId),
+      );
+      await this.campusScope.assertHierarchyTargetAllowed(
+        campusIds,
+        'SCHOOL',
+        String(dto.school_id),
+      );
+    }
     return this.superAdmin.linkDepartmentToSchool(
       this.tenant(req),
       req.user.user_id,

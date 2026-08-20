@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ShieldAlert } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -12,6 +12,11 @@ export function RoleGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const redirectingRef = useRef(false);
+  const hasHydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   const allowed = canRoleAccessPath(
     user?.roles?.length ? user.roles : user?.role,
     pathname,
@@ -21,7 +26,7 @@ export function RoleGate({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    if (isLoading || redirectingRef.current) return;
+    if (!hasHydrated || isLoading || redirectingRef.current) return;
     if (!isAuthenticated) {
       redirectingRef.current = true;
       const timer = window.setTimeout(() => {
@@ -45,9 +50,9 @@ export function RoleGate({ children }: { children: React.ReactNode }) {
       }, 1200);
       return () => window.clearTimeout(timer);
     }
-  }, [allowed, isAuthenticated, isLoading, router, user]);
+  }, [allowed, hasHydrated, isAuthenticated, isLoading, router, user]);
 
-  if (isLoading || !isAuthenticated || !user) {
+  if (!hasHydrated || isLoading || !isAuthenticated || !user) {
     return <FalconLoader label="Switching Falcon workspace…" className="min-h-screen" />;
   }
 

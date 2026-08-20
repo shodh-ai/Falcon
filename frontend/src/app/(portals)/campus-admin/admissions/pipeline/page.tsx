@@ -1,1 +1,6 @@
-export { default } from '../../../admissions-crm/pipeline/page';
+import { redirect } from 'next/navigation';
+import { campusAdminRoutes } from '@/lib/campus-admin.roles';
+
+export default function LegacyKanbanRedirect() {
+  redirect(campusAdminRoutes.admissionsKanban);
+}

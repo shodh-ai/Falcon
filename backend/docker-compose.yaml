@@ -1,0 +1,44 @@
+# Coolify / production compose for Falcon API
+#
+# Do NOT bind host port 4000:4000 here. Host publishing blocks Coolify rolling
+# updates and fails with "Bind for 0.0.0.0:4000 failed: port is already allocated"
+# when the previous container still holds the port.
+#
+# Coolify settings (required):
+# - Build Pack: Docker Compose
+# - Base Directory: backend
+# - Ports Exposes: 4000
+# - Ports Mappings: LEAVE EMPTY (host 4000 bind caused the production failure)
+# - Set DB_*/REDIS_*/JWT_* as Runtime-only env vars
+# - Keep NODE_ENV=production as Runtime-only (Dockerfile build stage forces development)
+
+services:
+  falcon-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: node:20-alpine
+    restart: unless-stopped
+    expose:
+      - '4000'
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+    volumes:
+      - falcon_api_uploads:/app/uploads
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/').then(r=>process.exit(r.ok||r.status===404?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  falcon_api_uploads:

@@ -1,1 +1,6 @@
-export { default } from '../../super-admin/entities/page';
+import { redirect } from 'next/navigation';
+import { campusAdminRoutes } from '@/lib/campus-admin.roles';
+
+export default function RemovedEntitiesRedirect() {
+  redirect(campusAdminRoutes.dashboard);
+}

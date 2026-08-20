@@ -17,6 +17,8 @@ export default function Home() {
   const [showPassword, setShowPassword] = useState(false);
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [forgotSent, setForgotSent] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated || !user || isLoading) return;
@@ -33,7 +35,7 @@ export default function Home() {
     setLocalError(null);
     try {
       const result = await api.localLogin(email.trim(), password);
-      login(result.token, result.user);
+      login(result.token, result.user, rememberMe);
       let fresh = null;
       try {
         fresh = await refreshUser();
@@ -193,6 +195,40 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <label className="inline-flex items-center gap-2 text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                    />
+                    Remember me
+                  </label>
+                  <button
+                    type="button"
+                    className="font-medium text-sgvu-navy underline-offset-2 hover:underline"
+                    onClick={async () => {
+                      if (!email.trim()) {
+                        setLocalError('Enter your email first');
+                        return;
+                      }
+                      try {
+                        const data = await api.forgotPassword(email.trim());
+                        setForgotSent(
+                          data.reset_token
+                            ? `Reset token (dev): ${data.reset_token}`
+                            : 'If the account exists, a reset link was issued.',
+                        );
+                        setLocalError(null);
+                      } catch {
+                        setLocalError('Could not start password reset');
+                      }
+                    }}
+                  >
+                    Forgot password
+                  </button>
+                </div>
+                {forgotSent ? <p className="text-sm text-emerald-700">{forgotSent}</p> : null}
                 {localError && <p className="text-sm text-red-600">{localError}</p>}
                 <button
                   type="submit"

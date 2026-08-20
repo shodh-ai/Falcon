@@ -10,7 +10,7 @@ const ADMISSIONS_WORKFORCE_ROLES = new Set([
 export function workforceStatusPathForRole(roleName: string | null | undefined): string {
   const normalized = (roleName ?? '').trim().toLowerCase();
   if (ADMISSIONS_WORKFORCE_ROLES.has(normalized)) {
-    return campusAdminRoutes.admissionsLeaves;
+    return campusAdminRoutes.myLeave;
   }
   return '/faculty/leaves';
 }

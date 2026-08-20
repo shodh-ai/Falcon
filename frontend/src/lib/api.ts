@@ -110,6 +110,33 @@ export const api = {
     const tenant = getSubdomainFromClient();
     return `${getApiBaseUrl()}/auth/google?tenant=${encodeURIComponent(tenant)}`;
   },
+  forgotPassword: async (email: string) => {
+    const response = await fetch(`${getApiBaseUrl()}/api/auth/forgot-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...tenantHeaders(),
+      },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(extractApiErrorMessage(text, response.status, '/api/auth/forgot-password'));
+    }
+    return response.json() as Promise<{ sent: true; reset_token?: string }>;
+  },
+  resetPasswordWithToken: async (token: string, newPassword: string) => {
+    const response = await fetch(`${getApiBaseUrl()}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...tenantHeaders() },
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(extractApiErrorMessage(text, response.status, '/api/auth/reset-password'));
+    }
+    return response.json() as Promise<{ success: true }>;
+  },
   localLogin: async (email: string, password: string) => {
     const response = await fetch(`${getApiBaseUrl()}/api/auth/local-login`, {
       method: 'POST',

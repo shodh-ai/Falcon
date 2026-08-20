@@ -37,7 +37,7 @@ export class Lead extends BaseSoftDeleteEntity {
   @Column({ length: 20, nullable: true })
   phone: string;
 
-  @Column({ length: 20, default: 'INQUIRY' })
+  @Column({ length: 32, default: 'INQUIRY' })
   stage: LeadStage;
 
   @Column({ length: 50, nullable: true })

@@ -24,6 +24,7 @@ import {
   RegistrarKpiSection,
   type RegistrarKpiSnapshot,
 } from '@/components/admin/RegistrarKpiSection';
+import { RegistrarExamIntegrationPanel } from '@/components/admin/RegistrarExamIntegrationPanel';
 import { RegistrarWorkflowStepper } from '@/components/admin/registrar-desk/RegistrarWorkflowStepper';
 import { GovernanceTasksSummaryCard } from '@/components/admin/GovernanceTasksPanel';
 import { REGISTRAR_DESK } from '@/lib/api/api.registrar-desk';
@@ -519,6 +520,8 @@ export default function AdminDashboardPage() {
       </div>
 
       <ProfileCorrectionWidget limit={10} reviewHref="/admin/profile-corrections" />
+
+      <RegistrarExamIntegrationPanel compact />
     </div>
   );
 }

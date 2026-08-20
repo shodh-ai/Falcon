@@ -22,9 +22,14 @@ import { AuthService } from './auth.service';
 import { TenantService } from '../tenant/tenant.service';
 import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
+import { CampusScopeService } from '../common/campus-scope/campus-scope.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { LocalLoginDto } from './dto/local-login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import {
+  ForgotPasswordDto,
+  ResetPasswordWithTokenDto,
+} from './dto/forgot-password.dto';
 
 type AuthProfileUser = {
   user_id: string;
@@ -42,6 +47,7 @@ export class AuthController {
     private authService: AuthService,
     private tenantService: TenantService,
     private hrEntityCtx: HrEntityContextService,
+    private campusScope: CampusScopeService,
   ) {}
 
   @Get('google')
@@ -144,11 +150,18 @@ export class AuthController {
     const isDepartmentHod = await this.authService.isDepartmentHod(
       user.user_id,
     );
+    const campusIds = await this.campusScope.resolveCampusIds({
+      user_id: user.user_id,
+      tenant_id: user.tenant_id,
+      role: primaryRole,
+      roles,
+    });
     return {
       ...user,
       role: primaryRole,
       roles,
       primaryRole,
+      campus_ids: campusIds,
       onboarding_status: normalizeOnboardingStatusForWizard(
         dbUser?.onboarding_status,
         primaryRole,
@@ -172,6 +185,21 @@ export class AuthController {
       dto.password,
       tenantSubdomain,
     );
+  }
+
+  @Public()
+  @Post('forgot-password')
+  forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+    @Headers('x-tenant-subdomain') tenantSubdomain: string | undefined,
+  ) {
+    return this.authService.forgotPassword(dto.email, tenantSubdomain);
+  }
+
+  @Public()
+  @Post('reset-password')
+  resetPasswordWithToken(@Body() dto: ResetPasswordWithTokenDto) {
+    return this.authService.resetPasswordWithToken(dto.token, dto.new_password);
   }
 
   @Public()

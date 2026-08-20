@@ -46,6 +46,8 @@ export function ProfileMenu({ profileHref }: ProfileMenuProps) {
       user?.role,
       ...(user?.roles ?? []),
     ].filter(Boolean) as string[];
+    const normalized = roleCandidates.map((role) => String(role).trim().toLowerCase());
+    if (normalized.includes('superadmin')) return 'Super Admin';
     if (roleCandidates.some(isCampusAdminFamilyRole)) {
       return 'Campus Admin';
     }

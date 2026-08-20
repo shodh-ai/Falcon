@@ -16,7 +16,12 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 import { AddTicketMessageDto } from './dto/add-ticket-message.dto';
 
-type AuthUser = { user_id: string; role?: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  role?: string;
+  roles?: string[];
+  tenant_id?: string;
+};
 
 /** Users who can raise tickets and list tickets they filed (ESS / student helpdesk). */
 const HELPDESK_REQUESTER_ROLES = [
@@ -28,6 +33,7 @@ const HELPDESK_REQUESTER_ROLES = [
   'HRAdmin',
   'SuperAdmin',
   'AdmissionsOfficer',
+  'CampusAdmin',
   'Registrar',
   'Accountant',
   'Warden',
@@ -91,7 +97,7 @@ export class TicketController {
   @Get('finance-grievances')
   @Roles(...FINANCE_HELPDESK_ROLES)
   listFinanceGrievances(@Req() req: { user: AuthUser }) {
-    return this.tickets.listFinanceGrievances(this.tenant(req));
+    return this.tickets.listFinanceGrievances(this.tenant(req), req.user);
   }
 
   @Get('ref/:ticketRef')
@@ -105,6 +111,7 @@ export class TicketController {
       req.user.user_id,
       req.user.role ?? 'UNKNOWN',
       this.tenant(req),
+      req.user,
     );
   }
 
@@ -139,7 +146,12 @@ export class TicketController {
       req.user.user_id,
     );
     const deptIds = hodDeptIds.length ? hodDeptIds : undefined;
-    return this.tickets.listProfileCorrectionTickets(tenantId, 100, deptIds);
+    return this.tickets.listProfileCorrectionTickets(
+      tenantId,
+      100,
+      deptIds,
+      req.user,
+    );
   }
 
   @Get(':ticketId')
@@ -153,6 +165,7 @@ export class TicketController {
       req.user.user_id,
       req.user.role ?? 'UNKNOWN',
       this.tenant(req),
+      req.user,
     );
   }
 
@@ -181,6 +194,7 @@ export class TicketController {
     return this.tickets.updateStatus(ticketId, dto, {
       userId: req.user.user_id,
       role: req.user.role ?? 'UNKNOWN',
+      roles: req.user.roles,
       tenantId: this.tenant(req),
     });
   }

@@ -25,7 +25,7 @@ import { StudentBulkService } from './student-bulk.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadStageDto } from './dto/update-lead-stage.dto';
 
-type AuthUser = { user_id: string; tenant_id?: string; role?: string };
+type AuthUser = { user_id: string; tenant_id?: string; role?: string; roles?: string[] };
 
 @Controller('admissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -43,13 +43,13 @@ export class AdmissionsController {
 
   @Get('leads')
   listLeads(@Req() req: { user: AuthUser }, @Query('stage') stage?: string) {
-    return this.admissions.listLeads(stage, this.tenant(req));
+    return this.admissions.listLeads(stage, this.tenant(req), req.user);
   }
 
   @Post('leads')
   @Roles('SuperAdmin', 'AdmissionsOfficer')
   createLead(@Req() req: { user: AuthUser }, @Body() dto: CreateLeadDto) {
-    return this.admissions.createLead(dto, this.tenant(req));
+    return this.admissions.createLead(dto, this.tenant(req), req.user);
   }
 
   @Patch('leads/:id/stage')
@@ -59,17 +59,17 @@ export class AdmissionsController {
     @Param('id') id: string,
     @Body() dto: UpdateLeadStageDto,
   ) {
-    return this.admissions.updateLeadStage(id, dto, this.tenant(req));
+    return this.admissions.updateLeadStage(id, dto, this.tenant(req), req.user);
   }
 
   @Get('applications')
-  listApplications() {
-    return this.admissions.listApplications();
+  listApplications(@Req() req: { user: AuthUser }) {
+    return this.admissions.listApplications(req.user);
   }
 
   @Get('applications/:id/documents')
-  listDocs(@Param('id') id: string) {
-    return this.admissions.listDocumentsForApplication(id);
+  listDocs(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    return this.admissions.listDocumentsForApplication(id, req.user);
   }
 
   @Get('students/bulk-upload/template')

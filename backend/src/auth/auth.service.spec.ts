@@ -233,15 +233,11 @@ describe('AuthService.localLogin', () => {
   });
 
   it('still returns a token when HR enrichment throws', async () => {
-    const user = buildUser({
+    const fixture = buildLoginFixture({
       email: 'dev.president@mygyanvihar.com',
       roleName: 'President',
     });
-
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    mockUserRepository.findOne.mockResolvedValue(user);
+    mockSuccessfulLoginQueries(fixture);
     mockHrEntityCtx.getPermissions.mockRejectedValueOnce(
       new Error('Redis connection refused'),
     );
@@ -280,5 +276,36 @@ describe('AuthService.localLogin', () => {
     expect(result.token).toBe('signed-jwt');
     expect(result.user.role).toBe('Librarian');
     expect(result.user.permissions).toEqual([]);
+  });
+
+  it('returns the new primary role after a role change when user_roles is synchronized', async () => {
+    const fixture = buildLoginFixture({
+      email: 'dev.registrar@mygyanvihar.com',
+      role_id: 12,
+      roleName: 'Registrar',
+    });
+    fixture.roleRows = [
+      {
+        role_id: 12,
+        is_primary: true,
+        role_name: 'Registrar',
+      },
+      {
+        role_id: 2,
+        is_primary: false,
+        role_name: 'Faculty',
+      },
+    ];
+    mockSuccessfulLoginQueries(fixture);
+
+    const result = await service.localLogin(
+      'dev.registrar@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    expect(result.user.role).toBe('Registrar');
+    expect(result.user.primaryRole).toBe('Registrar');
+    expect(result.user.roles).toEqual(['Registrar', 'Faculty']);
   });
 });

@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import { toast } from '@/lib/notifications/falcon-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -61,7 +68,6 @@ function mapPhaseToStatus(phase?: string | null): ScholarStatus {
   if (p.includes('course')) return 'Coursework';
   return phase ?? 'Coursework';
 }
-
 function statusBadgeClass(status: ScholarStatus) {
   switch (status) {
     case 'Coursework':
@@ -83,6 +89,8 @@ export default function RegistrarPhdAdmissionsPage() {
   const [scholars, setScholars] = useState<PhdScholar[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedScholar, setSelectedScholar] = useState<PhdScholar | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,11 +164,7 @@ export default function RegistrarPhdAdmissionsPage() {
                 aria-label="Search scholar name or topic"
               />
             </div>
-            <Button
-              type="button"
-              className={cn('h-11 shrink-0', BRAND_BTN)}
-              onClick={() => toast.info('Add Ph.D. Scholar — coming soon')}
-            >
+            <Button type="button" className={cn('h-11 shrink-0', BRAND_BTN)} disabled title="Coming soon">
               Add Ph.D. Scholar
             </Button>
           </div>
@@ -234,7 +238,10 @@ export default function RegistrarPhdAdmissionsPage() {
                         type="button"
                         size="sm"
                         className={cn('h-9 px-4', BRAND_BTN)}
-                        onClick={() => toast.info(`Viewing ${scholar.name}`)}
+                        onClick={() => {
+                          setSelectedScholar(scholar);
+                          setDetailsOpen(true);
+                        }}
                       >
                         View Details
                       </Button>
@@ -246,6 +253,63 @@ export default function RegistrarPhdAdmissionsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={detailsOpen}
+        onOpenChange={(open) => {
+          setDetailsOpen(open);
+          if (!open) setSelectedScholar(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ph.D. Scholar Details</DialogTitle>
+            <DialogDescription>
+              Read-only overview from the research scholars listing.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedScholar ? (
+            <div className="space-y-3 text-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-semibold text-sgvu-navy">{selectedScholar.name}</p>
+                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">{selectedScholar.id}</p>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={cn('font-medium', statusBadgeClass(selectedScholar.status))}
+                >
+                  {selectedScholar.status}
+                </Badge>
+              </div>
+
+              <div className="grid gap-2 rounded-lg border p-3">
+                <p>
+                  <span className="text-muted-foreground">Topic: </span>
+                  <span className="font-medium text-sgvu-navy">{selectedScholar.topic}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Guide: </span>
+                  <span className="font-medium text-sgvu-navy">{selectedScholar.guide}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Department: </span>
+                  <span className="font-medium text-sgvu-navy">{selectedScholar.department}</span>
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="py-6 text-sm text-muted-foreground">No scholar selected.</div>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDetailsOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

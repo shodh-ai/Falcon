@@ -7,6 +7,7 @@
     "noEmit": false,
     "module": "commonjs",
     "moduleResolution": "node",
-    "resolvePackageJsonExports": false
+    "resolvePackageJsonExports": false,
+    "incremental": false
   }
 }

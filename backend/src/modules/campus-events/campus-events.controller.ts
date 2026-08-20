@@ -21,7 +21,12 @@ import { EstateApproveDto } from './dto/estate-approve.dto';
 import { FundTransferDto } from './dto/fund-transfer.dto';
 import { ConfirmEventRegistrationDto } from './dto/confirm-registration.dto';
 
-type AuthUser = { user_id: string; tenant_id?: string; roles?: string[] };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 /** Finance desk — club event fund transfers after Dean sign-off. */
 const FINANCE_EVENT_FUNDING_ROLES = [
@@ -40,7 +45,7 @@ export class CampusEventsController {
   constructor(private readonly events: CampusEventsService) {}
 
   @Get('master-calendar')
-  @Roles('Registrar', 'Dean', 'SuperAdmin', 'Student', 'Faculty')
+  @Roles('Registrar', 'Dean', 'SuperAdmin', 'Student', 'Faculty', 'CampusAdmin')
   masterCalendar(
     @Req() req: { user: AuthUser },
     @Query('academic_year') academicYear?: string,
@@ -54,13 +59,21 @@ export class CampusEventsController {
     @Req() req: { user: AuthUser },
     @Body() dto: UpsertMasterCalendarDto,
   ) {
-    return this.events.upsertMasterCalendarEntry(this.tenant(req), dto);
+    return this.events.upsertMasterCalendarEntry(
+      this.tenant(req),
+      dto,
+      req.user,
+    );
   }
 
   @Delete('master-calendar/:id')
   @Roles('Registrar', 'Dean', 'SuperAdmin')
   deleteCalendar(@Req() req: { user: AuthUser }, @Param('id') id: string) {
-    return this.events.deleteMasterCalendarEntry(this.tenant(req), id);
+    return this.events.deleteMasterCalendarEntry(
+      this.tenant(req),
+      id,
+      req.user,
+    );
   }
 
   @Get('blocked-dates')
@@ -70,7 +83,7 @@ export class CampusEventsController {
   }
 
   @Get('venues')
-  @Roles('Student', 'Faculty', 'Registrar', 'Dean', 'SuperAdmin')
+  @Roles('Student', 'Faculty', 'Registrar', 'Dean', 'SuperAdmin', 'CampusAdmin')
   venues(@Req() req: { user: AuthUser }) {
     return this.events.listVenues(this.tenant(req));
   }
@@ -82,7 +95,7 @@ export class CampusEventsController {
   }
 
   @Get('events')
-  @Roles('Student', 'Faculty', 'Dean', 'HOD', 'SuperAdmin')
+  @Roles('Student', 'Faculty', 'Dean', 'HOD', 'SuperAdmin', 'CampusAdmin')
   listEvents(@Req() req: { user: AuthUser }) {
     return this.events.listApprovedEvents(this.tenant(req));
   }
@@ -348,13 +361,13 @@ export class CampusEventsController {
   }
 
   @Get('estate/pending')
-  @Roles('Registrar', 'Dean', 'SuperAdmin')
+  @Roles('Registrar', 'Dean', 'SuperAdmin', 'CampusAdmin')
   estatePending(@Req() req: { user: AuthUser }) {
     return this.events.listEstatePending(this.tenant(req));
   }
 
   @Post('estate/:id/approve')
-  @Roles('Registrar', 'Dean', 'SuperAdmin')
+  @Roles('Registrar', 'Dean', 'SuperAdmin', 'CampusAdmin')
   estateApprove(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
@@ -369,7 +382,7 @@ export class CampusEventsController {
   }
 
   @Post('estate/:id/reject')
-  @Roles('Registrar', 'Dean', 'SuperAdmin')
+  @Roles('Registrar', 'Dean', 'SuperAdmin', 'CampusAdmin')
   estateReject(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,

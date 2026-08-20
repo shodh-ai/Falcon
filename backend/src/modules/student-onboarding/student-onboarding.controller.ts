@@ -34,6 +34,7 @@ type AuthUser = {
   user_id: string;
   tenant_id?: string;
   role?: string;
+  roles?: string[];
   role_name?: string;
 };
 
@@ -348,6 +349,7 @@ export class StudentVerificationAdminController {
     return this.onboarding.getVerificationQueue(
       this.tenant(req),
       portalKind ?? 'all',
+      req.user,
     );
   }
 
@@ -371,6 +373,7 @@ export class StudentVerificationAdminController {
     return this.onboarding.getVerificationDetail(
       this.tenant(req),
       targetUserId,
+      req.user,
     );
   }
 
@@ -388,6 +391,7 @@ export class StudentVerificationAdminController {
       this.tenant(req),
       targetUserId,
       auditActor(req),
+      req.user,
     );
   }
 
@@ -407,6 +411,7 @@ export class StudentVerificationAdminController {
       targetUserId,
       body.remarks,
       auditActor(req),
+      req.user,
     );
   }
 
@@ -421,6 +426,7 @@ export class StudentVerificationAdminController {
       this.tenant(req),
       targetUserId,
       docType.toUpperCase().replace(/-/g, '_'),
+      req.user,
     );
 
     if (filePath.startsWith('http')) {
