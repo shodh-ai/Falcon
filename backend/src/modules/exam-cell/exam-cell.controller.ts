@@ -9,6 +9,7 @@ import {
   Delete,
   Param,
   BadRequestException,
+  ParseIntPipe,
   StreamableFile,
 } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -192,12 +193,9 @@ export class ExamCellController {
   @Get('branches')
   getBranches(
     @Req() req: { user: AuthUser },
-    @Query('semester') semester: string,
+    @Query('semester', ParseIntPipe) semester: number,
   ) {
-    return this.examCell.getBranchesBySemester(
-      this.tenant(req),
-      Number(semester),
-    );
+    return this.examCell.getBranchesBySemester(this.tenant(req), semester);
   }
 
   @Get('blocks-halls')

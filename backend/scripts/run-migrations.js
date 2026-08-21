@@ -143,13 +143,20 @@ async function run() {
 
         console.log(`>>> ${base}`);
         try {
+          await client.query('BEGIN');
           await client.query(sql);
           await markApplied(client, base);
+          await client.query('COMMIT');
           ok += 1;
         } catch (err) {
+          await client.query('ROLLBACK').catch(() => undefined);
           failed += 1;
           failures.push({ file: base, message: err.message });
           console.error(`!!! ${base} failed: ${err.message}`);
+          console.error(
+            'Stopping to preserve migration ordering. Fix the failure, then rerun.',
+          );
+          break;
         }
       }
       console.log(`Migrations complete (${ok} ok, ${skipped} skipped, ${failed} failed).`);

@@ -180,6 +180,26 @@ describe('AuthService.localLogin', () => {
     expect(mockUserRepository.findOne).not.toHaveBeenCalled();
   });
 
+  it('casts the login audit resource id so PostgreSQL does not infer conflicting types', async () => {
+    const fixture = buildLoginFixture({
+      user_id: '00000000-0000-4000-8000-000000000001',
+      email: 'library@mygyanvihar.com',
+      roleName: 'Librarian',
+    });
+    mockSuccessfulLoginQueries(fixture);
+
+    await service.localLogin(
+      'library@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    const auditCall = mockDataSource.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO admin_control_audit'),
+    );
+    expect(auditCall?.[0]).toContain('$2::text');
+  });
+
   it('falls back to sgvu when tenant subdomain header is empty', async () => {
     const fixture = buildLoginFixture({
       email: 'library@mygyanvihar.com',

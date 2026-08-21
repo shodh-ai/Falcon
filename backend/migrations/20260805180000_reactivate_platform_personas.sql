@@ -69,7 +69,8 @@ INSERT INTO system_audit_logs (table_name, record_id, action, new_value, changed
 SELECT
   'users',
   u.user_id,
-  'REACTIVATE_PERSONA',
+  -- Existing production databases constrain this ledger to INSERT/UPDATE/SOFT_DELETE.
+  'UPDATE',
   jsonb_build_object(
     'email', u.official_email,
     'role', r.role_name,

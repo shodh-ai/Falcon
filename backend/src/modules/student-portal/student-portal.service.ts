@@ -636,7 +636,6 @@ export class StudentPortalService {
            AND entry->>'student_id' = e.student_user_id::text
        ) stats ON true
        WHERE e.student_user_id = $1 AND e.tenant_id = $2
-         AND ($3::int IS NULL OR e.semester = $3)
        ORDER BY e.semester, c.course_code`,
         [userId, tenantId],
       ),

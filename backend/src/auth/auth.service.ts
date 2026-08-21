@@ -317,7 +317,7 @@ export class AuthService {
         await this.dataSource.query(
           `INSERT INTO admin_control_audit
              (tenant_id, actor_user_id, action, resource_type, resource_id, details)
-           VALUES ($1, $2, 'LOGIN', 'session', $2, '{"source":"local-login"}'::jsonb)`,
+           VALUES ($1, $2, 'LOGIN', 'session', $2::text, '{"source":"local-login"}'::jsonb)`,
           [tenantId, userId],
         );
       }
