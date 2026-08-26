@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -102,7 +103,7 @@ export class AdminOpsController {
     @Req() req: { user: AuthUser },
     @Query('academic_year') academicYear?: string,
   ) {
-    return this.adminOps.listTimetable(this.tenant(req), academicYear);
+    return this.adminOps.listTimetable(this.tenant(req), academicYear, req.user);
   }
 
   @Post('timetable')
@@ -111,7 +112,7 @@ export class AdminOpsController {
     @Req() req: { user: AuthUser },
     @Body() dto: Record<string, unknown>,
   ) {
-    return this.adminOps.upsertTimetableSlot(this.tenant(req), dto);
+    return this.adminOps.upsertTimetableSlot(this.tenant(req), dto, req.user);
   }
 
   @Get('transport-zones')
@@ -126,6 +127,57 @@ export class AdminOpsController {
     return this.announcements.listForAdmin(this.tenant(req), req.user);
   }
 
+  @Get('announcements/feed')
+  @Roles(
+    'Student',
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'Registrar',
+    'President',
+    'CampusAdmin',
+    'Warden',
+    'Librarian',
+    'LabAdmin',
+    'TransportOfficer',
+    'Accountant',
+    'HR',
+    'HrAdmin',
+  )
+  announcementFeed(@Req() req: { user: AuthUser }) {
+    return this.announcements.listForUser(this.tenant(req), req.user);
+  }
+
+  @Get('announcements/:id')
+  @Roles(
+    'Student',
+    'Faculty',
+    'HOD',
+    'Dean',
+    'SuperAdmin',
+    'Registrar',
+    'President',
+    'CampusAdmin',
+    'Warden',
+    'Librarian',
+    'LabAdmin',
+    'TransportOfficer',
+    'Accountant',
+    'HR',
+    'HrAdmin',
+  )
+  announcementDetail(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+  ) {
+    return this.announcements.getPublishedForViewer(
+      this.tenant(req),
+      id,
+      req.user,
+    );
+  }
+
   @Post('announcements')
   @Roles('SuperAdmin', 'Registrar', 'President', 'CampusAdmin')
   createAnnouncement(
@@ -136,6 +188,8 @@ export class AdminOpsController {
       body_html: string;
       target_dept_ids?: number[];
       campus_id?: unknown;
+      audience?: string;
+      notify?: boolean;
     },
   ) {
     void body.campus_id;
@@ -146,22 +200,40 @@ export class AdminOpsController {
         title: body.title,
         body_html: body.body_html,
         target_dept_ids: body.target_dept_ids,
+        audience: body.audience as
+          | 'all'
+          | 'students'
+          | 'faculty'
+          | 'hods'
+          | 'staff'
+          | undefined,
+        notify: body.notify,
       },
       req.user,
     );
   }
 
-  @Get('announcements/feed')
-  @Roles(
-    'Student',
-    'Faculty',
-    'HOD',
-    'Dean',
-    'SuperAdmin',
-    'Registrar',
-    'President',
-  )
-  announcementFeed(@Req() req: { user: AuthUser }) {
-    return this.announcements.listForUser(this.tenant(req), req.user);
+  @Patch('announcements/:id')
+  @Roles('SuperAdmin', 'Registrar', 'President', 'CampusAdmin')
+  updateAnnouncement(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+    @Body()
+    body: {
+      title?: string;
+      body_html?: string;
+      is_published?: boolean;
+    },
+  ) {
+    return this.announcements.update(this.tenant(req), id, body, req.user);
+  }
+
+  @Delete('announcements/:id')
+  @Roles('SuperAdmin', 'Registrar', 'President', 'CampusAdmin')
+  unpublishAnnouncement(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+  ) {
+    return this.announcements.unpublish(this.tenant(req), id, req.user);
   }
 }

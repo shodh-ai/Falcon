@@ -3,6 +3,7 @@ export type DepartmentStatus = 'ACTIVE' | 'INACTIVE';
 export type DepartmentListRow = {
   dept_id: number;
   dept_name: string;
+  dept_code?: string | null;
   description?: string | null;
   school_id?: number | null;
   school_name?: string | null;

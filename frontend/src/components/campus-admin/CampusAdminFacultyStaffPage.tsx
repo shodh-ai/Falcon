@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import { Loader2, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { campusAdminRoutes } from '@/lib/campus-admin.roles';
 import { useAuthedApi } from '@/lib/api';
 
 type StaffRow = {
@@ -51,7 +53,42 @@ type StaffDetail = StaffRow & {
   }>;
 };
 
-export function CampusAdminFacultyStaffPage() {
+export type CampusAdminPeoplePreset = 'all' | 'faculty' | 'hod' | 'staff';
+
+type CampusAdminFacultyStaffPageProps = {
+  preset?: CampusAdminPeoplePreset;
+  pageTitle?: string;
+  pageDescription?: string;
+  sectionLabel?: string;
+};
+
+const FACULTY_ROLES = new Set(['faculty', 'dean']);
+const HOD_ROLES = new Set(['hod']);
+const STAFF_ROLES = new Set([
+  'warden',
+  'librarian',
+  'labadmin',
+  'transportofficer',
+  'accountant',
+  'hr',
+  'hradmin',
+]);
+
+function matchesPeoplePreset(roleName: string | null | undefined, preset: CampusAdminPeoplePreset) {
+  if (preset === 'all') return true;
+  const role = String(roleName ?? '').trim().toLowerCase();
+  if (!role) return false;
+  if (preset === 'faculty') return FACULTY_ROLES.has(role);
+  if (preset === 'hod') return HOD_ROLES.has(role);
+  return STAFF_ROLES.has(role);
+}
+
+export function CampusAdminFacultyStaffPage({
+  preset = 'all',
+  pageTitle = 'Faculty & Staff',
+  pageDescription = 'Employees whose department sits on your assigned campus.',
+  sectionLabel = 'Campus Administration',
+}: CampusAdminFacultyStaffPageProps = {}) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<StaffRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,7 +105,11 @@ export function CampusAdminFacultyStaffPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get<StaffRow[]>('/api/campus-admin/faculty-staff');
+      const roleQuery =
+        preset === 'all' ? '' : `?role=${encodeURIComponent(preset)}`;
+      const data = await api.get<StaffRow[]>(
+        `/api/campus-admin/faculty-staff${roleQuery}`,
+      );
       setRows(Array.isArray(data) ? data : []);
     } catch {
       setRows([]);
@@ -76,7 +117,7 @@ export function CampusAdminFacultyStaffPage() {
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, preset]);
 
   useEffect(() => {
     void load();
@@ -110,18 +151,34 @@ export function CampusAdminFacultyStaffPage() {
     };
   }, [api, selected]);
 
+  const visibleRows = useMemo(
+    () => rows.filter((row) => matchesPeoplePreset(row.role_name, preset)),
+    [preset, rows],
+  );
+
   const roles = useMemo(
-    () => [...new Set(rows.map((row) => row.role_name).filter((value): value is string => Boolean(value)))].sort(),
-    [rows],
+    () =>
+      [
+        ...new Set(
+          visibleRows.map((row) => row.role_name).filter((value): value is string => Boolean(value)),
+        ),
+      ].sort(),
+    [visibleRows],
   );
   const schools = useMemo(
-    () => [...new Set(rows.map((row) => row.school_name).filter((value): value is string => Boolean(value)))].sort(),
-    [rows],
+    () =>
+      [
+        ...new Set(
+          visibleRows.map((row) => row.school_name).filter((value): value is string => Boolean(value)),
+        ),
+      ].sort(),
+    [visibleRows],
   );
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return rows.filter((row) => {
+      if (!matchesPeoplePreset(row.role_name, preset)) return false;
       if (
         term &&
         !`${row.name} ${row.email ?? ''} ${row.dept_name ?? ''}`.toLowerCase().includes(term)
@@ -132,24 +189,30 @@ export function CampusAdminFacultyStaffPage() {
       if (school && row.school_name !== school) return false;
       return true;
     });
-  }, [q, role, rows, school]);
+  }, [preset, q, role, rows, school]);
 
   return (
     <div className="space-y-5 p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="p-5 md:p-6">
-          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">Campus Admin</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-sgvu-navy">Faculty & Staff</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Employees whose department sits on your assigned campus.
-          </p>
+        <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-end md:justify-between md:p-6">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">{sectionLabel}</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-sgvu-navy">{pageTitle}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{pageDescription}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Create or edit accounts from User Management.
+            </p>
+          </div>
+          <Button asChild className="h-9" variant="outline">
+            <Link href={campusAdminRoutes.peopleUsers}>Manage users</Link>
+          </Button>
         </CardContent>
       </Card>
 
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Faculty & Staff</p>
-          <p className="mt-1 text-2xl font-bold text-sgvu-navy">{loading ? '—' : rows.length}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{pageTitle}</p>
+          <p className="mt-1 text-2xl font-bold text-sgvu-navy">{loading ? '—' : visibleRows.length}</p>
         </CardContent>
       </Card>
 

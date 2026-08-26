@@ -2,9 +2,12 @@ export const CAMPUS_ADMIN_ROLE = 'CampusAdmin';
 
 export const CAMPUS_ADMIN_LOGIN_EMAIL = 'campusadmin@mygyanvihar.com';
 
+/**
+ * Roles associated with the Campus Admin portal family.
+ * SuperAdmin is intentionally excluded — never expand CampusAdmin → SuperAdmin.
+ */
 export const LEGACY_CAMPUS_ADMIN_ROLES = [
   CAMPUS_ADMIN_ROLE,
-  'SuperAdmin',
   'AdmissionsOfficer',
 ] as const;
 
@@ -20,14 +23,9 @@ export function isCampusAdminFamilyRole(role: string): boolean {
   return CAMPUS_ADMIN_ROLE_SET.has(normalizeRoleName(role));
 }
 
+/** Normalize only — does not grant SuperAdmin capabilities to Campus Admin. */
 export function expandCampusAdminRoles(roles: string[]): string[] {
-  const expanded = new Set(roles.map(normalizeRoleName).filter(Boolean));
-  if ([...expanded].some(isCampusAdminFamilyRole)) {
-    for (const role of CAMPUS_ADMIN_ROLE_SET) {
-      expanded.add(role);
-    }
-  }
-  return [...expanded];
+  return Array.from(new Set(roles.map(normalizeRoleName).filter(Boolean)));
 }
 
 export function rolesIncludeAny(
@@ -55,6 +53,12 @@ export const campusAdminRoutes = {
   departments: `${CAMPUS_ADMIN_PORTAL_PREFIX}/departments`,
   programsCourses: `${CAMPUS_ADMIN_PORTAL_PREFIX}/programs-courses`,
   facultyStaff: `${CAMPUS_ADMIN_PORTAL_PREFIX}/faculty-staff`,
+  peopleStudents: `${CAMPUS_ADMIN_PORTAL_PREFIX}/people/students`,
+  peopleFaculty: `${CAMPUS_ADMIN_PORTAL_PREFIX}/people/faculty`,
+  peopleHods: `${CAMPUS_ADMIN_PORTAL_PREFIX}/people/hods`,
+  peopleStaff: `${CAMPUS_ADMIN_PORTAL_PREFIX}/people/staff`,
+  peopleUsers: `${CAMPUS_ADMIN_PORTAL_PREFIX}/people/users`,
+  rolesPermissions: `${CAMPUS_ADMIN_PORTAL_PREFIX}/security/roles-permissions`,
   students: `${CAMPUS_ADMIN_PORTAL_PREFIX}/students`,
   admissionsApplications: `${CAMPUS_ADMIN_PORTAL_PREFIX}/admissions/applications`,
   admissionsKanban: `${CAMPUS_ADMIN_PORTAL_PREFIX}/admissions/kanban`,
@@ -68,6 +72,8 @@ export const campusAdminRoutes = {
   operationsEvents: `${CAMPUS_ADMIN_PORTAL_PREFIX}/operations/events`,
   operationsFacilities: `${CAMPUS_ADMIN_PORTAL_PREFIX}/operations/facilities`,
   operationsRequests: `${CAMPUS_ADMIN_PORTAL_PREFIX}/operations/requests`,
+  operationsRequestDetail: (ticketId: string) =>
+    `${CAMPUS_ADMIN_PORTAL_PREFIX}/operations/requests/${encodeURIComponent(ticketId)}`,
   reports: `${CAMPUS_ADMIN_PORTAL_PREFIX}/reports`,
   analytics: `${CAMPUS_ADMIN_PORTAL_PREFIX}/analytics`,
   myLeave: `${CAMPUS_ADMIN_PORTAL_PREFIX}/my-leave`,

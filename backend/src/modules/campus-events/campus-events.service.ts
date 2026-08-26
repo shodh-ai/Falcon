@@ -47,15 +47,43 @@ export class CampusEventsService {
     private readonly campusScope: CampusScopeService,
   ) {}
 
-  private assertCalendarWritable(user?: ScopedAuthUser) {
+  private async assertCalendarWritable(user?: ScopedAuthUser) {
     if (!user) return;
-    if (
-      this.campusScope.isCampusAdmin(user) &&
-      !this.campusScope.isUnrestricted(user)
-    ) {
+    // Campus Admin may maintain the master calendar for their tenant campus ops.
+    if (this.campusScope.isCampusAdmin(user)) {
+      await this.campusScope.requireCampusIds(user);
+    }
+  }
+
+  private async campusIdsForActor(
+    actor?: ScopedAuthUser,
+  ): Promise<number[] | null> {
+    if (!actor) return null;
+    return this.campusScope.resolveCampusIds(actor);
+  }
+
+  private async assertCampusAdminEventAccess(
+    actor: ScopedAuthUser | undefined,
+    tenantId: string,
+    eventId: string,
+  ) {
+    const campusIds = await this.campusIdsForActor(actor);
+    if (campusIds === null) return;
+    if (!campusIds.length) {
       throw new ForbiddenException(
-        'Campus Admin cannot modify the university academic calendar',
+        'No campus is assigned to this Campus Admin account',
       );
+    }
+    const rows = await this.dataSource.query(
+      `SELECT e.event_id
+       FROM campus_events e
+       WHERE e.event_id = $1
+         AND e.tenant_id = $2
+         AND ${this.campusScope.campusEventCampusMatchSql('e', 3)}`,
+      [eventId, tenantId, campusIds],
+    );
+    if (!rows[0]) {
+      throw new ForbiddenException('Access denied for this campus');
     }
   }
 
@@ -108,7 +136,7 @@ export class CampusEventsService {
     dto: UpsertMasterCalendarDto,
     actor?: ScopedAuthUser,
   ) {
-    this.assertCalendarWritable(actor);
+    await this.assertCalendarWritable(actor);
     const rows = await this.dataSource.query(
       `INSERT INTO campus_master_calendar (tenant_id, date, title, description, is_blocked_for_events, academic_year)
        VALUES ($1, $2::date, $3, $4, COALESCE($5, true), $6)
@@ -135,7 +163,7 @@ export class CampusEventsService {
     calendarId: string,
     actor?: ScopedAuthUser,
   ) {
-    this.assertCalendarWritable(actor);
+    await this.assertCalendarWritable(actor);
     const rows = await this.dataSource.query(
       `DELETE FROM campus_master_calendar WHERE calendar_id = $1 AND tenant_id = $2 RETURNING calendar_id`,
       [calendarId, tenantId],
@@ -900,15 +928,25 @@ export class CampusEventsService {
     return rows[0];
   }
 
-  async listEstatePending(tenantId: string) {
+  async listEstatePending(tenantId: string, actor?: ScopedAuthUser) {
+    const campusIds = await this.campusIdsForActor(actor);
+    if (campusIds && !campusIds.length) return [];
+
+    const params: unknown[] = [tenantId];
+    let campusSql = '';
+    if (campusIds) {
+      params.push(campusIds);
+      campusSql = ` AND ${this.campusScope.campusEventCampusMatchSql('e', params.length)}`;
+    }
+
     const rows = await this.dataSource.query(
       `SELECT e.*, c.name AS club_name, a.name AS venue_asset_name
        FROM campus_events e
        LEFT JOIN campus_clubs c ON c.club_id = e.club_id
        LEFT JOIN university_assets a ON a.asset_id = e.venue_id
-       WHERE e.tenant_id = $1 AND e.status = 'PENDING_ESTATE' AND e.advisor_approval = 'APPROVED'
+       WHERE e.tenant_id = $1 AND e.status = 'PENDING_ESTATE' AND e.advisor_approval = 'APPROVED'${campusSql}
        ORDER BY e.event_date ASC`,
-      [tenantId],
+      params,
     );
     const enriched = await Promise.all(
       rows.map(
@@ -937,7 +975,9 @@ export class CampusEventsService {
     userId: string,
     eventId: string,
     dto: EstateApproveDto,
+    actor?: ScopedAuthUser,
   ) {
+    await this.assertCampusAdminEventAccess(actor, tenantId, eventId);
     const current = await this.dataSource.query(
       `SELECT * FROM campus_events WHERE event_id = $1 AND tenant_id = $2`,
       [eventId, tenantId],
@@ -1012,7 +1052,9 @@ export class CampusEventsService {
     userId: string,
     eventId: string,
     comment: string,
+    actor?: ScopedAuthUser,
   ) {
+    await this.assertCampusAdminEventAccess(actor, tenantId, eventId);
     const rows = await this.dataSource.query(
       `UPDATE campus_events
        SET status = 'REJECTED', estate_approval = 'REJECTED', rejection_comment = $3, approved_by = $4
@@ -1115,7 +1157,17 @@ export class CampusEventsService {
     return rows[0];
   }
 
-  async listApprovedEvents(tenantId: string) {
+  async listApprovedEvents(tenantId: string, actor?: ScopedAuthUser) {
+    const campusIds = await this.campusIdsForActor(actor);
+    if (campusIds && !campusIds.length) return [];
+
+    const params: unknown[] = [tenantId];
+    let campusSql = '';
+    if (campusIds) {
+      params.push(campusIds);
+      campusSql = ` AND ${this.campusScope.campusEventCampusMatchSql('e', params.length)}`;
+    }
+
     return this.dataSource.query(
       `SELECT e.*, c.name AS club_name,
               (e.available_slots - e.pending_holds) AS bookable_slots,
@@ -1124,9 +1176,9 @@ export class CampusEventsService {
                 ELSE 0 END AS capacity_percent
        FROM campus_events e
        LEFT JOIN campus_clubs c ON c.club_id = e.club_id
-       WHERE e.tenant_id = $1 AND e.status = 'LIVE' AND e.event_date >= NOW() - INTERVAL '1 day'
+       WHERE e.tenant_id = $1 AND e.status = 'LIVE' AND e.event_date >= NOW() - INTERVAL '1 day'${campusSql}
        ORDER BY e.event_date ASC`,
-      [tenantId],
+      params,
     );
   }
 

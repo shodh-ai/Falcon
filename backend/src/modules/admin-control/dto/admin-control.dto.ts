@@ -143,6 +143,12 @@ export class CreateDepartmentDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(2)
+  @MaxLength(20)
+  dept_code?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 
   @Type(() => Number)
@@ -160,6 +166,12 @@ export class UpdateDepartmentDto {
   @MinLength(2)
   @MaxLength(100)
   dept_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(20)
+  dept_code?: string | null;
 
   @IsOptional()
   @IsString()

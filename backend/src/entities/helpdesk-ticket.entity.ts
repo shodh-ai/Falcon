@@ -49,7 +49,7 @@ export class HelpdeskTicket extends BaseSoftDeleteEntity {
   status: HelpdeskTicketStatus;
 
   @Column({ type: 'uuid', nullable: true })
-  assigned_to_user_id: string;
+  assigned_to_user_id: string | null;
 
   @Column({ type: 'jsonb', nullable: true })
   conversation: Array<{

@@ -18,6 +18,7 @@ export class UpdateTicketStatusDto {
   rejection_reason?: string;
 
   @IsOptional()
+  @ValidateIf((_, value) => value !== null && value !== undefined && value !== '')
   @IsUUID()
-  assigned_to_user_id?: string;
+  assigned_to_user_id?: string | null;
 }

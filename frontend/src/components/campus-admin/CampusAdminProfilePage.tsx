@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import {
   BookOpen,
   Building2,
@@ -14,7 +14,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 
 type CampusProfileRow = {
@@ -76,6 +78,11 @@ export function CampusAdminProfilePage() {
   const [stats, setStats] = useState<CampusStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editCode, setEditCode] = useState('');
+  const [editAddress, setEditAddress] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -118,6 +125,34 @@ export function CampusAdminProfilePage() {
 
   const campus = campuses?.[0];
   const extraCampuses = campuses?.slice(1) ?? [];
+
+  useEffect(() => {
+    if (!campus || editing) return;
+    setEditName(campus.campus_name ?? '');
+    setEditCode(campus.campus_code ?? '');
+    setEditAddress(campus.address ?? '');
+  }, [campus, editing]);
+
+  async function saveProfile(event: FormEvent) {
+    event.preventDefault();
+    if (!campus) return;
+    setSaving(true);
+    try {
+      await api.patch('/api/campus-admin/profile', {
+        campus_id: campus.campus_id,
+        campus_name: editName.trim(),
+        campus_code: editCode.trim(),
+        address: editAddress.trim(),
+      });
+      toast.success('Campus profile updated.');
+      setEditing(false);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update campus profile');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-6 p-6">
@@ -196,11 +231,73 @@ export function CampusAdminProfilePage() {
                   ) : null}
                 </div>
               </div>
-              <Badge variant="outline" className="w-fit shrink-0 border-sgvu-navy/20 text-sgvu-navy">
-                View only
-              </Badge>
+              <div className="flex shrink-0 flex-col items-end gap-2">
+                {editing ? null : (
+                  <Button type="button" className="h-9" onClick={() => setEditing(true)}>
+                    Edit profile
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
+
+          {editing ? (
+            <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">Edit campus details</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={saveProfile} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Campus name
+                    </label>
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      required
+                      minLength={2}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Campus code
+                    </label>
+                    <Input
+                      value={editCode}
+                      onChange={(e) => setEditCode(e.target.value)}
+                      maxLength={20}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Address
+                    </label>
+                    <textarea
+                      className="min-h-[90px] w-full rounded-lg border border-border/60 px-3 py-2 text-sm"
+                      value={editAddress}
+                      onChange={(e) => setEditAddress(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="submit" disabled={saving} className="h-9">
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Save changes
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9"
+                      disabled={saving}
+                      onClick={() => setEditing(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="border-sgvu-navy/10 bg-white shadow-sm">

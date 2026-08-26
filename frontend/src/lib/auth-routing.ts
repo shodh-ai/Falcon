@@ -721,11 +721,11 @@ export function canRoleAccessPath(
     return rawRoles.includes('superadmin');
   }
   if (pathname === '/campus-admin' || pathname.startsWith('/campus-admin/')) {
+    // Legacy aliases under /settings/* must reach their redirect pages.
+    // Hard-deny only truly removed Super Admin surfaces.
     if (
       pathname === '/campus-admin/impersonation' ||
       pathname.startsWith('/campus-admin/impersonation/') ||
-      pathname === '/campus-admin/settings' ||
-      pathname.startsWith('/campus-admin/settings/') ||
       pathname === '/campus-admin/entities' ||
       pathname.startsWith('/campus-admin/entities/') ||
       pathname === '/campus-admin/override-logs' ||
@@ -829,6 +829,7 @@ export function canRoleAccessPath(
   if (!portal) {
     const sharedAllow = [
       '/notifications',
+      '/announcements',
       '/directory',
       '/account',
       '/ess',

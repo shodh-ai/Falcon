@@ -8,6 +8,7 @@ import { AppTopBar } from '@/components/layout/AppTopBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
 import type { PortalConfig } from '@/lib/navigation';
+import { collectNavHrefs, isNavHrefActive, resolveActiveNavHref } from '@/lib/navigation';
 
 interface AppShellProps {
   config: PortalConfig;
@@ -16,21 +17,26 @@ interface AppShellProps {
   headerExtra?: ReactNode;
   /** Align header and main to the same max width (e.g. max-w-6xl) */
   contentMaxWidthClass?: string;
+  /** Optional breadcrumb root label (e.g. Campus Administration) */
+  breadcrumbPortalLabel?: string;
 }
 
 function findActiveNavItem(config: PortalConfig, pathname: string | null) {
   if (!pathname) return null;
+  const hrefs = collectNavHrefs(config.navGroups);
+  const activeHref = resolveActiveNavHref(pathname, hrefs);
+  if (!activeHref) return null;
   for (const group of config.navGroups) {
     for (const item of group.items) {
-      if (pathname === item.href || pathname.startsWith(`${item.href}/`)) {
-        return item;
+      if (item.href === activeHref) {
+        return { item, groupTitle: group.title };
       }
     }
   }
   return null;
 }
 
-export function AppShell({ config, children, profileHref, headerExtra, contentMaxWidthClass }: AppShellProps) {
+export function AppShell({ config, children, profileHref, headerExtra, contentMaxWidthClass, breadcrumbPortalLabel }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -39,6 +45,15 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;
   const mobileItems = launchConfig.mobileNavItems ?? launchConfig.commandItems.slice(0, 4);
+  const pageTitle = isHome ? launchConfig.personaTitle : activeNav?.item.label ?? launchConfig.personaTitle;
+  const breadcrumb =
+    breadcrumbPortalLabel && activeNav && !isHome
+      ? {
+          portal: breadcrumbPortalLabel,
+          section: activeNav.groupTitle,
+          page: activeNav.item.label,
+        }
+      : null;
 
   const sidebar = (
     <AppSidebar
@@ -46,6 +61,8 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
       navGroups={launchConfig.navGroups}
       collapsed={collapsed}
       onToggleCollapse={() => setCollapsed((v) => !v)}
+      collapsibleNavGroups={launchConfig.collapsibleNavGroups}
+      sidebarBrandLabel={launchConfig.sidebarBrandLabel}
       className="h-full"
     />
   );
@@ -62,8 +79,9 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
       >
         <AppTopBar
           config={launchConfig}
-          pageTitle={isHome ? launchConfig.personaTitle : activeNav?.label ?? launchConfig.personaTitle}
-          pageShortTitle={isHome ? undefined : activeNav?.shortLabel}
+          pageTitle={pageTitle}
+          pageShortTitle={isHome ? undefined : activeNav?.item.shortLabel}
+          breadcrumb={breadcrumb}
           profileHref={profileHref}
           headerExtra={headerExtra}
           mobileOpen={mobileOpen}
@@ -84,7 +102,7 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
         <ul className="mx-auto grid max-w-lg grid-cols-4 gap-0.5 px-1 pt-1">
           {mobileItems.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            const active = isNavHrefActive(pathname, item.href, collectNavHrefs(launchConfig.navGroups));
             const label = item.shortLabel ?? item.label;
             return (
               <li key={item.href}>

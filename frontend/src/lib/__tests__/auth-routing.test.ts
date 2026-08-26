@@ -49,9 +49,10 @@ describe('Auth routing — protected paths', () => {
     expect(canRoleAccessPath('campusadmin', '/super-admin/dashboard')).toBe(false);
   });
 
-  it('removes impersonation, master settings, and DOFA vault from Campus Admin', () => {
+  it('removes impersonation and university-admin surfaces from Campus Admin', () => {
     expect(canRoleAccessPath('campusadmin', '/campus-admin/impersonation')).toBe(false);
-    expect(canRoleAccessPath('campusadmin', '/campus-admin/settings')).toBe(false);
+    expect(canRoleAccessPath('campusadmin', '/campus-admin/settings/profile')).toBe(true);
+    expect(canRoleAccessPath('campusadmin', '/campus-admin/settings/system')).toBe(true);
     expect(canRoleAccessPath('campusadmin', '/campus-admin/entities')).toBe(false);
     expect(canRoleAccessPath('campusadmin', '/campus-admin/override-logs')).toBe(false);
     expect(canRoleAccessPath('campusadmin', '/admin/dofa-policy-vault')).toBe(false);
@@ -61,6 +62,10 @@ describe('Auth routing — protected paths', () => {
     expect(canRoleAccessPath('campusadmin', '/admin/audit-logs')).toBe(false);
     expect(canRoleAccessPath('campusadmin', '/campus-admin/account/settings')).toBe(true);
     expect(canRoleAccessPath('campusadmin', '/campus-admin/hierarchy')).toBe(true);
+    expect(canRoleAccessPath('campusadmin', '/campus-admin/people/faculty')).toBe(true);
+    expect(canRoleAccessPath('campusadmin', '/campus-admin/people/hods')).toBe(true);
+    expect(canRoleAccessPath('campusadmin', '/notifications')).toBe(true);
+    expect(canRoleAccessPath('campusadmin', '/announcements/abc')).toBe(true);
     expect(canRoleAccessPath('superadmin', '/super-admin/impersonation')).toBe(true);
     expect(canRoleAccessPath('superadmin', '/super-admin/settings')).toBe(true);
     expect(canRoleAccessPath('superadmin', '/admin/dofa-policy-vault')).toBe(true);

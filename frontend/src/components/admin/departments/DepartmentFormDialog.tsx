@@ -38,6 +38,7 @@ export function DepartmentFormDialog({
   const [campusId, setCampusId] = useState('');
   const [schoolId, setSchoolId] = useState('');
   const [deptName, setDeptName] = useState('');
+  const [deptCode, setDeptCode] = useState('');
   const [description, setDescription] = useState('');
   const [hodUserId, setHodUserId] = useState('');
   const [candidates, setCandidates] = useState<HodCandidate[]>([]);
@@ -64,6 +65,7 @@ export function DepartmentFormDialog({
         : '';
     const timeout = window.setTimeout(() => {
       setDeptName(department?.dept_name ?? '');
+      setDeptCode(department?.dept_code ?? '');
       setDescription(department?.description ?? '');
       setCampusId(nextCampusId);
       setSchoolId(nextSchoolId);
@@ -74,11 +76,15 @@ export function DepartmentFormDialog({
 
   useEffect(() => {
     if (!open) return;
+    const params = new URLSearchParams();
+    if (department?.dept_id) params.set('dept_id', String(department.dept_id));
     void api
-      .get<HodCandidate[]>('/api/admin-control/hod/candidates')
+      .get<HodCandidate[]>(
+        `/api/admin-control/hod/candidates${params.toString() ? `?${params}` : ''}`,
+      )
       .then((rows) => setCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => setCandidates([]));
-  }, [api, open]);
+  }, [api, open, department?.dept_id]);
 
   const schoolsForCampus = useMemo(
     () =>
@@ -90,8 +96,13 @@ export function DepartmentFormDialog({
 
   async function save() {
     const name = deptName.trim();
+    const code = deptCode.trim().toUpperCase();
     if (name.length < 2) {
       toast.error('Department name is required.');
+      return;
+    }
+    if (code && code.length < 2) {
+      toast.error('Department code must be at least 2 characters.');
       return;
     }
     if (!schoolId) {
@@ -107,6 +118,7 @@ export function DepartmentFormDialog({
     try {
       const body = {
         dept_name: name,
+        dept_code: code || null,
         description: description.trim() || null,
         school_id: Number(schoolId),
         hod_user_id: hodUserId || null,
@@ -131,20 +143,30 @@ export function DepartmentFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Edit Department' : 'Add Department'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Edit Department' : 'Create Department'}</DialogTitle>
           <DialogDescription>
-            Departments belong to a school, and the school belongs to a campus. Only fields that exist
-            on the Falcon department record are shown.
+            University → Campus → School → Department. Faculty, programs, and courses stay linked when
+            you edit.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <label className="block space-y-1.5 text-sm">
-            <span className="font-semibold text-sgvu-navy">Department Name</span>
+            <span className="font-semibold text-sgvu-navy">Department Name *</span>
             <Input
               value={deptName}
               onChange={(e) => setDeptName(e.target.value)}
               placeholder="Computer Science"
               className="h-11 rounded-xl border-sgvu-navy/15"
+            />
+          </label>
+          <label className="block space-y-1.5 text-sm">
+            <span className="font-semibold text-sgvu-navy">Department Code</span>
+            <Input
+              value={deptCode}
+              onChange={(e) => setDeptCode(e.target.value.toUpperCase())}
+              placeholder="CSE"
+              maxLength={20}
+              className="h-11 rounded-xl border-sgvu-navy/15 uppercase"
             />
           </label>
           <label className="block space-y-1.5 text-sm">
@@ -177,7 +199,7 @@ export function DepartmentFormDialog({
               </Select>
             </label>
             <label className="block space-y-1.5 text-sm">
-              <span className="font-semibold text-sgvu-navy">School</span>
+              <span className="font-semibold text-sgvu-navy">School *</span>
               <Select
                 value={schoolId}
                 onChange={(e) => setSchoolId(e.target.value)}
@@ -204,11 +226,12 @@ export function DepartmentFormDialog({
                 <option key={person.user_id} value={person.user_id}>
                   {person.name}
                   {person.role_name ? ` · ${person.role_name}` : ''}
+                  {person.dept_name ? ` · ${person.dept_name}` : ''}
                 </option>
               ))}
             </Select>
             <p className="text-xs text-muted-foreground">
-              HOD is assigned from existing Faculty, HOD, or Dean records.
+              Eligible Faculty, HOD, or Dean users on the same campus.
             </p>
           </label>
         </div>

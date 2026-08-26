@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import Link from 'next/link';
 import { Loader2, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { campusAdminRoutes } from '@/lib/campus-admin.roles';
 import { useAuthedApi } from '@/lib/api';
 
 type StudentRow = {
@@ -135,12 +137,17 @@ export function CampusAdminStudentsPage() {
   return (
     <div className="space-y-5 p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="p-5 md:p-6">
-          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">Campus Admin</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-sgvu-navy">Students</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Students placed in departments on your assigned campus.
-          </p>
+        <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-end md:justify-between md:p-6">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">Campus Admin</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-sgvu-navy">Students</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Students placed in departments on your assigned campus. Create or edit accounts from User Management.
+            </p>
+          </div>
+          <Button asChild className="h-9" variant="outline">
+            <Link href={campusAdminRoutes.peopleUsers}>Manage users</Link>
+          </Button>
         </CardContent>
       </Card>
 

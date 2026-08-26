@@ -210,6 +210,7 @@ export class TicketController {
       req.user.user_id,
       req.user.role ?? 'UNKNOWN',
       dto.message,
+      req.user,
     );
   }
 

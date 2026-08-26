@@ -18,8 +18,14 @@ export class Department extends BaseSoftDeleteEntity {
   @Column({ unique: true, length: 100 })
   dept_name: string;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  dept_code: string | null;
+
   @Column({ type: 'text', nullable: true })
   description: string;
+
+  @Column({ type: 'int', nullable: true })
+  school_id: number | null;
 
   @Column({ type: 'uuid', nullable: true })
   hod_user_id: string | null;

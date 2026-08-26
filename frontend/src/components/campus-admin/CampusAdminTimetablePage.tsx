@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   ArrowDown,
@@ -8,11 +8,12 @@ import {
   LayoutGrid,
   List,
   Loader2,
+  Plus,
   Search,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import {
@@ -24,6 +25,7 @@ import {
 } from '@/components/ui/sheet';
 import { campusAdminRoutes } from '@/lib/campus-admin.roles';
 import { useAuthedApi } from '@/lib/api';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 const DAYS = [
   { id: 1, label: 'Monday', short: 'Mon' },
@@ -115,6 +117,16 @@ export function CampusAdminTimetablePage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<TimetableSlot | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [slotForm, setSlotForm] = useState({
+    room_code: '',
+    day_of_week: '1',
+    start_time: '09:00',
+    end_time: '10:00',
+    course_code: '',
+    academic_year: '',
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -228,6 +240,39 @@ export function CampusAdminTimetablePage() {
     setSortDir('asc');
   };
 
+  async function addSlot(event: FormEvent) {
+    event.preventDefault();
+    setAdding(true);
+    try {
+      await api.post('/api/admin-ops/timetable', {
+        room_code: slotForm.room_code.trim(),
+        day_of_week: Number(slotForm.day_of_week),
+        start_time: slotForm.start_time,
+        end_time: slotForm.end_time,
+        course_code: slotForm.course_code.trim(),
+        academic_year:
+          slotForm.academic_year.trim() ||
+          academicYear ||
+          String(new Date().getFullYear()),
+      });
+      toast.success('Timetable slot added.');
+      setShowAdd(false);
+      setSlotForm({
+        room_code: '',
+        day_of_week: '1',
+        start_time: '09:00',
+        end_time: '10:00',
+        course_code: '',
+        academic_year: academicYear || '',
+      });
+      await load();
+    } catch (err) {
+      toast.error(parseApiError(err) || 'Could not add timetable slot');
+    } finally {
+      setAdding(false);
+    }
+  }
+
   return (
     <div className="space-y-5 p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
@@ -239,11 +284,105 @@ export function CampusAdminTimetablePage() {
               Master timetable and room allocation for teaching slots on your campus.
             </p>
           </div>
-          <Button asChild className="h-9" variant="outline">
-            <Link href={campusAdminRoutes.academicsClassrooms}>View classrooms</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" className="h-9" onClick={() => setShowAdd((prev) => !prev)}>
+              <Plus className="h-4 w-4" />
+              {showAdd ? 'Close form' : 'Add slot'}
+            </Button>
+            <Button asChild className="h-9" variant="outline">
+              <Link href={campusAdminRoutes.academicsClassrooms}>View classrooms</Link>
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      {showAdd ? (
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold text-sgvu-navy">Add timetable slot</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={addSlot} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Room code
+                </label>
+                <Input
+                  required
+                  value={slotForm.room_code}
+                  onChange={(e) => setSlotForm((prev) => ({ ...prev, room_code: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Day
+                </label>
+                <Select
+                  value={slotForm.day_of_week}
+                  onChange={(e) => setSlotForm((prev) => ({ ...prev, day_of_week: e.target.value }))}
+                >
+                  {DAYS.map((day) => (
+                    <option key={day.id} value={String(day.id)}>
+                      {day.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Academic year
+                </label>
+                <Input
+                  placeholder={academicYear || String(new Date().getFullYear())}
+                  value={slotForm.academic_year}
+                  onChange={(e) =>
+                    setSlotForm((prev) => ({ ...prev, academic_year: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Start
+                </label>
+                <Input
+                  type="time"
+                  required
+                  value={slotForm.start_time}
+                  onChange={(e) => setSlotForm((prev) => ({ ...prev, start_time: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  End
+                </label>
+                <Input
+                  type="time"
+                  required
+                  value={slotForm.end_time}
+                  onChange={(e) => setSlotForm((prev) => ({ ...prev, end_time: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Course code
+                </label>
+                <Input
+                  required
+                  value={slotForm.course_code}
+                  onChange={(e) => setSlotForm((prev) => ({ ...prev, course_code: e.target.value }))}
+                  placeholder="Required for campus scoping"
+                />
+              </div>
+              <div className="sm:col-span-2 lg:col-span-3">
+                <Button type="submit" disabled={adding} className="h-9">
+                  {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Save slot
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {stats.conflicts > 0 ? (
         <Card className="border-amber-200 bg-amber-50/70 shadow-sm">

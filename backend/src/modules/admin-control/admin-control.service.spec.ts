@@ -77,6 +77,8 @@ describe('AdminControlService department hierarchy', () => {
           name: 'Student User',
           role_name: 'Student',
           is_active: true,
+          dept_id: null,
+          user_campus_id: null,
         },
       ]);
 
@@ -85,6 +87,28 @@ describe('AdminControlService department hierarchy', () => {
         'tenant',
         { user_id: 'reg', role: 'Registrar' },
         { dept_id: 5, hod_user_id: 'stu' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects duplicate department code on create', async () => {
+    campusScope.resolveCampusIds.mockResolvedValue(null);
+    db.query
+      .mockResolvedValueOnce([
+        { school_id: 20, campus_id: 1, school_name: 'School of Engineering' },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ dept_id: 9 }]);
+
+    await expect(
+      service.createDepartment(
+        'tenant',
+        { user_id: 'reg', role: 'Registrar' },
+        {
+          dept_name: 'New Department',
+          dept_code: 'CSE',
+          school_id: 20,
+        },
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });

@@ -36,7 +36,7 @@ type AuthUser = {
 
 @Controller('api/super-admin')
 @UseGuards(JwtAuthGuard, RolesGuard, EntityCreatorGuard)
-@Roles('CampusAdmin', 'SuperAdmin')
+@Roles('SuperAdmin')
 export class SuperAdminController {
   constructor(
     private readonly superAdmin: SuperAdminService,
@@ -105,7 +105,7 @@ export class SuperAdminController {
   }
 
   @Get('hierarchy')
-  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
+  @Roles('SuperAdmin', 'Registrar')
   async hierarchy(@Req() req: { user: AuthUser }) {
     const tree = await this.superAdmin.getHierarchyTree(this.tenant(req));
     const campusIds = await this.campusScope.resolveCampusIds(req.user);
@@ -113,7 +113,7 @@ export class SuperAdminController {
   }
 
   @Get('hierarchy/assignable-users')
-  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
+  @Roles('SuperAdmin', 'Registrar')
   hierarchyAssignableUsers(
     @Req() req: { user: AuthUser },
     @Query('q') q?: string,
@@ -122,7 +122,7 @@ export class SuperAdminController {
   }
 
   @Post('assignments')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   async assign(
     @Req() req: { user: AuthUser },
     @Body()
@@ -149,13 +149,13 @@ export class SuperAdminController {
   }
 
   @Get('assignments')
-  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
+  @Roles('SuperAdmin', 'Registrar')
   listAssignments(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listAssignments(this.tenant(req));
   }
 
   @Delete('assignments/:assignmentId')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   revokeAssignment(
     @Req() req: { user: AuthUser },
     @Param('assignmentId') assignmentId: string,
@@ -168,7 +168,7 @@ export class SuperAdminController {
   }
 
   @Patch('departments/:deptId/school')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   async linkDepartmentToSchool(
     @Req() req: { user: AuthUser },
     @Param('deptId', ParseIntPipe) deptId: number,
@@ -196,11 +196,13 @@ export class SuperAdminController {
   }
 
   @Get('impersonation/logs')
+  @Roles('SuperAdmin')
   impersonationLogs(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listImpersonationSessions(this.tenant(req));
   }
 
   @Post('impersonate')
+  @Roles('SuperAdmin')
   @AllowImpersonationWrite()
   startImpersonation(
     @Req() req: { user: AuthUser },
@@ -216,6 +218,7 @@ export class SuperAdminController {
   }
 
   @Post('impersonate/end')
+  @Roles('SuperAdmin')
   @AllowImpersonationWrite()
   endImpersonation(@Req() req: { user: AuthUser }) {
     const sessionId = req.user.impersonation_session_id;
@@ -229,6 +232,7 @@ export class SuperAdminController {
   }
 
   @Get('override-logs')
+  @Roles('SuperAdmin')
   listOverrideLogs(@Req() req: { user: AuthUser }) {
     return this.superAdmin.listHrOverrideLogs(this.tenant(req));
   }

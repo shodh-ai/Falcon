@@ -1,19 +1,30 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
   List,
   Loader2,
+  Plus,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Select } from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Sheet,
   SheetContent,
@@ -23,6 +34,7 @@ import {
 } from '@/components/ui/sheet';
 import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi } from '@/lib/api/api.campus-events';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PAGE_SIZE = 10;
@@ -84,6 +96,36 @@ function weekday(value?: string | null) {
 function todayIso() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/** Academic year label as YYYY-YY (e.g. 2020-21). Year runs Jul–Jun. */
+function formatAcademicYearLabel(startYear: number) {
+  return `${startYear}-${String(startYear + 1).slice(-2)}`;
+}
+
+function currentAcademicStartYear(now = new Date()) {
+  return now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+function parseAcademicStartYear(label: string): number | null {
+  const match = /^(\d{4})(?:\s*[-–/]\s*\d{2,4})?$/.exec(label.trim());
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+function buildAcademicYearOptions(fromData: string[], now = new Date()) {
+  const oldest = 2015;
+  const newest = currentAcademicStartYear(now) + 2;
+  const generated: string[] = [];
+  for (let year = newest; year >= oldest; year -= 1) {
+    generated.push(formatAcademicYearLabel(year));
+  }
+  const merged = new Set<string>([...generated, ...fromData.filter(Boolean)]);
+  return [...merged].sort((a, b) => {
+    const aStart = parseAcademicStartYear(a) ?? 0;
+    const bStart = parseAcademicStartYear(b) ?? 0;
+    return bStart - aStart || b.localeCompare(a);
+  });
 }
 
 function display(value?: string | number | boolean | null) {
@@ -149,8 +191,6 @@ export function CampusAdminAcademicCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [academicYear, setAcademicYear] = useState('');
-  const [when, setWhen] = useState('');
-  const [blocked, setBlocked] = useState('');
   const [view, setView] = useState<ViewMode>('calendar');
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -159,6 +199,15 @@ export function CampusAdminAcademicCalendarPage() {
   const [selectedDay, setSelectedDay] = useState<string | null>(today);
   const [selected, setSelected] = useState<CalendarEntry | null>(null);
   const didFocusMonth = useRef(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [entryForm, setEntryForm] = useState({
+    date: todayIso(),
+    title: '',
+    description: '',
+    academic_year: '',
+    is_blocked_for_events: true,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -192,20 +241,34 @@ export function CampusAdminAcademicCalendarPage() {
     setSelectedDay(focus);
   }, [rows, today]);
 
-  const years = useMemo(
-    () =>
-      [...new Set(rows.map((row) => row.academic_year).filter((value): value is string => Boolean(value)))].sort(),
-    [rows],
-  );
+  const years = useMemo(() => {
+    const fromData = rows
+      .map((row) => row.academic_year)
+      .filter((value): value is string => Boolean(value));
+    return buildAcademicYearOptions(fromData, now);
+  }, [now, rows]);
+
+  const yearsWithEntries = useMemo(() => {
+    return new Set(
+      rows
+        .map((row) => row.academic_year)
+        .filter((value): value is string => Boolean(value)),
+    );
+  }, [rows]);
+
+  const chooseAcademicYear = (year: string) => {
+    setAcademicYear(year);
+    if (!year) return;
+    const startYear = parseAcademicStartYear(year);
+    if (startYear == null) return;
+    // Jump calendar to the start of that academic year (July).
+    setMonthCursor({ year: startYear, month: 6 });
+    setSelectedDay(`${startYear}-07-01`);
+  };
 
   const filtered = useMemo(() => {
     const next = rows.filter((row) => {
-      const iso = dateIso(row.date);
       if (academicYear && row.academic_year !== academicYear) return false;
-      if (blocked === 'blocked' && row.is_blocked_for_events === false) return false;
-      if (blocked === 'open' && row.is_blocked_for_events !== false) return false;
-      if (when === 'upcoming' && iso < today) return false;
-      if (when === 'past' && iso >= today) return false;
       return true;
     });
     const direction = sortDir === 'asc' ? 1 : -1;
@@ -217,7 +280,7 @@ export function CampusAdminAcademicCalendarPage() {
       return (a.title ?? '').localeCompare(b.title ?? '', undefined, { sensitivity: 'base' }) * direction;
     });
     return next;
-  }, [academicYear, blocked, rows, sortDir, sortKey, today, when]);
+  }, [academicYear, rows, sortDir, sortKey]);
 
   const monthPrefix = `${monthCursor.year}-${String(monthCursor.month + 1).padStart(2, '0')}`;
   const monthEntries = useMemo(
@@ -246,7 +309,7 @@ export function CampusAdminAcademicCalendarPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [academicYear, when, blocked, sortKey, sortDir]);
+  }, [academicYear, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -263,17 +326,145 @@ export function CampusAdminAcademicCalendarPage() {
     setSelectedDay(null);
   };
 
+  async function saveEntry(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await eventsApi.upsertCalendar({
+        date: entryForm.date,
+        title: entryForm.title.trim(),
+        description: entryForm.description.trim() || null,
+        academic_year:
+          entryForm.academic_year.trim() ||
+          academicYear ||
+          formatAcademicYearLabel(currentAcademicStartYear()),
+        is_blocked_for_events: entryForm.is_blocked_for_events,
+      });
+      toast.success('Calendar entry saved.');
+      setShowAdd(false);
+      setEntryForm({
+        date: todayIso(),
+        title: '',
+        description: '',
+        academic_year: academicYear || '',
+        is_blocked_for_events: true,
+      });
+      await load();
+    } catch (err) {
+      toast.error(parseApiError(err) || 'Could not save calendar entry');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteEntry(entry: CalendarEntry) {
+    if (!window.confirm(`Delete “${entry.title}” on ${formatDate(entry.date)}?`)) return;
+    setSaving(true);
+    try {
+      await eventsApi.deleteCalendar(entry.calendar_id);
+      toast.success('Calendar entry deleted.');
+      setSelected(null);
+      await load();
+    } catch (err) {
+      toast.error(parseApiError(err) || 'Could not delete calendar entry');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-5 p-6">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="p-5 md:p-6">
-          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">Campus Admin</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-sgvu-navy">Academic Calendar</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            University academic calendar for your campus. Dates are view-only and cannot be changed here.
-          </p>
+        <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-end md:justify-between md:p-6">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sgvu-gold">Campus Admin</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-sgvu-navy">Academic Calendar</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              University academic calendar for your campus. Add blocked dates and key academic milestones.
+            </p>
+          </div>
+          <Button type="button" className="h-9" onClick={() => setShowAdd((prev) => !prev)}>
+            <Plus className="h-4 w-4" />
+            {showAdd ? 'Close form' : 'Add date'}
+          </Button>
         </CardContent>
       </Card>
+
+      {showAdd ? (
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-bold text-sgvu-navy">Add calendar entry</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={saveEntry} className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Date
+                </label>
+                <Input
+                  type="date"
+                  required
+                  value={entryForm.date}
+                  onChange={(e) => setEntryForm((prev) => ({ ...prev, date: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Academic year
+                </label>
+                <Input
+                  placeholder={academicYear || formatAcademicYearLabel(currentAcademicStartYear())}
+                  value={entryForm.academic_year}
+                  onChange={(e) =>
+                    setEntryForm((prev) => ({ ...prev, academic_year: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Title
+                </label>
+                <Input
+                  required
+                  value={entryForm.title}
+                  onChange={(e) => setEntryForm((prev) => ({ ...prev, title: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Description
+                </label>
+                <textarea
+                  className="min-h-[80px] w-full rounded-lg border border-border/60 px-3 py-2 text-sm"
+                  value={entryForm.description}
+                  onChange={(e) =>
+                    setEntryForm((prev) => ({ ...prev, description: e.target.value }))
+                  }
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-sgvu-navy sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={entryForm.is_blocked_for_events}
+                  onChange={(e) =>
+                    setEntryForm((prev) => ({
+                      ...prev,
+                      is_blocked_for_events: e.target.checked,
+                    }))
+                  }
+                />
+                Block campus events on this date
+              </label>
+              <div className="sm:col-span-2">
+                <Button type="submit" disabled={saving} className="h-9">
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Save entry
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="space-y-4 p-4 md:p-5">
@@ -287,39 +478,66 @@ export function CampusAdminAcademicCalendarPage() {
           ) : (
             <>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={academicYear}
-                    onChange={(e) => setAcademicYear(e.target.value)}
-                    className="h-10 w-[9.5rem] rounded-xl border-gray-200 bg-white"
-                  >
-                    <option value="">All years</option>
-                    {years.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </Select>
-                  <Select
-                    value={when}
-                    onChange={(e) => setWhen(e.target.value)}
-                    className="h-10 w-[9.5rem] rounded-xl border-gray-200 bg-white"
-                  >
-                    <option value="">All dates</option>
-                    <option value="upcoming">Upcoming</option>
-                    <option value="past">Past</option>
-                  </Select>
-                  <Select
-                    value={blocked}
-                    onChange={(e) => setBlocked(e.target.value)}
-                    className="h-10 w-[11rem] rounded-xl border-gray-200 bg-white"
-                  >
-                    <option value="">All statuses</option>
-                    <option value="blocked">Blocked for events</option>
-                    <option value="open">Not blocked</option>
-                  </Select>
+                <div className="min-w-0 space-y-1.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Academic year
+                  </p>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 min-w-[11rem] justify-between rounded-xl border-sgvu-navy/20 bg-white px-3.5 text-sgvu-navy hover:bg-sgvu-navy/5"
+                      >
+                        <span className="font-semibold">
+                          {academicYear || 'All years'}
+                        </span>
+                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-70" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="start"
+                      className="max-h-72 w-[13rem] overflow-y-auto rounded-xl border-sgvu-navy/10 p-1 shadow-lg"
+                    >
+                      <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Choose year
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="cursor-pointer justify-between rounded-lg"
+                        onSelect={() => chooseAcademicYear('')}
+                      >
+                        <span className="font-medium">All years</span>
+                        {academicYear === '' ? (
+                          <Check className="h-4 w-4 text-sgvu-navy" />
+                        ) : null}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {years.map((item) => {
+                        const active = academicYear === item;
+                        const hasEntries = yearsWithEntries.has(item);
+                        return (
+                          <DropdownMenuItem
+                            key={item}
+                            className="cursor-pointer justify-between rounded-lg"
+                            onSelect={() => chooseAcademicYear(item)}
+                          >
+                            <span className={hasEntries ? 'font-medium' : 'text-muted-foreground'}>
+                              {item}
+                              {!hasEntries ? (
+                                <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide">
+                                  empty
+                                </span>
+                              ) : null}
+                            </span>
+                            {active ? <Check className="h-4 w-4 text-sgvu-navy" /> : null}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-                <div className="flex w-fit rounded-xl border border-gray-200 bg-white p-1">
+                <div className="flex w-fit shrink-0 rounded-xl border border-gray-200 bg-white p-1">
                   <button
                     type="button"
                     className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold ${view === 'calendar' ? 'bg-sgvu-navy text-white' : 'text-sgvu-navy'}`}
@@ -524,7 +742,11 @@ export function CampusAdminAcademicCalendarPage() {
           side="right"
           className="w-[min(100vw,40rem)] overflow-y-auto bg-white p-0 text-sgvu-navy"
         >
-          <CalendarDetailPanel entry={selected} />
+          <CalendarDetailPanel
+            entry={selected}
+            deleting={saving}
+            onDelete={(entry) => void deleteEntry(entry)}
+          />
         </SheetContent>
       </Sheet>
     </div>
@@ -552,7 +774,15 @@ function SortHeader({
   );
 }
 
-function CalendarDetailPanel({ entry }: { entry: CalendarEntry | null }) {
+function CalendarDetailPanel({
+  entry,
+  deleting,
+  onDelete,
+}: {
+  entry: CalendarEntry | null;
+  deleting?: boolean;
+  onDelete?: (entry: CalendarEntry) => void;
+}) {
   if (!entry) return null;
   const iso = dateIso(entry.date);
   const nextDay = parseLocalDate(entry.date);
@@ -602,16 +832,30 @@ function CalendarDetailPanel({ entry }: { entry: CalendarEntry | null }) {
             </dd>
           </div>
         </Section>
-        {googleUrl ? (
-          <a
-            href={googleUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex text-sm font-semibold text-sgvu-navy hover:underline"
-          >
-            Add to Google Calendar
-          </a>
-        ) : null}
+        <div className="flex flex-wrap gap-3">
+          {googleUrl ? (
+            <a
+              href={googleUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex text-sm font-semibold text-sgvu-navy hover:underline"
+            >
+              Add to Google Calendar
+            </a>
+          ) : null}
+          {onDelete ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 text-destructive"
+              disabled={deleting}
+              onClick={() => onDelete(entry)}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Delete entry
+            </Button>
+          ) : null}
+        </div>
       </div>
     </div>
   );

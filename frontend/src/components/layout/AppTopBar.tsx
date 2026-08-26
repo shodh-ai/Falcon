@@ -16,6 +16,7 @@ interface AppTopBarProps {
   config: PortalConfig;
   pageTitle: string;
   pageShortTitle?: string;
+  breadcrumb?: { portal: string; section: string; page: string } | null;
   profileHref?: string;
   headerExtra?: ReactNode;
   mobileOpen: boolean;
@@ -26,6 +27,7 @@ export function AppTopBar({
   config,
   pageTitle,
   pageShortTitle,
+  breadcrumb,
   profileHref,
   headerExtra,
   mobileOpen,
@@ -56,12 +58,23 @@ export function AppTopBar({
                 navGroups={config.navGroups}
                 collapsed={false}
                 onToggleCollapse={() => {}}
+                collapsibleNavGroups={config.collapsibleNavGroups}
+                sidebarBrandLabel={config.sidebarBrandLabel}
               />
             </div>
           </SheetContent>
         </Sheet>
 
         <div className="min-w-0 flex-1">
+          {breadcrumb ? (
+            <p className="truncate text-[10px] font-medium text-sgvu-navy/45 sm:text-[11px]">
+              <span className="hidden sm:inline">{breadcrumb.portal}</span>
+              <span className="hidden sm:inline"> · </span>
+              <span>{breadcrumb.section}</span>
+              <span aria-hidden> / </span>
+              <span className="text-sgvu-navy/70">{breadcrumb.page}</span>
+            </p>
+          ) : null}
           <h1 className="truncate text-base font-bold tracking-tight text-sgvu-navy sm:text-lg">
             {pageShortTitle ? (
               <>
@@ -72,7 +85,9 @@ export function AppTopBar({
               pageTitle
             )}
           </h1>
-          <p className="truncate text-[11px] font-medium text-sgvu-navy/50">{config.personaLabel}</p>
+          <p className="truncate text-[11px] font-medium text-sgvu-navy/50">
+            {breadcrumb ? 'FALCON' : config.personaLabel}
+          </p>
         </div>
 
         <div

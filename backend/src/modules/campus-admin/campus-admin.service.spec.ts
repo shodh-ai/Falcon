@@ -5,9 +5,27 @@ describe('CampusAdminService.profile', () => {
   const campusScope = {
     requireCampusIds: jest.fn(),
     assertRecordCampusAllowed: jest.fn(),
+    studentCampusVisibilityClause: jest.fn(
+      (tenantParam: number, campusParam: number) =>
+        `(s.campus_id = ANY($${campusParam}::int[]) OR sp.campus_id = ANY($${campusParam}::int[]))`,
+    ),
   };
   const dataSource = {
     query: jest.fn(),
+    transaction: jest.fn(),
+  };
+
+  const ticketService = {
+    getTicketById: jest.fn(),
+  };
+  const adminControl = {
+    listDepartments: jest.fn(),
+    listDepartmentLookups: jest.fn(),
+    listHodCandidates: jest.fn(),
+    createDepartment: jest.fn(),
+    updateDepartment: jest.fn(),
+    deleteDepartment: jest.fn(),
+    restoreDepartment: jest.fn(),
   };
 
   let service: CampusAdminService;
@@ -18,6 +36,8 @@ describe('CampusAdminService.profile', () => {
       dataSource as never,
       campusScope as never,
       { assignEntity: jest.fn(), revokeAssignment: jest.fn() } as never,
+      ticketService as never,
+      adminControl as never,
     );
   });
 
@@ -99,6 +119,20 @@ describe('CampusAdminService.profile', () => {
     expect(dataSource.query.mock.calls[0][1][2]).toEqual([3]);
   });
 
+  it('filters HOD role on the server for faculty-staff list', async () => {
+    campusScope.requireCampusIds.mockResolvedValue([3]);
+    dataSource.query.mockResolvedValueOnce([]);
+
+    await service.facultyStaff(
+      { user_id: 'ca-1', role: 'CampusAdmin', tenant_id: 'tenant-1' },
+      undefined,
+      'hod',
+    );
+
+    expect(dataSource.query.mock.calls[0][0]).toContain("lower(r.role_name) IN ('hod')");
+    expect(dataSource.query.mock.calls[0][1][1]).toEqual([3]);
+  });
+
   it('loads student detail only for assigned campus ids', async () => {
     campusScope.requireCampusIds.mockResolvedValue([3]);
     dataSource.query.mockResolvedValueOnce([
@@ -173,6 +207,100 @@ describe('CampusAdminService.profile', () => {
           program_code: 'CSE',
           school_id: 9,
         },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('loads campus ticket inbox with campus scope filters', async () => {
+    campusScope.requireCampusIds.mockResolvedValue([1]);
+    dataSource.query.mockResolvedValue([
+      { ticket_id: 't-1', ticket_ref: 'TKT-0001', status: 'PENDING' },
+    ]);
+
+    const rows = await service.requests(
+      { user_id: 'ca-1', role: 'CampusAdmin', tenant_id: 'tenant-1' },
+      { status: 'PENDING', q: 'wifi' },
+    );
+
+    expect(campusScope.requireCampusIds).toHaveBeenCalled();
+    expect(rows).toHaveLength(1);
+    expect(String(dataSource.query.mock.calls[0][0])).toContain('s.campus_id = ANY($2::int[])');
+  });
+
+  it('delegates ticket detail lookup to TicketService with campus scope', async () => {
+    ticketService.getTicketById.mockResolvedValue({ ticket_id: 't-1' });
+
+    const detail = await service.requestDetail(
+      { user_id: 'ca-1', role: 'CampusAdmin', tenant_id: 'tenant-1' },
+      't-1',
+    );
+
+    expect(ticketService.getTicketById).toHaveBeenCalledWith(
+      't-1',
+      'ca-1',
+      'CampusAdmin',
+      'tenant-1',
+      expect.objectContaining({ user_id: 'ca-1' }),
+    );
+    expect(detail).toEqual({ ticket_id: 't-1' });
+  });
+
+  it('rejects SuperAdmin role assignment for Campus Admin create', async () => {
+    campusScope.requireCampusIds.mockResolvedValue([1]);
+    await expect(
+      service.createManagedUser(
+        { user_id: 'ca-1', role: 'CampusAdmin', tenant_id: 'tenant-1' },
+        {
+          name: 'Should Fail',
+          email: 'fail@mygyanvihar.com',
+          role_name: 'SuperAdmin',
+          dept_id: 10,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects create when department is outside campus', async () => {
+    campusScope.requireCampusIds.mockResolvedValue([1]);
+    dataSource.query.mockResolvedValueOnce([
+      { dept_id: 10, campus_id: 2 },
+    ]);
+    campusScope.assertRecordCampusAllowed.mockImplementation(() => {
+      throw new ForbiddenException('Access denied for this campus');
+    });
+
+    await expect(
+      service.createManagedUser(
+        { user_id: 'ca-1', role: 'CampusAdmin', tenant_id: 'tenant-1' },
+        {
+          name: 'Faculty User',
+          email: 'faculty.new@mygyanvihar.com',
+          role_name: 'Faculty',
+          dept_id: 10,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects SuperAdmin role-permission updates from Campus Admin', async () => {
+    campusScope.requireCampusIds.mockResolvedValue([1]);
+    await expect(
+      service.updateRolePermissions(
+        { user_id: 'ca-1', role: 'CampusAdmin', tenant_id: 'tenant-1' },
+        'SuperAdmin',
+        { view: ['academics'], edit: ['academics'] },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects privileged resource grants from Campus Admin', async () => {
+    campusScope.requireCampusIds.mockResolvedValue([1]);
+    dataSource.query.mockResolvedValueOnce([{ role_id: 3, role_name: 'Faculty' }]);
+    await expect(
+      service.updateRolePermissions(
+        { user_id: 'ca-1', role: 'CampusAdmin', tenant_id: 'tenant-1' },
+        'Faculty',
+        { view: ['*'], edit: ['admin_ops'] },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });

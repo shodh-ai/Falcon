@@ -201,7 +201,7 @@ export class TicketService {
       Array<Record<string, unknown>>
     >(
       `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
-              t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
+              t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at, t.updated_at,
               t.escalation_level,
               su.name AS student_name, au.name AS assigned_to_name
        FROM helpdesk_tickets t
@@ -248,7 +248,7 @@ export class TicketService {
       Array<Record<string, unknown>>
     >(
       `SELECT t.ticket_id, t.ticket_ref, t.category, t.subject, t.description, t.status,
-              t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at,
+              t.student_user_id, t.assigned_to_user_id, t.conversation, t.created_at, t.updated_at,
               t.sla_deadline, t.resolved_at, t.rejection_reason, t.escalation_level,
               su.name AS student_name, au.name AS assigned_to_name
        FROM helpdesk_tickets t
@@ -503,7 +503,7 @@ export class TicketService {
 
     ticket.status = dto.status;
     if (dto.assigned_to_user_id !== undefined) {
-      ticket.assigned_to_user_id = dto.assigned_to_user_id;
+      ticket.assigned_to_user_id = dto.assigned_to_user_id || null;
     }
     if (dto.status === 'REJECTED') {
       ticket.rejection_reason = dto.rejection_reason!.trim();
@@ -512,9 +512,40 @@ export class TicketService {
     if (dto.status === 'RESOLVED') {
       ticket.resolved_at = new Date();
       ticket.rejection_reason = null;
+      if (actor?.userId) {
+        ticket.resolved_by = actor.userId;
+      }
+    }
+
+    if (
+      dto.assigned_to_user_id &&
+      actor?.role?.trim().toLowerCase() === 'campusadmin'
+    ) {
+      await this.assertCampusAdminAssigneeAllowed(
+        actor,
+        dto.assigned_to_user_id,
+        ticket.student_user_id,
+      );
     }
 
     const saved = await this.tickets.save(ticket);
+
+    try {
+      await this.dataSource.query(
+        `INSERT INTO helpdesk_ticket_events (ticket_id, event_type, actor_user_id, payload)
+         VALUES ($1, 'STATUS_UPDATED', $2, $3::jsonb)`,
+        [
+          ticket.ticket_id,
+          actor?.userId ?? null,
+          JSON.stringify({
+            status: dto.status,
+            assigned_to_user_id: dto.assigned_to_user_id ?? null,
+          }),
+        ],
+      );
+    } catch {
+      // Event ledger is best-effort.
+    }
 
     if (dto.status === 'RESOLVED' && ticket.category === 'STUDENT_PROFILE') {
       await this.dataSource.query(
@@ -617,28 +648,35 @@ export class TicketService {
     actorUserId: string,
     actorRole: string,
     message: string,
+    actor?: ScopedAuthUser,
   ) {
     const ticket = await this.tickets.findOne({
       where: { ticket_id: ticketId },
     });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
+    const normalizedRole = actorRole.trim().toLowerCase();
     const isStudentOwner = ticket.student_user_id === actorUserId;
     const isAdminActor = [
-      'SuperAdmin',
-      'Registrar',
-      'Accountant',
-      'Warden',
-      'HOD',
-      'Dean',
-      'Faculty',
-      'HR',
-      'HRAdmin',
-    ].includes(actorRole);
+      'superadmin',
+      'registrar',
+      'accountant',
+      'warden',
+      'hod',
+      'dean',
+      'faculty',
+      'hr',
+      'hradmin',
+      'campusadmin',
+    ].includes(normalizedRole);
     if (!isStudentOwner && !isAdminActor) {
       throw new ForbiddenException(
         'You are not allowed to post messages in this ticket',
       );
+    }
+
+    if (!isStudentOwner && isAdminActor && actor) {
+      await this.assertTicketCampus(actor, ticket.student_user_id);
     }
 
     const conversation = ticket.conversation ?? [];
@@ -650,6 +688,20 @@ export class TicketService {
     });
     ticket.conversation = conversation;
     const saved = await this.tickets.save(ticket);
+
+    try {
+      await this.dataSource.query(
+        `INSERT INTO helpdesk_ticket_events (ticket_id, event_type, actor_user_id, payload)
+         VALUES ($1, 'MESSAGE_ADDED', $2, $3::jsonb)`,
+        [
+          ticket.ticket_id,
+          actorUserId,
+          JSON.stringify({ sender_role: actorRole }),
+        ],
+      );
+    } catch {
+      // Event ledger is best-effort.
+    }
 
     if (isAdminActor && !isStudentOwner && ticket.category !== 'MENTORSHIP') {
       const student = await this.tickets.manager.query<
@@ -668,6 +720,69 @@ export class TicketService {
     }
 
     return saved;
+  }
+
+  private async assertCampusAdminAssigneeAllowed(
+    actor: { userId: string; role: string; tenantId: string; roles?: string[] },
+    assigneeUserId: string,
+    studentUserId: string,
+  ) {
+    const campusIds = await this.campusScope.resolveCampusIds({
+      user_id: actor.userId,
+      role: actor.role,
+      roles: actor.roles,
+      tenant_id: actor.tenantId,
+    });
+    if (!campusIds?.length) {
+      throw new ForbiddenException('No campus is assigned to this Campus Admin account');
+    }
+
+    const rows = await this.dataSource.query<Array<{ user_id: string }>>(
+      `SELECT u.user_id
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id AND d.deleted_at IS NULL
+       LEFT JOIN schools s ON s.school_id = d.school_id AND s.deleted_at IS NULL
+       WHERE u.user_id = $1
+         AND u.tenant_id = $2
+         AND u.is_active = true
+         AND u.deleted_at IS NULL
+         AND lower(r.role_name) IN ('dean', 'hod', 'faculty', 'warden', 'campusadmin')
+         AND (
+           s.campus_id = ANY($3::int[])
+           OR EXISTS (
+             SELECT 1 FROM schools sc
+             WHERE sc.dean_user_id = u.user_id
+               AND sc.deleted_at IS NULL
+               AND sc.campus_id = ANY($3::int[])
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM departments hd
+             JOIN schools hs ON hs.school_id = hd.school_id AND hs.deleted_at IS NULL
+             WHERE hd.hod_user_id = u.user_id
+               AND hd.deleted_at IS NULL
+               AND hs.campus_id = ANY($3::int[])
+           )
+         )
+       LIMIT 1`,
+      [assigneeUserId, actor.tenantId, campusIds],
+    );
+    if (!rows.length) {
+      throw new ForbiddenException(
+        'Assignee must be active campus faculty, HOD, Dean, Warden, or Campus Admin staff',
+      );
+    }
+
+    await this.assertTicketCampus(
+      {
+        user_id: actor.userId,
+        role: actor.role,
+        roles: actor.roles,
+        tenant_id: actor.tenantId,
+      },
+      studentUserId,
+    );
   }
 
   async escalateTicket(

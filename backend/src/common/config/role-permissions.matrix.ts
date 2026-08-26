@@ -50,10 +50,87 @@ export const ROLE_PERMISSIONS: Record<string, RoleCapability> = {
     edit: ['finance'],
     approve: ['fee_waivers'],
   },
+  Faculty: {
+    view: ['academics', 'students', 'timetables', 'attendance', 'marks'],
+    edit: ['attendance', 'marks'],
+    approve: [],
+  },
+  HOD: {
+    view: ['academics', 'students', 'timetables', 'faculty', 'departments', 'reports'],
+    edit: ['academics', 'timetables', 'faculty', 'departments'],
+    approve: ['leave_requests', 'marks'],
+  },
+  Dean: {
+    view: ['academics', 'students', 'programs', 'faculty', 'departments', 'reports'],
+    edit: ['academics', 'programs', 'departments'],
+    approve: ['academic_rules', 'leave_requests'],
+  },
+  Student: {
+    view: ['academics', 'timetables', 'announcements', 'events', 'own_profile'],
+    edit: ['own_profile'],
+    approve: [],
+    readOnlyPortal: true,
+  },
+  Warden: {
+    view: ['hostel', 'students', 'discipline'],
+    edit: ['hostel'],
+    approve: ['hostel_requests'],
+  },
+  Librarian: {
+    view: ['library'],
+    edit: ['library'],
+    approve: [],
+  },
+  LabAdmin: {
+    view: ['labs', 'academics', 'facilities'],
+    edit: ['labs', 'facilities'],
+    approve: [],
+  },
+  TransportOfficer: {
+    view: ['transport'],
+    edit: ['transport'],
+    approve: [],
+  },
+  HR: {
+    view: ['faculty', 'staff', 'reports'],
+    edit: ['staff'],
+    approve: ['leave_requests'],
+  },
+  HRAdmin: {
+    view: ['faculty', 'staff', 'reports'],
+    edit: ['faculty', 'staff'],
+    approve: ['leave_requests', 'staff'],
+  },
   SuperAdmin: {
     view: ['*'],
     edit: ['*'],
     approve: ['*'],
+  },
+  CampusAdmin: {
+    view: [
+      'academics',
+      'students',
+      'faculty',
+      'departments',
+      'programs',
+      'timetables',
+      'announcements',
+      'events',
+      'helpdesk',
+      'reports',
+      'campus_profile',
+      'users',
+    ],
+    edit: [
+      'academics',
+      'departments',
+      'programs',
+      'announcements',
+      'helpdesk',
+      'users',
+      'role_permissions',
+    ],
+    approve: ['events_estate', 'helpdesk'],
   },
 };
 

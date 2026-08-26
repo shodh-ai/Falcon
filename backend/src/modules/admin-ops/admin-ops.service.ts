@@ -2,12 +2,17 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CacheService } from '../../core/redis/cache.service';
+import {
+  CampusScopeService,
+  type ScopedAuthUser,
+} from '../../common/campus-scope/campus-scope.service';
 
 @Injectable()
 export class AdminOpsService {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly cache: CacheService,
+    private readonly campusScope: CampusScopeService,
   ) {}
 
   private tenant(tenantId?: string) {
@@ -129,23 +134,48 @@ export class AdminOpsService {
     );
   }
 
-  listTimetable(tenantId?: string, academicYear?: string) {
+  listTimetable(
+    tenantId?: string,
+    academicYear?: string,
+    actor?: ScopedAuthUser,
+  ) {
     const tid = this.tenant(tenantId);
     const yearKey = academicYear ?? 'all';
-    const cacheKey = `timetable:${tid}:${yearKey}`;
-    return this.cache.getOrSet(cacheKey, () =>
-      this.db.query(
+    const cacheKey = actor
+      ? `timetable:${tid}:${yearKey}:scoped:${actor.user_id ?? 'anon'}`
+      : `timetable:${tid}:${yearKey}`;
+    return this.cache.getOrSet(cacheKey, async () => {
+      const campusIds = actor
+        ? await this.campusScope.resolveCampusIds(actor)
+        : null;
+      if (campusIds && !campusIds.length) return [];
+
+      const params: unknown[] = [tid, academicYear ?? null];
+      let campusSql = '';
+      if (campusIds) {
+        params.push(campusIds);
+        campusSql = ` AND ${this.campusScope.timetableSlotCampusMatchSql('s', params.length)}`;
+      }
+
+      return this.db.query(
         `SELECT s.*, u.name AS faculty_name
          FROM admin_timetable_slots s
          LEFT JOIN users u ON u.user_id = s.faculty_user_id
-         WHERE s.tenant_id = $1 AND ($2::text IS NULL OR s.academic_year = $2)
+         WHERE s.tenant_id = $1 AND ($2::text IS NULL OR s.academic_year = $2)${campusSql}
          ORDER BY s.day_of_week, s.start_time`,
-        [tid, academicYear ?? null],
-      ),
-    );
+        params,
+      );
+    });
   }
 
-  async upsertTimetableSlot(tenantId: string, dto: Record<string, unknown>) {
+  async upsertTimetableSlot(
+    tenantId: string,
+    dto: Record<string, unknown>,
+    actor?: ScopedAuthUser,
+  ) {
+    if (actor) {
+      await this.campusScope.assertTimetableSlotCampusAllowed(actor, tenantId, dto);
+    }
     const conflicts = await this.db.query(
       `SELECT slot_id, room_code, course_code
        FROM admin_timetable_slots

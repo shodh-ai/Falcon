@@ -21,6 +21,8 @@ describe('AdminControlController RBAC', () => {
     updateDepartment: jest.fn(),
     deleteDepartment: jest.fn(),
     restoreDepartment: jest.fn(),
+    assignHod: jest.fn(),
+    removeHod: jest.fn(),
     listAuditLogs: jest.fn(),
     listAnnouncements: jest.fn(),
     createAnnouncement: jest.fn(),
@@ -75,6 +77,13 @@ describe('AdminControlController RBAC', () => {
         school_id: 1,
       }),
     ).toThrow(ForbiddenException);
+    expect(() =>
+      controller.assignHod(pureCampusAdminReq, {
+        dept_id: 1,
+        hod_user_id: '00000000-0000-4000-8000-000000000001',
+      }),
+    ).toThrow(ForbiddenException);
+    expect(() => controller.removeHod(pureCampusAdminReq, '1')).toThrow(ForbiddenException);
   });
 
   it('denies pure Campus Admin from communication and audit endpoints', () => {
@@ -87,9 +96,25 @@ describe('AdminControlController RBAC', () => {
         audience: 'everyone',
       }),
     ).toThrow(ForbiddenException);
+    expect(() =>
+      controller.broadcast(pureCampusAdminReq, {
+        title: 'Ping',
+        message: 'Hello',
+        audience: 'everyone',
+      }),
+    ).toThrow(ForbiddenException);
     expect(() => controller.auditLogs(pureCampusAdminReq, undefined, undefined, undefined, undefined)).toThrow(
       ForbiddenException,
     );
+  });
+
+  it('denies pure Campus Admin from courses, reports, helpdesk bridge, and dashboard', () => {
+    expect(() => controller.dashboard(pureCampusAdminReq)).toThrow(ForbiddenException);
+    expect(() => controller.courses(pureCampusAdminReq)).toThrow(ForbiddenException);
+    expect(() => controller.reports(pureCampusAdminReq)).toThrow(ForbiddenException);
+    expect(() => controller.tickets(pureCampusAdminReq)).toThrow(ForbiddenException);
+    expect(() => controller.portalAccess(pureCampusAdminReq)).toThrow(ForbiddenException);
+    expect(() => controller.structure(pureCampusAdminReq)).toThrow(ForbiddenException);
   });
 
   it('allows Registrar to reach those admin-only endpoints', () => {

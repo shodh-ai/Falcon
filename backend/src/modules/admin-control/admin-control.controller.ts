@@ -52,7 +52,7 @@ type AuthUser = {
 
 @Controller('api/admin-control')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
+@Roles('SuperAdmin', 'Registrar')
 export class AdminControlController {
   constructor(private readonly admin: AdminControlService) {}
 
@@ -87,6 +87,7 @@ export class AdminControlController {
 
   @Get('dashboard')
   dashboard(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'dashboard');
     return this.admin.getDashboard(this.tenant(req));
   }
 
@@ -131,7 +132,11 @@ export class AdminControlController {
     @Body() body: BulkImportUsersDto,
   ) {
     this.denyPureCampusAdmin(req.user, 'user management');
-    return this.admin.importUsers(this.tenant(req), req.user.user_id, body);
+    return this.admin.importUsers(
+      this.tenant(req),
+      req.user.user_id,
+      body,
+    );
   }
 
   @Post('users')
@@ -147,7 +152,12 @@ export class AdminControlController {
     @Body() body: UpdateAdminUserDto,
   ) {
     this.denyPureCampusAdmin(req.user, 'user management');
-    return this.admin.updateUser(this.tenant(req), req.user.user_id, id, body);
+    return this.admin.updateUser(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+      body,
+    );
   }
 
   @Delete('users/:id')
@@ -159,19 +169,31 @@ export class AdminControlController {
   @Post('users/:id/suspend')
   suspend(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     this.denyPureCampusAdmin(req.user, 'user management');
-    return this.admin.suspendUser(this.tenant(req), req.user.user_id, id);
+    return this.admin.suspendUser(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+    );
   }
 
   @Post('users/:id/deactivate')
   deactivate(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     this.denyPureCampusAdmin(req.user, 'user management');
-    return this.admin.deactivateUser(this.tenant(req), req.user.user_id, id);
+    return this.admin.deactivateUser(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+    );
   }
 
   @Post('users/:id/activate')
   activate(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     this.denyPureCampusAdmin(req.user, 'user management');
-    return this.admin.activateUser(this.tenant(req), req.user.user_id, id);
+    return this.admin.activateUser(
+      this.tenant(req),
+      req.user.user_id,
+      id,
+    );
   }
 
   @Post('users/:id/reset-password')
@@ -191,16 +213,18 @@ export class AdminControlController {
 
   @Get('roles')
   roles(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'roles & permissions');
     return this.admin.listRoles(this.tenant(req));
   }
 
   @Put('roles/:role/permissions')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin', 'Registrar')
   updateRole(
     @Req() req: { user: AuthUser },
     @Param('role') role: string,
     @Body() body: RolePermissionsDto,
   ) {
+    this.denyPureCampusAdmin(req.user, 'roles & permissions');
     return this.admin.updateRolePermissions(
       this.tenant(req),
       req.user.user_id,
@@ -242,9 +266,18 @@ export class AdminControlController {
   }
 
   @Get('hod/candidates')
-  hodCandidates(@Req() req: { user: AuthUser }, @Query('q') q?: string) {
+  hodCandidates(
+    @Req() req: { user: AuthUser },
+    @Query('q') q?: string,
+    @Query('dept_id') deptId?: string,
+  ) {
     this.denyPureCampusAdmin(req.user, 'department management');
-    return this.admin.listHodCandidates(req.user, this.tenant(req), q);
+    return this.admin.listHodCandidates(
+      req.user,
+      this.tenant(req),
+      q,
+      deptId && Number.isInteger(Number(deptId)) ? Number(deptId) : undefined,
+    );
   }
 
   @Get('departments/:id')
@@ -254,7 +287,8 @@ export class AdminControlController {
   }
 
   @Get('structure')
-  structure() {
+  structure(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'university structure');
     return this.admin.listStructure();
   }
 
@@ -296,11 +330,13 @@ export class AdminControlController {
 
   @Get('courses')
   courses(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'course management');
     return this.admin.listCourses(this.tenant(req));
   }
 
   @Post('courses')
   createCourse(@Req() req: { user: AuthUser }, @Body() body: CreateCourseDto) {
+    this.denyPureCampusAdmin(req.user, 'course management');
     return this.admin.createCourse(this.tenant(req), req.user.user_id, body);
   }
 
@@ -310,6 +346,7 @@ export class AdminControlController {
     @Param('id') id: string,
     @Body() body: UpdateCourseDto,
   ) {
+    this.denyPureCampusAdmin(req.user, 'course management');
     return this.admin.updateCourse(
       this.tenant(req),
       req.user.user_id,
@@ -320,11 +357,13 @@ export class AdminControlController {
 
   @Delete('courses/:id')
   deleteCourse(@Req() req: { user: AuthUser }, @Param('id') id: string) {
+    this.denyPureCampusAdmin(req.user, 'course management');
     return this.admin.deleteCourse(this.tenant(req), req.user.user_id, id);
   }
 
   @Get('calendar')
   calendar(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'calendar management');
     return this.admin.listCalendar(this.tenant(req));
   }
 
@@ -354,6 +393,7 @@ export class AdminControlController {
     @Req() req: { user: AuthUser },
     @Body() body: BroadcastNotificationDto,
   ) {
+    this.denyPureCampusAdmin(req.user, 'tenant-wide notification broadcast');
     return this.admin.broadcastNotification(
       this.tenant(req),
       req.user.user_id,
@@ -381,23 +421,24 @@ export class AdminControlController {
 
   @Get('system/health')
   health(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'system health');
     return this.admin.getSystemHealth(this.tenant(req));
   }
 
   @Post('backup/run')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   runBackup(@Req() req: { user: AuthUser }) {
     return this.admin.runBackup(this.tenant(req), req.user.user_id);
   }
 
   @Get('backup/history')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   backupHistory(@Req() req: { user: AuthUser }) {
     return this.admin.listBackups(this.tenant(req));
   }
 
   @Get('backup/:id/download')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   async downloadBackup(
     @Req() req: { user: AuthUser },
     @Param('id') id: string,
@@ -413,24 +454,25 @@ export class AdminControlController {
   }
 
   @Post('backup/:id/restore')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   restore(@Req() req: { user: AuthUser }, @Param('id') id: string) {
     return this.admin.restoreBackup(this.tenant(req), req.user.user_id, id);
   }
 
   @Post('ai/assist')
   ai(@Req() req: { user: AuthUser }, @Body() body: AiAssistDto) {
+    this.denyPureCampusAdmin(req.user, 'AI assist');
     return this.admin.aiAssist(this.tenant(req), req.user.user_id, body);
   }
 
   @Get('settings')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   settings(@Req() req: { user: AuthUser }) {
     return this.admin.getSettings(this.tenant(req));
   }
 
   @Put('settings')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   updateSettings(
     @Req() req: { user: AuthUser },
     @Body() body: SystemSettingsDto,
@@ -440,6 +482,7 @@ export class AdminControlController {
 
   @Get('reports/summary')
   reports(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'university reports');
     return this.admin.reportSummary(this.tenant(req));
   }
 
@@ -460,6 +503,7 @@ export class AdminControlController {
 
   @Get('helpdesk/tickets')
   tickets(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'university helpdesk');
     return this.admin.listHelpdeskTickets(this.tenant(req));
   }
 
@@ -481,11 +525,13 @@ export class AdminControlController {
 
   @Get('pending')
   pending(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'university pending queue');
     return this.admin.pendingQueue(this.tenant(req));
   }
 
   @Get('academic/catalog')
   academicCatalog(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'academic catalog');
     return this.admin.listAcademicCatalog(this.tenant(req));
   }
 
@@ -519,16 +565,19 @@ export class AdminControlController {
 
   @Post('hod/assign')
   assignHod(@Req() req: { user: AuthUser }, @Body() body: AssignHodDto) {
+    this.denyPureCampusAdmin(req.user, 'department management');
     return this.admin.assignHod(this.tenant(req), req.user, body);
   }
 
   @Post('hod/:deptId/remove')
   removeHod(@Req() req: { user: AuthUser }, @Param('deptId') deptId: string) {
+    this.denyPureCampusAdmin(req.user, 'department management');
     return this.admin.removeHod(this.tenant(req), req.user, Number(deptId));
   }
 
   @Post('students/promote')
   promote(@Req() req: { user: AuthUser }, @Body() body: PromoteStudentDto) {
+    this.denyPureCampusAdmin(req.user, 'student promotion');
     return this.admin.promoteStudent(this.tenant(req), req.user.user_id, body);
   }
 
@@ -553,6 +602,7 @@ export class AdminControlController {
 
   @Get('fees')
   fees(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'fees');
     return this.admin.listFeeStructures(this.tenant(req));
   }
 
@@ -567,11 +617,12 @@ export class AdminControlController {
 
   @Get('portal-access')
   portalAccess(@Req() req: { user: AuthUser }) {
+    this.denyPureCampusAdmin(req.user, 'portal access');
     return this.admin.listPortalAccess(this.tenant(req));
   }
 
   @Put('portal-access')
-  @Roles('CampusAdmin', 'SuperAdmin')
+  @Roles('SuperAdmin')
   updatePortalAccess(
     @Req() req: { user: AuthUser },
     @Body() body: PortalAccessDto,
@@ -585,6 +636,7 @@ export class AdminControlController {
 
   @Get('login-history')
   loginHistory(@Req() req: { user: AuthUser }, @Query('limit') limit?: string) {
+    this.denyPureCampusAdmin(req.user, 'login history');
     return this.admin.listLoginHistory(
       this.tenant(req),
       limit ? Number(limit) : 100,
@@ -593,6 +645,7 @@ export class AdminControlController {
 
   @Get('error-logs')
   errorLogs(@Req() req: { user: AuthUser }, @Query('limit') limit?: string) {
+    this.denyPureCampusAdmin(req.user, 'error logs');
     return this.admin.listErrorLogs(
       this.tenant(req),
       limit ? Number(limit) : 100,
@@ -600,7 +653,8 @@ export class AdminControlController {
   }
 
   @Get('timetable/conflicts')
+  @Roles('CampusAdmin', 'SuperAdmin', 'Registrar')
   timetableConflicts(@Req() req: { user: AuthUser }) {
-    return this.admin.timetableConflicts(this.tenant(req));
+    return this.admin.timetableConflicts(this.tenant(req), req.user);
   }
 }

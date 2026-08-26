@@ -150,6 +150,10 @@ export interface PortalConfig {
   includeAccountSettingsNav?: boolean;
   /** Hide multi-role workspace switcher in the header (single-workspace portals). */
   hideWorkspaceSwitcher?: boolean;
+  /** Allow collapsing sidebar section groups (Campus Admin). */
+  collapsibleNavGroups?: boolean;
+  /** Optional sidebar brand line above persona label (defaults to SGVU Workspace). */
+  sidebarBrandLabel?: string;
 }
 
 /**
@@ -166,6 +170,28 @@ const NAV_ACTIVE_ALIASES: Record<string, string[]> = {
   '/campus-admin/admissions/counselling': ['/admissions-crm/counseling', '/campus-admin/admissions/counseling'],
   '/campus-admin/admissions/leaves': ['/admissions-crm/leaves', '/campus-admin/my-leave'],
   '/campus-admin/my-leave': ['/admissions-crm/leaves', '/campus-admin/admissions/leaves'],
+  '/campus-admin/students': ['/campus-admin/people/students'],
+  '/campus-admin/people/students': ['/campus-admin/students'],
+  '/campus-admin/faculty-staff': [
+    '/campus-admin/people/faculty',
+    '/campus-admin/people/hods',
+    '/campus-admin/people/staff',
+  ],
+  '/campus-admin/people/faculty': ['/campus-admin/faculty-staff'],
+  '/campus-admin/people/hods': ['/campus-admin/hierarchy'],
+  '/campus-admin/people/staff': ['/campus-admin/faculty-staff'],
+  '/campus-admin/hierarchy': ['/campus-admin/people/hods'],
+  '/campus-admin/departments': ['/campus-admin/academics/departments'],
+  '/campus-admin/programs-courses': ['/campus-admin/academics/programs-courses'],
+  '/campus-admin/academics/classrooms': ['/campus-admin/operations/buildings-classrooms'],
+  '/campus-admin/operations/facilities': ['/campus-admin/operations/facilities-venues'],
+  '/campus-admin/operations/announcements': ['/campus-admin/communication/announcements'],
+  '/campus-admin/operations/events': ['/campus-admin/communication/events'],
+  '/campus-admin/operations/requests': ['/campus-admin/communication/helpdesk'],
+  '/campus-admin/analytics': ['/campus-admin/reports/analytics'],
+  '/campus-admin/reports': ['/campus-admin/reports/custom'],
+  '/campus-admin/campus-profile': ['/campus-admin/settings/profile'],
+  '/campus-admin/account/settings': ['/campus-admin/settings/system'],
 };
 
 function pathnameMatchesNavHref(pathname: string, href: string): boolean {

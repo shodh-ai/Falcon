@@ -907,12 +907,16 @@ export class AdminControlService {
   private async assertHodEligible(
     tenantId: string,
     hodUserId: string,
+    opts?: { targetDeptId?: number; targetCampusId?: number | null },
   ): Promise<{ user_id: string; name: string; role_name: string }> {
     const tid = this.tid(tenantId);
     const [user] = await this.db.query(
-      `SELECT u.user_id, u.name, r.role_name, u.is_active
+      `SELECT u.user_id, u.name, r.role_name, u.is_active, u.dept_id,
+              s.campus_id AS user_campus_id
        FROM users u
        LEFT JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN schools s ON s.school_id = d.school_id
        WHERE u.user_id = $1 AND u.tenant_id = $2`,
       [hodUserId, tid],
     );
@@ -922,16 +926,94 @@ export class AdminControlService {
     if (user.is_active === false) {
       throw new BadRequestException('Selected person is inactive and cannot be assigned as HOD');
     }
-    if (
-      !(HOD_ELIGIBLE_ROLES as readonly string[]).includes(
-        String(user.role_name ?? ''),
-      )
-    ) {
+    const roleKey = String(user.role_name ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '');
+    const eligible = new Set(
+      (HOD_ELIGIBLE_ROLES as readonly string[]).map((role) =>
+        role.toLowerCase().replace(/\s+/g, ''),
+      ),
+    );
+    if (!eligible.has(roleKey)) {
       throw new BadRequestException(
         'HOD can only be assigned from existing Faculty, HOD, or Dean records',
       );
     }
+
+    let targetCampusId =
+      opts?.targetCampusId === undefined ? null : opts.targetCampusId;
+    if (opts?.targetDeptId != null) {
+      const [target] = await this.db.query(
+        `SELECT d.dept_id, d.deleted_at, s.campus_id
+         FROM departments d
+         LEFT JOIN schools s ON s.school_id = d.school_id
+         WHERE d.dept_id = $1`,
+        [opts.targetDeptId],
+      );
+      if (!target || target.deleted_at) {
+        throw new BadRequestException(
+          'Cannot assign an HOD to an inactive or missing department',
+        );
+      }
+      targetCampusId =
+        target.campus_id == null ? null : Number(target.campus_id);
+    }
+
+    if (
+      user.user_campus_id != null &&
+      targetCampusId != null &&
+      Number(user.user_campus_id) !== Number(targetCampusId)
+    ) {
+      throw new BadRequestException(
+        'Selected HOD belongs to a different campus than this department',
+      );
+    }
     return user;
+  }
+
+  private normalizeDeptCode(code?: string | null): string | null {
+    if (code == null) return null;
+    const trimmed = code.trim().toUpperCase();
+    return trimmed || null;
+  }
+
+  private async assertUniqueDepartmentIdentity(
+    deptName: string,
+    deptCode: string | null,
+    excludeDeptId?: number,
+  ) {
+    const nameParams: unknown[] = [deptName.trim().toLowerCase()];
+    let nameSql = `SELECT dept_id FROM departments
+                   WHERE lower(dept_name) = $1 AND deleted_at IS NULL`;
+    if (excludeDeptId != null) {
+      nameParams.push(excludeDeptId);
+      nameSql += ` AND dept_id <> $2`;
+    }
+    nameSql += ' LIMIT 1';
+    const [nameDup] = await this.db.query(nameSql, nameParams);
+    if (nameDup) {
+      throw new BadRequestException('Department name already exists');
+    }
+
+    if (!deptCode) return;
+    try {
+      const codeParams: unknown[] = [deptCode.toLowerCase()];
+      let codeSql = `SELECT dept_id FROM departments
+                     WHERE lower(dept_code) = $1 AND deleted_at IS NULL`;
+      if (excludeDeptId != null) {
+        codeParams.push(excludeDeptId);
+        codeSql += ` AND dept_id <> $2`;
+      }
+      codeSql += ' LIMIT 1';
+      const [codeDup] = await this.db.query(codeSql, codeParams);
+      if (codeDup) {
+        throw new BadRequestException('Department code already exists');
+      }
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      // dept_code column may be absent until migration runs.
+    }
   }
 
   private async syncHodHierarchy(
@@ -1048,12 +1130,16 @@ export class AdminControlService {
     }
     if (filters.q?.trim()) {
       params.push(`%${filters.q.trim().toLowerCase()}%`);
-      where.push(`lower(d.dept_name) LIKE $${params.length}`);
+      where.push(
+        `(lower(d.dept_name) LIKE $${params.length}
+          OR lower(COALESCE(d.dept_code, '')) LIKE $${params.length}
+          OR lower(COALESCE(s.school_name, '')) LIKE $${params.length})`,
+      );
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     return this.db.query(
-      `SELECT d.dept_id, d.dept_name, d.description, d.school_id, d.hod_user_id,
+      `SELECT d.dept_id, d.dept_name, d.dept_code, d.description, d.school_id, d.hod_user_id,
               CASE WHEN d.deleted_at IS NULL THEN 'ACTIVE' ELSE 'INACTIVE' END AS status,
               s.school_name, s.school_code, s.campus_id,
               c.campus_name, c.campus_code,
@@ -1084,7 +1170,7 @@ export class AdminControlService {
       throw new BadRequestException('Invalid department id');
     }
     await this.assertDepartmentInScope(actor, deptId, true);
-    const departmentSql = `SELECT d.dept_id, d.dept_name, d.description, d.school_id, d.hod_user_id,
+    const departmentSql = `SELECT d.dept_id, d.dept_name, d.dept_code, d.description, d.school_id, d.hod_user_id,
               CASE WHEN d.deleted_at IS NULL THEN 'ACTIVE' ELSE 'INACTIVE' END AS status,
               s.school_name, s.school_code, s.campus_id,
               c.campus_name, c.campus_code,
@@ -1239,21 +1325,38 @@ export class AdminControlService {
     actor: ScopedAuthUser,
     tenantId: string,
     q?: string,
+    deptId?: number,
   ) {
     const tid = this.tid(tenantId);
     const campusIds = await this.campusIdsForActor(actor);
     if (campusIds !== null && campusIds.length === 0) return [];
 
+    let targetCampusId: number | null = null;
+    if (deptId != null) {
+      if (!Number.isInteger(deptId) || deptId <= 0) {
+        throw new BadRequestException('Invalid department id');
+      }
+      const scoped = await this.assertDepartmentInScope(actor, deptId, true);
+      targetCampusId =
+        scoped.campus_id == null ? null : Number(scoped.campus_id);
+    }
+
     const params: unknown[] = [tid];
     const where = [
       'u.tenant_id = $1',
       'u.is_active = true',
-      `r.role_name IN ('Faculty', 'HOD', 'Dean')`,
+      `lower(r.role_name) IN ('faculty', 'hod', 'dean')`,
     ];
     if (campusIds !== null) {
       params.push(campusIds);
       where.push(
         `(s.campus_id = ANY($${params.length}::int[]) OR s.campus_id IS NULL)`,
+      );
+    }
+    if (targetCampusId != null) {
+      params.push(targetCampusId);
+      where.push(
+        `(s.campus_id = $${params.length} OR s.campus_id IS NULL OR u.dept_id IS NULL)`,
       );
     }
     if (q?.trim()) {
@@ -1264,7 +1367,8 @@ export class AdminControlService {
     }
 
     return this.db.query(
-      `SELECT u.user_id, u.name, u.official_email AS email, r.role_name, d.dept_name
+      `SELECT u.user_id, u.name, u.official_email AS email, r.role_name, d.dept_name,
+              s.campus_id
        FROM users u
        INNER JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id AND d.deleted_at IS NULL
@@ -1283,22 +1387,57 @@ export class AdminControlService {
   ) {
     const campusIds = await this.campusIdsForActor(actor);
     const school = await this.requireSchoolInScope(dto.school_id, campusIds);
+    const deptCode = this.normalizeDeptCode(dto.dept_code);
+    await this.assertUniqueDepartmentIdentity(dto.dept_name, deptCode);
     if (dto.hod_user_id) {
-      await this.assertHodEligible(tenantId, dto.hod_user_id);
+      await this.assertHodEligible(tenantId, dto.hod_user_id, {
+        targetCampusId: school.campus_id == null ? null : Number(school.campus_id),
+      });
     }
-    const [row] = await this.db.query(
-      `INSERT INTO departments (dept_name, description, school_id, hod_user_id)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [
-        dto.dept_name.trim(),
-        dto.description?.trim() || null,
-        school.school_id,
-        dto.hod_user_id ?? null,
-      ],
-    );
+    let row: Record<string, unknown>;
+    try {
+      const inserted = await this.db.query(
+        `INSERT INTO departments (dept_name, dept_code, description, school_id, hod_user_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [
+          dto.dept_name.trim(),
+          deptCode,
+          dto.description?.trim() || null,
+          school.school_id,
+          dto.hod_user_id ?? null,
+        ],
+      );
+      row = inserted[0];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/column .*dept_code|dept_code does not exist/i.test(message)) {
+        const inserted = await this.db.query(
+          `INSERT INTO departments (dept_name, description, school_id, hod_user_id)
+           VALUES ($1, $2, $3, $4)
+           RETURNING *`,
+          [
+            dto.dept_name.trim(),
+            dto.description?.trim() || null,
+            school.school_id,
+            dto.hod_user_id ?? null,
+          ],
+        );
+        row = inserted[0];
+      } else if (/uq_departments_dept_code|dept_code/i.test(message) && /unique|duplicate/i.test(message)) {
+        throw new BadRequestException('Department code already exists');
+      } else if (/dept_name|unique|duplicate/i.test(message)) {
+        throw new BadRequestException('Department name already exists');
+      } else {
+        throw err;
+      }
+    }
     if (dto.hod_user_id) {
-      await this.syncHodHierarchy(tenantId, Number(row.dept_id), dto.hod_user_id);
+      await this.syncHodHierarchy(
+        tenantId,
+        Number(row.dept_id),
+        dto.hod_user_id,
+      );
     }
     await this.writeAudit(
       tenantId,
@@ -1306,7 +1445,7 @@ export class AdminControlService {
       'CREATE',
       'department',
       String(row.dept_id),
-      { ...dto, campus_id: school.campus_id },
+      { ...dto, dept_code: deptCode, campus_id: school.campus_id },
     );
     return row;
   }
@@ -1326,29 +1465,82 @@ export class AdminControlService {
         'Department must remain linked to a school in the academic hierarchy',
       );
     }
-    if (dto.hod_user_id) {
-      await this.assertHodEligible(tenantId, dto.hod_user_id);
-    }
-    const [row] = await this.db.query(
-      `UPDATE departments SET
-         dept_name = COALESCE($2, dept_name),
-         description = CASE WHEN $3::boolean THEN $4 ELSE description END,
-         school_id = CASE WHEN $5::boolean THEN $6 ELSE school_id END,
-         hod_user_id = CASE WHEN $7::boolean THEN $8 ELSE hod_user_id END,
-         updated_at = NOW()
-       WHERE dept_id = $1 AND deleted_at IS NULL
-       RETURNING *`,
-      [
+    const nextName = dto.dept_name?.trim();
+    const nextCode =
+      dto.dept_code !== undefined
+        ? this.normalizeDeptCode(dto.dept_code)
+        : undefined;
+    if (nextName || nextCode !== undefined) {
+      const [existing] = await this.db.query(
+        `SELECT dept_name, dept_code FROM departments WHERE dept_id = $1`,
+        [deptId],
+      );
+      await this.assertUniqueDepartmentIdentity(
+        nextName ?? String(existing?.dept_name ?? ''),
+        nextCode !== undefined ? nextCode : (existing?.dept_code ?? null),
         deptId,
-        dto.dept_name?.trim() ?? null,
-        dto.description !== undefined,
-        dto.description ?? null,
-        dto.school_id !== undefined,
-        dto.school_id ?? null,
-        dto.hod_user_id !== undefined,
-        dto.hod_user_id ?? null,
-      ],
-    );
+      );
+    }
+    if (dto.hod_user_id) {
+      await this.assertHodEligible(tenantId, dto.hod_user_id, { targetDeptId: deptId });
+    }
+    let row: Record<string, unknown> | undefined;
+    try {
+      const updated = await this.db.query(
+        `UPDATE departments SET
+           dept_name = COALESCE($2, dept_name),
+           dept_code = CASE WHEN $3::boolean THEN $4 ELSE dept_code END,
+           description = CASE WHEN $5::boolean THEN $6 ELSE description END,
+           school_id = CASE WHEN $7::boolean THEN $8 ELSE school_id END,
+           hod_user_id = CASE WHEN $9::boolean THEN $10 ELSE hod_user_id END,
+           updated_at = NOW()
+         WHERE dept_id = $1 AND deleted_at IS NULL
+         RETURNING *`,
+        [
+          deptId,
+          nextName ?? null,
+          dto.dept_code !== undefined,
+          nextCode,
+          dto.description !== undefined,
+          dto.description ?? null,
+          dto.school_id !== undefined,
+          dto.school_id ?? null,
+          dto.hod_user_id !== undefined,
+          dto.hod_user_id ?? null,
+        ],
+      );
+      row = updated[0];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/dept_code/i.test(message) && /unique|duplicate/i.test(message)) {
+        throw new BadRequestException('Department code already exists');
+      }
+      if (/column .*dept_code/i.test(message)) {
+        const updated = await this.db.query(
+          `UPDATE departments SET
+             dept_name = COALESCE($2, dept_name),
+             description = CASE WHEN $3::boolean THEN $4 ELSE description END,
+             school_id = CASE WHEN $5::boolean THEN $6 ELSE school_id END,
+             hod_user_id = CASE WHEN $7::boolean THEN $8 ELSE hod_user_id END,
+             updated_at = NOW()
+           WHERE dept_id = $1 AND deleted_at IS NULL
+           RETURNING *`,
+          [
+            deptId,
+            nextName ?? null,
+            dto.description !== undefined,
+            dto.description ?? null,
+            dto.school_id !== undefined,
+            dto.school_id ?? null,
+            dto.hod_user_id !== undefined,
+            dto.hod_user_id ?? null,
+          ],
+        );
+        row = updated[0];
+      } else {
+        throw err;
+      }
+    }
     if (!row) throw new NotFoundException('Department not found');
     if (dto.hod_user_id !== undefined) {
       await this.syncHodHierarchy(tenantId, deptId, dto.hod_user_id);
@@ -1461,6 +1653,20 @@ export class AdminControlService {
 
   async createCourse(tenantId: string, actorId: string, dto: CreateCourseDto) {
     const tid = this.tid(tenantId);
+    const linkedDeptId = dto.entity_id ?? dto.dept_id ?? null;
+    if (linkedDeptId != null) {
+      const [dept] = await this.db.query(
+        `SELECT dept_id FROM departments
+         WHERE dept_id = $1 AND deleted_at IS NULL
+         LIMIT 1`,
+        [linkedDeptId],
+      );
+      if (!dept) {
+        throw new BadRequestException(
+          'Cannot assign courses to an inactive or missing department',
+        );
+      }
+    }
     const [row] = await this.db.query(
       `INSERT INTO academic_courses
          (tenant_id, course_code, course_name, credits, is_elective, entity_id, min_attendance)
@@ -1472,7 +1678,7 @@ export class AdminControlService {
         dto.course_name.trim(),
         dto.credits,
         dto.is_elective ?? false,
-        dto.entity_id ?? dto.dept_id ?? null,
+        linkedDeptId,
         dto.min_attendance ?? null,
       ],
     );
@@ -2167,14 +2373,20 @@ export class AdminControlService {
     dto: AssignHodDto,
   ) {
     await this.assertDepartmentInScope(actor, dto.dept_id);
-    await this.assertHodEligible(tenantId, dto.hod_user_id);
+    await this.assertHodEligible(tenantId, dto.hod_user_id, {
+      targetDeptId: dto.dept_id,
+    });
     const [dept] = await this.db.query(
       `UPDATE departments SET hod_user_id = $2, updated_at = NOW()
        WHERE dept_id = $1 AND deleted_at IS NULL
        RETURNING dept_id, dept_name, hod_user_id`,
       [dto.dept_id, dto.hod_user_id],
     );
-    if (!dept) throw new NotFoundException('Department not found');
+    if (!dept) {
+      throw new NotFoundException(
+        'Department not found or inactive; activate it before assigning an HOD',
+      );
+    }
     await this.syncHodHierarchy(tenantId, dto.dept_id, dto.hod_user_id);
     await this.writeAudit(
       tenantId,
@@ -2407,6 +2619,7 @@ export class AdminControlService {
           ? 'faculty'
           : audience,
       severity: dto.category === 'EMERGENCY' ? 'critical' : 'info',
+      action_link: `/announcements/${campusRow.announcement_id}`,
     });
     await this.writeAudit(
       tid,
@@ -2516,8 +2729,22 @@ export class AdminControlService {
     );
   }
 
-  async timetableConflicts(tenantId: string) {
+  async timetableConflicts(tenantId: string, actor?: ScopedAuthUser) {
     try {
+      const campusIds = actor
+        ? await this.campusScope.resolveCampusIds(actor)
+        : null;
+      if (campusIds && !campusIds.length) return [];
+
+      const params: unknown[] = [this.tid(tenantId)];
+      let campusSql = '';
+      if (campusIds) {
+        params.push(campusIds);
+        const idx = params.length;
+        campusSql = ` AND ${this.campusScope.timetableSlotCampusMatchSql('a', idx)}
+          AND ${this.campusScope.timetableSlotCampusMatchSql('b', idx)}`;
+      }
+
       return await this.db.query(
         `SELECT a.slot_id, a.faculty_user_id, a.room_code, a.day_of_week, a.start_time, a.end_time,
                 b.slot_id AS conflicting_slot_id
@@ -2531,9 +2758,9 @@ export class AdminControlService {
             a.faculty_user_id = b.faculty_user_id
             OR (a.room_code IS NOT NULL AND a.room_code = b.room_code)
           )
-         WHERE a.tenant_id = $1
+         WHERE a.tenant_id = $1${campusSql}
          LIMIT 50`,
-        [this.tid(tenantId)],
+        params,
       );
     } catch {
       return [];

@@ -294,6 +294,106 @@ export class CampusScopeService {
     );
   }
 
+  async campusIdForCourseCode(
+    tenantId: string,
+    courseCode: string | null | undefined,
+  ): Promise<number | null> {
+    const code = String(courseCode ?? '').trim();
+    if (!code) return null;
+    try {
+      const rows = await this.dataSource.query<Array<{ campus_id: number }>>(
+        `SELECT s.campus_id
+         FROM academic_courses ac
+         JOIN departments d ON d.dept_id = ac.entity_id AND d.deleted_at IS NULL
+         JOIN schools s ON s.school_id = d.school_id AND s.deleted_at IS NULL
+         WHERE ac.tenant_id = $1
+           AND upper(trim(ac.course_code)) = upper(trim($2))
+           AND s.campus_id IS NOT NULL
+         LIMIT 1`,
+        [tenantId, code],
+      );
+      const campusId = Number(rows[0]?.campus_id);
+      return Number.isInteger(campusId) && campusId > 0 ? campusId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** SQL predicate: timetable slot belongs to one of the campus ids (via faculty dept or course dept). */
+  timetableSlotCampusMatchSql(slotAlias: string, campusParamIdx: number): string {
+    return `(
+      EXISTS (
+        SELECT 1
+        FROM users fu
+        JOIN departments fd ON fd.dept_id = fu.dept_id AND fd.deleted_at IS NULL
+        JOIN schools fs ON fs.school_id = fd.school_id AND fs.deleted_at IS NULL
+        WHERE fu.user_id = ${slotAlias}.faculty_user_id
+          AND fs.campus_id = ANY($${campusParamIdx}::int[])
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM academic_courses ac
+        JOIN departments d ON d.dept_id = ac.entity_id AND d.deleted_at IS NULL
+        JOIN schools sch ON sch.school_id = d.school_id AND sch.deleted_at IS NULL
+        WHERE ac.tenant_id = ${slotAlias}.tenant_id
+          AND ${slotAlias}.course_code IS NOT NULL
+          AND upper(trim(ac.course_code)) = upper(trim(${slotAlias}.course_code))
+          AND sch.campus_id = ANY($${campusParamIdx}::int[])
+      )
+    )`;
+  }
+
+  /** SQL predicate: campus club event resolves to faculty advisor department campus. */
+  campusEventCampusMatchSql(eventAlias: string, campusParamIdx: number): string {
+    return `EXISTS (
+      SELECT 1
+      FROM campus_clubs c
+      JOIN users fa ON fa.user_id = c.faculty_advisor_id
+      JOIN departments d ON d.dept_id = fa.dept_id AND d.deleted_at IS NULL
+      JOIN schools s ON s.school_id = d.school_id AND s.deleted_at IS NULL
+      WHERE c.club_id = ${eventAlias}.club_id
+        AND s.campus_id = ANY($${campusParamIdx}::int[])
+    )`;
+  }
+
+  async assertTimetableSlotCampusAllowed(
+    actor: ScopedAuthUser,
+    tenantId: string,
+    dto: { faculty_user_id?: unknown; course_code?: unknown },
+  ) {
+    const campusIds = await this.resolveCampusIds(actor);
+    if (campusIds === null) return;
+    if (!campusIds.length) {
+      throw new ForbiddenException(
+        'No campus is assigned to this Campus Admin account',
+      );
+    }
+
+    const facultyId =
+      dto.faculty_user_id != null && dto.faculty_user_id !== ''
+        ? String(dto.faculty_user_id)
+        : null;
+    const courseCode =
+      dto.course_code != null && dto.course_code !== ''
+        ? String(dto.course_code)
+        : null;
+
+    let matched = false;
+    if (facultyId) {
+      const campusId = await this.campusIdForUserDept(facultyId);
+      if (campusId != null && campusIds.includes(campusId)) matched = true;
+    }
+    if (courseCode) {
+      const campusId = await this.campusIdForCourseCode(tenantId, courseCode);
+      if (campusId != null && campusIds.includes(campusId)) matched = true;
+    }
+    if (!matched) {
+      throw new ForbiddenException(
+        'Timetable slot must use faculty or a course on your assigned campus',
+      );
+    }
+  }
+
   /**
    * SQL predicate: student visible to Campus Admin via department school OR admissions lead program.
    * Requires LEFT JOIN schools AS `schoolsAlias` ON d.school_id (from user's dept).

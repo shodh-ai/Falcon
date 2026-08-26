@@ -40,8 +40,15 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
     extractOptions(children);
 
     if (isNativeReplacement) {
-      const activeValue = value !== undefined && value !== null ? String(value) : undefined;
-      const activeDefaultValue = props.defaultValue !== undefined && props.defaultValue !== null ? String(props.defaultValue) : undefined;
+      const EMPTY_VALUE = '__empty__';
+      const toSelectValue = (raw: unknown) => {
+        if (raw === undefined || raw === null) return undefined;
+        const text = String(raw);
+        return text === '' ? EMPTY_VALUE : text;
+      };
+      const fromSelectValue = (raw: string) => (raw === EMPTY_VALUE ? '' : raw);
+      const activeValue = toSelectValue(value);
+      const activeDefaultValue = toSelectValue(props.defaultValue);
       return (
         <SelectPrimitive.Root
           value={activeValue}
@@ -51,7 +58,7 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
             if (onChange) {
               onChange({
                 target: {
-                  value: val,
+                  value: fromSelectValue(val),
                   name: name,
                 },
               });
@@ -60,11 +67,20 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           {...props}
         >
           <SelectTrigger ref={ref} className={className} id={id}>
-            <SelectValue placeholder={placeholder || options.find((o) => o.value === '')?.label || 'Select...'} />
+            <SelectValue
+              placeholder={
+                placeholder ||
+                options.find((o) => o.value === '')?.label ||
+                'Select...'
+              }
+            />
           </SelectTrigger>
           <SelectContent>
             {options.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
+              <SelectItem
+                key={opt.value === '' ? EMPTY_VALUE : opt.value}
+                value={opt.value === '' ? EMPTY_VALUE : opt.value}
+              >
                 {opt.label}
               </SelectItem>
             ))}

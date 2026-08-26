@@ -27,3 +27,11 @@ export function isValidHelpdeskTicketId(id: string): boolean {
     /^TKT-/i.test(trimmed)
   );
 }
+
+export function campusAdminHelpdeskBasePath(): string {
+  return '/campus-admin/operations/requests';
+}
+
+export function campusAdminHelpdeskTicketDetailPath(ticketId: string): string {
+  return `${campusAdminHelpdeskBasePath()}/${encodeURIComponent(ticketId)}`;
+}
