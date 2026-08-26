@@ -20,6 +20,7 @@ const DEFAULT_TENANT = 'a0000000-0000-4000-8000-000000000001';
 
 export type PolicyDomain =
   | 'P2P'
+  | 'ACQUISITION'
   | 'HR_HIRE'
   | 'GRADE_CHANGE'
   | 'ASSET_WRITEOFF'

@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash, randomUUID } from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
@@ -11,6 +13,7 @@ import { DOFA_DECISION, DOFA_STATUS } from './dofa.constants';
 
 export type DofaDomain =
   | 'P2P'
+  | 'ACQUISITION'
   | 'HR_HIRE'
   | 'GRADE_CHANGE'
   | 'ASSET_WRITEOFF'
@@ -293,6 +296,21 @@ export class DofaEngineService {
       });
     }
 
+    if (String(c.domain) === 'ACQUISITION') {
+      await this.assertAcquisitionBudgetActive(tid, String(c.source_id));
+      const priorSigner = await this.db.query(
+        `SELECT 1 FROM acq_approval_decisions
+         WHERE dofa_case_id = $1 AND approver_id = $2 LIMIT 1`,
+        [caseId, userId],
+      );
+      if (priorSigner[0]) {
+        throw new BadRequestException({
+          message: 'The same user cannot sign multiple acquisition approval levels',
+          code: 'DISTINCT_SIGNER_REQUIRED',
+        });
+      }
+    }
+
     const step = (
       c.steps as Array<{
         step_no: number;
@@ -311,12 +329,56 @@ export class DofaEngineService {
       });
     }
 
-    await this.db.query(
-      `UPDATE dofa_case_steps
-       SET decided_by = $2, decision = $3, notes = $4, decided_at = NOW()
-       WHERE case_id = $1 AND step_no = $5`,
-      [caseId, userId, body.decision, body.notes ?? null, step.step_no],
-    );
+    await this.db.transaction(async (manager) => {
+      const decided = await manager.query(
+        `UPDATE dofa_case_steps
+         SET decided_by = $2, decision = $3, notes = $4, decided_at = NOW()
+         WHERE case_id = $1 AND step_no = $5 AND decision IS NULL
+         RETURNING decided_at`,
+        [caseId, userId, body.decision, body.notes ?? null, step.step_no],
+      );
+      if (!decided[0]) {
+        throw new ConflictException({
+          message: 'Approval step was already decided',
+          code: 'DOFA_DECISION_REPLAY',
+        });
+      }
+      if (String(c.domain) !== 'ACQUISITION') return;
+      const actualRole =
+        roles.find((role) => this.roleMatches(step.required_role, role)) ??
+        step.required_role;
+      const approvalLevel = step.step_no + 1;
+      const previous = await manager.query(
+        `SELECT decision_hash FROM acq_approval_decisions
+         WHERE dofa_case_id = $1 ORDER BY approval_level DESC LIMIT 1 FOR UPDATE`,
+        [caseId],
+      );
+      const previousHash = previous[0]?.decision_hash ?? null;
+      const decisionAt = decided[0].decided_at;
+      const decisionHash = createHash('sha256')
+        .update(JSON.stringify({
+          tenant_id: tid,
+          acquisition_version_id: c.source_id,
+          dofa_case_id: caseId,
+          approval_level: approvalLevel,
+          approver_id: userId,
+          approver_role: actualRole,
+          decision: body.decision,
+          comment: body.notes ?? null,
+          decision_at: decisionAt,
+          previous_decision_hash: previousHash,
+        }))
+        .digest('hex');
+      await manager.query(
+        `INSERT INTO acq_approval_decisions (
+           tenant_id, acquisition_version_id, dofa_case_id, approval_level,
+           approver_id, approver_role, decision, comment, decision_at,
+           decision_hash, previous_decision_hash
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [tid, c.source_id, caseId, approvalLevel, userId, actualRole,
+          body.decision, body.notes ?? null, decisionAt, decisionHash, previousHash],
+      );
+    });
 
     if (body.decision === DOFA_DECISION.REJECTED) {
       await this.db.query(
@@ -488,6 +550,15 @@ export class DofaEngineService {
     const domain = String(c.domain);
     const sourceId = c.source_id;
 
+    if (domain === 'ACQUISITION' && sourceId) {
+      await this.finalizeAcquisition(
+        tenantId,
+        sourceId,
+        outcome,
+        userId ?? null,
+      );
+    }
+
     if (domain === 'HR_HIRE' && sourceId) {
       if (outcome === 'APPROVED') {
         await this.db.query(
@@ -566,6 +637,269 @@ export class DofaEngineService {
         );
       }
     }
+  }
+
+  private acquisitionFundingTable(type: string) {
+    if (type === 'DEPARTMENT')
+      return { table: 'fin_dept_budgets', id: 'budget_id' };
+    if (type === 'PROGRAM')
+      return { table: 'fin_program_budgets', id: 'program_id' };
+    if (type === 'RESEARCH_GRANT')
+      return { table: 'research_grants', id: 'grant_id' };
+    if (type === 'INSTITUTIONAL')
+      return {
+        table: 'fin_university_budgets',
+        id: 'university_budget_id',
+      };
+    return { table: 'acq_funding_sources', id: 'funding_source_id' };
+  }
+
+  private async assertAcquisitionBudgetActive(
+    tenantId: string,
+    versionId: string,
+  ) {
+    const rows = await this.db.query(
+      `SELECT r.*,
+         (SELECT event_type FROM acq_budget_reservation_events e
+          WHERE e.budget_reservation_id = r.budget_reservation_id
+          ORDER BY e.created_at DESC LIMIT 1) AS latest_event
+       FROM acq_budget_reservations r
+       WHERE r.acquisition_version_id = $1 AND r.tenant_id = $2`,
+      [versionId, tenantId],
+    );
+    const reservation = rows[0];
+    if (!reservation || reservation.latest_event !== 'RESERVED') {
+      throw new BadRequestException({
+        message: 'Acquisition does not have an active budget reservation',
+        code: 'BUDGET_RESERVATION_INACTIVE',
+      });
+    }
+    if (new Date(reservation.expires_at).getTime() <= Date.now()) {
+      await this.releaseAcquisitionBudget(
+        tenantId,
+        versionId,
+        'Reservation expired before approval',
+        null,
+        'EXPIRED',
+      );
+      await this.db.query(
+        `UPDATE acq_request_versions SET status = 'EXPIRED', updated_at = NOW()
+         WHERE acquisition_version_id = $1 AND tenant_id = $2`,
+        [versionId, tenantId],
+      );
+      throw new BadRequestException({
+        message: 'Budget reservation expired; create an amendment to retry',
+        code: 'BUDGET_RESERVATION_EXPIRED',
+      });
+    }
+    return reservation;
+  }
+
+  private async releaseAcquisitionBudget(
+    tenantId: string,
+    versionId: string,
+    reason: string,
+    actorId: string | null,
+    eventType: 'RELEASED' | 'EXPIRED' = 'RELEASED',
+  ) {
+    await this.db.transaction(async (manager) => {
+      const rows = await manager.query(
+        `SELECT * FROM acq_budget_reservations
+         WHERE acquisition_version_id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [versionId, tenantId],
+      );
+      const reservation = rows[0];
+      if (!reservation) return;
+      const latest = await manager.query(
+        `SELECT event_type FROM acq_budget_reservation_events
+         WHERE budget_reservation_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [reservation.budget_reservation_id],
+      );
+      if (latest[0]?.event_type !== 'RESERVED') return;
+      const source = this.acquisitionFundingTable(
+        reservation.funding_source_type,
+      );
+      await manager.query(
+        `UPDATE ${source.table}
+         SET encumbered_amount = GREATEST(0, COALESCE(encumbered_amount,0) - $2)
+         WHERE ${source.id} = $1 AND tenant_id = $3`,
+        [reservation.funding_source_id, reservation.amount, tenantId],
+      );
+      await manager.query(
+        `INSERT INTO acq_budget_reservation_events
+           (budget_reservation_id, tenant_id, event_type, reason, actor_user_id)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [
+          reservation.budget_reservation_id,
+          tenantId,
+          eventType,
+          reason,
+          actorId,
+        ],
+      );
+    });
+  }
+
+  private async finalizeAcquisition(
+    tenantId: string,
+    versionId: string,
+    outcome: 'APPROVED' | 'REJECTED',
+    actorId: string | null,
+  ) {
+    if (outcome === 'REJECTED') {
+      await this.releaseAcquisitionBudget(
+        tenantId,
+        versionId,
+        'DOFA rejected acquisition',
+        actorId,
+      );
+      await this.db.query(
+        `UPDATE acq_request_versions SET status='REJECTED', updated_at=NOW()
+         WHERE acquisition_version_id=$1 AND tenant_id=$2`,
+        [versionId, tenantId],
+      );
+      return;
+    }
+
+    const reservation = await this.assertAcquisitionBudgetActive(
+      tenantId,
+      versionId,
+    );
+    await this.db.transaction(async (manager) => {
+      const versions = await manager.query(
+        `SELECT v.*, r.acquisition_number, r.requester_id,
+                r.requesting_department_id, r.acquisition_id
+         FROM acq_request_versions v
+         JOIN acq_requests r ON r.acquisition_id=v.acquisition_id
+         WHERE v.acquisition_version_id=$1 AND v.tenant_id=$2 FOR UPDATE`,
+        [versionId, tenantId],
+      );
+      const version = versions[0];
+      if (!version) throw new NotFoundException('Acquisition not found');
+      if (version.status === 'APPROVED') return;
+      if (version.status !== 'PENDING_DOFA') {
+        throw new BadRequestException(`Acquisition is ${version.status}`);
+      }
+      const [lines, route, decisions] = await Promise.all([
+        manager.query(
+          `SELECT l.*,
+             (SELECT jsonb_build_object(
+                'recommendation_id', vr.recommendation_id,
+                'vendor_id', vr.vendor_id,
+                'score', vr.final_score,
+                'confidence', vr.confidence,
+                'policy_version', vr.scoring_policy_version,
+                'factor_scores', vr.factor_scores
+              ) FROM acq_vendor_recommendations vr
+              WHERE vr.line_id=l.line_id AND vr.vendor_id=l.selected_vendor_id
+              LIMIT 1) AS recommendation_snapshot
+           FROM acq_lines l
+           WHERE l.acquisition_version_id=$1 AND l.line_status='ACTIVE'
+           ORDER BY l.line_number`,
+          [versionId],
+        ),
+        manager.query(
+          `SELECT * FROM acq_dofa_route_snapshots
+           WHERE acquisition_version_id=$1`,
+          [versionId],
+        ),
+        manager.query(
+          `SELECT decision_id, approval_level, approver_id, approver_role,
+                  decision, decision_at, comment, decision_hash,
+                  previous_decision_hash
+           FROM acq_approval_decisions
+           WHERE acquisition_version_id=$1 ORDER BY approval_level`,
+          [versionId],
+        ),
+      ]);
+      const eventId = randomUUID();
+      const payload = {
+        event_id: eventId,
+        event_version: 1,
+        acquisition_id: version.acquisition_id,
+        acquisition_version_id: versionId,
+        acquisition_number: version.acquisition_number,
+        version_number: version.version_number,
+        tenant: tenantId,
+        requester: version.requester_id,
+        department: version.requesting_department_id,
+        intended_department_or_lab:
+          version.intended_lab_or_project ?? version.intended_department_id,
+        required_by_date: version.required_by_date,
+        priority: version.priority,
+        funding_source: {
+          type: version.funding_source_type,
+          id: version.funding_source_id,
+        },
+        budget_reservation: reservation,
+        approved_amount: version.estimated_total,
+        currency: version.currency,
+        lines: lines.map((line: Record<string, any>) => ({
+          line_id: line.line_id,
+          product: line.product_name,
+          category: line.category,
+          quantity: line.quantity,
+          unit: line.unit,
+          brand: line.brand,
+          model: line.model_number,
+          part_number: line.part_number,
+          specifications: line.technical_specifications,
+          intended_use: line.intended_use,
+          selected_vendor: line.selected_vendor_id,
+          recommendation_snapshot: line.recommendation_snapshot,
+          estimated_cost:
+            Number(line.estimated_line_total) +
+            Number(line.delivery_cost) +
+            Number(line.tax_cost) +
+            Number(line.installation_cost) +
+            Number(line.service_cost) +
+            Number(line.miscellaneous_cost),
+          warranty: line.warranty_requirements,
+          expected_delivery: line.expected_delivery_days,
+          asset_classification: line.item_classification,
+          special_procurement_requirements:
+            line.special_procurement_requirements,
+        })),
+        vendor_scoring_policy_version:
+          lines[0]?.recommendation_snapshot?.policy_version ?? null,
+        vendor_deviation_justification: lines
+          .filter((line: Record<string, any>) =>
+            Boolean(line.vendor_deviation_justification),
+          )
+          .map((line: Record<string, any>) => ({
+            line_id: line.line_id,
+            justification: line.vendor_deviation_justification,
+          })),
+        dofa: {
+          policy_version: route[0]?.policy_version ?? null,
+          route_snapshot: route[0] ?? null,
+          approval_decisions: decisions,
+        },
+        snapshot_hash: version.snapshot_hash,
+        approved_at: new Date().toISOString(),
+      };
+      const payloadHash = createHash('sha256')
+        .update(JSON.stringify(payload))
+        .digest('hex');
+      await manager.query(
+        `UPDATE acq_request_versions
+         SET status='APPROVED', approved_at=NOW(), updated_at=NOW()
+         WHERE acquisition_version_id=$1 AND status='PENDING_DOFA'`,
+        [versionId],
+      );
+      await manager.query(
+        `UPDATE acq_lines SET line_status='APPROVED'
+         WHERE acquisition_version_id=$1 AND line_status='ACTIVE'`,
+        [versionId],
+      );
+      await manager.query(
+        `INSERT INTO acq_outbox_events (
+           event_id, tenant_id, aggregate_type, aggregate_id, event_type,
+           event_version, payload, payload_hash
+         ) VALUES ($1,$2,'ACQUISITION',$3,'AcquisitionApproved.v1',1,$4::jsonb,$5)`,
+        [eventId, tenantId, versionId, JSON.stringify(payload), payloadHash],
+      );
+    });
   }
 
   async openHeadcountRequest(
