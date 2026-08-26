@@ -27,14 +27,22 @@ import type {
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+export const ACQUISITION_WORKBOOK_MAX_BYTES = 5 * 1024 * 1024;
+
+export function isAllowedAcquisitionWorkbook(
+  file: Pick<Express.Multer.File, 'originalname' | 'mimetype'>,
+) {
+  return (
+    file.originalname.toLowerCase().endsWith('.xlsx') &&
+    file.mimetype === XLSX_MIME
+  );
+}
 
 const workbookInterceptor = FileInterceptor('file', {
   storage: memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: { fileSize: ACQUISITION_WORKBOOK_MAX_BYTES, files: 1 },
   fileFilter: (_req, file, callback) => {
-    const valid =
-      file.originalname.toLowerCase().endsWith('.xlsx') &&
-      file.mimetype === XLSX_MIME;
+    const valid = isAllowedAcquisitionWorkbook(file);
     callback(
       valid
         ? null

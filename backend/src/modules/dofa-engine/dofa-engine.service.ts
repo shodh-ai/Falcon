@@ -147,9 +147,15 @@ export class DofaEngineService {
 
     const escalate =
       input.escalate_now || matrix.rule_key === 'EXCEPTION_OVER_LIMIT';
-    const roles = escalate
+    const configuredRoles = escalate
       ? [matrix.exception_escalate_role || 'Chairman']
       : matrix.required_roles;
+    const roles = [...configuredRoles];
+    if (!escalate && roles.length > 0) {
+      while (roles.length < matrix.required_signatures) {
+        roles.push(roles[roles.length - 1]);
+      }
+    }
     const status = escalate ? DOFA_STATUS.ESCALATED : DOFA_STATUS.PENDING;
 
     const cases = await this.db.query(
