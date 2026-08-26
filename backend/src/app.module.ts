@@ -67,6 +67,7 @@ import { FacultyAiModule } from './modules/faculty-ai/faculty-ai.module';
 import { RegistrarModule } from './modules/registrar/registrar.module';
 import { AdminControlModule } from './modules/admin-control/admin-control.module';
 import { AcquisitionModule } from './modules/acquisitions/acquisition.module';
+import { ProcurementModule } from './modules/procurements/procurement.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -198,6 +199,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     RegistrarModule,
     AdminControlModule,
     AcquisitionModule,
+    ProcurementModule,
   ],
   controllers: [AppController],
   providers: [

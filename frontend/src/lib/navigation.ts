@@ -83,6 +83,7 @@ import {
   UserPlus,
   BadgeCheck,
   Sparkles,
+  PackageCheck,
 } from 'lucide-react';
 import {
   FINANCE_DESK_ROLE_NAMES,
@@ -1305,6 +1306,7 @@ export const financePortal: PortalConfig = {
         { label: 'Purchase Orders', href: '/finance/purchase-orders', icon: ClipboardList, keywords: ['po', 'p2p', 'encumbrance'], roles: [...FINANCE_DESK_ROLES, ...PROCUREMENT_P2P_ROLES] },
         { label: 'Purchase Requisitions', href: '/finance/requisitions', icon: ClipboardList, keywords: ['rfq', 'requestor', 'maker', 'pr'], roles: ['LabAdmin', 'HOD', 'Faculty', 'Warden', 'EstateOfficer', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Digital Acquisitions', href: '/finance/acquisitions', icon: Shield, keywords: ['acquisition', 'requester', 'vendor', 'budget', 'dofa'], roles: ['LabAdmin', 'HOD', 'Dean', 'Faculty', 'Procurement', 'ProcurementHead', 'ProcurementBuyer', 'Accountant', 'FinanceController', 'CFO', 'COO', 'InternalAuditor', 'SuperAdmin', 'CampusAdmin'] },
+        { label: 'Progressive Procurement', href: '/finance/procurements', icon: PackageCheck, keywords: ['module 2', 'orders', 'receipts', 'invoice', 'commitment', 'fund utilization'], roles: ['LabAdmin', 'HOD', 'Faculty', 'Procurement', 'ProcurementHead', 'ProcurementBuyer', 'Stores', 'ReceivingClerk', 'APClerk', 'APManager', 'Accountant', 'FinanceController', 'CFO', 'InternalAuditor', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Central Procurement', href: '/finance/procurement', icon: Building2, keywords: ['sourcing', 'quotes', 'gst'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'DOFA Approvals', href: '/finance/approvals', icon: Scale, keywords: ['hierarchy', 'joint committee'], roles: ['HOD', 'Dean', 'ProcurementHead', 'FinanceController', 'CFO', 'COO', 'Chairman', 'President', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Procurement Catalog', href: '/finance/catalog', icon: Archive, keywords: ['amazon', 'locked price', 'vendor'], roles: ['Procurement', 'ProcurementHead', 'ProcurementBuyer', 'LabAdmin', 'HOD', 'Faculty', 'SuperAdmin', 'CampusAdmin'] },

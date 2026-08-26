@@ -1,0 +1,2977 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call -- TypeORM query() rows are untyped */
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { createHash, randomUUID } from 'crypto';
+import type { EntityManager } from 'typeorm';
+import { DataSource } from 'typeorm';
+import type {
+  CreateInvoiceInput,
+  CreateOrderInput,
+  CreateReceiptInput,
+  CreateReturnInput,
+  CreateServiceAcceptanceInput,
+  DownstreamStatusInput,
+  ProcurementActor,
+  ProcurementMatchPolicy,
+} from './procurement.types';
+import {
+  hash,
+  lineTotal,
+  minorUnits,
+  money,
+  moveBuckets,
+  quantityUnits,
+  withinTolerance,
+} from './procurement.util';
+
+const DEFAULT_TENANT = 'a0000000-0000-4000-8000-000000000001';
+const CASE_STATUSES_OPEN = ['ACTIVE', 'ON_HOLD', 'READY_TO_FINALIZE'];
+
+type CaseRow = Record<string, any> & {
+  proc_case_id: string;
+  tenant_id: string;
+  acquisition_id: string;
+  acquisition_version_id: string;
+  budget_reservation_id: string;
+  requester_id: string;
+  department_id?: number | null;
+  currency: string;
+  approved_allocation: string | number;
+  available_amount: string | number;
+  committed_amount: string | number;
+  expended_amount: string | number;
+  released_amount: string | number;
+  aggregate_revision: string | number;
+  next_event_sequence: string | number;
+  status: string;
+};
+
+@Injectable()
+export class ProcurementService {
+  constructor(@InjectDataSource() private readonly db: DataSource) {}
+
+  private tenant(actor: ProcurementActor) {
+    return actor.tenant_id ?? DEFAULT_TENANT;
+  }
+
+  private roles(actor: ProcurementActor) {
+    return [
+      ...new Set([...(actor.roles ?? []), ...(actor.role ? [actor.role] : [])]),
+    ].map((role) => role.toLowerCase());
+  }
+
+  private async grants(actor: ProcurementActor, capability: string) {
+    return this.db.query(
+      `SELECT scope_type, scope_reference FROM acq_access_grants
+       WHERE tenant_id=$1 AND capability=$2
+         AND valid_from <= NOW() AND (valid_until IS NULL OR valid_until > NOW())
+         AND (principal_user_id=$3::uuid OR lower(principal_role)=ANY($4::text[]))`,
+      [this.tenant(actor), capability, actor.user_id, this.roles(actor)],
+    );
+  }
+
+  private async requireCapability(
+    actor: ProcurementActor,
+    capability: string,
+    departmentId?: number | null,
+  ) {
+    const grants = await this.grants(actor, capability);
+    const allowed = grants.some(
+      (grant: Record<string, any>) =>
+        grant.scope_type === 'TENANT' ||
+        (grant.scope_type === 'DEPARTMENT' &&
+          departmentId != null &&
+          String(departmentId) === String(grant.scope_reference)),
+    );
+    if (!allowed) {
+      throw new ForbiddenException({
+        message: `Missing scoped capability ${capability}`,
+        code: 'PROCUREMENT_CAPABILITY_REQUIRED',
+      });
+    }
+  }
+
+  private async accessibleCase(
+    actor: ProcurementActor,
+    caseId: string,
+    capability = 'PROCUREMENT_VIEW',
+  ): Promise<CaseRow> {
+    const grants = await this.grants(actor, capability);
+    const tenantWide = grants.some(
+      (grant: Record<string, any>) => grant.scope_type === 'TENANT',
+    );
+    const departments = grants
+      .filter((grant: Record<string, any>) => grant.scope_type === 'DEPARTMENT')
+      .map((grant: Record<string, any>) => Number(grant.scope_reference))
+      .filter(Number.isInteger);
+    const rows = await this.db.query(
+      `SELECT * FROM proc_cases
+       WHERE proc_case_id=$1 AND tenant_id=$2
+         AND ($3::boolean OR department_id=ANY($4::int[]) OR requester_id=$5::uuid)`,
+      [caseId, this.tenant(actor), tenantWide, departments, actor.user_id],
+    );
+    if (!rows[0]) throw new NotFoundException('Procurement case not found');
+    if (capability !== 'PROCUREMENT_VIEW') {
+      await this.requireCapability(actor, capability, rows[0].department_id);
+    }
+    return rows[0] as CaseRow;
+  }
+
+  authorizeImport(actor: ProcurementActor, caseId: string) {
+    return this.accessibleCase(actor, caseId, 'PROCUREMENT_IMPORT_ADMIN');
+  }
+
+  authorizeInvoiceEntry(actor: ProcurementActor, caseId: string) {
+    return this.accessibleCase(actor, caseId, 'PROCUREMENT_INVOICE_ENTRY');
+  }
+
+  authorizeView(actor: ProcurementActor, caseId: string) {
+    return this.accessibleCase(actor, caseId);
+  }
+
+  private assertRevision(row: CaseRow, expected: number) {
+    if (!Number.isInteger(expected) || expected <= 0) {
+      throw new BadRequestException('If-Match aggregate revision is required');
+    }
+    if (Number(row.aggregate_revision) !== expected) {
+      throw new ConflictException({
+        message: 'Procurement case was changed by another user',
+        code: 'STALE_AGGREGATE_REVISION',
+        current_revision: Number(row.aggregate_revision),
+      });
+    }
+  }
+
+  private assertOpen(row: CaseRow) {
+    if (!CASE_STATUSES_OPEN.includes(row.status)) {
+      throw new ConflictException(`Procurement case is ${row.status}`);
+    }
+  }
+
+  private async lockedCase(
+    manager: EntityManager,
+    caseId: string,
+    tenantId: string,
+  ) {
+    const rows = await manager.query(
+      `SELECT * FROM proc_cases WHERE proc_case_id=$1 AND tenant_id=$2 FOR UPDATE`,
+      [caseId, tenantId],
+    );
+    if (!rows[0]) throw new NotFoundException('Procurement case not found');
+    return rows[0] as CaseRow;
+  }
+
+  private bucketColumn(
+    bucket: 'AVAILABLE' | 'COMMITTED' | 'EXPENDED' | 'RELEASED',
+  ) {
+    return {
+      AVAILABLE: 'available_amount',
+      COMMITTED: 'committed_amount',
+      EXPENDED: 'expended_amount',
+      RELEASED: 'released_amount',
+    }[bucket];
+  }
+
+  private async moveFunds(
+    manager: EntityManager,
+    row: CaseRow,
+    input: {
+      entryType: string;
+      from: 'AVAILABLE' | 'COMMITTED' | 'EXPENDED' | null;
+      to: 'AVAILABLE' | 'COMMITTED' | 'EXPENDED' | 'RELEASED';
+      amount: unknown;
+      sourceType: string;
+      sourceId: string;
+      idempotencyKey: string;
+      actorId: string | null;
+    },
+  ) {
+    const amount = money(input.amount);
+    if (amount <= 0)
+      throw new BadRequestException('Financial movement must be positive');
+    let moved: ReturnType<typeof moveBuckets> | null = null;
+    if (input.from) {
+      const available = money(row[this.bucketColumn(input.from)]);
+      try {
+        moved = moveBuckets(
+          {
+            AVAILABLE: row.available_amount,
+            COMMITTED: row.committed_amount,
+            EXPENDED: row.expended_amount,
+            RELEASED: row.released_amount,
+          },
+          input.from,
+          input.to,
+          amount,
+        );
+      } catch {
+        throw new ConflictException({
+          message: `Insufficient ${input.from.toLowerCase()} balance`,
+          code: 'PROCUREMENT_BUCKET_INSUFFICIENT',
+          bucket: input.from,
+          available,
+          requested: amount,
+        });
+      }
+    }
+    const previous = await manager.query(
+      `SELECT entry_hash FROM proc_financial_ledger
+       WHERE proc_case_id=$1 ORDER BY created_at DESC, ledger_entry_id DESC LIMIT 1`,
+      [row.proc_case_id],
+    );
+    const previousHash = previous[0]?.entry_hash ?? null;
+    const revision = Number(row.aggregate_revision) + 1;
+    const entryHash = hash({
+      proc_case_id: row.proc_case_id,
+      entry_type: input.entryType,
+      from_bucket: input.from,
+      to_bucket: input.to,
+      amount,
+      source_type: input.sourceType,
+      source_id: input.sourceId,
+      idempotency_key: input.idempotencyKey,
+      previous_entry_hash: previousHash,
+      revision,
+    });
+    const fromColumn = input.from ? this.bucketColumn(input.from) : null;
+    const toColumn = this.bucketColumn(input.to);
+    if (fromColumn) {
+      await manager.query(
+        `UPDATE proc_cases SET ${fromColumn}=${fromColumn}-$2, ${toColumn}=${toColumn}+$2,
+           updated_at=NOW(), last_activity_at=NOW()
+         WHERE proc_case_id=$1`,
+        [row.proc_case_id, amount],
+      );
+      row.available_amount = moved?.AVAILABLE ?? row.available_amount;
+      row.committed_amount = moved?.COMMITTED ?? row.committed_amount;
+      row.expended_amount = moved?.EXPENDED ?? row.expended_amount;
+      row.released_amount = moved?.RELEASED ?? row.released_amount;
+    } else {
+      await manager.query(
+        `UPDATE proc_cases SET ${toColumn}=${toColumn}+$2, updated_at=NOW(), last_activity_at=NOW()
+         WHERE proc_case_id=$1`,
+        [row.proc_case_id, amount],
+      );
+    }
+    if (!input.from) row[toColumn] = money(row[toColumn]) + amount;
+    await manager.query(
+      `INSERT INTO proc_financial_ledger
+         (proc_case_id,tenant_id,entry_type,from_bucket,to_bucket,amount,currency,
+          source_type,source_id,idempotency_key,actor_user_id,case_revision,
+          previous_entry_hash,entry_hash)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [
+        row.proc_case_id,
+        row.tenant_id,
+        input.entryType,
+        input.from,
+        input.to,
+        amount,
+        row.currency,
+        input.sourceType,
+        input.sourceId,
+        input.idempotencyKey,
+        input.actorId,
+        revision,
+        previousHash,
+        entryHash,
+      ],
+    );
+  }
+
+  private async audit(
+    manager: EntityManager,
+    row: CaseRow,
+    entityType: string,
+    entityId: string,
+    eventType: string,
+    actorId: string | null,
+    previousValues: unknown,
+    newValues: unknown,
+    requestId?: string,
+  ) {
+    const previous = await manager.query(
+      `SELECT event_hash FROM proc_audit_events
+       WHERE proc_case_id=$1 ORDER BY created_at DESC, audit_event_id DESC LIMIT 1`,
+      [row.proc_case_id],
+    );
+    const previousHash = previous[0]?.event_hash ?? null;
+    const eventHash = hash({
+      proc_case_id: row.proc_case_id,
+      entityType,
+      entityId,
+      eventType,
+      actorId,
+      previousValues,
+      newValues,
+      revision: Number(row.aggregate_revision) + 1,
+      previousHash,
+    });
+    await manager.query(
+      `INSERT INTO proc_audit_events
+         (proc_case_id,tenant_id,entity_type,entity_id,event_type,actor_user_id,
+          previous_values,new_values,entity_revision,request_id,previous_event_hash,event_hash)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12)`,
+      [
+        row.proc_case_id,
+        row.tenant_id,
+        entityType,
+        entityId,
+        eventType,
+        actorId,
+        previousValues == null ? null : JSON.stringify(previousValues),
+        newValues == null ? null : JSON.stringify(newValues),
+        Number(row.aggregate_revision) + 1,
+        requestId ?? null,
+        previousHash,
+        eventHash,
+      ],
+    );
+  }
+
+  private async emit(
+    manager: EntityManager,
+    row: CaseRow,
+    eventType: string,
+    aggregateId: string,
+    payload: Record<string, unknown>,
+  ) {
+    const eventId = randomUUID();
+    const revision = Number(row.aggregate_revision) + 1;
+    const sequence = Number(row.next_event_sequence);
+    const occurredAt = new Date().toISOString();
+    const envelope = {
+      event_id: eventId,
+      event_type: eventType,
+      event_version: 1,
+      aggregate_id: aggregateId,
+      aggregate_revision: revision,
+      aggregate_sequence: sequence,
+      tenant_id: row.tenant_id,
+      proc_case_id: row.proc_case_id,
+      acquisition_id: row.acquisition_id,
+      acquisition_version_id: row.acquisition_version_id,
+      occurred_at: occurredAt,
+      ...payload,
+    };
+    await manager.query(
+      `INSERT INTO proc_outbox_events
+         (event_id,tenant_id,proc_case_id,aggregate_id,aggregate_revision,
+          aggregate_sequence,event_type,event_version,occurred_at,payload,payload_hash)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8,$9::jsonb,$10)`,
+      [
+        eventId,
+        row.tenant_id,
+        row.proc_case_id,
+        aggregateId,
+        revision,
+        sequence,
+        eventType,
+        occurredAt,
+        JSON.stringify(envelope),
+        hash(envelope),
+      ],
+    );
+    await manager.query(
+      `UPDATE proc_cases SET aggregate_revision=$2,next_event_sequence=$3,
+         updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+      [row.proc_case_id, revision, sequence + 1],
+    );
+    row.aggregate_revision = revision;
+    row.next_event_sequence = sequence + 1;
+    return envelope;
+  }
+
+  private async fundingSource(manager: EntityManager, row: CaseRow) {
+    const reservations = await manager.query(
+      `SELECT funding_source_type,funding_source_id FROM acq_budget_reservations
+       WHERE budget_reservation_id=$1 AND tenant_id=$2`,
+      [row.budget_reservation_id, row.tenant_id],
+    );
+    if (!reservations[0])
+      throw new ConflictException('Budget reservation not found');
+    const mapping: Record<string, { table: string; id: string }> = {
+      DEPARTMENT: { table: 'fin_dept_budgets', id: 'budget_id' },
+      PROGRAM: { table: 'fin_program_budgets', id: 'program_id' },
+      RESEARCH_GRANT: { table: 'research_grants', id: 'grant_id' },
+      INSTITUTIONAL: {
+        table: 'fin_university_budgets',
+        id: 'university_budget_id',
+      },
+      PROJECT: { table: 'acq_funding_sources', id: 'funding_source_id' },
+      OTHER: { table: 'acq_funding_sources', id: 'funding_source_id' },
+    };
+    const target = mapping[String(reservations[0].funding_source_type)];
+    if (!target) throw new ConflictException('Unsupported funding source');
+    return { ...target, sourceId: reservations[0].funding_source_id };
+  }
+
+  async consumeApprovedEvent(eventId: string) {
+    return this.db.transaction(async (manager) => {
+      const existing = await manager.query(
+        `SELECT * FROM proc_cases WHERE source_event_id=$1`,
+        [eventId],
+      );
+      if (existing[0]) return existing[0];
+      const events = await manager.query(
+        `SELECT * FROM acq_outbox_events WHERE event_id=$1 AND event_type='AcquisitionApproved.v1' FOR UPDATE`,
+        [eventId],
+      );
+      const event = events[0];
+      if (!event)
+        throw new NotFoundException('Approved acquisition event not found');
+      const payload = event.payload as Record<string, any>;
+      const canonicalHash = hash(payload);
+      const legacyHash = createHash('sha256')
+        .update(JSON.stringify(payload))
+        .digest('hex');
+      if (
+        event.payload_hash !== canonicalHash &&
+        event.payload_hash !== legacyHash
+      ) {
+        throw new BadRequestException({
+          message: 'Acquisition event hash is invalid',
+          code: 'EVENT_HASH_INVALID',
+        });
+      }
+      if (
+        !payload.snapshot_hash ||
+        !payload.budget_reservation?.budget_reservation_id
+      ) {
+        throw new BadRequestException(
+          'Approved acquisition contract is incomplete',
+        );
+      }
+      const amount = money(payload.approved_amount);
+      const cases = await manager.query(
+        `INSERT INTO proc_cases
+           (tenant_id,acquisition_id,acquisition_version_id,acquisition_snapshot_hash,
+            budget_reservation_id,source_event_id,requester_id,department_id,currency,
+            approved_allocation,available_amount,allocated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11) RETURNING *`,
+        [
+          event.tenant_id,
+          payload.acquisition_id,
+          payload.acquisition_version_id,
+          payload.snapshot_hash,
+          payload.budget_reservation.budget_reservation_id,
+          eventId,
+          payload.requester,
+          payload.department,
+          String(payload.currency).toUpperCase(),
+          amount,
+          payload.approved_at,
+        ],
+      );
+      const row = cases[0] as CaseRow;
+      for (const [index, line] of (
+        payload.lines as Array<Record<string, any>>
+      ).entries()) {
+        const quantity = Number(line.quantity);
+        const approvedAmount = money(line.estimated_cost);
+        const classification = String(
+          line.asset_classification ?? 'ASSET',
+        ).toUpperCase();
+        await manager.query(
+          `INSERT INTO proc_case_lines
+             (proc_case_id,tenant_id,acquisition_line_id,line_number,product_name,category,
+              approved_quantity,unit,approved_vendor_id,approved_unit_price,approved_line_amount,
+              currency,fulfillment_type,requires_physical_verification,
+              requires_asset_identity,requires_inventory_ingestion)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+          [
+            row.proc_case_id,
+            row.tenant_id,
+            line.line_id,
+            index + 1,
+            line.product,
+            line.category,
+            quantity,
+            line.unit,
+            line.selected_vendor,
+            line.estimated_unit_price ?? approvedAmount / quantity,
+            approvedAmount,
+            row.currency,
+            classification,
+            classification === 'ASSET',
+            classification === 'ASSET',
+            classification !== 'SERVICE',
+          ],
+        );
+      }
+      const entryHash = hash({
+        proc_case_id: row.proc_case_id,
+        type: 'ALLOCATION_ESTABLISHED',
+        amount,
+        eventId,
+      });
+      await manager.query(
+        `INSERT INTO proc_financial_ledger
+           (proc_case_id,tenant_id,entry_type,from_bucket,to_bucket,amount,currency,
+            source_type,source_id,idempotency_key,case_revision,entry_hash)
+         VALUES ($1,$2,'ALLOCATION_ESTABLISHED',NULL,'AVAILABLE',$3,$4,
+                 'ACQUISITION_EVENT',$5,$6,1,$7)`,
+        [
+          row.proc_case_id,
+          row.tenant_id,
+          amount,
+          row.currency,
+          eventId,
+          `acquisition:${eventId}`,
+          entryHash,
+        ],
+      );
+      await this.audit(
+        manager,
+        row,
+        'PROC_CASE',
+        row.proc_case_id,
+        'PROCUREMENT_CASE_CREATED',
+        null,
+        null,
+        { source_event_id: eventId, approved_allocation: amount },
+      );
+      return row;
+    });
+  }
+
+  async list(actor: ProcurementActor, status?: string) {
+    const grants = await this.grants(actor, 'PROCUREMENT_VIEW');
+    const tenantWide = grants.some(
+      (grant: Record<string, any>) => grant.scope_type === 'TENANT',
+    );
+    const departments = grants
+      .filter((grant: Record<string, any>) => grant.scope_type === 'DEPARTMENT')
+      .map((grant: Record<string, any>) => Number(grant.scope_reference))
+      .filter(Number.isInteger);
+    return this.db.query(
+      `SELECT c.*,r.acquisition_number,
+         ROUND(CASE WHEN c.approved_allocation=0 THEN 0 ELSE c.expended_amount*100/c.approved_allocation END,2) AS utilization_percent,
+         EXTRACT(DAY FROM NOW()-c.allocated_at)::int AS allocation_age_days,
+         EXTRACT(DAY FROM NOW()-c.last_activity_at)::int AS inactive_days
+       FROM proc_cases c JOIN acq_requests r ON r.acquisition_id=c.acquisition_id
+       WHERE c.tenant_id=$1 AND ($2::boolean OR c.department_id=ANY($3::int[]) OR c.requester_id=$4::uuid)
+         AND ($5::text IS NULL OR c.status=$5) ORDER BY c.last_activity_at DESC`,
+      [
+        this.tenant(actor),
+        tenantWide,
+        departments,
+        actor.user_id,
+        status ?? null,
+      ],
+    );
+  }
+
+  async get(actor: ProcurementActor, caseId: string) {
+    const row = await this.accessibleCase(actor, caseId);
+    const [
+      lines,
+      orders,
+      orderLines,
+      receipts,
+      receiptLines,
+      services,
+      invoices,
+      invoiceLines,
+      matchResults,
+      payments,
+      adjustments,
+      returns,
+      repairs,
+      downstream,
+      ledger,
+      audit,
+    ] = await Promise.all([
+      this.db.query(
+        `SELECT * FROM proc_case_lines WHERE proc_case_id=$1 ORDER BY line_number`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_orders WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_order_lines WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_receipts WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT rl.* FROM proc_receipt_lines rl JOIN proc_receipts r ON r.receipt_id=rl.receipt_id WHERE r.proc_case_id=$1`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_service_acceptances WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_invoices WHERE proc_case_id=$1 ORDER BY invoice_date`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT il.* FROM proc_invoice_lines il JOIN proc_invoices i ON i.invoice_id=il.invoice_id WHERE i.proc_case_id=$1`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_match_results WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_payments WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_adjustments WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_returns WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_repairs WHERE proc_case_id=$1 ORDER BY created_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_downstream_status WHERE proc_case_id=$1 ORDER BY occurred_at`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_financial_ledger WHERE proc_case_id=$1 ORDER BY created_at,ledger_entry_id`,
+        [caseId],
+      ),
+      this.db.query(
+        `SELECT * FROM proc_audit_events WHERE proc_case_id=$1 ORDER BY created_at,audit_event_id`,
+        [caseId],
+      ),
+    ]);
+    const verifiedUnpaid =
+      invoices
+        .filter((i: Record<string, any>) =>
+          ['VERIFIED', 'PARTIALLY_PAID'].includes(i.status),
+        )
+        .reduce(
+          (sum: number, i: Record<string, any>) => sum + money(i.total_amount),
+          0,
+        ) -
+      payments
+        .filter((p: Record<string, any>) => p.status === 'POSTED')
+        .reduce(
+          (sum: number, p: Record<string, any>) => sum + money(p.amount),
+          0,
+        );
+    const safeInvoices = invoices.map((invoice: Record<string, any>) => {
+      const { document_object_key: privateObjectKey, ...safe } = invoice;
+      return { ...safe, document_available: Boolean(privateObjectKey) };
+    });
+    return {
+      ...row,
+      verified_unpaid_liability: Math.max(0, verifiedUnpaid),
+      lines,
+      orders,
+      order_lines: orderLines,
+      receipts,
+      receipt_lines: receiptLines,
+      service_acceptances: services,
+      invoices: safeInvoices,
+      invoice_lines: invoiceLines,
+      match_results: matchResults,
+      payments,
+      adjustments,
+      returns,
+      repairs,
+      downstream_status: downstream,
+      ledger,
+      audit_timeline: audit,
+    };
+  }
+
+  async dashboard(actor: ProcurementActor) {
+    const cases = await this.list(actor);
+    const totals = cases.reduce(
+      (sum: Record<string, number>, row: Record<string, any>) => {
+        for (const key of [
+          'approved_allocation',
+          'available_amount',
+          'committed_amount',
+          'expended_amount',
+          'released_amount',
+        ])
+          sum[key] += money(row[key]);
+        return sum;
+      },
+      {
+        approved_allocation: 0,
+        available_amount: 0,
+        committed_amount: 0,
+        expended_amount: 0,
+        released_amount: 0,
+      },
+    );
+    return {
+      ...totals,
+      cases: cases.length,
+      alerts: cases.flatMap((row: Record<string, any>) => {
+        const alerts: Array<Record<string, unknown>> = [];
+        const remainingPercent =
+          money(row.approved_allocation) === 0
+            ? 0
+            : (money(row.available_amount) * 100) /
+              money(row.approved_allocation);
+        if (Number(row.inactive_days) >= 30)
+          alerts.push({
+            proc_case_id: row.proc_case_id,
+            type: 'INACTIVE',
+            value: row.inactive_days,
+          });
+        if (remainingPercent <= 10)
+          alerts.push({
+            proc_case_id: row.proc_case_id,
+            type: 'NEAR_EXHAUSTION',
+            value: remainingPercent,
+          });
+        if (
+          Number(row.allocation_age_days) <= 7 &&
+          Number(row.utilization_percent) >= 50
+        )
+          alerts.push({
+            proc_case_id: row.proc_case_id,
+            type: 'RAPID_EXPENDITURE',
+            value: row.utilization_percent,
+          });
+        return alerts;
+      }),
+    };
+  }
+
+  async createOrder(
+    actor: ProcurementActor,
+    caseId: string,
+    expectedRevision: number,
+    input: CreateOrderInput,
+    requestId?: string,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_ORDER_ENTRY',
+    );
+    if (!input.lines?.length)
+      throw new BadRequestException('At least one order line is required');
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const ids = input.lines.map((line) => line.proc_case_line_id);
+      if (new Set(ids).size !== ids.length)
+        throw new BadRequestException('Duplicate order line allocation');
+      const approved = await manager.query(
+        `SELECT * FROM proc_case_lines WHERE proc_case_id=$1 AND proc_case_line_id=ANY($2::uuid[])`,
+        [caseId, ids],
+      );
+      if (approved.length !== ids.length)
+        throw new BadRequestException('Order lines do not belong to this case');
+      if (
+        approved.some(
+          (line: Record<string, any>) =>
+            line.approved_vendor_id !== input.vendor_id,
+        )
+      ) {
+        throw new ConflictException({
+          message: 'Vendor differs from approved acquisition vendor',
+          code: 'ACQUISITION_AMENDMENT_REQUIRED',
+        });
+      }
+      const orderId = randomUUID();
+      const orderNumber = `PO-${new Date().getUTCFullYear()}-${orderId.slice(0, 8).toUpperCase()}`;
+      const calculated = input.lines.map((line) => ({
+        input: line,
+        totals: lineTotal(line),
+      }));
+      const subtotal = calculated.reduce(
+        (sum, item) => sum + item.totals.product,
+        0,
+      );
+      const tax = calculated.reduce((sum, item) => sum + item.totals.tax, 0);
+      const freight = calculated.reduce(
+        (sum, item) => sum + item.totals.freight,
+        0,
+      );
+      const additional = calculated.reduce(
+        (sum, item) => sum + item.totals.additional,
+        0,
+      );
+      const total = calculated.reduce(
+        (sum, item) => sum + item.totals.total,
+        0,
+      );
+      await manager.query(
+        `INSERT INTO proc_orders
+           (order_id,proc_case_id,tenant_id,order_number,external_order_id,vendor_id,currency,
+            order_date,expected_delivery_date,product_url,progress_status,subtotal,tax_amount,
+            freight_amount,additional_charges,total_amount,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ENTERED',$11,$12,$13,$14,$15,$16)`,
+        [
+          orderId,
+          caseId,
+          row.tenant_id,
+          orderNumber,
+          input.external_order_id ?? null,
+          input.vendor_id,
+          row.currency,
+          input.order_date ?? null,
+          input.expected_delivery_date ?? null,
+          input.product_url ?? null,
+          subtotal,
+          tax,
+          freight,
+          additional,
+          total,
+          actor.user_id,
+        ],
+      );
+      for (const item of calculated) {
+        const source = approved.find(
+          (line: Record<string, any>) =>
+            line.proc_case_line_id === item.input.proc_case_line_id,
+        );
+        await manager.query(
+          `INSERT INTO proc_order_lines
+             (order_id,proc_case_id,proc_case_line_id,acquisition_line_id,tenant_id,
+              quantity,unit_price,tax_amount,freight_amount,additional_charges,line_total)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [
+            orderId,
+            caseId,
+            source.proc_case_line_id,
+            source.acquisition_line_id,
+            row.tenant_id,
+            item.input.quantity,
+            money(item.input.unit_price),
+            item.totals.tax,
+            item.totals.freight,
+            item.totals.additional,
+            item.totals.total,
+          ],
+        );
+      }
+      await this.audit(
+        manager,
+        row,
+        'ORDER',
+        orderId,
+        'ORDER_DRAFTED',
+        actor.user_id,
+        null,
+        { order_number: orderNumber, total_amount: total },
+        requestId,
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        order_id: orderId,
+        order_number: orderNumber,
+        total_amount: total,
+        revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  async issueOrder(
+    actor: ProcurementActor,
+    caseId: string,
+    orderId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_ORDER_ENTRY',
+    );
+    if (!idempotencyKey?.trim())
+      throw new BadRequestException('Idempotency-Key is required');
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const orders = await manager.query(
+        `SELECT * FROM proc_orders WHERE order_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [orderId, caseId],
+      );
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Order not found');
+      if (order.status === 'ISSUED') return order;
+      if (order.status !== 'DRAFT')
+        throw new ConflictException(`Order is ${order.status}`);
+      const allocations = await manager.query(
+        `SELECT ol.proc_case_line_id,SUM(ol.quantity-ol.cancelled_quantity) AS proposed,
+           pcl.approved_quantity,
+           COALESCE((SELECT SUM(x.quantity-x.cancelled_quantity) FROM proc_order_lines x
+             JOIN proc_orders o ON o.order_id=x.order_id
+             WHERE x.proc_case_line_id=ol.proc_case_line_id AND o.status IN ('ISSUED','PARTIALLY_RECEIVED','RECEIVED','CLOSED')),0) AS active
+         FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+         WHERE ol.order_id=$1 GROUP BY ol.proc_case_line_id,pcl.approved_quantity`,
+        [orderId],
+      );
+      if (
+        allocations.some(
+          (a: Record<string, any>) =>
+            quantityUnits(a.active) + quantityUnits(a.proposed) >
+            quantityUnits(a.approved_quantity),
+        )
+      ) {
+        throw new ConflictException({
+          message: 'Active ordered quantity exceeds approved quantity',
+          code: 'APPROVED_QUANTITY_EXCEEDED',
+        });
+      }
+      const total = money(order.total_amount);
+      if (minorUnits(total) > minorUnits(row.available_amount)) {
+        throw new ConflictException({
+          message: 'Order exceeds available allocation',
+          code: 'ACQUISITION_AMENDMENT_REQUIRED',
+        });
+      }
+      const legacy = await manager.query(
+        `INSERT INTO fin_purchase_orders
+           (tenant_id,vendor_id,description,amount,status,requested_by,approved_at,proc_order_id,source_system)
+         VALUES ($1,$2,$3,$4,'APPROVED',$5,NOW(),$6,'MODULE2') RETURNING po_id`,
+        [
+          row.tenant_id,
+          order.vendor_id,
+          `Module 2 order ${order.order_number}`,
+          total,
+          actor.user_id,
+          orderId,
+        ],
+      );
+      const lines = await manager.query(
+        `SELECT ol.*,pcl.product_name FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id WHERE ol.order_id=$1`,
+        [orderId],
+      );
+      for (const line of lines) {
+        await manager.query(
+          `INSERT INTO fin_po_lines (po_id,description,qty,unit_price,proc_order_line_id) VALUES ($1,$2,$3,$4,$5)`,
+          [
+            legacy[0].po_id,
+            line.product_name,
+            line.quantity,
+            line.unit_price,
+            line.order_line_id,
+          ],
+        );
+      }
+      await manager.query(
+        `UPDATE proc_orders SET status='ISSUED',progress_status='VERIFIED',issued_by=$2,issued_at=NOW(),legacy_po_id=$3,updated_at=NOW() WHERE order_id=$1`,
+        [orderId, actor.user_id, legacy[0].po_id],
+      );
+      await this.moveFunds(manager, row, {
+        entryType: 'ORDER_COMMITTED',
+        from: 'AVAILABLE',
+        to: 'COMMITTED',
+        amount: total,
+        sourceType: 'ORDER',
+        sourceId: orderId,
+        idempotencyKey,
+        actorId: actor.user_id,
+      });
+      await manager.query(
+        `INSERT INTO acq_budget_reservation_events (budget_reservation_id,tenant_id,event_type,amount,reason,actor_user_id,proc_case_id) VALUES ($1,$2,'PARTIALLY_COMMITTED',$3,$4,$5,$6)`,
+        [
+          row.budget_reservation_id,
+          row.tenant_id,
+          total,
+          `Order ${order.order_number} issued`,
+          actor.user_id,
+          caseId,
+        ],
+      );
+      await this.audit(
+        manager,
+        row,
+        'ORDER',
+        orderId,
+        'ORDER_ISSUED',
+        actor.user_id,
+        { status: 'DRAFT' },
+        { status: 'ISSUED', amount: total },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'ProcurementOrderIssued.v1',
+        orderId,
+        {
+          order: { ...order, status: 'ISSUED', lines },
+          amount: total,
+          currency: row.currency,
+        },
+      );
+      return {
+        ...order,
+        status: 'ISSUED',
+        legacy_po_id: legacy[0].po_id,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async cancelOrder(
+    actor: ProcurementActor,
+    caseId: string,
+    orderId: string,
+    expectedRevision: number,
+    input: {
+      lines: Array<{ order_line_id: string; quantity: number }>;
+      reason: string;
+    },
+    idempotencyKey: string,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_ORDER_ENTRY',
+    );
+    if (!input.reason?.trim() || !input.lines?.length)
+      throw new BadRequestException(
+        'Cancellation lines and reason are required',
+      );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const orders = await manager.query(
+        `SELECT * FROM proc_orders WHERE order_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [orderId, caseId],
+      );
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Order not found');
+      if (!['ISSUED', 'PARTIALLY_RECEIVED'].includes(order.status))
+        throw new ConflictException(`Order is ${order.status}`);
+      let releaseMinor = 0n;
+      for (const cancellation of input.lines) {
+        const lines = await manager.query(
+          `SELECT ol.*,
+             COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0) AS accepted
+           FROM proc_order_lines ol WHERE ol.order_line_id=$1 AND ol.order_id=$2 FOR UPDATE`,
+          [cancellation.order_line_id, orderId],
+        );
+        const line = lines[0];
+        if (!line)
+          throw new BadRequestException(
+            'Cancellation line does not belong to order',
+          );
+        const quantity = quantityUnits(cancellation.quantity);
+        const cancellable =
+          quantityUnits(line.quantity) -
+          quantityUnits(line.cancelled_quantity || 0) -
+          BigInt(Math.round(Number(line.accepted) * 1000));
+        if (quantity > cancellable)
+          throw new ConflictException({
+            message: 'Cancellation exceeds unfulfilled quantity',
+            code: 'CANCELLATION_QUANTITY_EXCEEDED',
+          });
+        const prorated =
+          (minorUnits(line.line_total) * quantity +
+            quantityUnits(line.quantity) / 2n) /
+          quantityUnits(line.quantity);
+        releaseMinor += prorated;
+        await manager.query(
+          `UPDATE proc_order_lines SET cancelled_quantity=cancelled_quantity+$2 WHERE order_line_id=$1`,
+          [line.order_line_id, cancellation.quantity],
+        );
+      }
+      const release = Number(releaseMinor) / 100;
+      await this.moveFunds(manager, row, {
+        entryType: 'ORDER_COMMITMENT_RELEASED',
+        from: 'COMMITTED',
+        to: 'AVAILABLE',
+        amount: release,
+        sourceType: 'ORDER',
+        sourceId: orderId,
+        idempotencyKey,
+        actorId: actor.user_id,
+      });
+      const remaining = await manager.query(
+        `SELECT COUNT(*)::int AS count FROM proc_order_lines WHERE order_id=$1 AND cancelled_quantity < quantity`,
+        [orderId],
+      );
+      const nextStatus =
+        Number(remaining[0].count) === 0 ? 'CANCELLED' : order.status;
+      await manager.query(
+        `UPDATE proc_orders SET status=$2,cancellation_reason=$3,cancelled_by=$4,cancelled_at=NOW(),updated_at=NOW() WHERE order_id=$1`,
+        [orderId, nextStatus, input.reason.trim(), actor.user_id],
+      );
+      if (order.legacy_po_id) {
+        await manager.query(
+          `UPDATE fin_purchase_orders SET amount=GREATEST(0,amount-$2),status=CASE WHEN $3='CANCELLED' THEN 'CANCELLED' ELSE status END WHERE po_id=$1 AND source_system='MODULE2'`,
+          [order.legacy_po_id, release, nextStatus],
+        );
+      }
+      await this.audit(
+        manager,
+        row,
+        'ORDER',
+        orderId,
+        'ORDER_CANCELLED',
+        actor.user_id,
+        { status: order.status },
+        { status: nextStatus, released: release, reason: input.reason },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'ProcurementOrderCancelled.v1',
+        orderId,
+        {
+          released_amount: release,
+          currency: row.currency,
+          reason: input.reason,
+          lines: input.lines,
+        },
+      );
+      return {
+        order_id: orderId,
+        status: nextStatus,
+        released_amount: release,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async cancelCaseLine(
+    actor: ProcurementActor,
+    caseId: string,
+    lineId: string,
+    expectedRevision: number,
+    input: { quantity: number; reason: string },
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_ORDER_ENTRY',
+    );
+    if (!input.reason?.trim())
+      throw new BadRequestException('Cancellation reason is required');
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const lines = await manager.query(
+        `SELECT pcl.*,
+           COALESCE((SELECT SUM(ol.quantity-ol.cancelled_quantity) FROM proc_order_lines ol JOIN proc_orders o ON o.order_id=ol.order_id WHERE ol.proc_case_line_id=pcl.proc_case_line_id AND o.status IN ('ISSUED','PARTIALLY_RECEIVED','RECEIVED','CLOSED')),0) AS active_ordered
+         FROM proc_case_lines pcl WHERE pcl.proc_case_line_id=$1 AND pcl.proc_case_id=$2 FOR UPDATE`,
+        [lineId, caseId],
+      );
+      const line = lines[0];
+      if (!line) throw new NotFoundException('Procurement line not found');
+      const requested = quantityUnits(input.quantity);
+      const unallocated =
+        quantityUnits(line.approved_quantity) -
+        quantityUnits(line.cancelled_quantity || 0) -
+        BigInt(Math.round(Number(line.active_ordered) * 1000));
+      if (requested > unallocated)
+        throw new ConflictException(
+          'Only unallocated quantity can be cancelled at case level',
+        );
+      await manager.query(
+        `UPDATE proc_case_lines SET cancelled_quantity=cancelled_quantity+$2,cancellation_reason=$3 WHERE proc_case_line_id=$1`,
+        [lineId, input.quantity, input.reason.trim()],
+      );
+      await this.audit(
+        manager,
+        row,
+        'CASE_LINE',
+        lineId,
+        'CASE_LINE_CANCELLED',
+        actor.user_id,
+        { cancelled_quantity: line.cancelled_quantity },
+        {
+          cancelled_quantity: Number(line.cancelled_quantity) + input.quantity,
+          reason: input.reason,
+        },
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        proc_case_line_id: lineId,
+        cancelled_quantity: Number(line.cancelled_quantity) + input.quantity,
+        aggregate_revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  async recordReceipt(
+    actor: ProcurementActor,
+    caseId: string,
+    orderId: string,
+    expectedRevision: number,
+    input: CreateReceiptInput,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_RECEIPT_ENTRY',
+    );
+    if (!input.lines?.length)
+      throw new BadRequestException('Receipt lines are required');
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const orders = await manager.query(
+        `SELECT * FROM proc_orders WHERE order_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [orderId, caseId],
+      );
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Order not found');
+      if (!['ISSUED', 'PARTIALLY_RECEIVED'].includes(order.status))
+        throw new ConflictException(`Order is ${order.status}`);
+      if (String(order.created_by) === actor.user_id)
+        throw new ForbiddenException({
+          message: 'Order creator cannot receive their order',
+          code: 'SOD_RECEIVER_VIOLATION',
+        });
+      const receiptId = randomUUID();
+      const receiptNumber = `GRN-${new Date().getUTCFullYear()}-${receiptId.slice(0, 8).toUpperCase()}`;
+      if (input.replacement_for_return_id) {
+        const replacement = await manager.query(
+          `SELECT * FROM proc_returns WHERE return_id=$1 AND proc_case_id=$2 AND status IN ('VENDOR_RECEIVED','RESOLVED')`,
+          [input.replacement_for_return_id, caseId],
+        );
+        if (!replacement[0])
+          throw new ConflictException(
+            'Replacement must reference an eligible return',
+          );
+      }
+      const legacy = await manager.query(
+        `INSERT INTO fin_goods_receipts (tenant_id,po_id,received_by,received_at,notes,proc_receipt_id,source_system)
+         VALUES ($1,$2,$3,$4,$5,$6,'MODULE2') RETURNING grn_id`,
+        [
+          row.tenant_id,
+          order.legacy_po_id,
+          actor.user_id,
+          input.actual_delivery_date,
+          input.notes ?? null,
+          receiptId,
+        ],
+      );
+      await manager.query(
+        `INSERT INTO proc_receipts (receipt_id,proc_case_id,order_id,tenant_id,receipt_number,actual_delivery_date,status,notes,recorded_by,replacement_for_return_id,legacy_grn_id)
+         VALUES ($1,$2,$3,$4,$5,$6,'ENTERED',$7,$8,$9,$10)`,
+        [
+          receiptId,
+          caseId,
+          orderId,
+          row.tenant_id,
+          receiptNumber,
+          input.actual_delivery_date,
+          input.notes ?? null,
+          actor.user_id,
+          input.replacement_for_return_id ?? null,
+          legacy[0].grn_id,
+        ],
+      );
+      for (const incoming of input.lines) {
+        if (
+          Math.abs(
+            incoming.received_quantity -
+              (incoming.accepted_quantity + (incoming.rejected_quantity ?? 0)),
+          ) > 0.0005
+        )
+          throw new BadRequestException(
+            'Received quantity must equal accepted plus rejected quantity',
+          );
+        const lines = await manager.query(
+          `SELECT ol.*,pcl.proc_case_line_id,
+             COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0) AS accepted,
+             COALESCE((SELECT SUM(r.quantity) FROM proc_returns r WHERE r.order_line_id=ol.order_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0) AS returned
+           FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+           WHERE ol.order_line_id=$1 AND ol.order_id=$2`,
+          [incoming.order_line_id, orderId],
+        );
+        const line = lines[0];
+        if (!line)
+          throw new BadRequestException(
+            'Receipt line does not belong to order',
+          );
+        const netAccepted =
+          Number(line.accepted) -
+          Number(line.returned) +
+          incoming.accepted_quantity;
+        const activeQuantity =
+          Number(line.quantity) - Number(line.cancelled_quantity);
+        if (netAccepted > activeQuantity + 0.0005)
+          throw new ConflictException({
+            message: 'Accepted quantity exceeds active ordered quantity',
+            code: 'RECEIPT_QUANTITY_EXCEEDED',
+          });
+        const receiptLineId = randomUUID();
+        await manager.query(
+          `INSERT INTO proc_receipt_lines (receipt_line_id,receipt_id,order_line_id,proc_case_line_id,tenant_id,received_quantity,accepted_quantity,rejected_quantity,discrepancy_reason)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            receiptLineId,
+            receiptId,
+            line.order_line_id,
+            line.proc_case_line_id,
+            row.tenant_id,
+            incoming.received_quantity,
+            incoming.accepted_quantity,
+            incoming.rejected_quantity ?? 0,
+            incoming.discrepancy_reason ?? null,
+          ],
+        );
+        const legacyLines = await manager.query(
+          `SELECT line_id FROM fin_po_lines WHERE proc_order_line_id=$1`,
+          [line.order_line_id],
+        );
+        await manager.query(
+          `INSERT INTO fin_grn_lines (grn_id,po_line_id,description,qty_received,proc_receipt_line_id) VALUES ($1,$2,$3,$4,$5)`,
+          [
+            legacy[0].grn_id,
+            legacyLines[0]?.line_id ?? null,
+            `Module 2 receipt ${receiptNumber}`,
+            incoming.accepted_quantity,
+            receiptLineId,
+          ],
+        );
+      }
+      const outstanding = await manager.query(
+        `SELECT COUNT(*)::int AS count FROM proc_order_lines ol
+         WHERE ol.order_id=$1 AND
+           COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0)
+             - COALESCE((SELECT SUM(r.quantity) FROM proc_returns r WHERE r.order_line_id=ol.order_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0)
+           < ol.quantity-ol.cancelled_quantity`,
+        [orderId],
+      );
+      const orderStatus =
+        Number(outstanding[0].count) === 0 ? 'RECEIVED' : 'PARTIALLY_RECEIVED';
+      await manager.query(
+        `UPDATE proc_orders SET status=$2,updated_at=NOW() WHERE order_id=$1`,
+        [orderId, orderStatus],
+      );
+      await this.audit(
+        manager,
+        row,
+        'RECEIPT',
+        receiptId,
+        'GOODS_RECEIPT_RECORDED',
+        actor.user_id,
+        null,
+        { receipt_number: receiptNumber, lines: input.lines },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'GoodsReceiptRecorded.v1',
+        receiptId,
+        {
+          order_id: orderId,
+          receipt_number: receiptNumber,
+          actual_delivery_date: input.actual_delivery_date,
+          lines: input.lines,
+        },
+      );
+      return {
+        receipt_id: receiptId,
+        receipt_number: receiptNumber,
+        order_status: orderStatus,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async recordServiceAcceptance(
+    actor: ProcurementActor,
+    caseId: string,
+    expectedRevision: number,
+    input: CreateServiceAcceptanceInput,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_RECEIPT_ENTRY',
+    );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const lines = await manager.query(
+        `SELECT ol.*,pcl.fulfillment_type,
+           COALESCE((SELECT SUM(sa.accepted_quantity) FROM proc_service_acceptances sa WHERE sa.order_line_id=ol.order_line_id AND sa.status IN ('VERIFIED','FINALIZED')),0) AS accepted
+         FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+         JOIN proc_orders o ON o.order_id=ol.order_id
+         WHERE ol.order_line_id=$1 AND ol.proc_case_id=$2 AND o.status NOT IN ('DRAFT','CANCELLED')`,
+        [input.order_line_id, caseId],
+      );
+      const line = lines[0];
+      if (!line) throw new NotFoundException('Order line not found');
+      if (!['SERVICE', 'INSTALLATION'].includes(line.fulfillment_type))
+        throw new BadRequestException(
+          'Service acceptance applies only to service or installation lines',
+        );
+      if (
+        Number(line.accepted) + input.accepted_quantity >
+        Number(line.quantity) - Number(line.cancelled_quantity) + 0.0005
+      )
+        throw new ConflictException(
+          'Service acceptance exceeds ordered quantity',
+        );
+      const acceptanceId = randomUUID();
+      await manager.query(
+        `INSERT INTO proc_service_acceptances (service_acceptance_id,proc_case_id,order_line_id,tenant_id,accepted_quantity,milestone,acceptance_date,status,entered_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'ENTERED',$8)`,
+        [
+          acceptanceId,
+          caseId,
+          input.order_line_id,
+          row.tenant_id,
+          input.accepted_quantity,
+          input.milestone ?? null,
+          input.acceptance_date,
+          actor.user_id,
+        ],
+      );
+      // Stores records objective acceptance; maker-checker is applied when Finance verifies the invoice.
+      await this.audit(
+        manager,
+        row,
+        'SERVICE_ACCEPTANCE',
+        acceptanceId,
+        'SERVICE_ACCEPTANCE_RECORDED',
+        actor.user_id,
+        null,
+        input,
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'ServiceAcceptanceRecorded.v1',
+        acceptanceId,
+        { ...input },
+      );
+      return {
+        service_acceptance_id: acceptanceId,
+        status: 'ENTERED',
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async verifyServiceAcceptance(
+    actor: ProcurementActor,
+    caseId: string,
+    acceptanceId: string,
+    expectedRevision: number,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_INVOICE_VERIFY',
+    );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const records = await manager.query(
+        `SELECT * FROM proc_service_acceptances WHERE service_acceptance_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [acceptanceId, caseId],
+      );
+      const record = records[0];
+      if (!record) throw new NotFoundException('Service acceptance not found');
+      if (record.status === 'VERIFIED') return record;
+      if (record.entered_by === actor.user_id)
+        throw new ForbiddenException({
+          message: 'Service acceptance entrant cannot verify it',
+          code: 'SOD_SERVICE_ACCEPTANCE_VIOLATION',
+        });
+      await manager.query(
+        `UPDATE proc_service_acceptances SET status='VERIFIED',verified_by=$2,verified_at=NOW() WHERE service_acceptance_id=$1`,
+        [acceptanceId, actor.user_id],
+      );
+      await this.audit(
+        manager,
+        row,
+        'SERVICE_ACCEPTANCE',
+        acceptanceId,
+        'SERVICE_ACCEPTANCE_VERIFIED',
+        actor.user_id,
+        { status: record.status },
+        { status: 'VERIFIED' },
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        ...record,
+        status: 'VERIFIED',
+        verified_by: actor.user_id,
+        aggregate_revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  async createInvoice(
+    actor: ProcurementActor,
+    caseId: string,
+    orderId: string,
+    expectedRevision: number,
+    input: CreateInvoiceInput,
+    requestId?: string,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_INVOICE_ENTRY',
+    );
+    if (!input.lines?.length || !input.invoice_number?.trim())
+      throw new BadRequestException('Invoice number and lines are required');
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const orders = await manager.query(
+        `SELECT * FROM proc_orders WHERE order_id=$1 AND proc_case_id=$2`,
+        [orderId, caseId],
+      );
+      const order = orders[0];
+      if (!order) throw new NotFoundException('Order not found');
+      if (
+        !['ISSUED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED'].includes(
+          order.status,
+        )
+      )
+        throw new ConflictException(`Order is ${order.status}`);
+      if (
+        input.currency.toUpperCase() !== row.currency ||
+        input.currency.toUpperCase() !== order.currency
+      )
+        throw new ConflictException({
+          message: 'Invoice currency must match approved currency',
+          code: 'INVOICE_CURRENCY_MISMATCH',
+        });
+      const uploads = await manager.query(
+        `SELECT * FROM proc_document_uploads
+         WHERE document_upload_id=$1 AND proc_case_id=$2 AND tenant_id=$3
+           AND uploaded_by=$4 AND malware_scan_status='CLEAN'
+           AND consumed_at IS NULL AND expires_at>NOW() FOR UPDATE`,
+        [input.document_upload_id, caseId, row.tenant_id, actor.user_id],
+      );
+      const upload = uploads[0];
+      if (!upload)
+        throw new ConflictException({
+          message: 'A current clean tenant-owned invoice upload is required',
+          code: 'INVOICE_DOCUMENT_UPLOAD_REQUIRED',
+        });
+      const duplicates = await manager.query(
+        `SELECT invoice_id FROM proc_invoices WHERE tenant_id=$1 AND document_hash=$2`,
+        [row.tenant_id, upload.content_hash],
+      );
+      if (duplicates[0])
+        throw new ConflictException({
+          message: 'Duplicate invoice document detected',
+          code: 'DUPLICATE_INVOICE_DOCUMENT',
+          duplicate_invoice_id: duplicates[0].invoice_id,
+        });
+      const invoiceId = randomUUID();
+      let taxableMinor = 0n,
+        taxMinor = 0n,
+        freightMinor = 0n,
+        totalMinor = 0n;
+      const calculated: Array<{
+        input: CreateInvoiceInput['lines'][number];
+        totals: ReturnType<typeof lineTotal>;
+        source: Record<string, any>;
+      }> = [];
+      for (const line of input.lines) {
+        const sourceRows = await manager.query(
+          `SELECT * FROM proc_order_lines WHERE order_line_id=$1 AND order_id=$2`,
+          [line.order_line_id, orderId],
+        );
+        const source = sourceRows[0];
+        if (!source)
+          throw new BadRequestException(
+            'Invoice line does not belong to order',
+          );
+        const totals = lineTotal(line);
+        calculated.push({ input: line, totals, source });
+        taxableMinor += minorUnits(totals.product);
+        taxMinor += minorUnits(totals.tax);
+        freightMinor += minorUnits(totals.freight);
+        totalMinor += minorUnits(totals.total);
+      }
+      const total = Number(totalMinor) / 100;
+      const duplicateHash = hash({
+        tenant_id: row.tenant_id,
+        vendor_id: order.vendor_id,
+        invoice_number: input.invoice_number.trim().toUpperCase(),
+        total,
+      });
+      await manager.query(
+        `INSERT INTO proc_invoices
+           (invoice_id,proc_case_id,order_id,tenant_id,vendor_id,invoice_number,invoice_date,currency,
+            taxable_amount,tax_amount,freight_amount,total_amount,status,document_object_key,
+            document_hash,document_scan_status,duplicate_hash,entered_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'ENTERED',$13,$14,$15,$16,$17)`,
+        [
+          invoiceId,
+          caseId,
+          orderId,
+          row.tenant_id,
+          order.vendor_id,
+          input.invoice_number.trim(),
+          input.invoice_date,
+          row.currency,
+          Number(taxableMinor) / 100,
+          Number(taxMinor) / 100,
+          Number(freightMinor) / 100,
+          total,
+          upload.object_key,
+          upload.content_hash,
+          upload.malware_scan_status,
+          duplicateHash,
+          actor.user_id,
+        ],
+      );
+      await manager.query(
+        `UPDATE proc_document_uploads SET consumed_at=NOW()
+         WHERE document_upload_id=$1`,
+        [input.document_upload_id],
+      );
+      for (const item of calculated) {
+        await manager.query(
+          `INSERT INTO proc_invoice_lines (invoice_id,order_line_id,proc_case_line_id,tenant_id,quantity,unit_price,tax_amount,freight_amount,line_total)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            invoiceId,
+            item.source.order_line_id,
+            item.source.proc_case_line_id,
+            row.tenant_id,
+            item.input.quantity,
+            money(item.input.unit_price),
+            item.totals.tax,
+            item.totals.freight,
+            item.totals.total,
+          ],
+        );
+      }
+      await this.audit(
+        manager,
+        row,
+        'INVOICE',
+        invoiceId,
+        'INVOICE_ENTERED',
+        actor.user_id,
+        null,
+        { invoice_number: input.invoice_number, total_amount: total },
+        requestId,
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        invoice_id: invoiceId,
+        status: 'ENTERED',
+        total_amount: total,
+        aggregate_revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  private async resolveMatchPolicy(
+    manager: EntityManager,
+    tenantId: string,
+    category: string,
+    fulfillmentType: string,
+  ): Promise<ProcurementMatchPolicy> {
+    const rows = await manager.query(
+      `SELECT * FROM proc_match_policies
+       WHERE tenant_id=$1 AND status='PUBLISHED' AND effective_from<=NOW()
+         AND (effective_to IS NULL OR effective_to>NOW())
+         AND category IN ($2,'*') AND fulfillment_type IN ($3,'*')
+       ORDER BY (category=$2) DESC,(fulfillment_type=$3) DESC,policy_version DESC LIMIT 1`,
+      [tenantId, category, fulfillmentType],
+    );
+    if (!rows[0])
+      throw new ConflictException('No published procurement match policy');
+    return rows[0] as ProcurementMatchPolicy;
+  }
+
+  async listMatchPolicies(actor: ProcurementActor, caseId: string) {
+    const row = await this.accessibleCase(actor, caseId);
+    return this.db.query(
+      `SELECT match_policy_id,policy_version,category,fulfillment_type,status,
+              quantity_tolerance,unit_price_tolerance,tax_tolerance,
+              freight_tolerance,rounding_tolerance,require_receipt,
+              require_service_acceptance,effective_from,effective_to,published_at
+       FROM proc_match_policies
+       WHERE tenant_id=$1 AND status='PUBLISHED'
+         AND effective_from<=NOW() AND (effective_to IS NULL OR effective_to>NOW())
+       ORDER BY category,fulfillment_type,policy_version DESC`,
+      [row.tenant_id],
+    );
+  }
+
+  private async evaluateInvoiceMatch(
+    manager: EntityManager,
+    row: CaseRow,
+    invoice: Record<string, any>,
+  ) {
+    const invoiceLines = await manager.query(
+      `SELECT il.*,ol.quantity AS ordered_quantity,ol.cancelled_quantity,ol.unit_price AS ordered_unit_price,
+              ol.tax_amount AS ordered_tax,ol.freight_amount AS ordered_freight,
+              pcl.category,pcl.fulfillment_type,o.vendor_id AS order_vendor,o.currency AS order_currency,
+              COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0) AS received_accepted,
+              COALESCE((SELECT SUM(sa.accepted_quantity) FROM proc_service_acceptances sa WHERE sa.order_line_id=ol.order_line_id AND sa.status IN ('VERIFIED','FINALIZED')),0) AS service_accepted,
+              COALESCE((SELECT SUM(r.quantity) FROM proc_returns r WHERE r.order_line_id=ol.order_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0) AS returned,
+              COALESCE((SELECT SUM(x.quantity) FROM proc_invoice_lines x JOIN proc_invoices pi ON pi.invoice_id=x.invoice_id WHERE x.order_line_id=ol.order_line_id AND pi.status NOT IN ('VOID','DISPUTED')),0) AS cumulative_invoiced
+       FROM proc_invoice_lines il JOIN proc_order_lines ol ON ol.order_line_id=il.order_line_id
+       JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+       JOIN proc_orders o ON o.order_id=ol.order_id WHERE il.invoice_id=$1`,
+      [invoice.invoice_id],
+    );
+    const first = invoiceLines[0];
+    if (!first) throw new BadRequestException('Invoice has no lines');
+    const policy = await this.resolveMatchPolicy(
+      manager,
+      row.tenant_id,
+      first.category,
+      first.fulfillment_type,
+    );
+    const discrepancies: Array<Record<string, unknown>> = [];
+    const dimensions: Array<Record<string, unknown>> = [];
+    if (invoice.vendor_id !== first.order_vendor)
+      discrepancies.push({
+        dimension: 'VENDOR',
+        expected: first.order_vendor,
+        actual: invoice.vendor_id,
+      });
+    if (
+      invoice.currency !== row.currency ||
+      invoice.currency !== first.order_currency
+    )
+      discrepancies.push({
+        dimension: 'CURRENCY',
+        expected: row.currency,
+        actual: invoice.currency,
+      });
+    for (const line of invoiceLines) {
+      const eligible = ['SERVICE', 'INSTALLATION'].includes(
+        line.fulfillment_type,
+      )
+        ? Number(line.service_accepted)
+        : Number(line.received_accepted) - Number(line.returned);
+      const quantityAllowed =
+        eligible * (1 + Number(policy.quantity_tolerance) / 100);
+      const priceAllowed =
+        Number(line.ordered_unit_price) *
+        (1 + Number(policy.unit_price_tolerance) / 100);
+      const quantityPass =
+        Number(line.cumulative_invoiced) <= quantityAllowed + 0.0005;
+      const pricePass =
+        Number(line.unit_price) <=
+        priceAllowed + Number(policy.rounding_tolerance);
+      const taxPass = withinTolerance(
+        line.tax_amount,
+        line.ordered_tax,
+        policy.tax_tolerance,
+        policy.rounding_tolerance,
+      );
+      const freightPass = withinTolerance(
+        line.freight_amount,
+        line.ordered_freight,
+        policy.freight_tolerance,
+        policy.rounding_tolerance,
+      );
+      dimensions.push({
+        order_line_id: line.order_line_id,
+        eligible_quantity: eligible,
+        cumulative_invoiced: line.cumulative_invoiced,
+        quantity_pass: quantityPass,
+        ordered_unit_price: line.ordered_unit_price,
+        invoice_unit_price: line.unit_price,
+        price_pass: pricePass,
+        tax_pass: taxPass,
+        freight_pass: freightPass,
+      });
+      if (!quantityPass)
+        discrepancies.push({
+          dimension: 'QUANTITY',
+          order_line_id: line.order_line_id,
+          eligible,
+          actual: line.cumulative_invoiced,
+        });
+      if (!pricePass)
+        discrepancies.push({
+          dimension: 'UNIT_PRICE',
+          order_line_id: line.order_line_id,
+          expected: line.ordered_unit_price,
+          actual: line.unit_price,
+        });
+      if (!taxPass)
+        discrepancies.push({
+          dimension: 'TAX',
+          order_line_id: line.order_line_id,
+          expected: line.ordered_tax,
+          actual: line.tax_amount,
+        });
+      if (!freightPass)
+        discrepancies.push({
+          dimension: 'FREIGHT',
+          order_line_id: line.order_line_id,
+          expected: line.ordered_freight,
+          actual: line.freight_amount,
+        });
+    }
+    const status = discrepancies.length ? 'BLOCKED' : 'MATCHED';
+    const snapshot = {
+      invoice_id: invoice.invoice_id,
+      policy_version: policy.policy_version,
+      dimensions,
+      discrepancies,
+      status,
+    };
+    const results = await manager.query(
+      `INSERT INTO proc_match_results (proc_case_id,invoice_id,tenant_id,match_policy_id,policy_version,status,dimensions,discrepancies,snapshot_hash)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9) RETURNING *`,
+      [
+        row.proc_case_id,
+        invoice.invoice_id,
+        row.tenant_id,
+        policy.match_policy_id,
+        policy.policy_version,
+        status,
+        JSON.stringify(dimensions),
+        JSON.stringify(discrepancies),
+        hash(snapshot),
+      ],
+    );
+    return results[0];
+  }
+
+  async verifyInvoice(
+    actor: ProcurementActor,
+    caseId: string,
+    invoiceId: string,
+    expectedRevision: number,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_INVOICE_VERIFY',
+    );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const invoices = await manager.query(
+        `SELECT * FROM proc_invoices WHERE invoice_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [invoiceId, caseId],
+      );
+      const invoice = invoices[0];
+      if (!invoice) throw new NotFoundException('Invoice not found');
+      if (invoice.status === 'VERIFIED') return invoice;
+      if (invoice.status !== 'ENTERED')
+        throw new ConflictException(`Invoice is ${invoice.status}`);
+      if (invoice.entered_by === actor.user_id)
+        throw new ForbiddenException({
+          message: 'Invoice entrant cannot verify their invoice',
+          code: 'SOD_INVOICE_VERIFICATION_VIOLATION',
+        });
+      if (
+        !invoice.document_object_key ||
+        invoice.document_scan_status !== 'CLEAN'
+      )
+        throw new ConflictException({
+          message: 'A clean invoice document is required',
+          code: 'INVOICE_DOCUMENT_NOT_CLEAN',
+        });
+      const match = await this.evaluateInvoiceMatch(manager, row, invoice);
+      if (match.status !== 'MATCHED') {
+        await manager.query(
+          `UPDATE proc_invoices SET status='DISPUTED',updated_at=NOW() WHERE invoice_id=$1`,
+          [invoiceId],
+        );
+        await this.audit(
+          manager,
+          row,
+          'INVOICE',
+          invoiceId,
+          'INVOICE_MATCH_BLOCKED',
+          actor.user_id,
+          { status: 'ENTERED' },
+          { status: 'DISPUTED', match_result_id: match.match_result_id },
+        );
+        await manager.query(
+          `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+          [caseId],
+        );
+        return {
+          invoice_id: invoiceId,
+          status: 'DISPUTED',
+          match,
+          aggregate_revision: Number(row.aggregate_revision) + 1,
+        };
+      }
+      const legacy = await manager.query(
+        `INSERT INTO fin_vendor_invoices
+           (tenant_id,vendor_id,invoice_number,invoice_date,taxable_amount,gst_amount,tds_amount,total_amount,net_payable,status,po_id,proc_invoice_id,source_system)
+         VALUES ($1,$2,$3,$4,$5,$6,0,$7,$7,'APPROVED',$8,$9,'MODULE2') RETURNING invoice_id`,
+        [
+          row.tenant_id,
+          invoice.vendor_id,
+          invoice.invoice_number,
+          invoice.invoice_date,
+          invoice.taxable_amount,
+          invoice.tax_amount,
+          invoice.total_amount,
+          (
+            await manager.query(
+              `SELECT legacy_po_id FROM proc_orders WHERE order_id=$1`,
+              [invoice.order_id],
+            )
+          )[0]?.legacy_po_id ?? null,
+          invoiceId,
+        ],
+      );
+      await manager.query(
+        `UPDATE proc_invoices SET status='VERIFIED',verified_by=$2,verified_at=NOW(),legacy_invoice_id=$3,updated_at=NOW() WHERE invoice_id=$1`,
+        [invoiceId, actor.user_id, legacy[0].invoice_id],
+      );
+      await this.audit(
+        manager,
+        row,
+        'INVOICE',
+        invoiceId,
+        'INVOICE_VERIFIED',
+        actor.user_id,
+        { status: 'ENTERED' },
+        { status: 'VERIFIED', match_result_id: match.match_result_id },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'ProcurementInvoiceVerified.v1',
+        invoiceId,
+        { invoice: { ...invoice, status: 'VERIFIED' }, match_result: match },
+      );
+      return {
+        ...invoice,
+        status: 'VERIFIED',
+        match,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async voidInvoice(
+    actor: ProcurementActor,
+    caseId: string,
+    invoiceId: string,
+    expectedRevision: number,
+    reason: string,
+  ) {
+    if (!reason?.trim())
+      throw new BadRequestException('Void reason is required');
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_INVOICE_VERIFY',
+    );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const invoices = await manager.query(
+        `SELECT * FROM proc_invoices WHERE invoice_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [invoiceId, caseId],
+      );
+      const invoice = invoices[0];
+      if (!invoice) throw new NotFoundException('Invoice not found');
+      if (invoice.status === 'VOID') return invoice;
+      if (!['ENTERED', 'DISPUTED'].includes(invoice.status))
+        throw new ConflictException(`Invoice is ${invoice.status}`);
+      const payments = await manager.query(
+        `SELECT payment_id FROM proc_payments WHERE invoice_id=$1 AND status='POSTED' LIMIT 1`,
+        [invoiceId],
+      );
+      if (payments.length)
+        throw new ConflictException(
+          'A paid invoice must be reversed, not voided',
+        );
+      await manager.query(
+        `UPDATE proc_invoices SET status='VOID',updated_at=NOW() WHERE invoice_id=$1`,
+        [invoiceId],
+      );
+      await manager.query(
+        `UPDATE proc_match_results
+         SET status='RESOLVED',resolved_by=$2,resolved_at=NOW(),resolution_reason=$3
+         WHERE invoice_id=$1 AND status='BLOCKED'`,
+        [invoiceId, actor.user_id, reason.trim()],
+      );
+      await this.audit(
+        manager,
+        row,
+        'INVOICE',
+        invoiceId,
+        'INVOICE_VOIDED',
+        actor.user_id,
+        { status: invoice.status },
+        { status: 'VOID', reason: reason.trim() },
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        invoice_id: invoiceId,
+        status: 'VOID',
+        aggregate_revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  async postPayment(
+    actor: ProcurementActor,
+    caseId: string,
+    invoiceId: string,
+    expectedRevision: number,
+    input: {
+      amount: number | string;
+      payment_reference: string;
+      payment_date: string;
+    },
+    idempotencyKey: string,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_PAYMENT_POST',
+    );
+    if (!idempotencyKey?.trim() || !input.payment_reference?.trim())
+      throw new BadRequestException(
+        'Idempotency-Key and payment reference are required',
+      );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const requestHash = hash(input);
+      const prior = await manager.query(
+        `SELECT request_hash,response_payload FROM proc_idempotency WHERE tenant_id=$1 AND actor_id=$2 AND idempotency_key=$3`,
+        [row.tenant_id, actor.user_id, idempotencyKey],
+      );
+      if (prior[0]) {
+        if (prior[0].request_hash !== requestHash)
+          throw new ConflictException({
+            message: 'Idempotency key was reused with a changed payload',
+            code: 'IDEMPOTENCY_PAYLOAD_CONFLICT',
+          });
+        if (prior[0].response_payload) return prior[0].response_payload;
+      }
+      const invoices = await manager.query(
+        `SELECT * FROM proc_invoices WHERE invoice_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [invoiceId, caseId],
+      );
+      const invoice = invoices[0];
+      if (!invoice) throw new NotFoundException('Invoice not found');
+      if (!['VERIFIED', 'PARTIALLY_PAID'].includes(invoice.status))
+        throw new ConflictException(`Invoice is ${invoice.status}`);
+      if (
+        invoice.entered_by === actor.user_id ||
+        invoice.verified_by === actor.user_id
+      )
+        throw new ForbiddenException({
+          message:
+            'Payment poster must be independent of invoice entry and verification',
+          code: 'SOD_PAYMENT_VIOLATION',
+        });
+      const matches = await manager.query(
+        `SELECT * FROM proc_match_results WHERE invoice_id=$1 ORDER BY created_at DESC LIMIT 1`,
+        [invoiceId],
+      );
+      if (!['MATCHED', 'RESOLVED'].includes(matches[0]?.status))
+        throw new ConflictException(
+          'Invoice does not have a successful three-way match',
+        );
+      const paid = await manager.query(
+        `SELECT COALESCE(SUM(amount),0) AS amount FROM proc_payments WHERE invoice_id=$1 AND status='POSTED'`,
+        [invoiceId],
+      );
+      const credits = await manager.query(
+        `SELECT COALESCE(SUM(amount),0) AS amount FROM proc_adjustments WHERE invoice_id=$1 AND adjustment_type='CREDIT_NOTE' AND status='POSTED'`,
+        [invoiceId],
+      );
+      const due =
+        money(invoice.total_amount) -
+        money(paid[0].amount) -
+        money(credits[0].amount);
+      const amount = money(input.amount);
+      if (amount > due + 0.005)
+        throw new ConflictException({
+          message: 'Payment exceeds invoice balance',
+          code: 'INVOICE_OVERPAYMENT',
+          due,
+        });
+      const paymentId = randomUUID();
+      await manager.query(
+        `INSERT INTO proc_payments (payment_id,proc_case_id,invoice_id,tenant_id,payment_reference,amount,currency,payment_date,posted_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          paymentId,
+          caseId,
+          invoiceId,
+          row.tenant_id,
+          input.payment_reference.trim(),
+          amount,
+          row.currency,
+          input.payment_date,
+          actor.user_id,
+        ],
+      );
+      await this.moveFunds(manager, row, {
+        entryType: 'PAYMENT_POSTED',
+        from: 'COMMITTED',
+        to: 'EXPENDED',
+        amount,
+        sourceType: 'PAYMENT',
+        sourceId: paymentId,
+        idempotencyKey: `ledger:${idempotencyKey}`,
+        actorId: actor.user_id,
+      });
+      const funding = await this.fundingSource(manager, row);
+      await manager.query(
+        `UPDATE ${funding.table} SET encumbered_amount=GREATEST(0,COALESCE(encumbered_amount,0)-$2),utilized_amount=COALESCE(utilized_amount,0)+$2 WHERE ${funding.id}=$1 AND tenant_id=$3`,
+        [funding.sourceId, amount, row.tenant_id],
+      );
+      const status = amount >= due - 0.005 ? 'PAID' : 'PARTIALLY_PAID';
+      await manager.query(
+        `UPDATE proc_invoices SET status=$2,updated_at=NOW() WHERE invoice_id=$1`,
+        [invoiceId, status],
+      );
+      if (invoice.legacy_invoice_id)
+        await manager.query(
+          `UPDATE fin_vendor_invoices SET status=$2,paid_at=CASE WHEN $2='PAID' THEN NOW() ELSE paid_at END WHERE invoice_id=$1 AND source_system='MODULE2'`,
+          [invoice.legacy_invoice_id, status],
+        );
+      await this.audit(
+        manager,
+        row,
+        'PAYMENT',
+        paymentId,
+        'PAYMENT_POSTED',
+        actor.user_id,
+        null,
+        {
+          invoice_id: invoiceId,
+          amount,
+          payment_reference: input.payment_reference,
+        },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'PaymentPosted.v1',
+        paymentId,
+        {
+          invoice_id: invoiceId,
+          amount,
+          currency: row.currency,
+          payment_reference: input.payment_reference,
+          payment_date: input.payment_date,
+        },
+      );
+      const response = {
+        payment_id: paymentId,
+        status,
+        amount,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+      await manager.query(
+        `INSERT INTO proc_idempotency (tenant_id,actor_id,idempotency_key,request_hash,response_status,response_payload) VALUES ($1,$2,$3,$4,201,$5::jsonb)`,
+        [
+          row.tenant_id,
+          actor.user_id,
+          idempotencyKey,
+          requestHash,
+          JSON.stringify(response),
+        ],
+      );
+      return response;
+    });
+  }
+
+  async enterAdjustment(
+    actor: ProcurementActor,
+    caseId: string,
+    expectedRevision: number,
+    input: {
+      adjustment_type: 'ADDITIONAL_CHARGE' | 'CREDIT_NOTE' | 'REFUND';
+      amount: number | string;
+      order_id?: string;
+      invoice_id?: string;
+      return_id?: string;
+      reference_number?: string;
+    },
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_INVOICE_ENTRY',
+    );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const amount = money(input.amount);
+      if (amount <= 0)
+        throw new BadRequestException('Adjustment amount must be positive');
+      if (
+        input.adjustment_type === 'ADDITIONAL_CHARGE' &&
+        minorUnits(amount) > minorUnits(row.available_amount)
+      )
+        throw new ConflictException({
+          message: 'Additional charge exceeds approved allocation',
+          code: 'ACQUISITION_AMENDMENT_REQUIRED',
+        });
+      const adjustmentId = randomUUID();
+      await manager.query(
+        `INSERT INTO proc_adjustments (adjustment_id,proc_case_id,order_id,invoice_id,return_id,tenant_id,adjustment_type,amount,currency,reference_number,entered_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          adjustmentId,
+          caseId,
+          input.order_id ?? null,
+          input.invoice_id ?? null,
+          input.return_id ?? null,
+          row.tenant_id,
+          input.adjustment_type,
+          amount,
+          row.currency,
+          input.reference_number ?? null,
+          actor.user_id,
+        ],
+      );
+      await this.audit(
+        manager,
+        row,
+        'ADJUSTMENT',
+        adjustmentId,
+        'ADJUSTMENT_ENTERED',
+        actor.user_id,
+        null,
+        { ...input, amount },
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        adjustment_id: adjustmentId,
+        status: 'ENTERED',
+        amount,
+        aggregate_revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  async postAdjustment(
+    actor: ProcurementActor,
+    caseId: string,
+    adjustmentId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_PAYMENT_POST',
+    );
+    if (!idempotencyKey?.trim())
+      throw new BadRequestException('Idempotency-Key is required');
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const adjustments = await manager.query(
+        `SELECT * FROM proc_adjustments WHERE adjustment_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [adjustmentId, caseId],
+      );
+      const adjustment = adjustments[0];
+      if (!adjustment) throw new NotFoundException('Adjustment not found');
+      if (adjustment.status === 'POSTED') return adjustment;
+      if (adjustment.entered_by === actor.user_id)
+        throw new ForbiddenException({
+          message: 'Adjustment entrant cannot verify and post it',
+          code: 'SOD_ADJUSTMENT_VIOLATION',
+        });
+      const amount = money(adjustment.amount);
+      let expendedRecovery = 0;
+      if (adjustment.adjustment_type === 'ADDITIONAL_CHARGE') {
+        await this.moveFunds(manager, row, {
+          entryType: 'ADDITIONAL_CHARGE_COMMITTED',
+          from: 'AVAILABLE',
+          to: 'COMMITTED',
+          amount,
+          sourceType: 'ADJUSTMENT',
+          sourceId: adjustmentId,
+          idempotencyKey,
+          actorId: actor.user_id,
+        });
+      } else if (adjustment.adjustment_type === 'CREDIT_NOTE') {
+        if (!adjustment.invoice_id)
+          throw new ConflictException('Credit note must reference an invoice');
+        const payments = adjustment.invoice_id
+          ? await manager.query(
+              `SELECT COALESCE(SUM(amount),0) AS amount FROM proc_payments WHERE invoice_id=$1 AND status='POSTED'`,
+              [adjustment.invoice_id],
+            )
+          : [{ amount: 0 }];
+        const invoiceRows = await manager.query(
+          `SELECT total_amount FROM proc_invoices WHERE invoice_id=$1 AND proc_case_id=$2`,
+          [adjustment.invoice_id, caseId],
+        );
+        const previousCredits = await manager.query(
+          `SELECT COALESCE(SUM(amount),0) AS amount FROM proc_adjustments WHERE invoice_id=$1 AND adjustment_type='CREDIT_NOTE' AND status='POSTED'`,
+          [adjustment.invoice_id],
+        );
+        const maximum =
+          money(invoiceRows[0]?.total_amount) -
+          money(previousCredits[0].amount);
+        if (amount > maximum + 0.005)
+          throw new ConflictException({
+            message:
+              'Credit note exceeds the remaining attributable invoice value',
+            code: 'CREDIT_VALUE_EXCEEDED',
+            maximum,
+          });
+        expendedRecovery = Math.min(
+          amount,
+          Math.max(
+            0,
+            money(payments[0].amount) - money(previousCredits[0].amount),
+          ),
+        );
+        const committedRecovery = amount - expendedRecovery;
+        if (expendedRecovery > 0)
+          await this.moveFunds(manager, row, {
+            entryType: 'PAID_CREDIT_POSTED',
+            from: 'EXPENDED',
+            to: 'AVAILABLE',
+            amount: expendedRecovery,
+            sourceType: 'ADJUSTMENT',
+            sourceId: adjustmentId,
+            idempotencyKey: `${idempotencyKey}:expended`,
+            actorId: actor.user_id,
+          });
+        if (committedRecovery > 0)
+          await this.moveFunds(manager, row, {
+            entryType: 'UNPAID_CREDIT_POSTED',
+            from: 'COMMITTED',
+            to: 'AVAILABLE',
+            amount: committedRecovery,
+            sourceType: 'ADJUSTMENT',
+            sourceId: adjustmentId,
+            idempotencyKey: `${idempotencyKey}:committed`,
+            actorId: actor.user_id,
+          });
+      } else {
+        expendedRecovery = amount;
+        await this.moveFunds(manager, row, {
+          entryType: 'REFUND_POSTED',
+          from: 'EXPENDED',
+          to: 'AVAILABLE',
+          amount,
+          sourceType: 'ADJUSTMENT',
+          sourceId: adjustmentId,
+          idempotencyKey,
+          actorId: actor.user_id,
+        });
+      }
+      if (expendedRecovery > 0) {
+        const funding = await this.fundingSource(manager, row);
+        await manager.query(
+          `UPDATE ${funding.table} SET utilized_amount=GREATEST(0,COALESCE(utilized_amount,0)-$2),encumbered_amount=COALESCE(encumbered_amount,0)+$2 WHERE ${funding.id}=$1 AND tenant_id=$3`,
+          [funding.sourceId, expendedRecovery, row.tenant_id],
+        );
+      }
+      await manager.query(
+        `UPDATE proc_adjustments SET status='POSTED',verified_by=$2,posted_by=$2 WHERE adjustment_id=$1`,
+        [adjustmentId, actor.user_id],
+      );
+      if (
+        adjustment.return_id &&
+        adjustment.adjustment_type !== 'ADDITIONAL_CHARGE'
+      ) {
+        const financialStatus =
+          adjustment.adjustment_type === 'REFUND'
+            ? 'REFUND_POSTED'
+            : 'CREDIT_RECEIVED';
+        await manager.query(
+          `UPDATE proc_returns SET financial_status=$2,updated_at=NOW()
+           WHERE return_id=$1 AND proc_case_id=$3`,
+          [adjustment.return_id, financialStatus, caseId],
+        );
+      }
+      await this.audit(
+        manager,
+        row,
+        'ADJUSTMENT',
+        adjustmentId,
+        'ADJUSTMENT_POSTED',
+        actor.user_id,
+        { status: adjustment.status },
+        { status: 'POSTED', amount },
+      );
+      const eventType =
+        adjustment.adjustment_type === 'REFUND'
+          ? 'RefundPosted.v1'
+          : adjustment.adjustment_type === 'CREDIT_NOTE'
+            ? 'CreditNotePosted.v1'
+            : 'AdditionalChargeCommitted.v1';
+      const event = await this.emit(manager, row, eventType, adjustmentId, {
+        adjustment_type: adjustment.adjustment_type,
+        invoice_id: adjustment.invoice_id,
+        order_id: adjustment.order_id,
+        amount,
+        currency: row.currency,
+      });
+      return {
+        ...adjustment,
+        status: 'POSTED',
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async createReturn(
+    actor: ProcurementActor,
+    caseId: string,
+    expectedRevision: number,
+    input: CreateReturnInput,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_RECEIPT_ENTRY',
+    );
+    if (!input.reason?.trim())
+      throw new BadRequestException('Return reason is required');
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const lines = await manager.query(
+        `SELECT rl.*,ol.line_total,ol.quantity,
+           COALESCE((SELECT SUM(r.quantity) FROM proc_returns r WHERE r.receipt_line_id=rl.receipt_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0) AS returned
+         FROM proc_receipt_lines rl JOIN proc_order_lines ol ON ol.order_line_id=rl.order_line_id
+         JOIN proc_receipts pr ON pr.receipt_id=rl.receipt_id
+         WHERE rl.receipt_line_id=$1 AND pr.proc_case_id=$2 FOR UPDATE`,
+        [input.receipt_line_id, caseId],
+      );
+      const line = lines[0];
+      if (!line) throw new NotFoundException('Receipt line not found');
+      if (
+        Number(line.returned) + input.quantity >
+        Number(line.accepted_quantity) + 0.0005
+      )
+        throw new ConflictException({
+          message:
+            'Return quantity exceeds accepted quantity available for return',
+          code: 'RETURN_QUANTITY_EXCEEDED',
+        });
+      const maxValue =
+        (money(line.line_total) * input.quantity) / Number(line.quantity);
+      if (money(input.attributable_value) > maxValue + 0.005)
+        throw new ConflictException({
+          message: 'Return value exceeds attributable accepted value',
+          code: 'RETURN_VALUE_EXCEEDED',
+          max_value: maxValue,
+        });
+      const returnId = randomUUID();
+      await manager.query(
+        `INSERT INTO proc_returns (return_id,proc_case_id,receipt_line_id,order_line_id,tenant_id,quantity,attributable_value,reason,requested_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          returnId,
+          caseId,
+          input.receipt_line_id,
+          line.order_line_id,
+          row.tenant_id,
+          input.quantity,
+          money(input.attributable_value),
+          input.reason.trim(),
+          actor.user_id,
+        ],
+      );
+      await this.audit(
+        manager,
+        row,
+        'RETURN',
+        returnId,
+        'RETURN_REQUESTED',
+        actor.user_id,
+        null,
+        input,
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'ReturnRecorded.v1',
+        returnId,
+        { status: 'REQUESTED', ...input, order_line_id: line.order_line_id },
+      );
+      return {
+        return_id: returnId,
+        status: 'REQUESTED',
+        financial_status: 'NONE',
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async transitionReturn(
+    actor: ProcurementActor,
+    caseId: string,
+    returnId: string,
+    expectedRevision: number,
+    nextStatus:
+      | 'APPROVED'
+      | 'SHIPPED'
+      | 'VENDOR_RECEIVED'
+      | 'RESOLVED'
+      | 'REJECTED'
+      | 'CANCELLED',
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_RECEIPT_ENTRY',
+    );
+    const transitions: Record<string, string[]> = {
+      REQUESTED: ['APPROVED', 'REJECTED', 'CANCELLED'],
+      APPROVED: ['SHIPPED', 'CANCELLED'],
+      SHIPPED: ['VENDOR_RECEIVED'],
+      VENDOR_RECEIVED: ['RESOLVED'],
+    };
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const records = await manager.query(
+        `SELECT * FROM proc_returns WHERE return_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+        [returnId, caseId],
+      );
+      const record = records[0];
+      if (!record) throw new NotFoundException('Return not found');
+      if (!transitions[record.status]?.includes(nextStatus))
+        throw new ConflictException(
+          `Cannot move return from ${record.status} to ${nextStatus}`,
+        );
+      if (nextStatus === 'APPROVED' && record.requested_by === actor.user_id)
+        throw new ForbiddenException({
+          message: 'Return requester cannot approve their return',
+          code: 'SOD_RETURN_APPROVAL_VIOLATION',
+        });
+      const financialStatus =
+        nextStatus === 'VENDOR_RECEIVED'
+          ? 'CREDIT_EXPECTED'
+          : record.financial_status;
+      await manager.query(
+        `UPDATE proc_returns SET status=$2,financial_status=$3,approved_by=CASE WHEN $2='APPROVED' THEN $4 ELSE approved_by END,updated_at=NOW() WHERE return_id=$1`,
+        [returnId, nextStatus, financialStatus, actor.user_id],
+      );
+      await this.audit(
+        manager,
+        row,
+        'RETURN',
+        returnId,
+        'RETURN_STATUS_CHANGED',
+        actor.user_id,
+        { status: record.status },
+        { status: nextStatus, financial_status: financialStatus },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'ReturnRecorded.v1',
+        returnId,
+        {
+          previous_status: record.status,
+          status: nextStatus,
+          financial_status: financialStatus,
+          quantity: record.quantity,
+        },
+      );
+      return {
+        ...record,
+        status: nextStatus,
+        financial_status: financialStatus,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async recordRepair(
+    actor: ProcurementActor,
+    caseId: string,
+    expectedRevision: number,
+    input: { receipt_line_id: string; quantity: number; notes?: string },
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_RECEIPT_ENTRY',
+    );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const lines = await manager.query(
+        `SELECT rl.* FROM proc_receipt_lines rl JOIN proc_receipts r ON r.receipt_id=rl.receipt_id WHERE rl.receipt_line_id=$1 AND r.proc_case_id=$2`,
+        [input.receipt_line_id, caseId],
+      );
+      if (!lines[0] || input.quantity > Number(lines[0].accepted_quantity))
+        throw new ConflictException(
+          'Repair quantity exceeds accepted receipt quantity',
+        );
+      const repairId = randomUUID();
+      await manager.query(
+        `INSERT INTO proc_repairs (repair_id,proc_case_id,receipt_line_id,tenant_id,quantity,notes,requested_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          repairId,
+          caseId,
+          input.receipt_line_id,
+          row.tenant_id,
+          input.quantity,
+          input.notes ?? null,
+          actor.user_id,
+        ],
+      );
+      await this.audit(
+        manager,
+        row,
+        'REPAIR',
+        repairId,
+        'REPAIR_REQUESTED',
+        actor.user_id,
+        null,
+        input,
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        repair_id: repairId,
+        status: 'REQUESTED',
+        aggregate_revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  async recordDownstreamStatus(
+    actor: ProcurementActor,
+    caseId: string,
+    input: DownstreamStatusInput,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_AUDIT_VIEW',
+    );
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      const duplicate = await manager.query(
+        `SELECT * FROM proc_downstream_status WHERE source_event_id=$1`,
+        [input.source_event_id],
+      );
+      if (duplicate[0]) return duplicate[0];
+      const latest = await manager.query(
+        `SELECT aggregate_sequence FROM proc_downstream_status WHERE proc_case_line_id=$1 AND status_type=$2 ORDER BY aggregate_sequence DESC LIMIT 1`,
+        [input.proc_case_line_id, input.status_type],
+      );
+      if (
+        latest[0] &&
+        Number(input.aggregate_sequence) <= Number(latest[0].aggregate_sequence)
+      )
+        throw new ConflictException({
+          message: 'Older downstream status cannot overwrite newer state',
+          code: 'STALE_DOWNSTREAM_EVENT',
+        });
+      const inserted = await manager.query(
+        `INSERT INTO proc_downstream_status (proc_case_id,proc_case_line_id,tenant_id,source_event_id,source_module,status_type,status,aggregate_sequence,payload,occurred_at)
+         SELECT $1,pcl.proc_case_line_id,$2,$3,$4,$5,$6,$7,$8::jsonb,$9 FROM proc_case_lines pcl
+         WHERE pcl.proc_case_line_id=$10 AND pcl.proc_case_id=$1 RETURNING *`,
+        [
+          caseId,
+          row.tenant_id,
+          input.source_event_id,
+          input.source_module,
+          input.status_type,
+          input.status,
+          input.aggregate_sequence,
+          JSON.stringify(input.payload ?? {}),
+          input.occurred_at,
+          input.proc_case_line_id,
+        ],
+      );
+      if (!inserted[0])
+        throw new NotFoundException('Procurement case line not found');
+      await this.audit(
+        manager,
+        row,
+        'DOWNSTREAM_STATUS',
+        inserted[0].downstream_status_id,
+        'DOWNSTREAM_STATUS_RECORDED',
+        actor.user_id,
+        null,
+        input,
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      return {
+        ...inserted[0],
+        aggregate_revision: Number(row.aggregate_revision) + 1,
+      };
+    });
+  }
+
+  async finalizationReadiness(actor: ProcurementActor, caseId: string) {
+    const row = await this.accessibleCase(actor, caseId);
+    const lines = await this.db.query(
+      `SELECT pcl.*,
+         COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.proc_case_line_id=pcl.proc_case_line_id),0) AS received,
+         COALESCE((SELECT SUM(sa.accepted_quantity) FROM proc_service_acceptances sa JOIN proc_order_lines ol ON ol.order_line_id=sa.order_line_id WHERE ol.proc_case_line_id=pcl.proc_case_line_id AND sa.status IN ('VERIFIED','FINALIZED')),0) AS service_accepted,
+         COALESCE((SELECT SUM(r.quantity) FROM proc_returns r JOIN proc_order_lines ol ON ol.order_line_id=r.order_line_id WHERE ol.proc_case_line_id=pcl.proc_case_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0) AS returned
+       FROM proc_case_lines pcl WHERE pcl.proc_case_id=$1 ORDER BY pcl.line_number`,
+      [caseId],
+    );
+    const downstream = await this.db.query(
+      `SELECT DISTINCT ON (proc_case_line_id,status_type) proc_case_line_id,status_type,status
+       FROM proc_downstream_status WHERE proc_case_id=$1 ORDER BY proc_case_line_id,status_type,aggregate_sequence DESC`,
+      [caseId],
+    );
+    const lineChecks = lines.map((line: Record<string, any>) => {
+      const fulfilled = ['SERVICE', 'INSTALLATION'].includes(
+        line.fulfillment_type,
+      )
+        ? Number(line.service_accepted)
+        : Number(line.received) - Number(line.returned);
+      const quantityResolved =
+        fulfilled + Number(line.cancelled_quantity) >=
+        Number(line.approved_quantity) - 0.0005;
+      const status = (type: string) =>
+        downstream.find(
+          (d: Record<string, any>) =>
+            d.proc_case_line_id === line.proc_case_line_id &&
+            d.status_type === type,
+        )?.status;
+      const finalized = (type: string) =>
+        ['FINALIZED', 'NOT_REQUIRED'].includes(status(type));
+      let downstreamReady = true;
+      if (line.fulfillment_type === 'ASSET')
+        downstreamReady =
+          finalized('PHYSICAL_VERIFICATION') &&
+          finalized('ASSET_ID_ALLOCATION') &&
+          finalized('INVENTORY_INGESTION');
+      if (line.fulfillment_type === 'CONSUMABLE')
+        downstreamReady =
+          finalized('CONSUMABLE_LEDGER') || finalized('INVENTORY_INGESTION');
+      return {
+        proc_case_line_id: line.proc_case_line_id,
+        fulfillment_type: line.fulfillment_type,
+        approved_quantity: Number(line.approved_quantity),
+        fulfilled_quantity: fulfilled,
+        cancelled_quantity: Number(line.cancelled_quantity),
+        quantity_resolved: quantityResolved,
+        downstream_ready: downstreamReady,
+        ready: quantityResolved && downstreamReady,
+      };
+    });
+    const blockers: Array<Record<string, unknown>> = [];
+    if (lineChecks.some((line) => !line.ready))
+      blockers.push({
+        type: 'LINES_INCOMPLETE',
+        lines: lineChecks.filter((line) => !line.ready),
+      });
+    const invoices = await this.db.query(
+      `SELECT invoice_id,status FROM proc_invoices WHERE proc_case_id=$1 AND status NOT IN ('PAID','VOID','FINALIZED')`,
+      [caseId],
+    );
+    if (invoices.length)
+      blockers.push({ type: 'INVOICES_UNRESOLVED', invoices });
+    const returns = await this.db.query(
+      `SELECT return_id,status,financial_status FROM proc_returns WHERE proc_case_id=$1 AND (status NOT IN ('RESOLVED','REJECTED','CANCELLED') OR financial_status IN ('CREDIT_EXPECTED','REFUND_EXPECTED'))`,
+      [caseId],
+    );
+    if (returns.length) blockers.push({ type: 'RETURNS_UNRESOLVED', returns });
+    const discrepancies = await this.db.query(
+      `SELECT match_result_id,status FROM proc_match_results WHERE proc_case_id=$1 AND status='BLOCKED'`,
+      [caseId],
+    );
+    if (discrepancies.length)
+      blockers.push({ type: 'MATCH_DISCREPANCIES', discrepancies });
+    if (money(row.committed_amount) > 0)
+      blockers.push({
+        type: 'OPEN_COMMITMENT',
+        amount: money(row.committed_amount),
+      });
+    return {
+      ready: blockers.length === 0,
+      line_checks: lineChecks,
+      blockers,
+      buckets: {
+        approved: money(row.approved_allocation),
+        available: money(row.available_amount),
+        committed: money(row.committed_amount),
+        expended: money(row.expended_amount),
+        released: money(row.released_amount),
+      },
+    };
+  }
+
+  async finalize(
+    actor: ProcurementActor,
+    caseId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ) {
+    const access = await this.accessibleCase(
+      actor,
+      caseId,
+      'PROCUREMENT_AUDIT_VIEW',
+    );
+    if (!idempotencyKey?.trim())
+      throw new BadRequestException('Idempotency-Key is required');
+    const prior = await this.db.query(
+      `SELECT response_payload FROM proc_idempotency
+       WHERE tenant_id=$1 AND actor_id=$2 AND idempotency_key=$3`,
+      [access.tenant_id, actor.user_id, idempotencyKey],
+    );
+    if (prior[0]?.response_payload) return prior[0].response_payload;
+    const readiness = await this.finalizationReadiness(actor, caseId);
+    if (!readiness.ready)
+      throw new ConflictException({
+        message: 'Procurement case is not ready to finalize',
+        code: 'FINALIZATION_BLOCKED',
+        blockers: readiness.blockers,
+      });
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const release = money(row.available_amount);
+      if (release > 0) {
+        await this.moveFunds(manager, row, {
+          entryType: 'UNUSED_ALLOCATION_RELEASED',
+          from: 'AVAILABLE',
+          to: 'RELEASED',
+          amount: release,
+          sourceType: 'PROC_CASE',
+          sourceId: caseId,
+          idempotencyKey,
+          actorId: actor.user_id,
+        });
+        const funding = await this.fundingSource(manager, row);
+        await manager.query(
+          `UPDATE ${funding.table} SET encumbered_amount=GREATEST(0,COALESCE(encumbered_amount,0)-$2) WHERE ${funding.id}=$1 AND tenant_id=$3`,
+          [funding.sourceId, release, row.tenant_id],
+        );
+      }
+      await manager.query(
+        `INSERT INTO acq_budget_reservation_events (budget_reservation_id,tenant_id,event_type,amount,reason,actor_user_id,proc_case_id) VALUES ($1,$2,'COMMITTED',$3,'Procurement case finalized',$4,$5)`,
+        [
+          row.budget_reservation_id,
+          row.tenant_id,
+          money(row.expended_amount),
+          actor.user_id,
+          caseId,
+        ],
+      );
+      await manager.query(
+        `UPDATE proc_cases SET status='FINALIZED',finalized_at=NOW(),finalized_by=$2,updated_at=NOW() WHERE proc_case_id=$1`,
+        [caseId, actor.user_id],
+      );
+      await manager.query(
+        `UPDATE proc_orders SET progress_status='FINALIZED',status=CASE WHEN status='CANCELLED' THEN status ELSE 'CLOSED' END WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      await manager.query(
+        `UPDATE proc_invoices SET status=CASE WHEN status='PAID' THEN 'FINALIZED' ELSE status END WHERE proc_case_id=$1`,
+        [caseId],
+      );
+      await this.audit(
+        manager,
+        row,
+        'PROC_CASE',
+        caseId,
+        'PROCUREMENT_FINALIZED',
+        actor.user_id,
+        { status: row.status },
+        { status: 'FINALIZED', released_amount: release },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'ProcurementFinalized.v1',
+        caseId,
+        {
+          financial_summary: {
+            approved_allocation: money(row.approved_allocation),
+            expended_amount: money(row.expended_amount),
+            released_amount: money(row.released_amount),
+          },
+          line_checks: readiness.line_checks,
+        },
+      );
+      const response = {
+        proc_case_id: caseId,
+        status: 'FINALIZED',
+        released_amount: release,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+      await manager.query(
+        `INSERT INTO proc_idempotency
+           (tenant_id,actor_id,idempotency_key,request_hash,response_status,response_payload)
+         VALUES ($1,$2,$3,$4,200,$5::jsonb)`,
+        [
+          row.tenant_id,
+          actor.user_id,
+          idempotencyKey,
+          hash({ caseId, action: 'FINALIZE' }),
+          JSON.stringify(response),
+        ],
+      );
+      return response;
+    });
+  }
+}

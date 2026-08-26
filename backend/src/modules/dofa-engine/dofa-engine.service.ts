@@ -10,6 +10,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { DOFA_DECISION, DOFA_STATUS } from './dofa.constants';
+import { sha256 } from '../acquisitions/acquisition.util';
 
 export type DofaDomain =
   | 'P2P'
@@ -860,6 +861,15 @@ export class DofaEngineService {
             Number(line.installation_cost) +
             Number(line.service_cost) +
             Number(line.miscellaneous_cost),
+          estimated_unit_price: line.estimated_unit_price,
+          cost_breakdown: {
+            product: line.estimated_line_total,
+            delivery: line.delivery_cost,
+            tax: line.tax_cost,
+            installation: line.installation_cost,
+            service: line.service_cost,
+            miscellaneous: line.miscellaneous_cost,
+          },
           warranty: line.warranty_requirements,
           expected_delivery: line.expected_delivery_days,
           asset_classification: line.item_classification,
@@ -884,9 +894,7 @@ export class DofaEngineService {
         snapshot_hash: version.snapshot_hash,
         approved_at: new Date().toISOString(),
       };
-      const payloadHash = createHash('sha256')
-        .update(JSON.stringify(payload))
-        .digest('hex');
+      const payloadHash = sha256(payload);
       await manager.query(
         `UPDATE acq_request_versions
          SET status='APPROVED', approved_at=NOW(), updated_at=NOW()
