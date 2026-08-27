@@ -50,6 +50,11 @@ export type CreateInvoiceInput = {
   currency: string;
   lines: InvoiceLineInput[];
   document_upload_id: string;
+  invoice_type?:
+    | 'ONLINE_INSTITUTIONAL'
+    | 'ONLINE_PERSONAL_EXCEPTION'
+    | 'OFFLINE_PRINTED'
+    | 'OFFLINE_HANDWRITTEN';
 };
 
 export type CreateServiceAcceptanceInput = {

@@ -24,7 +24,10 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
   const [detail, setDetail] = useState<ProcurementCaseDetail | null>(null);
   const [tab, setTab] = useState("orders");
   const [busy, setBusy] = useState(false);
-  const [importPreview, setImportPreview] = useState<Record<string, unknown> | null>(null);
+  const [importPreview, setImportPreview] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [order, setOrder] = useState({
     proc_case_line_id: "",
     vendor_id: "",
@@ -105,11 +108,56 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <a className="inline-flex h-10 items-center rounded-md border px-4 text-sm font-medium" href={`/api/procurements/v1/cases/${caseId}/workbook`}>Export Excel</a>
-          <label className="inline-flex h-10 cursor-pointer items-center rounded-md border px-4 text-sm font-medium">Preview Excel<input className="hidden" type="file" accept=".xlsx" onChange={(event) => void previewWorkbook(event.target.files?.[0])}/></label>
+          <a
+            className="inline-flex h-10 items-center rounded-md border px-4 text-sm font-medium"
+            href={`/api/procurements/v1/cases/${caseId}/workbook`}
+          >
+            Export Excel
+          </a>
+          <label className="inline-flex h-10 cursor-pointer items-center rounded-md border px-4 text-sm font-medium">
+            Preview Excel
+            <input
+              className="hidden"
+              type="file"
+              accept=".xlsx"
+              onChange={(event) =>
+                void previewWorkbook(event.target.files?.[0])
+              }
+            />
+          </label>
         </div>
       </div>
-      {importPreview && <Card className="border-emerald-200 bg-emerald-50"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm"><div><strong>{String(importPreview.changed_rows ?? 0)} workbook rows validated</strong><p className="text-muted-foreground">Revision {String(importPreview.base_revision ?? revision)} · explicit atomic commit required</p></div><Button disabled={busy} onClick={() => void action(() => api.commitWorkbook(caseId, String(importPreview.import_preview_id)), "Workbook changes committed atomically").then(() => setImportPreview(null))}>Commit workbook</Button></CardContent></Card>}
+      {importPreview && (
+        <Card className="border-emerald-200 bg-emerald-50">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+            <div>
+              <strong>
+                {String(importPreview.changed_rows ?? 0)} workbook rows
+                validated
+              </strong>
+              <p className="text-muted-foreground">
+                Revision {String(importPreview.base_revision ?? revision)} ·
+                explicit atomic commit required
+              </p>
+            </div>
+            <Button
+              disabled={busy}
+              onClick={() =>
+                void action(
+                  () =>
+                    api.commitWorkbook(
+                      caseId,
+                      String(importPreview.import_preview_id),
+                    ),
+                  "Workbook changes committed atomically",
+                ).then(() => setImportPreview(null))
+              }
+            >
+              Commit workbook
+            </Button>
+          </CardContent>
+        </Card>
+      )}
       <div className="grid gap-3 md:grid-cols-5">
         {[
           ["Allocated", detail.approved_allocation],
@@ -348,6 +396,9 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
           <CardContent className="space-y-3">
             {detail.invoices.map((item) => {
               const id = value(item, "invoice_id");
+              const integrity = detail.integrity_projections.find(
+                (projection) => value(projection, "invoice_id") === id,
+              );
               return (
                 <div
                   key={id}
@@ -359,6 +410,26 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
                       {value(item, "status")} ·{" "}
                       {money(item.total_amount, detail.currency)}
                     </p>
+                    <p className="text-xs text-muted-foreground">
+                      Integrity:{" "}
+                      {integrity
+                        ? value(integrity, "final_decision").replaceAll(
+                            "_",
+                            " ",
+                          )
+                        : value(item, "integrity_status") || "PENDING"}
+                      {integrity
+                        ? ` · payment ${Boolean(integrity.payment_eligible) ? "eligible" : "blocked"}`
+                        : " · exact revision clearance required when the gate activates"}
+                    </p>
+                    {integrity && (
+                      <a
+                        className="text-xs font-medium text-blue-700 underline"
+                        href={`/finance/invoice-integrity/${value(integrity, "integrity_case_id")}`}
+                      >
+                        Open integrity evidence timeline
+                      </a>
+                    )}
                   </div>
                   {value(item, "status") === "ENTERED" && (
                     <Button

@@ -68,6 +68,7 @@ import { RegistrarModule } from './modules/registrar/registrar.module';
 import { AdminControlModule } from './modules/admin-control/admin-control.module';
 import { AcquisitionModule } from './modules/acquisitions/acquisition.module';
 import { ProcurementModule } from './modules/procurements/procurement.module';
+import { InvoiceIntegrityModule } from './modules/invoice-integrity/invoice-integrity.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -200,6 +201,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     AdminControlModule,
     AcquisitionModule,
     ProcurementModule,
+    InvoiceIntegrityModule,
   ],
   controllers: [AppController],
   providers: [

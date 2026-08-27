@@ -35,6 +35,7 @@ export type ProcurementCaseDetail = ProcurementCaseSummary & {
   downstream_status: Array<Record<string, unknown>>;
   ledger: Array<Record<string, unknown>>;
   audit_timeline: Array<Record<string, unknown>>;
+  integrity_projections: Array<Record<string, unknown>>;
   verified_unpaid_liability: number;
 };
 

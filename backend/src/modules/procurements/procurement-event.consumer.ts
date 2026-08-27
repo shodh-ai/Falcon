@@ -35,4 +35,52 @@ export class ProcurementEventConsumer {
       }
     }
   }
+
+  @Interval(10_000)
+  async consumeIntegrityDecisions() {
+    const rows = await this.db.query(
+      `SELECT e.event_id FROM inv_integrity_outbox_events e
+       JOIN tenant_subscriptions ts ON ts.tenant_id=e.tenant_id
+         AND ts.feature_key='dofa_module3_invoice_integrity' AND ts.is_enabled=true
+         AND (ts.expires_at IS NULL OR ts.expires_at>=NOW())
+       WHERE e.event_type IN ('InvoiceIntegrityCleared.v1','InvoiceIntegrityRejected.v1')
+         AND NOT EXISTS (
+           SELECT 1 FROM proc_integrity_event_consumption c
+           WHERE c.event_id=e.event_id
+         )
+       ORDER BY e.created_at LIMIT 20`,
+    );
+    for (const row of rows as Array<{ event_id: string }>) {
+      try {
+        await this.procurements.applyIntegrityDecision(row.event_id);
+      } catch (error) {
+        this.logger.error(
+          `Failed to apply integrity decision ${row.event_id}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+  }
+
+  @Interval(10_000)
+  async consumeIntegrityReconsiderations() {
+    const rows = await this.db.query(
+      `SELECT e.event_id FROM inv_integrity_outbox_events e
+       JOIN tenant_subscriptions ts ON ts.tenant_id=e.tenant_id
+         AND ts.feature_key='dofa_module3_invoice_integrity' AND ts.is_enabled=true
+       WHERE e.event_type='InvoiceIntegrityReconsiderationOpened.v1'
+         AND NOT EXISTS (SELECT 1 FROM proc_integrity_event_consumption c WHERE c.event_id=e.event_id)
+       ORDER BY e.created_at LIMIT 20`,
+    );
+    for (const row of rows as Array<{ event_id: string }>) {
+      try {
+        await this.procurements.invalidateIntegrityClearance(row.event_id);
+      } catch (error) {
+        this.logger.error(
+          `Failed to invalidate reconsidered integrity clearance ${row.event_id}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+  }
 }

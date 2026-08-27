@@ -412,6 +412,20 @@ export class ProcurementService {
     return { ...target, sourceId: reservations[0].funding_source_id };
   }
 
+  private async featureEnabled(
+    manager: EntityManager,
+    tenantId: string,
+    featureKey: string,
+  ) {
+    const rows = await manager.query(
+      `SELECT 1 FROM tenant_subscriptions
+       WHERE tenant_id=$1 AND feature_key=$2
+         AND is_enabled=true AND (expires_at IS NULL OR expires_at>=NOW())`,
+      [tenantId, featureKey],
+    );
+    return Boolean(rows[0]);
+  }
+
   async consumeApprovedEvent(eventId: string) {
     return this.db.transaction(async (manager) => {
       const existing = await manager.query(
@@ -541,6 +555,287 @@ export class ProcurementService {
     });
   }
 
+  async applyIntegrityDecision(eventId: string) {
+    return this.db.transaction(async (manager) => {
+      const prior = await manager.query(
+        `SELECT * FROM proc_integrity_event_consumption WHERE event_id=$1`,
+        [eventId],
+      );
+      if (prior[0]) return prior[0];
+      const events = await manager.query(
+        `SELECT * FROM inv_integrity_outbox_events
+         WHERE event_id=$1 AND event_type IN ('InvoiceIntegrityCleared.v1','InvoiceIntegrityRejected.v1')
+         FOR UPDATE`,
+        [eventId],
+      );
+      const event = events[0];
+      if (!event)
+        throw new NotFoundException('Integrity decision event not found');
+      if (hash(event.payload) !== event.payload_hash)
+        throw new ConflictException({
+          message: 'Integrity event hash mismatch',
+          code: 'EVENT_HASH_MISMATCH',
+        });
+      const envelope = event.payload as Record<string, any>;
+      const decision = envelope.payload as Record<string, any>;
+      const invoices = await manager.query(
+        `SELECT * FROM proc_invoices WHERE invoice_id=$1 AND tenant_id=$2 FOR UPDATE`,
+        [event.invoice_id, event.tenant_id],
+      );
+      const invoice = invoices[0];
+      if (!invoice) throw new NotFoundException('Invoice not found');
+      const row = await this.lockedCase(
+        manager,
+        invoice.proc_case_id,
+        event.tenant_id,
+      );
+      if (
+        Number(event.invoice_revision) !== Number(invoice.revision) ||
+        decision.document_hash !== invoice.document_hash
+      )
+        throw new ConflictException({
+          message: 'Integrity decision is stale',
+          code: 'STALE_INTEGRITY_DECISION',
+        });
+      const certifications = await manager.query(
+        `SELECT * FROM inv_certifications
+         WHERE integrity_decision_id=$1 AND integrity_case_id=$2 AND decision_hash=$3`,
+        [
+          decision.integrity_decision_id,
+          event.integrity_case_id,
+          decision.decision_hash,
+        ],
+      );
+      if (!certifications[0])
+        throw new ConflictException('Integrity certification is invalid');
+      const cleared = ['CLEARED_AUTOMATED', 'CLEARED_HUMAN'].includes(
+        decision.decision,
+      );
+      const matches = await manager.query(
+        `SELECT * FROM proc_match_results WHERE invoice_id=$1 ORDER BY created_at DESC LIMIT 1`,
+        [invoice.invoice_id],
+      );
+      const blockers = await manager.query(
+        `SELECT b.blocker_id FROM inv_integrity_blockers b
+         LEFT JOIN inv_integrity_blocker_resolutions r
+           ON r.blocker_id=b.blocker_id AND r.integrity_decision_id=$2
+         WHERE b.integrity_case_id=$1 AND r.blocker_resolution_id IS NULL LIMIT 1`,
+        [event.integrity_case_id, decision.integrity_decision_id],
+      );
+      const paymentEligible =
+        cleared && matches[0]?.status === 'MATCHED' && blockers.length === 0;
+      await manager.query(
+        `UPDATE proc_invoice_integrity_projections SET superseded_at=NOW(),payment_eligible=false
+         WHERE invoice_id=$1 AND integrity_decision_id<>$2`,
+        [invoice.invoice_id, decision.integrity_decision_id],
+      );
+      await manager.query(
+        `INSERT INTO proc_invoice_integrity_projections
+           (invoice_id,tenant_id,integrity_case_id,integrity_decision_id,invoice_revision,
+            document_hash,final_decision,trust_level,policy_version,evidence_set_hash,
+            decision_hash,cleared_at,superseded_at,payment_eligible,applied_source_event_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+                 CASE WHEN $12 THEN NOW() ELSE NULL END,NULL,$13,$14)
+         ON CONFLICT (invoice_id) DO UPDATE SET
+           integrity_case_id=EXCLUDED.integrity_case_id,
+           integrity_decision_id=EXCLUDED.integrity_decision_id,
+           invoice_revision=EXCLUDED.invoice_revision,
+           document_hash=EXCLUDED.document_hash,
+           final_decision=EXCLUDED.final_decision,
+           trust_level=EXCLUDED.trust_level,
+           policy_version=EXCLUDED.policy_version,
+           evidence_set_hash=EXCLUDED.evidence_set_hash,
+           decision_hash=EXCLUDED.decision_hash,
+           cleared_at=EXCLUDED.cleared_at,
+           superseded_at=NULL,
+           payment_eligible=EXCLUDED.payment_eligible,
+           applied_source_event_id=EXCLUDED.applied_source_event_id,
+           updated_at=NOW()`,
+        [
+          invoice.invoice_id,
+          event.tenant_id,
+          event.integrity_case_id,
+          decision.integrity_decision_id,
+          invoice.revision,
+          invoice.document_hash,
+          decision.decision,
+          decision.trust_level,
+          decision.policy_version,
+          decision.evidence_set_hash,
+          decision.decision_hash,
+          cleared,
+          paymentEligible,
+          eventId,
+        ],
+      );
+      if (!cleared) {
+        await manager.query(
+          `UPDATE proc_invoices SET status='DISPUTED',integrity_status='REJECTED',updated_at=NOW()
+           WHERE invoice_id=$1`,
+          [invoice.invoice_id],
+        );
+        await this.audit(
+          manager,
+          row,
+          'INVOICE',
+          invoice.invoice_id,
+          'INVOICE_INTEGRITY_REJECTED',
+          null,
+          {
+            integrity_status: invoice.integrity_status,
+          },
+          {
+            integrity_status: 'REJECTED',
+            integrity_decision_id: decision.integrity_decision_id,
+          },
+        );
+        await manager.query(
+          `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW()
+           WHERE proc_case_id=$1`,
+          [row.proc_case_id],
+        );
+        await manager.query(
+          `INSERT INTO proc_integrity_event_consumption (event_id,tenant_id,invoice_id,event_type)
+           VALUES ($1,$2,$3,$4) ON CONFLICT (event_id) DO NOTHING`,
+          [eventId, event.tenant_id, invoice.invoice_id, event.event_type],
+        );
+        return {
+          invoice_id: invoice.invoice_id,
+          payment_eligible: false,
+          status: 'DISPUTED',
+        };
+      }
+      if (!paymentEligible)
+        throw new ConflictException(
+          'Integrity cleared but current three-way match/blocker gate failed',
+        );
+      let legacyInvoiceId = invoice.legacy_invoice_id as string | null;
+      if (!legacyInvoiceId) {
+        const legacy = await manager.query(
+          `INSERT INTO fin_vendor_invoices
+             (tenant_id,vendor_id,invoice_number,invoice_date,taxable_amount,gst_amount,tds_amount,
+              total_amount,net_payable,status,po_id,proc_invoice_id,source_system)
+           VALUES ($1,$2,$3,$4,$5,$6,0,$7,$7,'APPROVED',$8,$9,'MODULE2') RETURNING invoice_id`,
+          [
+            row.tenant_id,
+            invoice.vendor_id,
+            invoice.invoice_number,
+            invoice.invoice_date,
+            invoice.taxable_amount,
+            invoice.tax_amount,
+            invoice.total_amount,
+            (
+              await manager.query(
+                `SELECT legacy_po_id FROM proc_orders WHERE order_id=$1`,
+                [invoice.order_id],
+              )
+            )[0]?.legacy_po_id ?? null,
+            invoice.invoice_id,
+          ],
+        );
+        legacyInvoiceId = legacy[0].invoice_id;
+      }
+      await manager.query(
+        `UPDATE proc_invoices SET status='VERIFIED',integrity_status='CLEARED',legacy_invoice_id=$2,
+         updated_at=NOW() WHERE invoice_id=$1`,
+        [invoice.invoice_id, legacyInvoiceId],
+      );
+      await this.audit(
+        manager,
+        row,
+        'INVOICE',
+        invoice.invoice_id,
+        'INVOICE_PAYMENT_ELIGIBLE',
+        null,
+        null,
+        {
+          integrity_decision_id: decision.integrity_decision_id,
+          match_result_id: matches[0].match_result_id,
+          invoice_revision: invoice.revision,
+          document_hash: invoice.document_hash,
+        },
+      );
+      const paymentEvent = await this.emit(
+        manager,
+        row,
+        'ProcurementInvoicePaymentEligible.v1',
+        invoice.invoice_id,
+        {
+          invoice_id: invoice.invoice_id,
+          invoice_revision: Number(invoice.revision),
+          document_hash: invoice.document_hash,
+          three_way_match_status: matches[0].status,
+          integrity_decision: decision.decision,
+          trust_level: decision.trust_level,
+          payment_eligibility: true,
+          integrity_decision_id: decision.integrity_decision_id,
+        },
+      );
+      await manager.query(
+        `INSERT INTO proc_integrity_event_consumption (event_id,tenant_id,invoice_id,event_type)
+         VALUES ($1,$2,$3,$4) ON CONFLICT (event_id) DO NOTHING`,
+        [eventId, event.tenant_id, invoice.invoice_id, event.event_type],
+      );
+      return {
+        invoice_id: invoice.invoice_id,
+        status: 'VERIFIED',
+        integrity_status: 'CLEARED',
+        payment_eligible: true,
+        event: paymentEvent,
+      };
+    });
+  }
+
+  async invalidateIntegrityClearance(eventId: string) {
+    return this.db.transaction(async (manager) => {
+      const prior = await manager.query(
+        `SELECT * FROM proc_integrity_event_consumption WHERE event_id=$1`,
+        [eventId],
+      );
+      if (prior[0]) return prior[0];
+      const events = await manager.query(
+        `SELECT * FROM inv_integrity_outbox_events
+         WHERE event_id=$1 AND event_type='InvoiceIntegrityReconsiderationOpened.v1' FOR UPDATE`,
+        [eventId],
+      );
+      const event = events[0];
+      if (!event || hash(event.payload) !== event.payload_hash)
+        throw new ConflictException(
+          'Integrity reconsideration event is invalid',
+        );
+      const envelope = event.payload as Record<string, any>;
+      const payload = envelope.payload as Record<string, any>;
+      const invoices = await manager.query(
+        `SELECT * FROM proc_invoices WHERE invoice_id=$1 AND tenant_id=$2 FOR UPDATE`,
+        [event.invoice_id, event.tenant_id],
+      );
+      const invoice = invoices[0];
+      if (
+        !invoice ||
+        Number(invoice.revision) !== Number(event.invoice_revision) ||
+        invoice.document_hash !== payload.document_hash
+      )
+        throw new ConflictException('Integrity reconsideration is stale');
+      await manager.query(
+        `UPDATE proc_invoice_integrity_projections SET payment_eligible=false,superseded_at=NOW(),updated_at=NOW()
+         WHERE invoice_id=$1`,
+        [invoice.invoice_id],
+      );
+      await manager.query(
+        `UPDATE proc_invoices SET integrity_status='PENDING',
+         status=CASE WHEN status='VERIFIED' THEN 'INTEGRITY_REVIEW' ELSE status END,updated_at=NOW()
+         WHERE invoice_id=$1`,
+        [invoice.invoice_id],
+      );
+      await manager.query(
+        `INSERT INTO proc_integrity_event_consumption (event_id,tenant_id,invoice_id,event_type)
+         VALUES ($1,$2,$3,$4)`,
+        [eventId, event.tenant_id, invoice.invoice_id, event.event_type],
+      );
+      return { invoice_id: invoice.invoice_id, payment_eligible: false };
+    });
+  }
+
   async list(actor: ProcurementActor, status?: string) {
     const grants = await this.grants(actor, 'PROCUREMENT_VIEW');
     const tenantWide = grants.some(
@@ -587,6 +882,7 @@ export class ProcurementService {
       downstream,
       ledger,
       audit,
+      integrityProjections,
     ] = await Promise.all([
       this.db.query(
         `SELECT * FROM proc_case_lines WHERE proc_case_id=$1 ORDER BY line_number`,
@@ -652,6 +948,12 @@ export class ProcurementService {
         `SELECT * FROM proc_audit_events WHERE proc_case_id=$1 ORDER BY created_at,audit_event_id`,
         [caseId],
       ),
+      this.db.query(
+        `SELECT p.* FROM proc_invoice_integrity_projections p
+         JOIN proc_invoices i ON i.invoice_id=p.invoice_id
+         WHERE i.proc_case_id=$1 ORDER BY p.updated_at`,
+        [caseId],
+      ),
     ]);
     const verifiedUnpaid =
       invoices
@@ -691,6 +993,7 @@ export class ProcurementService {
       downstream_status: downstream,
       ledger,
       audit_timeline: audit,
+      integrity_projections: integrityProjections,
     };
   }
 
@@ -1630,8 +1933,8 @@ export class ProcurementService {
         `INSERT INTO proc_invoices
            (invoice_id,proc_case_id,order_id,tenant_id,vendor_id,invoice_number,invoice_date,currency,
             taxable_amount,tax_amount,freight_amount,total_amount,status,document_object_key,
-            document_hash,document_scan_status,duplicate_hash,entered_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'ENTERED',$13,$14,$15,$16,$17)`,
+            document_hash,document_scan_status,duplicate_hash,entered_by,invoice_type)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'ENTERED',$13,$14,$15,$16,$17,$18)`,
         [
           invoiceId,
           caseId,
@@ -1650,6 +1953,7 @@ export class ProcurementService {
           upload.malware_scan_status,
           duplicateHash,
           actor.user_id,
+          input.invoice_type ?? 'ONLINE_INSTITUTIONAL',
         ],
       );
       await manager.query(
@@ -1685,15 +1989,38 @@ export class ProcurementService {
         { invoice_number: input.invoice_number, total_amount: total },
         requestId,
       );
-      await manager.query(
-        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
-        [caseId],
+      const event = await this.emit(
+        manager,
+        row,
+        'ProcurementInvoiceSubmitted.v1',
+        invoiceId,
+        {
+          invoice_id: invoiceId,
+          invoice_revision: 1,
+          document_hash: upload.content_hash,
+          proc_case_id: caseId,
+          order_id: orderId,
+          vendor_id: order.vendor_id,
+          amount: total,
+          currency: row.currency,
+          invoice_type: input.invoice_type ?? 'ONLINE_INSTITUTIONAL',
+          invoice_lines: calculated.map((item) => ({
+            order_line_id: item.source.order_line_id,
+            quantity: item.input.quantity,
+            unit_price: money(item.input.unit_price),
+            tax_amount: item.totals.tax,
+            freight_amount: item.totals.freight,
+            line_total: item.totals.total,
+          })),
+          three_way_match_reference: null,
+        },
       );
       return {
         invoice_id: invoiceId,
         status: 'ENTERED',
         total_amount: total,
-        aggregate_revision: Number(row.aggregate_revision) + 1,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
       };
     });
   }
@@ -1933,6 +2260,52 @@ export class ProcurementService {
           aggregate_revision: Number(row.aggregate_revision) + 1,
         };
       }
+      if (
+        await this.featureEnabled(
+          manager,
+          row.tenant_id,
+          'dofa_module3_payment_gate',
+        )
+      ) {
+        await manager.query(
+          `UPDATE proc_invoices SET status='INTEGRITY_REVIEW',integrity_status='PENDING',
+           verified_by=$2,verified_at=NOW(),updated_at=NOW() WHERE invoice_id=$1`,
+          [invoiceId, actor.user_id],
+        );
+        await this.audit(
+          manager,
+          row,
+          'INVOICE',
+          invoiceId,
+          'INVOICE_MATCHED',
+          actor.user_id,
+          { status: 'ENTERED' },
+          {
+            status: 'INTEGRITY_REVIEW',
+            match_result_id: match.match_result_id,
+          },
+        );
+        const event = await this.emit(
+          manager,
+          row,
+          'ProcurementInvoiceMatched.v1',
+          invoiceId,
+          {
+            invoice_id: invoiceId,
+            invoice_revision: Number(invoice.revision),
+            document_hash: invoice.document_hash,
+            match_result: match,
+          },
+        );
+        return {
+          ...invoice,
+          status: 'INTEGRITY_REVIEW',
+          integrity_status: 'PENDING',
+          match,
+          event,
+          aggregate_revision: Number(row.aggregate_revision),
+        };
+      }
       const legacy = await manager.query(
         `INSERT INTO fin_vendor_invoices
            (tenant_id,vendor_id,invoice_number,invoice_date,taxable_amount,gst_amount,tds_amount,total_amount,net_payable,status,po_id,proc_invoice_id,source_system)
@@ -2098,6 +2471,61 @@ export class ProcurementService {
       if (!invoice) throw new NotFoundException('Invoice not found');
       if (!['VERIFIED', 'PARTIALLY_PAID'].includes(invoice.status))
         throw new ConflictException(`Invoice is ${invoice.status}`);
+      const integrityEnabled = await this.featureEnabled(
+        manager,
+        row.tenant_id,
+        'dofa_module3_payment_gate',
+      );
+      if (integrityEnabled) {
+        const projections = await manager.query(
+          `SELECT p.*,c.investigator_id,c.certifier_id,c.decision
+           FROM proc_invoice_integrity_projections p
+           JOIN inv_certifications c ON c.integrity_decision_id=p.integrity_decision_id
+           WHERE p.invoice_id=$1 FOR UPDATE`,
+          [invoiceId],
+        );
+        const projection = projections[0];
+        const blockers = await manager.query(
+          `SELECT b.blocker_id FROM inv_integrity_blockers b
+           JOIN inv_integrity_cases c ON c.integrity_case_id=b.integrity_case_id
+           LEFT JOIN inv_integrity_blocker_resolutions r
+             ON r.blocker_id=b.blocker_id AND r.integrity_decision_id=$4
+           WHERE c.invoice_id=$1 AND c.invoice_revision=$2
+             AND c.document_hash=$3 AND c.workflow_state<>'SUPERSEDED'
+             AND r.blocker_resolution_id IS NULL LIMIT 1`,
+          [
+            invoiceId,
+            invoice.revision,
+            invoice.document_hash,
+            projection?.integrity_decision_id ?? null,
+          ],
+        );
+        if (
+          !projection ||
+          !projection.payment_eligible ||
+          projection.superseded_at ||
+          Number(projection.invoice_revision) !== Number(invoice.revision) ||
+          projection.document_hash !== invoice.document_hash ||
+          !['CLEARED_AUTOMATED', 'CLEARED_HUMAN'].includes(
+            projection.final_decision,
+          ) ||
+          blockers.length
+        )
+          throw new ConflictException({
+            message:
+              'Current invoice integrity clearance is required for payment',
+            code: 'INVOICE_INTEGRITY_CLEARANCE_REQUIRED',
+          });
+        if (
+          projection.investigator_id === actor.user_id ||
+          projection.certifier_id === actor.user_id
+        )
+          throw new ForbiddenException({
+            message:
+              'Payment poster must be independent of integrity investigation and certification',
+            code: 'SOD_INTEGRITY_PAYMENT_VIOLATION',
+          });
+      }
       if (
         invoice.entered_by === actor.user_id ||
         invoice.verified_by === actor.user_id
