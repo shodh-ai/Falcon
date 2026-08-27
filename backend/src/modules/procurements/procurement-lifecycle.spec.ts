@@ -207,6 +207,8 @@ describe('Module 2 lifecycle', () => {
           service_accepted: 0,
         },
       ])
+      // Module 4 inventory gate remains disabled during shadow rollout.
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           proc_case_line_id: 'line-asset',

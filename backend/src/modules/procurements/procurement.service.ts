@@ -3202,6 +3202,15 @@ export class ProcurementService {
        FROM proc_case_lines pcl WHERE pcl.proc_case_id=$1 ORDER BY pcl.line_number`,
       [caseId],
     );
+    const module4GateEnabled = lines.some((line: Record<string, any>) =>
+      ['ASSET', 'CONSUMABLE'].includes(line.fulfillment_type),
+    )
+      ? await this.featureEnabled(
+          this.db.manager ?? (this.db as unknown as EntityManager),
+          row.tenant_id,
+          'dofa_module4_inventory_gate',
+        )
+      : false;
     const downstream = await this.db.query(
       `SELECT DISTINCT ON (proc_case_line_id,status_type) proc_case_line_id,status_type,status
        FROM proc_downstream_status WHERE proc_case_id=$1 ORDER BY proc_case_line_id,status_type,aggregate_sequence DESC`,
@@ -3227,12 +3236,13 @@ export class ProcurementService {
       let downstreamReady = true;
       if (line.fulfillment_type === 'ASSET')
         downstreamReady =
-          finalized('PHYSICAL_VERIFICATION') &&
+          (!module4GateEnabled || finalized('PHYSICAL_VERIFICATION')) &&
           finalized('ASSET_ID_ALLOCATION') &&
           finalized('INVENTORY_INGESTION');
       if (line.fulfillment_type === 'CONSUMABLE')
         downstreamReady =
-          finalized('CONSUMABLE_LEDGER') || finalized('INVENTORY_INGESTION');
+          (!module4GateEnabled || finalized('PHYSICAL_VERIFICATION')) &&
+          (finalized('CONSUMABLE_LEDGER') || finalized('INVENTORY_INGESTION'));
       return {
         proc_case_line_id: line.proc_case_line_id,
         fulfillment_type: line.fulfillment_type,
@@ -3284,6 +3294,109 @@ export class ProcurementService {
         released: money(row.released_amount),
       },
     };
+  }
+
+  async applyPhysicalVerificationCompletion(eventId: string) {
+    return this.db.transaction(async (manager) => {
+      const existing = await manager.query(
+        `SELECT * FROM proc_physical_verification_event_consumption WHERE event_id=$1`,
+        [eventId],
+      );
+      if (existing[0]) return { duplicate: true };
+      const events = await manager.query(
+        `SELECT * FROM pv_outbox_events WHERE event_id=$1
+           AND event_type='PhysicalVerificationLineCompleted.v1' FOR UPDATE`,
+        [eventId],
+      );
+      const event = events[0];
+      if (!event)
+        throw new NotFoundException('Physical verification event not found');
+      if (hash(event.payload) !== event.payload_hash)
+        throw new ConflictException({
+          message: 'Physical verification event hash mismatch',
+          code: 'EVENT_HASH_MISMATCH',
+        });
+      const payload = event.payload as Record<string, any>;
+      const caseLines = await manager.query(
+        `SELECT pcl.*,pc.aggregate_revision FROM proc_case_lines pcl
+         JOIN proc_cases pc ON pc.proc_case_id=pcl.proc_case_id
+         WHERE pcl.proc_case_line_id=$1 AND pcl.proc_case_id=$2 AND pcl.tenant_id=$3 FOR UPDATE OF pcl`,
+        [
+          payload.proc_case_line_id,
+          event.payload.proc_case_id,
+          event.tenant_id,
+        ],
+      );
+      const line = caseLines[0];
+      if (!line) throw new NotFoundException('Procurement case line not found');
+      const verification = await manager.query(
+        `WITH case_totals AS (
+           SELECT c.verification_case_id,c.workflow_state,
+                  c.eligible_quantity-COALESCE((SELECT SUM(r.quantity) FROM proc_returns r
+                    WHERE r.receipt_line_id=c.receipt_line_id AND r.status='RESOLVED'),0) AS eligible_quantity
+           FROM pv_cases c WHERE c.proc_case_line_id=$1
+         )
+         SELECT COUNT(*) FILTER (WHERE ct.workflow_state<>'CLOSED')::int AS open_cases,
+                COALESCE(SUM(ct.eligible_quantity),0) AS eligible_quantity,
+                COALESCE((SELECT SUM(s.subject_quantity) FROM pv_subjects s
+                  JOIN pv_verification_identities i ON i.subject_id=s.subject_id AND i.status='ACTIVE'
+                  JOIN pv_cases c ON c.verification_case_id=s.verification_case_id
+                  WHERE c.proc_case_line_id=$1 AND s.status='ACTIVE'),0) AS verified_quantity
+         FROM case_totals ct`,
+        [line.proc_case_line_id],
+      );
+      const aggregate = verification[0];
+      const finalized =
+        payload.status === 'FINALIZED' &&
+        Number(aggregate.open_cases) === 0 &&
+        Math.abs(
+          Number(aggregate.eligible_quantity) -
+            Number(aggregate.verified_quantity),
+        ) <= 0.0005;
+      const sequences = await manager.query(
+        `SELECT COALESCE(MAX(aggregate_sequence),0)+1 AS next FROM proc_downstream_status
+         WHERE proc_case_line_id=$1 AND status_type='PHYSICAL_VERIFICATION'`,
+        [line.proc_case_line_id],
+      );
+      const statusId = randomUUID();
+      await manager.query(
+        `INSERT INTO proc_downstream_status
+         (downstream_status_id,proc_case_id,proc_case_line_id,tenant_id,source_event_id,
+          source_module,status_type,status,aggregate_sequence,payload,occurred_at)
+         VALUES ($1,$2,$3,$4,$5,'MODULE_4','PHYSICAL_VERIFICATION',$6,$7,$8::jsonb,$9)`,
+        [
+          statusId,
+          line.proc_case_id,
+          line.proc_case_line_id,
+          line.tenant_id,
+          eventId,
+          finalized ? 'FINALIZED' : 'PENDING',
+          sequences[0].next,
+          JSON.stringify({
+            source_aggregate_sequence: Number(event.aggregate_sequence),
+            source_verification_case_id: event.verification_case_id,
+            eligible_quantity: Number(aggregate.eligible_quantity),
+            verified_quantity: Number(aggregate.verified_quantity),
+            reason: payload.reason ?? null,
+          }),
+          event.occurred_at,
+        ],
+      );
+      await manager.query(
+        `INSERT INTO proc_physical_verification_event_consumption
+         (event_id,tenant_id,proc_case_id,proc_case_line_id) VALUES ($1,$2,$3,$4)`,
+        [eventId, line.tenant_id, line.proc_case_id, line.proc_case_line_id],
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [line.proc_case_id],
+      );
+      return {
+        proc_case_line_id: line.proc_case_line_id,
+        status: finalized ? 'FINALIZED' : 'PENDING',
+        verified_quantity: Number(aggregate.verified_quantity),
+      };
+    });
   }
 
   async finalize(
