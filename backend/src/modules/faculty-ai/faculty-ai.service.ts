@@ -297,12 +297,12 @@ export class FacultyAiService implements OnModuleInit {
   async facultyContext(facultyUserId: string, tenantId?: string) {
     const tid = this.tenantId(tenantId);
     const [profile] = await this.dataSource.query(
-      `SELECT u.full_name, u.email, d.name AS department_name
+      `SELECT u.name AS full_name, u.official_email AS email, d.dept_name AS department_name
        FROM users u
-       LEFT JOIN departments d ON d.department_id = u.department_id
-       WHERE u.user_id = $1
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE u.user_id = $1 AND u.tenant_id = $2
        LIMIT 1`,
-      [facultyUserId],
+      [facultyUserId, tid],
     );
 
     const isoDay = new Date().getDay() === 0 ? 7 : new Date().getDay();

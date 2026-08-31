@@ -991,11 +991,11 @@ export class LeadershipService {
         .catch(() => [{ scholarship_total: 0 }]),
       this.db
         .query(
-          `SELECT COALESCE(sp.department, 'Unknown') AS department,
+          `SELECT COALESCE(dep.dept_name, 'Unknown') AS department,
                   SUM(d.total_amount - d.paid_amount)::numeric AS outstanding
            FROM finance_fee_demands d
            JOIN users u ON u.user_id = d.student_user_id
-           LEFT JOIN student_profiles sp ON sp.user_id = d.student_user_id
+           LEFT JOIN departments dep ON dep.dept_id = u.dept_id
            WHERE u.tenant_id = $1 AND d.deleted_at IS NULL
              AND d.status IN ('PENDING', 'PARTIALLY_PAID', 'OVERDUE')
            GROUP BY 1 ORDER BY outstanding DESC LIMIT 5`,

@@ -154,7 +154,7 @@ export class LeadershipIntelligenceService {
     if (metric === 'TUITION_REVENUE') {
       const rows = await this.db.query(
         `WITH m AS (
-           SELECT DATE_TRUNC('month', created_at)::date AS month,
+           SELECT DATE_TRUNC('month', t.created_at)::date AS month,
                   COALESCE(SUM(amount), 0)::numeric AS revenue
            FROM finance_transactions t
            JOIN users u ON u.user_id = t.student_user_id
@@ -686,7 +686,7 @@ export class LeadershipIntelligenceService {
            SELECT MAX(score_date) FROM dept_financial_scores WHERE tenant_id = $1
          )
        ORDER BY s.total_score ASC`,
-      [tid, tid],
+      [tid],
     );
     return rows.map(
       (r: {
@@ -799,11 +799,11 @@ export class LeadershipIntelligenceService {
     const [monthly, defaulters, salaryRows] = await Promise.all([
       this.getLedgerBreakdown(tid, 'month'),
       this.db.query(
-        `SELECT COALESCE(sp.department, 'Unknown') AS department,
+        `SELECT COALESCE(dep.dept_name, 'Unknown') AS department,
                 COALESCE(SUM(d.total_amount - d.paid_amount), 0)::numeric AS outstanding
          FROM finance_fee_demands d
          JOIN users u ON u.user_id = d.student_user_id
-         LEFT JOIN student_profiles sp ON sp.user_id = d.student_user_id
+         LEFT JOIN departments dep ON dep.dept_id = u.dept_id
          WHERE u.tenant_id = $1
            AND d.deleted_at IS NULL
            AND d.status IN ('PENDING', 'PARTIALLY_PAID', 'OVERDUE')

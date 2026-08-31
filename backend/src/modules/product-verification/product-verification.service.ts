@@ -2747,20 +2747,61 @@ export class ProductVerificationService {
       );
       const returned = returns[0];
       if (!returned) throw new NotFoundException('Return record not found');
+      const exactAllocations = await manager.query(
+        `SELECT a.subject_id,a.quantity,s.verification_case_id
+         FROM proc_return_subject_allocations a JOIN pv_subjects s ON s.subject_id=a.subject_id
+         WHERE a.return_id=$1 ORDER BY a.subject_id FOR UPDATE OF s`,
+        [returned.return_id],
+      );
+      if (returned.managed_by === 'MODULE7' && !exactAllocations.length)
+        throw new ConflictException({
+          message: 'Module 7 return is missing exact subject allocations',
+          code: 'RETURN_SUBJECT_ALLOCATION_REQUIRED',
+        });
       const cases = await manager.query(
         `SELECT * FROM pv_cases WHERE receipt_line_id=$1 AND tenant_id=$2 FOR UPDATE`,
         [returned.receipt_line_id, event.tenant_id],
       );
       for (const row of cases as VerificationCase[]) {
-        let remaining = Number(returned.quantity);
-        const subjects = await manager.query(
-          `SELECT * FROM pv_subjects WHERE verification_case_id=$1 AND status='ACTIVE' ORDER BY subject_sequence FOR UPDATE`,
-          [row.verification_case_id],
+        const exactForCase = exactAllocations.filter(
+          (allocation: any) =>
+            allocation.verification_case_id === row.verification_case_id,
         );
+        if (returned.managed_by === 'MODULE7' && !exactForCase.length) continue;
+        let remaining =
+          returned.managed_by === 'MODULE7'
+            ? exactForCase.reduce(
+                (sum: number, allocation: any) =>
+                  sum + Number(allocation.quantity),
+                0,
+              )
+            : Number(returned.quantity);
+        const subjects =
+          returned.managed_by === 'MODULE7'
+            ? await manager.query(
+                `SELECT s.*,a.quantity AS exact_return_quantity FROM pv_subjects s
+                 JOIN proc_return_subject_allocations a ON a.subject_id=s.subject_id
+                 WHERE a.return_id=$1 AND s.verification_case_id=$2 AND s.status='ACTIVE'
+                 ORDER BY s.subject_sequence FOR UPDATE OF s`,
+                [returned.return_id, row.verification_case_id],
+              )
+            : await manager.query(
+                `SELECT * FROM pv_subjects WHERE verification_case_id=$1 AND status='ACTIVE' ORDER BY subject_sequence FOR UPDATE`,
+                [row.verification_case_id],
+              );
         for (const subject of subjects) {
           if (remaining <= 0.0005) break;
           const quantity = Number(subject.subject_quantity);
-          const returnedQuantity = Math.min(quantity, remaining);
+          const returnedQuantity = subject.exact_return_quantity
+            ? Number(subject.exact_return_quantity)
+            : Math.min(quantity, remaining);
+          if (returnedQuantity < quantity - 0.0005) {
+            // A partial LOT return is represented by Module 5's immutable quantity
+            // movement. The physical LOT identity remains active and is not guessed,
+            // split, or revoked by receipt order.
+            remaining -= returnedQuantity;
+            continue;
+          }
           const identities = await manager.query(
             `SELECT * FROM pv_verification_identities WHERE subject_id=$1 AND status='ACTIVE' FOR UPDATE`,
             [subject.subject_id],
@@ -2787,30 +2828,6 @@ export class ProductVerificationService {
             `UPDATE pv_subjects SET status='RETURNED',updated_at=NOW() WHERE subject_id=$1`,
             [subject.subject_id],
           );
-          if (returnedQuantity < quantity - 0.0005) {
-            const sequences = await manager.query(
-              `SELECT COALESCE(MAX(subject_sequence),0)+1 AS next FROM pv_subjects WHERE verification_case_id=$1`,
-              [row.verification_case_id],
-            );
-            await manager.query(
-              `INSERT INTO pv_subjects
-               (verification_case_id,tenant_id,subject_type,subject_sequence,subject_quantity,unit_of_measure,
-                batch_number,expiry_date,manufacture_date,manufacturer,status,created_by)
-               VALUES ($1,$2,'LOT',$3,$4,$5,$6,$7,$8,$9,'ACTIVE',$10)`,
-              [
-                row.verification_case_id,
-                row.tenant_id,
-                sequences[0].next,
-                quantity - returnedQuantity,
-                subject.unit_of_measure,
-                subject.batch_number,
-                subject.expiry_date,
-                subject.manufacture_date,
-                subject.manufacturer,
-                subject.created_by,
-              ],
-            );
-          }
           remaining -= returnedQuantity;
         }
         await manager.query(
@@ -2906,6 +2923,72 @@ export class ProductVerificationService {
         ],
       );
       return rows[0] ?? { duplicate: true };
+    });
+  }
+
+  async applyInventoryIdentityEvent(eventId: string) {
+    return this.db.transaction(async (manager) => {
+      if (
+        (
+          await manager.query(
+            `SELECT 1 FROM pv_inventory_event_consumption WHERE event_id=$1`,
+            [eventId],
+          )
+        )[0]
+      )
+        return { duplicate: true };
+      const events = await manager.query(
+        `SELECT * FROM inv_outbox_events WHERE event_id=$1 AND event_type='InventoryIdentityAllocated.v1' FOR UPDATE`,
+        [eventId],
+      );
+      const event = events[0];
+      if (!event)
+        throw new NotFoundException('Inventory identity event not found');
+      if (verificationHash(event.payload) !== event.payload_hash)
+        throw new ConflictException({
+          message: 'Inventory identity event hash mismatch',
+          code: 'EVENT_HASH_MISMATCH',
+        });
+      const payload = event.payload as Record<string, any>;
+      const subjects = await manager.query(
+        `SELECT subject_id,tenant_id FROM pv_subjects WHERE subject_id=$1 AND tenant_id=$2 FOR UPDATE`,
+        [event.subject_id, event.tenant_id],
+      );
+      if (!subjects[0])
+        throw new NotFoundException('Physical subject not found');
+      const latest = await manager.query(
+        `SELECT source_aggregate_sequence FROM pv_inventory_identity_projections WHERE subject_id=$1 ORDER BY source_aggregate_sequence DESC LIMIT 1`,
+        [event.subject_id],
+      );
+      if (
+        !latest[0] ||
+        Number(latest[0].source_aggregate_sequence) <
+          Number(event.aggregate_sequence)
+      )
+        await manager.query(
+          `INSERT INTO pv_inventory_identity_projections(tenant_id,subject_id,verification_identity_id,source_event_id,rfid,university_serial,asset_id,inventory_record_id,source_aggregate_sequence,occurred_at,payload)
+           VALUES($1,$2,$3,$4,$5,NULL,$6,$7,$8,$9,$10::jsonb) ON CONFLICT(source_event_id) DO NOTHING`,
+          [
+            event.tenant_id,
+            event.subject_id,
+            payload.verification_identity_id,
+            eventId,
+            payload.logical_rfid_code ?? null,
+            payload.university_asset_id ?? payload.lot_id ?? null,
+            payload.inventory_record_id,
+            event.aggregate_sequence,
+            event.occurred_at,
+            JSON.stringify(payload),
+          ],
+        );
+      await manager.query(
+        `INSERT INTO pv_inventory_event_consumption(event_id,tenant_id,subject_id) VALUES($1,$2,$3)`,
+        [eventId, event.tenant_id, event.subject_id],
+      );
+      return {
+        subject_id: event.subject_id,
+        inventory_record_id: payload.inventory_record_id,
+      };
     });
   }
 

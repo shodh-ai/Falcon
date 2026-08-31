@@ -79,4 +79,26 @@ export class ProductVerificationEventConsumer {
       }
     }
   }
+
+  @Interval(12_000)
+  async consumeInventoryIdentities() {
+    const rows = await this.db.query(
+      `SELECT e.event_id FROM inv_outbox_events e
+       JOIN tenant_subscriptions ts ON ts.tenant_id=e.tenant_id
+         AND ts.feature_key='dofa_module5_inventory' AND ts.is_enabled=true
+       WHERE e.event_type='InventoryIdentityAllocated.v1'
+         AND NOT EXISTS (SELECT 1 FROM pv_inventory_event_consumption c WHERE c.event_id=e.event_id)
+       ORDER BY e.created_at LIMIT 20`,
+    );
+    for (const row of rows as Array<{ event_id: string }>) {
+      try {
+        await this.verification.applyInventoryIdentityEvent(row.event_id);
+      } catch (error) {
+        this.logger.error(
+          `Failed to project inventory identity ${row.event_id}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+  }
 }

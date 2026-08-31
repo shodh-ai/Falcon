@@ -156,6 +156,23 @@ export function assertSafeAcquisitionInput(input: CreateAcquisitionInput) {
       `${prefix} special_procurement_requirements`,
     );
     bounded(line.product_url, 2_048, `${prefix} product_url`);
+    bounded(
+      line.policy_source_reference,
+      2_048,
+      `${prefix} policy_source_reference`,
+    );
+    for (const [field, value] of [
+      ['return_window_days', line.return_window_days],
+      ['doa_window_days', line.doa_window_days],
+    ] as const) {
+      if (
+        value != null &&
+        (!Number.isInteger(Number(value)) ||
+          Number(value) < 0 ||
+          Number(value) > 36_500)
+      )
+        throw new Error(`${prefix} ${field} is invalid`);
+    }
     if (
       line.expected_delivery_days != null &&
       (!Number.isInteger(Number(line.expected_delivery_days)) ||

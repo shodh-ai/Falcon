@@ -312,7 +312,8 @@ export class DofaEngineService {
       );
       if (priorSigner[0]) {
         throw new BadRequestException({
-          message: 'The same user cannot sign multiple acquisition approval levels',
+          message:
+            'The same user cannot sign multiple acquisition approval levels',
           code: 'DISTINCT_SIGNER_REQUIRED',
         });
       }
@@ -363,18 +364,20 @@ export class DofaEngineService {
       const previousHash = previous[0]?.decision_hash ?? null;
       const decisionAt = decided[0].decided_at;
       const decisionHash = createHash('sha256')
-        .update(JSON.stringify({
-          tenant_id: tid,
-          acquisition_version_id: c.source_id,
-          dofa_case_id: caseId,
-          approval_level: approvalLevel,
-          approver_id: userId,
-          approver_role: actualRole,
-          decision: body.decision,
-          comment: body.notes ?? null,
-          decision_at: decisionAt,
-          previous_decision_hash: previousHash,
-        }))
+        .update(
+          JSON.stringify({
+            tenant_id: tid,
+            acquisition_version_id: c.source_id,
+            dofa_case_id: caseId,
+            approval_level: approvalLevel,
+            approver_id: userId,
+            approver_role: actualRole,
+            decision: body.decision,
+            comment: body.notes ?? null,
+            decision_at: decisionAt,
+            previous_decision_hash: previousHash,
+          }),
+        )
         .digest('hex');
       await manager.query(
         `INSERT INTO acq_approval_decisions (
@@ -382,8 +385,19 @@ export class DofaEngineService {
            approver_id, approver_role, decision, comment, decision_at,
            decision_hash, previous_decision_hash
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [tid, c.source_id, caseId, approvalLevel, userId, actualRole,
-          body.decision, body.notes ?? null, decisionAt, decisionHash, previousHash],
+        [
+          tid,
+          c.source_id,
+          caseId,
+          approvalLevel,
+          userId,
+          actualRole,
+          body.decision,
+          body.notes ?? null,
+          decisionAt,
+          decisionHash,
+          previousHash,
+        ],
       );
     });
 
@@ -614,6 +628,14 @@ export class DofaEngineService {
     }
 
     if (domain === 'ASSET_WRITEOFF' && sourceId) {
+      if (c.source_table === 'retirement_cases') {
+        await this.db.query(
+          `UPDATE retirement_cases SET dofa_decision_status=$3,updated_at=NOW()
+           WHERE retirement_case_id=$1::uuid AND tenant_id=$2::uuid`,
+          [sourceId, tenantId, outcome],
+        );
+        return;
+      }
       if (outcome === 'APPROVED') {
         await this.db.query(
           `UPDATE asset_writeoff_requests

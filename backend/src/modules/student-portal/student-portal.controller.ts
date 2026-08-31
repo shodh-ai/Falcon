@@ -46,6 +46,11 @@ export class StudentPortalController {
     private readonly officialTranscripts: OfficialTranscriptService,
   ) {}
 
+  @Post('portal-bootstrap')
+  portalBootstrap(@Req() req: { user: AuthUser }) {
+    return this.portal.bootstrapPortal(this.tenant(req), req.user.user_id);
+  }
+
   @Get('dashboard')
   async dashboard(@Req() req: { user: AuthUser }) {
     const tenantId = this.tenant(req);

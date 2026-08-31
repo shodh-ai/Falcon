@@ -112,7 +112,7 @@ export default function StudentResearchPage() {
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await api.post<{ url: string }>('/api/uploads', fd);
+      const res = await api.post<{ url: string }>('/api/uploads/single', fd);
       setForm((f) => ({ ...f, [field]: res.url }));
       toast.success('Document uploaded');
     } catch (e) {

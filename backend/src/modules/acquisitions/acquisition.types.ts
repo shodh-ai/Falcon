@@ -43,6 +43,18 @@ export type AcquisitionLineInput = {
   vendor_business_reference?: string;
   return_policy?: string;
   replacement_policy?: string;
+  return_window_days?: number;
+  doa_window_days?: number;
+  return_conditions?: Record<string, unknown>;
+  replacement_conditions?: Record<string, unknown>;
+  refund_conditions?: Record<string, unknown>;
+  restocking_fee_policy?: Record<string, unknown>;
+  return_shipping_responsibility?:
+    | 'BUYER'
+    | 'VENDOR'
+    | 'SHARED'
+    | 'UNSPECIFIED';
+  policy_source_reference?: string;
   warranty_requirements?: string;
   expected_delivery_days?: number;
   item_classification: ItemClassification;
@@ -72,7 +84,7 @@ export type CreateAcquisitionInput = {
   special_procurement_requirements?: string;
   remarks?: string;
   currency?: string;
-  source?: 'FALCON' | 'IRMS';
+  source?: 'FALCON' | 'IRMS' | 'INVENTORY_REPLENISHMENT' | 'ASSET_SERVICE';
   external_reference?: string;
   /** Set only by the authenticated IRMS integration boundary. */
   integration_client_id?: string;

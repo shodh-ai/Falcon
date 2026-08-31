@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -101,6 +102,9 @@ export class LibraryAdminController {
     @Req() req: { user: AuthUser },
     @Query('barcode') barcode: string,
   ) {
+    if (!barcode?.trim()) {
+      throw new BadRequestException('barcode is required');
+    }
     return this.library.resolveUserByBarcode(this.tenant(req), barcode);
   }
 
@@ -130,6 +134,9 @@ export class LibraryAdminController {
   @Get('isbn-lookup')
   @Roles('Librarian', 'SuperAdmin')
   isbnLookup(@Query('isbn') isbn: string) {
+    if (!isbn?.trim()) {
+      throw new BadRequestException('isbn is required');
+    }
     return this.library.lookupIsbn(isbn);
   }
 

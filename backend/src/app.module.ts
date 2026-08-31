@@ -37,6 +37,12 @@ import { ResearchModule } from './modules/research/research.module';
 import { ClinicModule } from './modules/clinic/clinic.module';
 import { SearchModule } from './modules/search/search.module';
 import { OperationsModule } from './modules/operations/operations.module';
+import { CooOpsModule } from './modules/coo-ops/coo-ops.module';
+import { LabsModule } from './modules/labs/labs.module';
+import { CompetitionsModule } from './modules/competitions/competitions.module';
+import { MoonshotsModule } from './modules/moonshots/moonshots.module';
+import { SpecialProgramsModule } from './modules/special-programs/special-programs.module';
+import { UosGovernanceModule } from './modules/uos-governance/uos-governance.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module';
@@ -70,6 +76,12 @@ import { AcquisitionModule } from './modules/acquisitions/acquisition.module';
 import { ProcurementModule } from './modules/procurements/procurement.module';
 import { InvoiceIntegrityModule } from './modules/invoice-integrity/invoice-integrity.module';
 import { ProductVerificationModule } from './modules/product-verification/product-verification.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { ConsumablesModule } from './modules/consumables/consumables.module';
+import { ReturnsModule } from './modules/returns/returns.module';
+import { AssetServiceModule } from './modules/asset-service/asset-service.module';
+import { AssetRetirementModule } from './modules/asset-retirement/asset-retirement.module';
+import { PhysicalIdentityModule } from './modules/physical-identity/physical-identity.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -171,6 +183,12 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     ClinicModule,
     SearchModule,
     OperationsModule,
+    CooOpsModule,
+    LabsModule,
+    CompetitionsModule,
+    MoonshotsModule,
+    SpecialProgramsModule,
+    UosGovernanceModule,
     SettingsModule,
     HelpdeskModule,
     StudentPortalModule,
@@ -204,6 +222,12 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     ProcurementModule,
     InvoiceIntegrityModule,
     ProductVerificationModule,
+    InventoryModule,
+    ConsumablesModule,
+    ReturnsModule,
+    AssetServiceModule,
+    AssetRetirementModule,
+    PhysicalIdentityModule,
   ],
   controllers: [AppController],
   providers: [

@@ -71,6 +71,26 @@ export type CreateReturnInput = {
   reason: string;
 };
 
+export type Module7ReturnCommand = {
+  initiator_id: string;
+  module7_case_id: string;
+  active_decision_id: string;
+  decision_hash: string;
+  policy_snapshot_hash: string;
+  proc_case_id: string;
+  receipt_line_id: string;
+  quantity: number;
+  attributable_value: MoneyInput;
+  reason: string;
+  disposition: string;
+  allocations: Array<{
+    module7_allocation_id: string;
+    subject_id: string;
+    inventory_record_id: string;
+    quantity: number;
+  }>;
+};
+
 export type DownstreamStatusInput = {
   source_event_id: string;
   proc_case_line_id: string;
