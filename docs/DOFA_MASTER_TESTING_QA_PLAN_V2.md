@@ -346,6 +346,15 @@ For each row record the grant row, token claims, requested object scope, HTTP re
 
 The following credentials are test fixtures, not production accounts. They must be seeded only in disposable CI, QA, SECURITY, HARDWARE-QA and UAT environments. The seed process must refuse to run when `NODE_ENV=production` or when the database is marked as production. Passwords must be replaced through the environment secret store where policy forbids committed test credentials.
 
+Seed the human QA personas after normal migrations:
+
+```bash
+cd backend
+NODE_ENV=test DOFA_QA_SEED_ENABLED=true npm run db:seed:dofa-qa
+```
+
+The idempotent seed migration is `backend/migrations/20260907120000_dofa_qa_personas.seed.sql`. Normal `db:migrate` and production deployments deliberately skip `*.seed.sql` files. Rerunning the command resets the documented QA passwords and direct capability grants. Cross-tenant identities are created only when the QA database already contains a second tenant.
+
 Default login endpoint:
 
 ```text

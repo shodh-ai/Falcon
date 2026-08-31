@@ -86,6 +86,15 @@ Implemented workspace paths:
 
 These are disposable QA fixtures, never production credentials.
 
+Seed them in a non-production database before first use:
+
+```bash
+cd backend
+NODE_ENV=test DOFA_QA_SEED_ENABLED=true npm run db:seed:dofa-qa
+```
+
+Normal migrations deliberately do not create known-password accounts. The guarded seed refuses production environments.
+
 | ID | Role | Login | Password |
 |---|---|---|---|
 | P01 | Acquisition requester | `qa.dofa.p01.requester.a@mygyanvihar.test` | `DofaQA!P01#2026` |

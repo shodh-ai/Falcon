@@ -44,6 +44,13 @@ const SEED_FILES = [
   '20260609140000_hr_portal_smoke_seed.sql',
 ];
 
+/**
+ * Known-password DoFA personas are deliberately isolated from normal migrations
+ * and ordinary smoke seeds. They may only be installed by the explicit,
+ * environment-guarded db:seed:dofa-qa command.
+ */
+const DOFA_QA_SEED_FILES = ['20260907120000_dofa_qa_personas.seed.sql'];
+
 function dbConfig() {
   return {
     host: process.env.DB_HOST || 'localhost',
@@ -54,21 +61,45 @@ function dbConfig() {
   };
 }
 
-function listSqlFiles(seedOnly) {
+function listSqlFiles(seedMode) {
   const all = fs
     .readdirSync(MIGRATIONS_DIR)
     .filter((name) => name.endsWith('.sql'))
     .sort();
 
-  if (!seedOnly) {
-    return all.map((name) => path.join(MIGRATIONS_DIR, name));
+  if (seedMode === 'migrations') {
+    return all
+      .filter((name) => !name.endsWith('.seed.sql'))
+      .map((name) => path.join(MIGRATIONS_DIR, name));
   }
 
-  const selected = all.filter((name) => SEED_FILES.includes(name));
+  const expected = seedMode === 'dofa-qa' ? DOFA_QA_SEED_FILES : SEED_FILES;
+  const selected = all.filter((name) => expected.includes(name));
   if (selected.length === 0) {
-    throw new Error(`No seed files found. Expected: ${SEED_FILES.join(', ')}`);
+    throw new Error(`No seed files found. Expected: ${expected.join(', ')}`);
   }
   return selected.map((name) => path.join(MIGRATIONS_DIR, name));
+}
+
+function assertDofaQaSeedAllowed() {
+  const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+  const databaseEnv = String(
+    process.env.DATABASE_ENV || process.env.DEPLOYMENT_ENV || '',
+  ).toLowerCase();
+  if (process.env.DOFA_QA_SEED_ENABLED !== 'true') {
+    throw new Error(
+      'Refusing DoFA QA seed: set DOFA_QA_SEED_ENABLED=true explicitly.',
+    );
+  }
+  if (
+    nodeEnv === 'production' ||
+    databaseEnv === 'production' ||
+    databaseEnv === 'prod'
+  ) {
+    throw new Error(
+      'Refusing DoFA QA seed: known-password QA accounts cannot be installed in production.',
+    );
+  }
 }
 
 async function ensureMigrationTable(client) {
@@ -81,7 +112,10 @@ async function ensureMigrationTable(client) {
 }
 
 async function isApplied(client, filename) {
-  const res = await client.query('SELECT 1 FROM schema_migrations WHERE filename = $1', [filename]);
+  const res = await client.query(
+    'SELECT 1 FROM schema_migrations WHERE filename = $1',
+    [filename],
+  );
   return res.rows.length > 0;
 }
 
@@ -98,18 +132,28 @@ async function resetMigrationLedger(client) {
 
 async function run() {
   const seedOnly = process.argv.includes('--seed');
+  const dofaQaSeedOnly = process.argv.includes('--dofa-qa-seed');
+  if (seedOnly && dofaQaSeedOnly) {
+    throw new Error('Choose either --seed or --dofa-qa-seed, not both.');
+  }
+  if (dofaQaSeedOnly) assertDofaQaSeedAllowed();
+  const seedMode = dofaQaSeedOnly
+    ? 'dofa-qa'
+    : seedOnly
+      ? 'standard'
+      : 'migrations';
   const forceAll = process.argv.includes('--force');
   const repair = process.argv.includes('--repair');
-  const files = listSqlFiles(seedOnly);
+  const files = listSqlFiles(seedMode);
 
   const cfg = dbConfig();
   console.log(
-    seedOnly
+    seedMode !== 'migrations'
       ? `Running ${files.length} seed file(s) as ${cfg.user}@${cfg.host}/${cfg.database}...`
       : `Running ${files.length} migration(s) as ${cfg.user}@${cfg.host}/${cfg.database}...`,
   );
 
-  if (!seedOnly) {
+  if (seedMode === 'migrations') {
     const hadCoreTables = await coreTablesExist();
     if (!hadCoreTables) {
       await syncSchema({ quiet: false });
@@ -119,9 +163,13 @@ async function run() {
     await client.connect();
     await ensureMigrationTable(client);
 
-    const ledger = await client.query('SELECT COUNT(*)::int AS n FROM schema_migrations');
+    const ledger = await client.query(
+      'SELECT COUNT(*)::int AS n FROM schema_migrations',
+    );
     if (repair || (!hadCoreTables && ledger.rows[0].n > 0)) {
-      console.log('Repair: clearing schema_migrations ledger before re-applying SQL files...');
+      console.log(
+        'Repair: clearing schema_migrations ledger before re-applying SQL files...',
+      );
       await resetMigrationLedger(client);
     }
 
@@ -159,9 +207,14 @@ async function run() {
           break;
         }
       }
-      console.log(`Migrations complete (${ok} ok, ${skipped} skipped, ${failed} failed).`);
+      console.log(
+        `Migrations complete (${ok} ok, ${skipped} skipped, ${failed} failed).`,
+      );
       if (failures.length) {
-        console.error('Failures:', JSON.stringify(failures.slice(0, 15), null, 2));
+        console.error(
+          'Failures:',
+          JSON.stringify(failures.slice(0, 15), null, 2),
+        );
         if (failures.length > 15) {
           console.error(`... and ${failures.length - 15} more`);
         }
@@ -190,7 +243,11 @@ async function run() {
       const sql = fs.readFileSync(file, 'utf8');
       const base = path.basename(file);
 
-      if (!forceAll && !seedOnly && (await isApplied(client, base))) {
+      if (
+        !forceAll &&
+        seedMode === 'migrations' &&
+        (await isApplied(client, base))
+      ) {
         skipped += 1;
         console.log(`--- ${base} (skipped)`);
         continue;
@@ -199,7 +256,7 @@ async function run() {
       console.log(`>>> ${base}`);
       try {
         await client.query(sql);
-        if (!seedOnly) {
+        if (seedMode === 'migrations') {
           await markApplied(client, base);
         }
         ok += 1;
@@ -210,12 +267,15 @@ async function run() {
       }
     }
     console.log(
-      seedOnly
+      seedMode !== 'migrations'
         ? `Seed complete (${ok} ok, ${failed} failed).`
         : `Migrations complete (${ok} ok, ${skipped} skipped, ${failed} failed).`,
     );
     if (failures.length) {
-      console.error('Failures:', JSON.stringify(failures.slice(0, 15), null, 2));
+      console.error(
+        'Failures:',
+        JSON.stringify(failures.slice(0, 15), null, 2),
+      );
       if (failures.length > 15) {
         console.error(`... and ${failures.length - 15} more`);
       }
