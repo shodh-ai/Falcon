@@ -66,6 +66,10 @@ import { WeeklyTestsModule } from './modules/weekly-tests/weekly-tests.module';
 import { FacultyAiModule } from './modules/faculty-ai/faculty-ai.module';
 import { RegistrarModule } from './modules/registrar/registrar.module';
 import { AdminControlModule } from './modules/admin-control/admin-control.module';
+import { AcquisitionModule } from './modules/acquisitions/acquisition.module';
+import { ProcurementModule } from './modules/procurements/procurement.module';
+import { InvoiceIntegrityModule } from './modules/invoice-integrity/invoice-integrity.module';
+import { ProductVerificationModule } from './modules/product-verification/product-verification.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -196,6 +200,10 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     FacultyAiModule,
     RegistrarModule,
     AdminControlModule,
+    AcquisitionModule,
+    ProcurementModule,
+    InvoiceIntegrityModule,
+    ProductVerificationModule,
   ],
   controllers: [AppController],
   providers: [

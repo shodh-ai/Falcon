@@ -6,6 +6,7 @@ export const LAUNCH_MODULES = {
   library: true,
   finance: true,
   admissionVault: true,
+  acquisitions: true,
 } as const;
 
 export type LaunchModule = keyof typeof LAUNCH_MODULES;
@@ -29,6 +30,8 @@ const FINANCE_PATH_PREFIXES = [
   '/hod/funding-approvals',
 ];
 
+const ACQUISITION_PATH_PREFIXES = ['/finance/acquisitions'];
+
 function matchesPathPrefix(pathname: string | null | undefined, prefix: string): boolean {
   if (!pathname || !prefix) return false;
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
@@ -43,6 +46,11 @@ export function isPathHiddenForLaunch(pathname: string | null | undefined): bool
   ) {
     return true;
   }
+
+  if (
+    !isLaunchModuleEnabled('acquisitions') &&
+    ACQUISITION_PATH_PREFIXES.some((prefix) => matchesPathPrefix(pathname, prefix))
+  ) return true;
 
   if (
     !isLaunchModuleEnabled('finance') &&

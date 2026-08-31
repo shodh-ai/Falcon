@@ -561,7 +561,7 @@ export class BudgetFpaService {
 
     if (dto.po_id) {
       const poRows = await this.db.query(
-        `SELECT amount, program_id, budget_id, status FROM fin_purchase_orders WHERE po_id = $1`,
+        `SELECT amount, program_id, budget_id, status, source_system, proc_order_id FROM fin_purchase_orders WHERE po_id = $1`,
         [dto.po_id],
       );
       const po = poRows[0] as {
@@ -569,7 +569,17 @@ export class BudgetFpaService {
         program_id: string;
         budget_id: string;
         status: string;
+        source_system?: string;
+        proc_order_id?: string;
       };
+      if (po?.source_system === 'MODULE2') {
+        throw new ForbiddenException({
+          statusCode: 403,
+          message: 'Post expenditure through Progressive Procurement',
+          code: 'MODULE2_CANONICAL_RECORD',
+          proc_order_id: po.proc_order_id,
+        });
+      }
       if (po?.status && po.status !== 'APPROVED') {
         throw new ForbiddenException({
           statusCode: 403,

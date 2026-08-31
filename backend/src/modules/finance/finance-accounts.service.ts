@@ -297,6 +297,21 @@ export class FinanceAccountsService {
       const totalAmount = Number((taxable + gstAmount).toFixed(2));
       const netPayable = Number((totalAmount - tdsAmount).toFixed(2));
 
+      if (dto.po_id) {
+        const poRows = await tx.query(
+          `SELECT source_system, proc_order_id FROM fin_purchase_orders
+           WHERE po_id=$1 AND tenant_id=$2`,
+          [dto.po_id, tenantId],
+        );
+        if (poRows[0]?.source_system === 'MODULE2') {
+          throw new BadRequestException({
+            message: 'Enter invoices through Progressive Procurement',
+            code: 'MODULE2_CANONICAL_RECORD',
+            proc_order_id: poRows[0].proc_order_id,
+          });
+        }
+      }
+
       if (!dto.po_id) {
         await this.budgetFpa.checkEncumbrance({
           tenantId,

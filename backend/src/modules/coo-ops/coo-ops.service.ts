@@ -304,6 +304,13 @@ export class CooOpsService {
       [body.po_id, tid],
     );
     if (!po[0]) throw new NotFoundException('PO not found');
+    if (po[0].source_system === 'MODULE2') {
+      throw new BadRequestException({
+        message: 'This purchase order is managed by Progressive Procurement',
+        code: 'MODULE2_CANONICAL_RECORD',
+        proc_order_id: po[0].proc_order_id,
+      });
+    }
 
     if (po[0].requested_by && String(po[0].requested_by) === userId) {
       throw new BadRequestException({
@@ -457,10 +464,17 @@ export class CooOpsService {
   ) {
     const tid = this.tenant(tenantId);
     const poCheck = await this.db.query(
-      `SELECT status FROM fin_purchase_orders WHERE po_id = $1 AND tenant_id = $2`,
+      `SELECT status, source_system, proc_order_id FROM fin_purchase_orders WHERE po_id = $1 AND tenant_id = $2`,
       [poId, tid],
     );
     if (!poCheck[0]) throw new NotFoundException('PO not found');
+    if (poCheck[0].source_system === 'MODULE2') {
+      throw new BadRequestException({
+        message: 'Post payment through Progressive Procurement',
+        code: 'MODULE2_CANONICAL_RECORD',
+        proc_order_id: poCheck[0].proc_order_id,
+      });
+    }
     if (poCheck[0].status === 'PAID') {
       throw new BadRequestException('PO already paid');
     }
@@ -723,6 +737,13 @@ export class CooOpsService {
     );
     const po = poRows[0];
     if (!po) throw new NotFoundException('PO not found');
+    if (po.source_system === 'MODULE2') {
+      throw new BadRequestException({
+        message: 'Enter invoices through Progressive Procurement',
+        code: 'MODULE2_CANONICAL_RECORD',
+        proc_order_id: po.proc_order_id,
+      });
+    }
 
     const existing = await this.db.query(
       `SELECT invoice_id FROM fin_vendor_invoices WHERE tenant_id = $1 AND po_id = $2 LIMIT 1`,
