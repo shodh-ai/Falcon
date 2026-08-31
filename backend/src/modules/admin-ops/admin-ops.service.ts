@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CacheService } from '../../core/redis/cache.service';
@@ -25,11 +29,21 @@ export class AdminOpsService {
     );
   }
 
-  assignAsset(
+  async assignAsset(
     tenantId: string,
     assetId: string,
     dto: { assigned_user_id?: string; assigned_room?: string; status?: string },
   ) {
+    const managed = await this.db.query(
+      `SELECT module5_managed FROM university_assets WHERE asset_id=$1 AND tenant_id=$2`,
+      [assetId, this.tenant(tenantId)],
+    );
+    if (managed[0]?.module5_managed)
+      throw new ConflictException({
+        message:
+          'Module-5-managed assets must be changed through the inventory workflow',
+        code: 'MODULE5_LEGACY_WRITE_BLOCKED',
+      });
     return this.db.query(
       `UPDATE university_assets
        SET assigned_user_id = COALESCE($3, assigned_user_id),

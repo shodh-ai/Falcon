@@ -17,6 +17,7 @@ import type {
   CreateReturnInput,
   CreateServiceAcceptanceInput,
   DownstreamStatusInput,
+  Module7ReturnCommand,
   ProcurementActor,
   ProcurementMatchPolicy,
 } from './procurement.types';
@@ -2757,6 +2758,42 @@ export class ProcurementService {
         });
       const amount = money(adjustment.amount);
       let expendedRecovery = 0;
+      let recoveryDestination: 'AVAILABLE' | 'RELEASED' = 'AVAILABLE';
+      let recoveryPolicy: any = null;
+      let managedReturn: any = null;
+      if (
+        adjustment.return_id &&
+        adjustment.adjustment_type !== 'ADDITIONAL_CHARGE'
+      ) {
+        managedReturn = (
+          await manager.query(
+            `SELECT * FROM proc_returns WHERE return_id=$1 AND proc_case_id=$2 FOR UPDATE`,
+            [adjustment.return_id, caseId],
+          )
+        )[0];
+        if (managedReturn?.managed_by === 'MODULE7') {
+          if (amount > money(managedReturn.attributable_value) + 0.005)
+            throw new ConflictException({
+              message: 'Recovery exceeds the return attributable value',
+              code: 'RETURN_RECOVERY_VALUE_EXCEEDED',
+            });
+          recoveryPolicy = (
+            await manager.query(
+              `SELECT * FROM proc_financial_recovery_policies WHERE tenant_id=$1 AND status='PUBLISHED'
+               AND effective_from<=NOW() AND(effective_to IS NULL OR effective_to>NOW())
+               ORDER BY CASE WHEN funding_source_type='*' THEN 1 ELSE 0 END,policy_version DESC LIMIT 1`,
+              [row.tenant_id],
+            )
+          )[0];
+          if (!recoveryPolicy)
+            throw new ConflictException(
+              'Published financial recovery policy required',
+            );
+          recoveryDestination = recoveryPolicy.open_period_reusable
+            ? 'AVAILABLE'
+            : 'RELEASED';
+        }
+      }
       if (adjustment.adjustment_type === 'ADDITIONAL_CHARGE') {
         await this.moveFunds(manager, row, {
           entryType: 'ADDITIONAL_CHARGE_COMMITTED',
@@ -2807,7 +2844,7 @@ export class ProcurementService {
           await this.moveFunds(manager, row, {
             entryType: 'PAID_CREDIT_POSTED',
             from: 'EXPENDED',
-            to: 'AVAILABLE',
+            to: recoveryDestination,
             amount: expendedRecovery,
             sourceType: 'ADJUSTMENT',
             sourceId: adjustmentId,
@@ -2818,7 +2855,7 @@ export class ProcurementService {
           await this.moveFunds(manager, row, {
             entryType: 'UNPAID_CREDIT_POSTED',
             from: 'COMMITTED',
-            to: 'AVAILABLE',
+            to: recoveryDestination,
             amount: committedRecovery,
             sourceType: 'ADJUSTMENT',
             sourceId: adjustmentId,
@@ -2830,7 +2867,7 @@ export class ProcurementService {
         await this.moveFunds(manager, row, {
           entryType: 'REFUND_POSTED',
           from: 'EXPENDED',
-          to: 'AVAILABLE',
+          to: recoveryDestination,
           amount,
           sourceType: 'ADJUSTMENT',
           sourceId: adjustmentId,
@@ -2841,8 +2878,13 @@ export class ProcurementService {
       if (expendedRecovery > 0) {
         const funding = await this.fundingSource(manager, row);
         await manager.query(
-          `UPDATE ${funding.table} SET utilized_amount=GREATEST(0,COALESCE(utilized_amount,0)-$2),encumbered_amount=COALESCE(encumbered_amount,0)+$2 WHERE ${funding.id}=$1 AND tenant_id=$3`,
-          [funding.sourceId, expendedRecovery, row.tenant_id],
+          `UPDATE ${funding.table} SET utilized_amount=GREATEST(0,COALESCE(utilized_amount,0)-$2),encumbered_amount=COALESCE(encumbered_amount,0)+CASE WHEN $4='AVAILABLE' THEN $2 ELSE 0 END WHERE ${funding.id}=$1 AND tenant_id=$3`,
+          [
+            funding.sourceId,
+            expendedRecovery,
+            row.tenant_id,
+            recoveryDestination,
+          ],
         );
       }
       await manager.query(
@@ -2862,6 +2904,29 @@ export class ProcurementService {
            WHERE return_id=$1 AND proc_case_id=$3`,
           [adjustment.return_id, financialStatus, caseId],
         );
+        if (managedReturn?.managed_by === 'MODULE7' && recoveryPolicy) {
+          const original = money(managedReturn.attributable_value);
+          await manager.query(
+            `INSERT INTO proc_financial_recoveries(tenant_id,proc_case_id,return_id,adjustment_id,policy_id,original_expenditure,posted_recovery,retained_charges,net_effective_expenditure,destination_bucket,recovery_account_reference,posted_by,idempotency_key)
+             VALUES($1,$2,$3,$4,$5,$6,$7,0,$8,$9,$10,$11,$12)`,
+            [
+              row.tenant_id,
+              caseId,
+              adjustment.return_id,
+              adjustmentId,
+              recoveryPolicy.financial_recovery_policy_id,
+              original,
+              amount,
+              original - amount,
+              recoveryDestination,
+              recoveryDestination === 'RELEASED'
+                ? recoveryPolicy.recovery_account_reference
+                : null,
+              actor.user_id,
+              idempotencyKey,
+            ],
+          );
+        }
       }
       await this.audit(
         manager,
@@ -2885,6 +2950,11 @@ export class ProcurementService {
         order_id: adjustment.order_id,
         amount,
         currency: row.currency,
+        return_id: adjustment.return_id,
+        module7_case_id: managedReturn?.module7_case_id ?? null,
+        recovery_destination: recoveryDestination,
+        financial_recovery_policy_version:
+          recoveryPolicy?.policy_version ?? null,
       });
       return {
         ...adjustment,
@@ -2893,6 +2963,183 @@ export class ProcurementService {
         aggregate_revision: Number(row.aggregate_revision),
       };
     });
+  }
+
+  async createModule7Return(
+    manager: EntityManager,
+    actor: ProcurementActor,
+    command: Module7ReturnCommand,
+  ) {
+    const cases = await manager.query(
+      `SELECT * FROM proc_cases WHERE proc_case_id=$1 AND tenant_id=$2 FOR UPDATE`,
+      [command.proc_case_id, this.tenant(actor)],
+    );
+    const row = cases[0] as CaseRow | undefined;
+    if (!row) throw new NotFoundException('Procurement case not found');
+    this.assertOpen(row);
+    const decisions = await manager.query(
+      `SELECT c.workflow_status,c.active_decision_id,c.initiator_id,c.approver_id,d.decision_hash,d.decision
+       FROM ret_cases c JOIN ret_decisions d ON d.decision_id=c.active_decision_id
+       WHERE c.return_case_id=$1 AND c.tenant_id=$2 FOR UPDATE OF c`,
+      [command.module7_case_id, row.tenant_id],
+    );
+    const current = decisions[0];
+    if (
+      !current ||
+      current.active_decision_id !== command.active_decision_id ||
+      current.decision_hash !== command.decision_hash ||
+      current.decision !== 'APPROVED' ||
+      current.workflow_status !== 'APPROVED' ||
+      current.initiator_id !== command.initiator_id ||
+      current.approver_id !== actor.user_id ||
+      current.initiator_id === actor.user_id
+    )
+      throw new ConflictException({
+        message: 'Module 7 decision is stale or not approved',
+        code: 'RETURN_DECISION_SUPERSEDED',
+      });
+    const prior = await manager.query(
+      `SELECT * FROM proc_returns WHERE module7_case_id=$1 FOR UPDATE`,
+      [command.module7_case_id],
+    );
+    if (prior[0]) return prior[0];
+    const lines = await manager.query(
+      `SELECT rl.*,ol.line_total,ol.quantity,ol.order_line_id FROM proc_receipt_lines rl
+       JOIN proc_order_lines ol ON ol.order_line_id=rl.order_line_id JOIN proc_receipts pr ON pr.receipt_id=rl.receipt_id
+       WHERE rl.receipt_line_id=$1 AND pr.proc_case_id=$2 FOR UPDATE`,
+      [command.receipt_line_id, row.proc_case_id],
+    );
+    const line = lines[0];
+    if (!line) throw new NotFoundException('Receipt line not found');
+    const allocationQuantity = command.allocations.reduce(
+      (sum, allocation) => sum + Number(allocation.quantity),
+      0,
+    );
+    if (Math.abs(allocationQuantity - command.quantity) > 0.0005)
+      throw new ConflictException(
+        'Exact subject allocations do not conserve return quantity',
+      );
+    const maxValue =
+      (money(line.line_total) * command.quantity) / Number(line.quantity);
+    if (money(command.attributable_value) > maxValue + 0.005)
+      throw new ConflictException('Return value exceeds attributable value');
+    const returnId = randomUUID();
+    await manager.query(
+      `INSERT INTO proc_returns(return_id,proc_case_id,receipt_line_id,order_line_id,tenant_id,quantity,attributable_value,reason,requested_by,approved_by,status,managed_by,module7_case_id,module7_decision_id,decision_hash,policy_snapshot_hash)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'APPROVED','MODULE7',$11,$12,$13,$14)`,
+      [
+        returnId,
+        row.proc_case_id,
+        line.receipt_line_id,
+        line.order_line_id,
+        row.tenant_id,
+        command.quantity,
+        money(command.attributable_value),
+        command.reason.trim(),
+        command.initiator_id,
+        actor.user_id,
+        command.module7_case_id,
+        command.active_decision_id,
+        command.decision_hash,
+        command.policy_snapshot_hash,
+      ],
+    );
+    for (const allocation of command.allocations)
+      await manager.query(
+        `INSERT INTO proc_return_subject_allocations(return_id,tenant_id,module7_allocation_id,subject_id,inventory_record_id,quantity) VALUES($1,$2,$3,$4,$5,$6)`,
+        [
+          returnId,
+          row.tenant_id,
+          allocation.module7_allocation_id,
+          allocation.subject_id,
+          allocation.inventory_record_id,
+          allocation.quantity,
+        ],
+      );
+    await this.audit(
+      manager,
+      row,
+      'RETURN',
+      returnId,
+      'MODULE7_RETURN_AUTHORIZED',
+      actor.user_id,
+      null,
+      {
+        module7_case_id: command.module7_case_id,
+        disposition: command.disposition,
+        allocations: command.allocations,
+      },
+    );
+    const event = await this.emit(manager, row, 'ReturnRecorded.v1', returnId, {
+      status: 'APPROVED',
+      managed_by: 'MODULE7',
+      module7_case_id: command.module7_case_id,
+      decision_id: command.active_decision_id,
+      decision_hash: command.decision_hash,
+      disposition: command.disposition,
+      quantity: command.quantity,
+      subject_allocations: command.allocations,
+    });
+    return { return_id: returnId, status: 'APPROVED', event };
+  }
+
+  async transitionModule7Return(
+    manager: EntityManager,
+    actor: ProcurementActor,
+    module7CaseId: string,
+    decisionId: string,
+    nextStatus: 'SHIPPED' | 'VENDOR_RECEIVED' | 'RESOLVED',
+  ) {
+    const records = await manager.query(
+      `SELECT r.*,c.aggregate_revision,c.next_event_sequence,c.status case_status,c.currency,c.acquisition_id,c.acquisition_version_id,c.budget_reservation_id,c.requester_id,c.department_id,c.approved_allocation,c.available_amount,c.committed_amount,c.expended_amount,c.released_amount
+       FROM proc_returns r JOIN proc_cases c ON c.proc_case_id=r.proc_case_id
+       JOIN ret_cases x ON x.return_case_id=r.module7_case_id
+       WHERE r.module7_case_id=$1 AND r.tenant_id=$2 AND x.active_decision_id=$3 FOR UPDATE OF r,c,x`,
+      [module7CaseId, this.tenant(actor), decisionId],
+    );
+    const record = records[0];
+    if (!record)
+      throw new ConflictException('Current Module 7 managed return not found');
+    const allowed: Record<string, string> = {
+      APPROVED: 'SHIPPED',
+      SHIPPED: 'VENDOR_RECEIVED',
+      VENDOR_RECEIVED: 'RESOLVED',
+    };
+    if (allowed[record.status] !== nextStatus)
+      throw new ConflictException(
+        `Cannot move return from ${record.status} to ${nextStatus}`,
+      );
+    const financialStatus =
+      nextStatus === 'VENDOR_RECEIVED'
+        ? 'CREDIT_EXPECTED'
+        : record.financial_status;
+    await manager.query(
+      `UPDATE proc_returns SET status=$2,financial_status=$3,updated_at=NOW() WHERE return_id=$1`,
+      [record.return_id, nextStatus, financialStatus],
+    );
+    const event = await this.emit(
+      manager,
+      record as CaseRow,
+      'ReturnRecorded.v1',
+      record.return_id,
+      {
+        previous_status: record.status,
+        status: nextStatus,
+        financial_status: financialStatus,
+        managed_by: 'MODULE7',
+        module7_case_id: module7CaseId,
+        subject_allocations: await manager.query(
+          `SELECT module7_allocation_id,subject_id,inventory_record_id,quantity FROM proc_return_subject_allocations WHERE return_id=$1 ORDER BY subject_id`,
+          [record.return_id],
+        ),
+      },
+    );
+    return {
+      ...record,
+      status: nextStatus,
+      financial_status: financialStatus,
+      event,
+    };
   }
 
   async createReturn(
@@ -3016,6 +3263,12 @@ export class ProcurementService {
       );
       const record = records[0];
       if (!record) throw new NotFoundException('Return not found');
+      if (record.managed_by === 'MODULE7')
+        throw new ForbiddenException({
+          message:
+            'Module 7 managed returns can only be advanced by the Return/DOA workflow',
+          code: 'MODULE7_RETURN_BYPASS_REJECTED',
+        });
       if (!transitions[record.status]?.includes(nextStatus))
         throw new ConflictException(
           `Cannot move return from ${record.status} to ${nextStatus}`,
@@ -3395,6 +3648,84 @@ export class ProcurementService {
         proc_case_line_id: line.proc_case_line_id,
         status: finalized ? 'FINALIZED' : 'PENDING',
         verified_quantity: Number(aggregate.verified_quantity),
+      };
+    });
+  }
+
+  async applyInventoryLineCompletion(eventId: string) {
+    return this.db.transaction(async (manager) => {
+      if (
+        (
+          await manager.query(
+            `SELECT 1 FROM proc_inventory_event_consumption WHERE event_id=$1`,
+            [eventId],
+          )
+        )[0]
+      )
+        return { duplicate: true };
+      const events = await manager.query(
+        `SELECT * FROM inv_outbox_events WHERE event_id=$1 AND event_type='InventoryLineCompleted.v1' FOR UPDATE`,
+        [eventId],
+      );
+      const event = events[0];
+      if (!event)
+        throw new NotFoundException('Inventory completion event not found');
+      if (hash(event.payload) !== event.payload_hash)
+        throw new ConflictException({
+          message: 'Inventory event hash mismatch',
+          code: 'EVENT_HASH_MISMATCH',
+        });
+      const payload = event.payload as Record<string, any>;
+      const lines = await manager.query(
+        `SELECT pcl.* FROM proc_case_lines pcl WHERE pcl.proc_case_line_id=$1 AND pcl.proc_case_id=$2 AND pcl.tenant_id=$3 FOR UPDATE`,
+        [payload.proc_case_line_id, payload.proc_case_id, event.tenant_id],
+      );
+      const line = lines[0];
+      if (!line) throw new NotFoundException('Procurement case line not found');
+      const statuses = [
+        ['ASSET_ID_ALLOCATION', payload.asset_id_allocation],
+        ['RFID_ALLOCATION', payload.rfid_allocation],
+        ['INVENTORY_INGESTION', payload.inventory_ingestion],
+        ['CONSUMABLE_LEDGER', payload.consumable_ledger],
+      ];
+      for (const [statusType, status] of statuses) {
+        if (!['PENDING', 'FINALIZED', 'NOT_REQUIRED'].includes(String(status)))
+          throw new ConflictException('Invalid inventory completion status');
+        const sequences = await manager.query(
+          `SELECT COALESCE(MAX(aggregate_sequence),0)+1 next FROM proc_downstream_status WHERE proc_case_line_id=$1 AND status_type=$2`,
+          [line.proc_case_line_id, statusType],
+        );
+        await manager.query(
+          `INSERT INTO proc_downstream_status(downstream_status_id,proc_case_id,proc_case_line_id,tenant_id,source_event_id,source_module,status_type,status,aggregate_sequence,payload,occurred_at)
+           VALUES($1,$2,$3,$4,$5,'MODULE_5',$6,$7,$8,$9::jsonb,$10)`,
+          [
+            randomUUID(),
+            line.proc_case_id,
+            line.proc_case_line_id,
+            line.tenant_id,
+            randomUUID(),
+            statusType,
+            status,
+            sequences[0].next,
+            JSON.stringify({
+              source_event_id: eventId,
+              source_aggregate_sequence: event.aggregate_sequence,
+            }),
+            event.occurred_at,
+          ],
+        );
+      }
+      await manager.query(
+        `INSERT INTO proc_inventory_event_consumption(event_id,tenant_id,proc_case_id,proc_case_line_id) VALUES($1,$2,$3,$4)`,
+        [eventId, line.tenant_id, line.proc_case_id, line.proc_case_line_id],
+      );
+      await manager.query(
+        `UPDATE proc_cases SET aggregate_revision=aggregate_revision+1,updated_at=NOW(),last_activity_at=NOW() WHERE proc_case_id=$1`,
+        [line.proc_case_id],
+      );
+      return {
+        proc_case_line_id: line.proc_case_line_id,
+        statuses: Object.fromEntries(statuses),
       };
     });
   }

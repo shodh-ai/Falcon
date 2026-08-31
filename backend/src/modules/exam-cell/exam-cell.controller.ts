@@ -344,9 +344,13 @@ export class ExamCellController {
     @Req() req: { user: AuthUser },
     @Query('semester') semester: string,
   ) {
+    const parsedSemester = Number(semester);
+    if (!Number.isInteger(parsedSemester) || parsedSemester < 1) {
+      throw new BadRequestException('semester must be a positive integer');
+    }
     return this.examCell.getGradesAggregateCourses(
       this.tenant(req),
-      Number(semester),
+      parsedSemester,
     );
   }
 
@@ -356,9 +360,16 @@ export class ExamCellController {
     @Query('semester') semester: string,
     @Query('course_id') courseId: string,
   ) {
+    const parsedSemester = Number(semester);
+    if (!Number.isInteger(parsedSemester) || parsedSemester < 1) {
+      throw new BadRequestException('semester must be a positive integer');
+    }
+    if (!courseId?.trim()) {
+      throw new BadRequestException('course_id is required');
+    }
     return this.examCell.getGradesAggregateTable(
       this.tenant(req),
-      Number(semester),
+      parsedSemester,
       courseId,
     );
   }
@@ -495,10 +506,18 @@ export class ExamCellController {
     @Query('semester') semester: string,
     @Query('limit') limit?: string,
   ) {
+    const parsedSemester = Number(semester);
+    const parsedLimit = limit === undefined ? 10 : Number(limit);
+    if (!Number.isInteger(parsedSemester) || parsedSemester < 1) {
+      throw new BadRequestException('semester must be a positive integer');
+    }
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+      throw new BadRequestException('limit must be an integer between 1 and 100');
+    }
     return this.semesterResults.topStudents(
       this.tenant(req),
-      Number(semester),
-      limit ? Number(limit) : 10,
+      parsedSemester,
+      parsedLimit,
     );
   }
 

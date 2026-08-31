@@ -142,6 +142,15 @@ export class UosGovernanceService {
   ) {
     if (!body.reason?.trim()) throw new BadRequestException('reason required');
     const tid = this.tenant(tenantId);
+    const managed = await this.db.query(
+      `SELECT module5_managed FROM university_assets WHERE asset_id=$1 AND tenant_id=$2`,
+      [body.asset_id, tid],
+    );
+    if (managed[0]?.module5_managed)
+      throw new BadRequestException({
+        message: 'Module-5-managed assets must use /api/asset-retirement/v1',
+        code: 'MODULE9_CANONICAL_RETIREMENT_REQUIRED',
+      });
     const rows = await this.db.query(
       `INSERT INTO asset_writeoff_requests (
          tenant_id, asset_id, requested_by, reason, status

@@ -237,10 +237,13 @@ export class AcquisitionService {
            preferred_vendor_name, product_url, vendor_contact, vendor_address,
            vendor_business_reference, return_policy, replacement_policy,
            warranty_requirements, expected_delivery_days, item_classification,
-           expected_service_life_months, special_procurement_requirements, remarks
+           expected_service_life_months, special_procurement_requirements, remarks,
+           return_window_days, doa_window_days, return_conditions, replacement_conditions,
+           refund_conditions, restocking_fee_policy, return_shipping_responsibility, policy_source_reference
          ) VALUES (
            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,
-           $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35
+           $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,
+           $36,$37,$38::jsonb,$39::jsonb,$40::jsonb,$41::jsonb,$42,$43
          )`,
         [
           versionId,
@@ -278,6 +281,14 @@ export class AcquisitionService {
           line.expected_service_life_months ?? null,
           line.special_procurement_requirements?.trim() || null,
           line.remarks?.trim() || null,
+          line.return_window_days ?? null,
+          line.doa_window_days ?? null,
+          JSON.stringify(line.return_conditions ?? {}),
+          JSON.stringify(line.replacement_conditions ?? {}),
+          JSON.stringify(line.refund_conditions ?? {}),
+          JSON.stringify(line.restocking_fee_policy ?? {}),
+          line.return_shipping_responsibility ?? 'UNSPECIFIED',
+          line.policy_source_reference?.trim() || null,
         ],
       );
     }
@@ -678,6 +689,15 @@ export class AcquisitionService {
         vendor_business_reference: line.vendor_business_reference ?? undefined,
         return_policy: line.return_policy ?? undefined,
         replacement_policy: line.replacement_policy ?? undefined,
+        return_window_days: line.return_window_days ?? undefined,
+        doa_window_days: line.doa_window_days ?? undefined,
+        return_conditions: line.return_conditions ?? undefined,
+        replacement_conditions: line.replacement_conditions ?? undefined,
+        refund_conditions: line.refund_conditions ?? undefined,
+        restocking_fee_policy: line.restocking_fee_policy ?? undefined,
+        return_shipping_responsibility:
+          line.return_shipping_responsibility ?? undefined,
+        policy_source_reference: line.policy_source_reference ?? undefined,
         warranty_requirements: line.warranty_requirements ?? undefined,
         expected_delivery_days: line.expected_delivery_days ?? undefined,
         item_classification: line.item_classification,
@@ -1471,7 +1491,9 @@ export class AcquisitionService {
            preferred_vendor_name, product_url, vendor_contact, vendor_address,
            vendor_business_reference, return_policy, replacement_policy,
            warranty_requirements, expected_delivery_days, item_classification,
-           expected_service_life_months, special_procurement_requirements, remarks
+           expected_service_life_months, special_procurement_requirements, remarks,
+           return_window_days, doa_window_days, return_conditions, replacement_conditions,
+           refund_conditions, restocking_fee_policy, return_shipping_responsibility, policy_source_reference
          ) SELECT $2, tenant_id, line_number, acquisition_layout,
            product_name, category, quantity, unit, brand, model_number, part_number,
            technical_specifications, product_description, intended_use,
@@ -1480,7 +1502,9 @@ export class AcquisitionService {
            preferred_vendor_name, product_url, vendor_contact, vendor_address,
            vendor_business_reference, return_policy, replacement_policy,
            warranty_requirements, expected_delivery_days, item_classification,
-           expected_service_life_months, special_procurement_requirements, remarks
+           expected_service_life_months, special_procurement_requirements, remarks,
+           return_window_days, doa_window_days, return_conditions, replacement_conditions,
+           refund_conditions, restocking_fee_policy, return_shipping_responsibility, policy_source_reference
          FROM acq_lines WHERE acquisition_version_id=$1 AND line_status<>'EXCLUDED'`,
         [versionId, newId],
       );

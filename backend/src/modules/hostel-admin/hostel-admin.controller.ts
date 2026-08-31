@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -113,6 +114,12 @@ export class HostelAdminController {
     @Query('hostelId') hostelId: string,
     @Query('month') month: string,
   ) {
+    if (!hostelId?.trim()) {
+      throw new BadRequestException('hostelId is required');
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month ?? '')) {
+      throw new BadRequestException('month must use YYYY-MM format');
+    }
     return this.hostelAdmin.getMonthlyRollCall(this.ctx(req), hostelId, month);
   }
 
@@ -186,19 +193,26 @@ export class HostelAdminController {
     return this.hostelAdmin.approveHostelRequest(this.ctx(req), requestId);
   }
 
-  // @Patch('requests/:requestId/reject')
-  // rejectRequest(@Req() req: { user: AuthUser }, @Param('requestId') requestId: string) {
-  //   return this.hostelAdmin.rejectHostelRequest(this.ctx(req), requestId);
-  // }
+  @Patch('requests/:requestId/reject')
+  rejectRequest(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+  ) {
+    return this.hostelAdmin.rejectHostelRequest(this.ctx(req), requestId);
+  }
 
-  // @Patch('gate-passes/:passId')
-  // updateGatePass(
-  //   @Req() req: { user: AuthUser },
-  //   @Param('passId') passId: string,
-  //   @Body() dto: { status: 'APPROVED' | 'REJECTED' },
-  // ) {
-  //   return this.hostelAdmin.updateGatePassStatus(this.ctx(req), passId, dto.status);
-  // }
+  @Patch('gate-passes/:passId')
+  updateGatePass(
+    @Req() req: { user: AuthUser },
+    @Param('passId') passId: string,
+    @Body() dto: { status: 'APPROVED' | 'REJECTED' },
+  ) {
+    return this.hostelAdmin.updateGatePassStatus(
+      this.ctx(req),
+      passId,
+      dto.status,
+    );
+  }
 
   @Get('visitors')
   visitors(

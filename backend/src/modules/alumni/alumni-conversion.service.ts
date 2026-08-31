@@ -207,7 +207,7 @@ export class AlumniConversionService {
     );
 
     const existing = await this.dataSource.query(
-      `SELECT COALESCE(p.alumni_id, p.alumni_profile_id) AS row_id, p.verification_status
+      `SELECT p.alumni_id AS row_id, p.verification_status
        FROM alumni_profiles p
        WHERE p.tenant_id = $1 AND p.student_user_id = $2`,
       [tenantId, studentUserId],
@@ -270,7 +270,7 @@ export class AlumniConversionService {
              personal_email = COALESCE($4, personal_email),
              higher_education_details = COALESCE($5, higher_education_details),
              profile_updated_at = NOW()
-         WHERE COALESCE(alumni_id, alumni_profile_id) = $1`,
+         WHERE alumni_id = $1`,
         [
           existing[0].row_id,
           dto.linkedin_url,
@@ -283,10 +283,10 @@ export class AlumniConversionService {
       const newAlumniId = randomUUID();
       await this.dataSource.query(
         `INSERT INTO alumni_profiles (
-           tenant_id, alumni_profile_id, alumni_id, student_profile_id, student_user_id, user_id,
+           tenant_id, alumni_id, student_profile_id, student_user_id, user_id,
            name, email, personal_email, enrollment_number, batch_year, graduation_year, program_name,
            current_organization, linkedin_url, higher_education_details, verification_status, profile_updated_at
-         ) VALUES ($1, $2, $2, $3, $4, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13::jsonb, 'PENDING', NOW())`,
+         ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13::jsonb, 'PENDING', NOW())`,
         [
           tenantId,
           newAlumniId,
@@ -395,10 +395,10 @@ export class AlumniConversionService {
         student_user_id: string;
       }>
     >(
-      `SELECT COALESCE(p.alumni_id, p.alumni_profile_id) AS row_id, p.student_user_id
+      `SELECT p.alumni_id AS row_id, p.student_user_id
        FROM alumni_profiles p
        WHERE p.tenant_id = $1
-         AND (COALESCE(p.alumni_id, p.alumni_profile_id) = $2 OR p.alumni_profile_id = $2)
+         AND p.alumni_id = $2
          AND p.verification_status = 'PENDING'`,
       [tenantId, alumniId],
     );

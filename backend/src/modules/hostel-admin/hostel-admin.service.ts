@@ -817,6 +817,83 @@ export class HostelAdminService {
     return { request_id: requestId, status: 'APPROVED', qr_token: token };
   }
 
+  async rejectHostelRequest(ctx: AuthCtx, requestId: string) {
+    const [request] = await this.db.query<
+      Array<{ student_user_id: string; hostel_id: string | null }>
+    >(
+      `SELECT hr.student_user_id, r.hostel_id
+       FROM hostel_requests hr
+       JOIN users u ON u.user_id = hr.student_user_id
+       LEFT JOIN hostel_allocations a
+         ON a.student_user_id = hr.student_user_id AND a.status = 'ACTIVE'
+       LEFT JOIN operations_hostel_rooms r ON r.room_id = a.room_id
+       WHERE hr.request_id = $1 AND u.tenant_id = $2`,
+      [requestId, ctx.tenantId],
+    );
+    if (!request) throw new NotFoundException('Request not found');
+    if (request.hostel_id) {
+      await this.assertHostelAccess(ctx, request.hostel_id);
+    } else if (!this.isGlobalAdmin(ctx.roles)) {
+      throw new ForbiddenException('Request is outside your hostel scope');
+    }
+
+    await this.db.query(
+      `UPDATE hostel_requests
+       SET status = 'REJECTED', approved_at = NOW(), qr_token = NULL
+       WHERE request_id = $1`,
+      [requestId],
+    );
+    this.broadcastGatePass(ctx, {
+      request_id: requestId,
+      status: 'REJECTED',
+      hostel_id: request.hostel_id ?? undefined,
+    });
+    return { request_id: requestId, status: 'REJECTED' };
+  }
+
+  async updateGatePassStatus(
+    ctx: AuthCtx,
+    passId: string,
+    status: 'APPROVED' | 'REJECTED',
+  ) {
+    const [pass] = await this.db.query<
+      Array<{ student_user_id: string; hostel_id: string | null }>
+    >(
+      `SELECT gp.student_user_id, COALESCE(gp.hostel_id, r.hostel_id) AS hostel_id
+       FROM operations_gate_passes gp
+       JOIN users u ON u.user_id = gp.student_user_id
+       LEFT JOIN hostel_allocations a
+         ON a.student_user_id = gp.student_user_id AND a.status = 'ACTIVE'
+       LEFT JOIN operations_hostel_rooms r ON r.room_id = a.room_id
+       WHERE gp.pass_id = $1 AND u.tenant_id = $2`,
+      [passId, ctx.tenantId],
+    );
+    if (!pass) throw new NotFoundException('Gate pass not found');
+    if (pass.hostel_id) {
+      await this.assertHostelAccess(ctx, pass.hostel_id);
+    } else if (!this.isGlobalAdmin(ctx.roles)) {
+      throw new ForbiddenException('Gate pass is outside your hostel scope');
+    }
+
+    const qrToken = status === 'APPROVED' ? randomBytes(24).toString('hex') : null;
+    const [updated] = await this.db.query(
+      `UPDATE operations_gate_passes
+       SET status = $2,
+           approved_by_user_id = $3,
+           qr_token = $4,
+           updated_at = NOW()
+       WHERE pass_id = $1
+       RETURNING *`,
+      [passId, status, ctx.userId, qrToken],
+    );
+    this.gateway.emitToTenant(ctx.tenantId, 'gate_pass.updated', {
+      pass_id: passId,
+      status,
+      hostel_id: pass.hostel_id,
+    });
+    return updated;
+  }
+
   async createLeave(
     ctx: AuthCtx,
     dto: {

@@ -131,12 +131,12 @@ export class CompetitionsService {
 
   funnelStats(tenantId?: string) {
     return this.db.query(
-      `SELECT stage, status, COUNT(*)::int AS count
+      `SELECT e.stage, e.status, COUNT(*)::int AS count
        FROM competition_entries e
        JOIN competitions c ON c.competition_id = e.competition_id
        WHERE c.tenant_id = $1
-       GROUP BY stage, status
-       ORDER BY stage`,
+       GROUP BY e.stage, e.status
+       ORDER BY e.stage`,
       [this.tenant(tenantId)],
     );
   }

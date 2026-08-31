@@ -58,7 +58,7 @@ export class LeadershipAiController {
        FROM cash_flow_forecasts
        WHERE tenant_id = $1 AND forecast_date = (SELECT MAX(forecast_date) FROM cash_flow_forecasts WHERE tenant_id = $1)
        ORDER BY horizon_days`,
-      [tid, tid],
+      [tid],
     );
     return rows.map(
       (r: {

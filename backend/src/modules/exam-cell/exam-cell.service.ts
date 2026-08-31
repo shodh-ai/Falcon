@@ -1659,7 +1659,7 @@ export class ExamCellService {
        LEFT JOIN users f ON f.user_id = a.assigned_faculty_user_id
        WHERE a.exam_application_id = $1
          AND a.application_type = 'RE_EVALUATION'
-         AND a.tenant_id = $2`,
+         AND u.tenant_id = $2`,
       [applicationId, tenantId],
     );
     if (!rows[0])

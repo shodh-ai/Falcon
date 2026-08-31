@@ -157,6 +157,20 @@ export class ProctorController {
     return this.chat.listMenteesWithChatSummary(req.user.user_id);
   }
 
+  @Post('messages/:interactionId/reply')
+  @Roles('Faculty', 'SuperAdmin', 'Registrar', 'HOD', 'Dean')
+  replyToMessage(
+    @Req() req: { user: AuthUser },
+    @Param('interactionId') interactionId: string,
+    @Body() body: { reply: string },
+  ) {
+    return this.proctor.replyToMessage(
+      req.user.user_id,
+      interactionId,
+      body.reply,
+    );
+  }
+
   @Post('leave-requests')
   @Roles('Student')
   submitLeaveRequest(
