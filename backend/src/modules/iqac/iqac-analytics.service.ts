@@ -321,7 +321,7 @@ export class IqacAnalyticsService {
   ) {
     const params: unknown[] = [tenantId, academicYear];
     let sql = `
-      SELECT document_id, naac_criterion, metric_number, title, file_path, academic_year, created_at,
+      SELECT document_id, naac_criterion, metric_number, title, file_path, academic_year, r.created_at,
              u.name AS uploaded_by_name
       FROM iqac_document_repository r
       LEFT JOIN users u ON u.user_id = r.uploaded_by
