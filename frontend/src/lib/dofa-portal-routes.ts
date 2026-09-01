@@ -2,6 +2,7 @@
  * Role-scoped DOFA / P2P routes — keep approvers in their home portal shell.
  */
 import {
+  getDofaFinanceModuleAccess,
   getActiveWorkspaceRoleFromPath,
   getDashboardPathForRole,
   isFinancePathAllowedForRole,
@@ -179,6 +180,13 @@ export function getFinancePortalRedirect(
   if (!pathname.startsWith('/finance')) return null;
 
   const r = norm(role);
+
+  const dofaModuleAccess = getDofaFinanceModuleAccess(role, pathname);
+  if (dofaModuleAccess !== null) {
+    if (dofaModuleAccess) return null;
+    const target = getDashboardPathForRole(role);
+    return target === pathname ? null : target;
+  }
 
   if (isFinanceOfficeRole(role) || r === 'cfo' || r === 'coo') {
     if (isFinancePathAllowedForRole(role, pathname)) return null;
