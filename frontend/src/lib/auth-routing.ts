@@ -515,6 +515,76 @@ export function getActiveWorkspaceRoleFromPath(
 
 const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
 
+/**
+ * DoFA Modules 1-9 + X share the Finance shell, but many valid actors are not
+ * finance-office personas. Keep navigation visibility and route authorization
+ * aligned so a role cannot be shown a module that RoleGate then rejects.
+ */
+export const DOFA_FINANCE_MODULE_PATH_ROLES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  '/finance/acquisitions': [
+    'labadmin', 'hod', 'dean', 'faculty', 'procurement', 'procurementhead',
+    'procurementbuyer', 'accountant', 'financecontroller', 'cfo', 'coo',
+    'internalauditor', 'superadmin', 'campusadmin',
+  ],
+  '/finance/procurements': [
+    'labadmin', 'hod', 'faculty', 'procurement', 'procurementhead',
+    'procurementbuyer', 'stores', 'receivingclerk', 'apclerk', 'apmanager',
+    'accountant', 'financecontroller', 'cfo', 'internalauditor', 'superadmin',
+    'campusadmin',
+  ],
+  '/finance/invoice-integrity': [
+    'apclerk', 'apmanager', 'accountant', 'financecontroller', 'cfo',
+    'internalauditor', 'tenantadmin', 'superadmin', 'campusadmin',
+  ],
+  '/finance/product-verification': [
+    'stores', 'receivingclerk', 'procurementhead', 'internalauditor',
+    'tenantadmin', 'superadmin',
+  ],
+  '/finance/inventory': [
+    'stores', 'receivingclerk', 'inventoryverifier', 'procurementhead',
+    'internalauditor', 'tenantadmin', 'superadmin',
+  ],
+  '/finance/physical-identity': [
+    'stores', 'security', 'inventoryverifier', 'procurementhead',
+    'internalauditor', 'tenantadmin', 'superadmin',
+  ],
+  '/finance/consumables': [
+    'faculty', 'labadmin', 'stores', 'procurementhead', 'internalauditor',
+    'tenantadmin', 'superadmin',
+  ],
+  '/finance/returns': [
+    'faculty', 'labadmin', 'stores', 'procurementhead', 'finance',
+    'financecontroller', 'cfo', 'internalauditor', 'tenantadmin', 'superadmin',
+  ],
+  '/finance/asset-service': [
+    'faculty', 'labadmin', 'stores', 'procurementhead', 'finance',
+    'financecontroller', 'cfo', 'servicetechnician', 'externalserviceprovider',
+    'internalauditor', 'tenantadmin', 'superadmin',
+  ],
+  '/finance/asset-retirement': [
+    'faculty', 'labadmin', 'stores', 'procurementhead', 'finance',
+    'financecontroller', 'cfo', 'sanitizationoperator', 'sanitizationverifier',
+    'internalauditor', 'tenantadmin', 'superadmin',
+  ],
+};
+
+export function getDofaFinanceModuleAccess(
+  roleOrRoles: string | string[] | undefined | null,
+  pathname: string,
+): boolean | null {
+  const match = Object.keys(DOFA_FINANCE_MODULE_PATH_ROLES)
+    .sort((a, b) => b.length - a.length)
+    .find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  if (!match) return null;
+
+  const roles = (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles])
+    .filter((role): role is string => Boolean(role))
+    .map((role) => role.trim().toLowerCase());
+  return roles.some((role) => DOFA_FINANCE_MODULE_PATH_ROLES[match].includes(role));
+}
+
 /** Full finance desk — receivables, payables settlement, core accounting */
 export const FINANCE_DESK_ROLE_NAMES = [
   'Accountant',
@@ -793,6 +863,11 @@ export function canRoleAccessPath(
 
   if (isPathHiddenForLaunch(pathname)) {
     return false;
+  }
+
+  const dofaModuleAccess = getDofaFinanceModuleAccess(roles, pathname);
+  if (dofaModuleAccess !== null) {
+    return dofaModuleAccess;
   }
 
   if (
