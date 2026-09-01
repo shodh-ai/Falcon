@@ -245,7 +245,10 @@ export default function AdminStudentVerificationsPage() {
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading queue…</p>
           ) : queue.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No users awaiting verification.</p>
+            <p className="text-sm text-muted-foreground">
+              No users awaiting verification. Students and staff appear here after they finish
+              first-login document submission.
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

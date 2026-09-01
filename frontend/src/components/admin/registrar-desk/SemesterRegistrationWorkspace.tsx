@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { ChevronDown, Loader2, Search } from 'lucide-react';
 import {
   REG_BRAND_BTN,
   REG_OUTLINE_BTN,
@@ -36,6 +36,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -54,6 +61,12 @@ type RegRow = {
 };
 
 const PAGE = 10;
+
+const REVIEW_ACTIONS = [
+  { action: 'APPROVED' as const, label: 'Approve' },
+  { action: 'REJECTED' as const, label: 'Reject' },
+  { action: 'SENT_BACK' as const, label: 'Send back' },
+];
 
 export function SemesterRegistrationWorkspace() {
   const api = useAuthedApi();
@@ -226,7 +239,7 @@ export function SemesterRegistrationWorkspace() {
                       <TableHead>Program</TableHead>
                       <TableHead>Semester</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -244,23 +257,37 @@ export function SemesterRegistrationWorkspace() {
                             {r.status ?? '—'}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {(['APPROVED', 'REJECTED', 'SENT_BACK'] as const).map((action) => (
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
                               <Button
-                                key={action}
                                 size="sm"
-                                variant="outline"
-                                className="h-7 text-[11px]"
-                                onClick={() => {
-                                  setReview({ row: r, action });
-                                  setRemarks(r.registrar_remarks ?? '');
-                                }}
+                                className={cn(
+                                  'h-8 gap-1.5 px-3 text-xs font-semibold',
+                                  REG_BRAND_BTN,
+                                )}
                               >
-                                {action === 'APPROVED' ? 'Approve' : action === 'REJECTED' ? 'Reject' : 'Send back'}
+                                View
+                                <ChevronDown className="h-3.5 w-3.5 opacity-90" />
                               </Button>
-                            ))}
-                          </div>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                Registration review
+                              </DropdownMenuLabel>
+                              {REVIEW_ACTIONS.map(({ action, label }) => (
+                                <DropdownMenuItem
+                                  key={action}
+                                  onSelect={() => {
+                                    setReview({ row: r, action });
+                                    setRemarks(r.registrar_remarks ?? '');
+                                  }}
+                                >
+                                  {label}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}

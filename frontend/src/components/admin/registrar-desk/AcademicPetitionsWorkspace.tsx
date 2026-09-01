@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, Loader2, Search } from 'lucide-react';
 import {
   REG_BRAND_BTN,
   REG_OUTLINE_BTN,
@@ -36,6 +36,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -296,6 +304,20 @@ export function AcademicPetitionsWorkspace() {
     ['TRANSFER_CERTIFICATE', 'MIGRATION_CERTIFICATE'].includes(row.petition_type) &&
     (row.status === 'PENDING' || row.status === 'APPROVED');
 
+  function petitionActions(row: PetitionRow) {
+    const actions: Array<{ action: 'APPROVED' | 'REJECTED' | 'ISSUED'; label: string }> = [];
+    if (row.status === 'PENDING') {
+      actions.push({ action: 'APPROVED', label: 'Approve' });
+      actions.push({ action: 'REJECTED', label: 'Reject' });
+      if (canIssue(row)) {
+        actions.push({ action: 'ISSUED', label: 'Issue' });
+      }
+    } else if (canIssue(row) && row.status === 'APPROVED') {
+      actions.push({ action: 'ISSUED', label: 'Issue' });
+    }
+    return actions;
+  }
+
   return (
     <RegistrarDeskChrome
       title="Academic Petitions"
@@ -387,7 +409,7 @@ export function AcademicPetitionsWorkspace() {
                       <TableHead>Request</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Updated</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -420,55 +442,45 @@ export function AcademicPetitionsWorkspace() {
                         <TableCell className="text-xs text-muted-foreground">
                           {r.updated_at ? new Date(r.updated_at).toLocaleString() : '—'}
                         </TableCell>
-                        <TableCell>
-                          {r.status === 'PENDING' ? (
-                            <div className="flex flex-wrap gap-1">
-                              <Button
-                                size="sm"
-                                className={cn('h-7 text-[11px]', REG_BRAND_BTN)}
-                                onClick={() => {
-                                  setDecide({ row: r, action: 'APPROVED' });
-                                  setRemarks('');
-                                }}
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-[11px]"
-                                onClick={() => {
-                                  setDecide({ row: r, action: 'REJECTED' });
-                                  setRemarks('');
-                                }}
-                              >
-                                Reject
-                              </Button>
-                              {canIssue(r) ? (
+                        <TableCell className="text-right">
+                          {petitionActions(r).length > 0 ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
                                 <Button
                                   size="sm"
-                                  variant="outline"
-                                  className="h-7 text-[11px]"
-                                  onClick={() => {
-                                    setDecide({ row: r, action: 'ISSUED' });
-                                    setRemarks('');
-                                  }}
+                                  className={cn(
+                                    'h-8 gap-1.5 px-3 text-xs font-semibold',
+                                    REG_BRAND_BTN,
+                                  )}
                                 >
-                                  Issue
+                                  View
+                                  <ChevronDown className="h-3.5 w-3.5 opacity-90" />
                                 </Button>
-                              ) : null}
-                            </div>
-                          ) : canIssue(r) && r.status === 'APPROVED' ? (
-                            <Button
-                              size="sm"
-                              className={cn('h-7 text-[11px]', REG_BRAND_BTN)}
-                              onClick={() => {
-                                setDecide({ row: r, action: 'ISSUED' });
-                                setRemarks('');
-                              }}
-                            >
-                              Issue
-                            </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                  Petition review
+                                </DropdownMenuLabel>
+                                {petitionActions(r).map((item, index) => {
+                                  const isReject = item.action === 'REJECTED';
+                                  const showSeparator = isReject && index > 0;
+                                  return (
+                                    <Fragment key={item.action}>
+                                      {showSeparator ? <DropdownMenuSeparator /> : null}
+                                      <DropdownMenuItem
+                                        className={isReject ? 'text-red-700 focus:text-red-700' : undefined}
+                                        onSelect={() => {
+                                          setDecide({ row: r, action: item.action });
+                                          setRemarks('');
+                                        }}
+                                      >
+                                        {item.label}
+                                      </DropdownMenuItem>
+                                    </Fragment>
+                                  );
+                                })}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}

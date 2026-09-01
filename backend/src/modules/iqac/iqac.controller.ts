@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -79,7 +80,7 @@ export class IqacController {
   }
 
   @Get('repository')
-  @Roles('SuperAdmin', 'IQAC', 'President')
+  @Roles('SuperAdmin', 'IQAC', 'President', 'Registrar')
   repository(
     @Req() req: { user: AuthUser },
     @Query('criterion') criterion?: string,
@@ -90,6 +91,57 @@ export class IqacController {
       criterion ? Number(criterion) : undefined,
       academicYear,
     );
+  }
+
+  @Post('repository/documents')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar')
+  addRepositoryDocument(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      naac_criterion: number;
+      metric_number?: string;
+      title: string;
+      file_path: string;
+      academic_year?: string;
+    },
+  ) {
+    return this.analytics.addRepositoryDocument(
+      this.tenant(req),
+      req.user.user_id,
+      dto,
+    );
+  }
+
+  @Delete('repository/documents/:id')
+  @Roles('SuperAdmin', 'IQAC', 'Registrar')
+  deleteRepositoryDocument(
+    @Req() req: { user: AuthUser },
+    @Param('id') id: string,
+  ) {
+    return this.analytics.deleteRepositoryDocument(this.tenant(req), id);
+  }
+
+  @Get('repository/export')
+  @Roles('SuperAdmin', 'IQAC', 'President', 'Registrar')
+  @Header('Content-Type', 'text/csv')
+  async repositoryExport(
+    @Req() req: { user: AuthUser },
+    @Res() res: Response,
+    @Query('criterion') criterion?: string,
+    @Query('academic_year') academicYear = '2025-2026',
+  ) {
+    const csv = await this.analytics.exportRepositoryCsv(
+      this.tenant(req),
+      criterion ? Number(criterion) : undefined,
+      academicYear,
+    );
+    const suffix = criterion ? `-c${criterion}` : '';
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="naac-repository${suffix}.csv"`,
+    );
+    res.send(csv);
   }
 
   @Get('audits')

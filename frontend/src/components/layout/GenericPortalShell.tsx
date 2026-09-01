@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
+import { useAuth } from '@/context/AuthContext';
 import {
   financePortal,
   hodPortal,
@@ -18,7 +19,9 @@ import {
   alumniAdminPortal,
   adminOpsPortal,
   placementPortal,
+  filterPortalConfigForRole,
 } from '@/lib/navigation';
+import { isPureRegistrarRoles, registrarPortal } from '@/lib/registrar.navigation';
 
 type PortalKey =
   | 'hod'
@@ -62,10 +65,21 @@ export function GenericPortalShell({
   children: ReactNode;
   portal: PortalKey | 'dean';
 }) {
+  const { user } = useAuth();
+  const roles = (user?.roles?.length ? user.roles : [user?.primaryRole ?? user?.role ?? ''])
+    .filter(Boolean)
+    .map(String);
+
+  // Keep FINAL Registrar sidebar when Registrar opens shared surfaces
+  // (e.g. /iqac/repository, /admin-ops/convocation). Other roles unchanged.
+  if (isPureRegistrarRoles(roles)) {
+    return (
+      <AppShell config={filterPortalConfigForRole(registrarPortal, roles)}>
+        {children}
+      </AppShell>
+    );
+  }
+
   const config = configs[portal];
-  return (
-    <AppShell config={config}>
-      {children}
-    </AppShell>
-  );
+  return <AppShell config={config}>{children}</AppShell>;
 }

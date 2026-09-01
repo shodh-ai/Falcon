@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { ChevronDown, History, Loader2, Search } from 'lucide-react';
 import {
   REG_BRAND_BTN,
   REG_OUTLINE_BTN,
@@ -36,6 +36,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAuthedApi } from '@/lib/api';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
@@ -50,6 +58,14 @@ const STATUSES = [
   'WITHDRAWN',
   'GRADUATED',
   'ALUMNI',
+] as const;
+
+const STATUS_ACTIONS = [
+  { next: 'SUSPENDED', label: 'Suspend' },
+  { next: 'ACTIVE', label: 'Re-activate' },
+  { next: 'WITHDRAWN', label: 'Withdraw' },
+  { next: 'GRADUATED', label: 'Mark graduated' },
+  { next: 'ALUMNI', label: 'Move to alumni' },
 ] as const;
 
 type Row = {
@@ -234,59 +250,81 @@ export function StudentLifecycleWorkspace() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <Table className="min-w-[800px]">
+                <Table className="min-w-[720px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Student</TableHead>
                       <TableHead>Enrollment</TableHead>
                       <TableHead>Program</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="w-[120px] text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rows.map((r) => (
-                      <TableRow key={r.user_id}>
-                        <TableCell>
-                          <p className="font-medium text-sgvu-navy">{r.name}</p>
-                          <p className="text-xs text-muted-foreground">{r.official_email}</p>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{r.enrollment_no ?? '—'}</TableCell>
-                        <TableCell>{r.program_name ?? '—'}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="border-transparent bg-sgvu-navy/5 text-sgvu-navy">
-                            {(r.lifecycle_status ?? 'ACTIVE').replace(/_/g, ' ')}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {(['SUSPENDED', 'ACTIVE', 'WITHDRAWN', 'GRADUATED', 'ALUMNI'] as const).map(
-                              (next) => (
-                                <Button
-                                  key={next}
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-[11px]"
-                                  onClick={() => {
-                                    setDialog({ row: r, next });
-                                    setReason('');
-                                  }}
-                                >
-                                  {next === 'ACTIVE' ? 'Re-activate' : next.replace(/_/g, ' ')}
-                                </Button>
-                              ),
-                            )}
-                            <Button
-                              size="sm"
-                              className={cn('h-7 text-[11px]', REG_BRAND_BTN)}
-                              onClick={() => void openHistory(r)}
+                    {rows.map((r) => {
+                      const current = String(r.lifecycle_status ?? 'ACTIVE').toUpperCase();
+                      return (
+                        <TableRow key={r.user_id}>
+                          <TableCell>
+                            <p className="font-medium text-sgvu-navy">{r.name}</p>
+                            <p className="text-xs text-muted-foreground">{r.official_email}</p>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{r.enrollment_no ?? '—'}</TableCell>
+                          <TableCell>{r.program_name ?? '—'}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className="border-transparent bg-sgvu-navy/5 text-sgvu-navy"
                             >
-                              History
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                              {current.replace(/_/g, ' ')}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  className={cn(
+                                    'h-8 gap-1.5 px-3 text-xs font-semibold',
+                                    REG_BRAND_BTN,
+                                  )}
+                                >
+                                  View
+                                  <ChevronDown className="h-3.5 w-3.5 opacity-90" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-52">
+                                <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                  Change status
+                                </DropdownMenuLabel>
+                                {STATUS_ACTIONS.map((action) => (
+                                  <DropdownMenuItem
+                                    key={action.next}
+                                    disabled={current === action.next}
+                                    onSelect={() => {
+                                      setDialog({ row: r, next: action.next });
+                                      setReason('');
+                                    }}
+                                  >
+                                    {action.label}
+                                    {current === action.next ? (
+                                      <span className="ml-auto text-[10px] text-muted-foreground">
+                                        current
+                                      </span>
+                                    ) : null}
+                                  </DropdownMenuItem>
+                                ))}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onSelect={() => void openHistory(r)}>
+                                  <History className="mr-2 h-4 w-4" />
+                                  View history
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -315,7 +353,10 @@ export function StudentLifecycleWorkspace() {
               <p className="text-sm text-muted-foreground">No status changes recorded.</p>
             ) : (
               history.map((h) => (
-                <div key={String(h.history_id)} className="rounded-lg border border-sgvu-navy/10 px-3 py-2 text-sm">
+                <div
+                  key={String(h.history_id)}
+                  className="rounded-lg border border-sgvu-navy/10 px-3 py-2 text-sm"
+                >
                   <p className="font-medium text-sgvu-navy">
                     {String(h.from_status ?? '—')} → {String(h.to_status ?? '—')}
                   </p>

@@ -24,8 +24,12 @@ import {
   studentPortal,
   type PortalConfig,
 } from '@/lib/navigation';
+import { isPureRegistrarRoles, registrarPortal } from '@/lib/registrar.navigation';
 
-export function portalForRole(role: string): PortalConfig {
+function portalForRole(role: string, allRoles?: string[] | null): PortalConfig {
+  const roles = (allRoles?.length ? allRoles : [role]).filter(Boolean).map(String);
+  if (isPureRegistrarRoles(roles)) return registrarPortal;
+
   const r = role.trim().toLowerCase();
   if (r === 'student' || r === 'applicant') return studentPortal;
   if (r === 'faculty') return facultyPortal;
@@ -43,19 +47,21 @@ export function portalForRole(role: string): PortalConfig {
   if (r === 'examcell' || r === 'exam cell') return examCellPortal;
   if (r === 'placementcell' || r === 'placement cell') return placementPortal;
   if (r === 'transportofficer' || r === 'transport officer') return adminOpsPortal;
-  if (r === 'registrar') return adminPortal;
+  if (r === 'registrar') return registrarPortal;
   return adminPortal;
 }
 
-/** True when the role uses the Management adminPortal sidebar (shared with /admin/*). */
+/** True when the role uses the Management /admin console sidebar. */
 export function usesManagementAdminSidebar(role: string | undefined | null): boolean {
-  return portalForRole(role ?? '') === adminPortal;
+  const portal = portalForRole(role ?? '');
+  return portal === adminPortal || portal === registrarPortal;
 }
 
 export function RoleAwareShell({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const role = user?.primaryRole ?? user?.role ?? 'Faculty';
-  const config = portalForRole(role);
+  const roles = user?.roles?.length ? user.roles : [role];
+  const config = portalForRole(role, roles);
   const home = getDashboardPathForRole(role);
 
   return (

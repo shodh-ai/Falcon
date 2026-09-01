@@ -213,50 +213,60 @@ export function RegistrarGovernanceWorkspace() {
       }
     >
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="flex flex-wrap gap-2 p-3">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={cn(
-                'inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold',
-                category === c.id ? REG_BRAND_BTN : REG_OUTLINE_BTN,
-              )}
-              onClick={() => {
-                setCategory(c.id);
-                setOffset(0);
-                setQ('');
-              }}
-            >
-              <c.icon className="h-3.5 w-3.5" aria-hidden />
-              {c.label}
-            </button>
-          ))}
+        <CardContent className="p-3">
+          <div className="flex flex-nowrap gap-2">
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={cn(
+                  'inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-xs font-semibold sm:px-3 sm:text-sm',
+                  category === c.id ? REG_BRAND_BTN : REG_OUTLINE_BTN,
+                )}
+                onClick={() => {
+                  setCategory(c.id);
+                  setOffset(0);
+                  setQ('');
+                }}
+              >
+                <c.icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="truncate">{c.label}</span>
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="grid gap-3 p-4 md:grid-cols-5">
-          <label className="md:col-span-2 space-y-1">
+        <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-end lg:gap-4">
+          <label className="min-w-0 flex-1 space-y-1">
             <span className="text-xs text-muted-foreground">Search</span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="h-10 pl-9" value={q} onChange={(e) => { setQ(e.target.value); setOffset(0); }} placeholder="Title, owner…" />
+              <Input
+                className="h-10 pl-9"
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setOffset(0);
+                }}
+                placeholder="Title, owner…"
+              />
             </div>
           </label>
-          <label className="space-y-1">
+          <label className="w-full shrink-0 space-y-1 lg:w-44">
             <span className="text-xs text-muted-foreground">Status</span>
-            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-10">
+            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-10 w-full">
               <option value="all">All</option>
               <option value="PENDING">Pending</option>
               <option value="APPROVED">Approved</option>
               <option value="REJECTED">Rejected</option>
             </Select>
           </label>
-          <div className="flex items-end gap-2 md:col-span-2">
+          <div className="flex w-full shrink-0 gap-2 lg:w-auto lg:pl-2">
             <button
               type="button"
-              className={cn('h-10 rounded-lg px-3 text-sm font-semibold', REG_BRAND_BTN)}
+              className={cn('h-10 flex-1 rounded-lg px-4 text-sm font-semibold lg:min-w-[7.5rem] lg:flex-none', REG_BRAND_BTN)}
               onClick={() => {
                 setForm({ status: 'PENDING', priority: 'MEDIUM' });
                 setCreateOpen(true);
@@ -264,7 +274,11 @@ export function RegistrarGovernanceWorkspace() {
             >
               New item
             </button>
-            <button type="button" className={cn('h-10 rounded-lg px-3 text-sm font-semibold', REG_OUTLINE_BTN)} onClick={exportCsv}>
+            <button
+              type="button"
+              className={cn('h-10 flex-1 rounded-lg px-4 text-sm font-semibold lg:min-w-[7.5rem] lg:flex-none', REG_OUTLINE_BTN)}
+              onClick={exportCsv}
+            >
               Export
             </button>
           </div>

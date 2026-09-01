@@ -86,15 +86,17 @@ export default function AdminConvocationPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-sgvu-navy">
-          <GraduationCap className="h-7 w-7" />
-          Convocation & Certificate Automation
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Create convocation windows, verify no-dues, and batch-generate watermarked degree PDFs.
-        </p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-sgvu-navy sm:text-3xl">
+            <GraduationCap className="h-7 w-7 shrink-0" />
+            Convocation & Certificate Automation
+          </h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            Create convocation windows, verify no-dues, and batch-generate watermarked degree PDFs.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

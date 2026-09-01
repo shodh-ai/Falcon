@@ -131,6 +131,10 @@ export interface PortalConfig {
   includeAccountSettingsNav?: boolean;
   /** Hide multi-role workspace switcher in the header (single-workspace portals). */
   hideWorkspaceSwitcher?: boolean;
+  /** Collapsible sidebar section headers (Registrar FINAL IA). */
+  collapsibleNavGroups?: boolean;
+  /** Brand line under the logo in the sidebar header. */
+  sidebarBrandLabel?: string;
 }
 
 /**

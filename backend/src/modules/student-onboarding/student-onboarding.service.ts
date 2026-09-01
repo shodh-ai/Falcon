@@ -493,6 +493,13 @@ export class StudentOnboardingService {
     await qr.connect();
     await qr.startTransaction();
 
+    let approvedUser: {
+      name: string;
+      official_email: string;
+      role_name: string;
+      prior_status: string;
+    } | null = null;
+
     try {
       const locked = (await qr.query(
         `SELECT u.user_id, u.name, u.official_email, u.onboarding_status, r.role_name
@@ -551,42 +558,59 @@ export class StudentOnboardingService {
         );
       }
 
+      approvedUser = {
+        name: user.name,
+        official_email: user.official_email,
+        role_name: user.role_name,
+        prior_status: status,
+      };
       await qr.commitTransaction();
-
-      await this.onboardingVerificationNotify
-        .dismissVerificationNotifications(tenant, targetUserId)
-        .catch(() => undefined);
-
-      this.notifications.studentOnboardingApproved({
-        tenantId: tenant,
-        userId: targetUserId,
-        studentName: user.name,
-        officialEmail: user.official_email,
-        dashboardPath: getDashboardPathForRoleName(user.role_name),
-      });
-
-      if (actor?.userId) {
-        await this.enterpriseAudit.log({
-          tenantId: tenant,
-          userId: actor.userId,
-          role: actor.role,
-          module: 'student_verifications',
-          action: 'VERIFY_APPROVE',
-          recordId: targetUserId,
-          oldValue: { onboarding_status: status },
-          newValue: { onboarding_status: 'COMPLETED' },
-          ip: actor.ip,
-          sessionId: actor.sessionId,
-        });
-      }
-
-      return { onboarding_status: 'COMPLETED' };
     } catch (error) {
-      await qr.rollbackTransaction();
+      if (qr.isTransactionActive) {
+        await qr.rollbackTransaction();
+      }
       throw error;
     } finally {
       await qr.release();
     }
+
+    // Side effects after commit — never fail the approval HTTP response.
+    await this.onboardingVerificationNotify
+      .dismissVerificationNotifications(tenant, targetUserId)
+      .catch(() => undefined);
+
+    if (approvedUser) {
+      try {
+        this.notifications.studentOnboardingApproved({
+          tenantId: tenant,
+          userId: targetUserId,
+          studentName: approvedUser.name,
+          officialEmail: approvedUser.official_email,
+          dashboardPath: getDashboardPathForRoleName(approvedUser.role_name),
+        });
+      } catch {
+        /* listeners must not break verify */
+      }
+
+      if (actor?.userId) {
+        await this.enterpriseAudit
+          .log({
+            tenantId: tenant,
+            userId: actor.userId,
+            role: actor.role,
+            module: 'student_verifications',
+            action: 'VERIFY_APPROVE',
+            recordId: targetUserId,
+            oldValue: { onboarding_status: approvedUser.prior_status },
+            newValue: { onboarding_status: 'COMPLETED' },
+            ip: actor.ip,
+            sessionId: actor.sessionId,
+          })
+          .catch(() => undefined);
+      }
+    }
+
+    return { onboarding_status: 'COMPLETED' };
   }
 
   async reject(
@@ -602,6 +626,13 @@ export class StudentOnboardingService {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
+
+    let rejectedUser: {
+      name: string;
+      official_email: string;
+      role_name: string;
+      prior_status: string;
+    } | null = null;
 
     try {
       const locked = (await qr.query(
@@ -659,43 +690,64 @@ export class StudentOnboardingService {
         );
       }
 
+      rejectedUser = {
+        name: user.name,
+        official_email: user.official_email,
+        role_name: user.role_name,
+        prior_status: status,
+      };
       await qr.commitTransaction();
-
-      await this.onboardingVerificationNotify
-        .dismissVerificationNotifications(tenant, targetUserId)
-        .catch(() => undefined);
-
-      this.notifications.studentOnboardingRejected({
-        tenantId: tenant,
-        userId: targetUserId,
-        studentName: user.name,
-        officialEmail: user.official_email,
-        remarks: reason,
-        dashboardPath: getDashboardPathForRoleName(user.role_name),
-      });
-
-      if (actor?.userId) {
-        await this.enterpriseAudit.log({
-          tenantId: tenant,
-          userId: actor.userId,
-          role: actor.role,
-          module: 'student_verifications',
-          action: 'VERIFY_REJECT',
-          recordId: targetUserId,
-          oldValue: { onboarding_status: status },
-          newValue: { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason },
-          ip: actor.ip,
-          sessionId: actor.sessionId,
-        });
-      }
-
-      return { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason };
     } catch (error) {
-      await qr.rollbackTransaction();
+      if (qr.isTransactionActive) {
+        await qr.rollbackTransaction();
+      }
       throw error;
     } finally {
       await qr.release();
     }
+
+    await this.onboardingVerificationNotify
+      .dismissVerificationNotifications(tenant, targetUserId)
+      .catch(() => undefined);
+
+    if (rejectedUser) {
+      try {
+        this.notifications.studentOnboardingRejected({
+          tenantId: tenant,
+          userId: targetUserId,
+          studentName: rejectedUser.name,
+          officialEmail: rejectedUser.official_email,
+          remarks: reason,
+          dashboardPath: getDashboardPathForRoleName(
+            rejectedUser.role_name,
+          ),
+        });
+      } catch {
+        /* listeners must not break verify */
+      }
+
+      if (actor?.userId) {
+        await this.enterpriseAudit
+          .log({
+            tenantId: tenant,
+            userId: actor.userId,
+            role: actor.role,
+            module: 'student_verifications',
+            action: 'VERIFY_REJECT',
+            recordId: targetUserId,
+            oldValue: { onboarding_status: rejectedUser.prior_status },
+            newValue: {
+              onboarding_status: 'PENDING_DOCUMENTS',
+              admin_remarks: reason,
+            },
+            ip: actor.ip,
+            sessionId: actor.sessionId,
+          })
+          .catch(() => undefined);
+      }
+    }
+
+    return { onboarding_status: 'PENDING_DOCUMENTS', admin_remarks: reason };
   }
 
   async getDocumentPath(

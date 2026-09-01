@@ -61,7 +61,10 @@ type ApiCertificate = {
 };
 
 type ApiHistoryRow = {
-  history_id: string;
+  /** Primary key on registrar_signing_history */
+  sign_id?: string;
+  /** Legacy alias some clients expected */
+  history_id?: string;
   document_label: string;
   action: string;
   status: string;
@@ -96,8 +99,8 @@ function fmtDateTime(v?: string | null) {
 }
 
 function mapHistory(rows: ApiHistoryRow[]): SignatureActivity[] {
-  return rows.map((r) => ({
-    id: r.history_id,
+  return rows.map((r, index) => ({
+    id: String(r.sign_id ?? r.history_id ?? `hist-${index}`),
     date: fmtCertDate(r.created_at),
     document: r.document_label,
     signedBy: r.signed_by_name ?? 'Registrar',
@@ -742,8 +745,11 @@ export function DigitalSignatureCredentialsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pagedActivity.map((row) => (
-                    <TableRow key={row.id} className="border-sgvu-navy/5 bg-white hover:bg-white">
+                  {pagedActivity.map((row, index) => (
+                    <TableRow
+                      key={row.id || `activity-${activityOffset + index}`}
+                      className="border-sgvu-navy/5 bg-white hover:bg-white"
+                    >
                       <TableCell className={CELL}>{row.date}</TableCell>
                       <TableCell className={cn(CELL, 'font-medium')}>{row.document}</TableCell>
                       <TableCell className={CELL}>{row.signedBy}</TableCell>

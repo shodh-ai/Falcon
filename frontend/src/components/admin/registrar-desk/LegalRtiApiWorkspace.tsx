@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CalendarClock,
+  ChevronDown,
   FileText,
   Gavel,
   Loader2,
@@ -31,6 +32,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { PaginationBar } from '@/components/ui/PaginationBar';
 import { Select } from '@/components/ui/select';
@@ -174,23 +183,38 @@ export function LegalRtiApiWorkspace() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [rtiData, courtData, noticeData, discData, compData] = await Promise.all([
+      const [rtiRes, courtRes, noticeRes, discRes, compRes] = await Promise.allSettled([
         api.get<RtiRow[]>(REGISTRAR_DESK.legalRti),
         api.get<CourtRow[]>(REGISTRAR_DESK.legalCourt),
         api.get<NoticeRow[]>(REGISTRAR_DESK.legalNotices),
         api.get<DisciplinaryRow[]>(REGISTRAR_DESK.legalDisciplinary),
         api.get<ComplianceSummary>(REGISTRAR_DESK.legalCompliance),
       ]);
-      setRti(Array.isArray(rtiData) ? rtiData : []);
-      setCourt(Array.isArray(courtData) ? courtData : []);
-      setNotices(Array.isArray(noticeData) ? noticeData : []);
-      setDisciplinary(Array.isArray(discData) ? discData : []);
-      setCompliance(compData ?? null);
+
+      setRti(rtiRes.status === 'fulfilled' && Array.isArray(rtiRes.value) ? rtiRes.value : []);
+      setCourt(courtRes.status === 'fulfilled' && Array.isArray(courtRes.value) ? courtRes.value : []);
+      setNotices(noticeRes.status === 'fulfilled' && Array.isArray(noticeRes.value) ? noticeRes.value : []);
+      setDisciplinary(
+        discRes.status === 'fulfilled' && Array.isArray(discRes.value) ? discRes.value : [],
+      );
+      setCompliance(compRes.status === 'fulfilled' ? compRes.value ?? null : null);
+
+      const failed = [rtiRes, courtRes, noticeRes, discRes, compRes].filter(
+        (r) => r.status === 'rejected',
+      );
+      if (failed.length === 5) {
+        toast.error('Could not load legal workspace', {
+          description:
+            failed[0].status === 'rejected' && failed[0].reason instanceof Error
+              ? failed[0].reason.message
+              : 'Request failed',
+        });
+      } else if (failed.length > 0) {
+        toast.warning('Some legal desk data could not be loaded', {
+          description: 'Partial data is shown. Retry or check backend migrations.',
+        });
+      }
       setOffset(0);
-    } catch (e) {
-      toast.error('Could not load legal workspace', {
-        description: e instanceof Error ? e.message : 'Request failed',
-      });
     } finally {
       setLoading(false);
     }
@@ -249,7 +273,82 @@ export function LegalRtiApiWorkspace() {
 
   const pageRows = useMemo(() => activeRows.slice(offset, offset + PAGE), [activeRows, offset]);
 
+  function openEditRti(row: RtiRow) {
+    setEditCourt(null);
+    setEditNotice(null);
+    setEditDisc(null);
+    setEditRti(row);
+    setDialogOpen(true);
+  }
+
+  function openEditCourt(row: CourtRow) {
+    setEditRti(null);
+    setEditNotice(null);
+    setEditDisc(null);
+    setEditCourt(row);
+    setDialogOpen(true);
+  }
+
+  function openEditNotice(row: NoticeRow) {
+    setEditRti(null);
+    setEditCourt(null);
+    setEditDisc(null);
+    setEditNotice(row);
+    setDialogOpen(true);
+  }
+
+  function openEditDisc(row: DisciplinaryRow) {
+    setEditRti(null);
+    setEditCourt(null);
+    setEditNotice(null);
+    setEditDisc(row);
+    setDialogOpen(true);
+  }
+
+  async function quickUpdateRti(row: RtiRow, status: string) {
+    try {
+      await api.post(REGISTRAR_DESK.legalRti, { ...row, status });
+      toast.success(`RTI marked ${status.replace(/_/g, ' ').toLowerCase()}`);
+      void load();
+    } catch (e) {
+      toast.error('Update failed', { description: e instanceof Error ? e.message : 'Error' });
+    }
+  }
+
+  async function quickUpdateCourt(row: CourtRow, status: string) {
+    try {
+      await api.post(REGISTRAR_DESK.legalCourt, { ...row, status });
+      toast.success(`Court case marked ${status.toLowerCase()}`);
+      void load();
+    } catch (e) {
+      toast.error('Update failed', { description: e instanceof Error ? e.message : 'Error' });
+    }
+  }
+
+  async function quickUpdateNotice(row: NoticeRow, status: string) {
+    try {
+      await api.post(REGISTRAR_DESK.legalNotices, { ...row, status });
+      toast.success(`Notice marked ${status.toLowerCase()}`);
+      void load();
+    } catch (e) {
+      toast.error('Update failed', { description: e instanceof Error ? e.message : 'Error' });
+    }
+  }
+
+  async function quickUpdateDisc(row: DisciplinaryRow, status: string) {
+    try {
+      await api.post(REGISTRAR_DESK.legalDisciplinary, { ...row, status });
+      toast.success(`Disciplinary case marked ${status.toLowerCase()}`);
+      void load();
+    } catch (e) {
+      toast.error('Update failed', { description: e instanceof Error ? e.message : 'Error' });
+    }
+  }
+
   function openCreate() {
+    setEditCourt(null);
+    setEditNotice(null);
+    setEditDisc(null);
     if (tab === 'rti') setEditRti({ status: 'OPEN' });
     else if (tab === 'court') setEditCourt({ status: 'ACTIVE' });
     else if (tab === 'notices') setEditNotice({ status: 'OPEN' });
@@ -259,34 +358,40 @@ export function LegalRtiApiWorkspace() {
   }
 
   async function saveRecord() {
+    if (editRti) {
+      if (!editRti.reference_no?.trim() || !editRti.applicant_name?.trim() || !editRti.subject?.trim()) {
+        toast.warning('Fill reference, applicant, and subject');
+        return;
+      }
+    } else if (editCourt) {
+      if (!editCourt.case_number?.trim() || !editCourt.title?.trim()) {
+        toast.warning('Fill case number and title');
+        return;
+      }
+    } else if (editNotice) {
+      if (!editNotice.notice_number?.trim() || !editNotice.title?.trim()) {
+        toast.warning('Fill notice number and title');
+        return;
+      }
+    } else if (editDisc) {
+      if (!editDisc.case_number?.trim() || !editDisc.allegation?.trim()) {
+        toast.warning('Fill case number and allegation');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       if (editRti) {
-        if (!editRti.reference_no?.trim() || !editRti.applicant_name?.trim() || !editRti.subject?.trim()) {
-          toast.warning('Fill reference, applicant, and subject');
-          return;
-        }
         await api.post(REGISTRAR_DESK.legalRti, editRti);
         toast.success(editRti.rti_id ? 'RTI updated' : 'RTI registered');
       } else if (editCourt) {
-        if (!editCourt.case_number?.trim() || !editCourt.title?.trim()) {
-          toast.warning('Fill case number and title');
-          return;
-        }
         await api.post(REGISTRAR_DESK.legalCourt, editCourt);
         toast.success(editCourt.case_id ? 'Court case updated' : 'Court case registered');
       } else if (editNotice) {
-        if (!editNotice.notice_number?.trim() || !editNotice.title?.trim()) {
-          toast.warning('Fill notice number and title');
-          return;
-        }
         await api.post(REGISTRAR_DESK.legalNotices, editNotice);
         toast.success(editNotice.notice_id ? 'Notice updated' : 'Notice added');
       } else if (editDisc) {
-        if (!editDisc.case_number?.trim() || !editDisc.allegation?.trim()) {
-          toast.warning('Fill case number and allegation');
-          return;
-        }
         await api.post(REGISTRAR_DESK.legalDisciplinary, editDisc);
         toast.success(editDisc.case_id ? 'Case updated' : 'Case created');
       }
@@ -395,6 +500,20 @@ export function LegalRtiApiWorkspace() {
         ['Case no.', 'Student', 'Status'],
         filteredDisc.map((r) => [r.case_number, r.student_name ?? '—', r.status]),
       );
+    } else if (tab === 'compliance' && compliance) {
+      printTable(
+        'Legal Compliance Summary',
+        ['Metric', 'Count'],
+        [
+          ['RTI open', String(compliance.rti_open)],
+          ['RTI due within 7 days', String(compliance.rti_due_soon)],
+          ['Active court cases', String(compliance.court_active)],
+          ['Open notices', String(compliance.notices_open)],
+          ['Open disciplinary cases', String(compliance.disciplinary_open)],
+        ],
+      );
+    } else {
+      toast.warning('Nothing to print for this tab');
     }
   }
 
@@ -436,33 +555,35 @@ export function LegalRtiApiWorkspace() {
       </div>
 
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-        <CardContent className="flex flex-wrap gap-2 p-3">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={cn(
-                'h-9 rounded-lg px-3 text-sm font-semibold',
-                tab === t.id ? REG_BRAND_BTN : REG_OUTLINE_BTN,
-              )}
-              onClick={() => {
-                setTab(t.id);
-                setOffset(0);
-                setStatusFilter('all');
-                setQ('');
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
+        <CardContent className="p-3">
+          <div className="flex flex-nowrap gap-2 overflow-x-auto">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={cn(
+                  'inline-flex h-9 min-w-0 flex-1 items-center justify-center whitespace-nowrap rounded-lg px-2 text-xs font-semibold sm:px-3 sm:text-sm',
+                  tab === t.id ? REG_BRAND_BTN : REG_OUTLINE_BTN,
+                )}
+                onClick={() => {
+                  setTab(t.id);
+                  setOffset(0);
+                  setStatusFilter('all');
+                  setQ('');
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
       {tab !== 'compliance' ? (
         <>
           <Card className="border-sgvu-navy/10 bg-white shadow-sm">
-            <CardContent className="grid gap-3 p-4 md:grid-cols-5">
-              <label className="md:col-span-2 space-y-1">
+            <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-end lg:gap-4">
+              <label className="min-w-0 flex-1 space-y-1">
                 <span className="text-xs text-muted-foreground">Search</span>
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -477,7 +598,7 @@ export function LegalRtiApiWorkspace() {
                   />
                 </div>
               </label>
-              <label className="space-y-1">
+              <label className="w-full shrink-0 space-y-1 lg:w-44">
                 <span className="text-xs text-muted-foreground">Status</span>
                 <Select
                   value={statusFilter}
@@ -485,12 +606,20 @@ export function LegalRtiApiWorkspace() {
                     setStatusFilter(e.target.value);
                     setOffset(0);
                   }}
-                  className="h-10"
+                  className="h-10 w-full"
                 >
                   <option value="all">All statuses</option>
                   {tab === 'court' ? (
                     <>
                       <option value="ACTIVE">Active</option>
+                      <option value="CLOSED">Closed</option>
+                    </>
+                  ) : tab === 'rti' ? (
+                    <>
+                      <option value="OPEN">Open</option>
+                      <option value="IN_PROGRESS">In progress</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="REPLIED">Replied</option>
                       <option value="CLOSED">Closed</option>
                     </>
                   ) : (
@@ -503,15 +632,27 @@ export function LegalRtiApiWorkspace() {
                   )}
                 </Select>
               </label>
-              <div className="flex items-end gap-2 md:col-span-2">
-                <button type="button" className={cn('h-10 rounded-lg px-3 text-sm font-semibold', REG_BRAND_BTN)} onClick={openCreate}>
+              <div className="flex w-full shrink-0 gap-2 lg:w-auto lg:pl-2">
+                <button
+                  type="button"
+                  className={cn('h-10 flex-1 rounded-lg px-4 text-sm font-semibold lg:min-w-[7.5rem] lg:flex-none', REG_BRAND_BTN)}
+                  onClick={openCreate}
+                >
                   Add record
                 </button>
-                <button type="button" className={cn('h-10 rounded-lg px-3 text-sm font-semibold', REG_OUTLINE_BTN)} onClick={handleExport}>
+                <button
+                  type="button"
+                  className={cn('h-10 flex-1 rounded-lg px-4 text-sm font-semibold lg:min-w-[7.5rem] lg:flex-none', REG_OUTLINE_BTN)}
+                  onClick={handleExport}
+                >
                   Export
                 </button>
-                <button type="button" className={cn('h-10 rounded-lg px-3 text-sm font-semibold', REG_OUTLINE_BTN)} onClick={handlePrint}>
-                  <Printer className="mr-1 inline h-4 w-4" aria-hidden />
+                <button
+                  type="button"
+                  className={cn('inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-semibold lg:min-w-[7.5rem] lg:flex-none', REG_OUTLINE_BTN)}
+                  onClick={handlePrint}
+                >
+                  <Printer className="h-4 w-4" aria-hidden />
                   Print
                 </button>
               </div>
@@ -543,7 +684,7 @@ export function LegalRtiApiWorkspace() {
                             <TableHead className={TABLE_HEAD}>Subject</TableHead>
                             <TableHead className={TABLE_HEAD}>Status</TableHead>
                             <TableHead className={TABLE_HEAD}>Due</TableHead>
-                            <TableHead className={TABLE_HEAD} />
+                            <TableHead className={cn(TABLE_HEAD, 'text-right')}>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -560,10 +701,47 @@ export function LegalRtiApiWorkspace() {
                                   {fmtDate(r.due_date)}
                                 </span>
                               </TableCell>
-                              <TableCell className={CELL}>
-                                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => { setEditRti(r); setDialogOpen(true); }}>
-                                  Edit
-                                </Button>
+                              <TableCell className={cn(CELL, 'text-right')}>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      className={cn('h-8 gap-1.5 px-3 text-xs font-semibold', REG_BRAND_BTN)}
+                                    >
+                                      View
+                                      <ChevronDown className="h-3.5 w-3.5 opacity-90" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-48">
+                                    <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                      RTI actions
+                                    </DropdownMenuLabel>
+                                    <DropdownMenuItem onSelect={() => openEditRti(r)}>
+                                      Edit record
+                                    </DropdownMenuItem>
+                                    {r.status === 'OPEN' ? (
+                                      <DropdownMenuItem onSelect={() => void quickUpdateRti(r, 'IN_PROGRESS')}>
+                                        Mark in progress
+                                      </DropdownMenuItem>
+                                    ) : null}
+                                    {r.status === 'OPEN' || r.status === 'IN_PROGRESS' ? (
+                                      <DropdownMenuItem onSelect={() => void quickUpdateRti(r, 'REPLIED')}>
+                                        Mark replied
+                                      </DropdownMenuItem>
+                                    ) : null}
+                                    {r.status !== 'CLOSED' ? (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          className="text-red-700 focus:text-red-700"
+                                          onSelect={() => void quickUpdateRti(r, 'CLOSED')}
+                                        >
+                                          Close request
+                                        </DropdownMenuItem>
+                                      </>
+                                    ) : null}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -579,7 +757,7 @@ export function LegalRtiApiWorkspace() {
                             <TableHead className={TABLE_HEAD}>Court</TableHead>
                             <TableHead className={TABLE_HEAD}>Status</TableHead>
                             <TableHead className={TABLE_HEAD}>Next hearing</TableHead>
-                            <TableHead className={TABLE_HEAD} />
+                            <TableHead className={cn(TABLE_HEAD, 'text-right')}>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -590,10 +768,37 @@ export function LegalRtiApiWorkspace() {
                               <TableCell className={CELL}>{r.court_name ?? '—'}</TableCell>
                               <TableCell className={CELL}>{r.status}</TableCell>
                               <TableCell className={CELL}>{fmtDate(r.next_hearing)}</TableCell>
-                              <TableCell className={CELL}>
-                                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => { setEditCourt(r); setDialogOpen(true); }}>
-                                  Edit
-                                </Button>
+                              <TableCell className={cn(CELL, 'text-right')}>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      className={cn('h-8 gap-1.5 px-3 text-xs font-semibold', REG_BRAND_BTN)}
+                                    >
+                                      View
+                                      <ChevronDown className="h-3.5 w-3.5 opacity-90" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-44">
+                                    <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                      Court actions
+                                    </DropdownMenuLabel>
+                                    <DropdownMenuItem onSelect={() => openEditCourt(r)}>
+                                      Edit record
+                                    </DropdownMenuItem>
+                                    {r.status === 'ACTIVE' ? (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          className="text-red-700 focus:text-red-700"
+                                          onSelect={() => void quickUpdateCourt(r, 'CLOSED')}
+                                        >
+                                          Close case
+                                        </DropdownMenuItem>
+                                      </>
+                                    ) : null}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -609,7 +814,7 @@ export function LegalRtiApiWorkspace() {
                             <TableHead className={TABLE_HEAD}>Party</TableHead>
                             <TableHead className={TABLE_HEAD}>Status</TableHead>
                             <TableHead className={TABLE_HEAD}>Due</TableHead>
-                            <TableHead className={TABLE_HEAD} />
+                            <TableHead className={cn(TABLE_HEAD, 'text-right')}>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -620,10 +825,37 @@ export function LegalRtiApiWorkspace() {
                               <TableCell className={CELL}>{r.party ?? '—'}</TableCell>
                               <TableCell className={CELL}>{r.status}</TableCell>
                               <TableCell className={CELL}>{fmtDate(r.due_date)}</TableCell>
-                              <TableCell className={CELL}>
-                                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => { setEditNotice(r); setDialogOpen(true); }}>
-                                  Edit
-                                </Button>
+                              <TableCell className={cn(CELL, 'text-right')}>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      className={cn('h-8 gap-1.5 px-3 text-xs font-semibold', REG_BRAND_BTN)}
+                                    >
+                                      View
+                                      <ChevronDown className="h-3.5 w-3.5 opacity-90" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-44">
+                                    <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                      Notice actions
+                                    </DropdownMenuLabel>
+                                    <DropdownMenuItem onSelect={() => openEditNotice(r)}>
+                                      Edit record
+                                    </DropdownMenuItem>
+                                    {r.status === 'OPEN' ? (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          className="text-red-700 focus:text-red-700"
+                                          onSelect={() => void quickUpdateNotice(r, 'CLOSED')}
+                                        >
+                                          Close notice
+                                        </DropdownMenuItem>
+                                      </>
+                                    ) : null}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -639,7 +871,7 @@ export function LegalRtiApiWorkspace() {
                             <TableHead className={TABLE_HEAD}>Allegation</TableHead>
                             <TableHead className={TABLE_HEAD}>Committee</TableHead>
                             <TableHead className={TABLE_HEAD}>Status</TableHead>
-                            <TableHead className={TABLE_HEAD} />
+                            <TableHead className={cn(TABLE_HEAD, 'text-right')}>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -650,10 +882,37 @@ export function LegalRtiApiWorkspace() {
                               <TableCell className={CELL}>{r.allegation}</TableCell>
                               <TableCell className={CELL}>{r.committee ?? '—'}</TableCell>
                               <TableCell className={CELL}>{r.status}</TableCell>
-                              <TableCell className={CELL}>
-                                <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => { setEditDisc(r); setDialogOpen(true); }}>
-                                  Edit
-                                </Button>
+                              <TableCell className={cn(CELL, 'text-right')}>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      className={cn('h-8 gap-1.5 px-3 text-xs font-semibold', REG_BRAND_BTN)}
+                                    >
+                                      View
+                                      <ChevronDown className="h-3.5 w-3.5 opacity-90" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-44">
+                                    <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                      Disciplinary actions
+                                    </DropdownMenuLabel>
+                                    <DropdownMenuItem onSelect={() => openEditDisc(r)}>
+                                      Edit record
+                                    </DropdownMenuItem>
+                                    {r.status === 'OPEN' ? (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          className="text-red-700 focus:text-red-700"
+                                          onSelect={() => void quickUpdateDisc(r, 'CLOSED')}
+                                        >
+                                          Close case
+                                        </DropdownMenuItem>
+                                      </>
+                                    ) : null}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -734,8 +993,9 @@ export function LegalRtiApiWorkspace() {
               <label className="block space-y-1"><span className="text-xs text-muted-foreground">Applicant</span><Input value={editRti.applicant_name ?? ''} onChange={(e) => setEditRti({ ...editRti, applicant_name: e.target.value })} /></label>
               <label className="block space-y-1"><span className="text-xs text-muted-foreground">Subject</span><Input value={editRti.subject ?? ''} onChange={(e) => setEditRti({ ...editRti, subject: e.target.value })} /></label>
               <label className="block space-y-1"><span className="text-xs text-muted-foreground">Department</span><Input value={editRti.department ?? ''} onChange={(e) => setEditRti({ ...editRti, department: e.target.value })} /></label>
+              <label className="block space-y-1"><span className="text-xs text-muted-foreground">Assigned to</span><Input value={editRti.assigned_to ?? ''} onChange={(e) => setEditRti({ ...editRti, assigned_to: e.target.value })} /></label>
               <label className="block space-y-1"><span className="text-xs text-muted-foreground">Due date</span><Input type="date" value={editRti.due_date?.slice(0, 10) ?? ''} onChange={(e) => setEditRti({ ...editRti, due_date: e.target.value })} /></label>
-              <label className="block space-y-1"><span className="text-xs text-muted-foreground">Status</span><Select value={editRti.status ?? 'OPEN'} onChange={(e) => setEditRti({ ...editRti, status: e.target.value })} className="h-10"><option value="OPEN">Open</option><option value="PENDING">Pending</option><option value="REPLIED">Replied</option><option value="CLOSED">Closed</option></Select></label>
+              <label className="block space-y-1"><span className="text-xs text-muted-foreground">Status</span><Select value={editRti.status ?? 'OPEN'} onChange={(e) => setEditRti({ ...editRti, status: e.target.value })} className="h-10"><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="PENDING">Pending</option><option value="REPLIED">Replied</option><option value="CLOSED">Closed</option></Select></label>
               <label className="block space-y-1"><span className="text-xs text-muted-foreground">Reply summary</span><textarea className="w-full rounded-md border px-3 py-2 text-sm" rows={3} value={editRti.reply_summary ?? ''} onChange={(e) => setEditRti({ ...editRti, reply_summary: e.target.value })} /></label>
             </div>
           ) : null}

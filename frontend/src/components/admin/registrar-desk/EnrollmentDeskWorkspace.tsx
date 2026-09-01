@@ -52,6 +52,10 @@ type QueueRow = {
   source?: string;
   fee_verified: boolean;
   student_user_id?: string;
+  preferred_program?: string;
+  preferred_department?: string;
+  preferred_school?: string;
+  preferred_batch?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -136,7 +140,15 @@ export function EnrollmentDeskWorkspace() {
       if (q.trim()) params.set('q', q.trim());
       if (stage !== 'all') params.set('status', stage);
       const data = await api.get<QueueRow[]>(`${REGISTRAR_DESK.enrollmentQueue}?${params}`);
-      setQueue(Array.isArray(data) ? data : []);
+      setQueue(
+        Array.isArray(data)
+          ? data.map((row) => ({
+              ...row,
+              fee_verified: Boolean(row.fee_verified),
+              stage: String(row.stage ?? ''),
+            }))
+          : [],
+      );
       setOffset(0);
     } catch (e) {
       toast.error('Could not load enrollment queue', {
@@ -187,32 +199,71 @@ export function EnrollmentDeskWorkspace() {
     void loadRules();
   }, [loadRules]);
 
-  const pageRows = useMemo(() => queue.slice(offset, offset + PAGE), [queue, offset]);
+  const pageRows = useMemo(() => {
+    // Default "all" queue is actionable candidates only — already enrolled leads
+    // previously rendered as greyed-out Enroll buttons and looked broken.
+    const actionable =
+      stage === 'all' ? queue.filter((r) => String(r.stage).toUpperCase() !== 'ENROLLED') : queue;
+    return actionable.slice(offset, offset + PAGE);
+  }, [queue, offset, stage]);
+
+  const queueTotal = useMemo(() => {
+    if (stage === 'all') {
+      return queue.filter((r) => String(r.stage).toUpperCase() !== 'ENROLLED').length;
+    }
+    return queue.length;
+  }, [queue, stage]);
+
+  useEffect(() => {
+    if (offset > 0 && offset >= queueTotal) setOffset(0);
+  }, [offset, queueTotal]);
+
   const historyPageRows = useMemo(
     () => history.slice(historyOffset, historyOffset + PAGE),
     [history, historyOffset],
   );
 
-  function openEnroll(row: QueueRow) {
-    setEnrollTarget(row);
-    setForceEnroll(false);
-    setForm((f) => ({
-      ...f,
-      rule_id: f.rule_id || rules[0]?.rule_id || '',
-      remarks: '',
-    }));
+  function isAlreadyEnrolled(row: QueueRow): boolean {
+    return String(row.stage).toUpperCase() === 'ENROLLED';
   }
 
-  function canEnroll(row: QueueRow): boolean {
-    if (row.stage === 'ENROLLED') return false;
+  function openEnroll(row: QueueRow) {
+    if (isAlreadyEnrolled(row)) return;
+    setEnrollTarget(row);
+    // Registrar can force-enroll fee-pending leads; enable that path by default
+    // so Confirm enrollment is not stuck disabled.
+    const needsForce = !row.fee_verified && canForceEnroll;
+    setForceEnroll(needsForce);
+    setForm({
+      rule_id: rules[0]?.rule_id || '',
+      school_name: row.preferred_school ?? '',
+      department_name: row.preferred_department ?? '',
+      program_name: row.preferred_program ?? '',
+      degree_name: '',
+      batch: row.preferred_batch ?? String(new Date().getFullYear()),
+      semester: '1',
+      section_code: '',
+      advisor_name: '',
+      remarks: '',
+    });
+  }
+
+  function canConfirmEnroll(row: QueueRow): boolean {
+    if (isAlreadyEnrolled(row)) return false;
     if (row.fee_verified) return true;
     return canForceEnroll && forceEnroll;
   }
 
   async function submitEnroll() {
     if (!enrollTarget) return;
+    if (isAlreadyEnrolled(enrollTarget)) {
+      toast.info('This candidate is already enrolled');
+      return;
+    }
     if (!enrollTarget.fee_verified && !forceEnroll) {
-      toast.warning('Fee must be verified before enrollment');
+      toast.warning('Fee must be verified before enrollment', {
+        description: 'Verify fee in Admissions, or enable force enroll with remarks.',
+      });
       return;
     }
     if (!enrollTarget.fee_verified && forceEnroll && !form.remarks.trim()) {
@@ -244,14 +295,23 @@ export function EnrollmentDeskWorkspace() {
       });
       toast.success(`Enrolled — ${result.enrollment_no}`, {
         description: result.credentials_provisioned
-          ? 'Portal credentials were provisioned securely (not shown here).'
+          ? 'Student portal account was provisioned. Check Enrollment history for the record.'
           : 'Student record activated with enrollment number.',
       });
       setEnrollTarget(null);
-      void loadQueue();
-      if (tab === 'history') void loadHistory();
+      await loadQueue();
+      void loadHistory();
+      setTab('history');
     } catch (e) {
-      toast.error('Enrollment failed', { description: e instanceof Error ? e.message : 'Error' });
+      const message =
+        e instanceof Error
+          ? e.message
+          : typeof e === 'object' && e && 'message' in e
+            ? String((e as { message: unknown }).message)
+            : 'Enrollment failed';
+      toast.error('Enrollment failed', {
+        description: message.replace(/^Internal server error:?\s*/i, '') || message,
+      });
     } finally {
       setSaving(false);
     }
@@ -424,14 +484,27 @@ export function EnrollmentDeskWorkspace() {
                               {r.updated_at ? new Date(r.updated_at).toLocaleString() : '—'}
                             </TableCell>
                             <TableCell>
-                              <Button
-                                size="sm"
-                                className={cn('h-7 text-[11px]', REG_BRAND_BTN)}
-                                disabled={r.stage === 'ENROLLED'}
-                                onClick={() => openEnroll(r)}
-                              >
-                                Enroll
-                              </Button>
+                              {isAlreadyEnrolled(r) ? (
+                                <Badge
+                                  variant="outline"
+                                  className="border-transparent bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800"
+                                >
+                                  Enrolled
+                                </Badge>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className={cn(
+                                    'h-8 min-w-[4.75rem] px-3 text-xs font-semibold shadow-none',
+                                    REG_BRAND_BTN,
+                                    'disabled:opacity-100',
+                                  )}
+                                  onClick={() => openEnroll(r)}
+                                >
+                                  Enroll
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -439,7 +512,14 @@ export function EnrollmentDeskWorkspace() {
                     </Table>
                   </div>
                   <div className="border-t border-sgvu-navy/10 p-4">
-                    <PaginationBar total={queue.length} limit={PAGE} offset={offset} onPageChange={setOffset} />
+                    <PaginationBar total={queueTotal} limit={PAGE} offset={offset} onPageChange={setOffset} />
+                    {stage === 'all' ? (
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        Already enrolled candidates are hidden here. Choose stage{' '}
+                        <span className="font-semibold text-sgvu-navy">ENROLLED</span> to review them, or open
+                        Enrollment history.
+                      </p>
+                    ) : null}
                   </div>
                 </>
               )}
@@ -573,15 +653,28 @@ export function EnrollmentDeskWorkspace() {
               </div>
 
               {!enrollTarget.fee_verified && canForceEnroll ? (
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={forceEnroll}
-                    onChange={(e) => setForceEnroll(e.target.checked)}
-                    className="h-4 w-4 rounded border-sgvu-navy/30"
-                  />
-                  Force enroll without fee verification (remarks required)
-                </label>
+                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5">
+                  <label className="flex cursor-pointer items-start gap-2 text-sm text-sgvu-navy">
+                    <input
+                      type="checkbox"
+                      checked={forceEnroll}
+                      onChange={(e) => setForceEnroll(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-sgvu-navy/30"
+                    />
+                    <span>
+                      Force enroll without fee verification
+                      <span className="mt-0.5 block text-xs font-normal text-amber-900/80">
+                        Audit remarks are required. This still creates the student account and enrollment number.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              ) : null}
+
+              {!enrollTarget.fee_verified && !canForceEnroll ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
+                  Fee is not verified. Mark fee paid in Admissions before enrollment, or ask a Registrar with force-enroll rights.
+                </p>
               ) : null}
 
               <label className="block space-y-1">
@@ -638,11 +731,21 @@ export function EnrollmentDeskWorkspace() {
               </div>
 
               <label className="block space-y-1">
-                <span className="text-xs text-muted-foreground">Remarks</span>
+                <span className="text-xs text-muted-foreground">
+                  Remarks
+                  {!enrollTarget.fee_verified && forceEnroll ? (
+                    <span className="font-semibold text-amber-800"> (required for force enroll)</span>
+                  ) : null}
+                </span>
                 <Textarea
                   rows={2}
                   value={form.remarks}
                   onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))}
+                  placeholder={
+                    !enrollTarget.fee_verified && forceEnroll
+                      ? 'Why is enrollment allowed without fee verification?'
+                      : 'Optional notes for the enrollment run'
+                  }
                 />
               </label>
             </div>
@@ -652,8 +755,9 @@ export function EnrollmentDeskWorkspace() {
               Cancel
             </Button>
             <Button
-              className={REG_BRAND_BTN}
-              disabled={saving || !enrollTarget || !canEnroll(enrollTarget)}
+              type="button"
+              className={cn(REG_BRAND_BTN, 'disabled:opacity-60')}
+              disabled={saving || !enrollTarget || !canConfirmEnroll(enrollTarget)}
               onClick={() => void submitEnroll()}
             >
               {saving ? 'Enrolling…' : 'Confirm enrollment'}

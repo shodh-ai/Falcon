@@ -36,7 +36,7 @@
     "echarts-for-react": "^3.0.6",
     "framer-motion": "^12.40.0",
     "geist": "^1.7.2",
-    "html2canvas-pro": "^2.2.4",
+    "html2canvas-pro": "^2.4.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "leaflet": "^1.9.4",
@@ -75,6 +75,6 @@
     "jsdom": "^26.1.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.1.1"
+    "vitest": "^3.2.7"
   }
 }

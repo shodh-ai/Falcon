@@ -73,6 +73,8 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
       collapsed={collapsed}
       onToggleCollapse={() => writeSidebarCollapsed(!collapsed)}
       className="h-full"
+      collapsibleNavGroups={launchConfig.collapsibleNavGroups}
+      sidebarBrandLabel={launchConfig.sidebarBrandLabel}
     />
   );
 

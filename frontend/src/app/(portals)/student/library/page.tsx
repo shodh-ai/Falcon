@@ -259,7 +259,12 @@ export default function StudentLibraryOpacPage() {
         )}
       </StudentSectionCard>
 
-      <LibraryOpacPanel />
+      <LibraryOpacPanel
+        basePath="/student/library"
+        title="Student library"
+        description="Search the Falcon catalog, place holds, and manage your loans."
+        embedded
+      />
     </StudentPageShell>
   );
 }

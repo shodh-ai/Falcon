@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { LucideIcon } from 'lucide-react';
-import { Loader2 } from 'lucide-react';
+import { ArrowUpRight, Loader2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -73,6 +73,7 @@ export function RegistrarKpiCard({
   accent = 'blue',
   loading = false,
   trailing,
+  emphasize = false,
   className,
 }: {
   title: string;
@@ -85,6 +86,8 @@ export function RegistrarKpiCard({
   accent?: RegistrarKpiAccent;
   loading?: boolean;
   trailing?: ReactNode;
+  /** Visually highlight cards that need user action */
+  emphasize?: boolean;
   className?: string;
 }) {
   const styles = ACCENT_STYLES[accent];
@@ -132,6 +135,12 @@ export function RegistrarKpiCard({
               <span aria-hidden>{trendPositive ? '▲' : '▼'}</span> {trendLabel}
             </p>
           ) : null}
+          {href ? (
+            <p className="mt-2 inline-flex items-center text-[11px] font-semibold text-sgvu-navy/70">
+              Open
+              <ArrowUpRight className="ml-0.5 h-3 w-3" />
+            </p>
+          ) : null}
         </div>
         {trailing}
       </div>
@@ -142,13 +151,14 @@ export function RegistrarKpiCard({
     'flex h-full flex-col rounded-2xl border border-sgvu-navy/10 bg-white p-5 shadow-[0_8px_30px_rgba(8,35,74,0.06)] transition-all duration-200',
     'hover:-translate-y-0.5 hover:shadow-[0_12px_36px_rgba(8,35,74,0.1)]',
     styles.ring,
+    emphasize && 'ring-1 ring-amber-300/70 border-amber-200/90',
     href && 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold/50',
     className,
   );
 
   if (href) {
     return (
-      <Link href={href} className={sharedClass} aria-label={`${title}: ${displayValue}`}>
+      <Link href={href} className={sharedClass} aria-label={`${title}: ${displayValue}. Open details`}>
         {body}
       </Link>
     );

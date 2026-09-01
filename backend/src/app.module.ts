@@ -22,6 +22,7 @@ import { AdmissionsModule } from './modules/admissions/admissions.module';
 import { PlacementModule } from './modules/placement/placement.module';
 import { AlumniModule } from './modules/alumni/alumni.module';
 import { AdminOpsModule } from './modules/admin-ops/admin-ops.module';
+import { AdminControlModule } from './modules/admin-control/admin-control.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { ParentModule } from './modules/parent/parent.module';
 import { ExamCellModule } from './modules/exam-cell/exam-cell.module';
@@ -62,6 +63,7 @@ import { AcademicRndModule } from './modules/academic-rnd/academic-rnd.module';
 import { CertificateAutomationModule } from './modules/certificate-automation/certificate-automation.module';
 import { WeeklyTestsModule } from './modules/weekly-tests/weekly-tests.module';
 import { RegistrarModule } from './modules/registrar/registrar.module';
+import { CampusScopeModule } from './common/campus-scope/campus-scope.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -129,6 +131,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
       inject: [ConfigService],
     }),
     AuditModule,
+    CampusScopeModule,
     RedisModule,
     NotificationsModule,
     WorkflowModule,
@@ -148,6 +151,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     PlacementModule,
     AlumniModule,
     AdminOpsModule,
+    AdminControlModule,
     IntegrationsModule,
     ParentModule,
     ExamCellModule,

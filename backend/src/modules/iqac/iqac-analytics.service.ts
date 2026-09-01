@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -371,6 +376,104 @@ export class IqacAnalyticsService {
       })),
       documents,
     };
+  }
+
+  private async refreshRepositoryHealthView() {
+    try {
+      await this.dataSource.query(
+        `REFRESH MATERIALIZED VIEW CONCURRENTLY iqac_mv_repository_health`,
+      );
+    } catch {
+      try {
+        await this.dataSource.query(
+          `REFRESH MATERIALIZED VIEW iqac_mv_repository_health`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Repository health refresh skipped: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  async addRepositoryDocument(
+    tenantId: string,
+    userId: string,
+    dto: {
+      naac_criterion: number;
+      metric_number?: string;
+      title: string;
+      file_path: string;
+      academic_year?: string;
+    },
+  ) {
+    if (!dto.title?.trim() || !dto.file_path?.trim()) {
+      throw new BadRequestException('title and file_path are required');
+    }
+    const criterion = Number(dto.naac_criterion);
+    if (!Number.isFinite(criterion) || criterion < 1 || criterion > 7) {
+      throw new BadRequestException('naac_criterion must be between 1 and 7');
+    }
+    const academicYear = dto.academic_year?.trim() || '2025-2026';
+    const [row] = await this.dataSource.query(
+      `INSERT INTO iqac_document_repository
+        (tenant_id, naac_criterion, metric_number, title, file_path, uploaded_by, academic_year)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING document_id, naac_criterion, metric_number, title, file_path, academic_year, created_at`,
+      [
+        tenantId,
+        criterion,
+        dto.metric_number?.trim() || null,
+        dto.title.trim(),
+        dto.file_path.trim(),
+        userId,
+        academicYear,
+      ],
+    );
+    await this.refreshRepositoryHealthView();
+    return row;
+  }
+
+  async deleteRepositoryDocument(tenantId: string, documentId: string) {
+    const [row] = await this.dataSource.query(
+      `DELETE FROM iqac_document_repository
+       WHERE tenant_id = $1 AND document_id = $2
+       RETURNING document_id`,
+      [tenantId, documentId],
+    );
+    if (!row) throw new NotFoundException('Document not found');
+    await this.refreshRepositoryHealthView();
+    return { deleted: true, document_id: documentId };
+  }
+
+  exportRepositoryCsv(
+    tenantId: string,
+    criterion?: number,
+    academicYear = '2025-2026',
+  ) {
+    return this.getRepository(tenantId, criterion, academicYear).then((data) => {
+      const header = [
+        'Criterion',
+        'Metric',
+        'Title',
+        'File path',
+        'Academic year',
+        'Uploaded at',
+      ];
+      const rows = (data.documents as Array<Record<string, unknown>>).map((d) =>
+        [
+          String(d.naac_criterion ?? ''),
+          String(d.metric_number ?? ''),
+          String(d.title ?? ''),
+          String(d.file_path ?? ''),
+          String(d.academic_year ?? academicYear),
+          d.created_at ? new Date(String(d.created_at)).toISOString() : '',
+        ]
+          .map((c) => `"${c.replace(/"/g, '""')}"`)
+          .join(','),
+      );
+      return [header.join(','), ...rows].join('\n');
+    });
   }
 
   async getAudits(tenantId: string, academicYear = '2025-2026') {

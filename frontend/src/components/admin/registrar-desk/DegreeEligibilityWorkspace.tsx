@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Printer, Search } from 'lucide-react';
+import { ChevronDown, History, Loader2, Printer, Search } from 'lucide-react';
 import {
   REG_BRAND_BTN,
   REG_OUTLINE_BTN,
@@ -18,6 +18,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { PaginationBar } from '@/components/ui/PaginationBar';
 import {
@@ -70,6 +78,44 @@ const PAGE = 10;
 
 function clearanceLabel(ok: boolean) {
   return ok ? 'Y' : '—';
+}
+
+function ClearanceHeader() {
+  return (
+    <div className="space-y-2 text-center">
+      <span>Clearances</span>
+      <div className="mx-auto grid w-24 grid-cols-4 text-[10px] font-semibold normal-case tracking-normal text-muted-foreground">
+        {['Lib', 'Fin', 'Hos', 'Exm'].map((label) => (
+          <span key={label}>{label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClearanceValues({ row }: { row: EligibilityRow }) {
+  const values = [
+    row.library_clearance,
+    row.finance_clearance,
+    row.hostel_clearance,
+    row.examination_clearance,
+  ];
+  return (
+    <div className="mx-auto grid w-24 grid-cols-4 text-xs tabular-nums">
+      {values.map((ok, index) => (
+        <span
+          key={index}
+          className={cn('text-center', ok ? 'font-semibold text-emerald-600' : 'text-muted-foreground')}
+        >
+          {clearanceLabel(ok)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function shortStatus(status: string) {
+  return status.replace(/_/g, ' ');
 }
 
 function statusClass(status: string) {
@@ -296,18 +342,24 @@ export function DegreeEligibilityWorkspace() {
             </div>
           ) : (
             <>
-              <div ref={printRef} className="overflow-x-auto">
-                <Table className="min-w-[1280px]">
+              <div ref={printRef} className="[&>div]:overflow-visible">
+                <Table className="w-full table-fixed [&_td]:px-4 [&_td]:py-4 [&_th]:px-4 [&_th]:py-3 [&_th]:align-middle">
+                  <colgroup>
+                    <col className="w-[34%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[12%]" />
+                  </colgroup>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Student</TableHead>
-                      <TableHead>Credits</TableHead>
-                      <TableHead>CGPA</TableHead>
-                      <TableHead>Backlogs</TableHead>
-                      <TableHead>Clearances</TableHead>
-                      <TableHead>Exam status</TableHead>
-                      <TableHead>Registrar</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs">Student</TableHead>
+                      <TableHead className="text-xs">Academics</TableHead>
+                      <TableHead className="text-xs">
+                        <ClearanceHeader />
+                      </TableHead>
+                      <TableHead className="text-center text-xs">Status</TableHead>
+                      <TableHead className="text-right text-xs">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -316,73 +368,94 @@ export function DegreeEligibilityWorkspace() {
                       const decision = (r.registrar_decision ?? 'PENDING').toUpperCase();
                       return (
                         <TableRow key={r.audit_id}>
-                          <TableCell>
-                            <p className="font-medium text-sgvu-navy">{r.student_name ?? '—'}</p>
-                            <p className="text-xs text-muted-foreground">
+                          <TableCell className="align-middle">
+                            <p className="truncate font-medium text-sgvu-navy">{r.student_name ?? '—'}</p>
+                            <p className="mt-0.5 truncate text-xs leading-5 text-muted-foreground">
                               {r.enrollment_no ?? r.prn_number ?? '—'}
                               {r.program_name ? ` · ${r.program_name}` : ''}
                             </p>
                           </TableCell>
-                          <TableCell className="text-sm tabular-nums">
-                            {r.credits_earned}/{r.credits_required}
-                          </TableCell>
-                          <TableCell className="text-sm tabular-nums">
-                            {r.cgpa_earned != null ? r.cgpa_earned : '—'}/{r.cgpa_required}
-                          </TableCell>
-                          <TableCell className="tabular-nums">{r.pending_backlogs}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            Lib {clearanceLabel(r.library_clearance)} · Fin{' '}
-                            {clearanceLabel(r.finance_clearance)} · Hos{' '}
-                            {clearanceLabel(r.hostel_clearance)} · Exm{' '}
-                            {clearanceLabel(r.examination_clearance)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={cn('border-transparent', statusClass(r.final_status))}
-                            >
-                              {r.final_status.replace(/_/g, ' ')}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={cn('border-transparent', decisionClass(decision))}
-                            >
-                              {decision}
-                            </Badge>
-                            {r.registrar_decided_by_name ? (
-                              <p className="mt-1 text-[11px] text-muted-foreground">
-                                {r.registrar_decided_by_name}
+                          <TableCell className="align-middle">
+                            <div className="space-y-0.5 text-xs leading-5 tabular-nums">
+                              <p>{r.credits_earned}/{r.credits_required} cr</p>
+                              <p className="text-muted-foreground">
+                                {r.cgpa_earned != null ? r.cgpa_earned : '—'}/{r.cgpa_required} GPA
                               </p>
-                            ) : null}
+                              <p className="text-muted-foreground">
+                                {r.pending_backlogs} backlog{r.pending_backlogs === 1 ? '' : 's'}
+                              </p>
+                            </div>
                           </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-wrap justify-end gap-1.5">
-                              <Button
-                                size="sm"
+                          <TableCell className="align-middle">
+                            <ClearanceValues row={r} />
+                          </TableCell>
+                          <TableCell className="align-middle">
+                            <div className="mx-auto flex w-fit flex-col items-center gap-1.5">
+                              <Badge
                                 variant="outline"
-                                className="h-8"
-                                onClick={() => void openHistory(r)}
+                                className={cn(
+                                  'whitespace-nowrap border-transparent px-2 py-0.5 text-[10px]',
+                                  statusClass(r.final_status),
+                                )}
                               >
-                                History
-                              </Button>
-                              <Button
-                                size="sm"
-                                className={cn('h-8', REG_BRAND_BTN)}
-                                disabled={!canApprove}
-                                onClick={() => openDecide(r, 'APPROVED')}
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                size="sm"
+                                Exam: {shortStatus(r.final_status)}
+                              </Badge>
+                              <Badge
                                 variant="outline"
-                                className="h-8"
-                                onClick={() => openDecide(r, 'REJECTED')}
+                                className={cn(
+                                  'whitespace-nowrap border-transparent px-2 py-0.5 text-[10px]',
+                                  decisionClass(decision),
+                                )}
                               >
-                                Reject
-                              </Button>
+                                Reg: {decision}
+                              </Badge>
+                              {r.registrar_decided_by_name ? (
+                                <p className="max-w-[10rem] truncate text-center text-[10px] text-muted-foreground">
+                                  {r.registrar_decided_by_name}
+                                </p>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="align-middle text-right">
+                            <div className="flex justify-end">
+                              <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  className={cn(
+                                    'h-8 gap-1.5 px-3 text-xs font-semibold',
+                                    REG_BRAND_BTN,
+                                  )}
+                                >
+                                  View
+                                  <ChevronDown className="h-3.5 w-3.5 opacity-90" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                  Degree review
+                                </DropdownMenuLabel>
+                                <DropdownMenuItem onSelect={() => void openHistory(r)}>
+                                  <History className="mr-2 h-4 w-4" />
+                                  History
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  disabled={!canApprove}
+                                  onSelect={() => openDecide(r, 'APPROVED')}
+                                >
+                                  Approve
+                                  {!canApprove ? (
+                                    <span className="ml-auto text-[10px] text-muted-foreground">
+                                      not eligible
+                                    </span>
+                                  ) : null}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => openDecide(r, 'REJECTED')}>
+                                  Reject
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                             </div>
                           </TableCell>
                         </TableRow>

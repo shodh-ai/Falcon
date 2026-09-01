@@ -864,8 +864,20 @@ export class RegistrarService {
 
   // ── Legal ────────────────────────────────────────────────────────────────
 
+  private async safeLegalQuery<T = Record<string, unknown>>(
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<T[]> {
+    try {
+      return await this.db.query(sql, params);
+    } catch {
+      // Tables may be missing until legal RTI migration runs — never 500 the desk.
+      return [];
+    }
+  }
+
   listRti(tenantId: string) {
-    return this.db.query(
+    return this.safeLegalQuery(
       `SELECT * FROM registrar_rti_requests WHERE tenant_id = $1 ORDER BY created_at DESC`,
       [tenantId],
     );
@@ -905,6 +917,7 @@ export class RegistrarService {
           dto.reply_summary ?? null,
         ],
       );
+      if (!row) throw new NotFoundException('RTI request not found');
       return row;
     }
     const [row] = await this.db.query(
@@ -928,7 +941,7 @@ export class RegistrarService {
   }
 
   listCourt(tenantId: string) {
-    return this.db.query(
+    return this.safeLegalQuery(
       `SELECT * FROM registrar_court_cases WHERE tenant_id = $1 ORDER BY updated_at DESC`,
       [tenantId],
     );
@@ -962,6 +975,7 @@ export class RegistrarService {
           dto.counsel ?? null,
         ],
       );
+      if (!row) throw new NotFoundException('Court case not found');
       return row;
     }
     const [row] = await this.db.query(
@@ -982,7 +996,7 @@ export class RegistrarService {
   }
 
   listNotices(tenantId: string) {
-    return this.db.query(
+    return this.safeLegalQuery(
       `SELECT * FROM registrar_legal_notices WHERE tenant_id = $1 ORDER BY created_at DESC`,
       [tenantId],
     );
@@ -1014,6 +1028,7 @@ export class RegistrarService {
           dto.due_date ?? null,
         ],
       );
+      if (!row) throw new NotFoundException('Legal notice not found');
       return row;
     }
     const [row] = await this.db.query(
@@ -1033,7 +1048,7 @@ export class RegistrarService {
   }
 
   listDisciplinary(tenantId: string) {
-    return this.db.query(
+    return this.safeLegalQuery(
       `SELECT * FROM registrar_disciplinary_cases WHERE tenant_id = $1 ORDER BY created_at DESC`,
       [tenantId],
     );
@@ -1065,6 +1080,7 @@ export class RegistrarService {
           dto.committee ?? null,
         ],
       );
+      if (!row) throw new NotFoundException('Disciplinary case not found');
       return row;
     }
     const [row] = await this.db.query(
@@ -1084,24 +1100,26 @@ export class RegistrarService {
   }
 
   async legalCompliance(tenantId: string) {
-    const [rtiOpen] = await this.db.query(
-      `SELECT COUNT(*)::int AS c FROM registrar_rti_requests WHERE tenant_id=$1 AND status IN ('OPEN','PENDING')`,
-      [tenantId],
-    );
-    const [rtiDue] = await this.db.query(
+    const [rtiOpen] = await this.safeLegalQuery<{ c: number }>(
       `SELECT COUNT(*)::int AS c FROM registrar_rti_requests
-       WHERE tenant_id=$1 AND due_date IS NOT NULL AND due_date <= CURRENT_DATE + 7 AND status IN ('OPEN','PENDING')`,
+       WHERE tenant_id=$1 AND status IN ('OPEN','PENDING','IN_PROGRESS')`,
       [tenantId],
     );
-    const [court] = await this.db.query(
+    const [rtiDue] = await this.safeLegalQuery<{ c: number }>(
+      `SELECT COUNT(*)::int AS c FROM registrar_rti_requests
+       WHERE tenant_id=$1 AND due_date IS NOT NULL AND due_date <= CURRENT_DATE + 7
+         AND status IN ('OPEN','PENDING','IN_PROGRESS')`,
+      [tenantId],
+    );
+    const [court] = await this.safeLegalQuery<{ c: number }>(
       `SELECT COUNT(*)::int AS c FROM registrar_court_cases WHERE tenant_id=$1 AND status='ACTIVE'`,
       [tenantId],
     );
-    const [notices] = await this.db.query(
+    const [notices] = await this.safeLegalQuery<{ c: number }>(
       `SELECT COUNT(*)::int AS c FROM registrar_legal_notices WHERE tenant_id=$1 AND status='OPEN'`,
       [tenantId],
     );
-    const [disc] = await this.db.query(
+    const [disc] = await this.safeLegalQuery<{ c: number }>(
       `SELECT COUNT(*)::int AS c FROM registrar_disciplinary_cases WHERE tenant_id=$1 AND status='OPEN'`,
       [tenantId],
     );
@@ -1866,7 +1884,24 @@ export class RegistrarService {
                OR COALESCE((l.metadata->>'fee_paid')::boolean, false)
                OR COALESCE((l.metadata->>'fee_verified')::boolean, false)
              ) AS fee_verified,
-             l.metadata->>'student_user_id' AS student_user_id
+             l.metadata->>'student_user_id' AS student_user_id,
+             COALESCE(
+               l.metadata->>'preferred_program',
+               l.metadata->>'program_name',
+               l.metadata->>'program'
+             ) AS preferred_program,
+             COALESCE(
+               l.metadata->>'department_name',
+               l.metadata->>'department'
+             ) AS preferred_department,
+             COALESCE(
+               l.metadata->>'school_name',
+               l.metadata->>'school'
+             ) AS preferred_school,
+             COALESCE(
+               l.metadata->>'batch',
+               to_char(NOW(), 'YYYY')
+             ) AS preferred_batch
       FROM admissions_leads l
       WHERE l.tenant_id = $1
         AND l.deleted_at IS NULL
@@ -2072,7 +2107,15 @@ export class RegistrarService {
       }
     }
 
-    const enrollmentNo = await this.resolveEnrollmentNumber(tenantId, dto, lead);
+    const enrollmentNo = await this.resolveEnrollmentNumber(
+      tenantId,
+      dto,
+      lead,
+    ).catch(async () => {
+      // Rule generation can fail for misconfigured templates — still enroll with a unique ID.
+      const year = new Date().getFullYear();
+      return `ENR-${year}-${randomBytes(3).toString('hex').toUpperCase()}`;
+    });
     let studentUserId =
       typeof metadata.student_user_id === 'string'
         ? metadata.student_user_id
@@ -2082,6 +2125,45 @@ export class RegistrarService {
       stage === 'FEE_PAID' ||
       metadata.fee_paid === true ||
       metadata.fee_verified === true;
+
+    const placementDefaults = {
+      school_name:
+        dto.school_name?.trim() ||
+        (typeof metadata.school === 'string' ? metadata.school : undefined) ||
+        (typeof metadata.school_name === 'string'
+          ? metadata.school_name
+          : undefined),
+      department_name:
+        dto.department_name?.trim() ||
+        (typeof metadata.department === 'string'
+          ? metadata.department
+          : undefined) ||
+        (typeof metadata.department_name === 'string'
+          ? metadata.department_name
+          : undefined),
+      program_name:
+        dto.program_name?.trim() ||
+        (typeof metadata.preferred_program === 'string'
+          ? metadata.preferred_program
+          : undefined) ||
+        (typeof metadata.program === 'string' ? metadata.program : undefined) ||
+        (typeof metadata.program_name === 'string'
+          ? metadata.program_name
+          : undefined),
+      degree_name:
+        dto.degree_name?.trim() ||
+        (typeof metadata.degree === 'string' ? metadata.degree : undefined) ||
+        (typeof metadata.degree_name === 'string'
+          ? metadata.degree_name
+          : undefined),
+      batch:
+        dto.batch?.trim() ||
+        (typeof metadata.batch === 'string' ? metadata.batch : undefined) ||
+        String(new Date().getFullYear()),
+      semester: dto.semester,
+      section_code: dto.section_code?.trim() || undefined,
+      advisor_name: dto.advisor_name?.trim() || undefined,
+    };
 
     try {
       if (dto.rule_id) {
@@ -2134,14 +2216,14 @@ export class RegistrarService {
 
       await this.assignPlacement(tenantId, actorUserId, {
         student_user_id: studentUserId,
-        school_name: dto.school_name,
-        department_name: dto.department_name,
-        program_name: dto.program_name,
-        degree_name: dto.degree_name,
-        batch: dto.batch,
-        semester: dto.semester,
-        section_code: dto.section_code,
-        advisor_name: dto.advisor_name,
+        school_name: placementDefaults.school_name,
+        department_name: placementDefaults.department_name,
+        program_name: placementDefaults.program_name,
+        degree_name: placementDefaults.degree_name,
+        batch: placementDefaults.batch,
+        semester: placementDefaults.semester,
+        section_code: placementDefaults.section_code,
+        advisor_name: placementDefaults.advisor_name,
         remarks: dto.remarks,
         source: 'REGISTRAR_ENROLLMENT',
       });
@@ -2190,13 +2272,13 @@ export class RegistrarService {
           studentUserId,
           enrollmentNo,
           feeVerified,
-          dto.program_name ?? null,
-          dto.department_name ?? null,
-          dto.school_name ?? null,
-          dto.batch ?? null,
-          dto.semester ?? null,
-          dto.section_code ?? null,
-          dto.degree_name ?? null,
+          placementDefaults.program_name ?? null,
+          placementDefaults.department_name ?? null,
+          placementDefaults.school_name ?? null,
+          placementDefaults.batch ?? null,
+          placementDefaults.semester ?? null,
+          placementDefaults.section_code ?? null,
+          placementDefaults.degree_name ?? null,
           actorUserId,
           dto.remarks ?? null,
         ],
@@ -2233,13 +2315,13 @@ export class RegistrarService {
           studentUserId || null,
           enrollmentNo,
           feeVerified,
-          dto.program_name ?? null,
-          dto.department_name ?? null,
-          dto.school_name ?? null,
-          dto.batch ?? null,
-          dto.semester ?? null,
-          dto.section_code ?? null,
-          dto.degree_name ?? null,
+          placementDefaults.program_name ?? null,
+          placementDefaults.department_name ?? null,
+          placementDefaults.school_name ?? null,
+          placementDefaults.batch ?? null,
+          placementDefaults.semester ?? null,
+          placementDefaults.section_code ?? null,
+          placementDefaults.degree_name ?? null,
           actorUserId,
           err instanceof Error ? err.message : 'Enrollment failed',
         ],
@@ -2517,6 +2599,32 @@ export class RegistrarService {
         [tenantId],
       ),
     };
+    const pendingEnrollments = {
+      count: await countOrZero(
+        `SELECT COUNT(*)::int AS count
+         FROM admissions_leads l
+         WHERE l.tenant_id = $1
+           AND l.deleted_at IS NULL
+           AND (
+             l.stage = 'FEE_PAID'
+             OR COALESCE((l.metadata->>'fee_paid')::boolean, false)
+             OR COALESCE((l.metadata->>'fee_verified')::boolean, false)
+           )
+           AND COALESCE(l.metadata->>'student_user_id', '') = ''
+           AND upper(COALESCE(l.stage, '')) <> 'ENROLLED'`,
+        [tenantId],
+      ),
+    };
+    const pendingDegree = {
+      count: await countOrZero(
+        `SELECT COUNT(*)::int AS count
+         FROM degree_eligibility_audits a
+         WHERE a.tenant_id = $1
+           AND upper(COALESCE(a.final_status, '')) = 'ELIGIBLE'
+           AND upper(COALESCE(a.registrar_decision, 'PENDING')) = 'PENDING'`,
+        [tenantId],
+      ),
+    };
     const bulkDocs = {
       count: await countOrZero(
         `SELECT COUNT(*)::int AS count FROM student_bulk_upload_runs
@@ -2549,11 +2657,14 @@ export class RegistrarService {
     const pendingPetitionsCount = pendingPetitions?.count ?? 0;
     const pendingCertificates = pendingCerts?.count ?? 0;
     const pendingGovernance = pendingGov?.count ?? 0;
+    const pendingDegreeEligibility = pendingDegree?.count ?? 0;
+    const pendingEnrollmentCount = pendingEnrollments?.count ?? 0;
     const pendingApprovals =
       pendingRegistrations +
       pendingPetitionsCount +
       pendingGovernance +
-      pendingCertificates;
+      pendingCertificates +
+      pendingDegreeEligibility;
     const verificationRequests = verifications?.count ?? 0;
     const documentsPending = (bulkDocs?.count ?? 0) + (petitionDocs?.count ?? 0);
 
@@ -2562,6 +2673,7 @@ export class RegistrarService {
       total_faculty: faculty?.count ?? 0,
       active_departments: departments?.count ?? 0,
       admissions_today: admissionsToday?.count ?? 0,
+      pending_enrollments: pendingEnrollmentCount,
       pending_approvals: pendingApprovals,
       verification_requests: verificationRequests,
       documents_pending: documentsPending,
@@ -2569,6 +2681,7 @@ export class RegistrarService {
       pending_petitions: pendingPetitionsCount,
       pending_certificates: pendingCertificates,
       pending_governance: pendingGovernance,
+      pending_degree_eligibility: pendingDegreeEligibility,
       health_score: this.computeHealthScore({
         pendingApprovals,
         verificationRequests,

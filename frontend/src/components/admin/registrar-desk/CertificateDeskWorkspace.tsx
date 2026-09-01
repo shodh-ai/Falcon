@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, Fragment } from 'react';
+import { ChevronDown, Loader2, Search } from 'lucide-react';
 import {
   REG_BRAND_BTN,
   REG_OUTLINE_BTN,
@@ -35,6 +35,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAuthedApi } from '@/lib/api';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { useAuth } from '@/context/AuthContext';
@@ -69,6 +77,31 @@ type CertRow = {
 type StudentOpt = { user_id: string; name: string; enrollment_no?: string };
 
 const PAGE = 10;
+
+type CertAction =
+  | { kind: 'preview'; label: 'Preview' }
+  | { kind: 'pdf'; label: 'PDF' }
+  | { kind: 'api'; action: string; label: string };
+
+function certificateActions(row: CertRow): CertAction[] {
+  const actions: CertAction[] = [
+    { kind: 'preview', label: 'Preview' },
+    { kind: 'pdf', label: 'PDF' },
+  ];
+  if (row.status === 'DRAFT' || row.status === 'REJECTED') {
+    actions.push({ kind: 'api', action: 'generate', label: 'Generate' });
+  }
+  if (row.status === 'GENERATED') {
+    actions.push({ kind: 'api', action: 'sign', label: 'Attest & sign' });
+  }
+  if (row.status === 'SIGNED') {
+    actions.push({ kind: 'api', action: 'issue', label: 'Issue' });
+  }
+  if (row.status === 'DRAFT' || row.status === 'GENERATED') {
+    actions.push({ kind: 'api', action: 'reject', label: 'Reject' });
+  }
+  return actions;
+}
 
 export function CertificateDeskWorkspace() {
   const api = useAuthedApi();
@@ -280,7 +313,7 @@ export function CertificateDeskWorkspace() {
                       <TableHead>Type</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Issued</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -299,40 +332,55 @@ export function CertificateDeskWorkspace() {
                         <TableCell className="text-xs text-muted-foreground">
                           {r.issued_at ? new Date(r.issued_at).toLocaleString() : '—'}
                         </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => setPreview(r)}>
-                              Preview
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => void downloadCertificatePdf(r)}>
-                              PDF
-                            </Button>
-                            {r.status === 'DRAFT' || r.status === 'REJECTED' ? (
-                              <Button size="sm" className={cn('h-7 text-[11px]', REG_BRAND_BTN)} onClick={() => void act(r, 'generate')}>
-                                Generate
-                              </Button>
-                            ) : null}
-                            {r.status === 'GENERATED' ? (
-                              <Button size="sm" className={cn('h-7 text-[11px]', REG_BRAND_BTN)} onClick={() => void act(r, 'sign')}>
-                                Attest &amp; sign
-                              </Button>
-                            ) : null}
-                            {r.status === 'SIGNED' ? (
-                              <Button size="sm" className={cn('h-7 text-[11px]', REG_BRAND_BTN)} onClick={() => void act(r, 'issue')}>
-                                Issue
-                              </Button>
-                            ) : null}
-                            {r.status === 'DRAFT' || r.status === 'GENERATED' ? (
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
                               <Button
                                 size="sm"
-                                variant="outline"
-                                className="h-7 text-[11px] text-red-700"
-                                onClick={() => void act(r, 'reject')}
+                                className={cn(
+                                  'h-8 gap-1.5 px-3 text-xs font-semibold',
+                                  REG_BRAND_BTN,
+                                )}
                               >
-                                Reject
+                                View
+                                <ChevronDown className="h-3.5 w-3.5 opacity-90" />
                               </Button>
-                            ) : null}
-                          </div>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground">
+                                Certificate actions
+                              </DropdownMenuLabel>
+                              {certificateActions(r).map((item) => {
+                                const key =
+                                  item.kind === 'api'
+                                    ? item.action
+                                    : item.kind;
+                                const isReject =
+                                  item.kind === 'api' && item.action === 'reject';
+                                return (
+                                  <Fragment key={key}>
+                                    {isReject ? <DropdownMenuSeparator /> : null}
+                                    <DropdownMenuItem
+                                      className={isReject ? 'text-red-700 focus:text-red-700' : undefined}
+                                      onSelect={() => {
+                                        if (item.kind === 'preview') {
+                                          setPreview(r);
+                                          return;
+                                        }
+                                        if (item.kind === 'pdf') {
+                                          void downloadCertificatePdf(r);
+                                          return;
+                                        }
+                                        void act(r, item.action);
+                                      }}
+                                    >
+                                      {item.label}
+                                    </DropdownMenuItem>
+                                  </Fragment>
+                                );
+                              })}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}
