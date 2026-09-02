@@ -338,14 +338,27 @@ export class DofaEngineService {
     }
 
     await this.db.transaction(async (manager) => {
+      // Pin one timestamp for both the workflow step and the acquisition
+      // decision ledger. Some TypeORM/Postgres combinations return mutation
+      // results as [rows, affected] rather than rows directly, so the
+      // authoritative timestamp must not depend on the RETURNING shape.
+      const decisionAt = new Date().toISOString();
       const decided = await manager.query(
         `UPDATE dofa_case_steps
-         SET decided_by = $2, decision = $3, notes = $4, decided_at = NOW()
+         SET decided_by = $2, decision = $3, notes = $4, decided_at = $6
          WHERE case_id = $1 AND step_no = $5 AND decision IS NULL
-         RETURNING decided_at`,
-        [caseId, userId, body.decision, body.notes ?? null, step.step_no],
+         RETURNING step_id`,
+        [
+          caseId,
+          userId,
+          body.decision,
+          body.notes ?? null,
+          step.step_no,
+          decisionAt,
+        ],
       );
-      if (!decided[0]) {
+      const decidedRows = Array.isArray(decided?.[0]) ? decided[0] : decided;
+      if (!decidedRows?.[0]) {
         throw new ConflictException({
           message: 'Approval step was already decided',
           code: 'DOFA_DECISION_REPLAY',
@@ -362,7 +375,6 @@ export class DofaEngineService {
         [caseId],
       );
       const previousHash = previous[0]?.decision_hash ?? null;
-      const decisionAt = decided[0].decided_at;
       const decisionHash = createHash('sha256')
         .update(
           JSON.stringify({

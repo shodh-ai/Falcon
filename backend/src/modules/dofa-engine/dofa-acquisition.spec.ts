@@ -289,7 +289,7 @@ describe('DofaEngineService acquisition behavior', () => {
             const target = steps[Number(params?.[4])];
             if (target.decision) return [];
             target.decision = String(params?.[2]);
-            return [{ decided_at: '2099-01-01T00:00:00Z' }];
+            return [[{ step_id: 'step-1' }], 1];
           }
           if (sql.includes('SELECT decision_hash')) {
             return decisions.length
@@ -321,6 +321,10 @@ describe('DofaEngineService acquisition behavior', () => {
         previous_decision_hash: null,
       }),
     ]);
+    const insertCall = manager.query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO acq_approval_decisions'),
+    );
+    expect(insertCall?.[1]?.[8]).toEqual(expect.any(String));
     expect(currentStep).toBe(1);
     await expect(
       service.decide('tenant-1', 'hod-user', ['Dean'], 'case-1', {
