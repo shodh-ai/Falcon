@@ -187,6 +187,17 @@ export function createAcquisitionsApi(api: AuthedApi) {
       api.post<AcquisitionMutationResult>(root, input),
     replace: (versionId: string, input: AcquisitionDraftInput) =>
       api.put(`${root}/versions/${versionId}`, input),
+    updateFundingSource: (
+      versionId: string,
+      input: Pick<
+        AcquisitionDraftInput,
+        'funding_source_type' | 'funding_source_id'
+      >,
+    ) =>
+      api.put<AcquisitionDetail>(
+        `${root}/versions/${versionId}/funding-source`,
+        input,
+      ),
     validate: (versionId: string) =>
       api.post<AcquisitionMutationResult>(
         `${root}/versions/${versionId}/validate`,

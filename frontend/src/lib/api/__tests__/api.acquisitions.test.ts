@@ -39,6 +39,10 @@ describe('acquisition API contract', () => {
     await api.fundingSources('DEPARTMENT');
     await api.template();
     await api.create(draft);
+    await api.updateFundingSource('version-1', {
+      funding_source_type: 'DEPARTMENT',
+      funding_source_id: 'fund-1',
+    });
     await api.validate('version-1');
     await api.submit('version-1');
     await api.withdraw('version-1');
@@ -53,6 +57,10 @@ describe('acquisition API contract', () => {
       '/api/acquisitions/v1/imports/template',
     );
     expect(transport.post).toHaveBeenCalledWith('/api/acquisitions/v1', draft);
+    expect(transport.put).toHaveBeenCalledWith(
+      '/api/acquisitions/v1/versions/version-1/funding-source',
+      { funding_source_type: 'DEPARTMENT', funding_source_id: 'fund-1' },
+    );
     expect(transport.post).toHaveBeenCalledWith(
       '/api/acquisitions/v1/versions/version-1/validate',
     );

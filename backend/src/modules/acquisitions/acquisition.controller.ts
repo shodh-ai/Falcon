@@ -116,6 +116,19 @@ export class AcquisitionController {
     return this.acquisitions.replaceDraft(req.user, id, body);
   }
 
+  @Put('versions/:id/funding-source')
+  updateFundingSource(
+    @Req() req: { user: AcquisitionActor },
+    @Param('id') id: string,
+    @Body()
+    body: {
+      funding_source_type: CreateAcquisitionInput['funding_source_type'];
+      funding_source_id: string;
+    },
+  ) {
+    return this.acquisitions.updateDraftFundingSource(req.user, id, body);
+  }
+
   @Post('versions/:id/validate')
   validate(@Req() req: { user: AcquisitionActor }, @Param('id') id: string) {
     return this.acquisitions.validate(req.user, id);

@@ -864,6 +864,93 @@ export class AcquisitionService {
     return this.getVersion(actor, versionId);
   }
 
+  private async fundingSourceExists(
+    tenantId: string,
+    type: string,
+    fundingSourceId: string,
+  ) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        fundingSourceId,
+      )
+    ) {
+      return false;
+    }
+    const source = this.fundingTable(type);
+    const activePredicate: Record<string, string> = {
+      DEPARTMENT: `status='ACTIVE' AND deleted_at IS NULL`,
+      PROGRAM: `status='ACTIVE' AND deleted_at IS NULL`,
+      RESEARCH_GRANT: `status='ACTIVE'`,
+      INSTITUTIONAL: `status='LOCKED'`,
+      PROJECT: `is_active=true`,
+      OTHER: `is_active=true`,
+    };
+    const rows = await this.db.query(
+      `SELECT 1 FROM ${source.table} WHERE ${source.id}=$1 AND tenant_id=$2
+         AND ${activePredicate[type]} LIMIT 1`,
+      [fundingSourceId, tenantId],
+    );
+    return Boolean(rows[0]);
+  }
+
+  async updateDraftFundingSource(
+    actor: AcquisitionActor,
+    versionId: string,
+    input: {
+      funding_source_type: CreateAcquisitionInput['funding_source_type'];
+      funding_source_id: string;
+    },
+  ) {
+    const tenantId = this.tenant(actor);
+    const row = await this.getRawVersion(tenantId, versionId);
+    if (row.requester_id !== actor.user_id)
+      throw new ForbiddenException('Only the requester may edit this draft');
+    if (row.status !== 'DRAFT')
+      throw new ConflictException(
+        'Submitted acquisition versions are immutable',
+      );
+    if (
+      !(await this.fundingSourceExists(
+        tenantId,
+        input.funding_source_type,
+        input.funding_source_id,
+      ))
+    ) {
+      throw new BadRequestException(
+        'Select an active funding source from the available list',
+      );
+    }
+    await this.db.transaction(async (manager) => {
+      const updated = await manager.query(
+        `UPDATE acq_request_versions
+         SET funding_source_type=$3,funding_source_id=$4,updated_at=NOW()
+         WHERE acquisition_version_id=$1 AND tenant_id=$2 AND status='DRAFT'
+         RETURNING acquisition_version_id`,
+        [
+          versionId,
+          tenantId,
+          input.funding_source_type,
+          input.funding_source_id,
+        ],
+      );
+      if (!updated[0])
+        throw new ConflictException('Draft changed concurrently');
+      await this.writeAudit(
+        manager,
+        tenantId,
+        row.acquisition_id,
+        versionId,
+        'DRAFT_FUNDING_SOURCE_UPDATED',
+        actor.user_id,
+        {
+          funding_source_type: input.funding_source_type,
+          funding_source_id: input.funding_source_id,
+        },
+      );
+    });
+    return this.getVersion(actor, versionId);
+  }
+
   async validate(actor: AcquisitionActor, versionId: string) {
     const tenantId = this.tenant(actor);
     const row = await this.getRawVersion(tenantId, versionId);
@@ -879,6 +966,19 @@ export class AcquisitionService {
     );
     const input = this.rowToInput(row, lines);
     const result = validateAcquisition(input);
+    if (
+      result.valid &&
+      !(await this.fundingSourceExists(
+        tenantId,
+        input.funding_source_type,
+        input.funding_source_id,
+      ))
+    ) {
+      result.valid = false;
+      result.errors.push(
+        'Select an active funding source from the available list',
+      );
+    }
     await this.db.transaction(async (manager) => {
       for (const line of result.lines) {
         await manager.query(
