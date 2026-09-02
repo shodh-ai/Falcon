@@ -24,6 +24,7 @@ import {
   scoreVendor,
   sha256,
   stableJson,
+  toDateOnlyString,
   validateAcquisition,
 } from './acquisition.util';
 
@@ -650,7 +651,7 @@ export class AcquisitionService {
       intended_department_id: row.intended_department_id ?? undefined,
       intended_lab_or_project: row.intended_lab_or_project ?? undefined,
       intended_use_case: row.intended_use_case,
-      required_by_date: row.required_by_date,
+      required_by_date: toDateOnlyString(row.required_by_date),
       priority: row.priority,
       funding_source_type:
         row.funding_source_type as CreateAcquisitionInput['funding_source_type'],

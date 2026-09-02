@@ -124,6 +124,11 @@ function text(value: unknown) {
   return '';
 }
 
+export function toDateOnlyString(value: unknown) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return text(value).slice(0, 10);
+}
+
 export function assertSafeAcquisitionInput(input: CreateAcquisitionInput) {
   const bounded = (value: unknown, max: number, field: string) => {
     if (text(value).length > max)

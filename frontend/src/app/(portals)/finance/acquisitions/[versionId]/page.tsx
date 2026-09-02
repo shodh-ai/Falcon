@@ -30,7 +30,15 @@ export default function AcquisitionDetailPage({ params }: { params: Promise<{ ve
     try {
       const result = await api[action](versionId);
       if (action === 'amend' && result.acquisition_version_id) window.location.assign(`/finance/acquisitions/${result.acquisition_version_id}`);
-      else { await load(); toast.success(`${action} completed`); }
+      else {
+        await load();
+        if (action === 'validate' && 'valid' in result && !result.valid) {
+          const errors = Array.isArray(result.errors) ? result.errors : [];
+          toast.error(errors.length ? errors.join(' · ') : 'Validation failed');
+        } else {
+          toast.success(`${action} completed`);
+        }
+      }
     } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };

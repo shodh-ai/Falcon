@@ -4,6 +4,7 @@ import {
   scoreVendor,
   sha256,
   stableJson,
+  toDateOnlyString,
   validateAcquisition,
 } from './acquisition.util';
 import type { CreateAcquisitionInput } from './acquisition.types';
@@ -70,6 +71,13 @@ describe('acquisition utilities', () => {
     expect(validateAcquisition(invalid).errors).toContain(
       'Line 1: product_url must use HTTPS',
     );
+  });
+
+  it('normalizes PostgreSQL Date values before acquisition validation', () => {
+    expect(toDateOnlyString(new Date('2099-01-01T00:00:00.000Z'))).toBe(
+      '2099-01-01',
+    );
+    expect(toDateOnlyString('2099-01-01T00:00:00.000Z')).toBe('2099-01-01');
   });
 
   it('rejects oversized text and invalid currency before persistence', () => {
