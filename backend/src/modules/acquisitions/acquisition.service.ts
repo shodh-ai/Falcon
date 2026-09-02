@@ -363,7 +363,7 @@ export class AcquisitionService {
           input.required_by_date || null,
           input.priority ?? 'NORMAL',
           input.funding_source_type,
-          input.funding_source_id,
+          input.funding_source_id?.trim() || null,
           input.expected_service_life_months ?? null,
           input.default_item_classification ?? null,
           Boolean(input.installation_or_service_required),
@@ -434,6 +434,65 @@ export class AcquisitionService {
     );
     if (!rows[0]) throw new NotFoundException('Acquisition version not found');
     return rows[0] as VersionRow;
+  }
+
+  async listFundingSources(actor: AcquisitionActor, type?: string) {
+    await this.requireCapability(actor, 'ACQUISITION_REQUESTER');
+    const tenantId = this.tenant(actor);
+    const requested = String(type ?? '').toUpperCase();
+    const allowed = [
+      'DEPARTMENT',
+      'PROGRAM',
+      'PROJECT',
+      'RESEARCH_GRANT',
+      'INSTITUTIONAL',
+      'OTHER',
+    ];
+    if (requested && !allowed.includes(requested)) {
+      throw new BadRequestException('Unsupported funding source type');
+    }
+    const rows = await this.db.query(
+      `SELECT * FROM (
+         SELECT 'DEPARTMENT'::text source_type,b.budget_id::text source_id,
+                COALESCE(d.dept_name,'Department budget') || ' · ' || b.financial_year label,
+                b.allocated_amount,b.encumbered_amount,b.utilized_amount
+         FROM fin_dept_budgets b LEFT JOIN departments d ON d.dept_id=b.department_id
+         WHERE b.tenant_id=$1 AND b.status='ACTIVE' AND b.deleted_at IS NULL
+         UNION ALL
+         SELECT 'PROGRAM',p.program_id::text,p.program_name,
+                p.allocated_amount,p.encumbered_amount,p.utilized_amount
+         FROM fin_program_budgets p
+         WHERE p.tenant_id=$1 AND p.status='ACTIVE' AND p.deleted_at IS NULL
+         UNION ALL
+         SELECT 'RESEARCH_GRANT',g.grant_id::text,
+                g.grant_title || ' · ' || g.funding_agency,
+                g.sanctioned_amount,COALESCE(g.encumbered_amount,0),g.utilized_amount
+         FROM research_grants g WHERE g.tenant_id=$1 AND g.status='ACTIVE'
+         UNION ALL
+         SELECT 'INSTITUTIONAL',u.university_budget_id::text,
+                'University budget · ' || u.financial_year,
+                u.total_allocated,COALESCE(u.encumbered_amount,0),0
+         FROM fin_university_budgets u WHERE u.tenant_id=$1 AND u.status='LOCKED'
+         UNION ALL
+         SELECT f.funding_source_type,f.funding_source_id::text,f.name,
+                f.allocated_amount,f.encumbered_amount,f.utilized_amount
+         FROM acq_funding_sources f WHERE f.tenant_id=$1 AND f.is_active=true
+       ) sources
+       WHERE ($2='' OR source_type=$2)
+       ORDER BY source_type,label`,
+      [tenantId, requested],
+    );
+    return rows.map((row: Record<string, unknown>) => ({
+      funding_source_type: row.source_type,
+      funding_source_id: row.source_id,
+      label: row.label,
+      available_amount: Math.max(
+        0,
+        Number(row.allocated_amount ?? 0) -
+          Number(row.encumbered_amount ?? 0) -
+          Number(row.utilized_amount ?? 0),
+      ),
+    }));
   }
 
   private async assertCanView(actor: AcquisitionActor, row: VersionRow) {
@@ -757,7 +816,7 @@ export class AcquisitionService {
           input.required_by_date,
           input.priority ?? 'NORMAL',
           input.funding_source_type,
-          input.funding_source_id,
+          input.funding_source_id?.trim() || null,
           input.expected_service_life_months ?? null,
           input.default_item_classification ?? null,
           Boolean(input.installation_or_service_required),

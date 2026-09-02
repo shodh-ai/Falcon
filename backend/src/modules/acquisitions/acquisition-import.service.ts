@@ -78,6 +78,15 @@ export class AcquisitionImportService {
       ['Online', 'Product URL must be HTTPS.'],
       ['Offline', 'Preferred vendor name is recommended.'],
       ['Limits', 'Maximum 500 product rows and 5 MB.'],
+      [
+        'How to use',
+        'Complete purpose, required date and funding in Falcon, then upload this workbook for product lines.',
+      ],
+      ['Quantity', 'Whole numbers only, for example 1, 25 or 500.'],
+      [
+        'Required columns',
+        'Layout, Product, Category, Quantity, Unit, Technical Specifications, Intended Use, Estimated Unit Price and Item Classification.',
+      ],
     ]);
     instructions.getColumn(1).width = 24;
     instructions.getColumn(2).width = 90;
@@ -126,6 +135,63 @@ export class AcquisitionImportService {
       '',
       '',
     ]);
+    for (let row = 2; row <= 501; row += 1) {
+      sheet.getCell(`A${row}`).dataValidation = {
+        type: 'list',
+        allowBlank: false,
+        formulae: ['"GENERAL,ONLINE,OFFLINE"'],
+      };
+      sheet.getCell(`D${row}`).dataValidation = {
+        type: 'whole',
+        operator: 'between',
+        allowBlank: false,
+        formulae: [1, 1_000_000],
+        showErrorMessage: true,
+        errorTitle: 'Whole number required',
+        error: 'Quantity must be a whole number from 1 to 1,000,000.',
+      };
+      sheet.getCell(`AA${row}`).dataValidation = {
+        type: 'list',
+        allowBlank: false,
+        formulae: ['"ASSET,CONSUMABLE,SERVICE"'],
+      };
+    }
+
+    const definitions = workbook.addWorksheet('Field Definitions');
+    definitions.addRows([
+      ['Field', 'Required', 'Accepted format / meaning'],
+      ['Layout', 'Yes', 'GENERAL, ONLINE or OFFLINE'],
+      ['Product', 'Yes', 'Plain product or service name'],
+      ['Category', 'Yes', 'Procurement category, for example Electronics'],
+      ['Quantity', 'Yes', 'Whole number from 1 to 1,000,000'],
+      ['Unit', 'Yes', 'For example unit, box or license'],
+      [
+        'Technical Specifications',
+        'Yes',
+        'Required technical characteristics; plain text',
+      ],
+      ['Intended Use', 'Yes', 'Why this line is needed'],
+      [
+        'Estimated Unit Price',
+        'Yes',
+        'Non-negative amount; Falcon recalculates totals',
+      ],
+      ['Preferred Vendor', 'Offline', 'Vendor name for an offline acquisition'],
+      ['Product URL', 'Online', 'HTTPS URL for an online acquisition'],
+      ['Item Classification', 'Yes', 'ASSET, CONSUMABLE or SERVICE'],
+    ]);
+    definitions.getRow(1).font = {
+      bold: true,
+      color: { argb: 'FFFFFFFF' },
+    };
+    definitions.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF102A43' },
+    };
+    definitions.getColumn(1).width = 30;
+    definitions.getColumn(2).width = 14;
+    definitions.getColumn(3).width = 90;
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 

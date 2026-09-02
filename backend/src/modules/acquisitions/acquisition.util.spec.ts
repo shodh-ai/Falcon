@@ -44,7 +44,7 @@ describe('acquisition utilities', () => {
     });
   });
 
-  it('uses integer minor units for fractional quantities and floating point traps', () => {
+  it('rejects fractional quantities before persistence', () => {
     const lines = [
       {
         ...request.lines[0],
@@ -61,7 +61,9 @@ describe('acquisition utilities', () => {
         tax_cost: 0,
       },
     ];
-    expect(calculateAcquisition(lines).total).toBe(0.63);
+    expect(() => calculateAcquisition(lines)).toThrow(
+      'Quantity must be a whole number greater than zero',
+    );
   });
 
   it('validates online requirements and required-by date', () => {
@@ -103,6 +105,12 @@ describe('acquisition utilities', () => {
         ],
       }),
     ).toThrow('product_url');
+    expect(() =>
+      assertSafeAcquisitionInput({
+        ...request,
+        funding_source_id: 'typed-by-user',
+      }),
+    ).toThrow('Select a valid funding source');
   });
 
   it('produces deterministic canonical hashes', () => {

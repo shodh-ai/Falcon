@@ -39,8 +39,13 @@ export function money(value: unknown): number {
 
 export function calculateLine(line: AcquisitionLineInput) {
   const quantity = Number(line.quantity);
-  if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 1_000_000) {
-    throw new Error('Quantity must be greater than zero');
+  if (
+    !Number.isFinite(quantity) ||
+    !Number.isInteger(quantity) ||
+    quantity <= 0 ||
+    quantity > 1_000_000
+  ) {
+    throw new Error('Quantity must be a whole number greater than zero');
   }
   const quantityThousandths = scaledInteger(line.quantity, 3);
   const unitCents = scaledInteger(line.estimated_unit_price, 2);
@@ -137,6 +142,14 @@ export function assertSafeAcquisitionInput(input: CreateAcquisitionInput) {
   const currency = text(input.currency || 'INR').toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency))
     throw new Error('currency must be a 3-letter ISO code');
+  if (
+    text(input.funding_source_id) &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      text(input.funding_source_id),
+    )
+  ) {
+    throw new Error('Select a valid funding source from the available list');
+  }
   bounded(input.intended_use_case, 5_000, 'intended_use_case');
   bounded(input.intended_lab_or_project, 255, 'intended_lab_or_project');
   bounded(

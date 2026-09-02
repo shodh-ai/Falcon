@@ -80,6 +80,14 @@ export class AcquisitionController {
     return this.acquisitions.list(req.user, status);
   }
 
+  @Get('funding-sources')
+  fundingSources(
+    @Req() req: { user: AcquisitionActor },
+    @Query('type') type?: string,
+  ) {
+    return this.acquisitions.listFundingSources(req.user, type);
+  }
+
   @Get('versions/:id')
   get(@Req() req: { user: AcquisitionActor }, @Param('id') id: string) {
     return this.acquisitions.getVersion(req.user, id);
