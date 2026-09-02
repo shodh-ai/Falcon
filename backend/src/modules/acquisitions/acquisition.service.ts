@@ -323,7 +323,14 @@ export class AcquisitionService {
         'Acquisition needs between 1 and 500 lines',
       );
     }
-    const totals = calculateAcquisition(input.lines);
+    let totals: ReturnType<typeof calculateAcquisition>;
+    try {
+      totals = calculateAcquisition(input.lines);
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid acquisition totals',
+      );
+    }
     const create = async (manager: EntityManager) => {
       const number = await this.nextNumber(manager, tenantId);
       const requestRows = await manager.query(
@@ -790,7 +797,14 @@ export class AcquisitionService {
       throw new ConflictException(
         'Submitted acquisition versions are immutable',
       );
-    const totals = calculateAcquisition(input.lines);
+    let totals: ReturnType<typeof calculateAcquisition>;
+    try {
+      totals = calculateAcquisition(input.lines);
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Invalid acquisition totals',
+      );
+    }
     await this.db.transaction(async (manager) => {
       const locked = await manager.query(
         `SELECT status FROM acq_request_versions WHERE acquisition_version_id = $1 AND tenant_id = $2 FOR UPDATE`,
