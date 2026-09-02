@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/require-await -- Jest database mocks are intentionally dynamic */
 import type { DataSource } from 'typeorm';
 import type { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { hash as procurementHash } from '../procurements/procurement.util';
 import { DofaEngineService } from './dofa-engine.service';
 
 describe('DofaEngineService acquisition behavior', () => {
@@ -235,6 +236,12 @@ describe('DofaEngineService acquisition behavior', () => {
         estimated_cost: 1250,
       }),
     ]);
+    const outboxCall = manager.query.mock.calls.find(([statement]) =>
+      statement.includes('INSERT INTO acq_outbox_events'),
+    );
+    expect(outboxCall?.[1]?.[4]).toBe(
+      procurementHash(JSON.parse(String(outboxCall?.[1]?.[3]))),
+    );
     const sql = manager.query.mock.calls
       .map(([statement]) => statement)
       .join('\n');

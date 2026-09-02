@@ -80,6 +80,14 @@ describe('acquisition utilities', () => {
     expect(toDateOnlyString('2099-01-01T00:00:00.000Z')).toBe('2099-01-01');
   });
 
+  it('hashes Date values exactly as their stored JSON representation', () => {
+    const payload = {
+      required_by_date: new Date('2026-10-02T00:00:00.000Z'),
+      nested: { reserved_at: new Date('2026-09-02T11:08:12.352Z') },
+    };
+    expect(sha256(payload)).toBe(sha256(JSON.parse(JSON.stringify(payload))));
+  });
+
   it('rejects oversized text and invalid currency before persistence', () => {
     expect(() =>
       assertSafeAcquisitionInput({ ...request, currency: 'RUPEES' }),
