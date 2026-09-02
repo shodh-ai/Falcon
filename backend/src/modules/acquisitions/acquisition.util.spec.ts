@@ -100,6 +100,9 @@ describe('acquisition utilities', () => {
   it('produces deterministic canonical hashes', () => {
     expect(stableJson({ b: 2, a: 1 })).toBe(stableJson({ a: 1, b: 2 }));
     expect(sha256({ b: 2, a: 1 })).toBe(sha256({ a: 1, b: 2 }));
+    expect(JSON.parse(stableJson({ a: 1, optional: undefined }))).toEqual({
+      a: 1,
+    });
   });
 
   it('scores vendors reproducibly and marks sparse evidence low confidence', () => {
