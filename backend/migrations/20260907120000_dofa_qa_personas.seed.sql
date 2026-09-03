@@ -95,6 +95,7 @@ BEGIN
       {"code":"P40","email":"qa.dofa.p40.tenant-admin@mygyanvihar.test","name":"QA DoFA P40 Tenant Admin","role":"TenantAdmin","grants":["INVOICE_INTEGRITY_POLICY_ADMIN","PRODUCT_VERIFICATION_POLICY_ADMIN","INVENTORY_POLICY_ADMIN","CONSUMABLES_POLICY_ADMIN","RETURNS_POLICY_ADMIN","ASSET_SERVICE_POLICY_ADMIN","ASSET_RETIREMENT_POLICY_ADMIN","PHYSICAL_IDENTITY_POLICY_ADMIN"]},
       {"code":"P41","email":"qa.dofa.p41.super-admin@mygyanvihar.test","name":"QA DoFA P41 Super Admin","role":"SuperAdmin","grants":[]},
       {"code":"P42","email":"qa.dofa.p42.external-provider@provider.test","name":"QA DoFA P42 External Provider","role":"ExternalServiceProvider","grants":[]},
+      {"code":"P46","email":"qa.dofa.p46.coo@mygyanvihar.test","name":"QA DoFA P46 COO Approver","role":"COO","grants":[]},
 
       {"code":"C01","email":"qa.dofa.c01.requester-hod@mygyanvihar.test","name":"QA DoFA C01 Requester HOD","role":"HOD","dept":"A","grants":["ACQUISITION_REQUESTER"]},
       {"code":"C02","email":"qa.dofa.c02.buyer-receiver@mygyanvihar.test","name":"QA DoFA C02 Buyer Receiver","role":"ProcurementBuyer","grants":["PROCUREMENT_VIEW","PROCUREMENT_ORDER_ENTRY","PROCUREMENT_RECEIPT_ENTRY"]},

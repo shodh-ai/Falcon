@@ -136,6 +136,7 @@ Normal migrations deliberately do not create known-password accounts. The guarde
 | P37 | Award approver | `qa.dofa.p37.disposal-award@mygyanvihar.test` | `DofaQA!P37#2026` |
 | P38 | Disposal executor | `qa.dofa.p38.disposal-execute@mygyanvihar.test` | `DofaQA!P38#2026` |
 | P39 | Internal auditor | `qa.dofa.p39.auditor@mygyanvihar.test` | `DofaQA!P39#2026` |
+| P46 | COO DoFA approver | `qa.dofa.p46.coo@mygyanvihar.test` | `DofaQA!P46#2026` |
 
 Wrong-tenant account:
 

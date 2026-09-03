@@ -211,13 +211,14 @@ Each persona must have a dedicated account, tenant, department/project/location 
 | P40 | Tenant Admin | tenant policy/device/user administration | cross-tenant access, business approval by administration alone |
 | P41 | Super Admin | explicitly granted platform administration | implicit tenant business authority without grant |
 | P42 | External Service Provider | case-specific Module 8 tasks/evidence | other cases, warranty decision, custody return approval |
+| P46 | COO DoFA Approver | acquisition cases routed to the COO band | requester/vendor/budget mutations |
 | P43 | IRMS Service Identity | scoped acquisition/API exchange | interactive user actions, cross-tenant token use |
 | P44 | Module X Device Identity | signed machine endpoints for assigned profile/gate | user endpoints, other gate/device, stale sequence |
 | P45 | Anonymous/Public Scanner | public-safe QR/RFID/certificate result | serial, custodian, exact location, price, evidence or funding |
 
 ### 6.2 Required account variations
 
-For P01–P45, add variations where applicable:
+For P01–P46, add variations where applicable:
 
 - active vs disabled account;
 - correct vs wrong tenant;
@@ -409,6 +410,7 @@ POST /auth/local-login
 | P40 | `qa.dofa.p40.tenant-admin@mygyanvihar.test` | `DofaQA!P40#2026` | Tenant A / tenant administration | tenant admin |
 | P41 | `qa.dofa.p41.super-admin@mygyanvihar.test` | `DofaQA!P41#2026` | platform administration | super admin without implicit business grants |
 | P42 | `qa.dofa.p42.external-provider@provider.test` | `DofaQA!P42#2026` | Tenant A / assigned service case only | external service provider |
+| P46 | `qa.dofa.p46.coo@mygyanvihar.test` | `DofaQA!P46#2026` | Tenant A / COO DoFA cases | COO approver |
 
 Machine and public personas do not use human passwords:
 

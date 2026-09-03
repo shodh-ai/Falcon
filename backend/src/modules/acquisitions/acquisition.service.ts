@@ -659,7 +659,7 @@ export class AcquisitionService {
         ].includes(row.status),
       amend:
         owner &&
-        ['REJECTED', 'APPROVED', 'BUDGET_BLOCKED', 'EXPIRED'].includes(
+        ['REJECTED', 'APPROVED', 'BUDGET_BLOCKED', 'EXPIRED', 'WITHDRAWN'].includes(
           row.status,
         ),
       vendor_review:

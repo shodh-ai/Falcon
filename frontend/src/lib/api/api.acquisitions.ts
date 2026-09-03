@@ -94,6 +94,9 @@ export type AcquisitionLineRecord = {
   acquisition_layout: string;
   technical_specifications: unknown;
   estimated_line_total: number | string;
+  selected_vendor_id?: string | null;
+  vendor_review_status?: string;
+  vendor_deviation_justification?: string | null;
   validation_errors?: string[];
 };
 export type VendorRecommendationRecord = {
