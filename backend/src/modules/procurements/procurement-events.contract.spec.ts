@@ -11,6 +11,7 @@ describe('Module 2 event and compatibility contract', () => {
     'ProcurementOrderIssued.v1',
     'ProcurementOrderCancelled.v1',
     'ProcurementInvoiceVerified.v1',
+    'PackageReceiptRecorded.v1',
     'GoodsReceiptRecorded.v1',
     'ServiceAcceptanceRecorded.v1',
     'PaymentPosted.v1',
@@ -19,6 +20,13 @@ describe('Module 2 event and compatibility contract', () => {
     'ProcurementFinalized.v1',
   ])('publishes %s transactionally', (eventType) => {
     expect(service).toContain(eventType);
+  });
+
+  it('separates sealed-package custody from requester product acceptance', () => {
+    expect(service).toContain('PACKAGE_RECEIPT_RECORDED');
+    expect(service).toContain("acceptance_status='PRODUCT_CONFIRMED'");
+    expect(service).toContain('PRODUCT_ACCEPTANCE_REQUESTER_REQUIRED');
+    expect(service).toContain("purpose='RECEIVED_PRODUCT'");
   });
 
   it('uses sequence and revision in every event envelope', () => {

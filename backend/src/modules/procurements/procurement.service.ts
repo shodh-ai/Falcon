@@ -1727,14 +1727,13 @@ export class ProcurementService {
         [input.package_evidence_upload_id],
       );
       for (const incoming of input.lines) {
-        if (
-          Math.abs(
-            incoming.received_quantity -
-              (incoming.accepted_quantity + (incoming.rejected_quantity ?? 0)),
-          ) > 0.0005
-        )
+        if (incoming.received_quantity <= 0)
           throw new BadRequestException(
-            'Received quantity must equal accepted plus rejected quantity',
+            'Received package quantity must be positive',
+          );
+        if (incoming.accepted_quantity !== 0 || (incoming.rejected_quantity ?? 0) !== 0)
+          throw new BadRequestException(
+            'Stores records sealed-package custody only; product acceptance is completed later by the requester',
           );
         const lines = await manager.query(
           `SELECT ol.*,
@@ -1762,8 +1761,8 @@ export class ProcurementService {
           });
         const receiptLineId = randomUUID();
         await manager.query(
-          `INSERT INTO proc_receipt_lines (receipt_line_id,receipt_id,order_line_id,proc_case_line_id,tenant_id,received_quantity,accepted_quantity,rejected_quantity,discrepancy_reason)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          `INSERT INTO proc_receipt_lines (receipt_line_id,receipt_id,order_line_id,proc_case_line_id,tenant_id,received_quantity,accepted_quantity,rejected_quantity,discrepancy_reason,acceptance_status)
+           VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,'PACKAGE_RECEIVED')`,
           [
             receiptLineId,
             receiptId,
@@ -1771,8 +1770,6 @@ export class ProcurementService {
             line.proc_case_line_id,
             row.tenant_id,
             incoming.received_quantity,
-            incoming.accepted_quantity,
-            incoming.rejected_quantity ?? 0,
             incoming.discrepancy_reason ?? null,
           ],
         );
@@ -1786,7 +1783,7 @@ export class ProcurementService {
             legacy[0].grn_id,
             legacyLines[0]?.line_id ?? null,
             `Module 2 receipt ${receiptNumber}`,
-            incoming.accepted_quantity,
+            incoming.received_quantity,
             receiptLineId,
           ],
         );
@@ -1794,9 +1791,8 @@ export class ProcurementService {
       const outstanding = await manager.query(
         `SELECT COUNT(*)::int AS count FROM proc_order_lines ol
          WHERE ol.order_id=$1 AND
-           COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0)
-             - COALESCE((SELECT SUM(r.quantity) FROM proc_returns r WHERE r.order_line_id=ol.order_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0)
-           < ol.quantity-ol.cancelled_quantity`,
+           COALESCE((SELECT SUM(rl.received_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0)
+             < ol.quantity-ol.cancelled_quantity`,
         [orderId],
       );
       const orderStatus =
@@ -1810,7 +1806,7 @@ export class ProcurementService {
         row,
         'RECEIPT',
         receiptId,
-        'GOODS_RECEIPT_RECORDED',
+        'PACKAGE_RECEIPT_RECORDED',
         actor.user_id,
         null,
         { receipt_number: receiptNumber, lines: input.lines },
@@ -1818,7 +1814,7 @@ export class ProcurementService {
       const event = await this.emit(
         manager,
         row,
-        'GoodsReceiptRecorded.v1',
+        'PackageReceiptRecorded.v1',
         receiptId,
         {
           order_id: orderId,
@@ -1831,6 +1827,100 @@ export class ProcurementService {
         receipt_id: receiptId,
         receipt_number: receiptNumber,
         order_status: orderStatus,
+        event,
+        aggregate_revision: Number(row.aggregate_revision),
+      };
+    });
+  }
+
+  async confirmReceivedProduct(
+    actor: ProcurementActor,
+    caseId: string,
+    receiptLineId: string,
+    expectedRevision: number,
+    documentUploadId: string,
+  ) {
+    const access = await this.accessibleCase(actor, caseId);
+    if (String(access.requester_id) !== actor.user_id)
+      throw new ForbiddenException({
+        message: 'Only the original requester can confirm the opened product',
+        code: 'PRODUCT_ACCEPTANCE_REQUESTER_REQUIRED',
+      });
+    return this.db.transaction(async (manager) => {
+      const row = await this.lockedCase(manager, caseId, access.tenant_id);
+      this.assertRevision(row, expectedRevision);
+      this.assertOpen(row);
+      const lines = await manager.query(
+        `SELECT rl.*,r.receipt_id,r.order_id,r.receipt_number,ol.quantity AS ordered_quantity,
+                ol.cancelled_quantity
+         FROM proc_receipt_lines rl
+         JOIN proc_receipts r ON r.receipt_id=rl.receipt_id
+         JOIN proc_order_lines ol ON ol.order_line_id=rl.order_line_id
+         WHERE rl.receipt_line_id=$1 AND r.proc_case_id=$2 AND rl.tenant_id=$3
+         FOR UPDATE OF rl`,
+        [receiptLineId, caseId, row.tenant_id],
+      );
+      const line = lines[0];
+      if (!line) throw new NotFoundException('Receipt line not found');
+      if (line.acceptance_status === 'PRODUCT_CONFIRMED') return line;
+      const evidence = await manager.query(
+        `SELECT u.* FROM proc_document_uploads u
+         JOIN proc_receipt_evidence e ON e.document_upload_id=u.document_upload_id
+         WHERE u.document_upload_id=$1 AND e.receipt_line_id=$2
+           AND u.proc_case_id=$3 AND u.tenant_id=$4 AND u.uploaded_by=$5
+           AND u.purpose='RECEIVED_PRODUCT' AND u.malware_scan_status='CLEAN'
+         FOR UPDATE OF u`,
+        [documentUploadId, receiptLineId, caseId, row.tenant_id, actor.user_id],
+      );
+      if (!evidence[0])
+        throw new ConflictException('A clean geo-tagged product image for this receipt line is required');
+      const acceptedQuantity = Number(line.received_quantity);
+      const priorAccepted = await manager.query(
+        `SELECT COALESCE(SUM(accepted_quantity),0) AS accepted
+         FROM proc_receipt_lines WHERE order_line_id=$1 AND receipt_line_id<>$2`,
+        [line.order_line_id, receiptLineId],
+      );
+      const activeOrdered = Number(line.ordered_quantity) - Number(line.cancelled_quantity);
+      if (Number(priorAccepted[0].accepted) + acceptedQuantity > activeOrdered + 0.0005)
+        throw new ConflictException('Product acceptance exceeds active ordered quantity');
+      await manager.query(
+        `UPDATE proc_receipt_lines SET accepted_quantity=$2,acceptance_status='PRODUCT_CONFIRMED',
+           product_evidence_upload_id=$3,accepted_by=$4,accepted_at=NOW()
+         WHERE receipt_line_id=$1`,
+        [receiptLineId, acceptedQuantity, documentUploadId, actor.user_id],
+      );
+      await manager.query(
+        `UPDATE proc_receipts SET status='VERIFIED'
+         WHERE receipt_id=$1 AND NOT EXISTS (
+           SELECT 1 FROM proc_receipt_lines WHERE receipt_id=$1 AND acceptance_status<>'PRODUCT_CONFIRMED'
+         )`,
+        [line.receipt_id],
+      );
+      await this.audit(
+        manager,
+        row,
+        'RECEIPT_LINE',
+        receiptLineId,
+        'RECEIVED_PRODUCT_CONFIRMED',
+        actor.user_id,
+        { accepted_quantity: 0, acceptance_status: 'PACKAGE_RECEIVED' },
+        { accepted_quantity: acceptedQuantity, acceptance_status: 'PRODUCT_CONFIRMED', document_upload_id: documentUploadId },
+      );
+      const event = await this.emit(manager, row, 'GoodsReceiptRecorded.v1', line.receipt_id, {
+        order_id: line.order_id,
+        receipt_number: line.receipt_number,
+        lines: [{
+          receipt_line_id: receiptLineId,
+          order_line_id: line.order_line_id,
+          received_quantity: acceptedQuantity,
+          accepted_quantity: acceptedQuantity,
+          rejected_quantity: 0,
+        }],
+      });
+      return {
+        receipt_line_id: receiptLineId,
+        acceptance_status: 'PRODUCT_CONFIRMED',
+        accepted_quantity: acceptedQuantity,
         event,
         aggregate_revision: Number(row.aggregate_revision),
       };

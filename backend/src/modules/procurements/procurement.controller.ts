@@ -287,6 +287,25 @@ export class ProcurementController {
     );
   }
 
+  @Post('cases/:caseId/receipt-lines/:receiptLineId/confirm-product')
+  confirmReceivedProduct(
+    @Req() req: { user: ProcurementActor },
+    @Param('caseId') caseId: string,
+    @Param('receiptLineId') receiptLineId: string,
+    @Headers('if-match') revision: string,
+    @Body() body: { document_upload_id: string },
+  ) {
+    if (!body.document_upload_id)
+      throw new BadRequestException('Product evidence upload is required');
+    return this.procurements.confirmReceivedProduct(
+      req.user,
+      caseId,
+      receiptLineId,
+      this.revision(revision),
+      body.document_upload_id,
+    );
+  }
+
   @Post('cases/:caseId/service-acceptances')
   serviceAcceptance(
     @Req() req: { user: ProcurementActor },

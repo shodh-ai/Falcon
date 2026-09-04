@@ -52,4 +52,14 @@ describe("progressive procurement API", () => {
       { "If-Match": "10", "Idempotency-Key": "final-key" },
     );
   });
+  it("binds requester product confirmation to an exact receipt line", async () => {
+    const client = { get: vi.fn(), post: vi.fn().mockResolvedValue({}) };
+    const api = createProcurementsApi(client);
+    await api.confirmReceivedProduct("case-1", "receipt-line-1", 12, "upload-1");
+    expect(client.post).toHaveBeenCalledWith(
+      "/api/procurements/v1/cases/case-1/receipt-lines/receipt-line-1/confirm-product",
+      { document_upload_id: "upload-1" },
+      { "If-Match": "12" },
+    );
+  });
 });

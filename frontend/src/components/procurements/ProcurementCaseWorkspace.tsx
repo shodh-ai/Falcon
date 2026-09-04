@@ -45,9 +45,10 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     unit: "unit",
     fulfillment_type: "ASSET",
   });
-  const [receipt, setReceipt] = useState({ order_id: "", order_line_id: "", received_quantity: 1, accepted_quantity: 1, evidence_upload_id: "", latitude: 0, longitude: 0, accuracy: 0 });
+  const [receipt, setReceipt] = useState({ order_id: "", order_line_id: "", received_quantity: 0, evidence_upload_id: "", latitude: 0, longitude: 0, accuracy: 0 });
   const [invoice, setInvoice] = useState({ order_id: "", order_line_id: "", invoice_number: "QA-INV-2026-0001", invoice_date: new Date().toISOString().slice(0,10), quantity: 1, unit_price: 0, document_upload_id: "" });
   const [productEvidenceReceiptLine, setProductEvidenceReceiptLine] = useState("");
+  const [productEvidenceUploadId, setProductEvidenceUploadId] = useState("");
   const reload = useCallback(
     () =>
       api
@@ -138,6 +139,7 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     if (receiptLineId) form.set("receipt_line_id", receiptLineId);
     const result = await api.uploadReceiptEvidence(caseId, form);
     if (purpose === "PACKAGE_RECEIPT") setReceipt((current) => ({ ...current, evidence_upload_id: result.document_upload_id, latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }));
+    else setProductEvidenceUploadId(result.document_upload_id);
     toast.success(purpose === "PACKAGE_RECEIPT" ? "Geo-tagged package evidence ready" : "Geo-tagged received-product evidence saved");
   }
   if (!detail)
@@ -425,16 +427,17 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
               P12: photograph the unopened package with the shipping label and relevant delivery information clearly visible. Location is captured with the image. Do not open the package at this stage.
             </p>
             <select className="h-10 w-full rounded-md border px-3" value={receipt.order_id} onChange={(e)=>setReceipt({...receipt,order_id:e.target.value,order_line_id:""})}><option value="">Select issued order</option>{receivableOrders.map((item)=><option key={value(item,"order_id")} value={value(item,"order_id")}>{value(item,"order_number")}</option>)}</select>
-            <select className="h-10 w-full rounded-md border px-3" value={receipt.order_line_id} onChange={(e)=>setReceipt({...receipt,order_line_id:e.target.value})}><option value="">Select order line</option>{receiptOrderLines.map((item)=><option key={value(item,"order_line_id")} value={value(item,"order_line_id")}>{value(item,"product_name") || "Order item"} · {value(item,"quantity")} {value(item,"unit")}</option>)}</select>
-            <Input aria-label="Received quantity" type="number" min="0.001" step="0.001" value={receipt.received_quantity} onChange={(e)=>setReceipt({...receipt,received_quantity:Number(e.target.value),accepted_quantity:Number(e.target.value)})}/>
+            <select className="h-10 w-full rounded-md border px-3" value={receipt.order_line_id} onChange={(e)=>{const line=receiptOrderLines.find((item)=>value(item,"order_line_id")===e.target.value);setReceipt({...receipt,order_line_id:e.target.value,received_quantity:Number(line?.quantity ?? 0) - Number(line?.cancelled_quantity ?? 0)})}}><option value="">Select order line</option>{receiptOrderLines.map((item)=><option key={value(item,"order_line_id")} value={value(item,"order_line_id")}>{value(item,"product_name") || "Order item"} · {value(item,"quantity")} {value(item,"unit")}</option>)}</select>
+            {receipt.order_line_id && <p className="rounded bg-slate-50 p-2 text-sm">Package quantity from issued order: <strong>{receipt.received_quantity}</strong>. Stores does not inspect or accept the product at this stage.</p>}
             <label className="block rounded-md border border-dashed p-3 text-sm font-medium">Capture package + shipping label image<input className="mt-2 block w-full" type="file" accept="image/*" capture="environment" onChange={(e)=>{const file=e.target.files?.[0]; if(file) void uploadGeoEvidence(file,"PACKAGE_RECEIPT").catch((error)=>toast.error(error.message))}}/></label>
             {receipt.evidence_upload_id && <p className="text-xs text-emerald-700">Geo evidence ready · accuracy {Math.round(receipt.accuracy)} m</p>}
-            <Button disabled={busy || !receipt.order_id || !receipt.order_line_id || !receipt.evidence_upload_id} onClick={()=>void action(()=>api.recordReceipt(caseId,receipt.order_id,revision,{actual_delivery_date:new Date().toISOString().slice(0,10),package_evidence_upload_id:receipt.evidence_upload_id,capture_latitude:receipt.latitude,capture_longitude:receipt.longitude,capture_accuracy_metres:receipt.accuracy,evidence_captured_at:new Date().toISOString(),lines:[{order_line_id:receipt.order_line_id,received_quantity:receipt.received_quantity,accepted_quantity:receipt.accepted_quantity,rejected_quantity:0}]}),"Package receipt recorded")}>Mark package received</Button>
+            <Button disabled={busy || !receipt.order_id || !receipt.order_line_id || !receipt.evidence_upload_id} onClick={()=>void action(()=>api.recordReceipt(caseId,receipt.order_id,revision,{actual_delivery_date:new Date().toISOString().slice(0,10),package_evidence_upload_id:receipt.evidence_upload_id,capture_latitude:receipt.latitude,capture_longitude:receipt.longitude,capture_accuracy_metres:receipt.accuracy,evidence_captured_at:new Date().toISOString(),lines:[{order_line_id:receipt.order_line_id,received_quantity:receipt.received_quantity,accepted_quantity:0,rejected_quantity:0}]}),"Sealed package received; requester confirmation is pending")}>Mark sealed package received</Button>
           </CardContent>
         </Card><Card><CardHeader><CardTitle>Receipt history and requester product evidence</CardTitle></CardHeader><CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">After opening, the original requester may add geo-tagged images of the exact products here. These images supplement—not replace—the Stores package receipt.</p>
             <select aria-label="Receipt line for product evidence" className="h-10 w-full rounded-md border px-3 text-sm" value={productEvidenceReceiptLine} onChange={(e)=>setProductEvidenceReceiptLine(e.target.value)}><option value="">Select the received item</option>{detail.receipt_lines.map((line)=><option key={value(line,"receipt_line_id")} value={value(line,"receipt_line_id")}>{value(line,"receipt_number") || "Receipt"} · {value(line,"product_name") || "Received item"} · {value(line,"received_quantity")}</option>)}</select>
             <label className={`inline-flex rounded-md border px-3 py-2 text-sm font-medium ${productEvidenceReceiptLine ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>Capture exact received-product image<input disabled={!productEvidenceReceiptLine} className="hidden" type="file" accept="image/*" capture="environment" onChange={(e)=>{const file=e.target.files?.[0]; if(file) void uploadGeoEvidence(file,"RECEIVED_PRODUCT",productEvidenceReceiptLine).catch((error)=>toast.error(error.message))}}/></label>
+            {productEvidenceUploadId && <Button disabled={busy} onClick={()=>void action(()=>api.confirmReceivedProduct(caseId,productEvidenceReceiptLine,revision,productEvidenceUploadId),"Received product confirmed and forwarded for physical verification").then(()=>setProductEvidenceUploadId(""))}>Confirm exact received product</Button>}
             {detail.receipts.map((item) => (
               <div
                 className="rounded border p-3"

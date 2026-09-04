@@ -164,6 +164,17 @@ export function createProcurementsApi(api: Api) {
         content_hash: string;
         malware_scan_status: string;
       }>(`${root}/cases/${caseId}/receipt-evidence`, form),
+    confirmReceivedProduct: (
+      caseId: string,
+      receiptLineId: string,
+      revision: number,
+      documentUploadId: string,
+    ) =>
+      api.post(
+        `${root}/cases/${caseId}/receipt-lines/${receiptLineId}/confirm-product`,
+        { document_upload_id: documentUploadId },
+        mutationHeaders(revision),
+      ),
     verifyInvoice: (caseId: string, invoiceId: string, revision: number) =>
       api.post(
         `${root}/cases/${caseId}/invoices/${invoiceId}/verify`,
