@@ -132,6 +132,22 @@ export class ProcurementService {
     return this.accessibleCase(actor, caseId, 'PROCUREMENT_INVOICE_ENTRY');
   }
 
+  authorizeReceiptEntry(actor: ProcurementActor, caseId: string) {
+    return this.accessibleCase(actor, caseId, 'PROCUREMENT_RECEIPT_ENTRY');
+  }
+
+  async authorizeProductEvidence(actor: ProcurementActor, caseId: string) {
+    const row = await this.accessibleCase(actor, caseId);
+    if (String(row.requester_id) !== actor.user_id) {
+      await this.requireCapability(
+        actor,
+        'PROCUREMENT_RECEIPT_ENTRY',
+        row.department_id,
+      );
+    }
+    return row;
+  }
+
   authorizeView(actor: ProcurementActor, caseId: string) {
     return this.accessibleCase(actor, caseId);
   }
@@ -864,6 +880,16 @@ export class ProcurementService {
     );
   }
 
+  async listVendors(actor: ProcurementActor) {
+    await this.requireCapability(actor, 'PROCUREMENT_ORDER_ENTRY');
+    return this.db.query(
+      `SELECT vendor_id,business_name,gstin
+       FROM fin_vendors WHERE tenant_id=$1 AND is_active=true
+       ORDER BY business_name`,
+      [this.tenant(actor)],
+    );
+  }
+
   async get(actor: ProcurementActor, caseId: string) {
     const row = await this.accessibleCase(actor, caseId);
     const [
@@ -902,7 +928,12 @@ export class ProcurementService {
         [caseId],
       ),
       this.db.query(
-        `SELECT rl.* FROM proc_receipt_lines rl JOIN proc_receipts r ON r.receipt_id=rl.receipt_id WHERE r.proc_case_id=$1`,
+        `SELECT rl.*,r.receipt_number,COALESCE(ol.product_name,pcl.product_name) AS product_name
+         FROM proc_receipt_lines rl
+         JOIN proc_receipts r ON r.receipt_id=rl.receipt_id
+         JOIN proc_order_lines ol ON ol.order_line_id=rl.order_line_id
+         LEFT JOIN proc_case_lines pcl ON pcl.proc_case_line_id=rl.proc_case_line_id
+         WHERE r.proc_case_id=$1`,
         [caseId],
       ),
       this.db.query(
@@ -1074,26 +1105,45 @@ export class ProcurementService {
       const row = await this.lockedCase(manager, caseId, access.tenant_id);
       this.assertRevision(row, expectedRevision);
       this.assertOpen(row);
-      const ids = input.lines.map((line) => line.proc_case_line_id);
+      const ids = input.lines
+        .map((line) => line.proc_case_line_id)
+        .filter((id): id is string => Boolean(id));
       if (new Set(ids).size !== ids.length)
         throw new BadRequestException('Duplicate order line allocation');
-      const approved = await manager.query(
-        `SELECT * FROM proc_case_lines WHERE proc_case_id=$1 AND proc_case_line_id=ANY($2::uuid[])`,
-        [caseId, ids],
-      );
+      const approved = ids.length
+        ? await manager.query(
+            `SELECT * FROM proc_case_lines WHERE proc_case_id=$1 AND proc_case_line_id=ANY($2::uuid[])`,
+            [caseId, ids],
+          )
+        : [];
       if (approved.length !== ids.length)
         throw new BadRequestException('Order lines do not belong to this case');
-      if (
-        approved.some(
-          (line: Record<string, any>) =>
-            line.approved_vendor_id !== input.vendor_id,
-        )
-      ) {
-        throw new ConflictException({
-          message: 'Vendor differs from approved acquisition vendor',
-          code: 'ACQUISITION_AMENDMENT_REQUIRED',
-        });
+      const discrepancies = new Set<string>();
+      for (const line of input.lines) {
+        const source = approved.find(
+          (candidate: Record<string, any>) =>
+            candidate.proc_case_line_id === line.proc_case_line_id,
+        );
+        if (!source) {
+          if (!line.product_name?.trim() || !line.category?.trim() || !line.unit?.trim() || !line.fulfillment_type)
+            throw new BadRequestException(
+              'New products require product name, category, unit and classification',
+            );
+          discrepancies.add('UNPLANNED_PRODUCT');
+          continue;
+        }
+        if (source.approved_vendor_id !== input.vendor_id)
+          discrepancies.add('VENDOR_CHANGED');
+        if (Number(line.quantity) > Number(source.approved_quantity))
+          discrepancies.add('QUANTITY_CHANGED');
+        if (money(line.unit_price) !== money(source.approved_unit_price))
+          discrepancies.add('UNIT_PRICE_CHANGED');
       }
+      const justification = input.discrepancy_justification?.trim();
+      if (discrepancies.size && (!justification || justification.length < 20))
+        throw new BadRequestException(
+          'Order deviations require a justification of at least 20 characters',
+        );
       const orderId = randomUUID();
       const orderNumber = `PO-${new Date().getUTCFullYear()}-${orderId.slice(0, 8).toUpperCase()}`;
       const calculated = input.lines.map((line) => ({
@@ -1117,12 +1167,26 @@ export class ProcurementService {
         (sum, item) => sum + item.totals.total,
         0,
       );
+      const overrunPercent = Math.max(
+        0,
+        ((total - Number(row.available_amount)) / Number(row.approved_allocation)) * 100,
+      );
+      if (overrunPercent > 10.0001)
+        throw new ConflictException({
+          message: 'Order exceeds the maximum 10% controlled overrun window',
+          code: 'MODULE1_AMENDMENT_REQUIRED',
+        });
+      if (overrunPercent > 0) discrepancies.add('BUDGET_OVERRUN');
+      const exceptionStatus = overrunPercent > 0
+        ? 'FINANCE_APPROVAL_REQUIRED'
+        : discrepancies.size ? 'JUSTIFIED' : 'NOT_REQUIRED';
       await manager.query(
         `INSERT INTO proc_orders
            (order_id,proc_case_id,tenant_id,order_number,external_order_id,vendor_id,currency,
             order_date,expected_delivery_date,product_url,progress_status,subtotal,tax_amount,
-            freight_amount,additional_charges,total_amount,created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ENTERED',$11,$12,$13,$14,$15,$16)`,
+            freight_amount,additional_charges,total_amount,created_by,has_discrepancy,
+            discrepancy_justification,overrun_percent,exception_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ENTERED',$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
         [
           orderId,
           caseId,
@@ -1140,6 +1204,10 @@ export class ProcurementService {
           additional,
           total,
           actor.user_id,
+          discrepancies.size > 0,
+          justification ?? null,
+          overrunPercent,
+          exceptionStatus,
         ],
       );
       for (const item of calculated) {
@@ -1147,16 +1215,24 @@ export class ProcurementService {
           (line: Record<string, any>) =>
             line.proc_case_line_id === item.input.proc_case_line_id,
         );
+        const lineDiscrepancies = [
+          ...(!source ? ['UNPLANNED_PRODUCT'] : []),
+          ...(source && source.approved_vendor_id !== input.vendor_id ? ['VENDOR_CHANGED'] : []),
+          ...(source && Number(item.input.quantity) > Number(source.approved_quantity) ? ['QUANTITY_CHANGED'] : []),
+          ...(source && money(item.input.unit_price) !== money(source.approved_unit_price) ? ['UNIT_PRICE_CHANGED'] : []),
+        ];
         await manager.query(
           `INSERT INTO proc_order_lines
              (order_id,proc_case_id,proc_case_line_id,acquisition_line_id,tenant_id,
-              quantity,unit_price,tax_amount,freight_amount,additional_charges,line_total)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+              quantity,unit_price,tax_amount,freight_amount,additional_charges,line_total,
+              product_name,category,unit,fulfillment_type,is_unplanned,discrepancy_codes,
+              discrepancy_justification)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
           [
             orderId,
             caseId,
-            source.proc_case_line_id,
-            source.acquisition_line_id,
+            source?.proc_case_line_id ?? null,
+            source?.acquisition_line_id ?? null,
             row.tenant_id,
             item.input.quantity,
             money(item.input.unit_price),
@@ -1164,6 +1240,15 @@ export class ProcurementService {
             item.totals.freight,
             item.totals.additional,
             item.totals.total,
+            source?.product_name ?? item.input.product_name?.trim(),
+            source?.category ?? item.input.category?.trim(),
+            source?.unit ?? item.input.unit?.trim(),
+            source?.fulfillment_type ?? item.input.fulfillment_type,
+            !source,
+            JSON.stringify(lineDiscrepancies),
+            lineDiscrepancies.length
+              ? item.input.discrepancy_justification?.trim() ?? justification
+              : null,
           ],
         );
       }
@@ -1175,7 +1260,14 @@ export class ProcurementService {
         'ORDER_DRAFTED',
         actor.user_id,
         null,
-        { order_number: orderNumber, total_amount: total },
+        {
+          order_number: orderNumber,
+          total_amount: total,
+          discrepancy_codes: [...discrepancies],
+          discrepancy_justification: justification,
+          overrun_percent: overrunPercent,
+          exception_status: exceptionStatus,
+        },
         requestId,
       );
       await manager.query(
@@ -1186,6 +1278,8 @@ export class ProcurementService {
         order_id: orderId,
         order_number: orderNumber,
         total_amount: total,
+        discrepancy_codes: [...discrepancies],
+        exception_status: exceptionStatus,
         revision: Number(row.aggregate_revision) + 1,
       };
     });
@@ -1218,14 +1312,21 @@ export class ProcurementService {
       if (order.status === 'ISSUED') return order;
       if (order.status !== 'DRAFT')
         throw new ConflictException(`Order is ${order.status}`);
+      if (order.exception_status === 'FINANCE_APPROVAL_REQUIRED')
+        throw new ConflictException({
+          message:
+            'This order is within the controlled overrun window but needs Finance approval before issue',
+          code: 'ORDER_OVERRUN_APPROVAL_REQUIRED',
+        });
       const allocations = await manager.query(
         `SELECT ol.proc_case_line_id,SUM(ol.quantity-ol.cancelled_quantity) AS proposed,
            pcl.approved_quantity,
            COALESCE((SELECT SUM(x.quantity-x.cancelled_quantity) FROM proc_order_lines x
              JOIN proc_orders o ON o.order_id=x.order_id
              WHERE x.proc_case_line_id=ol.proc_case_line_id AND o.status IN ('ISSUED','PARTIALLY_RECEIVED','RECEIVED','CLOSED')),0) AS active
-         FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
-         WHERE ol.order_id=$1 GROUP BY ol.proc_case_line_id,pcl.approved_quantity`,
+         FROM proc_order_lines ol LEFT JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+         WHERE ol.order_id=$1 AND ol.proc_case_line_id IS NOT NULL
+         GROUP BY ol.proc_case_line_id,pcl.approved_quantity`,
         [orderId],
       );
       if (
@@ -1233,11 +1334,11 @@ export class ProcurementService {
           (a: Record<string, any>) =>
             quantityUnits(a.active) + quantityUnits(a.proposed) >
             quantityUnits(a.approved_quantity),
-        )
+        ) && !order.discrepancy_justification
       ) {
         throw new ConflictException({
-          message: 'Active ordered quantity exceeds approved quantity',
-          code: 'APPROVED_QUANTITY_EXCEEDED',
+          message: 'Quantity deviation requires justification',
+          code: 'ORDER_DEVIATION_JUSTIFICATION_REQUIRED',
         });
       }
       const total = money(order.total_amount);
@@ -1261,7 +1362,9 @@ export class ProcurementService {
         ],
       );
       const lines = await manager.query(
-        `SELECT ol.*,pcl.product_name FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id WHERE ol.order_id=$1`,
+        `SELECT ol.*,COALESCE(ol.product_name,pcl.product_name) AS product_name
+         FROM proc_order_lines ol LEFT JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+         WHERE ol.order_id=$1`,
         [orderId],
       );
       for (const line of lines) {
@@ -1551,6 +1654,28 @@ export class ProcurementService {
           message: 'Order creator cannot receive their order',
           code: 'SOD_RECEIVER_VIOLATION',
         });
+      if (!input.package_evidence_upload_id)
+        throw new BadRequestException(
+          'A geo-tagged package and shipping-label image is required',
+        );
+      const evidenceRows = await manager.query(
+        `SELECT * FROM proc_document_uploads
+         WHERE document_upload_id=$1 AND proc_case_id=$2 AND tenant_id=$3
+           AND uploaded_by=$4 AND purpose='PACKAGE_RECEIPT'
+           AND malware_scan_status='CLEAN' AND consumed_at IS NULL
+           AND expires_at>NOW() FOR UPDATE`,
+        [
+          input.package_evidence_upload_id,
+          caseId,
+          row.tenant_id,
+          actor.user_id,
+        ],
+      );
+      const packageEvidence = evidenceRows[0];
+      if (!packageEvidence)
+        throw new ConflictException(
+          'A current clean geo-tagged package image owned by this receiver is required',
+        );
       const receiptId = randomUUID();
       const receiptNumber = `GRN-${new Date().getUTCFullYear()}-${receiptId.slice(0, 8).toUpperCase()}`;
       if (input.replacement_for_return_id) {
@@ -1576,8 +1701,9 @@ export class ProcurementService {
         ],
       );
       await manager.query(
-        `INSERT INTO proc_receipts (receipt_id,proc_case_id,order_id,tenant_id,receipt_number,actual_delivery_date,status,notes,recorded_by,replacement_for_return_id,legacy_grn_id)
-         VALUES ($1,$2,$3,$4,$5,$6,'ENTERED',$7,$8,$9,$10)`,
+        `INSERT INTO proc_receipts (receipt_id,proc_case_id,order_id,tenant_id,receipt_number,actual_delivery_date,status,notes,recorded_by,replacement_for_return_id,legacy_grn_id,
+          package_evidence_upload_id,capture_latitude,capture_longitude,capture_accuracy_metres,evidence_captured_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'ENTERED',$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [
           receiptId,
           caseId,
@@ -1589,7 +1715,16 @@ export class ProcurementService {
           actor.user_id,
           input.replacement_for_return_id ?? null,
           legacy[0].grn_id,
+          input.package_evidence_upload_id,
+          packageEvidence.capture_latitude,
+          packageEvidence.capture_longitude,
+          packageEvidence.capture_accuracy_metres,
+          packageEvidence.client_captured_at,
         ],
+      );
+      await manager.query(
+        `UPDATE proc_document_uploads SET consumed_at=NOW() WHERE document_upload_id=$1`,
+        [input.package_evidence_upload_id],
       );
       for (const incoming of input.lines) {
         if (
@@ -1602,10 +1737,10 @@ export class ProcurementService {
             'Received quantity must equal accepted plus rejected quantity',
           );
         const lines = await manager.query(
-          `SELECT ol.*,pcl.proc_case_line_id,
+          `SELECT ol.*,
              COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0) AS accepted,
              COALESCE((SELECT SUM(r.quantity) FROM proc_returns r WHERE r.order_line_id=ol.order_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0) AS returned
-           FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+           FROM proc_order_lines ol
            WHERE ol.order_line_id=$1 AND ol.order_id=$2`,
           [incoming.order_line_id, orderId],
         );
@@ -1718,9 +1853,9 @@ export class ProcurementService {
       this.assertRevision(row, expectedRevision);
       this.assertOpen(row);
       const lines = await manager.query(
-        `SELECT ol.*,pcl.fulfillment_type,
+        `SELECT ol.*,COALESCE(ol.fulfillment_type,pcl.fulfillment_type) AS fulfillment_type,
            COALESCE((SELECT SUM(sa.accepted_quantity) FROM proc_service_acceptances sa WHERE sa.order_line_id=ol.order_line_id AND sa.status IN ('VERIFIED','FINALIZED')),0) AS accepted
-         FROM proc_order_lines ol JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+         FROM proc_order_lines ol LEFT JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
          JOIN proc_orders o ON o.order_id=ol.order_id
          WHERE ol.order_line_id=$1 AND ol.proc_case_id=$2 AND o.status NOT IN ('DRAFT','CANCELLED')`,
         [input.order_line_id, caseId],
@@ -2068,13 +2203,15 @@ export class ProcurementService {
     const invoiceLines = await manager.query(
       `SELECT il.*,ol.quantity AS ordered_quantity,ol.cancelled_quantity,ol.unit_price AS ordered_unit_price,
               ol.tax_amount AS ordered_tax,ol.freight_amount AS ordered_freight,
-              pcl.category,pcl.fulfillment_type,o.vendor_id AS order_vendor,o.currency AS order_currency,
+              COALESCE(ol.category,pcl.category,'UNPLANNED') AS category,
+              COALESCE(ol.fulfillment_type,pcl.fulfillment_type,'ASSET') AS fulfillment_type,
+              o.vendor_id AS order_vendor,o.currency AS order_currency,
               COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0) AS received_accepted,
               COALESCE((SELECT SUM(sa.accepted_quantity) FROM proc_service_acceptances sa WHERE sa.order_line_id=ol.order_line_id AND sa.status IN ('VERIFIED','FINALIZED')),0) AS service_accepted,
               COALESCE((SELECT SUM(r.quantity) FROM proc_returns r WHERE r.order_line_id=ol.order_line_id AND r.status NOT IN ('REJECTED','CANCELLED')),0) AS returned,
               COALESCE((SELECT SUM(x.quantity) FROM proc_invoice_lines x JOIN proc_invoices pi ON pi.invoice_id=x.invoice_id WHERE x.order_line_id=ol.order_line_id AND pi.status NOT IN ('VOID','DISPUTED')),0) AS cumulative_invoiced
        FROM proc_invoice_lines il JOIN proc_order_lines ol ON ol.order_line_id=il.order_line_id
-       JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
+       LEFT JOIN proc_case_lines pcl ON pcl.proc_case_line_id=ol.proc_case_line_id
        JOIN proc_orders o ON o.order_id=ol.order_id WHERE il.invoice_id=$1`,
       [invoice.invoice_id],
     );

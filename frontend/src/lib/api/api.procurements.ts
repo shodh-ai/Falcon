@@ -51,6 +51,7 @@ export type ProcurementDashboard = {
 
 type Api = {
   get<T>(path: string, headers?: Record<string, string>): Promise<T>;
+  getBlob?(path: string): Promise<Blob>;
   post<T>(
     path: string,
     body?: unknown,
@@ -69,9 +70,18 @@ export function createProcurementsApi(api: Api) {
       api.get<ProcurementCaseSummary[]>(
         `${root}/cases${status ? `?status=${encodeURIComponent(status)}` : ""}`,
       ),
+    vendors: () => api.get<Array<{vendor_id:string;business_name:string;gstin?:string}>>(`${root}/vendors`),
     get: (caseId: string) =>
       api.get<ProcurementCaseDetail>(`${root}/cases/${caseId}`),
     dashboard: () => api.get<ProcurementDashboard>(`${root}/dashboard`),
+    workbook: (caseId: string) => {
+      if (!api.getBlob) throw new Error("Authenticated download is unavailable");
+      return api.getBlob(`${root}/cases/${caseId}/workbook`);
+    },
+    sampleInvoice: () => {
+      if (!api.getBlob) throw new Error("Authenticated download is unavailable");
+      return api.getBlob(`${root}/sample-invoice`);
+    },
     readiness: (caseId: string) =>
       api.get<Record<string, unknown>>(
         `${root}/cases/${caseId}/finalization-readiness`,
@@ -148,6 +158,12 @@ export function createProcurementsApi(api: Api) {
         content_hash: string;
         malware_scan_status: string;
       }>(`${root}/cases/${caseId}/invoice-documents`, form),
+    uploadReceiptEvidence: (caseId: string, form: FormData) =>
+      api.post<{
+        document_upload_id: string;
+        content_hash: string;
+        malware_scan_status: string;
+      }>(`${root}/cases/${caseId}/receipt-evidence`, form),
     verifyInvoice: (caseId: string, invoiceId: string, revision: number) =>
       api.post(
         `${root}/cases/${caseId}/invoices/${invoiceId}/verify`,

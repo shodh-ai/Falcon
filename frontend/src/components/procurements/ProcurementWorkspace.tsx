@@ -2,18 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  Clock,
-  IndianRupee,
-  PackageCheck,
-  RefreshCw,
-} from "lucide-react";
+import { PackageCheck, RefreshCw } from "lucide-react";
 import { useAuthedApi } from "@/lib/api";
 import {
   createProcurementsApi,
   type ProcurementCaseSummary,
-  type ProcurementDashboard,
 } from "@/lib/api/api.procurements";
 import { toast } from "@/lib/notifications/falcon-toast";
 import { Button } from "@/components/ui/button";
@@ -28,14 +21,14 @@ export function ProcurementWorkspace() {
   const authed = useAuthedApi();
   const api = useMemo(() => createProcurementsApi(authed), [authed]);
   const [rows, setRows] = useState<ProcurementCaseSummary[]>([]);
-  const [dashboard, setDashboard] = useState<ProcurementDashboard | null>(null);
+  const [selectedCaseId, setSelectedCaseId] = useState("");
   const [filter, setFilter] = useState("ALL");
   const reload = useCallback(
     () =>
-      Promise.all([api.list(), api.dashboard()])
-        .then(([cases, summary]) => {
+      api.list()
+        .then((cases) => {
           setRows(cases);
-          setDashboard(summary);
+          setSelectedCaseId((current) => current || cases[0]?.proc_case_id || "");
         })
         .catch((error) => toast.error(error.message)),
     [api],
@@ -46,12 +39,7 @@ export function ProcurementWorkspace() {
   const visible = rows.filter(
     (row) => filter === "ALL" || row.status === filter,
   );
-  const cards = [
-    ["Approved", dashboard?.approved_allocation ?? 0, IndianRupee],
-    ["Available", dashboard?.available_amount ?? 0, PackageCheck],
-    ["Committed", dashboard?.committed_amount ?? 0, Clock],
-    ["Expended", dashboard?.expended_amount ?? 0, IndianRupee],
-  ] as const;
+  const selected = rows.find((row) => row.proc_case_id === selectedCaseId);
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -60,9 +48,8 @@ export function ProcurementWorkspace() {
             Progressive Procurement
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Canonical allocation → commitment → expenditure ledger with
-            independent order, receipt, invoice, return, payment, and inventory
-            progress.
+            Select one approved requirement. Financial and operational figures
+            are shown only for that procurement case.
           </p>
         </div>
         <Button variant="outline" onClick={() => void reload()}>
@@ -70,47 +57,23 @@ export function ProcurementWorkspace() {
           Refresh
         </Button>
       </div>
-      <div className="grid gap-3 md:grid-cols-4">
-        {cards.map(([label, value, Icon]) => (
-          <Card key={label}>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase text-muted-foreground">
-                  {label}
-                </p>
-                <Icon className="h-4 w-4 text-blue-600" />
-              </div>
-              <p className="mt-2 text-2xl font-black">{money(value)}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      {!!dashboard?.alerts.length && (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardHeader>
-            <CardTitle className="flex items-center text-base">
-              <AlertTriangle className="mr-2 h-4 w-4" />
-              Financial attention queue
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 md:grid-cols-3">
-            {dashboard.alerts.map((alert, index) => (
-              <Link
-                key={`${alert.proc_case_id}-${alert.type}-${index}`}
-                href={`/finance/procurements/${alert.proc_case_id}`}
-                className="rounded border border-amber-200 bg-white p-3 text-sm"
-              >
-                <strong>{alert.type.replaceAll("_", " ")}</strong>
-                <p className="text-muted-foreground">{String(alert.value)}</p>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      <Card className="border-blue-200">
+        <CardHeader><CardTitle>Select procurement requirement</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <select aria-label="Procurement requirement" className="h-11 w-full rounded-md border bg-background px-3" value={selectedCaseId} onChange={(event) => setSelectedCaseId(event.target.value)}>
+            {rows.map((row) => <option key={row.proc_case_id} value={row.proc_case_id}>{row.acquisition_number} · {row.status.replaceAll("_", " ")} · {money(row.approved_allocation,row.currency)}</option>)}
+          </select>
+          {selected && <div className="grid gap-3 md:grid-cols-4">
+            {[["Approved",selected.approved_allocation],["Available",selected.available_amount],["Committed",selected.committed_amount],["Expended",selected.expended_amount]].map(([label,amount]) => <div key={String(label)} className="rounded-md bg-slate-50 p-3"><p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p><strong>{money(amount,selected.currency)}</strong></div>)}
+          </div>}
+          {selected && <Button asChild><Link href={`/finance/procurements/${selected.proc_case_id}`}>Open this procurement case</Link></Button>}
+          {!rows.length && <p className="text-sm text-muted-foreground">No procurement requirements are assigned to your scope.</p>}
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Scoped persona queue</CardTitle>
+            <CardTitle>Other requirements in your scoped queue</CardTitle>
             <div className="flex gap-2">
               {[
                 "ALL",

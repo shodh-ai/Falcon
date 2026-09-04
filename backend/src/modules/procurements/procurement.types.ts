@@ -4,12 +4,17 @@ export type ProcurementActor = AcquisitionActor;
 export type MoneyInput = number | string;
 
 export type OrderLineInput = {
-  proc_case_line_id: string;
+  proc_case_line_id?: string;
+  product_name?: string;
+  category?: string;
+  unit?: string;
+  fulfillment_type?: 'ASSET' | 'CONSUMABLE' | 'SERVICE' | 'INSTALLATION';
   quantity: number;
   unit_price: MoneyInput;
   tax_amount?: MoneyInput;
   freight_amount?: MoneyInput;
   additional_charges?: MoneyInput;
+  discrepancy_justification?: string;
 };
 
 export type CreateOrderInput = {
@@ -18,6 +23,7 @@ export type CreateOrderInput = {
   order_date?: string;
   expected_delivery_date?: string;
   product_url?: string;
+  discrepancy_justification?: string;
   lines: OrderLineInput[];
 };
 
@@ -33,6 +39,11 @@ export type CreateReceiptInput = {
   actual_delivery_date: string;
   notes?: string;
   replacement_for_return_id?: string;
+  package_evidence_upload_id?: string;
+  capture_latitude?: number;
+  capture_longitude?: number;
+  capture_accuracy_metres?: number;
+  evidence_captured_at?: string;
   lines: ReceiptLineInput[];
 };
 

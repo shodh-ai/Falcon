@@ -17,6 +17,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type {
   ProcurementActor,
@@ -85,6 +86,45 @@ export class ProcurementController {
     return Number(normalized);
   }
 
+  @Get('sample-invoice')
+  async sampleInvoice(@Res() response: Response) {
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([595, 842]);
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    page.drawText('FALCON MODULE 2 - QA TEST INVOICE', {
+      x: 48,
+      y: 780,
+      size: 18,
+      font: bold,
+      color: rgb(0.05, 0.16, 0.32),
+    });
+    const lines = [
+      'Invoice number: QA-INV-2026-0001',
+      'Invoice date: 2026-09-04',
+      'Vendor: Use the vendor shown on the selected Module 2 order',
+      'Currency: INR',
+      'Item: Test item - replace with the selected order line',
+      'Quantity: 1',
+      'Unit price: INR 1,000.00',
+      'Tax: INR 0.00',
+      'Freight: INR 0.00',
+      'Total: INR 1,000.00',
+      '',
+      'QA only. Adjust the entered values to match the selected test order.',
+    ];
+    lines.forEach((line, index) =>
+      page.drawText(line, { x: 48, y: 735 - index * 28, size: 11, font }),
+    );
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      'attachment; filename="falcon-module2-test-invoice.pdf"',
+    );
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(Buffer.from(await pdf.save()));
+  }
+
   @Get('dashboard')
   dashboard(@Req() req: { user: ProcurementActor }) {
     return this.procurements.dashboard(req.user);
@@ -96,6 +136,11 @@ export class ProcurementController {
     @Query('status') status?: string,
   ) {
     return this.procurements.list(req.user, status);
+  }
+
+  @Get('vendors')
+  vendors(@Req() req: { user: ProcurementActor }) {
+    return this.procurements.listVendors(req.user);
   }
 
   @Get('cases/:caseId')
@@ -298,6 +343,30 @@ export class ProcurementController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     return this.documents.upload(req.user, caseId, file);
+  }
+
+  @Post('cases/:caseId/receipt-evidence')
+  @UseInterceptors(documentInterceptor)
+  uploadReceiptEvidence(
+    @Req() req: { user: ProcurementActor },
+    @Param('caseId') caseId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('purpose') purpose: 'PACKAGE_RECEIPT' | 'RECEIVED_PRODUCT',
+    @Body('latitude') latitude: string,
+    @Body('longitude') longitude: string,
+    @Body('accuracy_metres') accuracy: string,
+    @Body('captured_at') capturedAt: string,
+    @Body('receipt_line_id') receiptLineId?: string,
+  ) {
+    if (!['PACKAGE_RECEIPT', 'RECEIVED_PRODUCT'].includes(purpose))
+      throw new BadRequestException('Receipt evidence purpose is invalid');
+    return this.documents.upload(req.user, caseId, file, purpose, {
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+      accuracy_metres: accuracy ? Number(accuracy) : undefined,
+      captured_at: capturedAt,
+      receipt_line_id: receiptLineId || undefined,
+    });
   }
 
   @Get('cases/:caseId/invoices/:invoiceId/document')

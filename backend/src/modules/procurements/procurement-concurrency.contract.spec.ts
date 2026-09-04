@@ -18,9 +18,8 @@ describe('Module 2 concurrency contract', () => {
     expect(service).toContain(
       'SELECT * FROM proc_cases WHERE proc_case_id=$1 AND tenant_id=$2 FOR UPDATE',
     );
-    expect(service).toContain(
-      'Active ordered quantity exceeds approved quantity',
-    );
+    expect(service).toContain('Quantity deviation requires justification');
+    expect(service).toContain('ORDER_DEVIATION_JUSTIFICATION_REQUIRED');
     expect(service).toContain('Order exceeds available allocation');
   });
 

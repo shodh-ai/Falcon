@@ -83,8 +83,21 @@ export class ProcurementDocumentService {
     actor: ProcurementActor,
     caseId: string,
     file: Express.Multer.File,
+    purpose: 'INVOICE' | 'PACKAGE_RECEIPT' | 'RECEIVED_PRODUCT' = 'INVOICE',
+    capture?: {
+      latitude?: number;
+      longitude?: number;
+      accuracy_metres?: number;
+      captured_at?: string;
+      receipt_line_id?: string;
+    },
   ) {
-    const access = await this.procurements.authorizeInvoiceEntry(actor, caseId);
+    const access =
+      purpose === 'INVOICE'
+        ? await this.procurements.authorizeInvoiceEntry(actor, caseId)
+        : purpose === 'PACKAGE_RECEIPT'
+          ? await this.procurements.authorizeReceiptEntry(actor, caseId)
+          : await this.procurements.authorizeProductEvidence(actor, caseId);
     if (!file?.buffer?.length || !ALLOWED_MIME.has(file.mimetype))
       throw new BadRequestException('Invoice must be a PDF, PNG, or JPEG');
     const extension = extname(file.originalname).toLowerCase();
@@ -112,9 +125,45 @@ export class ProcurementDocumentService {
     const contentHash = hash(file.buffer.toString('base64'));
     const documentId = randomUUID();
     const safeName = `${documentId}${extension}`;
+    if (
+      purpose !== 'INVOICE' &&
+      (!Number.isFinite(capture?.latitude) ||
+        !Number.isFinite(capture?.longitude) ||
+        !capture?.captured_at)
+    ) {
+      throw new BadRequestException(
+        'Geo-tagged evidence requires location and capture time',
+      );
+    }
+    if (purpose !== 'INVOICE' && file.mimetype === 'application/pdf') {
+      throw new BadRequestException('Receipt evidence must be a live image');
+    }
+    if (purpose === 'RECEIVED_PRODUCT' && !capture?.receipt_line_id) {
+      throw new BadRequestException(
+        'Received-product evidence must identify its receipt line',
+      );
+    }
+    if (capture?.receipt_line_id) {
+      const receiptLines = await this.db.query(
+        `SELECT rl.receipt_line_id FROM proc_receipt_lines rl
+         JOIN proc_receipts r ON r.receipt_id=rl.receipt_id
+         WHERE rl.receipt_line_id=$1 AND r.proc_case_id=$2 AND rl.tenant_id=$3`,
+        [capture.receipt_line_id, caseId, access.tenant_id],
+      );
+      if (!receiptLines[0])
+        throw new BadRequestException(
+          'Receipt line does not belong to this procurement case',
+        );
+    }
+    const folder =
+      purpose === 'INVOICE'
+        ? 'invoices'
+        : purpose === 'PACKAGE_RECEIPT'
+          ? 'package-receipts'
+          : 'received-products';
     const objectKey = this.storage.buildKey(
       access.tenant_id,
-      `procurements/${caseId}/invoices/${safeName}`,
+      `procurements/${caseId}/${folder}/${safeName}`,
     );
     await this.storage.upload(
       access.tenant_id,
@@ -125,8 +174,9 @@ export class ProcurementDocumentService {
     const rows = await this.db.query<DocumentUploadRow[]>(
       `INSERT INTO proc_document_uploads
          (document_upload_id,proc_case_id,tenant_id,object_key,original_filename,
-          mime_type,byte_size,content_hash,malware_scan_status,uploaded_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          mime_type,byte_size,content_hash,malware_scan_status,uploaded_by,purpose,
+          capture_latitude,capture_longitude,capture_accuracy_metres,client_captured_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING document_upload_id,content_hash,malware_scan_status,expires_at`,
       [
         documentId,
@@ -139,8 +189,28 @@ export class ProcurementDocumentService {
         contentHash,
         scanStatus,
         actor.user_id,
+        purpose,
+        capture?.latitude ?? null,
+        capture?.longitude ?? null,
+        capture?.accuracy_metres ?? null,
+        capture?.captured_at ?? null,
       ],
     );
+    if (purpose !== 'INVOICE') {
+      await this.db.query(
+        `INSERT INTO proc_receipt_evidence
+           (proc_case_id,receipt_line_id,document_upload_id,tenant_id,evidence_type,captured_by)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          caseId,
+          capture?.receipt_line_id ?? null,
+          documentId,
+          access.tenant_id,
+          purpose,
+          actor.user_id,
+        ],
+      );
+    }
     return rows[0];
   }
 

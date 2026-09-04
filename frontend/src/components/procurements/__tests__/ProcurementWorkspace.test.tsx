@@ -48,11 +48,13 @@ describe("Module 2 persona workspace", () => {
     expect(screen.getByText("₹1,00,000.00")).toBeInTheDocument();
     expect(screen.getAllByText("₹40,000.00")).toHaveLength(2);
   });
-  it("loads both cases and the funds dashboard", async () => {
+  it("loads scoped cases without mixing them into a cumulative dashboard", async () => {
     render(<ProcurementWorkspace />);
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith("/api/procurements/v1/cases"),
     );
-    expect(get).toHaveBeenCalledWith("/api/procurements/v1/dashboard");
+    expect(get).not.toHaveBeenCalledWith("/api/procurements/v1/dashboard");
+    expect(screen.getByLabelText("Procurement requirement")).toBeInTheDocument();
+    expect(screen.getByText("Open this procurement case")).toBeInTheDocument();
   });
 });
