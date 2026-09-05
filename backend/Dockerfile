@@ -38,6 +38,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=4000
+ENV NODE_OPTIONS=--max-old-space-size=768
 
 COPY --chown=node:node package.json ./
 COPY --chown=node:node --from=builder /app/node_modules ./node_modules
@@ -52,6 +53,9 @@ COPY --chown=node:node --from=builder /app/data ./data
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
 
 EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Use explicit .js — `node dist/main` can fail with MODULE_NOT_FOUND on some Node builds
 CMD ["node", "dist/main.js"]

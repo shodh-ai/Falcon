@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "cross-env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=4096 next build",
+    "build": "cross-env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=2048 next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",

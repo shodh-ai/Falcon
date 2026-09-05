@@ -20,6 +20,12 @@ services:
       args:
         NODE_IMAGE: node:20-alpine
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    mem_limit: 1g
+    mem_reservation: 512m
+    cpus: 1.5
+    pids_limit: 256
     expose:
       - '4000'
     environment:
@@ -33,12 +39,12 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:4000/').then(r=>process.exit(r.ok||r.status===404?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 40s
+      start_period: 45s
 
 volumes:
   falcon_api_uploads:
