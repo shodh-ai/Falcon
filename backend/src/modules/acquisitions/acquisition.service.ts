@@ -659,9 +659,13 @@ export class AcquisitionService {
         ].includes(row.status),
       amend:
         owner &&
-        ['REJECTED', 'APPROVED', 'BUDGET_BLOCKED', 'EXPIRED', 'WITHDRAWN'].includes(
-          row.status,
-        ),
+        [
+          'REJECTED',
+          'APPROVED',
+          'BUDGET_BLOCKED',
+          'EXPIRED',
+          'WITHDRAWN',
+        ].includes(row.status),
       vendor_review:
         row.status === 'VENDOR_REVIEW' &&
         String(row.requester_id) !== actor.user_id &&
@@ -1531,6 +1535,7 @@ export class AcquisitionService {
        JOIN acq_request_versions v ON v.acquisition_version_id=r.acquisition_version_id
        WHERE latest.event_type='RESERVED' AND r.expires_at<=NOW()
          AND v.status IN ('BUDGET_RESERVED','PENDING_DOFA')
+         AND platform_module_is_available('finance_procurement',v.tenant_id,NULL,v.department_id::text)
        ORDER BY r.expires_at LIMIT 100`,
     );
     for (const row of due) {

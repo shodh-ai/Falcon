@@ -6,6 +6,7 @@ import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { TenantProvider } from "@/context/TenantContext";
 import { SWRProvider } from "@/components/providers/SWRProvider";
+import { ModuleRuntimeProvider } from "@/context/ModuleRuntimeContext";
 
 export const metadata: Metadata = {
   title: "Falcon | SGVU Campus OS",
@@ -47,7 +48,9 @@ export default function RootLayout({
         ) : null}
         <TenantProvider>
           <AuthProvider>
-            <SWRProvider>{children}</SWRProvider>
+            <ModuleRuntimeProvider>
+              <SWRProvider>{children}</SWRProvider>
+            </ModuleRuntimeProvider>
           </AuthProvider>
         </TenantProvider>
         <Toaster

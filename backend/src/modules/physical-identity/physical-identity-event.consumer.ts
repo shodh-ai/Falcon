@@ -4,6 +4,7 @@ import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { PhysicalIdentityService } from './physical-identity.service';
+import { ModuleControlService } from '../../module-control/module-control.service';
 
 @Injectable()
 export class PhysicalIdentityEventConsumer {
@@ -11,6 +12,7 @@ export class PhysicalIdentityEventConsumer {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly service: PhysicalIdentityService,
+    private readonly moduleControl: ModuleControlService,
   ) {}
   @Interval(15_000)
   async consumeMovementAuthority() {
@@ -38,11 +40,18 @@ export class PhysicalIdentityEventConsumer {
     ];
     for (const source of sources) {
       const rows = await this.db.query(
-        `SELECT e.event_id FROM ${source.table} e JOIN tenant_subscriptions ts ON ts.tenant_id=e.tenant_id AND ts.feature_key='dofa_module_x_gate_observation' AND ts.is_enabled=true AND(ts.expires_at IS NULL OR ts.expires_at>=NOW()) WHERE e.event_type=ANY($1::text[]) AND NOT EXISTS(SELECT 1 FROM pix_consumed_events c WHERE c.event_id=e.event_id) ORDER BY e.created_at LIMIT 20`,
+        `SELECT e.event_id,e.tenant_id FROM ${source.table} e JOIN tenant_subscriptions ts ON ts.tenant_id=e.tenant_id AND ts.feature_key='dofa_module_x_gate_observation' AND ts.is_enabled=true AND(ts.expires_at IS NULL OR ts.expires_at>=NOW()) WHERE e.event_type=ANY($1::text[]) AND NOT EXISTS(SELECT 1 FROM pix_consumed_events c WHERE c.event_id=e.event_id) ORDER BY e.created_at LIMIT 20`,
         [source.events],
       );
       for (const row of rows)
         try {
+          if (
+            !(await this.moduleControl.isAvailable(
+              'inventory_assets',
+              String(row.tenant_id),
+            ))
+          )
+            continue;
           await this.service.consumeMovementEvent(
             source.table,
             String(row.event_id),

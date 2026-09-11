@@ -4,6 +4,7 @@ import { Interval } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InvoiceIntegrityService } from './invoice-integrity.service';
+import { ModuleControlService } from '../../module-control/module-control.service';
 
 @Injectable()
 export class InvoiceIntegrityEventConsumer {
@@ -11,12 +12,13 @@ export class InvoiceIntegrityEventConsumer {
   constructor(
     @InjectDataSource() private readonly db: DataSource,
     private readonly integrity: InvoiceIntegrityService,
+    private readonly moduleControl: ModuleControlService,
   ) {}
 
   @Interval(15_000)
   async consumeSubmittedInvoices() {
     const rows = await this.db.query(
-      `SELECT o.event_id FROM proc_outbox_events o
+      `SELECT o.event_id,o.tenant_id FROM proc_outbox_events o
        JOIN tenant_subscriptions ts ON ts.tenant_id=o.tenant_id
          AND ts.feature_key='dofa_module3_invoice_integrity' AND ts.is_enabled=true
          AND (ts.expires_at IS NULL OR ts.expires_at>=NOW())
@@ -24,8 +26,15 @@ export class InvoiceIntegrityEventConsumer {
          AND NOT EXISTS (SELECT 1 FROM inv_integrity_cases c WHERE c.source_event_id=o.event_id)
        ORDER BY o.created_at LIMIT 20`,
     );
-    for (const row of rows as Array<{ event_id: string }>) {
+    for (const row of rows as Array<{ event_id: string; tenant_id: string }>) {
       try {
+        if (
+          !(await this.moduleControl.isAvailable(
+            'finance_procurement',
+            row.tenant_id,
+          ))
+        )
+          continue;
         await this.integrity.consumeInvoiceSubmitted(row.event_id);
       } catch (error) {
         this.logger.error(

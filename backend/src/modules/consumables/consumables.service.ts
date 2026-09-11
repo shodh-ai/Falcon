@@ -831,7 +831,7 @@ export class ConsumablesService {
   async expireReservations() {
     return this.db.transaction(async (m) => {
       const rows = await m.query(
-        `SELECT * FROM con_reservations WHERE status IN('ACTIVE','PARTIALLY_CONSUMED') AND expires_at<=NOW() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED`,
+        `SELECT z.* FROM con_reservations z JOIN con_stock_requests r ON r.stock_request_id=z.stock_request_id WHERE z.status IN('ACTIVE','PARTIALLY_CONSUMED') AND z.expires_at<=NOW() AND platform_module_is_available('inventory_assets',z.tenant_id,NULL,r.department_id::text) ORDER BY z.expires_at LIMIT 100 FOR UPDATE OF z SKIP LOCKED`,
       );
       for (const r of rows) {
         await m.query(
@@ -1502,7 +1502,7 @@ export class ConsumablesService {
   async recalculateEligibilityAndAlerts() {
     return this.db.transaction(async (m) => {
       const lots = await m.query(
-        `SELECT r.tenant_id,r.inventory_record_id,r.product_model_id,r.location_space_id,r.record_status,s.expiry_date,COALESCE(SUM(l.signed_quantity),0) balance FROM inv_records r JOIN pv_subjects s ON s.subject_id=r.subject_id LEFT JOIN inv_lot_movements l ON l.inventory_record_id=r.inventory_record_id WHERE r.record_type='LOT' GROUP BY r.inventory_record_id,s.expiry_date`,
+        `SELECT r.tenant_id,r.inventory_record_id,r.product_model_id,r.location_space_id,r.record_status,s.expiry_date,COALESCE(SUM(l.signed_quantity),0) balance FROM inv_records r JOIN pv_subjects s ON s.subject_id=r.subject_id LEFT JOIN inv_lot_movements l ON l.inventory_record_id=r.inventory_record_id WHERE r.record_type='LOT' AND platform_module_is_available('inventory_assets',r.tenant_id,NULL,r.owner_department_id::text) GROUP BY r.inventory_record_id,s.expiry_date`,
       );
       let suggestions = 0;
       for (const lot of lots) {
@@ -1556,7 +1556,7 @@ export class ConsumablesService {
           );
       }
       const models = await m.query(
-        `SELECT r.tenant_id,r.product_model_id,r.location_space_id,COALESCE(SUM(CASE WHEN COALESCE(e.status,'AVAILABLE') IN('AVAILABLE','EXPIRING_SOON') THEN lm.signed_quantity ELSE 0 END),0)-COALESCE((SELECT SUM(a.allocated_quantity-a.issued_quantity) FROM con_reservation_allocations a JOIN con_reservations z ON z.reservation_id=a.reservation_id WHERE a.tenant_id=r.tenant_id AND a.inventory_record_id IN(SELECT inventory_record_id FROM inv_records x WHERE x.product_model_id=r.product_model_id AND x.location_space_id IS NOT DISTINCT FROM r.location_space_id) AND a.status IN('ACTIVE','PARTIALLY_CONSUMED') AND z.expires_at>NOW()),0) available FROM inv_records r LEFT JOIN inv_lot_movements lm ON lm.inventory_record_id=r.inventory_record_id LEFT JOIN con_lot_eligibility e ON e.inventory_record_id=r.inventory_record_id WHERE r.record_type='LOT' GROUP BY r.tenant_id,r.product_model_id,r.location_space_id`,
+        `SELECT r.tenant_id,r.product_model_id,r.location_space_id,COALESCE(SUM(CASE WHEN COALESCE(e.status,'AVAILABLE') IN('AVAILABLE','EXPIRING_SOON') THEN lm.signed_quantity ELSE 0 END),0)-COALESCE((SELECT SUM(a.allocated_quantity-a.issued_quantity) FROM con_reservation_allocations a JOIN con_reservations z ON z.reservation_id=a.reservation_id WHERE a.tenant_id=r.tenant_id AND a.inventory_record_id IN(SELECT inventory_record_id FROM inv_records x WHERE x.product_model_id=r.product_model_id AND x.location_space_id IS NOT DISTINCT FROM r.location_space_id) AND a.status IN('ACTIVE','PARTIALLY_CONSUMED') AND z.expires_at>NOW()),0) available FROM inv_records r LEFT JOIN inv_lot_movements lm ON lm.inventory_record_id=r.inventory_record_id LEFT JOIN con_lot_eligibility e ON e.inventory_record_id=r.inventory_record_id WHERE r.record_type='LOT' AND platform_module_is_available('inventory_assets',r.tenant_id,NULL,r.owner_department_id::text) GROUP BY r.tenant_id,r.product_model_id,r.location_space_id`,
       );
       for (const model of models) {
         const p = await this.policy(

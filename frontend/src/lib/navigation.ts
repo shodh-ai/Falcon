@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import type { BusinessModuleKey } from '@/lib/launch-modules';
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -120,6 +121,7 @@ export interface NavItem {
   keywords?: string[];
   roles?: string[];
   hrModule?: HrModuleKey;
+  moduleKey?: BusinessModuleKey;
   /** Shorter label for mobile bottom nav */
   shortLabel?: string;
 }

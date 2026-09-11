@@ -5,16 +5,27 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { retirementHash } from './asset-retirement.util';
+import { ModuleControlService } from '../../module-control/module-control.service';
 
 @Injectable()
 export class AssetRetirementEventConsumer {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly moduleControl: ModuleControlService,
+  ) {}
   @Interval(15000) async consume() {
     const events = await this.db.query(
       `SELECT event_id,tenant_id,event_type,payload,payload_hash,occurred_at,aggregate_sequence
        FROM svc_outbox_events WHERE event_type IN('AssetRetirementReferralRequested.v1','AssetServiceIrreparable.v1') ORDER BY occurred_at LIMIT 100`,
     );
-    for (const event of events)
+    for (const event of events) {
+      if (
+        !(await this.moduleControl.isAvailable(
+          'inventory_assets',
+          String(event.tenant_id),
+        ))
+      )
+        continue;
       await this.db.transaction(async (manager) => {
         if (
           (
@@ -37,6 +48,7 @@ export class AssetRetirementEventConsumer {
           [event.event_id, event.tenant_id, event.event_type],
         );
       });
+    }
   }
   private async consumeReferral(
     manager: EntityManager,

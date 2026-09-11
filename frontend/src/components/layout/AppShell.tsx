@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext';
 import { resolveUserRoleList } from '@/lib/available-workspaces';
 import { resolveDofaInboxPathForUser } from '@/lib/dofa-portal-routes';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
+import { useModuleRuntime } from '@/context/ModuleRuntimeContext';
 import {
   collectNavHrefs,
   isNavHrefActive,
@@ -56,12 +57,13 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const { user } = useAuth();
+  const { manifest } = useModuleRuntime();
   const launchConfig = useMemo(() => {
     const roles = resolveUserRoleList(user);
     const inboxHref = resolveDofaInboxPathForUser(roles, pathname);
     const withDofa = withRoleAwareDofaInboxNav(config, inboxHref);
-    return withAccountSettingsNav(filterPortalConfigForLaunchModules(withDofa));
-  }, [config, pathname, user]);
+    return withAccountSettingsNav(filterPortalConfigForLaunchModules(withDofa, manifest));
+  }, [config, manifest, pathname, user]);
 
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;

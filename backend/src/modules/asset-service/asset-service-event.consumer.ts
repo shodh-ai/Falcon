@@ -5,10 +5,14 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { serviceHash } from './asset-service.util';
+import { ModuleControlService } from '../../module-control/module-control.service';
 
 @Injectable()
 export class AssetServiceEventConsumer {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly moduleControl: ModuleControlService,
+  ) {}
   @Interval(15000) async consume() {
     const events = await this.db.query(`
       SELECT event_id,tenant_id,event_type,payload,payload_hash,occurred_at,aggregate_sequence,'RETURNS' source FROM ret_outbox_events WHERE event_type='ServiceReferralRequested.v1'
@@ -16,7 +20,14 @@ export class AssetServiceEventConsumer {
       UNION ALL SELECT event_id,tenant_id,event_type,payload,payload_hash,occurred_at,aggregate_sequence,'PROC' source FROM proc_outbox_events WHERE event_type IN('ProcurementOrderIssued.v1','PaymentPosted.v1')
       UNION ALL SELECT event_id,tenant_id,event_type,payload,payload_hash,occurred_at,aggregate_sequence,'CON' source FROM con_outbox_events WHERE event_type IN('ConsumableIssued.v1','ConsumableConsumptionRecorded.v1')
       ORDER BY occurred_at LIMIT 200`);
-    for (const event of events)
+    for (const event of events) {
+      if (
+        !(await this.moduleControl.isAvailable(
+          'inventory_assets',
+          String(event.tenant_id),
+        ))
+      )
+        continue;
       await this.db.transaction(async (m) => {
         if (
           (
@@ -46,6 +57,7 @@ export class AssetServiceEventConsumer {
           [event.event_id, event.tenant_id, event.event_type],
         );
       });
+    }
   }
   private async consumeReferral(
     m: EntityManager,

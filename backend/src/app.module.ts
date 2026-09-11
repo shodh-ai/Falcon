@@ -94,6 +94,8 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
 import { HrEntityScopeInterceptor } from './common/interceptors/hr-entity-scope.interceptor';
 import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscriber';
 import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
+import { ModuleControlModule } from './module-control/module-control.module';
+import { ModuleAvailabilityInterceptor } from './module-control/module-availability.interceptor';
 
 @Module({
   imports: [
@@ -157,6 +159,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     StorageModule,
     MetricsModule,
     SystemModule,
+    ModuleControlModule,
     AuthModule,
     UploadsModule,
     TasksModule,
@@ -234,6 +237,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     AppService,
     { provide: APP_GUARD, useClass: ImpersonationReadOnlyGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: ModuleAvailabilityInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TenantSchemaInterceptor },
     HrEntityScopeInterceptor,
     { provide: APP_INTERCEPTOR, useClass: HrEntityScopeInterceptor },

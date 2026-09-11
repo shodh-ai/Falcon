@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Not, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { FeeDemand } from '../../entities/fee-demand.entity';
 import { Transaction } from '../../entities/transaction.entity';
@@ -167,16 +167,16 @@ export class FinanceService {
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async markOverdueDemands(): Promise<void> {
     const today = new Date().toISOString().slice(0, 10);
-    const result = await this.demands
-      .createQueryBuilder()
-      .update(FeeDemand)
-      .set({ status: 'OVERDUE' })
-      .where({ due_date: LessThan(today), status: Not('PAID') })
-      .andWhere('status NOT IN (:...skip)', { skip: ['OVERDUE', 'WAIVED'] })
-      .execute();
-    this.logger.log(
-      `Late-fee sweep: marked ${result.affected ?? 0} demands as OVERDUE`,
+    const rows = await this.demands.manager.query(
+      `UPDATE finance_fee_demands d SET status='OVERDUE',updated_at=NOW()
+       FROM users u
+       WHERE u.user_id=d.student_user_id AND d.due_date<$1
+         AND d.status NOT IN('PAID','OVERDUE','WAIVED')
+         AND platform_module_is_available('finance_procurement',u.tenant_id,NULL,u.dept_id::text)
+       RETURNING d.demand_id`,
+      [today],
     );
+    this.logger.log(`Late-fee sweep: marked ${rows.length} demands as OVERDUE`);
   }
 
   listTransactions(studentUserId?: string) {
