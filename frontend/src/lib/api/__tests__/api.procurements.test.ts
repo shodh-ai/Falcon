@@ -34,6 +34,18 @@ describe("progressive procurement API", () => {
       { "If-Match": "7", "Idempotency-Key": "issue-key" },
     );
   });
+  it("exposes independent service-acceptance verification", async () => {
+    const client = { get: vi.fn(), post: vi.fn().mockResolvedValue({}) };
+    const api = createProcurementsApi(client);
+
+    await api.verifyServiceAcceptance("case-1", "acceptance-1", 8);
+
+    expect(client.post).toHaveBeenCalledWith(
+      "/api/procurements/v1/cases/case-1/service-acceptances/acceptance-1/verify",
+      {},
+      { "If-Match": "8" },
+    );
+  });
   it("keeps payment and finalization as explicit idempotent actions", async () => {
     const client = { get: vi.fn(), post: vi.fn().mockResolvedValue({}) };
     const api = createProcurementsApi(client);

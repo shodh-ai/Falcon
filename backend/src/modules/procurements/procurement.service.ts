@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -55,7 +56,33 @@ type CaseRow = Record<string, any> & {
 
 @Injectable()
 export class ProcurementService {
+  private readonly logger = new Logger(ProcurementService.name);
+
   constructor(@InjectDataSource() private readonly db: DataSource) {}
+
+  /**
+   * Module 3 owns this projection. A missing optional read model must not make
+   * the Module 2 order/receipt workspace unavailable while migrations roll
+   * through an environment.
+   */
+  private async invoiceIntegrityProjections(caseId: string) {
+    try {
+      return await this.db.query(
+        `SELECT p.* FROM proc_invoice_integrity_projections p
+         JOIN proc_invoices i ON i.invoice_id=p.invoice_id
+         WHERE i.proc_case_id=$1 ORDER BY p.updated_at`,
+        [caseId],
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code === '42P01') {
+        this.logger.warn(
+          'Invoice-integrity projection table is not available; returning the procurement case without Module 3 projections',
+        );
+        return [];
+      }
+      throw error;
+    }
+  }
 
   private tenant(actor: ProcurementActor) {
     return actor.tenant_id ?? DEFAULT_TENANT;
@@ -980,12 +1007,7 @@ export class ProcurementService {
         `SELECT * FROM proc_audit_events WHERE proc_case_id=$1 ORDER BY created_at,audit_event_id`,
         [caseId],
       ),
-      this.db.query(
-        `SELECT p.* FROM proc_invoice_integrity_projections p
-         JOIN proc_invoices i ON i.invoice_id=p.invoice_id
-         WHERE i.proc_case_id=$1 ORDER BY p.updated_at`,
-        [caseId],
-      ),
+      this.invoiceIntegrityProjections(caseId),
     ]);
     const verifiedUnpaid =
       invoices

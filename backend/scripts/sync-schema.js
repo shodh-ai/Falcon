@@ -92,10 +92,19 @@ async function run({ quiet = false } = {}) {
     );
   }
 
-  execSync('npm run build', {
-    cwd: path.join(__dirname, '..'),
-    stdio: quiet ? 'ignore' : 'inherit',
-  });
+  const compiledEntities = path.join(
+    __dirname,
+    '..',
+    'dist',
+    'entities',
+    'index.js',
+  );
+  if (!fs.existsSync(compiledEntities)) {
+    execSync('npm run build', {
+      cwd: path.join(__dirname, '..'),
+      stdio: quiet ? 'ignore' : 'inherit',
+    });
+  }
 
   await syncFromEntities();
 

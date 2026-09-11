@@ -28,6 +28,12 @@ export type ConsumableLot = {
   eligibility: string;
   location_text?: string;
 };
+export type ConsumableProduct = {
+  product_model_id: string;
+  product_model_code: string;
+  product_name: string;
+  category: string;
+};
 export type StockRequest = {
   stock_request_id: string;
   request_number: string;
@@ -46,6 +52,7 @@ export function createConsumablesApi(api: Api) {
   return {
     dashboard: () => api.get<ConsumablesDashboard>(`${root}/dashboard`),
     balances: () => api.get<ConsumableLot[]>(`${root}/balances`),
+    products: () => api.get<ConsumableProduct[]>(`${root}/products`),
     requests: () => api.get<StockRequest[]>(`${root}/requests`),
     issues: () => api.get<Record<string, unknown>[]>(`${root}/issues`),
     alerts: () => api.get<Record<string, unknown>[]>(`${root}/alerts`),

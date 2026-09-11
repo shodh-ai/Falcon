@@ -274,6 +274,16 @@ export class ConsumablesService {
       [this.tenant(actor), actor.user_id, this.roles(actor)],
     );
   }
+  async products(actor: InventoryActor) {
+    await this.require(actor, 'CONSUMABLES_VIEW');
+    return this.db.query(
+      `SELECT product_model_id,product_model_code,product_name,category
+       FROM inv_product_models
+       WHERE tenant_id=$1
+       ORDER BY product_name,product_model_code`,
+      [this.tenant(actor)],
+    );
+  }
   async queue(actor: InventoryActor) {
     await this.require(actor, 'CONSUMABLES_VIEW');
     return this.db.query(

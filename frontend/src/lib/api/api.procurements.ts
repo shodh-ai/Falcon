@@ -141,6 +141,16 @@ export function createProcurementsApi(api: Api) {
         body,
         mutationHeaders(revision),
       ),
+    verifyServiceAcceptance: (
+      caseId: string,
+      acceptanceId: string,
+      revision: number,
+    ) =>
+      api.post(
+        `${root}/cases/${caseId}/service-acceptances/${acceptanceId}/verify`,
+        {},
+        mutationHeaders(revision),
+      ),
     createInvoice: (
       caseId: string,
       orderId: string,

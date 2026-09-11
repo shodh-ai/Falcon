@@ -37,6 +37,7 @@ function loadEnvFile() {
 loadEnvFile();
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
+const MIGRATION_LOCK_NAME = 'falcon:schema-migrations';
 
 /** Seed-only files (idempotent); run after schema exists via db:migrate. */
 const SEED_FILES = [
@@ -154,31 +155,34 @@ async function run() {
   );
 
   if (seedMode === 'migrations') {
-    const hadCoreTables = await coreTablesExist();
-    if (!hadCoreTables) {
-      await syncSchema({ quiet: false });
-    }
-
     const client = new Client(dbConfig());
     await client.connect();
-    await ensureMigrationTable(client);
-
-    const ledger = await client.query(
-      'SELECT COUNT(*)::int AS n FROM schema_migrations',
-    );
-    if (repair || (!hadCoreTables && ledger.rows[0].n > 0)) {
-      console.log(
-        'Repair: clearing schema_migrations ledger before re-applying SQL files...',
-      );
-      await resetMigrationLedger(client);
-    }
-
-    let ok = 0;
-    let skipped = 0;
+    await client.query('SELECT pg_advisory_lock(hashtext($1))', [
+      MIGRATION_LOCK_NAME,
+    ]);
     let failed = 0;
-    const failures = [];
 
     try {
+      const hadCoreTables = await coreTablesExist();
+      if (!hadCoreTables) {
+        await syncSchema({ quiet: false });
+      }
+      await ensureMigrationTable(client);
+
+      const ledger = await client.query(
+        'SELECT COUNT(*)::int AS n FROM schema_migrations',
+      );
+      if (repair || (!hadCoreTables && ledger.rows[0].n > 0)) {
+        console.log(
+          'Repair: clearing schema_migrations ledger before re-applying SQL files...',
+        );
+        await resetMigrationLedger(client);
+      }
+
+      let ok = 0;
+      let skipped = 0;
+      const failures = [];
+
       for (const file of files) {
         const sql = fs.readFileSync(file, 'utf8');
         const base = path.basename(file);
@@ -220,6 +224,11 @@ async function run() {
         }
       }
     } finally {
+      await client
+        .query('SELECT pg_advisory_unlock(hashtext($1))', [
+          MIGRATION_LOCK_NAME,
+        ])
+        .catch(() => undefined);
       await client.end();
     }
 

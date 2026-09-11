@@ -29,6 +29,9 @@ export class ConsumablesController {
   @Get('balances') balances(@Req() req: { user: InventoryActor }) {
     return this.service.balances(req.user);
   }
+  @Get('products') products(@Req() req: { user: InventoryActor }) {
+    return this.service.products(req.user);
+  }
   @Get('requests') requests(@Req() req: { user: InventoryActor }) {
     return this.service.queue(req.user);
   }

@@ -2,6 +2,14 @@ import { createConsumablesApi } from "../api.consumables";
 import { vi } from "vitest";
 
 describe("consumables api", () => {
+  it("loads the requestable product catalog even before stock exists", async () => {
+    const get = vi.fn().mockResolvedValue([]);
+    const api = createConsumablesApi({ get, post: vi.fn() });
+
+    await api.products();
+
+    expect(get).toHaveBeenCalledWith("/api/consumables/v1/products");
+  });
   it("uses the versioned root and mutation guards", async () => {
     const post = vi.fn().mockResolvedValue({});
     const api = createConsumablesApi({ get: vi.fn(), post });
