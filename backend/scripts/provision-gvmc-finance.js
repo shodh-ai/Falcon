@@ -66,8 +66,9 @@ const FEATURE_STATES = {
   dofa_module_x_retrofit: false,
 };
 
-// Nineteen people cover the full lifecycle. Capabilities may span workflows,
-// but conflicting steps are deliberately assigned to different user IDs.
+// Eleven people cover the initial purchase-to-inventory launch. Compatible
+// duties are combined, while conflicting maker-checker steps stay on distinct
+// user IDs. Service and disposal operators are deferred to a later rollout.
 const ACCOUNTS = [
   {
     code: 'G01',
@@ -103,17 +104,10 @@ const ACCOUNTS = [
   },
   {
     code: 'G03',
-    slug: 'dean',
+    slug: 'college-approver',
     role: 'Dean',
-    name: 'GVMC Dean Approver',
-    grants: ['PROCUREMENT_VIEW'],
-  },
-  {
-    code: 'G04',
-    slug: 'executive',
-    role: 'President',
-    extraRoles: ['COO', 'Chairman'],
-    name: 'GVMC Executive DoFA Approver',
+    extraRoles: ['President', 'COO', 'Chairman'],
+    name: 'GVMC College DoFA Approver',
     grants: [
       'PROCUREMENT_VIEW',
       'ASSET_RETIREMENT_VIEW',
@@ -121,26 +115,33 @@ const ACCOUNTS = [
     ],
   },
   {
-    code: 'G05',
-    slug: 'buyer',
+    code: 'G04',
+    slug: 'procurement-operator',
     role: 'ProcurementBuyer',
-    name: 'GVMC Procurement Buyer',
+    extraRoles: ['APClerk'],
+    name: 'GVMC Procurement and Invoice Operator',
     grants: [
       'ACQUISITION_VENDOR_REVIEW',
       'PROCUREMENT_VIEW',
       'PROCUREMENT_ORDER_ENTRY',
+      'PROCUREMENT_INVOICE_ENTRY',
+      'INVOICE_INTEGRITY_VIEW',
     ],
   },
   {
-    code: 'G06',
-    slug: 'procurement-head',
+    code: 'G05',
+    slug: 'procurement-review',
     role: 'ProcurementHead',
-    name: 'GVMC Procurement Head',
+    extraRoles: ['APManager'],
+    name: 'GVMC Procurement and Invoice Reviewer',
     grants: [
       'ACQUISITION_VENDOR_REVIEW',
       'PROCUREMENT_VIEW',
       'PROCUREMENT_ORDER_ENTRY',
+      'PROCUREMENT_INVOICE_VERIFY',
       'INVOICE_SOURCE_RETRIEVE',
+      'INVOICE_INTEGRITY_VIEW',
+      'INVOICE_INTEGRITY_INVESTIGATE',
       'PRODUCT_VERIFICATION_VIEW',
       'PRODUCT_VERIFICATION_EXCEPTION_APPROVE',
       'CONSUMABLES_VIEW',
@@ -155,60 +156,26 @@ const ACCOUNTS = [
       'ASSET_DISPOSAL_BID_MANAGE',
       'CONSUMABLES_EMERGENCY_REVIEW',
       'CONSUMABLES_REPLENISHMENT_CONVERT',
-    ],
-  },
-  {
-    code: 'G07',
-    slug: 'budget',
-    role: 'FinanceController',
-    name: 'GVMC Budget Officer',
-    grants: [
-      'ACQUISITION_BUDGET_OVERSIGHT',
-      'PROCUREMENT_VIEW',
-      'INVOICE_INTEGRITY_VIEW',
-    ],
-  },
-  {
-    code: 'G08',
-    slug: 'invoice-entry',
-    role: 'APClerk',
-    name: 'GVMC Invoice Entrant',
-    grants: [
-      'PROCUREMENT_VIEW',
-      'PROCUREMENT_INVOICE_ENTRY',
-      'INVOICE_INTEGRITY_VIEW',
-    ],
-  },
-  {
-    code: 'G09',
-    slug: 'invoice-review',
-    role: 'APManager',
-    name: 'GVMC Invoice and Integrity Reviewer',
-    grants: [
-      'PROCUREMENT_VIEW',
-      'PROCUREMENT_INVOICE_VERIFY',
-      'INVOICE_INTEGRITY_VIEW',
-      'INVOICE_INTEGRITY_INVESTIGATE',
-      'RETURNS_VIEW',
       'RETURNS_ELIGIBILITY_REVIEW',
     ],
   },
   {
-    code: 'G10',
-    slug: 'integrity-certifier',
+    code: 'G06',
+    slug: 'budget-integrity',
     role: 'FinanceController',
-    name: 'GVMC Integrity Certifier',
+    name: 'GVMC Budget and Integrity Officer',
     grants: [
+      'ACQUISITION_BUDGET_OVERSIGHT',
       'PROCUREMENT_VIEW',
       'INVOICE_INTEGRITY_VIEW',
       'INVOICE_INTEGRITY_CERTIFY',
     ],
   },
   {
-    code: 'G11',
+    code: 'G07',
     slug: 'payment',
     role: 'CFO',
-    name: 'GVMC Payment Poster',
+    name: 'GVMC Payment Officer',
     grants: [
       'PROCUREMENT_VIEW',
       'PROCUREMENT_PAYMENT_POST',
@@ -218,45 +185,16 @@ const ACCOUNTS = [
     ],
   },
   {
-    code: 'G12',
-    slug: 'receiving',
+    code: 'G08',
+    slug: 'receiving-stores',
     role: 'ReceivingClerk',
-    name: 'GVMC Receiving and Capture Clerk',
+    extraRoles: ['Stores'],
+    name: 'GVMC Receiving and Stores Officer',
     grants: [
       'PROCUREMENT_VIEW',
       'PROCUREMENT_RECEIPT_ENTRY',
       'PRODUCT_VERIFICATION_VIEW',
       'PRODUCT_VERIFICATION_CAPTURE',
-    ],
-  },
-  {
-    code: 'G13',
-    slug: 'inventory-verifier',
-    role: 'InventoryVerifier',
-    name: 'GVMC Independent Inventory Verifier',
-    grants: [
-      'PRODUCT_VERIFICATION_VIEW',
-      'PRODUCT_VERIFICATION_REVIEW',
-      'INVENTORY_VIEW',
-      'INVENTORY_IDENTITY_VERIFY',
-      'PHYSICAL_IDENTITY_VIEW',
-      'PHYSICAL_IDENTITY_ATTACH_VERIFY',
-      'CONSUMABLES_VIEW',
-      'CONSUMABLES_COUNT_APPROVE',
-      'ASSET_SANITIZATION_VERIFY',
-      'ASSET_DISPOSAL_ACCEPT',
-      'PHYSICAL_IDENTITY_RECONCILE',
-      'GATE_ASSET_REVIEW',
-    ],
-  },
-  {
-    code: 'G14',
-    slug: 'stores',
-    role: 'Stores',
-    name: 'GVMC Stores and Inventory Operator',
-    grants: [
-      'PROCUREMENT_VIEW',
-      'PROCUREMENT_RECEIPT_ENTRY',
       'INVENTORY_VIEW',
       'INVENTORY_INGEST',
       'INVENTORY_IDENTITY_PREPARE',
@@ -278,44 +216,27 @@ const ACCOUNTS = [
     ],
   },
   {
-    code: 'G15',
-    slug: 'service-tech',
-    role: 'ServiceTechnician',
-    name: 'GVMC Service Technician',
+    code: 'G09',
+    slug: 'inventory-verifier',
+    role: 'InventoryVerifier',
+    name: 'GVMC Independent Inventory Verifier',
     grants: [
-      'ASSET_SERVICE_VIEW',
-      'ASSET_SERVICE_EXECUTE',
-      'ASSET_SERVICE_PARTS_MANAGE',
+      'PRODUCT_VERIFICATION_VIEW',
+      'PRODUCT_VERIFICATION_REVIEW',
+      'INVENTORY_VIEW',
+      'INVENTORY_IDENTITY_VERIFY',
+      'PHYSICAL_IDENTITY_VIEW',
+      'PHYSICAL_IDENTITY_ATTACH_VERIFY',
+      'CONSUMABLES_VIEW',
+      'CONSUMABLES_COUNT_APPROVE',
+      'ASSET_SANITIZATION_VERIFY',
+      'ASSET_DISPOSAL_ACCEPT',
+      'PHYSICAL_IDENTITY_RECONCILE',
+      'GATE_ASSET_REVIEW',
     ],
   },
   {
-    code: 'G16',
-    slug: 'service-manager',
-    role: 'LabAdmin',
-    name: 'GVMC Service Manager',
-    grants: [
-      'ASSET_SERVICE_VIEW',
-      'ASSET_SERVICE_TRIAGE',
-      'ASSET_SERVICE_ASSIGN',
-      'ASSET_SERVICE_WARRANTY_REVIEW',
-      'ASSET_SERVICE_ESTIMATE_APPROVE',
-      'ASSET_SERVICE_ACCEPT',
-      'ASSET_SERVICE_RETIREMENT_REFER',
-    ],
-  },
-  {
-    code: 'G17',
-    slug: 'sanitization',
-    role: 'SanitizationOperator',
-    name: 'GVMC Sanitization and Disposal Operator',
-    grants: [
-      'ASSET_RETIREMENT_VIEW',
-      'ASSET_SANITIZATION_EXECUTE',
-      'ASSET_DISPOSAL_PREPARE',
-    ],
-  },
-  {
-    code: 'G18',
+    code: 'G10',
     slug: 'auditor',
     role: 'InternalAuditor',
     name: 'GVMC Internal Auditor',
@@ -342,7 +263,7 @@ const ACCOUNTS = [
     ],
   },
   {
-    code: 'G19',
+    code: 'G11',
     slug: 'tenant-admin',
     role: 'TenantAdmin',
     name: 'GVMC Tenant Administrator',
@@ -360,6 +281,22 @@ const ACCOUNTS = [
       'PHYSICAL_IDENTITY_DEVICE_ADMIN',
     ],
   },
+];
+
+const SUPERSEDED_ACCOUNT_SLUGS = [
+  'dean',
+  'executive',
+  'buyer',
+  'procurement-head',
+  'budget',
+  'invoice-entry',
+  'invoice-review',
+  'integrity-certifier',
+  'receiving',
+  'stores',
+  'service-tech',
+  'service-manager',
+  'sanitization',
 ];
 
 function loadEnv() {
@@ -415,6 +352,18 @@ async function main() {
   if (process.env.GVMC_FINANCE_PROVISION_CONFIRM !== 'GVMC-FINANCE-LAUNCH') {
     throw new Error(
       'Refusing mutation: set GVMC_FINANCE_PROVISION_CONFIRM=GVMC-FINANCE-LAUNCH',
+    );
+  }
+  const rotateExistingPasswords = process.argv.includes(
+    '--rotate-existing-passwords',
+  );
+  if (
+    rotateExistingPasswords &&
+    process.env.GVMC_FINANCE_ROTATE_CONFIRM !==
+      'GVMC-FINANCE-RESET-TEST-CREDENTIALS'
+  ) {
+    throw new Error(
+      'Refusing password rotation: set GVMC_FINANCE_ROTATE_CONFIRM=GVMC-FINANCE-RESET-TEST-CREDENTIALS',
     );
   }
   const out = argValue('--credentials-out');
@@ -488,15 +437,37 @@ async function main() {
       let userId;
       if (existing.rowCount) {
         userId = existing.rows[0].user_id;
-        await client.query(
-          `UPDATE users SET name=$2,role_id=$3,dept_id=$4,is_active=true,deleted_at=NULL,updated_at=NOW() WHERE user_id=$1`,
-          [
-            userId,
-            account.name,
-            roles.get(account.role),
-            account.dept ? deptId : null,
-          ],
-        );
+        if (rotateExistingPasswords) {
+          const temporaryPassword = password();
+          const hash = await bcrypt.hash(temporaryPassword, 12);
+          await client.query(
+            `UPDATE users SET name=$2,role_id=$3,dept_id=$4,password_hash=$5,onboarding_status='PENDING_PASSWORD_RESET',is_active=true,deleted_at=NULL,updated_at=NOW() WHERE user_id=$1`,
+            [
+              userId,
+              account.name,
+              roles.get(account.role),
+              account.dept ? deptId : null,
+              hash,
+            ],
+          );
+          credentials.push({
+            code: account.code,
+            name: account.name,
+            email,
+            temporary_password: temporaryPassword,
+            must_change_password: true,
+          });
+        } else {
+          await client.query(
+            `UPDATE users SET name=$2,role_id=$3,dept_id=$4,is_active=true,deleted_at=NULL,updated_at=NOW() WHERE user_id=$1`,
+            [
+              userId,
+              account.name,
+              roles.get(account.role),
+              account.dept ? deptId : null,
+            ],
+          );
+        }
       } else {
         const temporaryPassword = password();
         const hash = await bcrypt.hash(temporaryPassword, 12);
@@ -521,7 +492,7 @@ async function main() {
           must_change_password: true,
         });
       }
-      if (account.code === 'G19') adminUserId = userId;
+      if (account.code === 'G11') adminUserId = userId;
       if (account.code === 'G02') hodUserId = userId;
       await client.query(
         `UPDATE user_roles SET is_primary=false WHERE user_id=$1`,
@@ -554,6 +525,14 @@ async function main() {
         );
       }
     }
+    const supersededEmails = SUPERSEDED_ACCOUNT_SLUGS.map(
+      (slug) => `${slug}.gvmc@mygyanvihar.com`,
+    );
+    await client.query(
+      `UPDATE users SET is_active=false,updated_at=NOW()
+       WHERE tenant_id=$1 AND lower(official_email)=ANY($2::text[])`,
+      [tenantId, supersededEmails],
+    );
     await client.query(
       `UPDATE departments SET hod_user_id=$2,updated_at=NOW() WHERE dept_id=$1`,
       [deptId, hodUserId],

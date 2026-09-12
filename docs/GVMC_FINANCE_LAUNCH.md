@@ -14,10 +14,13 @@ The P01–P46 identities in the QA plan are test personas used to prove every
 positive, negative and maker-checker path. They are not forty features and they
 are not a requirement to create forty production users.
 
-The GVMC profile provisions 19 temporary, one-person operational identities.
-Several non-conflicting capabilities are combined, while every required
-maker-checker boundary still uses distinct user IDs. Assign each credential to
-exactly one named staff member; never share an account.
+The GVMC profile provisions 11 temporary, one-person operational identities.
+The 19 business responsibilities are consolidated into compatible account
+groups while every required maker-checker boundary still uses distinct user
+IDs. Service and disposal operators are deferred until those workflows launch.
+Assign each credential to exactly one named staff member; never share an
+account. If one case requires both Dean and Executive approval, add a separate
+Executive account before that route is activated.
 
 ## Safe provisioning
 
@@ -35,6 +38,18 @@ GVMC_FINANCE_PROVISION_CONFIRM=GVMC-FINANCE-LAUNCH \
 GVMC_CONSTRUCTION_BUDGET_INR=<approved-limit> \
 npm run tenant:provision:gvmc-finance -- --apply \
   --credentials-out=/run/secrets/gvmc-finance-credentials.json
+```
+
+For an explicitly authorized test-credential rotation of all 11 exact GVMC
+launch accounts, use a new output path and the additional guard:
+
+```bash
+GVMC_FINANCE_PROVISION_CONFIRM=GVMC-FINANCE-LAUNCH \
+GVMC_FINANCE_ROTATE_CONFIRM=GVMC-FINANCE-RESET-TEST-CREDENTIALS \
+GVMC_CONSTRUCTION_BUDGET_INR=<approved-limit> \
+npm run tenant:provision:gvmc-finance -- --apply \
+  --rotate-existing-passwords \
+  --credentials-out=/run/secrets/gvmc-finance-test-credentials.json
 ```
 
 The provisioner is idempotent. It does not reset existing passwords. The
@@ -62,7 +77,7 @@ Do not claim the college is live until all of the following pass:
 1. Latest frontend/backend images and migrations are deployed.
 2. `/api/platform/modules/runtime` returns `finance_procurement=ACTIVE`,
    `inventory_assets=ACTIVE`, and every unrelated suite `OFF` for `gvmc`.
-3. All 19 users change their temporary password.
+3. All 11 users change their temporary password.
 4. Named staff assignments and DoFA approval routes are approved.
 5. Funding sources, fiscal period, departments, locations and signing keys are
    configured.
