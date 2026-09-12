@@ -24,7 +24,9 @@ export function resolveTenantSubdomain(
   if (trimmed && !TENANT_SUBDOMAIN_ALIASES.has(trimmed)) return trimmed;
 
   const fb = (
-    fallback ?? process.env.NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN ?? DEFAULT_SUBDOMAIN
+    fallback ??
+    process.env.NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN ??
+    DEFAULT_SUBDOMAIN
   ).trim();
   return fb || DEFAULT_SUBDOMAIN;
 }
@@ -35,11 +37,15 @@ export function resolveTenantFromHost(
   explicitSubdomain?: string | null,
 ): string {
   const host = hostname.split(':')[0].trim().toLowerCase();
-  if (isDedicatedAppHost(host)) {
-    return resolveTenantSubdomain(null);
-  }
+  // Dedicated shared app hosts support an explicit tenant selected by the
+  // middleware (query parameter on first entry, then a same-site cookie).
+  // Tenant isolation is still enforced by the backend token and query scope;
+  // this value only selects the tenant used for authentication/branding.
   if (explicitSubdomain?.trim()) {
     return resolveTenantSubdomain(explicitSubdomain);
+  }
+  if (isDedicatedAppHost(host)) {
+    return resolveTenantSubdomain(null);
   }
   return resolveTenantSubdomain(extractSubdomainFromHost(host));
 }
@@ -49,7 +55,11 @@ export function extractSubdomainFromHost(
   baseDomain?: string | null,
 ): string | null {
   const host = hostname.split(':')[0].trim().toLowerCase();
-  const base = (baseDomain ?? process.env.NEXT_PUBLIC_SAAS_BASE_DOMAIN ?? 'localhost').trim();
+  const base = (
+    baseDomain ??
+    process.env.NEXT_PUBLIC_SAAS_BASE_DOMAIN ??
+    'localhost'
+  ).trim();
 
   if (!host || !base) return null;
 

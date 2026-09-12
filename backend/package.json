@@ -24,6 +24,7 @@
     "db:migrate:repair": "node scripts/run-migrations.js --repair",
     "db:seed": "node scripts/run-migrations.js --seed",
     "db:seed:dofa-qa": "node scripts/run-migrations.js --dofa-qa-seed",
+    "tenant:provision:gvmc-finance": "node scripts/provision-gvmc-finance.js",
     "migration:run": "npm run db:migrate",
     "seed": "npm run db:seed",
     "db:migrate:tenants": "psql -d university_governance -f migrations/20260529120000_multi_tenant_saas_foundation.sql",

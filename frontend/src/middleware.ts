@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import {
-  resolveTenantFromHost,
-} from '@/lib/resolve-tenant-subdomain';
+import { resolveTenantFromHost } from '@/lib/resolve-tenant-subdomain';
 
 const TENANT_COOKIE = 'falcon_tenant_subdomain';
 const AUTH_COOKIE = 'falcon_auth_token';
@@ -18,8 +16,24 @@ const PUBLIC_PREFIXES = [
   '/api',
 ];
 
-function extractSubdomain(host: string): string {
-  return resolveTenantFromHost(host);
+function validTenantOverride(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalized)
+    ? normalized
+    : undefined;
+}
+
+function extractSubdomain(request: NextRequest): string {
+  const requested = validTenantOverride(
+    request.nextUrl.searchParams.get('tenant') ?? undefined,
+  );
+  const remembered = validTenantOverride(
+    request.cookies.get(TENANT_COOKIE)?.value,
+  );
+  return resolveTenantFromHost(
+    request.headers.get('host') ?? '',
+    requested ?? remembered,
+  );
 }
 
 function isPublicPath(pathname: string): boolean {
@@ -33,7 +47,9 @@ function isPublicPath(pathname: string): boolean {
     return true;
   }
   return PUBLIC_PREFIXES.some(
-    (prefix) => prefix !== '/' && (pathname === prefix || pathname.startsWith(`${prefix}/`)),
+    (prefix) =>
+      prefix !== '/' &&
+      (pathname === prefix || pathname.startsWith(`${prefix}/`)),
   );
 }
 
@@ -75,7 +91,7 @@ function isProtectedPortalPath(pathname: string): boolean {
 }
 
 export function middleware(request: NextRequest) {
-  const subdomain = extractSubdomain(request.headers.get('host') ?? '');
+  const subdomain = extractSubdomain(request);
   const { pathname } = request.nextUrl;
 
   if (isProtectedPortalPath(pathname)) {
@@ -100,5 +116,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|favicon.*\\.png|apple-touch-icon\\.png).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon\\.ico|favicon.*\\.png|apple-touch-icon\\.png).*)',
+  ],
 };
