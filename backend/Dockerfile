@@ -36,6 +36,10 @@ FROM ${NODE_IMAGE} AS production
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.source="https://github.com/shodh-ai/Falcon" \
+      org.opencontainers.image.description="Falcon API service" \
+      org.opencontainers.image.licenses="UNLICENSED"
+
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV NODE_OPTIONS=--max-old-space-size=768

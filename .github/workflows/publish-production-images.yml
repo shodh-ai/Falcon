@@ -1,0 +1,114 @@
+name: Publish production images
+
+on:
+  workflow_run:
+    workflows: ["Falcon CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: falcon-production-images-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: frontend
+            context: frontend
+            image: ghcr.io/shodh-ai/falcon-frontend
+          - component: backend
+            context: backend
+            image: ghcr.io/shodh-ai/falcon-backend
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=raw,value=sha-${{ github.event.workflow_run.head_sha }}
+            type=raw,value=main-candidate
+          labels: |
+            org.opencontainers.image.source=https://github.com/shodh-ai/Falcon
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+
+      - name: Build and publish ${{ matrix.component }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.PRODUCTION_API_URL || 'https://apifalcon.jataka.io' }}
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.PRODUCTION_GOOGLE_CLIENT_ID }}
+            NEXT_PUBLIC_SAAS_BASE_DOMAIN=${{ vars.PRODUCTION_SAAS_BASE_DOMAIN || 'jataka.io' }}
+            NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN=${{ vars.PRODUCTION_DEFAULT_TENANT || 'sgvu' }}
+
+      - name: Attest published image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  manifest:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write immutable release manifest
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          mkdir -p release
+          printf '%s\n' \
+            "release_sha=$RELEASE_SHA" \
+            "frontend=ghcr.io/shodh-ai/falcon-frontend:sha-$RELEASE_SHA" \
+            "backend=ghcr.io/shodh-ai/falcon-backend:sha-$RELEASE_SHA" \
+            > release/falcon-images.env
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: falcon-images-${{ github.event.workflow_run.head_sha }}
+          path: release/falcon-images.env
+          retention-days: 90

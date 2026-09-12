@@ -46,6 +46,10 @@ FROM node:20-bookworm-slim AS production
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.source="https://github.com/shodh-ai/Falcon" \
+      org.opencontainers.image.description="Falcon web application" \
+      org.opencontainers.image.licenses="UNLICENSED"
+
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0

@@ -1,0 +1,132 @@
+name: Promote production images
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full tested Git commit SHA to promote
+        required: true
+        type: string
+      deploy:
+        description: Trigger configured Coolify deployment webhooks
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: falcon-production-promotion
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.sha.outputs.release_sha }}
+    steps:
+      - name: Validate release SHA
+        id: sha
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          if ! printf '%s' "$RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo 'release_sha must be a full 40-character lowercase Git SHA' >&2
+            exit 1
+          fi
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify both immutable images exist
+        env:
+          RELEASE_SHA: ${{ steps.sha.outputs.release_sha }}
+        run: |
+          docker buildx imagetools inspect "ghcr.io/shodh-ai/falcon-backend:sha-$RELEASE_SHA"
+          docker buildx imagetools inspect "ghcr.io/shodh-ai/falcon-frontend:sha-$RELEASE_SHA"
+
+  promote:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote backend and frontend without rebuilding
+        env:
+          RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/shodh-ai/falcon-backend:production \
+            "ghcr.io/shodh-ai/falcon-backend:sha-$RELEASE_SHA"
+          docker buildx imagetools create \
+            --tag ghcr.io/shodh-ai/falcon-frontend:production \
+            "ghcr.io/shodh-ai/falcon-frontend:sha-$RELEASE_SHA"
+
+  deploy-backend:
+    if: inputs.deploy
+    needs: promote
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Trigger backend image pull
+        env:
+          DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_BACKEND_DEPLOY_WEBHOOK }}
+        run: |
+          test -n "$DEPLOY_WEBHOOK" || {
+            echo 'COOLIFY_BACKEND_DEPLOY_WEBHOOK is not configured' >&2
+            exit 1
+          }
+          curl --fail-with-body --retry 3 --retry-all-errors "$DEPLOY_WEBHOOK"
+
+      - name: Wait for backend health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 10 \
+              https://apifalcon.jataka.io/health >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Backend did not become healthy within five minutes' >&2
+          exit 1
+
+  deploy-frontend:
+    if: inputs.deploy
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Trigger frontend image pull
+        env:
+          DEPLOY_WEBHOOK: ${{ secrets.COOLIFY_FRONTEND_DEPLOY_WEBHOOK }}
+        run: |
+          test -n "$DEPLOY_WEBHOOK" || {
+            echo 'COOLIFY_FRONTEND_DEPLOY_WEBHOOK is not configured' >&2
+            exit 1
+          }
+          curl --fail-with-body --retry 3 --retry-all-errors "$DEPLOY_WEBHOOK"
+
+      - name: Wait for frontend health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 10 \
+              https://falcon.jataka.io/ >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Frontend did not become healthy within five minutes' >&2
+          exit 1
