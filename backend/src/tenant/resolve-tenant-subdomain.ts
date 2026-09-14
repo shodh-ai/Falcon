@@ -36,11 +36,14 @@ export function resolveTenantFromHost(
   explicitSubdomain?: string | null,
 ): string {
   const host = hostname.split(':')[0].trim().toLowerCase();
-  if (isDedicatedAppHost(host)) {
-    return resolveTenantSubdomain(null);
-  }
+  // Shared application hosts (for example apifalcon.jataka.io) serve multiple
+  // tenants. Honour the trusted request header/cookie selection first; tenant
+  // isolation is still enforced by the tenant-bound JWT and database scope.
   if (explicitSubdomain?.trim()) {
     return resolveTenantSubdomain(explicitSubdomain);
+  }
+  if (isDedicatedAppHost(host)) {
+    return resolveTenantSubdomain(null);
   }
   return resolveTenantSubdomain(extractSubdomainFromHost(host));
 }
