@@ -868,6 +868,96 @@ export class AcquisitionService {
     return this.getVersion(actor, versionId);
   }
 
+  async correctDraftContent(
+    actor: AcquisitionActor,
+    versionId: string,
+    input: {
+      required_by_date: string;
+      intended_use_case: string;
+      lines: Array<{
+        line_id: string;
+        intended_use: string;
+        technical_specifications: string;
+      }>;
+    },
+  ) {
+    const tenantId = this.tenant(actor);
+    const row = await this.getRawVersion(tenantId, versionId);
+    if (row.requester_id !== actor.user_id)
+      throw new ForbiddenException('Only the requester may edit this draft');
+    if (row.status !== 'DRAFT')
+      throw new ConflictException(
+        'Submitted acquisition versions are immutable',
+      );
+    if (!Array.isArray(input.lines))
+      throw new BadRequestException('Draft line corrections are required');
+
+    await this.db.transaction(async (manager) => {
+      const locked = await manager.query(
+        `SELECT status FROM acq_request_versions
+         WHERE acquisition_version_id=$1 AND tenant_id=$2 FOR UPDATE`,
+        [versionId, tenantId],
+      );
+      if (locked[0]?.status !== 'DRAFT')
+        throw new ConflictException('Draft changed concurrently');
+      const storedLines = await manager.query(
+        `SELECT line_id FROM acq_lines
+         WHERE acquisition_version_id=$1 AND tenant_id=$2 AND line_status='ACTIVE'
+         ORDER BY line_number FOR UPDATE`,
+        [versionId, tenantId],
+      );
+      const storedIds = storedLines
+        .map((line: { line_id: string }) => String(line.line_id))
+        .sort();
+      const suppliedIds = input.lines
+        .map((line) => String(line.line_id))
+        .sort();
+      if (stableJson(storedIds) !== stableJson(suppliedIds))
+        throw new BadRequestException(
+          'Draft corrections must include every active line exactly once',
+        );
+
+      await manager.query(
+        `UPDATE acq_request_versions SET required_by_date=$3,intended_use_case=$4,updated_at=NOW()
+         WHERE acquisition_version_id=$1 AND tenant_id=$2`,
+        [
+          versionId,
+          tenantId,
+          input.required_by_date || null,
+          input.intended_use_case?.trim() ?? '',
+        ],
+      );
+      for (const line of input.lines) {
+        await manager.query(
+          `UPDATE acq_lines SET intended_use=$4,technical_specifications=$5::jsonb,
+             validation_status='PENDING',validation_errors='[]'::jsonb,
+             validation_warnings='[]'::jsonb
+           WHERE acquisition_version_id=$1 AND tenant_id=$2 AND line_id=$3`,
+          [
+            versionId,
+            tenantId,
+            line.line_id,
+            line.intended_use?.trim() ?? '',
+            JSON.stringify(this.normalizeSpecs(line.technical_specifications)),
+          ],
+        );
+      }
+      await this.writeAudit(
+        manager,
+        tenantId,
+        row.acquisition_id,
+        versionId,
+        'DRAFT_CONTENT_CORRECTED',
+        actor.user_id,
+        {
+          required_by_date: input.required_by_date || null,
+          line_count: input.lines.length,
+        },
+      );
+    });
+    return this.getVersion(actor, versionId);
+  }
+
   private async fundingSourceExists(
     tenantId: string,
     type: string,

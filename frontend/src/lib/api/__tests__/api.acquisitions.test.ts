@@ -43,6 +43,11 @@ describe('acquisition API contract', () => {
       funding_source_type: 'DEPARTMENT',
       funding_source_id: 'fund-1',
     });
+    await api.correctDraft('version-1', {
+      required_by_date: '2099-02-01',
+      intended_use_case: 'Updated teaching laboratory',
+      lines: [{ line_id: 'line-1', intended_use: 'Updated robotics use', technical_specifications: '32 GB' }],
+    });
     await api.validate('version-1');
     await api.submit('version-1');
     await api.withdraw('version-1');
@@ -60,6 +65,14 @@ describe('acquisition API contract', () => {
     expect(transport.put).toHaveBeenCalledWith(
       '/api/acquisitions/v1/versions/version-1/funding-source',
       { funding_source_type: 'DEPARTMENT', funding_source_id: 'fund-1' },
+    );
+    expect(transport.put).toHaveBeenCalledWith(
+      '/api/acquisitions/v1/versions/version-1/draft-content',
+      {
+        required_by_date: '2099-02-01',
+        intended_use_case: 'Updated teaching laboratory',
+        lines: [{ line_id: 'line-1', intended_use: 'Updated robotics use', technical_specifications: '32 GB' }],
+      },
     );
     expect(transport.post).toHaveBeenCalledWith(
       '/api/acquisitions/v1/versions/version-1/validate',

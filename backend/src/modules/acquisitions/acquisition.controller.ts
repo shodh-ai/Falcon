@@ -129,6 +129,24 @@ export class AcquisitionController {
     return this.acquisitions.updateDraftFundingSource(req.user, id, body);
   }
 
+  @Put('versions/:id/draft-content')
+  correctDraftContent(
+    @Req() req: { user: AcquisitionActor },
+    @Param('id') id: string,
+    @Body()
+    body: {
+      required_by_date: string;
+      intended_use_case: string;
+      lines: Array<{
+        line_id: string;
+        intended_use: string;
+        technical_specifications: string;
+      }>;
+    },
+  ) {
+    return this.acquisitions.correctDraftContent(req.user, id, body);
+  }
+
   @Post('versions/:id/validate')
   validate(@Req() req: { user: AcquisitionActor }, @Param('id') id: string) {
     return this.acquisitions.validate(req.user, id);

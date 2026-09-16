@@ -86,6 +86,28 @@ describe('AcquisitionService authorization and sensitive data', () => {
     ).toBe(false);
   });
 
+  it('prevents a non-requester from correcting another user draft', async () => {
+    db.query.mockResolvedValueOnce([
+      {
+        acquisition_id: 'acq-1',
+        acquisition_version_id: 'version-1',
+        acquisition_number: 'ACQ-2099-000001',
+        requester_id: 'different-user',
+        status: 'DRAFT',
+        estimated_total: 100,
+        version_number: 1,
+      },
+    ]);
+    await expect(
+      service.correctDraftContent(actor, 'version-1', {
+        required_by_date: '2099-02-01',
+        intended_use_case: 'Changed',
+        lines: [],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
   it('enforces maker-checker separation during vendor selection', async () => {
     db.query
       .mockResolvedValueOnce([{ scope_type: 'TENANT', scope_reference: null }])

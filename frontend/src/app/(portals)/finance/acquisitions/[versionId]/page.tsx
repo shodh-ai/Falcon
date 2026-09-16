@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { use, useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CheckCircle2, CircleDollarSign, GitCompare, ShieldCheck, Truck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, CircleDollarSign, GitCompare, Pencil, ShieldCheck, Truck } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
-import { createAcquisitionsApi, type AcquisitionDetail, type AcquisitionDraftInput, type AcquisitionFundingSource } from '@/lib/api/api.acquisitions';
+import { createAcquisitionsApi, type AcquisitionDetail, type AcquisitionDraftCorrectionInput, type AcquisitionDraftInput, type AcquisitionFundingSource } from '@/lib/api/api.acquisitions';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { AcquisitionStatus } from '@/components/acquisitions/AcquisitionStatus';
+import { AcquisitionDraftEditor } from '@/components/acquisitions/AcquisitionDraftEditor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,8 @@ export default function AcquisitionDetailPage({ params }: { params: Promise<{ ve
   const authed = useAuthedApi();
   const api = useMemo(() => createAcquisitionsApi(authed), [authed]);
   const [detail, setDetail] = useState<AcquisitionDetail | null>(null);
+  const [loadDenied, setLoadDenied] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selections, setSelections] = useState<Record<string, { vendor_id: string; deviation_justification: string }>>({});
   const [fundingSources, setFundingSources] = useState<AcquisitionFundingSource[]>([]);
@@ -26,14 +29,16 @@ export default function AcquisitionDetailPage({ params }: { params: Promise<{ ve
   const [fundingId, setFundingId] = useState('');
   const load = useCallback(() => api.get(versionId).then((value) => {
     setDetail(value);
+    setLoadDenied(false);
     setFundingType(value.funding_source_type as AcquisitionDraftInput['funding_source_type']);
     setFundingId(value.funding_source_id ?? '');
-  }).catch((error) => toast.error(error.message)), [api, versionId]);
+  }).catch(() => { setDetail(null); setLoadDenied(true); }), [api, versionId]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    if (detail?.status !== 'DRAFT') return;
+    if (detail?.status !== 'DRAFT' || !detail.allowed_actions?.edit) return;
     void api.fundingSources().then(setFundingSources).catch((error) => toast.error(error.message));
-  }, [api, detail?.status]);
+  }, [api, detail?.allowed_actions?.edit, detail?.status]);
+  if (loadDenied) return <div className="mx-auto max-w-lg p-8"><Card><CardHeader><CardTitle>Acquisition unavailable</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">You do not have access to this acquisition, or it no longer exists.</p><Link href="/finance/acquisitions"><Button variant="outline"><ArrowLeft className="mr-2 h-4 w-4"/>Return to your acquisition queue</Button></Link></CardContent></Card></div>;
   if (!detail) return <div className="p-8 text-sm text-muted-foreground">Loading secure acquisition snapshot…</div>;
   const vendorSelectionLocked = detail.status !== 'VENDOR_REVIEW' && detail.lines.some((line) => Boolean(line.selected_vendor_id));
 
@@ -74,10 +79,25 @@ export default function AcquisitionDetailPage({ params }: { params: Promise<{ ve
     finally { setBusy(false); }
   };
 
-  return <div className="space-y-6 p-6">
-    <div><Link href="/finance/acquisitions" className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4"/>Acquisition queue</Link><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-3"><h1 className="text-2xl font-black">{detail.acquisition_number}</h1><AcquisitionStatus status={detail.status}/></div><p className="mt-1 text-sm text-muted-foreground">Version {detail.version_number} · {detail.intended_use_case}</p></div><div className="flex flex-wrap gap-2">{detail.allowed_actions?.validate && <Button disabled={busy} onClick={() => void act('validate')}>Validate</Button>}{detail.allowed_actions?.submit && <Button disabled={busy} onClick={() => void act('submit')}>Submit to Procurement</Button>}{detail.allowed_actions?.vendor_review && <Button variant="outline" disabled={busy} onClick={() => void act('recommend')}>Recalculate recommendations</Button>}{detail.allowed_actions?.withdraw && <Button variant="destructive" disabled={busy} onClick={() => void act('withdraw')}>Withdraw</Button>}{detail.allowed_actions?.amend && <Button disabled={busy} onClick={() => void act('amend')}>Create amendment</Button>}</div></div></div>
+  const saveDraftCorrections = async (input: AcquisitionDraftCorrectionInput) => {
+    setBusy(true);
+    try {
+      await api.correctDraft(versionId, input);
+      await load();
+      setEditing(false);
+      toast.success('Draft changes saved');
+    } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); }
+    finally { setBusy(false); }
+  };
 
+  return <div className="space-y-6 p-6">
+    <div><Link href="/finance/acquisitions" className="mb-3 inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="mr-1 h-4 w-4"/>Acquisition queue</Link><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-3"><h1 className="text-2xl font-black">{detail.acquisition_number}</h1><AcquisitionStatus status={detail.status}/></div><p className="mt-1 text-sm text-muted-foreground">Version {detail.version_number} · {detail.intended_use_case}</p></div><div className="flex flex-wrap gap-2">{detail.allowed_actions?.edit && <Button variant="outline" disabled={busy || editing} onClick={() => setEditing(true)}><Pencil className="mr-2 h-4 w-4"/>Edit draft</Button>}{detail.allowed_actions?.validate && <Button disabled={busy || editing} onClick={() => void act('validate')}>Validate</Button>}{detail.allowed_actions?.submit && <Button disabled={busy} onClick={() => void act('submit')}>Submit to Procurement</Button>}{detail.allowed_actions?.vendor_review && <Button variant="outline" disabled={busy} onClick={() => void act('recommend')}>Recalculate recommendations</Button>}{detail.allowed_actions?.withdraw && <Button variant="destructive" disabled={busy} onClick={() => void act('withdraw')}>Withdraw</Button>}{detail.allowed_actions?.amend && <Button disabled={busy} onClick={() => void act('amend')}>Create amendment</Button>}</div></div></div>
+
+    {editing && <AcquisitionDraftEditor detail={detail} busy={busy} onCancel={() => setEditing(false)} onSave={saveDraftCorrections}/>}
+
+    {detail.allowed_actions?.edit && <>
     {detail.status === 'DRAFT' && <Card className="border-blue-200 bg-blue-50/40"><CardHeader><CardTitle className="text-base">Complete draft funding</CardTitle><p className="text-sm text-muted-foreground">Choose the Finance-approved budget, program or grant that will pay for this request. The ID is stored automatically; requesters should never type a database ID. If the required source is missing, Finance must create or activate it first.</p></CardHeader><CardContent className="grid gap-3 md:grid-cols-[220px_1fr_auto] md:items-end"><label className="space-y-1 text-sm"><span className="font-medium">Funding type</span><select aria-label="Draft funding type" className="h-10 w-full rounded-md border bg-background px-3" value={fundingType} onChange={(e) => { setFundingType(e.target.value as AcquisitionDraftInput['funding_source_type']); setFundingId(''); }}><option>DEPARTMENT</option><option>PROGRAM</option><option>PROJECT</option><option>RESEARCH_GRANT</option><option>INSTITUTIONAL</option><option>OTHER</option></select></label><label className="space-y-1 text-sm"><span className="font-medium">Funding source</span><select aria-label="Draft funding source" className="h-10 w-full rounded-md border bg-background px-3" value={fundingId} onChange={(e) => setFundingId(e.target.value)}><option value="">Select funding source</option>{fundingSources.filter((source) => source.funding_source_type === fundingType).map((source) => <option key={source.funding_source_id} value={source.funding_source_id}>{source.label} · {money(source.available_amount)}</option>)}</select></label><Button disabled={busy || !fundingId} onClick={() => void saveFunding()}>Update funding</Button><div className="md:col-span-3 rounded-md bg-white p-3 text-xs text-muted-foreground"><strong className="text-foreground">Validate checks:</strong> required-by date, intended use, active funding source, at least one product line, whole-number quantities, classifications/layouts, online HTTPS URLs, required descriptions/specifications, and server-calculated costs. Passing validation freezes a hashed snapshot for submission.</div></CardContent></Card>}
+    </>}
 
     <div className="grid gap-3 md:grid-cols-4">{[
       ['Approved estimate',money(detail.estimated_total,detail.currency),CircleDollarSign],

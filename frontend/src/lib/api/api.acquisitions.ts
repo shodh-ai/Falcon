@@ -93,6 +93,7 @@ export type AcquisitionLineRecord = {
   unit: string;
   acquisition_layout: string;
   technical_specifications: unknown;
+  intended_use: string;
   estimated_line_total: number | string;
   selected_vendor_id?: string | null;
   vendor_review_status?: string;
@@ -139,6 +140,16 @@ export type AcquisitionMutationResult = {
   valid?: boolean;
   errors?: unknown[];
   warnings?: unknown[];
+};
+
+export type AcquisitionDraftCorrectionInput = {
+  required_by_date: string;
+  intended_use_case: string;
+  lines: Array<{
+    line_id: string;
+    intended_use: string;
+    technical_specifications: string;
+  }>;
 };
 export type ImportPreview = {
   import_preview_id: string;
@@ -190,6 +201,8 @@ export function createAcquisitionsApi(api: AuthedApi) {
       api.post<AcquisitionMutationResult>(root, input),
     replace: (versionId: string, input: AcquisitionDraftInput) =>
       api.put(`${root}/versions/${versionId}`, input),
+    correctDraft: (versionId: string, input: AcquisitionDraftCorrectionInput) =>
+      api.put<AcquisitionDetail>(`${root}/versions/${versionId}/draft-content`, input),
     updateFundingSource: (
       versionId: string,
       input: Pick<
