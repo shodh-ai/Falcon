@@ -28,6 +28,14 @@ describe('module catalogue', () => {
     );
   });
 
+  it('owns LMS APIs independently from SIS APIs', () => {
+    expect(resolveApiModule('/api/lms/courses/a/forums')).toBe('lms_learning');
+    expect(resolveApiModule('/api/academics/faculty/courses/a/workspace')).toBe(
+      'lms_learning',
+    );
+    expect(resolveApiModule('/api/academics/calendar')).toBe('sis_academics');
+  });
+
   it('does not overlap API prefixes across business modules', () => {
     const prefixes = MODULE_CATALOGUE.flatMap((item) =>
       item.apiPrefixes.map((prefix) => `${prefix}:${item.moduleKey}`),

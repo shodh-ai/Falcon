@@ -42,6 +42,11 @@ const manifest: RuntimeModuleManifest = {
 };
 
 describe("runtime module launch filtering", () => {
+  it("owns LMS routes independently from the broader SIS suite", () => {
+    expect(resolvePathModule("/student/courses/abc")).toBe("lms_learning");
+    expect(resolvePathModule("/faculty/courses/abc")).toBe("lms_learning");
+    expect(resolvePathModule("/student/academics")).toBe("sis_academics");
+  });
   it("selects the most specific route owner", () => {
     expect(resolvePathModule("/finance/inventory/abc")).toBe(
       "inventory_assets",

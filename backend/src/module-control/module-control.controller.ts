@@ -59,12 +59,17 @@ export class ModuleRuntimeController {
 
   @Get(':key/readiness')
   @Roles('SuperAdmin', 'CampusAdmin', 'TenantAdmin')
-  readiness(@Param('key') key: string, @Req() req: AuthRequest) {
+  readiness(
+    @Param('key') key: string,
+    @Req() req: AuthRequest,
+    @Query('scope_type') scopeType?: string,
+    @Query('scope_id') scopeId?: string,
+  ) {
     return this.modules.readiness(key, {
       tenantId: this.tenant(req),
       userId: req.user.user_id,
       campusIds: req.user.campus_ids,
-      departmentId: req.user.dept_id,
+      departmentId: scopeType === 'DEPARTMENT' ? scopeId : req.user.dept_id,
     });
   }
 
@@ -81,6 +86,35 @@ export class ModuleRuntimeController {
 @BelongsToModule('CORE')
 export class ModuleControlController {
   constructor(private readonly modules: ModuleControlService) {}
+
+  @Post('module-readiness/:key/evidence')
+  recordReadinessEvidence(
+    @Param('key') key: string,
+    @Req() req: AuthRequest,
+    @Body() body: any,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    this.requireIdempotency(idempotencyKey);
+    if (!['TENANT', 'CAMPUS', 'DEPARTMENT'].includes(body.scope_type))
+      throw new BadRequestException('Invalid readiness evidence scope');
+    if (body.scope_type !== 'TENANT' && !String(body.scope_id ?? '').trim())
+      throw new BadRequestException('scope_id is required for scoped evidence');
+    if (!['PASS', 'FAIL'].includes(body.status))
+      throw new BadRequestException('Invalid readiness evidence status');
+    return this.modules.recordReadinessEvidence({
+      tenantId: this.tenant(req),
+      moduleKey: key,
+      scopeType: body.scope_type,
+      scopeId: body.scope_id,
+      checkKey: body.check_key,
+      status: body.status,
+      evidenceHash: body.evidence_hash,
+      details: body.details,
+      validUntil: body.valid_until,
+      actorId: req.user.user_id,
+      idempotencyKey,
+    });
+  }
 
   @Post('module-rollouts')
   createRollout(

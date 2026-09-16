@@ -15,9 +15,76 @@ export class LmsExtendedService {
     private readonly notificationEmitter: NotificationEmitterService,
   ) {}
 
+  private async assertCourseAccess(
+    tenantId: string,
+    courseId: string,
+    userId: string,
+    roles: string[],
+    mode: 'READ' | 'TEACH',
+    executor: { query: Function } = this.dataSource,
+  ) {
+    const [course] = await executor.query(
+      `SELECT course_id FROM academic_courses WHERE tenant_id=$1 AND course_id=$2`,
+      [tenantId, courseId],
+    );
+    if (!course) throw new NotFoundException('Course not found');
+    if (roles.includes('SuperAdmin')) return;
+
+    if (roles.includes('Student') && mode === 'READ') {
+      const [enrollment] = await executor.query(
+        `SELECT 1 FROM student_course_enrollments
+          WHERE tenant_id=$1 AND course_id=$2 AND student_user_id=$3 AND status='ENROLLED'`,
+        [tenantId, courseId, userId],
+      );
+      if (enrollment) return;
+    }
+
+    if (roles.includes('Faculty')) {
+      const [allocation] = await executor.query(
+        `SELECT 1
+           FROM academic_courses c
+          WHERE c.tenant_id=$1 AND c.course_id=$2
+            AND (EXISTS (
+              SELECT 1 FROM academic_course_allocations a
+               WHERE a.tenant_id=c.tenant_id AND a.course_id=c.course_id
+                 AND a.faculty_user_id=$3 AND a.status='ACTIVE'
+            ) OR EXISTS (
+              SELECT 1 FROM academic_timetables t
+               WHERE t.tenant_id=c.tenant_id AND t.course_id=c.course_id
+                 AND t.faculty_user_id=$3
+            ))`,
+        [tenantId, courseId, userId],
+      );
+      if (allocation) return;
+    }
+
+    if (roles.some((role) => role === 'HOD' || role === 'Dean')) {
+      const [managed] = await executor.query(
+        `SELECT 1
+           FROM users actor
+           JOIN departments actor_dept ON actor_dept.dept_id=actor.dept_id
+          WHERE actor.tenant_id=$1 AND actor.user_id=$3
+            AND EXISTS (
+              SELECT 1
+                FROM academic_course_allocations a
+                JOIN users faculty ON faculty.user_id=a.faculty_user_id AND faculty.tenant_id=a.tenant_id
+                JOIN departments course_dept ON course_dept.dept_id=faculty.dept_id
+               WHERE a.tenant_id=$1 AND a.course_id=$2 AND a.status='ACTIVE'
+                 AND (course_dept.dept_id=actor_dept.dept_id
+                   OR ($4::boolean AND course_dept.school_id=actor_dept.school_id))
+            )`,
+        [tenantId, courseId, userId, roles.includes('Dean')],
+      );
+      if (managed) return;
+    }
+
+    throw new ForbiddenException('You do not have access to this course');
+  }
+
   async createQuiz(
     tenantId: string,
     userId: string,
+    roles: string[],
     dto: {
       course_id: string;
       title: string;
@@ -32,61 +99,89 @@ export class LmsExtendedService {
       }>;
     },
   ) {
-    const quizRows = await this.dataSource.query(
-      `INSERT INTO lms_quizzes (tenant_id, course_id, title, time_limit_mins, max_attempts, browser_lock, created_by, is_published)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, true) RETURNING *`,
-      [
+    return this.dataSource.transaction(async (manager) => {
+      await this.assertCourseAccess(
         tenantId,
         dto.course_id,
-        dto.title,
-        dto.time_limit_mins ?? null,
-        dto.max_attempts ?? 1,
-        dto.browser_lock ?? false,
         userId,
-      ],
-    );
-    const quiz = quizRows[0];
-    for (const [idx, q] of (dto.questions ?? []).entries()) {
-      const qRows = await this.dataSource.query(
-        `INSERT INTO lms_questions (quiz_id, question_type, prompt, points, sort_order)
-         VALUES ($1, $2, $3, $4, $5) RETURNING question_id`,
-        [quiz.quiz_id, q.question_type ?? 'MCQ', q.prompt, q.points ?? 1, idx],
+        roles,
+        'TEACH',
+        manager,
       );
-      for (const opt of q.options ?? []) {
-        await this.dataSource.query(
-          `INSERT INTO lms_question_options (question_id, option_text, is_correct) VALUES ($1, $2, $3)`,
-          [qRows[0].question_id, opt.option_text, opt.is_correct ?? false],
+      const quizRows = await manager.query(
+        `INSERT INTO lms_quizzes (tenant_id, course_id, title, time_limit_mins, max_attempts, browser_lock, created_by, is_published)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true) RETURNING *`,
+        [
+          tenantId,
+          dto.course_id,
+          dto.title,
+          dto.time_limit_mins ?? null,
+          dto.max_attempts ?? 1,
+          dto.browser_lock ?? false,
+          userId,
+        ],
+      );
+      const quiz = quizRows[0];
+      for (const [idx, q] of (dto.questions ?? []).entries()) {
+        const qRows = await manager.query(
+          `INSERT INTO lms_questions (quiz_id, question_type, prompt, points, sort_order)
+           VALUES ($1, $2, $3, $4, $5) RETURNING question_id`,
+          [
+            quiz.quiz_id,
+            q.question_type ?? 'MCQ',
+            q.prompt,
+            q.points ?? 1,
+            idx,
+          ],
         );
+        for (const opt of q.options ?? []) {
+          await manager.query(
+            `INSERT INTO lms_question_options (question_id, option_text, is_correct) VALUES ($1, $2, $3)`,
+            [qRows[0].question_id, opt.option_text, opt.is_correct ?? false],
+          );
+        }
       }
-    }
-    return quiz;
+      return quiz;
+    });
   }
 
-  async startAttempt(quizId: string, studentUserId: string) {
-    const quizRows = await this.dataSource.query(
-      `SELECT * FROM lms_quizzes WHERE quiz_id = $1`,
-      [quizId],
-    );
-    const quiz = quizRows[0];
-    if (!quiz) throw new NotFoundException('Quiz not found');
-
-    const countRows = await this.dataSource.query(
-      `SELECT COUNT(*)::int AS c FROM lms_student_attempts WHERE quiz_id = $1 AND student_user_id = $2`,
-      [quizId, studentUserId],
-    );
-    if (countRows[0].c >= quiz.max_attempts) {
-      throw new BadRequestException('Maximum attempts reached');
-    }
-
-    const rows = await this.dataSource.query(
-      `INSERT INTO lms_student_attempts (quiz_id, student_user_id) VALUES ($1, $2) RETURNING *`,
-      [quizId, studentUserId],
-    );
-    return rows[0];
+  async startAttempt(tenantId: string, quizId: string, studentUserId: string) {
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [`lms-attempt:${quizId}:${studentUserId}`],
+      );
+      const [quiz] = await manager.query(
+        `SELECT q.* FROM lms_quizzes q
+          WHERE q.tenant_id=$1 AND q.quiz_id=$2 AND q.is_published=true FOR UPDATE`,
+        [tenantId, quizId],
+      );
+      if (!quiz) throw new NotFoundException('Quiz not found');
+      await this.assertCourseAccess(
+        tenantId,
+        quiz.course_id,
+        studentUserId,
+        ['Student'],
+        'READ',
+        manager,
+      );
+      const [count] = await manager.query(
+        `SELECT COUNT(*)::int AS c FROM lms_student_attempts WHERE quiz_id=$1 AND student_user_id=$2`,
+        [quizId, studentUserId],
+      );
+      if (count.c >= quiz.max_attempts)
+        throw new BadRequestException('Maximum attempts reached');
+      const rows = await manager.query(
+        `INSERT INTO lms_student_attempts (quiz_id, student_user_id) VALUES ($1, $2) RETURNING *`,
+        [quizId, studentUserId],
+      );
+      return rows[0];
+    });
   }
 
   async submitAttempt(
     attemptId: string,
+    tenantId: string,
     studentUserId: string,
     answers: Array<{
       question_id: string;
@@ -95,65 +190,94 @@ export class LmsExtendedService {
     }>,
     antiCheatEvents?: unknown[],
   ) {
-    const attemptRows = await this.dataSource.query(
-      `SELECT * FROM lms_student_attempts WHERE attempt_id = $1 AND student_user_id = $2`,
-      [attemptId, studentUserId],
-    );
-    const attempt = attemptRows[0];
-    if (!attempt) throw new NotFoundException('Attempt not found');
-    if (attempt.status !== 'IN_PROGRESS')
-      throw new BadRequestException('Attempt already submitted');
-
-    let total = 0;
-    for (const ans of answers) {
-      let isCorrect: boolean | null = null;
-      let points = 0;
-      if (ans.selected_option_id) {
-        const optRows = await this.dataSource.query(
-          `SELECT is_correct, q.points FROM lms_question_options o
-           JOIN lms_questions q ON q.question_id = o.question_id
-           WHERE o.option_id = $1`,
-          [ans.selected_option_id],
-        );
-        isCorrect = optRows[0]?.is_correct ?? false;
-        points = isCorrect ? Number(optRows[0]?.points ?? 0) : 0;
-        total += points;
-      }
-      await this.dataSource.query(
-        `INSERT INTO lms_attempt_answers (attempt_id, question_id, selected_option_id, descriptive_answer, is_correct, points_awarded)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          attemptId,
-          ans.question_id,
-          ans.selected_option_id ?? null,
-          ans.descriptive_answer ?? null,
-          isCorrect,
-          points,
-        ],
+    return this.dataSource.transaction(async (manager) => {
+      const [attempt] = await manager.query(
+        `SELECT a.*, q.tenant_id, q.course_id
+           FROM lms_student_attempts a JOIN lms_quizzes q ON q.quiz_id=a.quiz_id
+          WHERE a.attempt_id=$1 AND a.student_user_id=$2 AND q.tenant_id=$3 FOR UPDATE OF a`,
+        [attemptId, studentUserId, tenantId],
       );
-    }
-
-    await this.dataSource.query(
-      `UPDATE lms_student_attempts
+      if (!attempt) throw new NotFoundException('Attempt not found');
+      if (attempt.status !== 'IN_PROGRESS')
+        throw new BadRequestException('Attempt already submitted');
+      await this.assertCourseAccess(
+        tenantId,
+        attempt.course_id,
+        studentUserId,
+        ['Student'],
+        'READ',
+        manager,
+      );
+      let total = 0;
+      const seen = new Set<string>();
+      for (const ans of answers) {
+        if (seen.has(ans.question_id))
+          throw new BadRequestException('Duplicate question answer');
+        seen.add(ans.question_id);
+        let isCorrect: boolean | null = null;
+        let points = 0;
+        if (ans.selected_option_id) {
+          const optRows = await manager.query(
+            `SELECT is_correct, q.points FROM lms_question_options o
+           JOIN lms_questions q ON q.question_id = o.question_id
+           WHERE o.option_id=$1 AND q.question_id=$2 AND q.quiz_id=$3`,
+            [ans.selected_option_id, ans.question_id, attempt.quiz_id],
+          );
+          if (!optRows[0]) throw new BadRequestException('Invalid quiz answer');
+          isCorrect = optRows[0].is_correct;
+          points = isCorrect ? Number(optRows[0]?.points ?? 0) : 0;
+          total += points;
+        } else {
+          const [question] = await manager.query(
+            `SELECT 1 FROM lms_questions WHERE question_id=$1 AND quiz_id=$2`,
+            [ans.question_id, attempt.quiz_id],
+          );
+          if (!question) throw new BadRequestException('Invalid quiz question');
+        }
+        await manager.query(
+          `INSERT INTO lms_attempt_answers (attempt_id, question_id, selected_option_id, descriptive_answer, is_correct, points_awarded)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            attemptId,
+            ans.question_id,
+            ans.selected_option_id ?? null,
+            ans.descriptive_answer ?? null,
+            isCorrect,
+            points,
+          ],
+        );
+      }
+      await manager.query(
+        `UPDATE lms_student_attempts
        SET submitted_at = NOW(), status = 'SUBMITTED', score = $2,
            anti_cheat_events = COALESCE(anti_cheat_events, '[]'::jsonb) || $3::jsonb
        WHERE attempt_id = $1`,
-      [attemptId, total, JSON.stringify(antiCheatEvents ?? [])],
-    );
-    return { attempt_id: attemptId, score: total };
+        [attemptId, total, JSON.stringify(antiCheatEvents ?? [])],
+      );
+      return { attempt_id: attemptId, score: total };
+    });
   }
 
-  listCourseQuizzes(courseId: string) {
+  async listCourseQuizzes(
+    tenantId: string,
+    courseId: string,
+    userId: string,
+    roles: string[],
+  ) {
+    await this.assertCourseAccess(tenantId, courseId, userId, roles, 'READ');
     return this.dataSource.query(
       `SELECT quiz_id, title, time_limit_mins, max_attempts, browser_lock, is_published
-       FROM lms_quizzes WHERE course_id = $1 ORDER BY created_at DESC`,
-      [courseId],
+       FROM lms_quizzes WHERE tenant_id=$1 AND course_id=$2
+         AND (is_published=true OR created_by=$3)
+       ORDER BY created_at DESC`,
+      [tenantId, courseId, userId],
     );
   }
 
   async createLiveClass(
     tenantId: string,
     userId: string,
+    roles: string[],
     dto: {
       course_id: string;
       title: string;
@@ -163,6 +287,13 @@ export class LmsExtendedService {
       ends_at: string;
     },
   ) {
+    await this.assertCourseAccess(
+      tenantId,
+      dto.course_id,
+      userId,
+      roles,
+      'TEACH',
+    );
     const rows = await this.dataSource.query(
       `INSERT INTO lms_live_classes (tenant_id, course_id, title, provider, meeting_url, starts_at, ends_at, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
@@ -218,19 +349,7 @@ export class LmsExtendedService {
     userId: string,
     roles: string[],
   ) {
-    const isStudent =
-      roles.includes('Student') &&
-      !roles.some((r) => ['Faculty', 'SuperAdmin', 'HOD', 'Dean'].includes(r));
-    if (isStudent) {
-      const [enrolled] = await this.dataSource.query<Array<{ ok: number }>>(
-        `SELECT 1 AS ok FROM student_course_enrollments
-         WHERE tenant_id = $1 AND course_id = $2 AND student_user_id = $3 AND status = 'ENROLLED'`,
-        [tenantId, courseId, userId],
-      );
-      if (!enrolled) {
-        throw new ForbiddenException('You are not enrolled in this course');
-      }
-    }
+    await this.assertCourseAccess(tenantId, courseId, userId, roles, 'READ');
 
     return this.dataSource.query(
       `SELECT live_class_id, course_id, title, provider, meeting_url, starts_at, ends_at, created_at
@@ -292,11 +411,19 @@ export class LmsExtendedService {
     );
   }
 
-  createThread(
+  async createThread(
     tenantId: string,
     userId: string,
+    roles: string[],
     dto: { course_id: string; title: string; body: string },
   ) {
+    await this.assertCourseAccess(
+      tenantId,
+      dto.course_id,
+      userId,
+      roles,
+      'READ',
+    );
     return this.dataSource
       .query(
         `INSERT INTO lms_forum_threads (tenant_id, course_id, author_user_id, title, body)
@@ -306,16 +433,41 @@ export class LmsExtendedService {
       .then((r) => r[0]);
   }
 
-  listThreads(courseId: string) {
+  async listThreads(
+    tenantId: string,
+    courseId: string,
+    userId: string,
+    roles: string[],
+  ) {
+    await this.assertCourseAccess(tenantId, courseId, userId, roles, 'READ');
     return this.dataSource.query(
       `SELECT t.*, u.name AS author_name FROM lms_forum_threads t
-       JOIN users u ON u.user_id = t.author_user_id
-       WHERE t.course_id = $1 ORDER BY t.is_pinned DESC, t.upvotes DESC, t.created_at DESC`,
-      [courseId],
+       JOIN users u ON u.user_id=t.author_user_id AND u.tenant_id=t.tenant_id
+       WHERE t.tenant_id=$1 AND t.course_id=$2
+       ORDER BY t.is_pinned DESC, t.upvotes DESC, t.created_at DESC`,
+      [tenantId, courseId],
     );
   }
 
-  replyToThread(threadId: string, userId: string, body: string) {
+  async replyToThread(
+    tenantId: string,
+    threadId: string,
+    userId: string,
+    roles: string[],
+    body: string,
+  ) {
+    const [thread] = await this.dataSource.query(
+      `SELECT course_id FROM lms_forum_threads WHERE tenant_id=$1 AND thread_id=$2`,
+      [tenantId, threadId],
+    );
+    if (!thread) throw new NotFoundException('Forum thread not found');
+    await this.assertCourseAccess(
+      tenantId,
+      thread.course_id,
+      userId,
+      roles,
+      'READ',
+    );
     return this.dataSource
       .query(
         `INSERT INTO lms_forum_posts (thread_id, author_user_id, body) VALUES ($1, $2, $3) RETURNING *`,
@@ -324,22 +476,43 @@ export class LmsExtendedService {
       .then((r) => r[0]);
   }
 
-  upvote(userId: string, targetType: 'THREAD' | 'POST', targetId: string) {
-    return this.dataSource
-      .query(
+  async upvote(
+    tenantId: string,
+    userId: string,
+    roles: string[],
+    targetType: 'THREAD' | 'POST',
+    targetId: string,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const targetSql =
+        targetType === 'THREAD'
+          ? `SELECT t.course_id FROM lms_forum_threads t WHERE t.tenant_id=$1 AND t.thread_id=$2`
+          : `SELECT t.course_id FROM lms_forum_posts p JOIN lms_forum_threads t ON t.thread_id=p.thread_id WHERE t.tenant_id=$1 AND p.post_id=$2`;
+      const [target] = await manager.query(targetSql, [tenantId, targetId]);
+      if (!target) throw new NotFoundException('Forum item not found');
+      await this.assertCourseAccess(
+        tenantId,
+        target.course_id,
+        userId,
+        roles,
+        'READ',
+        manager,
+      );
+      const inserted = await manager.query(
         `INSERT INTO lms_forum_votes (user_id, target_type, target_id) VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, target_type, target_id) DO NOTHING`,
+         ON CONFLICT (user_id, target_type, target_id) DO NOTHING RETURNING vote_id`,
         [userId, targetType, targetId],
-      )
-      .then(async () => {
+      );
+      if (inserted[0]) {
         const table =
           targetType === 'THREAD' ? 'lms_forum_threads' : 'lms_forum_posts';
         const col = targetType === 'THREAD' ? 'thread_id' : 'post_id';
-        await this.dataSource.query(
+        await manager.query(
           `UPDATE ${table} SET upvotes = upvotes + 1 WHERE ${col} = $1`,
           [targetId],
         );
-        return { upvoted: true };
-      });
+      }
+      return { upvoted: true, duplicate: !inserted[0] };
+    });
   }
 }

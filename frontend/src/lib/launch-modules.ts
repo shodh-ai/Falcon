@@ -2,6 +2,7 @@
 export const BUSINESS_MODULE_KEYS = [
   "admissions_onboarding",
   "sis_academics",
+  "lms_learning",
   "examinations_credentials",
   "hrms_ess",
   "finance_procurement",
@@ -93,7 +94,23 @@ const ROUTES: Array<{ moduleKey: BusinessModuleKey; prefixes: string[] }> = [
       "/academics",
       "/student/academics",
       "/faculty",
+    ],
+  },
+  {
+    moduleKey: "lms_learning",
+    prefixes: [
       "/lms",
+      "/student/courses",
+      "/student/weekly-tests",
+      "/faculty/courses",
+      "/faculty/assignments",
+      "/faculty/materials",
+      "/faculty/announcements",
+      "/faculty/logbook",
+      "/faculty/schedule-classes",
+      "/faculty/grading",
+      "/faculty/weekly-tests",
+      "/faculty/question-bank",
     ],
   },
   {

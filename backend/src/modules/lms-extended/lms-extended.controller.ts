@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -15,6 +16,7 @@ import { LmsExtendedService } from './lms-extended.service';
 import { CreateLiveClassDto } from './dto/create-live-class.dto';
 import { CreateForumThreadDto } from './dto/create-forum-thread.dto';
 import { CreateForumReplyDto } from './dto/create-forum-reply.dto';
+import { BelongsToModule } from '../../module-control/module-control.decorators';
 
 type AuthUser = {
   user_id: string;
@@ -25,6 +27,7 @@ type AuthUser = {
 
 @Controller('api/lms')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@BelongsToModule('lms_learning')
 export class LmsExtendedController {
   constructor(private readonly lms: LmsExtendedService) {}
 
@@ -37,14 +40,23 @@ export class LmsExtendedController {
     return this.lms.createQuiz(
       this.tenant(req),
       req.user.user_id,
+      this.roles(req),
       dto as never,
     );
   }
 
   @Get('courses/:courseId/quizzes')
   @Roles('Faculty', 'Student', 'SuperAdmin')
-  listQuizzes(@Param('courseId') courseId: string) {
-    return this.lms.listCourseQuizzes(courseId);
+  listQuizzes(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.lms.listCourseQuizzes(
+      this.tenant(req),
+      courseId,
+      req.user.user_id,
+      this.roles(req),
+    );
   }
 
   @Post('quizzes/:quizId/attempts')
@@ -53,7 +65,7 @@ export class LmsExtendedController {
     @Req() req: { user: AuthUser },
     @Param('quizId') quizId: string,
   ) {
-    return this.lms.startAttempt(quizId, req.user.user_id);
+    return this.lms.startAttempt(this.tenant(req), quizId, req.user.user_id);
   }
 
   @Post('attempts/:attemptId/submit')
@@ -73,6 +85,7 @@ export class LmsExtendedController {
   ) {
     return this.lms.submitAttempt(
       attemptId,
+      this.tenant(req),
       req.user.user_id,
       dto.answers,
       dto.anti_cheat_events,
@@ -82,7 +95,12 @@ export class LmsExtendedController {
   @Post('live-classes')
   @Roles('Faculty', 'SuperAdmin')
   createLive(@Req() req: { user: AuthUser }, @Body() dto: CreateLiveClassDto) {
-    return this.lms.createLiveClass(this.tenant(req), req.user.user_id, dto);
+    return this.lms.createLiveClass(
+      this.tenant(req),
+      req.user.user_id,
+      this.roles(req),
+      dto,
+    );
   }
 
   @Get('courses/:courseId/live-classes')
@@ -120,13 +138,26 @@ export class LmsExtendedController {
     @Req() req: { user: AuthUser },
     @Body() dto: CreateForumThreadDto,
   ) {
-    return this.lms.createThread(this.tenant(req), req.user.user_id, dto);
+    return this.lms.createThread(
+      this.tenant(req),
+      req.user.user_id,
+      this.roles(req),
+      dto,
+    );
   }
 
   @Get('courses/:courseId/forums')
   @Roles('Faculty', 'Student', 'SuperAdmin')
-  listThreads(@Param('courseId') courseId: string) {
-    return this.lms.listThreads(courseId);
+  listThreads(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.lms.listThreads(
+      this.tenant(req),
+      courseId,
+      req.user.user_id,
+      this.roles(req),
+    );
   }
 
   @Post('forums/threads/:threadId/replies')
@@ -136,7 +167,13 @@ export class LmsExtendedController {
     @Param('threadId') threadId: string,
     @Body() dto: CreateForumReplyDto,
   ) {
-    return this.lms.replyToThread(threadId, req.user.user_id, dto.body);
+    return this.lms.replyToThread(
+      this.tenant(req),
+      threadId,
+      req.user.user_id,
+      this.roles(req),
+      dto.body,
+    );
   }
 
   @Post('forums/upvote')
@@ -145,11 +182,20 @@ export class LmsExtendedController {
     @Req() req: { user: AuthUser },
     @Body() dto: { target_type: 'THREAD' | 'POST'; target_id: string },
   ) {
-    return this.lms.upvote(req.user.user_id, dto.target_type, dto.target_id);
+    return this.lms.upvote(
+      this.tenant(req),
+      req.user.user_id,
+      this.roles(req),
+      dto.target_type,
+      dto.target_id,
+    );
   }
 
   private tenant(req: { user: AuthUser }) {
-    return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+    if (!req.user.tenant_id) {
+      throw new ForbiddenException('Authenticated tenant context is required');
+    }
+    return req.user.tenant_id;
   }
 
   private roles(req: { user: AuthUser }) {

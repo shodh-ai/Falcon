@@ -143,8 +143,9 @@ export class ModuleControlService {
       modules: modules.map((module) => ({
         ...module,
         displayName:
-          MODULE_CATALOGUE.find((definition) => definition.moduleKey === module.moduleKey)
-            ?.displayName ?? module.moduleKey,
+          MODULE_CATALOGUE.find(
+            (definition) => definition.moduleKey === module.moduleKey,
+          )?.displayName ?? module.moduleKey,
       })),
     };
   }
@@ -179,6 +180,10 @@ export class ModuleControlService {
         })),
     );
     const schema = await this.hasControlSchema();
+    const moduleReadiness =
+      moduleKeyValue === 'lms_learning'
+        ? await this.lmsReadiness(scope)
+        : { ready: true, checks: {}, evidence: [] };
     const checks = {
       schema,
       dependencies: dependencyStates.every((item) =>
@@ -186,14 +191,196 @@ export class ModuleControlService {
       ),
       permissions: definition.businessOwnerRoles.length > 0,
       rollbackReady: true,
+      moduleAcceptance: moduleReadiness.ready,
     };
     return {
       moduleKey: moduleKeyValue,
       current,
       checks,
       dependencyStates,
+      moduleChecks: moduleReadiness.checks,
+      evidence: moduleReadiness.evidence,
       ready: Object.values(checks).every(Boolean),
     };
+  }
+
+  private async lmsReadiness(scope: RuntimeScope) {
+    const requiredTables = [
+      'academic_courses',
+      'academic_course_allocations',
+      'student_course_enrollments',
+      'lms_quizzes',
+      'lms_forum_threads',
+      'course_materials',
+    ];
+    try {
+      const [schemaRow] = await this.dataSource.query<
+        Array<{ tables_ready: boolean }>
+      >(
+        `SELECT bool_and(to_regclass('public.' || table_name) IS NOT NULL) AS tables_ready
+           FROM unnest($1::text[]) AS table_name`,
+        [requiredTables],
+      );
+      const departmentId =
+        scope.departmentId == null ? null : Number(scope.departmentId);
+      const [counts] = await this.dataSource.query<
+        Array<{
+          course_count: number;
+          programme_count: number;
+          faculty_allocation_count: number;
+          enrollment_count: number;
+        }>
+      >(
+        `SELECT
+          (SELECT COUNT(DISTINCT c.course_id)::int
+             FROM academic_courses c
+            WHERE c.tenant_id=$1
+              AND ($2::int IS NULL OR EXISTS (
+                SELECT 1 FROM academic_course_allocations a
+                JOIN users fu ON fu.user_id=a.faculty_user_id AND fu.tenant_id=a.tenant_id
+                WHERE a.tenant_id=c.tenant_id AND a.course_id=c.course_id
+                  AND a.status='ACTIVE' AND fu.is_active=true AND fu.dept_id=$2))) AS course_count,
+          (SELECT COUNT(DISTINCT NULLIF(BTRIM(a.program_name),''))::int
+             FROM academic_course_allocations a
+             LEFT JOIN users fu ON fu.user_id=a.faculty_user_id AND fu.tenant_id=a.tenant_id
+            WHERE a.tenant_id=$1 AND a.status='ACTIVE'
+              AND (fu.user_id IS NULL OR fu.is_active=true)
+              AND ($2::int IS NULL OR fu.dept_id=$2)) AS programme_count,
+          (SELECT COUNT(*)::int FROM academic_course_allocations a
+             JOIN users fu ON fu.user_id=a.faculty_user_id AND fu.tenant_id=a.tenant_id
+            WHERE a.tenant_id=$1 AND a.status='ACTIVE'
+              AND fu.is_active=true
+              AND ($2::int IS NULL OR fu.dept_id=$2)) AS faculty_allocation_count,
+          (SELECT COUNT(*)::int FROM student_course_enrollments e
+             JOIN users su ON su.user_id=e.student_user_id AND su.tenant_id=e.tenant_id
+            WHERE e.tenant_id=$1 AND e.status='ENROLLED'
+              AND su.is_active=true
+              AND ($2::int IS NULL OR su.dept_id=$2)) AS enrollment_count`,
+        [scope.tenantId, departmentId],
+      );
+      const evidence = await this.dataSource.query<
+        Array<{
+          check_key: string;
+          status: 'PASS' | 'FAIL';
+          checked_at: Date;
+          valid_until: Date | null;
+          evidence_hash: string;
+        }>
+      >(
+        `SELECT DISTINCT ON(check_key) check_key,status,checked_at,valid_until,evidence_hash
+           FROM platform_module_readiness_evidence
+          WHERE tenant_id=$1 AND module_key='lms_learning'
+            AND scope_type=$2
+            AND scope_id IS NOT DISTINCT FROM $3
+          ORDER BY check_key,checked_at DESC`,
+        [
+          scope.tenantId,
+          departmentId == null ? 'TENANT' : 'DEPARTMENT',
+          departmentId == null ? null : String(departmentId),
+        ],
+      );
+      const requiredEvidence = [
+        'DATA_MIGRATION',
+        'STORAGE_HEALTH',
+        'LMS_SMOKE',
+        'SECURITY_ACCEPTANCE',
+      ];
+      const now = Date.now();
+      const evidencePass = (key: string) => {
+        const item = evidence.find((row) => row.check_key === key);
+        return Boolean(
+          item?.status === 'PASS' &&
+          (!item.valid_until || new Date(item.valid_until).getTime() > now),
+        );
+      };
+      const checks = {
+        lmsSchema: Boolean(schemaRow?.tables_ready),
+        programmesConfigured: Number(counts?.programme_count ?? 0) > 0,
+        coursesConfigured: Number(counts?.course_count ?? 0) > 0,
+        facultyAllocated: Number(counts?.faculty_allocation_count ?? 0) > 0,
+        studentsEnrolled: Number(counts?.enrollment_count ?? 0) > 0,
+        providerMigrationAccepted: evidencePass('DATA_MIGRATION'),
+        storageVerified: evidencePass('STORAGE_HEALTH'),
+        smokeTestsPassed: evidencePass('LMS_SMOKE'),
+        securityTestsPassed: evidencePass('SECURITY_ACCEPTANCE'),
+      };
+      return {
+        ready: Object.values(checks).every(Boolean),
+        checks,
+        evidence,
+        requiredEvidence,
+        counts,
+      };
+    } catch (error) {
+      if ((error as { code?: string }).code === '42P01') {
+        return {
+          ready: false,
+          checks: { lmsSchema: false },
+          evidence: [],
+          requiredEvidence: [
+            'DATA_MIGRATION',
+            'STORAGE_HEALTH',
+            'LMS_SMOKE',
+            'SECURITY_ACCEPTANCE',
+          ],
+        };
+      }
+      throw error;
+    }
+  }
+
+  async recordReadinessEvidence(input: {
+    tenantId: string;
+    moduleKey: string;
+    scopeType: 'TENANT' | 'CAMPUS' | 'DEPARTMENT';
+    scopeId?: string | null;
+    checkKey: string;
+    status: 'PASS' | 'FAIL';
+    evidenceHash: string;
+    details?: unknown;
+    validUntil?: string | null;
+    actorId: string;
+    idempotencyKey: string;
+  }) {
+    this.assertModuleKey(input.moduleKey);
+    if (!/^[a-f0-9]{64}$/i.test(input.evidenceHash))
+      throw new ConflictException({ code: 'INVALID_EVIDENCE_HASH' });
+    const requestHash = hash({
+      moduleKey: input.moduleKey,
+      scopeType: input.scopeType,
+      scopeId: input.scopeId ?? null,
+      checkKey: input.checkKey,
+      status: input.status,
+      evidenceHash: input.evidenceHash.toLowerCase(),
+      details: input.details ?? {},
+      validUntil: input.validUntil ?? null,
+    });
+    const rows = await this.dataSource.query(
+      `INSERT INTO platform_module_readiness_evidence
+       (tenant_id,module_key,scope_type,scope_id,check_key,status,evidence_hash,details,valid_until,recorded_by,idempotency_key,request_hash)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12)
+       ON CONFLICT(tenant_id,module_key,recorded_by,idempotency_key)
+       DO UPDATE SET checked_at=platform_module_readiness_evidence.checked_at
+       WHERE platform_module_readiness_evidence.request_hash=EXCLUDED.request_hash
+       RETURNING *`,
+      [
+        input.tenantId,
+        input.moduleKey,
+        input.scopeType,
+        input.scopeId ?? null,
+        input.checkKey,
+        input.status,
+        input.evidenceHash.toLowerCase(),
+        JSON.stringify(input.details ?? {}),
+        input.validUntil ?? null,
+        input.actorId,
+        input.idempotencyKey,
+        requestHash,
+      ],
+    );
+    if (!rows[0])
+      throw new ConflictException({ code: 'IDEMPOTENCY_PAYLOAD_CHANGED' });
+    return rows[0];
   }
 
   private async hasControlSchema(): Promise<boolean> {
@@ -218,6 +405,8 @@ export class ModuleControlService {
     const id = randomUUID();
     const snapshot = await this.readiness(input.moduleKey, {
       tenantId: input.tenantId,
+      departmentId:
+        input.scopeType === 'DEPARTMENT' ? input.scopeId : undefined,
     });
     const requestHash = hash({
       moduleKey: input.moduleKey,
@@ -318,7 +507,11 @@ export class ModuleControlService {
           code: 'MODULE_OWNER_APPROVAL_REQUIRED',
         });
       }
-      const readiness = await this.readiness(rollout.module_key, { tenantId });
+      const readiness = await this.readiness(rollout.module_key, {
+        tenantId,
+        departmentId:
+          rollout.scope_type === 'DEPARTMENT' ? rollout.scope_id : undefined,
+      });
       if (
         !readiness.ready &&
         ['ACTIVE', 'PILOT'].includes(rollout.desired_state)

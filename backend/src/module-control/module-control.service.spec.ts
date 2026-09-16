@@ -60,3 +60,55 @@ describe('ModuleControlService effective state', () => {
     });
   });
 });
+
+describe('ModuleControlService LMS launch readiness', () => {
+  it('requires live data plus migration, storage, smoke and security evidence', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ tables_ready: true }])
+      .mockResolvedValueOnce([
+        {
+          course_count: 10,
+          programme_count: 1,
+          faculty_allocation_count: 4,
+          enrollment_count: 80,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { check_key: 'DATA_MIGRATION', status: 'PASS' },
+        { check_key: 'STORAGE_HEALTH', status: 'PASS' },
+        { check_key: 'LMS_SMOKE', status: 'PASS' },
+        { check_key: 'SECURITY_ACCEPTANCE', status: 'PASS' },
+      ]);
+    const result = await (
+      new ModuleControlService({ query } as any) as any
+    ).lmsReadiness({ tenantId: 'tenant-a', departmentId: 7 });
+    expect(result.ready).toBe(true);
+    expect(query.mock.calls[2][1]).toEqual(['tenant-a', 'DEPARTMENT', '7']);
+  });
+
+  it('fails closed when acceptance evidence is absent', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ tables_ready: true }])
+      .mockResolvedValueOnce([
+        {
+          course_count: 10,
+          programme_count: 1,
+          faculty_allocation_count: 4,
+          enrollment_count: 80,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    const result = await (
+      new ModuleControlService({ query } as any) as any
+    ).lmsReadiness({ tenantId: 'tenant-a', departmentId: 7 });
+    expect(result.ready).toBe(false);
+    expect(result.checks).toMatchObject({
+      providerMigrationAccepted: false,
+      storageVerified: false,
+      smokeTestsPassed: false,
+      securityTestsPassed: false,
+    });
+  });
+});
