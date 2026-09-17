@@ -1039,6 +1039,7 @@ export function getPostLoginPath(user: {
   role?: string;
   primaryRole?: string;
   roles?: string[];
+  permissions?: string[];
   is_department_hod?: boolean;
   onboarding_status?: string;
 }): string {
@@ -1047,6 +1048,14 @@ export function getPostLoginPath(user: {
     .map((role) => role.trim().toLowerCase());
   const hasHodRole = roles.includes('hod');
   const primaryRole = user.primaryRole ?? user.role;
+
+  // A finance capability is an explicit workspace assignment. Honour it
+  // before generic staff onboarding so finance-only tenant users are not sent
+  // into an unavailable SIS/Academics portal after signing in at the shared
+  // Falcon hostname.
+  if (user.permissions?.includes('ACQUISITION_REQUESTER')) {
+    return '/finance/acquisitions';
+  }
 
   // Department heads (including Deans mapped as hod_user_id) use the HOD Command Center.
   const landingRole =

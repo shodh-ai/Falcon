@@ -76,6 +76,16 @@ describe('Auth routing — protected paths', () => {
 });
 
 describe('Auth routing — post login', () => {
+  it('routes an acquisition requester to finance before staff onboarding', () => {
+    expect(
+      getPostLoginPath({
+        role: 'Faculty',
+        onboarding_status: 'PENDING_PASSWORD_RESET',
+        permissions: ['ACQUISITION_REQUESTER'],
+      }),
+    ).toBe('/finance/acquisitions');
+  });
+
   it('routes completed onboarding faculty to dashboard', () => {
     expect(
       getPostLoginPath({
