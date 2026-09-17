@@ -16,6 +16,7 @@ interface User {
   department?: string;
   dept_id?: number;
   tenant_id?: string;
+  tenant_subdomain?: string;
   tenant_schema?: string;
   features?: string[];
   hr_capabilities?: Record<string, 'none' | 'read' | 'write'>;
@@ -71,9 +72,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const api = getApiBaseUrl();
           const { getSubdomainFromClient } = await import('@/lib/tenant');
+          const tenantSubdomain = getSubdomainFromClient();
           const headers = {
             Authorization: `Bearer ${storedToken}`,
-            'x-tenant-subdomain': getSubdomainFromClient(),
+            'x-tenant-subdomain': tenantSubdomain,
           };
           const [profileRes, permsRes] = await Promise.all([
             fetch(`${api}/api/auth/me`, { headers }).catch(() => fetch(`${api}/auth/profile`, { headers })),
@@ -81,6 +83,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ]);
           if (profileRes.ok) {
             const fresh = await profileRes.json();
+            // The profile endpoint is tenant-scoped but does not currently
+            // repeat the tenant subdomain. Keep that resolved context on the
+            // cached user so post-login routing cannot fall back to an
+            // unrelated role workspace on the shared Falcon hostname.
+            fresh.tenant_subdomain ??= tenantSubdomain;
             if (permsRes.ok) {
               const perms = await permsRes.json();
               fresh.permissions = perms.permissions ?? fresh.permissions;
@@ -120,9 +127,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!activeToken) return null;
 
     const { getSubdomainFromClient } = await import('@/lib/tenant');
+    const tenantSubdomain = getSubdomainFromClient();
     const headers = {
       Authorization: `Bearer ${activeToken}`,
-      'x-tenant-subdomain': getSubdomainFromClient(),
+      'x-tenant-subdomain': tenantSubdomain,
     };
     const api = getApiBaseUrl();
     const [response, permsRes] = await Promise.all([
@@ -133,6 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!response.ok) return null;
 
     const freshUser = await response.json();
+    freshUser.tenant_subdomain ??= tenantSubdomain;
     if (permsRes.ok) {
       const perms = await permsRes.json();
       freshUser.permissions = perms.permissions ?? freshUser.permissions;
