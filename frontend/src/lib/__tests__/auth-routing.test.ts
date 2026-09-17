@@ -86,6 +86,16 @@ describe('Auth routing — post login', () => {
     ).toBe('/finance/acquisitions');
   });
 
+  it('routes a GVMC finance-only faculty account using resolved tenant context', () => {
+    expect(
+      getPostLoginPath({
+        role: 'Faculty',
+        onboarding_status: 'PENDING_PASSWORD_RESET',
+        tenant_subdomain: 'gvmc',
+      }),
+    ).toBe('/finance/acquisitions');
+  });
+
   it('routes completed onboarding faculty to dashboard', () => {
     expect(
       getPostLoginPath({

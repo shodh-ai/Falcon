@@ -1040,6 +1040,7 @@ export function getPostLoginPath(user: {
   primaryRole?: string;
   roles?: string[];
   permissions?: string[];
+  tenant_subdomain?: string;
   is_department_hod?: boolean;
   onboarding_status?: string;
 }): string {
@@ -1053,7 +1054,10 @@ export function getPostLoginPath(user: {
   // before generic staff onboarding so finance-only tenant users are not sent
   // into an unavailable SIS/Academics portal after signing in at the shared
   // Falcon hostname.
-  if (user.permissions?.includes('ACQUISITION_REQUESTER')) {
+  if (
+    user.permissions?.includes('ACQUISITION_REQUESTER') ||
+    (user.tenant_subdomain === 'gvmc' && primaryRole?.trim().toLowerCase() === 'faculty')
+  ) {
     return '/finance/acquisitions';
   }
 
