@@ -85,6 +85,7 @@ describe('AuthService.localLogin', () => {
 
   const mockTenantService = {
     findBySubdomain: jest.fn(),
+    findById: jest.fn(),
   };
 
   const mockHrEntityCtx = {
@@ -134,6 +135,7 @@ describe('AuthService.localLogin', () => {
     });
 
     mockTenantService.findBySubdomain.mockResolvedValue(TENANT);
+    mockTenantService.findById.mockResolvedValue(TENANT);
     mockHrEntityCtx.getPermissions.mockResolvedValue({});
     mockHrEntityCtx.capabilitiesToPermissionList.mockReturnValue([]);
     mockHrEntityCtx.listAllowedEntities.mockResolvedValue([]);
@@ -212,6 +214,67 @@ describe('AuthService.localLogin', () => {
     await service.localLogin('library@mygyanvihar.com', 'password123', '   ');
 
     expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
+  });
+
+  it('resolves a unique account in another tenant from the shared login page', async () => {
+    const gvmcTenant = {
+      tenant_id: 'b0000000-0000-4000-8000-000000000002',
+      pg_schema: 'public',
+      subdomain: 'gvmc',
+    };
+    const fixture = buildLoginFixture({
+      email: 'requester.gvmc@mygyanvihar.com',
+      roleName: 'Faculty',
+    });
+    mockTenantService.findById.mockResolvedValue(gvmcTenant);
+    mockDataSource.query.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      if (text.includes('INNER JOIN tenants t')) {
+        return [{ ...fixture.credential, tenant_id: gvmcTenant.tenant_id }];
+      }
+      if (text.includes('password_hash')) return [];
+      if (text.includes('official_email AS email')) return [fixture.userRow];
+      if (text.includes('FROM user_roles ur')) return fixture.roleRows;
+      if (text.includes('COUNT(*)')) return [{ count: '0' }];
+      if (text.includes('EXISTS')) return [{ is_hod: false }];
+      return [];
+    });
+
+    const result = await service.localLogin(
+      'requester.gvmc@mygyanvihar.com',
+      'temporary-password',
+      'sgvu',
+    );
+
+    expect(mockTenantService.findById).toHaveBeenCalledWith(
+      gvmcTenant.tenant_id,
+    );
+    expect(result.user.tenant_subdomain).toBe('gvmc');
+    expect(result.token).toBe('signed-jwt');
+  });
+
+  it('fails closed when the same email belongs to multiple tenants', async () => {
+    mockDataSource.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          user_id: 'user-1',
+          password_hash: PASSWORD_HASH,
+          is_active: true,
+          tenant_id: TENANT.tenant_id,
+        },
+        {
+          user_id: 'user-2',
+          password_hash: PASSWORD_HASH,
+          is_active: true,
+          tenant_id: 'b0000000-0000-4000-8000-000000000002',
+        },
+      ]);
+
+    await expect(
+      service.localLogin('shared@mygyanvihar.com', 'password123', 'sgvu'),
+    ).rejects.toThrow('Invalid email or password');
+    expect(mockTenantService.findById).not.toHaveBeenCalled();
   });
 
   it('returns token and Registrar role for dev.registrar@ persona', async () => {

@@ -32,6 +32,20 @@ export function getSubdomainFromClient(): string {
   return resolveTenantSubdomain(null);
 }
 
+export function rememberTenantSubdomain(subdomain: string): void {
+  if (typeof document === 'undefined') return;
+  const normalized = subdomain.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalized)) return;
+  document.cookie = `${TENANT_COOKIE}=${encodeURIComponent(normalized)}; Path=/; SameSite=Lax`;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem('tenant_subdomain', normalized);
+    } catch {
+      // Cookies are authoritative; storage can be unavailable in private mode.
+    }
+  }
+}
+
 export async function fetchTenantBranding(subdomain: string): Promise<TenantBranding> {
   const { getApiBaseUrl } = await import('./api-base-url');
   const apiUrl = getApiBaseUrl();

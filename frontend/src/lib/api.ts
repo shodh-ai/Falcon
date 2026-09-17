@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { getSubdomainFromClient } from '@/lib/tenant';
+import { getSubdomainFromClient, rememberTenantSubdomain } from '@/lib/tenant';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 
 let authRedirectInFlight = false;
@@ -210,7 +210,7 @@ export const api = {
         extractApiErrorMessage(text, response.status, '/api/auth/local-login'),
       );
     }
-    return response.json() as Promise<{
+    const result = (await response.json()) as {
       token: string;
       user: {
         user_id: string;
@@ -223,10 +223,15 @@ export const api = {
         department?: string;
         dept_id?: number;
         tenant_id?: string;
+        tenant_subdomain?: string;
         tenant_schema?: string;
         onboarding_status?: string;
       };
-    }>;
+    };
+    if (result.user.tenant_subdomain) {
+      rememberTenantSubdomain(result.user.tenant_subdomain);
+    }
+    return result;
   },
 };
 

@@ -26,6 +26,7 @@ type LoginCredentialRow = {
   user_id: string;
   password_hash: string;
   is_active: boolean;
+  tenant_id?: string;
 };
 
 type LoginUserRow = {
@@ -165,9 +166,9 @@ export class AuthService {
     tenantSubdomain?: string,
   ): Promise<{ token: string; user: Record<string, unknown> }> {
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
-    const tenant = await this.tenantService.findBySubdomain(subdomain);
+    let tenant = await this.tenantService.findBySubdomain(subdomain);
 
-    const [credential] = await this.dataSource.query<LoginCredentialRow[]>(
+    let [credential] = await this.dataSource.query<LoginCredentialRow[]>(
       `SELECT user_id, password_hash, is_active
        FROM users
        WHERE LOWER(official_email) = LOWER($1)
@@ -175,6 +176,27 @@ export class AuthService {
        LIMIT 1`,
       [email, tenant.tenant_id],
     );
+
+    // The shared Falcon hostname defaults to SGVU. If that default tenant has
+    // no such account, resolve the email only when it belongs to exactly one
+    // active tenant. Duplicate emails fail closed and still return the neutral
+    // login error, so this never guesses between tenants or leaks membership.
+    if (!credential) {
+      const candidates = await this.dataSource.query<LoginCredentialRow[]>(
+        `SELECT u.user_id, u.password_hash, u.is_active, u.tenant_id
+         FROM users u
+         INNER JOIN tenants t ON t.tenant_id = u.tenant_id
+         WHERE LOWER(u.official_email) = LOWER($1)
+           AND t.is_active = true
+         ORDER BY u.user_id
+         LIMIT 2`,
+        [email],
+      );
+      if (candidates.length === 1 && candidates[0].tenant_id) {
+        credential = candidates[0];
+        tenant = await this.tenantService.findById(candidates[0].tenant_id);
+      }
+    }
 
     if (!credential?.password_hash) {
       throw new UnauthorizedException('Invalid email or password');
@@ -278,6 +300,7 @@ export class AuthService {
         department: tokenUser.department?.dept_name,
         dept_id: tokenUser.dept_id,
         tenant_id: tenant.tenant_id,
+        tenant_subdomain: tenant.subdomain,
         tenant_schema: tenant.pg_schema,
         hr_capabilities: caps ?? {},
         permissions,
