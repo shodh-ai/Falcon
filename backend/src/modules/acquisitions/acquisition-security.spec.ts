@@ -12,6 +12,7 @@ const actor: AcquisitionActor = {
   user_id: '10000000-0000-4000-8000-000000000001',
   tenant_id: 'a0000000-0000-4000-8000-000000000001',
   role: 'Faculty',
+  department_id: 7,
 };
 
 const draft: CreateAcquisitionInput = {
@@ -58,6 +59,30 @@ describe('AcquisitionService authorization and sensitive data', () => {
       ForbiddenException,
     );
     expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('uses the actor department for a department-scoped requester grant', async () => {
+    db.query
+      .mockResolvedValueOnce([
+        { scope_type: 'DEPARTMENT', scope_reference: '7' },
+      ])
+      .mockResolvedValueOnce([
+        {
+          source_type: 'PROJECT',
+          source_id: '20000000-0000-4000-8000-000000000001',
+          label: 'GVMC test funding source',
+          allocated_amount: 100000,
+          encumbered_amount: 0,
+          utilized_amount: 0,
+        },
+      ]);
+
+    await expect(service.listFundingSources(actor)).resolves.toEqual([
+      expect.objectContaining({
+        label: 'GVMC test funding source',
+        available_amount: 100000,
+      }),
+    ]);
   });
 
   it('denies cross-scope object access before loading child records', async () => {

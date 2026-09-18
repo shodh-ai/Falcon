@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Plus, ShieldCheck, Upload, X } from 'lucide-react';
-import { useAuthedApi } from '@/lib/api';
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Download, Plus, ShieldCheck, Upload, X } from "lucide-react";
+import { useAuthedApi } from "@/lib/api";
 import {
   createAcquisitionsApi,
   type AcquisitionDraftInput,
@@ -11,38 +11,38 @@ import {
   type AcquisitionLineInput,
   type AcquisitionSummary,
   type ImportPreview,
-} from '@/lib/api/api.acquisitions';
-import { toast } from '@/lib/notifications/falcon-toast';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { AcquisitionStatus } from './AcquisitionStatus';
+} from "@/lib/api/api.acquisitions";
+import { toast } from "@/lib/notifications/falcon-toast";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { AcquisitionStatus } from "./AcquisitionStatus";
 
 const blankLine = (): AcquisitionLineInput => ({
-  acquisition_layout: 'GENERAL',
-  product_name: '',
-  category: '',
+  acquisition_layout: "GENERAL",
+  product_name: "",
+  category: "ASSET",
   quantity: 1,
-  unit: 'unit',
-  technical_specifications: '',
-  intended_use: '',
+  unit: "unit",
+  technical_specifications: "",
+  intended_use: "",
   estimated_unit_price: 0,
-  item_classification: 'ASSET',
+  item_classification: "ASSET",
 });
 
 const blankDraft = (): AcquisitionDraftInput => ({
-  intended_use_case: '',
-  required_by_date: '',
-  priority: 'NORMAL',
-  funding_source_type: 'DEPARTMENT',
-  funding_source_id: '',
-  currency: 'INR',
+  intended_use_case: "",
+  required_by_date: "",
+  priority: "NORMAL",
+  funding_source_type: "DEPARTMENT",
+  funding_source_id: "",
+  currency: "INR",
   lines: [blankLine()],
 });
 
-const money = (value: unknown, currency = 'INR') =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(
+const money = (value: unknown, currency = "INR") =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(
     Number(value ?? 0),
   );
 
@@ -53,7 +53,7 @@ export function AcquisitionWorkspace() {
   const [draft, setDraft] = useState(blankDraft);
   const [showWizard, setShowWizard] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState('ALL');
+  const [filter, setFilter] = useState("ALL");
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(
     null,
   );
@@ -76,7 +76,17 @@ export function AcquisitionWorkspace() {
     if (!showWizard) return;
     void api
       .fundingSources()
-      .then(setFundingSources)
+      .then((sources) => {
+        setFundingSources(sources);
+        if (sources.length === 1) {
+          setDraft((current) => ({
+            ...current,
+            funding_source_type: sources[0]
+              .funding_source_type as AcquisitionDraftInput["funding_source_type"],
+            funding_source_id: sources[0].funding_source_id,
+          }));
+        }
+      })
       .catch((error) => toast.error(error.message));
   }, [api, showWizard]);
 
@@ -97,7 +107,7 @@ export function AcquisitionWorkspace() {
     0,
   );
   const visible = rows.filter(
-    (row) => filter === 'ALL' || row.status === filter,
+    (row) => filter === "ALL" || row.status === filter,
   );
 
   async function save() {
@@ -120,11 +130,11 @@ export function AcquisitionWorkspace() {
   async function previewWorkbook(file?: File) {
     if (!file) return;
     const form = new FormData();
-    form.set('file', file);
-    form.set('header', JSON.stringify({ ...draft, lines: undefined }));
+    form.set("file", file);
+    form.set("header", JSON.stringify({ ...draft, lines: undefined }));
     try {
       setImportPreview(await api.previewImport(form));
-      toast.success('Workbook validated; review before atomic commit');
+      toast.success("Workbook validated; review before atomic commit");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -137,7 +147,7 @@ export function AcquisitionWorkspace() {
       setImportPreview(null);
       setShowWizard(false);
       await reload();
-      toast.success('All workbook rows committed atomically');
+      toast.success("All workbook rows committed atomically");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -147,9 +157,9 @@ export function AcquisitionWorkspace() {
     try {
       const blob = await api.template();
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
+      const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = 'falcon-acquisition-template-v1.xlsx';
+      anchor.download = "falcon-acquisition-template-v1.xlsx";
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -179,20 +189,20 @@ export function AcquisitionWorkspace() {
       <div className="grid gap-3 md:grid-cols-4">
         {[
           [
-            'Open',
+            "Open",
             rows.filter(
-              (r) => !['APPROVED', 'REJECTED', 'WITHDRAWN'].includes(r.status),
+              (r) => !["APPROVED", "REJECTED", "WITHDRAWN"].includes(r.status),
             ).length,
           ],
           [
-            'Vendor review',
-            rows.filter((r) => r.status === 'VENDOR_REVIEW').length,
+            "Vendor review",
+            rows.filter((r) => r.status === "VENDOR_REVIEW").length,
           ],
           [
-            'DoFA pending',
-            rows.filter((r) => r.status === 'PENDING_DOFA').length,
+            "DoFA pending",
+            rows.filter((r) => r.status === "PENDING_DOFA").length,
           ],
-          ['Approved', rows.filter((r) => r.status === 'APPROVED').length],
+          ["Approved", rows.filter((r) => r.status === "APPROVED").length],
         ].map(([label, value]) => (
           <Card key={String(label)}>
             <CardContent className="p-4">
@@ -227,7 +237,7 @@ export function AcquisitionWorkspace() {
             <div className="grid gap-3 md:grid-cols-3">
               <Input
                 placeholder="Intended department, lab or project"
-                value={draft.intended_lab_or_project ?? ''}
+                value={draft.intended_lab_or_project ?? ""}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -249,7 +259,7 @@ export function AcquisitionWorkspace() {
                   setDraft({
                     ...draft,
                     priority: e.target
-                      .value as AcquisitionDraftInput['priority'],
+                      .value as AcquisitionDraftInput["priority"],
                   })
                 }
               >
@@ -266,49 +276,40 @@ export function AcquisitionWorkspace() {
                   setDraft({ ...draft, intended_use_case: e.target.value })
                 }
               />
-              <select
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={draft.funding_source_type}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    funding_source_type: e.target
-                      .value as AcquisitionDraftInput['funding_source_type'],
-                    funding_source_id: '',
-                  })
-                }
-              >
-                <option>DEPARTMENT</option>
-                <option>PROGRAM</option>
-                <option>PROJECT</option>
-                <option>RESEARCH_GRANT</option>
-                <option>INSTITUTIONAL</option>
-                <option>OTHER</option>
-              </select>
-              <div className="space-y-1">
+              <div className="space-y-1 md:col-span-2">
+                <label
+                  htmlFor="acquisition-funding-source"
+                  className="text-sm font-medium"
+                >
+                  Funding source
+                </label>
                 <select
+                  id="acquisition-funding-source"
                   aria-label="Funding source"
                   className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   value={draft.funding_source_id}
-                  onChange={(e) =>
-                    setDraft({ ...draft, funding_source_id: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const selected = fundingSources.find(
+                      (source) => source.funding_source_id === e.target.value,
+                    );
+                    setDraft({
+                      ...draft,
+                      funding_source_id: e.target.value,
+                      funding_source_type:
+                        (selected?.funding_source_type as AcquisitionDraftInput["funding_source_type"]) ??
+                        draft.funding_source_type,
+                    });
+                  }}
                 >
                   <option value="">Select funding source</option>
-                  {fundingSources
-                    .filter(
-                      (source) =>
-                        source.funding_source_type ===
-                        draft.funding_source_type,
-                    )
-                    .map((source) => (
-                      <option
-                        key={source.funding_source_id}
-                        value={source.funding_source_id}
-                      >
-                        {source.label} · {money(source.available_amount)}
-                      </option>
-                    ))}
+                  {fundingSources.map((source) => (
+                    <option
+                      key={source.funding_source_id}
+                      value={source.funding_source_id}
+                    >
+                      {source.label} · {money(source.available_amount)}
+                    </option>
+                  ))}
                 </select>
                 <p className="text-xs text-muted-foreground">
                   This is the approved budget, program or grant that will fund
@@ -318,7 +319,7 @@ export function AcquisitionWorkspace() {
               <Textarea
                 className="md:col-span-2"
                 placeholder="Special procurement requirements"
-                value={draft.special_procurement_requirements ?? ''}
+                value={draft.special_procurement_requirements ?? ""}
                 onChange={(e) =>
                   setDraft({
                     ...draft,
@@ -354,7 +355,7 @@ export function AcquisitionWorkspace() {
                       onChange={(e) =>
                         setLine(index, {
                           acquisition_layout: e.target
-                            .value as AcquisitionLineInput['acquisition_layout'],
+                            .value as AcquisitionLineInput["acquisition_layout"],
                         })
                       }
                     >
@@ -369,27 +370,26 @@ export function AcquisitionWorkspace() {
                         setLine(index, { product_name: e.target.value })
                       }
                     />
-                    <Input
-                      placeholder="Category"
-                      value={line.category}
-                      onChange={(e) =>
-                        setLine(index, { category: e.target.value })
-                      }
-                    />
-                    <select
-                      className="h-10 rounded-md border bg-background px-3 text-sm"
-                      value={line.item_classification}
-                      onChange={(e) =>
-                        setLine(index, {
-                          item_classification: e.target
-                            .value as AcquisitionLineInput['item_classification'],
-                        })
-                      }
-                    >
-                      <option>ASSET</option>
-                      <option>CONSUMABLE</option>
-                      <option>SERVICE</option>
-                    </select>
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">Category</span>
+                      <select
+                        aria-label={`Product line ${index + 1} category`}
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                        value={line.item_classification}
+                        onChange={(e) => {
+                          const category = e.target
+                            .value as AcquisitionLineInput["item_classification"];
+                          setLine(index, {
+                            item_classification: category,
+                            category,
+                          });
+                        }}
+                      >
+                        <option value="ASSET">Asset</option>
+                        <option value="CONSUMABLE">Consumable</option>
+                        <option value="SERVICE">Service</option>
+                      </select>
+                    </label>
                     <Input
                       type="number"
                       min="1"
@@ -398,7 +398,7 @@ export function AcquisitionWorkspace() {
                       placeholder="Quantity (whole number)"
                       value={line.quantity}
                       onKeyDown={(e) => {
-                        if (['.', 'e', 'E', '+', '-'].includes(e.key))
+                        if ([".", "e", "E", "+", "-"].includes(e.key))
                           e.preventDefault();
                       }}
                       onChange={(e) => {
@@ -408,14 +408,10 @@ export function AcquisitionWorkspace() {
                       }}
                     />
                     <Input
-                      placeholder="Unit"
-                      value={line.unit}
-                      onChange={(e) => setLine(index, { unit: e.target.value })}
-                    />
-                    <Input
                       type="number"
                       min="0"
-                      placeholder="Unit price"
+                      aria-label="Price per unit"
+                      placeholder="Price per unit"
                       value={line.estimated_unit_price}
                       onChange={(e) =>
                         setLine(index, {
@@ -423,49 +419,34 @@ export function AcquisitionWorkspace() {
                         })
                       }
                     />
-                    <Input
-                      type="number"
-                      min="0"
-                      placeholder="Tax"
-                      value={line.tax_cost ?? ''}
-                      onChange={(e) =>
-                        setLine(index, { tax_cost: Number(e.target.value) })
-                      }
-                    />
                     <Textarea
-                      className="md:col-span-2"
-                      placeholder="Technical specifications"
+                      className="md:col-span-4"
+                      aria-label="Notes and General info (optional)"
+                      placeholder="Notes and General info (optional)"
                       value={line.technical_specifications}
                       onChange={(e) =>
                         setLine(index, {
                           technical_specifications: e.target.value,
+                          intended_use: e.target.value,
                         })
                       }
                     />
-                    <Textarea
-                      className="md:col-span-2"
-                      placeholder="Line intended use"
-                      value={line.intended_use}
-                      onChange={(e) =>
-                        setLine(index, { intended_use: e.target.value })
-                      }
-                    />
-                    {line.acquisition_layout === 'ONLINE' && (
+                    {line.acquisition_layout === "ONLINE" && (
                       <Input
                         className="md:col-span-2"
                         type="url"
                         placeholder="HTTPS product URL"
-                        value={line.product_url ?? ''}
+                        value={line.product_url ?? ""}
                         onChange={(e) =>
                           setLine(index, { product_url: e.target.value })
                         }
                       />
                     )}
-                    {line.acquisition_layout === 'OFFLINE' && (
+                    {line.acquisition_layout === "OFFLINE" && (
                       <Input
                         className="md:col-span-2"
                         placeholder="Preferred vendor name"
-                        value={line.preferred_vendor_name ?? ''}
+                        value={line.preferred_vendor_name ?? ""}
                         onChange={(e) =>
                           setLine(index, {
                             preferred_vendor_name: e.target.value,
@@ -521,18 +502,18 @@ export function AcquisitionWorkspace() {
                   />
                 </label>
                 <Button disabled={busy} onClick={() => void save()}>
-                  {busy ? 'Saving…' : 'Save draft'}
+                  {busy ? "Saving…" : "Save draft"}
                 </Button>
               </div>
             </div>
             {importPreview && (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm">
                 <p className="font-semibold">
-                  {importPreview.row_count} rows ready · scan{' '}
+                  {importPreview.row_count} rows ready · scan{" "}
                   {importPreview.malware_scan_status}
                 </p>
                 <p>
-                  {importPreview.validation?.errors?.length ?? 0} errors,{' '}
+                  {importPreview.validation?.errors?.length ?? 0} errors,{" "}
                   {importPreview.validation?.warnings?.length ?? 0} warnings
                 </p>
                 <Button
@@ -554,20 +535,20 @@ export function AcquisitionWorkspace() {
             <CardTitle>Scoped acquisition queue</CardTitle>
             <div className="flex flex-wrap gap-2">
               {[
-                'ALL',
-                'DRAFT',
-                'VENDOR_REVIEW',
-                'BUDGET_BLOCKED',
-                'PENDING_DOFA',
-                'APPROVED',
+                "ALL",
+                "DRAFT",
+                "VENDOR_REVIEW",
+                "BUDGET_BLOCKED",
+                "PENDING_DOFA",
+                "APPROVED",
               ].map((state) => (
                 <Button
                   key={state}
                   size="sm"
-                  variant={filter === state ? 'default' : 'outline'}
+                  variant={filter === state ? "default" : "outline"}
                   onClick={() => setFilter(state)}
                 >
-                  {state.replaceAll('_', ' ')}
+                  {state.replaceAll("_", " ")}
                 </Button>
               ))}
             </div>
@@ -580,22 +561,22 @@ export function AcquisitionWorkspace() {
               href={
                 row.acquisition_version_id
                   ? `/finance/acquisitions/${row.acquisition_version_id}`
-                  : '/finance/requisitions'
+                  : "/finance/requisitions"
               }
               className="grid gap-2 rounded-lg border p-4 transition hover:border-blue-300 md:grid-cols-[1fr_auto_auto] md:items-center"
             >
               <div>
                 <div className="font-semibold">
-                  {row.acquisition_number}{' '}
+                  {row.acquisition_number}{" "}
                   <span className="text-xs text-muted-foreground">
                     v{row.version_number}
                   </span>
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  Required{' '}
+                  Required{" "}
                   {row.required_by_date
-                    ? new Date(row.required_by_date).toLocaleDateString('en-IN')
-                    : 'not recorded'}{' '}
+                    ? new Date(row.required_by_date).toLocaleDateString("en-IN")
+                    : "not recorded"}{" "}
                   · {row.source}
                 </div>
               </div>

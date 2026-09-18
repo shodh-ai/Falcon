@@ -540,7 +540,7 @@ async function main() {
 
     const funding = await client.query(
       `INSERT INTO acq_funding_sources(tenant_id,funding_source_type,name,allocated_amount,is_active)
-       VALUES($1,'PROJECT','GVMC Construction', $2, true)
+       VALUES($1,'PROJECT','GVMC test funding source', $2, true)
        ON CONFLICT(tenant_id,funding_source_type,name) DO UPDATE SET
          allocated_amount=EXCLUDED.allocated_amount,is_active=true
        RETURNING funding_source_id`,
@@ -705,7 +705,7 @@ async function main() {
           launch_url: plan().launch_url,
           funding_source: {
             id: funding.rows[0].funding_source_id,
-            name: 'GVMC Construction',
+            name: 'GVMC test funding source',
             approved_limit_inr: constructionBudget,
           },
           credentials,

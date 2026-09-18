@@ -67,6 +67,7 @@ export class AcquisitionService {
     capability: string,
     departmentId?: number | null,
   ) {
+    const effectiveDepartmentId = departmentId ?? actor.department_id;
     const rows = await this.db.query(
       `SELECT scope_type, scope_reference
        FROM acq_access_grants
@@ -87,8 +88,8 @@ export class AcquisitionService {
       (grant: { scope_type: string; scope_reference?: string | null }) =>
         grant.scope_type === 'TENANT' ||
         (grant.scope_type === 'DEPARTMENT' &&
-          departmentId != null &&
-          String(departmentId) === String(grant.scope_reference)),
+          effectiveDepartmentId != null &&
+          String(effectiveDepartmentId) === String(grant.scope_reference)),
     );
   }
 
@@ -312,7 +313,9 @@ export class AcquisitionService {
     await this.requireCapability(
       actor,
       'ACQUISITION_REQUESTER',
-      input.requesting_department_id ?? input.intended_department_id,
+      input.requesting_department_id ??
+        input.intended_department_id ??
+        actor.department_id,
     );
     if (
       !Array.isArray(input.lines) ||

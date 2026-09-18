@@ -230,7 +230,6 @@ export function validateAcquisition(input: CreateAcquisitionInput) {
     const lineWarnings: string[] = [];
     if (!text(line.product_name)) lineErrors.push('product_name is required');
     if (!text(line.category)) lineErrors.push('category is required');
-    if (!text(line.intended_use)) lineErrors.push('intended_use is required');
     if (!['ONLINE', 'OFFLINE', 'GENERAL'].includes(line.acquisition_layout)) {
       lineErrors.push('acquisition_layout is invalid');
     }
