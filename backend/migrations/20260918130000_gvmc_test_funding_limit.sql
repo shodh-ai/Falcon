@@ -6,8 +6,7 @@
 -- GREATEST prevents this migration from reducing a larger approved balance.
 UPDATE acq_funding_sources AS funding
 SET allocated_amount = GREATEST(funding.allocated_amount, 10000000),
-    is_active = true,
-    updated_at = NOW()
+    is_active = true
 FROM tenants AS tenant
 WHERE funding.tenant_id = tenant.tenant_id
   AND lower(tenant.subdomain) = 'gvmc'
