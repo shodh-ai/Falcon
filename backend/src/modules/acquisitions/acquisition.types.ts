@@ -96,6 +96,9 @@ export type AcquisitionActor = {
   tenant_id?: string;
   role?: string;
   roles?: string[];
+  /** Canonical department field emitted by JwtStrategy. */
+  dept_id?: number | null;
+  /** Compatibility alias used by older acquisition callers and tests. */
   department_id?: number | null;
 };
 

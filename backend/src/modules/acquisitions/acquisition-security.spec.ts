@@ -12,7 +12,7 @@ const actor: AcquisitionActor = {
   user_id: '10000000-0000-4000-8000-000000000001',
   tenant_id: 'a0000000-0000-4000-8000-000000000001',
   role: 'Faculty',
-  department_id: 7,
+  dept_id: 7,
 };
 
 const draft: CreateAcquisitionInput = {

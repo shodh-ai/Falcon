@@ -67,7 +67,8 @@ export class AcquisitionService {
     capability: string,
     departmentId?: number | null,
   ) {
-    const effectiveDepartmentId = departmentId ?? actor.department_id;
+    const effectiveDepartmentId =
+      departmentId ?? actor.dept_id ?? actor.department_id;
     const rows = await this.db.query(
       `SELECT scope_type, scope_reference
        FROM acq_access_grants
@@ -315,6 +316,7 @@ export class AcquisitionService {
       'ACQUISITION_REQUESTER',
       input.requesting_department_id ??
         input.intended_department_id ??
+        actor.dept_id ??
         actor.department_id,
     );
     if (
