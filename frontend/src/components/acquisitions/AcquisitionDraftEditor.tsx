@@ -63,15 +63,23 @@ export function AcquisitionDraftEditor({
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-3">
           <label className="space-y-1 text-sm">
-            <span className="font-medium">Required-by date</span>
+            <span className="font-medium">Required by date</span>
             <Input
-              aria-label="Required-by date"
+              aria-label="Required by date"
+              aria-describedby="draft-required-date-help"
               type="date"
               value={draft.required_by_date}
               onChange={(event) =>
                 setDraft({ ...draft, required_by_date: event.target.value })
               }
             />
+            <span
+              id="draft-required-date-help"
+              className="block text-xs text-muted-foreground"
+            >
+              Date the goods or service must be available. This is not the
+              current date, fund-release date, or fund-utilization date.
+            </span>
           </label>
           <label className="space-y-1 text-sm md:col-span-2">
             <span className="font-medium">Overall intended use</span>

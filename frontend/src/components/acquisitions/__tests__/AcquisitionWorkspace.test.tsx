@@ -77,6 +77,12 @@ describe("AcquisitionWorkspace persona queue", () => {
       screen.getByText(/You do not need to enter an ID/),
     ).toBeInTheDocument();
     expect(
+      screen.getByLabelText("Required by date"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Date the goods or service must be available/),
+    ).toBeInTheDocument();
+    expect(
       await screen.findByRole("option", { name: /GVMC test funding source/ }),
     ).toBeInTheDocument();
     expect(

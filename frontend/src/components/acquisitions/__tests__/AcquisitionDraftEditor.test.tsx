@@ -29,7 +29,7 @@ describe("AcquisitionDraftEditor", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Required-by date"), {
+    fireEvent.change(screen.getByLabelText("Required by date"), {
       target: { value: "2026-11-15" },
     });
     fireEvent.change(screen.getByLabelText("Line 1 notes and general info"), {

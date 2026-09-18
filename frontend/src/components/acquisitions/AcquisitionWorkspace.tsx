@@ -245,13 +245,25 @@ export function AcquisitionWorkspace() {
                   })
                 }
               />
-              <Input
-                type="date"
-                value={draft.required_by_date}
-                onChange={(e) =>
-                  setDraft({ ...draft, required_by_date: e.target.value })
-                }
-              />
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Required by date</span>
+                <Input
+                  aria-label="Required by date"
+                  aria-describedby="acquisition-required-date-help"
+                  type="date"
+                  value={draft.required_by_date}
+                  onChange={(e) =>
+                    setDraft({ ...draft, required_by_date: e.target.value })
+                  }
+                />
+                <span
+                  id="acquisition-required-date-help"
+                  className="block text-xs text-muted-foreground"
+                >
+                  Date the goods or service must be available. This is not the
+                  current date, fund-release date, or fund-utilization date.
+                </span>
+              </label>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={draft.priority}
