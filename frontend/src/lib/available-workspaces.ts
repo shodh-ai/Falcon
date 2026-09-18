@@ -139,7 +139,21 @@ export function resolveActiveWorkspaceRole(
   user: WorkspaceUserLike,
   workspaces: AvailableWorkspace[] = getAvailableWorkspaces(user),
 ): string | null {
-  const roleList = workspaces.map((workspace) => workspace.role);
+  // A portal can host several roles (for example ProcurementBuyer and APClerk
+  // both use /finance). Preserve the declared primary role ahead of the
+  // presentation-sorted workspace list so an auxiliary role cannot silently
+  // replace it for route authorization.
+  const primaryRole = user?.primaryRole?.trim();
+  const roleList = [
+    ...(primaryRole ? [primaryRole] : []),
+    ...workspaces.map((workspace) => workspace.role),
+  ].filter(
+    (role, index, roles) =>
+      roles.findIndex(
+        (candidate) =>
+          normalizeWorkspaceRoleKey(candidate) === normalizeWorkspaceRoleKey(role),
+      ) === index,
+  );
   const fromPath = getActiveWorkspaceRoleFromPath(pathname, roleList);
   if (fromPath) return fromPath;
 
