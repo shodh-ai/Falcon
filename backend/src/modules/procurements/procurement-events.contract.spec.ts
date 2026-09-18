@@ -41,4 +41,19 @@ describe('Module 2 event and compatibility contract', () => {
     expect(service).toContain('INSERT INTO fin_vendor_invoices');
     expect(service).toContain('INSERT INTO fin_goods_receipts');
   });
+
+  it('creates the canonical receipt before back-linking the legacy GRN', () => {
+    const legacyInsert = service.indexOf('INSERT INTO fin_goods_receipts');
+    const canonicalInsert = service.indexOf('INSERT INTO proc_receipts');
+    const legacyBackLink = service.indexOf(
+      'UPDATE fin_goods_receipts SET proc_receipt_id=$2',
+    );
+
+    expect(legacyInsert).toBeGreaterThanOrEqual(0);
+    expect(canonicalInsert).toBeGreaterThan(legacyInsert);
+    expect(legacyBackLink).toBeGreaterThan(canonicalInsert);
+    expect(
+      service.slice(legacyInsert, canonicalInsert),
+    ).not.toContain('proc_receipt_id,source_system');
+  });
 });

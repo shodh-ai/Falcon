@@ -1710,16 +1710,19 @@ export class ProcurementService {
             'Replacement must reference an eligible return',
           );
       }
+      // fin_goods_receipts.proc_receipt_id and proc_receipts.legacy_grn_id form
+      // a compatibility link in both directions. Create the nullable legacy
+      // projection first, then link it back after the canonical receipt exists;
+      // inserting both references up front violates the immediate FK.
       const legacy = await manager.query(
-        `INSERT INTO fin_goods_receipts (tenant_id,po_id,received_by,received_at,notes,proc_receipt_id,source_system)
-         VALUES ($1,$2,$3,$4,$5,$6,'MODULE2') RETURNING grn_id`,
+        `INSERT INTO fin_goods_receipts (tenant_id,po_id,received_by,received_at,notes,source_system)
+         VALUES ($1,$2,$3,$4,$5,'MODULE2') RETURNING grn_id`,
         [
           row.tenant_id,
           order.legacy_po_id,
           actor.user_id,
           input.actual_delivery_date,
           input.notes ?? null,
-          receiptId,
         ],
       );
       await manager.query(
@@ -1743,6 +1746,11 @@ export class ProcurementService {
           packageEvidence.capture_accuracy_metres,
           packageEvidence.client_captured_at,
         ],
+      );
+      await manager.query(
+        `UPDATE fin_goods_receipts SET proc_receipt_id=$2
+         WHERE grn_id=$1 AND tenant_id=$3 AND source_system='MODULE2'`,
+        [legacy[0].grn_id, receiptId, row.tenant_id],
       );
       await manager.query(
         `UPDATE proc_document_uploads SET consumed_at=NOW() WHERE document_upload_id=$1`,
