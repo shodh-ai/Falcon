@@ -49,4 +49,8 @@ describe('Module 5 authority contracts', () => {
     expect(service).not.toContain('al.model,');
     expect(service).not.toContain('source.model ??');
   });
+  it('casts receipt cohort quantities before calculating resulting stock', () => {
+    expect(service).toContain('$11::numeric+$9::numeric');
+    expect(service).not.toContain('$11+$9');
+  });
 });

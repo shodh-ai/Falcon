@@ -730,7 +730,7 @@ export class InventoryService {
           [event.tenant_id, models[0].product_model_id],
         );
         batches = await manager.query(
-          `INSERT INTO inv_procurement_batches(tenant_id,batch_code,product_model_id,proc_case_id,acquisition_line_id,order_line_id,receipt_line_id,vendor_id,batch_quantity,unit_of_measure,previous_stock,resulting_stock) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11+$9) RETURNING *`,
+          `INSERT INTO inv_procurement_batches(tenant_id,batch_code,product_model_id,proc_case_id,acquisition_line_id,order_line_id,receipt_line_id,vendor_id,batch_quantity,unit_of_measure,previous_stock,resulting_stock) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11::numeric+$9::numeric) RETURNING *`,
           [
             event.tenant_id,
             code,
