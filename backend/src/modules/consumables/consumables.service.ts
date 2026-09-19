@@ -1577,14 +1577,14 @@ export class ConsumablesService {
           );
       }
       const models = await m.query(
-        `SELECT r.tenant_id,r.product_model_id,r.location_space_id,COALESCE(SUM(CASE WHEN COALESCE(e.status,'AVAILABLE') IN('AVAILABLE','EXPIRING_SOON') THEN lm.signed_quantity ELSE 0 END),0)-COALESCE((SELECT SUM(a.allocated_quantity-a.issued_quantity) FROM con_reservation_allocations a JOIN con_reservations z ON z.reservation_id=a.reservation_id WHERE a.tenant_id=r.tenant_id AND a.inventory_record_id IN(SELECT inventory_record_id FROM inv_records x WHERE x.product_model_id=r.product_model_id AND x.location_space_id IS NOT DISTINCT FROM r.location_space_id) AND a.status IN('ACTIVE','PARTIALLY_CONSUMED') AND z.expires_at>NOW()),0) available FROM inv_records r LEFT JOIN inv_lot_movements lm ON lm.inventory_record_id=r.inventory_record_id LEFT JOIN con_lot_eligibility e ON e.inventory_record_id=r.inventory_record_id WHERE r.record_type='LOT' AND platform_module_is_available('inventory_assets',r.tenant_id,NULL,r.owner_department_id::text) GROUP BY r.tenant_id,r.product_model_id,r.location_space_id`,
+        `SELECT r.tenant_id,r.product_model_id,r.owner_department_id,r.location_space_id,COALESCE(SUM(CASE WHEN COALESCE(e.status,'AVAILABLE') IN('AVAILABLE','EXPIRING_SOON') THEN lm.signed_quantity ELSE 0 END),0)-COALESCE((SELECT SUM(a.allocated_quantity-a.issued_quantity) FROM con_reservation_allocations a JOIN con_reservations z ON z.reservation_id=a.reservation_id WHERE a.tenant_id=r.tenant_id AND a.inventory_record_id IN(SELECT inventory_record_id FROM inv_records x WHERE x.product_model_id=r.product_model_id AND x.owner_department_id IS NOT DISTINCT FROM r.owner_department_id AND x.location_space_id IS NOT DISTINCT FROM r.location_space_id) AND a.status IN('ACTIVE','PARTIALLY_CONSUMED') AND z.expires_at>NOW()),0) available FROM inv_records r LEFT JOIN inv_lot_movements lm ON lm.inventory_record_id=r.inventory_record_id LEFT JOIN con_lot_eligibility e ON e.inventory_record_id=r.inventory_record_id WHERE r.record_type='LOT' AND platform_module_is_available('inventory_assets',r.tenant_id,NULL,r.owner_department_id::text) GROUP BY r.tenant_id,r.product_model_id,r.owner_department_id,r.location_space_id`,
       );
       for (const model of models) {
         const p = await this.policy(
           m,
           model.tenant_id,
           model.product_model_id,
-          undefined,
+          model.owner_department_id,
           model.location_space_id,
         );
         const available = Math.max(0, Number(model.available));
@@ -1599,8 +1599,12 @@ export class ConsumablesService {
             { available, reorder_level: Number(p.reorder_level) },
           );
           const inboundRows = await m.query(
-            `SELECT COALESCE(SUM(ol.quantity-ol.cancelled_quantity)-SUM(COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0)),0) inbound FROM proc_order_lines ol JOIN proc_orders o ON o.order_id=ol.order_id JOIN inv_procurement_batches b ON b.order_line_id=ol.order_line_id WHERE ol.tenant_id=$1 AND b.product_model_id=$2 AND o.status IN('ISSUED','PARTIALLY_RECEIVED')`,
-            [model.tenant_id, model.product_model_id],
+            `SELECT COALESCE(SUM(ol.quantity-ol.cancelled_quantity)-SUM(COALESCE((SELECT SUM(rl.accepted_quantity) FROM proc_receipt_lines rl WHERE rl.order_line_id=ol.order_line_id),0)),0) inbound FROM proc_order_lines ol JOIN proc_orders o ON o.order_id=ol.order_id JOIN proc_cases c ON c.proc_case_id=o.proc_case_id JOIN inv_procurement_batches b ON b.order_line_id=ol.order_line_id WHERE ol.tenant_id=$1 AND b.product_model_id=$2 AND c.department_id IS NOT DISTINCT FROM $3 AND o.status IN('ISSUED','PARTIALLY_RECEIVED')`,
+            [
+              model.tenant_id,
+              model.product_model_id,
+              model.owner_department_id,
+            ],
           );
           const inbound = Math.max(0, Number(inboundRows[0]?.inbound ?? 0)),
             suggested = Math.max(
@@ -1609,10 +1613,11 @@ export class ConsumablesService {
             );
           if (suggested > 0) {
             const created = await m.query(
-              `INSERT INTO con_replenishment_suggestions(tenant_id,product_model_id,location_space_id,policy_id,available_quantity,confirmed_inbound,target_quantity,suggested_quantity) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING RETURNING *`,
+              `INSERT INTO con_replenishment_suggestions(tenant_id,product_model_id,department_id,location_space_id,policy_id,available_quantity,confirmed_inbound,target_quantity,suggested_quantity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING RETURNING *`,
               [
                 model.tenant_id,
                 model.product_model_id,
+                model.owner_department_id,
                 model.location_space_id,
                 p.stock_policy_id,
                 available,

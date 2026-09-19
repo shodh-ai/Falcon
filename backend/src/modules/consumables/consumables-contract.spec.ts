@@ -43,6 +43,17 @@ describe('DoFA Module 6 contract', () => {
       'CHECK(consumed_quantity+returned_quantity<=issued_quantity)',
     );
   });
+  it('scopes replenishment stock, inbound, and suggestions to the owning department', () => {
+    expect(service).toContain(
+      'r.product_model_id,r.owner_department_id,r.location_space_id',
+    );
+    expect(service).toContain(
+      'c.department_id IS NOT DISTINCT FROM $3',
+    );
+    expect(service).toContain(
+      'tenant_id,product_model_id,department_id,location_space_id',
+    );
+  });
   it('rejects malformed workflow identifiers before PostgreSQL sees them', () => {
     expect(service).toContain('const UUID_RE =');
     expect(service).toContain(
