@@ -72,4 +72,16 @@ describe('Module 5 authority contracts', () => {
     );
     expect(service).not.toContain("($3->>'owner_department_id')::int");
   });
+  it('blocks both state-change initiation and acknowledgement during a return hold', () => {
+    const guardedStateChanges = service.match(
+      /Inventory state changes are blocked by an active return hold/g,
+    );
+    expect(guardedStateChanges).toHaveLength(3);
+    expect(service).toMatch(
+      /async requestStateChange[\s\S]*?lifecycle_status === 'RETURN_PENDING'[\s\S]*?withIdempotency/,
+    );
+    expect(service).toMatch(
+      /async acknowledgeStateChange[\s\S]*?lifecycle_status === 'RETURN_PENDING'[\s\S]*?withIdempotency/,
+    );
+  });
 });

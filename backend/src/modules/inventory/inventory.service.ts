@@ -2257,6 +2257,10 @@ export class InventoryService {
     return this.db.transaction(async (manager) => {
       const row = await this.locked(manager, id, access.tenant_id);
       this.assertRevision(row, revision);
+      if (row.lifecycle_status === 'RETURN_PENDING')
+        throw new ConflictException(
+          'Inventory state changes are blocked by an active return hold',
+        );
       return this.withIdempotency(
         manager,
         row.tenant_id,
@@ -2325,6 +2329,10 @@ export class InventoryService {
     return this.db.transaction(async (manager) => {
       const row = await this.locked(manager, id, access.tenant_id);
       this.assertRevision(row, revision);
+      if (row.lifecycle_status === 'RETURN_PENDING')
+        throw new ConflictException(
+          'Inventory state changes are blocked by an active return hold',
+        );
       return this.withIdempotency(
         manager,
         row.tenant_id,
