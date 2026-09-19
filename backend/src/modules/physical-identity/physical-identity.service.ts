@@ -1499,8 +1499,15 @@ export class PhysicalIdentityService {
           if (next === 'RESOLVED' && !input.resolution?.trim())
             throw new BadRequestException('Resolution is required');
           await manager.query(
-            `UPDATE pix_gate_alerts SET status=$2,acknowledged_by=CASE WHEN $2='ACKNOWLEDGED' THEN $3 ELSE acknowledged_by END,acknowledged_at=CASE WHEN $2='ACKNOWLEDGED' THEN NOW() ELSE acknowledged_at END,resolution=CASE WHEN $2='RESOLVED' THEN $4 ELSE resolution END,resolved_by=CASE WHEN $2='RESOLVED' THEN $3 ELSE resolved_by END,resolved_at=CASE WHEN $2='RESOLVED' THEN NOW() ELSE resolved_at END,updated_at=NOW() WHERE gate_alert_id=$1`,
-            [alertId, next, actor.user_id, input.resolution ?? null],
+            `UPDATE pix_gate_alerts SET status=$2,acknowledged_by=CASE WHEN $5 THEN $3 ELSE acknowledged_by END,acknowledged_at=CASE WHEN $5 THEN NOW() ELSE acknowledged_at END,resolution=CASE WHEN $6 THEN $4 ELSE resolution END,resolved_by=CASE WHEN $6 THEN $3 ELSE resolved_by END,resolved_at=CASE WHEN $6 THEN NOW() ELSE resolved_at END,updated_at=NOW() WHERE gate_alert_id=$1`,
+            [
+              alertId,
+              next,
+              actor.user_id,
+              input.resolution ?? null,
+              next === 'ACKNOWLEDGED',
+              next === 'RESOLVED',
+            ],
           );
           const observation = (
             await manager.query(

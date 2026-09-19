@@ -64,6 +64,16 @@ describe('DoFA Module X domain contract', () => {
     expect(service).toContain('aggregate_sequence: sequence');
   });
 
+  it('uses typed booleans for gate-alert transition timestamps', () => {
+    expect(service).toContain(
+      'acknowledged_by=CASE WHEN $5 THEN $3 ELSE acknowledged_by END',
+    );
+    expect(service).toContain(
+      'resolved_at=CASE WHEN $6 THEN NOW() ELSE resolved_at END',
+    );
+    expect(service).not.toContain("CASE WHEN $2='ACKNOWLEDGED'");
+  });
+
   it('publishes required physical identity and gate events', () => {
     for (const event of [
       'PhysicalIdentityProvisioningRequested.v1',
