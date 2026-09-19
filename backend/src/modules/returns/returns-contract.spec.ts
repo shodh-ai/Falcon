@@ -45,6 +45,14 @@ describe('DoFA Module 7 contract', () => {
     );
     expect(service).toMatch(/\['REPAIR_RETURN',\s*'REPLACEMENT_UNIT'\]/);
     expect(service).toContain('resulting_subject_id');
+    expect(service).toContain(
+      'A replacement unit must have new physical and university identities',
+    );
+    expect(service).toContain('pr.replacement_for_return_id=$4');
+    expect(service).toContain(
+      'A repaired original must preserve its physical and university identities',
+    );
+    expect(service).toContain('ir.identity_revision>1');
   });
   it('prevents superseded decisions from executing', () => {
     expect(service).toContain('ReturnCaseSuperseded.v1');

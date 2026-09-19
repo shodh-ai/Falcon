@@ -1255,16 +1255,94 @@ export class ReturnsService {
           )[0]
         )
           throw new ConflictException('Module 8 outcome is required');
+        const allocations = await m.query(
+          `SELECT * FROM ret_case_allocations WHERE return_case_id=$1`,
+          [id],
+        );
+        if (['REPAIR_RETURN', 'REPLACEMENT_UNIT'].includes(row.disposition)) {
+          if (
+            allocations.length !== 1 ||
+            allocations[0].subject_type !== 'ITEM'
+          )
+            throw new ConflictException(
+              'Repair and replacement resolution requires one exact ITEM allocation',
+            );
+          if (
+            !input.resulting_subject_id ||
+            !input.resulting_inventory_record_id
+          )
+            throw new ConflictException(
+              'Verified resulting subject and inventory identity are required',
+            );
+          const original = allocations[0];
+          if (row.disposition === 'REPLACEMENT_UNIT') {
+            if (
+              input.resulting_subject_id === original.subject_id ||
+              input.resulting_inventory_record_id ===
+                original.inventory_record_id
+            )
+              throw new ConflictException(
+                'A replacement unit must have new physical and university identities',
+              );
+            const replacement = (
+              await m.query(
+                `SELECT r.inventory_record_id FROM inv_records r
+                 JOIN pv_verification_identities vi ON vi.verification_identity_id=r.verification_identity_id AND vi.status='ACTIVE'
+                 JOIN inv_procurement_batches b ON b.procurement_batch_id=r.procurement_batch_id
+                 JOIN proc_receipt_lines rl ON rl.receipt_line_id=b.receipt_line_id
+                 JOIN proc_receipts pr ON pr.receipt_id=rl.receipt_id
+                 WHERE r.inventory_record_id=$1 AND r.subject_id=$2 AND r.tenant_id=$3
+                   AND r.record_type='ITEM' AND r.record_status='ACTIVE'
+                   AND pr.replacement_for_return_id=$4`,
+                [
+                  input.resulting_inventory_record_id,
+                  input.resulting_subject_id,
+                  row.tenant_id,
+                  row.proc_return_id,
+                ],
+              )
+            )[0];
+            if (!replacement)
+              throw new ConflictException(
+                'Replacement must be an active verified ITEM received against this return',
+              );
+          } else {
+            if (
+              input.resulting_subject_id !== original.subject_id ||
+              input.resulting_inventory_record_id !==
+                original.inventory_record_id
+            )
+              throw new ConflictException(
+                'A repaired original must preserve its physical and university identities',
+              );
+            const repaired = (
+              await m.query(
+                `SELECT r.inventory_record_id FROM inv_records r
+                 JOIN pv_verification_identities vi ON vi.verification_identity_id=r.verification_identity_id AND vi.status='ACTIVE'
+                 JOIN inv_identity_revisions ir ON ir.inventory_record_id=r.inventory_record_id AND ir.status='ACTIVE'
+                 WHERE r.inventory_record_id=$1 AND r.subject_id=$2 AND r.tenant_id=$3
+                   AND r.record_type='ITEM' AND r.record_status='ACTIVE'
+                   AND ir.identity_revision>1
+                   AND ir.signed_payload->>'verification_identity_id'=vi.verification_identity_id::text`,
+                [
+                  input.resulting_inventory_record_id,
+                  input.resulting_subject_id,
+                  row.tenant_id,
+                ],
+              )
+            )[0];
+            if (!repaired)
+              throw new ConflictException(
+                'Repaired original requires current Module 4 re-verification and a new Module 5 identity revision',
+              );
+          }
+        }
         await this.procurements.transitionModule7Return(
           m,
           actor,
           id,
           row.active_decision_id,
           'RESOLVED',
-        );
-        const allocations = await m.query(
-          `SELECT * FROM ret_case_allocations WHERE return_case_id=$1`,
-          [id],
         );
         if (['REPAIR_RETURN', 'REPLACEMENT_UNIT'].includes(row.disposition)) {
           for (const a of allocations)
