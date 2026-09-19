@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -96,6 +96,7 @@ import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscr
 import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
 import { ModuleControlModule } from './module-control/module-control.module';
 import { ModuleAvailabilityInterceptor } from './module-control/module-availability.interceptor';
+import { DatabaseExceptionFilter } from './common/filters/database-exception.filter';
 
 @Module({
   imports: [
@@ -235,6 +236,7 @@ import { ModuleAvailabilityInterceptor } from './module-control/module-availabil
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_FILTER, useClass: DatabaseExceptionFilter },
     { provide: APP_GUARD, useClass: ImpersonationReadOnlyGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ModuleAvailabilityInterceptor },
