@@ -43,4 +43,14 @@ describe('DoFA Module 6 contract', () => {
       'CHECK(consumed_quantity+returned_quantity<=issued_quantity)',
     );
   });
+  it('rejects malformed workflow identifiers before PostgreSQL sees them', () => {
+    expect(service).toContain('const UUID_RE =');
+    expect(service).toContain(
+      "this.uuid(input.issue_allocation_id, 'Issue allocation ID')",
+    );
+    expect(service).toContain(
+      "this.uuid(input.reservation_id, 'Reservation ID')",
+    );
+    expect(service).toContain("this.uuid(id, 'Stock request ID')");
+  });
 });

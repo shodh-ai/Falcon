@@ -15,6 +15,9 @@ import { InventoryService } from '../inventory/inventory.service';
 import { inventoryHash } from '../inventory/inventory.util';
 import type { InventoryActor } from '../inventory/inventory.types';
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class ConsumablesService {
   constructor(
@@ -74,6 +77,11 @@ export class ConsumablesService {
         code: 'STALE_REVISION',
         current_revision: Number(row.aggregate_revision),
       });
+  }
+  private uuid(value: string | undefined, label: string) {
+    if (!value || !UUID_RE.test(value))
+      throw new BadRequestException(`${label} must be a valid UUID`);
+    return value;
   }
   private async idempotent<T>(
     m: EntityManager,
@@ -310,6 +318,10 @@ export class ConsumablesService {
     },
   ) {
     await this.require(actor, 'CONSUMABLES_REQUEST');
+    for (const line of input.lines ?? [])
+      this.uuid(line.product_model_id, 'Product model ID');
+    if (input.delivery_location_id)
+      this.uuid(input.delivery_location_id, 'Delivery location ID');
     await this.requireScope(actor, 'CONSUMABLES_REQUEST', {
       department_id: input.department_id,
       project_reference: input.project_reference,
@@ -378,6 +390,7 @@ export class ConsumablesService {
     revision: number,
     key: string,
   ) {
+    this.uuid(id, 'Stock request ID');
     await this.require(actor, 'CONSUMABLES_REQUEST');
     return this.db.transaction(async (m) => {
       const rows = await m.query(
@@ -434,6 +447,9 @@ export class ConsumablesService {
       override_reason?: string;
     },
   ) {
+    this.uuid(id, 'Stock request ID');
+    for (const lotId of Object.values(input.override_lots ?? {}))
+      this.uuid(lotId, 'Override LOT inventory record ID');
     await this.require(actor, 'CONSUMABLES_APPROVE');
     return this.db.transaction(async (m) => {
       const rows = await m.query(
@@ -571,6 +587,9 @@ export class ConsumablesService {
       reason: string;
     },
   ) {
+    this.uuid(id, 'Stock request ID');
+    this.uuid(input.reservation_id, 'Reservation ID');
+    this.uuid(input.recipient_id, 'Recipient ID');
     await this.require(actor, 'CONSUMABLES_ISSUE');
     if (!(input.quantity > 0) || !input.reason?.trim())
       throw new BadRequestException('Positive quantity and reason required');
@@ -721,6 +740,8 @@ export class ConsumablesService {
       reason: string;
     },
   ) {
+    this.uuid(issueId, 'Issue ID');
+    this.uuid(input.issue_allocation_id, 'Issue allocation ID');
     await this.require(actor, 'CONSUMABLES_CONSUMPTION_RECORD');
     if (!(input.quantity > 0) || !input.reason?.trim())
       throw new BadRequestException('Positive quantity and reason required');
