@@ -50,6 +50,9 @@ describe('DoFA Module 8 contracts', () => {
     expect(acceptStart).toBeGreaterThanOrEqual(0);
     expect(returnedEvent).toBeGreaterThan(acceptStart);
     expect(terminalUpdate).toBeGreaterThan(returnedEvent);
+    expect(service.slice(terminalUpdate, terminalUpdate + 300)).toContain(
+      'closed_at=CASE WHEN $5 THEN NOW() ELSE NULL END',
+    );
   });
   it('does not mutate closed cases when reopening', () =>
     expect(service).toContain(

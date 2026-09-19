@@ -2094,7 +2094,7 @@ export class AssetServiceService {
         // every final audit/outbox event (which advances the aggregate
         // revision) before the terminal state is written.
         await m.query(
-          `UPDATE svc_cases SET workflow_status=$2,final_outcome=$3,asset_availability=$4,completed_at=NOW(),closed_at=CASE WHEN $2='CLOSED' THEN NOW() ELSE NULL END WHERE service_case_id=$1`,
+          `UPDATE svc_cases SET workflow_status=$2,final_outcome=$3,asset_availability=$4,completed_at=NOW(),closed_at=CASE WHEN $5 THEN NOW() ELSE NULL END WHERE service_case_id=$1`,
           [
             id,
             workflow,
@@ -2104,6 +2104,7 @@ export class AssetServiceService {
               : input.decision === 'REJECTED'
                 ? row.asset_availability
                 : 'RETURNED_TO_CUSTODIAN',
+            workflow === 'CLOSED',
           ],
         );
         return {
