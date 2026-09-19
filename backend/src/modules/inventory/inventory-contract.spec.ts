@@ -63,4 +63,13 @@ describe('Module 5 authority contracts', () => {
     expect(service).toContain('INVENTORY_IDENTIFIER_SEQUENCE_INVALID');
     expect(service).not.toContain('Number(rows[0].allocated)');
   });
+  it('casts state-change JSON parameters before extracting projected values', () => {
+    expect(service).toContain(
+      "(($3::jsonb)->>'owner_department_id')::int",
+    );
+    expect(service).toContain(
+      "NULLIF(($3::jsonb)->>'custodian_user_id','')::uuid",
+    );
+    expect(service).not.toContain("($3->>'owner_department_id')::int");
+  });
 });

@@ -2366,12 +2366,12 @@ export class InventoryService {
             throw new BadRequestException('Invalid lifecycle status');
           await manager.query(
             `UPDATE inv_records SET
-             owner_department_id=CASE WHEN $2='OWNERSHIP' THEN ($3->>'owner_department_id')::int ELSE owner_department_id END,
-             custodian_user_id=CASE WHEN $2='CUSTODY' THEN NULLIF($3->>'custodian_user_id','')::uuid ELSE custodian_user_id END,
-             location_space_id=CASE WHEN $2='LOCATION' THEN NULLIF($3->>'location_space_id','')::uuid ELSE location_space_id END,
-             location_text=CASE WHEN $2='LOCATION' THEN $3->>'location_text' ELSE location_text END,
-             condition=CASE WHEN $2='CONDITION' THEN $3->>'condition' ELSE condition END,
-             lifecycle_status=CASE WHEN $2='LIFECYCLE' THEN $3->>'lifecycle_status' ELSE lifecycle_status END,
+             owner_department_id=CASE WHEN $2='OWNERSHIP' THEN (($3::jsonb)->>'owner_department_id')::int ELSE owner_department_id END,
+             custodian_user_id=CASE WHEN $2='CUSTODY' THEN NULLIF(($3::jsonb)->>'custodian_user_id','')::uuid ELSE custodian_user_id END,
+             location_space_id=CASE WHEN $2='LOCATION' THEN NULLIF(($3::jsonb)->>'location_space_id','')::uuid ELSE location_space_id END,
+             location_text=CASE WHEN $2='LOCATION' THEN ($3::jsonb)->>'location_text' ELSE location_text END,
+             condition=CASE WHEN $2='CONDITION' THEN ($3::jsonb)->>'condition' ELSE condition END,
+             lifecycle_status=CASE WHEN $2='LIFECYCLE' THEN ($3::jsonb)->>'lifecycle_status' ELSE lifecycle_status END,
              aggregate_revision=aggregate_revision+1,updated_at=NOW() WHERE inventory_record_id=$1`,
             [id, history.dimension, JSON.stringify(value)],
           );
