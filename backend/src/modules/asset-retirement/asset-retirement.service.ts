@@ -1816,8 +1816,8 @@ export class AssetRetirementService {
               ? 'PROCEEDS_PENDING'
               : 'FINANCE_PENDING';
         await m.query(
-          `UPDATE retirement_cases SET finance_status=$2,finance_completed_at=CASE WHEN $2='SETTLED' THEN NOW() ELSE finance_completed_at END WHERE retirement_case_id=$1`,
-          [id, status],
+          `UPDATE retirement_cases SET finance_status=$2,finance_completed_at=CASE WHEN $3 THEN NOW() ELSE finance_completed_at END WHERE retirement_case_id=$1`,
+          [id, status, status === 'SETTLED'],
         );
         if (failed)
           await this.emit(m, row, 'AssetFinanceReconciliationFailed.v1', {

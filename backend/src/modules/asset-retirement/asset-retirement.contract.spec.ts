@@ -43,6 +43,16 @@ describe('DoFA Module 9 domain contract', () => {
     );
   });
 
+  it('uses a typed boolean for Finance-settlement completion', () => {
+    expect(service).toContain(
+      'finance_completed_at=CASE WHEN $3 THEN NOW() ELSE finance_completed_at END',
+    );
+    expect(service).toContain("[id, status, status === 'SETTLED']");
+    expect(service).not.toContain(
+      "finance_completed_at=CASE WHEN $2='SETTLED'",
+    );
+  });
+
   it('prevents certificate issuance before all final gates', () => {
     expect(service).toContain('All physical, sanitization and Finance gates');
     expect(service).toContain('AssetLifecycleCertificateIssued.v1');
