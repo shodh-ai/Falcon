@@ -37,6 +37,21 @@ describe('DoFA module route authorization', () => {
     expect(getFinancePortalRedirect('ProcurementBuyer', '/finance/procurements')).toBeNull();
   });
 
+  it('honors every assigned role when the primary finance-shell role is narrower', () => {
+    const roles = ['ReceivingClerk', 'Stores'];
+
+    for (const path of [
+      '/finance/consumables',
+      '/finance/returns',
+      '/finance/asset-service',
+      '/finance/asset-retirement',
+      '/finance/physical-identity',
+    ]) {
+      expect(canRoleAccessPath(roles, path), `${path} should accept the Stores hat`).toBe(true);
+      expect(getFinancePortalRedirect(roles, path), `${path} should not redirect`).toBeNull();
+    }
+  });
+
   it('supports specialist module personas without granting unrelated modules', () => {
     expect(canRoleAccessPath('InventoryVerifier', '/finance/inventory')).toBe(true);
     expect(canRoleAccessPath('InventoryVerifier', '/finance/physical-identity')).toBe(true);

@@ -27,7 +27,13 @@ function FinanceLayoutInner({ children }: { children: ReactNode }) {
       user.role ??
       roles[0] ??
       '';
-    const redirect = getFinancePortalRedirect(activeRole, pathname);
+    const routeRoles = [activeRole, ...roles].filter(
+      (role, index, values) =>
+        values.findIndex(
+          (candidate) => candidate.trim().toLowerCase() === role.trim().toLowerCase(),
+        ) === index,
+    );
+    const redirect = getFinancePortalRedirect(routeRoles, pathname);
     if (redirect) router.replace(redirect);
   }, [isLoading, user, pathname, router]);
 

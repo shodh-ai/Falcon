@@ -23,7 +23,7 @@ export function FinanceShell({ children }: { children: ReactNode }) {
     user?.role ??
     roles[0] ??
     '';
-  const config = filterPortalConfigForRole(financePortal, role);
+  const config = filterPortalConfigForRole(financePortal, roles.length ? roles : role);
   const branding = getFinancePortalBranding(role);
 
   return <AppShell config={{ ...config, ...branding }}>{children}</AppShell>;

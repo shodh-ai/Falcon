@@ -174,14 +174,17 @@ export function getPurchaseRequisitionsPath(role: string | undefined | null): st
 
 /** Redirect non-finance users away from /finance/* into their portal equivalents. */
 export function getFinancePortalRedirect(
-  role: string | undefined | null,
+  roleOrRoles: string | string[] | undefined | null,
   pathname: string,
 ): string | null {
   if (!pathname.startsWith('/finance')) return null;
 
+  const roles = (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles])
+    .filter((role): role is string => Boolean(role?.trim()));
+  const role = roles[0];
   const r = norm(role);
 
-  const dofaModuleAccess = getDofaFinanceModuleAccess(role, pathname);
+  const dofaModuleAccess = getDofaFinanceModuleAccess(roles, pathname);
   if (dofaModuleAccess !== null) {
     if (dofaModuleAccess) return null;
     const target = getDashboardPathForRole(role);
