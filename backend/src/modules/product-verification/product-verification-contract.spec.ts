@@ -60,4 +60,17 @@ describe('Module 4 authority and event contracts', () => {
     );
     expect(verification).toContain('row.aggregate_revision = revision');
   });
+
+  it('reuses only the exact returned subject allocation for a vendor replacement', () => {
+    expect(verification).toContain('JOIN proc_return_subject_allocations rsa');
+    expect(verification).toContain('pia.subject_id=rsa.subject_id');
+    expect(verification).toContain('pr.receipt_id=$1');
+    expect(verification).toContain(
+      "r.status IN ('VENDOR_RECEIVED','RESOLVED')",
+    );
+    expect(verification).toContain('releasedReplacementQuantity');
+    expect(verification).toContain(
+      'Number(invoice.quantity) + releasedReplacementQuantity + 0.0005',
+    );
+  });
 });

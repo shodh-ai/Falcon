@@ -582,10 +582,7 @@ export class ProductVerificationService {
       );
       const eligible =
         Number(row.eligible_quantity) - Number(returned[0]?.returned ?? 0);
-      if (
-        allocated + input.observed_quantity >
-        eligible + 0.0005
-      )
+      if (allocated + input.observed_quantity > eligible + 0.0005)
         throw new ConflictException({
           message:
             'Lot quantities exceed accepted quantity available for verification',
@@ -723,9 +720,35 @@ export class ProductVerificationService {
           total + Number(item.allocated_quantity),
         0,
       );
+      // A vendor replacement is a new physical subject, but it inherits the
+      // commercial allocation of the exact subject that was returned. Count
+      // only the allocation released by the return referenced by this receipt.
+      // Existing replacement allocations remain in invoiceAllocatedQuantity,
+      // so a second receipt cannot reuse the same return credit.
+      const replacementCredits = await manager.query(
+        `SELECT COALESCE(SUM(LEAST(rsa.quantity,pia.allocated_quantity)),0) AS released_quantity
+         FROM proc_receipts pr
+         JOIN proc_returns r ON r.return_id=pr.replacement_for_return_id
+          AND r.tenant_id=pr.tenant_id AND r.status IN ('VENDOR_RECEIVED','RESOLVED')
+         JOIN proc_return_subject_allocations rsa ON rsa.return_id=r.return_id
+          AND rsa.tenant_id=r.tenant_id
+         JOIN pv_invoice_allocations pia ON pia.subject_id=rsa.subject_id
+          AND pia.tenant_id=r.tenant_id
+         WHERE pr.receipt_id=$1 AND pr.tenant_id=$2
+           AND pia.invoice_line_id=$3 AND pia.invoice_revision=$4`,
+        [
+          row.receipt_id,
+          row.tenant_id,
+          input.invoice_line_id,
+          invoice.revision,
+        ],
+      );
+      const releasedReplacementQuantity = Number(
+        replacementCredits[0]?.released_quantity ?? 0,
+      );
       if (
         invoiceAllocatedQuantity + input.allocated_quantity >
-        Number(invoice.quantity) + 0.0005
+        Number(invoice.quantity) + releasedReplacementQuantity + 0.0005
       )
         throw new ConflictException(
           'Allocation exceeds eligible cleared invoice quantity',
