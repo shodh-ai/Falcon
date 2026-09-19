@@ -682,6 +682,135 @@ export class InventoryService {
         throw new ConflictException(
           'Current active Module 4 identity required',
         );
+      const existingRecords = await manager.query(
+        `SELECT r.*,m.product_model_code,m.product_name,m.category,b.batch_code
+         FROM inv_records r
+         JOIN inv_product_models m ON m.product_model_id=r.product_model_id
+         JOIN inv_procurement_batches b ON b.procurement_batch_id=r.procurement_batch_id
+         WHERE r.subject_id=$1 AND r.tenant_id=$2 FOR UPDATE OF r`,
+        [payload.subject_id, event.tenant_id],
+      );
+      const existing = existingRecords[0];
+      if (existing) {
+        if (existing.record_type !== payload.subject_type)
+          throw new ConflictException(
+            'Re-verification cannot change the inventory subject type',
+          );
+        if (existing.record_status !== 'QUARANTINED')
+          throw new ConflictException(
+            'Only a quarantined inventory identity can consume a new verification revision',
+          );
+        const prior = (
+          await manager.query(
+            `SELECT COALESCE(MAX((source_payload->>'verification_revision')::int),0)::int verification_revision
+             FROM inv_inventory_source_snapshots WHERE inventory_record_id=$1`,
+            [existing.inventory_record_id],
+          )
+        )[0];
+        if (
+          Number(payload.verification_revision) <=
+          Number(prior?.verification_revision ?? 0)
+        )
+          throw new ConflictException(
+            'Re-verification revision must advance the inventory source',
+          );
+        const priorVerificationIdentityId = existing.verification_identity_id;
+        const context = {
+          product: {
+            product_model_id: existing.product_model_id,
+            product_model_code: existing.product_model_code,
+            product_name: existing.product_name,
+            category: existing.category,
+          },
+          batch: {
+            procurement_batch_id: existing.procurement_batch_id,
+            batch_code: existing.batch_code,
+          },
+          module4: {
+            verification_identity_id: payload.verification_identity_id,
+            verification_revision: payload.verification_revision,
+            signature: payload.signature,
+          },
+          reverification: true,
+        };
+        const snapshotHash = inventoryHash({ source: payload, context });
+        await manager.query(
+          `INSERT INTO inv_inventory_source_snapshots(tenant_id,inventory_record_id,source_event_id,source_event_hash,verification_record_hash,evidence_manifest_hash,reference_snapshot_hash,source_payload,source_context,snapshot_hash)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10)`,
+          [
+            event.tenant_id,
+            existing.inventory_record_id,
+            eventId,
+            event.payload_hash,
+            payload.verification_record_hash,
+            payload.evidence_manifest_hash,
+            payload.reference_snapshot_hash,
+            JSON.stringify(payload),
+            JSON.stringify(context),
+            snapshotHash,
+          ],
+        );
+        await manager.query(
+          `UPDATE inv_records SET verification_identity_id=$2,record_status='ACTIVATION_PENDING',quarantined_at=NULL,aggregate_revision=aggregate_revision+1,updated_at=NOW() WHERE inventory_record_id=$1`,
+          [existing.inventory_record_id, payload.verification_identity_id],
+        );
+        if (existing.record_type === 'ITEM')
+          await manager.query(
+            `UPDATE inv_asset_identities SET status='PREPARED',activated_by=NULL,activated_at=NULL WHERE inventory_record_id=$1`,
+            [existing.inventory_record_id],
+          );
+        await manager.query(
+          `UPDATE pix_inventory_projections SET attachment_status='VOIDED',updated_at=NOW() WHERE inventory_record_id=$1 AND attachment_status='VERIFIED'`,
+          [existing.inventory_record_id],
+        );
+        existing.aggregate_revision = Number(existing.aggregate_revision) + 1;
+        existing.verification_identity_id = payload.verification_identity_id;
+        existing.record_status = 'ACTIVATION_PENDING';
+        await this.audit(
+          manager,
+          existing,
+          'INVENTORY_RECORD',
+          existing.inventory_record_id,
+          'INVENTORY_REVERIFICATION_PREPARED',
+          null,
+          {
+            record_status: 'QUARANTINED',
+            verification_identity_id: priorVerificationIdentityId,
+          },
+          {
+            record_status: 'ACTIVATION_PENDING',
+            verification_identity_id: payload.verification_identity_id,
+            verification_revision: payload.verification_revision,
+          },
+        );
+        const prepared = await this.emit(
+          manager,
+          existing,
+          'InventoryIdentityPrepared.v1',
+          {
+            reverification: true,
+            verification_identity_id: payload.verification_identity_id,
+            verification_revision: payload.verification_revision,
+            permanent_identity_preserved: true,
+          },
+        );
+        await manager.query(
+          `INSERT INTO inv_consumed_events(event_id,tenant_id,event_type,inventory_record_id) VALUES($1,$2,$3,$4)`,
+          [
+            eventId,
+            event.tenant_id,
+            event.event_type,
+            existing.inventory_record_id,
+          ],
+        );
+        await this.updateLineCompletion(manager, existing);
+        return {
+          inventory_record_id: existing.inventory_record_id,
+          record_status: 'ACTIVATION_PENDING',
+          reverification: true,
+          event: prepared,
+        };
+      }
       const policies = await manager.query(
         `SELECT ip.*,cp.category_policy_id,cp.required_attributes,cp.manufacturer_serial_required,cp.rfid_required FROM inv_identifier_policies ip JOIN LATERAL(SELECT * FROM inv_category_policies WHERE tenant_id=ip.tenant_id AND subject_type=$2 AND category IN($3,'*') AND status='PUBLISHED' AND effective_from<=NOW() AND(effective_to IS NULL OR effective_to>NOW()) ORDER BY CASE WHEN category=$3 THEN 0 ELSE 1 END,policy_version DESC LIMIT 1) cp ON true WHERE ip.tenant_id=$1 AND ip.status='PUBLISHED' AND ip.effective_from<=NOW() AND(ip.effective_to IS NULL OR ip.effective_to>NOW()) ORDER BY ip.policy_version DESC LIMIT 1`,
         [event.tenant_id, payload.subject_type, source.category],
@@ -1082,6 +1211,7 @@ export class InventoryService {
     tenantId: string,
     actorId: string,
     requireRfid: boolean,
+    allowReturnedForReplacement = false,
   ) {
     const rows = await manager.query(
       `SELECT r.*,m.category,m.product_name,m.product_model_id,cp.rfid_required,ip.rfid_pattern
@@ -1097,14 +1227,15 @@ export class InventoryService {
       !['IDENTITY_PENDING', 'ACTIVATION_PENDING', 'ACTIVE'].includes(
         row.record_status,
       ) ||
-      [
+      ([
         'MAINTENANCE',
         'RETURN_PENDING',
         'RETURNED',
         'RETIRED',
         'WRITTEN_OFF',
         'DISPOSED',
-      ].includes(row.lifecycle_status)
+      ].includes(row.lifecycle_status) &&
+        !(allowReturnedForReplacement && row.lifecycle_status === 'RETURNED'))
     )
       throw new ConflictException(
         'Asset lifecycle is not eligible for physical provisioning',
@@ -2062,6 +2193,68 @@ export class InventoryService {
       return_case_id: input.return_case_id,
       lifecycle_status: 'RETURNED',
     });
+  }
+
+  async completeRepairReturn(
+    manager: EntityManager,
+    input: {
+      tenant_id: string;
+      inventory_record_id: string;
+      return_case_id: string;
+      actor_id: string;
+      previous_lifecycle_status?: string | null;
+    },
+  ) {
+    const rows = await manager.query(
+      `SELECT r.*,COALESCE((SELECT MAX(identity_revision) FROM inv_identity_revisions ir WHERE ir.inventory_record_id=r.inventory_record_id AND ir.status='ACTIVE'),0)::int active_identity_revision
+       FROM inv_records r WHERE r.inventory_record_id=$1 AND r.tenant_id=$2 FOR UPDATE`,
+      [input.inventory_record_id, input.tenant_id],
+    );
+    const row = rows[0];
+    if (
+      !row ||
+      row.record_type !== 'ITEM' ||
+      row.record_status !== 'ACTIVE' ||
+      row.lifecycle_status !== 'RETURNED' ||
+      Number(row.active_identity_revision) <= 1
+    )
+      throw new ConflictException(
+        'Repaired ITEM is not re-verified and ready to return to service',
+      );
+    const restored =
+      input.previous_lifecycle_status &&
+      ![
+        'RETURN_PENDING',
+        'RETURNED',
+        'RETIRED',
+        'WRITTEN_OFF',
+        'DISPOSED',
+      ].includes(input.previous_lifecycle_status)
+        ? input.previous_lifecycle_status
+        : 'AVAILABLE';
+    await manager.query(
+      `UPDATE inv_records SET lifecycle_status=$2,updated_at=NOW() WHERE inventory_record_id=$1`,
+      [row.inventory_record_id, restored],
+    );
+    await this.audit(
+      manager,
+      row,
+      'RETURN',
+      input.return_case_id,
+      'REPAIRED_ORIGINAL_RETURNED_TO_SERVICE',
+      input.actor_id,
+      { lifecycle_status: 'RETURNED' },
+      { lifecycle_status: restored },
+    );
+    await this.emit(manager, row, 'InventoryRepairReturnAccepted.v1', {
+      return_case_id: input.return_case_id,
+      lifecycle_status: restored,
+      identity_revision: Number(row.active_identity_revision),
+    });
+    return {
+      inventory_record_id: row.inventory_record_id,
+      lifecycle_status: restored,
+    };
   }
 
   async transferLot(

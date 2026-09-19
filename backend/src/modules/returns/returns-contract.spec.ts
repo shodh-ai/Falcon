@@ -53,6 +53,7 @@ describe('DoFA Module 7 contract', () => {
       'A repaired original must preserve its physical and university identities',
     );
     expect(service).toContain('ir.identity_revision>1');
+    expect(service).toContain('completeRepairReturn');
   });
   it('prevents superseded decisions from executing', () => {
     expect(service).toContain('ReturnCaseSuperseded.v1');

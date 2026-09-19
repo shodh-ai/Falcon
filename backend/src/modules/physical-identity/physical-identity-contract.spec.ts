@@ -32,6 +32,12 @@ describe('DoFA Module X domain contract', () => {
     expect(inventory).toContain('MODULE_X_PAYLOAD_MISMATCH');
     expect(inventory).toContain('verifyModuleXAttachmentInTransaction');
   });
+  it('allows only a controlled replacement job to reprovision a returned repaired original', () => {
+    expect(service).toContain(
+      "OR ($6='REPLACEMENT' AND r.lifecycle_status='RETURNED')",
+    );
+    expect(service).toContain("jobType === 'REPLACEMENT'");
+  });
 
   it('excludes controlled and terminal asset lifecycles from provisioning', () => {
     for (const lifecycle of [

@@ -616,7 +616,8 @@ export class PhysicalIdentityService {
                WHERE r.inventory_record_id=$1 AND r.tenant_id=$2
                  AND r.record_type='ITEM'
                  AND r.record_status IN('IDENTITY_PENDING','ACTIVATION_PENDING','ACTIVE')
-                 AND r.lifecycle_status NOT IN('MAINTENANCE','RETURN_PENDING','RETURNED','RETIRED','WRITTEN_OFF','DISPOSED')
+                 AND (r.lifecycle_status NOT IN('MAINTENANCE','RETURN_PENDING','RETURNED','RETIRED','WRITTEN_OFF','DISPOSED')
+                      OR ($6='REPLACEMENT' AND r.lifecycle_status='RETURNED'))
                  AND EXISTS(SELECT 1 FROM acq_access_grants g WHERE g.tenant_id=r.tenant_id AND g.capability=$3 AND(g.principal_user_id=$4 OR lower(g.principal_role)=ANY($5::text[])) AND(g.scope_type='TENANT' OR(g.scope_type='DEPARTMENT' AND g.scope_reference=r.owner_department_id::text)))`,
               [
                 inventoryRecordId,
@@ -626,6 +627,7 @@ export class PhysicalIdentityService {
                   : 'PHYSICAL_IDENTITY_PROVISION',
                 actor.user_id,
                 this.roles(actor),
+                jobType,
               ],
             )
           )[0];
@@ -654,6 +656,7 @@ export class PhysicalIdentityService {
               tenantId,
               actor.user_id,
               rfidRequired,
+              jobType === 'REPLACEMENT',
             );
           if (jobType === 'NEW' && identity.record_status === 'ACTIVE')
             throw new ConflictException('Active assets require a retrofit job');

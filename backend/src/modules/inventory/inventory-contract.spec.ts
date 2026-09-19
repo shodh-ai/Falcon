@@ -32,6 +32,15 @@ describe('Module 5 authority contracts', () => {
     expect(service).toContain("record_status='QUARANTINED'");
     expect(service).toContain("status='REVOKED'");
   });
+  it('reactivates a re-verified subject without replacing its permanent identity', () => {
+    expect(service).toContain(
+      'Only a quarantined inventory identity can consume a new verification revision',
+    );
+    expect(service).toContain("record_status='ACTIVATION_PENDING'");
+    expect(service).toContain('permanent_identity_preserved: true');
+    expect(service).toContain('completeRepairReturn');
+    expect(service).toContain('REPAIRED_ORIGINAL_RETURNED_TO_SERVICE');
+  });
   it('locks idempotency and policy version allocation without locking aggregates', () => {
     expect(service).toContain('pg_advisory_xact_lock');
     expect(service).not.toContain(
@@ -55,8 +64,12 @@ describe('Module 5 authority contracts', () => {
   });
   it('keeps Module 5 source snapshots separate from Module 3 invoice snapshots', () => {
     expect(service).toContain('inv_inventory_source_snapshots');
-    expect(service).not.toContain('FROM inv_source_snapshots WHERE inventory_record_id');
-    expect(service).not.toContain('INSERT INTO inv_source_snapshots(tenant_id,inventory_record_id');
+    expect(service).not.toContain(
+      'FROM inv_source_snapshots WHERE inventory_record_id',
+    );
+    expect(service).not.toContain(
+      'INSERT INTO inv_source_snapshots(tenant_id,inventory_record_id',
+    );
   });
   it('normalizes mutation query results and refuses invalid identity sequences', () => {
     expect(service).toContain('Array.isArray(rows[0]) ? rows[0][0] : rows[0]');
@@ -64,9 +77,7 @@ describe('Module 5 authority contracts', () => {
     expect(service).not.toContain('Number(rows[0].allocated)');
   });
   it('casts state-change JSON parameters before extracting projected values', () => {
-    expect(service).toContain(
-      "(($3::jsonb)->>'owner_department_id')::int",
-    );
+    expect(service).toContain("(($3::jsonb)->>'owner_department_id')::int");
     expect(service).toContain(
       "NULLIF(($3::jsonb)->>'custodian_user_id','')::uuid",
     );

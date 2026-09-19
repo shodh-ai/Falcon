@@ -1359,6 +1359,14 @@ export class ReturnsService {
               ],
             );
         }
+        if (row.disposition === 'REPAIR_RETURN')
+          await this.inventory.completeRepairReturn(m, {
+            tenant_id: row.tenant_id,
+            inventory_record_id: allocations[0].inventory_record_id,
+            return_case_id: id,
+            actor_id: actor.user_id,
+            previous_lifecycle_status: allocations[0].previous_lifecycle_status,
+          });
         await m.query(
           `UPDATE ret_case_allocations SET status='RESOLVED' WHERE return_case_id=$1 AND status='SHIPPED'`,
           [id],
