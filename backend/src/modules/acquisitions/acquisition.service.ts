@@ -297,11 +297,12 @@ export class AcquisitionService {
     }
   }
 
-  async createDraft(
+  private async createDraftWithCapability(
     actor: AcquisitionActor,
     input: CreateAcquisitionInput,
     requestId?: string,
     transactionManager?: EntityManager,
+    capability = 'ACQUISITION_REQUESTER',
   ) {
     const tenantId = this.tenant(actor);
     try {
@@ -313,7 +314,7 @@ export class AcquisitionService {
     }
     await this.requireCapability(
       actor,
-      'ACQUISITION_REQUESTER',
+      capability,
       input.requesting_department_id ??
         input.intended_department_id ??
         actor.dept_id ??
@@ -430,6 +431,46 @@ export class AcquisitionService {
     return transactionManager
       ? create(transactionManager)
       : this.db.transaction(create);
+  }
+
+  async createDraft(
+    actor: AcquisitionActor,
+    input: CreateAcquisitionInput,
+    requestId?: string,
+    transactionManager?: EntityManager,
+  ) {
+    return this.createDraftWithCapability(
+      actor,
+      input,
+      requestId,
+      transactionManager,
+    );
+  }
+
+  async createWorkflowDraft(
+    actor: AcquisitionActor,
+    input: CreateAcquisitionInput,
+    requestId?: string,
+    transactionManager?: EntityManager,
+  ) {
+    const workflowCapabilities: Record<string, string> = {
+      INVENTORY_REPLENISHMENT: 'CONSUMABLES_REPLENISHMENT_CONVERT',
+      ASSET_SERVICE: 'ASSET_SERVICE_ESTIMATE_APPROVE',
+    };
+    const source = String(input.source ?? '');
+    const capability = workflowCapabilities[source];
+    if (!capability)
+      throw new ForbiddenException({
+        message: 'Unsupported workflow acquisition source',
+        code: 'ACQUISITION_WORKFLOW_SOURCE_DENIED',
+      });
+    return this.createDraftWithCapability(
+      actor,
+      input,
+      requestId,
+      transactionManager,
+      capability,
+    );
   }
 
   private async getRawVersion(

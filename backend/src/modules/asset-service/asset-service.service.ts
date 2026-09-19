@@ -1083,7 +1083,7 @@ export class AssetServiceService {
             [row.inventory_record_id],
           )
         )[0];
-        const draft = await this.acquisitions.createDraft(
+        const draft = await this.acquisitions.createWorkflowDraft(
           actor,
           {
             requesting_department_id:

@@ -61,6 +61,36 @@ describe('AcquisitionService authorization and sensitive data', () => {
     expect(db.transaction).not.toHaveBeenCalled();
   });
 
+  it('uses the owning workflow capability for an inventory replenishment draft', async () => {
+    db.query.mockResolvedValueOnce([
+      { scope_type: 'DEPARTMENT', scope_reference: '7' },
+    ]);
+    db.transaction.mockRejectedValueOnce(new Error('transaction reached'));
+    await expect(
+      service.createWorkflowDraft(actor, {
+        ...draft,
+        source: 'INVENTORY_REPLENISHMENT',
+      }),
+    ).rejects.toThrow('transaction reached');
+    expect(db.query.mock.calls[0]?.[1]).toContain(
+      'CONSUMABLES_REPLENISHMENT_CONVERT',
+    );
+  });
+
+  it('rejects unregistered workflow acquisition sources', async () => {
+    await expect(
+      service.createWorkflowDraft(actor, {
+        ...draft,
+        source: 'FALCON',
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'ACQUISITION_WORKFLOW_SOURCE_DENIED',
+      }),
+    });
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
   it('uses the actor department for a department-scoped requester grant', async () => {
     db.query
       .mockResolvedValueOnce([

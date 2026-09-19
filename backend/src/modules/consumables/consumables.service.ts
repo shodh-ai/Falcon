@@ -1464,7 +1464,7 @@ export class ConsumablesService {
           };
         if (!(input.estimated_unit_price >= 0))
           throw new BadRequestException('Estimated unit price required');
-        const draft = await this.acquisitions.createDraft(
+        const draft = await this.acquisitions.createWorkflowDraft(
           actor,
           {
             requesting_department_id:
