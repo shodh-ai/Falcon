@@ -31,6 +31,18 @@ describe('DoFA Module 9 domain contract', () => {
     expect(service).toContain('AssetFinanceReconciliationFailed.v1');
   });
 
+  it('uses a typed boolean for physical-completion gates', () => {
+    expect(service).toContain(
+      'physical_completed_at=CASE WHEN $3 THEN NOW() ELSE physical_completed_at END',
+    );
+    expect(service).toContain(
+      "[id, allDone ? 'PHYSICAL_COMPLETED' : 'HANDED_OVER', allDone]",
+    );
+    expect(service).not.toContain(
+      "physical_completed_at=CASE WHEN $2='PHYSICAL_COMPLETED'",
+    );
+  });
+
   it('prevents certificate issuance before all final gates', () => {
     expect(service).toContain('All physical, sanitization and Finance gates');
     expect(service).toContain('AssetLifecycleCertificateIssued.v1');

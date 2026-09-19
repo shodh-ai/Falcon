@@ -1699,8 +1699,8 @@ export class AssetRetirementService {
           ],
         );
         await m.query(
-          `UPDATE retirement_cases SET workflow_status='COMPLETION_PENDING',physical_status=$2,physical_completed_at=CASE WHEN $2='PHYSICAL_COMPLETED' THEN NOW() ELSE physical_completed_at END,finance_status=CASE WHEN $2='PHYSICAL_COMPLETED' AND finance_status NOT IN('SETTLED','NOT_APPLICABLE','WRITE_OFF_POSTED') THEN 'FINANCE_PENDING' ELSE finance_status END WHERE retirement_case_id=$1`,
-          [id, allDone ? 'PHYSICAL_COMPLETED' : 'HANDED_OVER'],
+          `UPDATE retirement_cases SET workflow_status='COMPLETION_PENDING',physical_status=$2,physical_completed_at=CASE WHEN $3 THEN NOW() ELSE physical_completed_at END,finance_status=CASE WHEN $3 AND finance_status NOT IN('SETTLED','NOT_APPLICABLE','WRITE_OFF_POSTED') THEN 'FINANCE_PENDING' ELSE finance_status END WHERE retirement_case_id=$1`,
+          [id, allDone ? 'PHYSICAL_COMPLETED' : 'HANDED_OVER', allDone],
         );
         await this.emit(m, row, 'AssetDispositionHandoverRecorded.v1', {
           custody_event_id: custodyId,
