@@ -63,4 +63,16 @@ describe('DoFA Module 8 contracts', () => {
     expect(service).toContain('const updated = Array.isArray(result[0])');
     expect(service).toContain('No pending re-verification request');
   });
+  it('binds a cleared reverification to its decision and verified source event', () => {
+    expect(service).toContain(
+      'JOIN pv_decisions d ON d.verification_id=i.verification_id',
+    );
+    expect(service).toContain("e.event_type='PhysicalProductVerified.v1'");
+    expect(service).toContain(
+      "e.payload->>'verification_identity_id'=i.verification_identity_id::text",
+    );
+    expect(service).not.toContain(
+      'SELECT i.verification_identity_id,i.verification_case_id FROM pv_verification_identities i',
+    );
+  });
 });

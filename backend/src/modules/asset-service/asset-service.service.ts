@@ -1894,9 +1894,23 @@ export class AssetServiceService {
         const row = await this.locked(m, id, this.tenant(actor));
         this.assertRevision(row, expected);
         const identity = await m.query(
-          `SELECT i.verification_identity_id,i.verification_case_id FROM pv_verification_identities i
+          `SELECT i.verification_identity_id,d.verification_case_id
+           FROM pv_verification_identities i
+           JOIN pv_decisions d ON d.verification_id=i.verification_id
+           JOIN pv_outbox_events e
+             ON e.event_id=$4
+            AND e.tenant_id=i.tenant_id
+            AND e.verification_case_id=d.verification_case_id
+            AND e.subject_id=i.subject_id
+            AND e.event_type='PhysicalProductVerified.v1'
+            AND e.payload->>'verification_identity_id'=i.verification_identity_id::text
            WHERE i.verification_identity_id=$1 AND i.subject_id=$2 AND i.tenant_id=$3 AND i.status='ACTIVE'`,
-          [input.verification_identity_id, row.subject_id, row.tenant_id],
+          [
+            input.verification_identity_id,
+            row.subject_id,
+            row.tenant_id,
+            input.source_event_id,
+          ],
         );
         if (
           !identity[0] ||
