@@ -60,10 +60,10 @@ const FEATURE_STATES = {
   dofa_module9_disposal_gate: false,
   dofa_module9_sanitization_gate: false,
   dofa_module9_controlled_auction: false,
-  dofa_module_x_physical_identity: false,
+  dofa_module_x_physical_identity: true,
   dofa_module_x_provisioning_gate: false,
-  dofa_module_x_gate_observation: false,
-  dofa_module_x_retrofit: false,
+  dofa_module_x_gate_observation: true,
+  dofa_module_x_retrofit: true,
 };
 
 // Eleven people cover the initial purchase-to-inventory launch. Compatible
@@ -213,6 +213,7 @@ const ACCOUNTS = [
       'INVENTORY_LOT_MOVEMENT',
       'PHYSICAL_IDENTITY_VIEW',
       'PHYSICAL_IDENTITY_PROVISION',
+      'PHYSICAL_IDENTITY_RETROFIT',
       'CONSUMABLES_VIEW',
       'CONSUMABLES_ISSUE',
       'CONSUMABLES_EMERGENCY_ISSUE',
@@ -285,6 +286,7 @@ const ACCOUNTS = [
     role: 'TenantAdmin',
     name: 'GVMC Tenant Administrator',
     grants: [
+      'PHYSICAL_IDENTITY_VIEW',
       'INVOICE_INTEGRITY_POLICY_ADMIN',
       'PRODUCT_VERIFICATION_POLICY_ADMIN',
       'INVENTORY_POLICY_ADMIN',

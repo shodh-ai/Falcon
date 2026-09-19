@@ -33,6 +33,23 @@ describe('DoFA Module X domain contract', () => {
     expect(inventory).toContain('verifyModuleXAttachmentInTransaction');
   });
 
+  it('excludes controlled and terminal asset lifecycles from provisioning', () => {
+    for (const lifecycle of [
+      'MAINTENANCE',
+      'RETURN_PENDING',
+      'RETURNED',
+      'RETIRED',
+      'WRITTEN_OFF',
+      'DISPOSED',
+    ]) {
+      expect(service).toContain(`'${lifecycle}'`);
+      expect(inventory).toContain(`'${lifecycle}'`);
+    }
+    expect(inventory).toContain(
+      'Asset lifecycle is not eligible for physical provisioning',
+    );
+  });
+
   it('uses human review rather than theft classification', () => {
     expect(service).toContain("'AUTHORIZED_PASSAGE'");
     expect(service).toContain("'REVIEW_REQUIRED'");

@@ -1093,6 +1093,22 @@ export class InventoryService {
     );
     const row = rows[0];
     if (!row) throw new NotFoundException('Module 5 ITEM identity not found');
+    if (
+      !['IDENTITY_PENDING', 'ACTIVATION_PENDING', 'ACTIVE'].includes(
+        row.record_status,
+      ) ||
+      [
+        'MAINTENANCE',
+        'RETURN_PENDING',
+        'RETURNED',
+        'RETIRED',
+        'WRITTEN_OFF',
+        'DISPOSED',
+      ].includes(row.lifecycle_status)
+    )
+      throw new ConflictException(
+        'Asset lifecycle is not eligible for physical provisioning',
+      );
     if (!row.university_asset_id)
       throw new ConflictException('Module 5 Asset ID must be prepared first');
     await manager.query(

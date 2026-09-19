@@ -354,7 +354,9 @@ export class PhysicalIdentityService {
        FROM inv_records r JOIN inv_product_models m ON m.product_model_id=r.product_model_id
        LEFT JOIN inv_logical_rfids l ON l.inventory_record_id=r.inventory_record_id AND l.status<>'REVOKED'
        LEFT JOIN pix_inventory_projections p ON p.inventory_record_id=r.inventory_record_id
-       WHERE r.tenant_id=$1 AND r.record_type='ITEM' AND r.record_status IN('IDENTITY_PENDING','ACTIVATION_PENDING','ACTIVE')
+       WHERE r.tenant_id=$1 AND r.record_type='ITEM'
+         AND r.record_status IN('IDENTITY_PENDING','ACTIVATION_PENDING','ACTIVE')
+         AND r.lifecycle_status NOT IN('MAINTENANCE','RETURN_PENDING','RETURNED','RETIRED','WRITTEN_OFF','DISPOSED')
        ORDER BY r.updated_at DESC LIMIT 500`,
       [this.tenant(actor)],
     );
@@ -604,7 +606,12 @@ export class PhysicalIdentityService {
         async () => {
           const scoped = (
             await manager.query(
-              `SELECT r.inventory_record_id,r.owner_department_id FROM inv_records r WHERE r.inventory_record_id=$1 AND r.tenant_id=$2 AND EXISTS(SELECT 1 FROM acq_access_grants g WHERE g.tenant_id=r.tenant_id AND g.capability=$3 AND(g.principal_user_id=$4 OR lower(g.principal_role)=ANY($5::text[])) AND(g.scope_type='TENANT' OR(g.scope_type='DEPARTMENT' AND g.scope_reference=r.owner_department_id::text)))`,
+              `SELECT r.inventory_record_id,r.owner_department_id FROM inv_records r
+               WHERE r.inventory_record_id=$1 AND r.tenant_id=$2
+                 AND r.record_type='ITEM'
+                 AND r.record_status IN('IDENTITY_PENDING','ACTIVATION_PENDING','ACTIVE')
+                 AND r.lifecycle_status NOT IN('MAINTENANCE','RETURN_PENDING','RETURNED','RETIRED','WRITTEN_OFF','DISPOSED')
+                 AND EXISTS(SELECT 1 FROM acq_access_grants g WHERE g.tenant_id=r.tenant_id AND g.capability=$3 AND(g.principal_user_id=$4 OR lower(g.principal_role)=ANY($5::text[])) AND(g.scope_type='TENANT' OR(g.scope_type='DEPARTMENT' AND g.scope_reference=r.owner_department_id::text)))`,
               [
                 inventoryRecordId,
                 tenantId,
