@@ -14,6 +14,17 @@ export class NotificationCronService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  /** Remove expired one-time codes from the authenticated notification inbox. */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async expireSensitiveStepUpNotifications() {
+    await this.dataSource.query(
+      `UPDATE falcon_notifications SET deleted_at=NOW()
+        WHERE deleted_at IS NULL
+          AND metadata->>'type'='INVOICE_INTEGRITY_STEP_UP'
+          AND NULLIF(metadata->>'expires_at','')::timestamptz <= NOW()`,
+    );
+  }
+
   /** Midnight: library books past return date. */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async scanLibraryOverdue() {

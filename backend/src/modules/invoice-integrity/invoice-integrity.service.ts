@@ -10,6 +10,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, randomInt, randomUUID } from 'crypto';
 import type { EntityManager } from 'typeorm';
 import { DataSource } from 'typeorm';
+import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
 import type {
   HumanDecisionInput,
   IntegrityActor,
@@ -45,7 +46,10 @@ type IntegrityCase = Record<string, any> & {
 
 @Injectable()
 export class InvoiceIntegrityService {
-  constructor(@InjectDataSource() private readonly db: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly db: DataSource,
+    private readonly notifications: NotificationDispatchService,
+  ) {}
 
   private tenant(actor: IntegrityActor) {
     return actor.tenant_id ?? DEFAULT_TENANT;
@@ -202,16 +206,53 @@ export class InvoiceIntegrityService {
     const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const otpHash = createHash('sha256').update(otp).digest('hex');
     const rows = await this.db.query(
-      `INSERT INTO inv_integrity_step_up_challenges
+      `WITH invalidated AS (
+         UPDATE inv_integrity_step_up_challenges
+            SET locked_at=COALESCE(locked_at,NOW())
+          WHERE tenant_id=$1 AND user_id=$2 AND integrity_case_id=$3 AND purpose=$4
+            AND verified_at IS NULL AND locked_at IS NULL
+       )
+       INSERT INTO inv_integrity_step_up_challenges
          (tenant_id,user_id,integrity_case_id,purpose,otp_hash,expires_at)
        VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL '10 minutes')
        RETURNING challenge_id,expires_at`,
       [this.tenant(actor), actor.user_id, caseId, purpose, otpHash],
     );
+    const challenge = rows[0] as {
+      challenge_id: string;
+      expires_at: Date;
+    };
+    try {
+      await this.notifications.dispatch({
+        tenantId: this.tenant(actor),
+        userId: actor.user_id,
+        category: 'FINANCE',
+        title: 'Invoice integrity verification code',
+        message: `Your verification code is ${otp}. It expires in 10 minutes. Do not share this code.`,
+        actionLink: `/finance/invoice-integrity/${caseId}`,
+        severity: 'warning',
+        intent: 'action_required',
+        actionLabel: 'Verify decision',
+        metadata: {
+          type: 'INVOICE_INTEGRITY_STEP_UP',
+          challenge_id: challenge.challenge_id,
+          expires_at: challenge.expires_at.toISOString(),
+        },
+        // In-app delivery is authoritative until a real SMTP provider is configured.
+        queueDelivery: false,
+      });
+    } catch (error) {
+      await this.db.query(
+        `UPDATE inv_integrity_step_up_challenges SET locked_at=NOW()
+          WHERE challenge_id=$1`,
+        [challenge.challenge_id],
+      );
+      throw error;
+    }
     return {
-      ...rows[0],
+      ...challenge,
       purpose,
-      delivery_status: 'QUEUED',
+      delivery_status: 'IN_APP_DELIVERED',
       ...(process.env.NODE_ENV === 'production' ? {} : { dev_otp: otp }),
     };
   }
@@ -252,6 +293,13 @@ export class InvoiceIntegrityService {
       await manager.query(
         `UPDATE inv_integrity_step_up_challenges SET verified_at=NOW() WHERE challenge_id=$1`,
         [challengeId],
+      );
+      await manager.query(
+        `UPDATE falcon_notifications SET deleted_at=NOW()
+          WHERE tenant_id=$1 AND user_id=$2 AND deleted_at IS NULL
+            AND metadata->>'type'='INVOICE_INTEGRITY_STEP_UP'
+            AND metadata->>'challenge_id'=$3`,
+        [this.tenant(actor), actor.user_id, challengeId],
       );
       return {
         invalid: false as const,

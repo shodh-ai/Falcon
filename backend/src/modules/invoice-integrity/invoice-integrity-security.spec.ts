@@ -3,6 +3,8 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import { InvoiceIntegrityService } from './invoice-integrity.service';
 
+const notifications = { dispatch: jest.fn() };
+
 const actor = {
   user_id: '10000000-0000-4000-8000-000000000001',
   tenant_id: '20000000-0000-4000-8000-000000000001',
@@ -10,6 +12,8 @@ const actor = {
 };
 
 describe('Module 3 security boundaries', () => {
+  beforeEach(() => notifications.dispatch.mockReset());
+
   it('returns not found before loading cross-scope child evidence', async () => {
     const query = jest
       .fn()
@@ -17,9 +21,10 @@ describe('Module 3 security boundaries', () => {
         { scope_type: 'DEPARTMENT', scope_reference: '9' },
       ])
       .mockResolvedValueOnce([]);
-    const service = new InvoiceIntegrityService({
-      query,
-    } as unknown as DataSource);
+    const service = new InvoiceIntegrityService(
+      { query } as unknown as DataSource,
+      notifications as never,
+    );
     await expect(
       service.get(actor, '30000000-0000-4000-8000-000000000001'),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -30,9 +35,10 @@ describe('Module 3 security boundaries', () => {
 
   it('rejects raw source secrets', async () => {
     const query = jest.fn().mockResolvedValueOnce([{ scope_type: 'TENANT' }]);
-    const service = new InvoiceIntegrityService({
-      query,
-    } as unknown as DataSource);
+    const service = new InvoiceIntegrityService(
+      { query } as unknown as DataSource,
+      notifications as never,
+    );
     await expect(
       service.createSourceAccount(actor, {
         platform: 'Example',
@@ -45,9 +51,10 @@ describe('Module 3 security boundaries', () => {
   });
 
   it('requires recent step-up for human certification', async () => {
-    const service = new InvoiceIntegrityService({
-      query: jest.fn(),
-    } as unknown as DataSource);
+    const service = new InvoiceIntegrityService(
+      { query: jest.fn() } as unknown as DataSource,
+      notifications as never,
+    );
     await expect(
       service.certifyHuman(
         actor,
@@ -61,5 +68,55 @@ describe('Module 3 security boundaries', () => {
         'key',
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('delivers production step-up codes to the authenticated in-app inbox', async () => {
+    const expiresAt = new Date(Date.now() + 10 * 60_000);
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ scope_type: 'TENANT' }])
+      .mockResolvedValueOnce([
+        {
+          integrity_case_id: '30000000-0000-4000-8000-000000000001',
+          tenant_id: actor.tenant_id,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          challenge_id: '50000000-0000-4000-8000-000000000001',
+          expires_at: expiresAt,
+        },
+      ]);
+    notifications.dispatch.mockResolvedValueOnce({});
+    const service = new InvoiceIntegrityService(
+      { query } as unknown as DataSource,
+      notifications as never,
+    );
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const result = await service.requestStepUp(
+        actor,
+        '30000000-0000-4000-8000-000000000001',
+        'CERTIFICATION',
+      );
+      expect(result).toMatchObject({
+        delivery_status: 'IN_APP_DELIVERED',
+        purpose: 'CERTIFICATION',
+      });
+      expect(result).not.toHaveProperty('dev_otp');
+      expect(notifications.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: actor.user_id,
+          category: 'FINANCE',
+          queueDelivery: false,
+          metadata: expect.objectContaining({
+            type: 'INVOICE_INTEGRITY_STEP_UP',
+          }),
+        }),
+      );
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
   });
 });
