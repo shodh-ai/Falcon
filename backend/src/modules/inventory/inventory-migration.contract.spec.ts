@@ -14,7 +14,7 @@ describe('Module 5 migration contract', () => {
     'inv_product_models',
     'inv_procurement_batches',
     'inv_records',
-    'inv_source_snapshots',
+    'inv_inventory_source_snapshots',
     'inv_asset_identities',
     'inv_logical_rfids',
     'inv_rfid_bindings',

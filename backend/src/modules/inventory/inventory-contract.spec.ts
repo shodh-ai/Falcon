@@ -53,4 +53,14 @@ describe('Module 5 authority contracts', () => {
     expect(service).toContain('$11::numeric+$9::numeric');
     expect(service).not.toContain('$11+$9');
   });
+  it('keeps Module 5 source snapshots separate from Module 3 invoice snapshots', () => {
+    expect(service).toContain('inv_inventory_source_snapshots');
+    expect(service).not.toContain('FROM inv_source_snapshots WHERE inventory_record_id');
+    expect(service).not.toContain('INSERT INTO inv_source_snapshots(tenant_id,inventory_record_id');
+  });
+  it('normalizes mutation query results and refuses invalid identity sequences', () => {
+    expect(service).toContain('Array.isArray(rows[0]) ? rows[0][0] : rows[0]');
+    expect(service).toContain('INVENTORY_IDENTIFIER_SEQUENCE_INVALID');
+    expect(service).not.toContain('Number(rows[0].allocated)');
+  });
 });

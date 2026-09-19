@@ -321,13 +321,23 @@ export class InventoryService {
       [tenantId, codeType, period],
     );
     const rows = await manager.query(
-      `UPDATE inv_code_sequences SET next_value=next_value+1,updated_at=NOW() WHERE tenant_id=$1 AND code_type=$2 AND period_key=$3 RETURNING next_value-1 AS allocated`,
+      `UPDATE inv_code_sequences SET next_value=next_value+1,updated_at=NOW() WHERE tenant_id=$1 AND code_type=$2 AND period_key=$3 RETURNING (next_value-1)::text AS allocated_sequence`,
       [tenantId, codeType, period],
     );
+    // Some TypeORM/Postgres combinations return mutation rows directly while
+    // others wrap them alongside the affected-row count. Normalize both forms
+    // and fail closed instead of ever issuing an identity containing `NaN`.
+    const allocationRow = Array.isArray(rows[0]) ? rows[0][0] : rows[0];
+    const allocatedSequence = Number(allocationRow?.allocated_sequence);
+    if (!Number.isSafeInteger(allocatedSequence) || allocatedSequence < 1)
+      throw new ConflictException({
+        message: 'Inventory identifier sequence allocation failed',
+        code: 'INVENTORY_IDENTIFIER_SEQUENCE_INVALID',
+      });
     return renderIdentifier(
       pattern,
       tenants[0]?.subdomain ?? tenantId.slice(0, 8),
-      Number(rows[0].allocated),
+      allocatedSequence,
       now,
     );
   }
@@ -591,7 +601,7 @@ export class InventoryService {
     const [source, identity, rfid, movements, history, discrepancies, audits] =
       await Promise.all([
         this.db.query(
-          `SELECT source_snapshot_id,source_event_id,source_event_hash,verification_record_hash,evidence_manifest_hash,reference_snapshot_hash,snapshot_hash,created_at FROM inv_source_snapshots WHERE inventory_record_id=$1`,
+          `SELECT source_snapshot_id,source_event_id,source_event_hash,verification_record_hash,evidence_manifest_hash,reference_snapshot_hash,snapshot_hash,created_at FROM inv_inventory_source_snapshots WHERE inventory_record_id=$1`,
           [id],
         ),
         this.db.query(
@@ -792,7 +802,7 @@ export class InventoryService {
       };
       const snapshotHash = inventoryHash({ source: payload, context });
       await manager.query(
-        `INSERT INTO inv_source_snapshots(tenant_id,inventory_record_id,source_event_id,source_event_hash,verification_record_hash,evidence_manifest_hash,reference_snapshot_hash,source_payload,source_context,snapshot_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10)`,
+        `INSERT INTO inv_inventory_source_snapshots(tenant_id,inventory_record_id,source_event_id,source_event_hash,verification_record_hash,evidence_manifest_hash,reference_snapshot_hash,source_payload,source_context,snapshot_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10)`,
         [
           event.tenant_id,
           recordId,
@@ -1387,7 +1397,7 @@ export class InventoryService {
           if (row.record_status !== 'ACTIVATION_PENDING')
             throw new ConflictException('Record is not ready for activation');
           const sources = await manager.query(
-            `SELECT s.*,i.status identity_status FROM inv_source_snapshots s JOIN pv_verification_identities i ON i.verification_identity_id=$2 WHERE s.inventory_record_id=$1`,
+            `SELECT s.*,i.status identity_status FROM inv_inventory_source_snapshots s JOIN pv_verification_identities i ON i.verification_identity_id=$2 WHERE s.inventory_record_id=$1`,
             [id, row.verification_identity_id],
           );
           if (!sources[0] || sources[0].identity_status !== 'ACTIVE')

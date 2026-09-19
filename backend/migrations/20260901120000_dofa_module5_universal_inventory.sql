@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS inv_records (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_manufacturer_serial ON inv_records(tenant_id,normalized_manufacturer_serial) WHERE normalized_manufacturer_serial IS NOT NULL AND record_status NOT IN ('REJECTED','SUPERSEDED');
 
-CREATE TABLE IF NOT EXISTS inv_source_snapshots (
+CREATE TABLE IF NOT EXISTS inv_inventory_source_snapshots (
   source_snapshot_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
   inventory_record_id UUID NOT NULL REFERENCES inv_records(inventory_record_id) ON DELETE RESTRICT, source_event_id UUID NOT NULL UNIQUE,
   source_event_hash CHAR(64) NOT NULL, verification_record_hash CHAR(64) NOT NULL, evidence_manifest_hash CHAR(64) NOT NULL, reference_snapshot_hash CHAR(64) NOT NULL,
@@ -207,7 +207,7 @@ CREATE OR REPLACE FUNCTION inv_protect_identity_revision() RETURNS trigger AS $$
   THEN RAISE EXCEPTION 'INVENTORY_IMMUTABLE: signed identity payload cannot be changed'; END IF;
   RETURN NEW;
 END; $$ LANGUAGE plpgsql;
-CREATE TRIGGER tr_inv_source_immutable BEFORE UPDATE OR DELETE ON inv_source_snapshots FOR EACH ROW EXECUTE FUNCTION inv_block_append_only_mutation();
+CREATE TRIGGER tr_inv_inventory_source_immutable BEFORE UPDATE OR DELETE ON inv_inventory_source_snapshots FOR EACH ROW EXECUTE FUNCTION inv_block_append_only_mutation();
 CREATE TRIGGER tr_inv_identity_revision_immutable BEFORE UPDATE ON inv_identity_revisions FOR EACH ROW EXECUTE FUNCTION inv_protect_identity_revision();
 CREATE TRIGGER tr_inv_identity_revision_no_delete BEFORE DELETE ON inv_identity_revisions FOR EACH ROW EXECUTE FUNCTION inv_block_append_only_mutation();
 CREATE TRIGGER tr_inv_lot_movement_immutable BEFORE UPDATE OR DELETE ON inv_lot_movements FOR EACH ROW EXECUTE FUNCTION inv_block_append_only_mutation();
