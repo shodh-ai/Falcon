@@ -36,4 +36,13 @@ describe('Module 2 concurrency contract', () => {
     );
     expect(migration).toContain('UNIQUE (aggregate_id, aggregate_sequence)');
   });
+
+  it('reopens receipt capacity only for an authoritative non-cancelled return', () => {
+    expect(service).toContain(
+      "SELECT SUM(quantity) FROM proc_returns\n                  WHERE order_line_id=$1 AND status NOT IN ('REJECTED','CANCELLED')",
+    );
+    expect(service).toContain(
+      'Number(priorAccepted[0].accepted) -\n        Number(priorAccepted[0].returned) +',
+    );
+  });
 });

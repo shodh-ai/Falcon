@@ -1907,12 +1907,18 @@ export class ProcurementService {
         throw new ConflictException('A clean geo-tagged product image for this receipt line is required');
       const acceptedQuantity = Number(line.received_quantity);
       const priorAccepted = await manager.query(
-        `SELECT COALESCE(SUM(accepted_quantity),0) AS accepted
+        `SELECT COALESCE(SUM(accepted_quantity),0) AS accepted,
+                COALESCE((SELECT SUM(quantity) FROM proc_returns
+                  WHERE order_line_id=$1 AND status NOT IN ('REJECTED','CANCELLED')),0) AS returned
          FROM proc_receipt_lines WHERE order_line_id=$1 AND receipt_line_id<>$2`,
         [line.order_line_id, receiptLineId],
       );
       const activeOrdered = Number(line.ordered_quantity) - Number(line.cancelled_quantity);
-      if (Number(priorAccepted[0].accepted) + acceptedQuantity > activeOrdered + 0.0005)
+      const netAccepted =
+        Number(priorAccepted[0].accepted) -
+        Number(priorAccepted[0].returned) +
+        acceptedQuantity;
+      if (netAccepted > activeOrdered + 0.0005)
         throw new ConflictException('Product acceptance exceeds active ordered quantity');
       await manager.query(
         `UPDATE proc_receipt_lines SET accepted_quantity=$2,acceptance_status='PRODUCT_CONFIRMED',
