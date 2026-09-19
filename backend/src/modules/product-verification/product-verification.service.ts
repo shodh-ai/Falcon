@@ -1617,11 +1617,13 @@ export class ProductVerificationService {
       policy_version: policy.policy_version,
     });
     const id = randomUUID();
-    await manager.query(
+    const inserted = await manager.query(
       `INSERT INTO pv_reference_snapshots
        (reference_snapshot_id,tenant_id,subject_id,verification_policy_id,policy_version,
         acquisition_snapshot,order_snapshot,receipt_snapshot,invoice_snapshot,vendor_references,snapshot_hash)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11)`,
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11)
+       ON CONFLICT(subject_id,snapshot_hash) DO NOTHING
+       RETURNING reference_snapshot_id`,
       [
         id,
         row.tenant_id,
@@ -1645,7 +1647,21 @@ export class ProductVerificationService {
         snapshotHash,
       ],
     );
-    return { reference_snapshot_id: id, snapshot_hash: snapshotHash, context };
+    const referenceSnapshotId = inserted[0]?.reference_snapshot_id
+      ? String(inserted[0].reference_snapshot_id)
+      : String(
+          (
+            await manager.query(
+              `SELECT reference_snapshot_id FROM pv_reference_snapshots WHERE subject_id=$1 AND snapshot_hash=$2`,
+              [subject.subject_id, snapshotHash],
+            )
+          )[0].reference_snapshot_id,
+        );
+    return {
+      reference_snapshot_id: referenceSnapshotId,
+      snapshot_hash: snapshotHash,
+      context,
+    };
   }
 
   async analyze(
@@ -1802,6 +1818,14 @@ export class ProductVerificationService {
                   : 'MATCHED';
           const calculation = {
             subject_id: subjectId,
+            verification_revision: Number(subject.verification_revision),
+            capture_session_id: session.capture_session_id,
+            evidence_manifest_hash: verificationHash(
+              evidence.map((item: Record<string, any>) => ({
+                evidence_id: item.evidence_id,
+                content_hash: item.content_hash,
+              })),
+            ),
             reference_snapshot_hash: reference.snapshot_hash,
             policy_version: Number(session.policy_version),
             scores,

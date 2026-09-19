@@ -77,4 +77,17 @@ describe('Module 4 authority and event contracts', () => {
       'Number(invoice.quantity) + releasedReplacementQuantity + 0.0005',
     );
   });
+
+  it('supports deterministic re-analysis for a new physical verification revision', () => {
+    expect(verification).toContain(
+      'ON CONFLICT(subject_id,snapshot_hash) DO NOTHING',
+    );
+    expect(verification).toContain(
+      'verification_revision: Number(subject.verification_revision)',
+    );
+    expect(verification).toContain(
+      'capture_session_id: session.capture_session_id',
+    );
+    expect(verification).toContain('evidence_manifest_hash: verificationHash(');
+  });
 });
