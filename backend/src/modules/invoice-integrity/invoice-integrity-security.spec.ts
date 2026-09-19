@@ -86,7 +86,8 @@ describe('Module 3 security boundaries', () => {
           challenge_id: '50000000-0000-4000-8000-000000000001',
           expires_at: expiresAt,
         },
-      ]);
+      ])
+      .mockResolvedValueOnce([]);
     notifications.dispatch.mockResolvedValueOnce({});
     const service = new InvoiceIntegrityService(
       { query } as unknown as DataSource,
@@ -114,8 +115,13 @@ describe('Module 3 security boundaries', () => {
           queueDelivery: false,
           metadata: expect.objectContaining({
             type: 'INVOICE_INTEGRITY_STEP_UP',
+            integrity_case_id:
+              '30000000-0000-4000-8000-000000000001',
           }),
         }),
+      );
+      expect(String(query.mock.calls[3][0])).toContain(
+        'challenge.locked_at IS NOT NULL',
       );
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;

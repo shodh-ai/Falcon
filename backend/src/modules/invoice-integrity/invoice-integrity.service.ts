@@ -222,6 +222,19 @@ export class InvoiceIntegrityService {
       challenge_id: string;
       expires_at: Date;
     };
+    await this.db.query(
+      `UPDATE falcon_notifications notification SET deleted_at=NOW()
+        WHERE notification.tenant_id=$1 AND notification.user_id=$2
+          AND notification.deleted_at IS NULL
+          AND notification.metadata->>'type'='INVOICE_INTEGRITY_STEP_UP'
+          AND EXISTS (
+            SELECT 1 FROM inv_integrity_step_up_challenges challenge
+             WHERE challenge.challenge_id::text=notification.metadata->>'challenge_id'
+               AND challenge.integrity_case_id=$3
+               AND challenge.locked_at IS NOT NULL
+          )`,
+      [this.tenant(actor), actor.user_id, caseId],
+    );
     try {
       await this.notifications.dispatch({
         tenantId: this.tenant(actor),
@@ -236,6 +249,7 @@ export class InvoiceIntegrityService {
         metadata: {
           type: 'INVOICE_INTEGRITY_STEP_UP',
           challenge_id: challenge.challenge_id,
+          integrity_case_id: caseId,
           expires_at: challenge.expires_at.toISOString(),
         },
         // In-app delivery is authoritative until a real SMTP provider is configured.

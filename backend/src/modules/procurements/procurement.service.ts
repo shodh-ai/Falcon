@@ -31,6 +31,7 @@ import {
   quantityUnits,
   withinTolerance,
 } from './procurement.util';
+import { integrityHash } from '../invoice-integrity/invoice-integrity.util';
 
 const DEFAULT_TENANT = 'a0000000-0000-4000-8000-000000000001';
 const CASE_STATUSES_OPEN = ['ACTIVE', 'ON_HOLD', 'READY_TO_FINALIZE'];
@@ -615,7 +616,7 @@ export class ProcurementService {
       const event = events[0];
       if (!event)
         throw new NotFoundException('Integrity decision event not found');
-      if (hash(event.payload) !== event.payload_hash)
+      if (integrityHash(event.payload) !== event.payload_hash)
         throw new ConflictException({
           message: 'Integrity event hash mismatch',
           code: 'EVENT_HASH_MISMATCH',
@@ -843,7 +844,7 @@ export class ProcurementService {
         [eventId],
       );
       const event = events[0];
-      if (!event || hash(event.payload) !== event.payload_hash)
+      if (!event || integrityHash(event.payload) !== event.payload_hash)
         throw new ConflictException(
           'Integrity reconsideration event is invalid',
         );

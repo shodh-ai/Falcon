@@ -35,6 +35,18 @@ describe('Module 2 event and compatibility contract', () => {
     expect(service).toContain('next_event_sequence=$3');
   });
 
+  it('verifies Module 3 events with the producer canonical hash', () => {
+    const start = service.indexOf('async applyIntegrityDecision');
+    const end = service.indexOf('async invalidateIntegrityClearance');
+    const consumer = service.slice(start, end);
+    expect(consumer).toContain(
+      'integrityHash(event.payload) !== event.payload_hash',
+    );
+    expect(consumer).not.toContain(
+      'hash(event.payload) !== event.payload_hash',
+    );
+  });
+
   it('writes legacy projections only from canonical actions', () => {
     expect(service).toContain("'MODULE2'");
     expect(service).toContain('INSERT INTO fin_purchase_orders');

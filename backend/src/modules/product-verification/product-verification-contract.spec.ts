@@ -58,8 +58,6 @@ describe('Module 4 authority and event contracts', () => {
     expect(verification).not.toMatch(
       /SUM\(allocated_quantity\)[\s\S]{0,160}FOR UPDATE/,
     );
-    expect(verification).toContain(
-      "workflow_state='CAPTURING',aggregate_revision=aggregate_revision+1",
-    );
+    expect(verification).toContain('row.aggregate_revision = revision');
   });
 });
