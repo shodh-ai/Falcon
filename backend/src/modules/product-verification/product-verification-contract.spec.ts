@@ -91,4 +91,11 @@ describe('Module 4 authority and event contracts', () => {
     expect(verification).toContain('evidence_manifest_hash: verificationHash(');
     expect(verification).toContain('Array.isArray(supersededResult[0])');
   });
+
+  it('allows only one final decision for each subject verification revision', () => {
+    expect(verification).toContain('SUBJECT_REVISION_ALREADY_DECIDED');
+    expect(verification).toContain(
+      'WHERE subject_id=$1 AND verification_revision=$2',
+    );
+  });
 });

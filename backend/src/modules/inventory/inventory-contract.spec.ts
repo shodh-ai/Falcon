@@ -34,10 +34,13 @@ describe('Module 5 authority contracts', () => {
   });
   it('reactivates a re-verified subject without replacing its permanent identity', () => {
     expect(service).toContain(
-      'Only a quarantined inventory identity can consume a new verification revision',
+      'Only an advancing quarantined re-verification or a current identity supersession can update the inventory source',
     );
     expect(service).toContain("record_status='ACTIVATION_PENDING'");
     expect(service).toContain('permanent_identity_preserved: true');
+    expect(service).toContain('reconcilesSameRevisionSupersession');
+    expect(service).toContain("status='SUPERSEDED'");
+    expect(service).toContain('superseded_by=$3');
     expect(service).toContain('completeRepairReturn');
     expect(service).toContain('REPAIRED_ORIGINAL_RETURNED_TO_SERVICE');
   });

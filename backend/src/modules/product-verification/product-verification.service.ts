@@ -2042,6 +2042,20 @@ export class ProductVerificationService {
     reviewerId: string | null,
     exceptionApproverId: string | null,
   ) {
+    const existingRevisionDecisions = await manager.query(
+      `SELECT verification_id,final_decision FROM pv_decisions
+       WHERE subject_id=$1 AND verification_revision=$2
+       ORDER BY decided_at DESC LIMIT 1`,
+      [subject.subject_id, subject.verification_revision],
+    );
+    if (existingRevisionDecisions[0])
+      throw new ConflictException({
+        message:
+          'This physical subject revision already has a final verification decision',
+        code: 'SUBJECT_REVISION_ALREADY_DECIDED',
+        verification_id: existingRevisionDecisions[0].verification_id,
+        final_decision: existingRevisionDecisions[0].final_decision,
+      });
     const analyses = await manager.query(
       `SELECT a.*,r.snapshot_hash AS reference_snapshot_hash FROM pv_analyses a JOIN pv_reference_snapshots r ON r.reference_snapshot_id=a.reference_snapshot_id WHERE a.analysis_id=$1 AND a.subject_id=$2`,
       [analysisId, subject.subject_id],

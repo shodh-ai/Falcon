@@ -696,10 +696,6 @@ export class InventoryService {
           throw new ConflictException(
             'Re-verification cannot change the inventory subject type',
           );
-        if (existing.record_status !== 'QUARANTINED')
-          throw new ConflictException(
-            'Only a quarantined inventory identity can consume a new verification revision',
-          );
         const prior = (
           await manager.query(
             `SELECT COALESCE(MAX((source_payload->>'verification_revision')::int),0)::int verification_revision
@@ -707,14 +703,36 @@ export class InventoryService {
             [existing.inventory_record_id],
           )
         )[0];
+        const priorRevision = Number(prior?.verification_revision ?? 0);
+        const incomingRevision = Number(payload.verification_revision);
+        const supersededSources = await manager.query(
+          `SELECT 1 FROM pv_verification_identities
+           WHERE verification_identity_id=$1
+             AND verification_revision=$2
+             AND status='SUPERSEDED'
+             AND superseded_by=$3`,
+          [
+            existing.verification_identity_id,
+            incomingRevision,
+            payload.verification_identity_id,
+          ],
+        );
+        const reconcilesSameRevisionSupersession =
+          existing.record_status === 'ACTIVATION_PENDING' &&
+          incomingRevision === priorRevision &&
+          Boolean(supersededSources[0]);
+        const advancesQuarantinedRevision =
+          existing.record_status === 'QUARANTINED' &&
+          incomingRevision > priorRevision;
         if (
-          Number(payload.verification_revision) <=
-          Number(prior?.verification_revision ?? 0)
+          !advancesQuarantinedRevision &&
+          !reconcilesSameRevisionSupersession
         )
           throw new ConflictException(
-            'Re-verification revision must advance the inventory source',
+            'Only an advancing quarantined re-verification or a current identity supersession can update the inventory source',
           );
         const priorVerificationIdentityId = existing.verification_identity_id;
+        const priorRecordStatus = existing.record_status;
         const context = {
           product: {
             product_model_id: existing.product_model_id,
@@ -774,13 +792,15 @@ export class InventoryService {
           'INVENTORY_REVERIFICATION_PREPARED',
           null,
           {
-            record_status: 'QUARANTINED',
+            record_status: priorRecordStatus,
             verification_identity_id: priorVerificationIdentityId,
           },
           {
             record_status: 'ACTIVATION_PENDING',
             verification_identity_id: payload.verification_identity_id,
             verification_revision: payload.verification_revision,
+            same_revision_identity_reconciliation:
+              reconcilesSameRevisionSupersession,
           },
         );
         const prepared = await this.emit(
@@ -792,6 +812,8 @@ export class InventoryService {
             verification_identity_id: payload.verification_identity_id,
             verification_revision: payload.verification_revision,
             permanent_identity_preserved: true,
+            same_revision_identity_reconciliation:
+              reconcilesSameRevisionSupersession,
           },
         );
         await manager.query(
