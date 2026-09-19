@@ -1628,9 +1628,13 @@ export class AcquisitionService {
          ORDER BY e.created_at DESC LIMIT 1
        ) latest ON true
        JOIN acq_request_versions v ON v.acquisition_version_id=r.acquisition_version_id
+       JOIN acq_requests request ON request.acquisition_id=v.acquisition_id
        WHERE latest.event_type='RESERVED' AND r.expires_at<=NOW()
          AND v.status IN ('BUDGET_RESERVED','PENDING_DOFA')
-         AND platform_module_is_available('finance_procurement',v.tenant_id,NULL,v.department_id::text)
+         AND platform_module_is_available(
+           'finance_procurement',v.tenant_id,NULL,
+           COALESCE(v.intended_department_id,request.requesting_department_id)::text
+         )
        ORDER BY r.expires_at LIMIT 100`,
     );
     for (const row of due) {

@@ -200,6 +200,11 @@ describe('Acquisition budget reservation concurrency', () => {
     );
 
     await expect(service.expireDueReservations()).resolves.toBe(1);
+    const dueQuery = String(db.query.mock.calls[0]?.[0]);
+    expect(dueQuery).toContain('JOIN acq_requests request');
+    expect(dueQuery).toContain('v.intended_department_id');
+    expect(dueQuery).toContain('request.requesting_department_id');
+    expect(dueQuery).not.toContain('v.department_id');
     expect(fund.encumbered_amount).toBe(0);
     expect(event).toBe('EXPIRED');
     expect(versionStatus).toBe('EXPIRED');
