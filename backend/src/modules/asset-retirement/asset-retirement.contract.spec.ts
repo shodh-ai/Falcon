@@ -60,6 +60,21 @@ describe('DoFA Module 9 domain contract', () => {
     expect(service).toContain('signRetirementPayload');
   });
 
+  it('publishes terminal events before making the case immutable', () => {
+    const certificateEvent = service.lastIndexOf(
+      "await this.emit(m, row, 'AssetLifecycleCertificateIssued.v1'",
+    );
+    const completionEvent = service.lastIndexOf(
+      "await this.emit(m, row, 'AssetLifecycleCompleted.v1'",
+    );
+    const closeUpdate = service.lastIndexOf(
+      "UPDATE retirement_cases SET workflow_status='CLOSED'",
+    );
+    expect(certificateEvent).toBeGreaterThan(-1);
+    expect(completionEvent).toBeGreaterThan(certificateEvent);
+    expect(closeUpdate).toBeGreaterThan(completionEvent);
+  });
+
   it('publishes the required lifecycle events', () => {
     for (const event of [
       'AssetRetirementCaseSubmitted.v1',

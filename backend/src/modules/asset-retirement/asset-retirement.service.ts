@@ -1968,10 +1968,6 @@ export class AssetRetirementService {
           [id, actor.user_id],
         );
         await m.query(
-          `UPDATE retirement_cases SET workflow_status='CLOSED',physical_status='DISPOSED',closed_at=NOW() WHERE retirement_case_id=$1`,
-          [id],
-        );
-        await m.query(
           `UPDATE asset_writeoff_requests SET status='WRITTEN_OFF',finance_at=NOW(),updated_at=NOW() WHERE module9_retirement_case_id=$1 AND module9_managed=true`,
           [id],
         );
@@ -1988,6 +1984,10 @@ export class AssetRetirementService {
           ),
           evidence_manifest_hash: evidenceManifestHash,
         });
+        await m.query(
+          `UPDATE retirement_cases SET workflow_status='CLOSED',physical_status='DISPOSED',closed_at=NOW() WHERE retirement_case_id=$1`,
+          [id],
+        );
         return {
           retirement_certificate_id: certificateId,
           certificate_code: code,
