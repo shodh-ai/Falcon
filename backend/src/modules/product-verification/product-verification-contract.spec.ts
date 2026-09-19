@@ -62,8 +62,12 @@ describe('Module 4 authority and event contracts', () => {
   });
 
   it('reuses only the exact returned subject allocation for a vendor replacement', () => {
+    expect(verification).toContain('JOIN ret_cases rc');
+    expect(verification).toContain('JOIN ret_case_allocations rca');
+    expect(verification).toContain("rc.disposition='REPLACEMENT_UNIT'");
+    expect(verification).toContain("rca.status IN ('SHIPPED','RESOLVED')");
     expect(verification).toContain('JOIN proc_return_subject_allocations rsa');
-    expect(verification).toContain('pia.subject_id=rsa.subject_id');
+    expect(verification).toContain('pia.subject_id=rs.subject_id');
     expect(verification).toContain('pr.receipt_id=$1');
     expect(verification).toContain(
       "r.status IN ('VENDOR_RECEIVED','RESOLVED')",

@@ -726,16 +726,31 @@ export class ProductVerificationService {
       // Existing replacement allocations remain in invoiceAllocatedQuantity,
       // so a second receipt cannot reuse the same return credit.
       const replacementCredits = await manager.query(
-        `SELECT COALESCE(SUM(LEAST(rsa.quantity,pia.allocated_quantity)),0) AS released_quantity
-         FROM proc_receipts pr
-         JOIN proc_returns r ON r.return_id=pr.replacement_for_return_id
-          AND r.tenant_id=pr.tenant_id AND r.status IN ('VENDOR_RECEIVED','RESOLVED')
-         JOIN proc_return_subject_allocations rsa ON rsa.return_id=r.return_id
-          AND rsa.tenant_id=r.tenant_id
-         JOIN pv_invoice_allocations pia ON pia.subject_id=rsa.subject_id
-          AND pia.tenant_id=r.tenant_id
-         WHERE pr.receipt_id=$1 AND pr.tenant_id=$2
-           AND pia.invoice_line_id=$3 AND pia.invoice_revision=$4`,
+        `WITH replacement_return AS (
+           SELECT r.return_id,r.tenant_id
+           FROM proc_receipts pr
+           JOIN proc_returns r ON r.return_id=pr.replacement_for_return_id
+            AND r.tenant_id=pr.tenant_id
+           WHERE pr.receipt_id=$1 AND pr.tenant_id=$2
+             AND r.status IN ('VENDOR_RECEIVED','RESOLVED')
+         ), returned_subjects AS (
+           SELECT rca.subject_id,rca.quantity
+           FROM replacement_return rr
+           JOIN ret_cases rc ON rc.proc_return_id=rr.return_id
+            AND rc.tenant_id=rr.tenant_id AND rc.disposition='REPLACEMENT_UNIT'
+           JOIN ret_case_allocations rca ON rca.return_case_id=rc.return_case_id
+            AND rca.tenant_id=rr.tenant_id AND rca.status IN ('SHIPPED','RESOLVED')
+           UNION
+           SELECT rsa.subject_id,rsa.quantity
+           FROM replacement_return rr
+           JOIN proc_return_subject_allocations rsa ON rsa.return_id=rr.return_id
+            AND rsa.tenant_id=rr.tenant_id
+         )
+         SELECT COALESCE(SUM(LEAST(rs.quantity,pia.allocated_quantity)),0) AS released_quantity
+         FROM returned_subjects rs
+         JOIN pv_invoice_allocations pia ON pia.subject_id=rs.subject_id
+          AND pia.tenant_id=$2
+         WHERE pia.invoice_line_id=$3 AND pia.invoice_revision=$4`,
         [
           row.receipt_id,
           row.tenant_id,
