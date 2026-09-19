@@ -253,7 +253,10 @@ export class InvoiceIntegrityService {
       ...challenge,
       purpose,
       delivery_status: 'IN_APP_DELIVERED',
-      ...(process.env.NODE_ENV === 'production' ? {} : { dev_otp: otp }),
+      ...(process.env.NODE_ENV !== 'production' &&
+      process.env.INVOICE_INTEGRITY_DEV_OTP === 'true'
+        ? { dev_otp: otp }
+        : {}),
     };
   }
 

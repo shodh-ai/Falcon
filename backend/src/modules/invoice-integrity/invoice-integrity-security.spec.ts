@@ -92,8 +92,10 @@ describe('Module 3 security boundaries', () => {
       { query } as unknown as DataSource,
       notifications as never,
     );
-    const previous = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousDevOtp = process.env.INVOICE_INTEGRITY_DEV_OTP;
+    delete process.env.NODE_ENV;
+    delete process.env.INVOICE_INTEGRITY_DEV_OTP;
     try {
       const result = await service.requestStepUp(
         actor,
@@ -116,7 +118,11 @@ describe('Module 3 security boundaries', () => {
         }),
       );
     } finally {
-      process.env.NODE_ENV = previous;
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousDevOtp === undefined)
+        delete process.env.INVOICE_INTEGRITY_DEV_OTP;
+      else process.env.INVOICE_INTEGRITY_DEV_OTP = previousDevOtp;
     }
   });
 });
