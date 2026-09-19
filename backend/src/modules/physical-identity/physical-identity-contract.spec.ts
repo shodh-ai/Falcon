@@ -56,6 +56,14 @@ describe('DoFA Module X domain contract', () => {
     expect(service).not.toContain("result = 'THEFT'");
   });
 
+  it('sequences every observation event without outbox collisions', () => {
+    expect(service).toContain(
+      'SELECT COALESCE(MAX(aggregate_sequence),0)::bigint latest FROM pix_outbox_events WHERE aggregate_id=$1',
+    );
+    expect(service).toContain('aggregate_revision: sequence');
+    expect(service).toContain('aggregate_sequence: sequence');
+  });
+
   it('publishes required physical identity and gate events', () => {
     for (const event of [
       'PhysicalIdentityProvisioningRequested.v1',

@@ -257,13 +257,18 @@ export class PhysicalIdentityService {
   ) {
     const eventId = randomUUID(),
       occurredAt = new Date().toISOString(),
+      prior = await manager.query(
+        `SELECT COALESCE(MAX(aggregate_sequence),0)::bigint latest FROM pix_outbox_events WHERE aggregate_id=$1`,
+        [observation.gate_observation_id],
+      ),
+      sequence = Number(prior[0]?.latest ?? 0) + 1,
       envelope = {
         event_id: eventId,
         event_type: eventType,
         event_version: 1,
         aggregate_id: observation.gate_observation_id,
-        aggregate_revision: 1,
-        aggregate_sequence: 1,
+        aggregate_revision: sequence,
+        aggregate_sequence: sequence,
         tenant_id: observation.tenant_id,
         inventory_record_id: observation.inventory_record_id,
         occurred_at: occurredAt,
@@ -271,11 +276,12 @@ export class PhysicalIdentityService {
       },
       hash = physicalIdentityHash(envelope);
     await manager.query(
-      `INSERT INTO pix_outbox_events(event_id,event_type,aggregate_id,aggregate_revision,aggregate_sequence,tenant_id,occurred_at,payload,payload_hash) VALUES($1,$2,$3,1,1,$4,$5,$6::jsonb,$7)`,
+      `INSERT INTO pix_outbox_events(event_id,event_type,aggregate_id,aggregate_revision,aggregate_sequence,tenant_id,occurred_at,payload,payload_hash) VALUES($1,$2,$3,$4,$4,$5,$6,$7::jsonb,$8)`,
       [
         eventId,
         eventType,
         observation.gate_observation_id,
+        sequence,
         observation.tenant_id,
         occurredAt,
         JSON.stringify({ ...envelope, payload_hash: hash }),
