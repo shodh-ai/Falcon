@@ -37,6 +37,20 @@ describe('DoFA Module 8 contracts', () => {
     expect(service).toContain(
       'Technician cannot accept their own completed work',
     ));
+  it('appends terminal events before activating closed-case immutability', () => {
+    const acceptStart = service.indexOf('async accept(');
+    const returnedEvent = service.indexOf(
+      "'AssetReturnedToService.v1'",
+      acceptStart,
+    );
+    const terminalUpdate = service.indexOf(
+      'UPDATE svc_cases SET workflow_status=$2,final_outcome=$3',
+      acceptStart,
+    );
+    expect(acceptStart).toBeGreaterThanOrEqual(0);
+    expect(returnedEvent).toBeGreaterThan(acceptStart);
+    expect(terminalUpdate).toBeGreaterThan(returnedEvent);
+  });
   it('does not mutate closed cases when reopening', () =>
     expect(service).toContain(
       'Only a closed case can be reopened by supersession',

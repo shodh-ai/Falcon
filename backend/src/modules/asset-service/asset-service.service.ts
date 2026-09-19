@@ -2049,19 +2049,6 @@ export class AssetServiceService {
         const workflow =
           terminal || input.decision !== 'REJECTED' ? 'CLOSED' : 'DISPUTED';
         await m.query(
-          `UPDATE svc_cases SET workflow_status=$2,final_outcome=$3,asset_availability=$4,completed_at=NOW(),closed_at=CASE WHEN $2='CLOSED' THEN NOW() ELSE NULL END WHERE service_case_id=$1`,
-          [
-            id,
-            workflow,
-            outcome,
-            terminal
-              ? 'QUARANTINED'
-              : input.decision === 'REJECTED'
-                ? row.asset_availability
-                : 'RETURNED_TO_CUSTODIAN',
-          ],
-        );
-        await m.query(
           `UPDATE proc_repairs SET status=CASE WHEN $2='CLOSED' THEN 'CLOSED' ELSE 'IN_REPAIR' END,updated_at=NOW() WHERE module8_service_case_id=$1`,
           [id, workflow],
         );
@@ -2103,6 +2090,22 @@ export class AssetServiceService {
             module7_case_id: row.module7_case_id,
           });
         }
+        // Closing a case activates the database immutability trigger. Append
+        // every final audit/outbox event (which advances the aggregate
+        // revision) before the terminal state is written.
+        await m.query(
+          `UPDATE svc_cases SET workflow_status=$2,final_outcome=$3,asset_availability=$4,completed_at=NOW(),closed_at=CASE WHEN $2='CLOSED' THEN NOW() ELSE NULL END WHERE service_case_id=$1`,
+          [
+            id,
+            workflow,
+            outcome,
+            terminal
+              ? 'QUARANTINED'
+              : input.decision === 'REJECTED'
+                ? row.asset_availability
+                : 'RETURNED_TO_CUSTODIAN',
+          ],
+        );
         return {
           workflow_status: workflow,
           final_outcome: outcome,
