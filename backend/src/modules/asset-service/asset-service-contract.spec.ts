@@ -58,4 +58,9 @@ describe('DoFA Module 8 contracts', () => {
     expect(service).toContain(
       'Only a closed case can be reopened by supersession',
     ));
+  it('normalizes PostgreSQL UPDATE RETURNING rows for task and reverification gates', () => {
+    expect(service).toContain('Array.isArray(mutationResult[0])');
+    expect(service).toContain('const updated = Array.isArray(result[0])');
+    expect(service).toContain('No pending re-verification request');
+  });
 });

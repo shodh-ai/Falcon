@@ -89,5 +89,6 @@ describe('Module 4 authority and event contracts', () => {
       'capture_session_id: session.capture_session_id',
     );
     expect(verification).toContain('evidence_manifest_hash: verificationHash(');
+    expect(verification).toContain('Array.isArray(supersededResult[0])');
   });
 });

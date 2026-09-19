@@ -1507,10 +1507,13 @@ export class AssetServiceService {
       this.idempotent(m, actor, key, result, async () => {
         const row = await this.locked(m, id, this.tenant(actor));
         this.assertRevision(row, expected);
-        const changed = await m.query(
+        const mutationResult = await m.query(
           `UPDATE svc_tasks SET status='COMPLETED',result=$3::jsonb,completed_at=NOW() WHERE service_task_id=$1 AND service_case_id=$2 AND status<>'COMPLETED' RETURNING service_task_id`,
           [taskId, id, JSON.stringify(result)],
         );
+        const changed = Array.isArray(mutationResult[0])
+          ? mutationResult[0]
+          : mutationResult;
         if (!changed[0]) throw new ConflictException('Task is not completable');
         await this.audit(
           m,
@@ -1902,7 +1905,7 @@ export class AssetServiceService {
           throw new ConflictException(
             'Current Module 4 verification identity does not match this asset',
           );
-        const updated = await m.query(
+        const result = await m.query(
           `UPDATE svc_reverification_projections SET status='CLEARED',module4_case_id=$2,verification_identity_id=$3,source_event_id=$4,source_payload=$5::jsonb,updated_at=NOW()
            WHERE service_case_id=$1 AND status IN('REQUESTED','IN_PROGRESS') RETURNING reverification_projection_id`,
           [
@@ -1913,6 +1916,7 @@ export class AssetServiceService {
             JSON.stringify(input),
           ],
         );
+        const updated = Array.isArray(result[0]) ? result[0] : result;
         if (!updated[0])
           throw new ConflictException('No pending re-verification request');
         await m.query(

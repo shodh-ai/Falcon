@@ -2251,11 +2251,14 @@ export class ProductVerificationService {
       signing_key_version: keyVersion,
     };
     const signature = signVerificationPayload(signedPayload, privateKey);
-    const supersededIdentities = await manager.query(
+    const supersededResult = await manager.query(
       `UPDATE pv_verification_identities SET status='SUPERSEDED',revoked_at=NOW()
        WHERE subject_id=$1 AND status='ACTIVE' RETURNING verification_identity_id`,
       [subject.subject_id],
     );
+    const supersededIdentities = Array.isArray(supersededResult[0])
+      ? supersededResult[0]
+      : supersededResult;
     await manager.query(
       `INSERT INTO pv_verification_identities
        (verification_identity_id,tenant_id,verification_id,subject_id,verification_revision,

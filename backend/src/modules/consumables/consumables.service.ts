@@ -1289,11 +1289,12 @@ export class ConsumablesService {
     await this.require(actor, 'CONSUMABLES_VIEW');
     return this.db.transaction((m) =>
       this.idempotent(m, actor, key, { id }, async () => {
-        const rows = await m.query(
+        const result = await m.query(
           `UPDATE con_alerts SET status='ACKNOWLEDGED',acknowledged_by=$3,last_seen_at=NOW()
             WHERE alert_id=$1 AND tenant_id=$2 AND status='OPEN' RETURNING *`,
           [id, this.tenant(actor), actor.user_id],
         );
+        const rows = Array.isArray(result[0]) ? result[0] : result;
         if (!rows[0]) throw new NotFoundException('Open alert not found');
         await this.requireScope(actor, 'CONSUMABLES_VIEW', {
           location_space_id: rows[0].location_space_id,
@@ -1675,10 +1676,11 @@ export class ConsumablesService {
       });
   }
   private async resolveAlert(m: EntityManager, tenant: string, key: string) {
-    const rows = await m.query(
+    const result = await m.query(
       `UPDATE con_alerts SET status='RESOLVED',resolved_at=NOW() WHERE tenant_id=$1 AND dedupe_key=$2 AND status IN('OPEN','ACKNOWLEDGED') RETURNING *`,
       [tenant, key],
     );
+    const rows = Array.isArray(result[0]) ? result[0] : result;
     for (const row of rows)
       await this.emit(m, row, 'ConsumableStockAlertResolved.v1', {
         alert_id: row.alert_id,

@@ -47,9 +47,7 @@ describe('DoFA Module 6 contract', () => {
     expect(service).toContain(
       'r.product_model_id,r.owner_department_id,r.location_space_id',
     );
-    expect(service).toContain(
-      'c.department_id IS NOT DISTINCT FROM $3',
-    );
+    expect(service).toContain('c.department_id IS NOT DISTINCT FROM $3');
     expect(service).toContain(
       'tenant_id,product_model_id,department_id,location_space_id',
     );
@@ -63,5 +61,11 @@ describe('DoFA Module 6 contract', () => {
       "this.uuid(input.reservation_id, 'Reservation ID')",
     );
     expect(service).toContain("this.uuid(id, 'Stock request ID')");
+  });
+  it('normalizes PostgreSQL UPDATE RETURNING rows before alert events', () => {
+    expect(
+      service.match(/Array\.isArray\(result\[0\]\)/g)?.length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(service).toContain("'ConsumableStockAlertResolved.v1'");
   });
 });
