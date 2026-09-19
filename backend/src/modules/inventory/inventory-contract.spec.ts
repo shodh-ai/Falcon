@@ -43,4 +43,10 @@ describe('Module 5 authority contracts', () => {
     expect(service).toContain('Custodian is outside the tenant scope');
     expect(service).toContain('Location is outside the tenant scope');
   });
+  it('ingests the canonical Module 1 model_number field', () => {
+    expect(service).toContain('al.model_number');
+    expect(service).toContain('source.model_number');
+    expect(service).not.toContain('al.model,');
+    expect(service).not.toContain('source.model ??');
+  });
 });

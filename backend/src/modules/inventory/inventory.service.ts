@@ -654,7 +654,7 @@ export class InventoryService {
         );
       const payload = event.payload;
       const sources = await manager.query(
-        `SELECT s.*,c.proc_case_id,c.proc_case_line_id,c.acquisition_line_id,c.order_line_id,c.receipt_line_id,c.vendor_id,c.department_id,pcl.product_name,pcl.category,pcl.unit,pcl.approved_unit_price,pcl.currency,al.brand,al.model,al.part_number,al.technical_specifications,al.expected_service_life_months,rs.acquisition_snapshot,rs.order_snapshot,rs.receipt_snapshot,rs.invoice_snapshot,i.status identity_status,i.signed_payload,i.signature FROM pv_subjects s JOIN pv_cases c ON c.verification_case_id=s.verification_case_id JOIN proc_case_lines pcl ON pcl.proc_case_line_id=c.proc_case_line_id JOIN acq_lines al ON al.line_id=c.acquisition_line_id JOIN pv_verification_identities i ON i.verification_identity_id=$2 AND i.subject_id=s.subject_id LEFT JOIN pv_reference_snapshots rs ON rs.subject_id=s.subject_id AND rs.snapshot_hash=$3 WHERE s.subject_id=$1 AND s.tenant_id=$4`,
+        `SELECT s.*,c.proc_case_id,c.proc_case_line_id,c.acquisition_line_id,c.order_line_id,c.receipt_line_id,c.vendor_id,c.department_id,pcl.product_name,pcl.category,pcl.unit,pcl.approved_unit_price,pcl.currency,al.brand,al.model_number,al.part_number,al.technical_specifications,al.expected_service_life_months,rs.acquisition_snapshot,rs.order_snapshot,rs.receipt_snapshot,rs.invoice_snapshot,i.status identity_status,i.signed_payload,i.signature FROM pv_subjects s JOIN pv_cases c ON c.verification_case_id=s.verification_case_id JOIN proc_case_lines pcl ON pcl.proc_case_line_id=c.proc_case_line_id JOIN acq_lines al ON al.line_id=c.acquisition_line_id JOIN pv_verification_identities i ON i.verification_identity_id=$2 AND i.subject_id=s.subject_id LEFT JOIN pv_reference_snapshots rs ON rs.subject_id=s.subject_id AND rs.snapshot_hash=$3 WHERE s.subject_id=$1 AND s.tenant_id=$4`,
         [
           payload.subject_id,
           payload.verification_identity_id,
@@ -683,7 +683,7 @@ export class InventoryService {
         category: source.category,
         brand: source.brand ?? '',
         manufacturer: source.manufacturer ?? '',
-        model: source.model ?? '',
+        model: source.model_number ?? '',
         part_number: source.part_number ?? '',
         specs: source.technical_specifications ?? {},
       });
@@ -707,7 +707,7 @@ export class InventoryService {
             source.category,
             source.brand ?? null,
             source.manufacturer ?? null,
-            source.model ?? null,
+            source.model_number ?? null,
             source.part_number ?? null,
             JSON.stringify(source.technical_specifications ?? {}),
             fingerprint,
