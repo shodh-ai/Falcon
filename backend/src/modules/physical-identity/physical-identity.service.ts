@@ -2041,10 +2041,13 @@ export class PhysicalIdentityService {
 
   @Interval(60_000)
   async expireProvisioningJobs() {
-    const rows = await this.db.query(
+    const mutationResult = await this.db.query(
       `UPDATE pix_provisioning_jobs SET status='EXPIRED',failure_code='AUTHORIZATION_EXPIRED',updated_at=NOW()
        WHERE status IN('AUTHORIZED','CLAIMED') AND expires_at<=NOW() RETURNING provisioning_job_id`,
     );
+    const rows = Array.isArray(mutationResult[0])
+      ? mutationResult[0]
+      : mutationResult;
     for (const row of rows)
       await this.db.query(
         `UPDATE inv_rfid_bindings SET status='FAILED' WHERE module_x_provisioning_job_id=$1 AND status='ENCODED'`,

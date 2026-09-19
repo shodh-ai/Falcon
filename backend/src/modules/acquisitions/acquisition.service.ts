@@ -1020,7 +1020,7 @@ export class AcquisitionService {
       );
     }
     await this.db.transaction(async (manager) => {
-      const updated = await manager.query(
+      const updateResult = await manager.query(
         `UPDATE acq_request_versions
          SET funding_source_type=$3,funding_source_id=$4,updated_at=NOW()
          WHERE acquisition_version_id=$1 AND tenant_id=$2 AND status='DRAFT'
@@ -1032,6 +1032,9 @@ export class AcquisitionService {
           input.funding_source_id,
         ],
       );
+      const updated = Array.isArray(updateResult[0])
+        ? updateResult[0]
+        : updateResult;
       if (!updated[0])
         throw new ConflictException('Draft changed concurrently');
       await this.writeAudit(
@@ -1132,11 +1135,14 @@ export class AcquisitionService {
     const row = await this.getRawVersion(tenantId, versionId);
     if (row.requester_id !== actor.user_id)
       throw new ForbiddenException('Only the requester may submit');
-    const updated = await this.db.query(
+    const updateResult = await this.db.query(
       `UPDATE acq_request_versions SET status='VENDOR_REVIEW', updated_at=NOW()
        WHERE acquisition_version_id=$1 AND tenant_id=$2 AND status='VALIDATED' RETURNING *`,
       [versionId, tenantId],
     );
+    const updated = Array.isArray(updateResult[0])
+      ? updateResult[0]
+      : updateResult;
     if (!updated[0])
       throw new ConflictException(
         'Acquisition must be VALIDATED before submission',

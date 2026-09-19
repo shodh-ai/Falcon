@@ -48,13 +48,16 @@ export class AcquisitionIntegrationService {
       }
       if (existing[0].response_payload) return existing[0].response_payload;
       if (Number(existing[0].response_status) >= 500) {
-        const claimed = await this.db.query(
+        const claimResult = await this.db.query(
           `UPDATE acq_integration_idempotency SET response_status=NULL
            WHERE idempotency_id=$1 AND response_status>=500
            RETURNING idempotency_id`,
           [existing[0].idempotency_id],
         );
-        claimedRetry = Boolean(claimed[0]);
+        const claimed = Array.isArray(claimResult[0])
+          ? claimResult[0]
+          : claimResult;
+        claimedRetry = claimed.length > 0;
       }
       if (!claimedRetry) {
         throw new ConflictException(

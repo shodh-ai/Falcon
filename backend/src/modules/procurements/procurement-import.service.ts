@@ -378,7 +378,7 @@ export class ProcurementImportService {
         const assignments = config.fields
           .map((field, index) => `${field}=$${index + 4}`)
           .join(',');
-        const result = await manager.query(
+        const mutationResult = await manager.query(
           `UPDATE ${config.table} SET ${assignments}${config.updated ? ',updated_at=NOW()' : ''} WHERE ${config.id}=$1 AND proc_case_id=$2 AND tenant_id=$3 AND ${config.status} RETURNING ${config.id}`,
           [
             change.id,
@@ -387,6 +387,9 @@ export class ProcurementImportService {
             ...config.fields.map((field) => change.values[field]),
           ],
         );
+        const result = Array.isArray(mutationResult[0])
+          ? mutationResult[0]
+          : mutationResult;
         if (!result[0])
           throw new ConflictException({
             message: 'Atomic import target changed or finalized',
