@@ -50,4 +50,16 @@ describe('Module 4 authority and event contracts', () => {
     expect(procurement).toContain('source_module,status_type,status');
     expect(procurement).toContain("'MODULE_4','PHYSICAL_VERIFICATION'");
   });
+
+  it('locks quantity rows before summing them in application code', () => {
+    expect(verification).not.toMatch(
+      /SUM\(subject_quantity\)[\s\S]{0,160}FOR UPDATE/,
+    );
+    expect(verification).not.toMatch(
+      /SUM\(allocated_quantity\)[\s\S]{0,160}FOR UPDATE/,
+    );
+    expect(verification).toContain(
+      "workflow_state='CAPTURING',aggregate_revision=aggregate_revision+1",
+    );
+  });
 });

@@ -564,10 +564,16 @@ export class ProductVerificationService {
       this.assertOpen(row);
       if (row.subject_type !== 'LOT')
         throw new ConflictException('Only consumable cases use lot subjects');
-      const totals = await manager.query(
-        `SELECT COALESCE(SUM(subject_quantity),0) AS allocated FROM pv_subjects
-         WHERE verification_case_id=$1 AND status='ACTIVE' FOR UPDATE`,
+      const activeSubjects = await manager.query(
+        `SELECT subject_quantity FROM pv_subjects
+         WHERE verification_case_id=$1 AND status='ACTIVE'
+         ORDER BY subject_id FOR UPDATE`,
         [caseId],
+      );
+      const allocated = activeSubjects.reduce(
+        (total: number, item: Record<string, unknown>) =>
+          total + Number(item.subject_quantity),
+        0,
       );
       const returned = await manager.query(
         `SELECT COALESCE(SUM(quantity),0) AS returned FROM proc_returns
@@ -577,14 +583,14 @@ export class ProductVerificationService {
       const eligible =
         Number(row.eligible_quantity) - Number(returned[0]?.returned ?? 0);
       if (
-        Number(totals[0].allocated) + input.observed_quantity >
+        allocated + input.observed_quantity >
         eligible + 0.0005
       )
         throw new ConflictException({
           message:
             'Lot quantities exceed accepted quantity available for verification',
           code: 'LOT_QUANTITY_EXCEEDED',
-          available_quantity: eligible - Number(totals[0].allocated),
+          available_quantity: eligible - allocated,
         });
       const sequences = await manager.query(
         `SELECT COALESCE(MAX(subject_sequence),0)+1 AS next FROM pv_subjects WHERE verification_case_id=$1`,
@@ -622,7 +628,8 @@ export class ProductVerificationService {
         input,
       );
       await manager.query(
-        `UPDATE pv_cases SET workflow_state='CAPTURING' WHERE verification_case_id=$1`,
+        `UPDATE pv_cases SET workflow_state='CAPTURING',aggregate_revision=aggregate_revision+1,
+         updated_at=NOW() WHERE verification_case_id=$1`,
         [caseId],
       );
       await this.emit(
@@ -638,7 +645,7 @@ export class ProductVerificationService {
       );
       return {
         subject_id: subjectId,
-        aggregate_revision: Number(row.aggregate_revision),
+        aggregate_revision: Number(row.aggregate_revision) + 1,
       };
     });
   }
@@ -689,22 +696,35 @@ export class ProductVerificationService {
           code: 'INVOICE_CLEARANCE_REQUIRED',
         });
       const existing = await manager.query(
-        `SELECT COALESCE(SUM(allocated_quantity),0) AS allocated FROM pv_invoice_allocations WHERE subject_id=$1 FOR UPDATE`,
+        `SELECT allocated_quantity FROM pv_invoice_allocations WHERE subject_id=$1
+         ORDER BY invoice_allocation_id FOR UPDATE`,
         [subjectId],
       );
+      const subjectAllocated = existing.reduce(
+        (total: number, item: Record<string, unknown>) =>
+          total + Number(item.allocated_quantity),
+        0,
+      );
       if (
-        Number(existing[0].allocated) + input.allocated_quantity >
+        subjectAllocated + input.allocated_quantity >
         Number(subject.subject_quantity) + 0.0005
       )
         throw new ConflictException(
           'Invoice allocations exceed subject quantity',
         );
       const invoiceAllocated = await manager.query(
-        `SELECT COALESCE(SUM(allocated_quantity),0) AS allocated FROM pv_invoice_allocations WHERE invoice_line_id=$1 AND invoice_revision=$2 FOR UPDATE`,
+        `SELECT allocated_quantity FROM pv_invoice_allocations
+         WHERE invoice_line_id=$1 AND invoice_revision=$2
+         ORDER BY invoice_allocation_id FOR UPDATE`,
         [input.invoice_line_id, invoice.revision],
       );
+      const invoiceAllocatedQuantity = invoiceAllocated.reduce(
+        (total: number, item: Record<string, unknown>) =>
+          total + Number(item.allocated_quantity),
+        0,
+      );
       if (
-        Number(invoiceAllocated[0].allocated) + input.allocated_quantity >
+        invoiceAllocatedQuantity + input.allocated_quantity >
         Number(invoice.quantity) + 0.0005
       )
         throw new ConflictException(
