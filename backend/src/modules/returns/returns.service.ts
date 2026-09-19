@@ -54,12 +54,22 @@ export class ReturnsService {
     const grants = await this.grants(actor, capability);
     if (!grants.length) throw new ForbiddenException(`Missing ${capability}`);
     const rows = await this.db.query(
-      `SELECT c.*,pc.department_id FROM ret_cases c JOIN proc_cases pc ON pc.proc_case_id=c.proc_case_id
+      `SELECT c.*,COALESCE(scoped_inventory.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id) department_id
+       FROM ret_cases c
+       JOIN proc_cases pc ON pc.proc_case_id=c.proc_case_id
+       LEFT JOIN acq_requests ar ON ar.acquisition_id=c.acquisition_id
+       LEFT JOIN acq_request_versions av ON av.acquisition_version_id=c.acquisition_version_id
+       LEFT JOIN LATERAL(
+         SELECT MIN(r.owner_department_id) owner_department_id
+         FROM ret_case_allocations a
+         JOIN inv_records r ON r.inventory_record_id=a.inventory_record_id
+         WHERE a.return_case_id=c.return_case_id
+       ) scoped_inventory ON TRUE
        WHERE c.return_case_id=$1 AND c.tenant_id=$2 AND EXISTS(
          SELECT 1 FROM acq_access_grants g WHERE g.tenant_id=c.tenant_id AND g.capability=$3
          AND g.valid_from<=NOW() AND(g.valid_until IS NULL OR g.valid_until>NOW())
          AND(g.principal_user_id=$4 OR lower(g.principal_role)=ANY($5::text[]))
-         AND(g.scope_type='TENANT' OR(g.scope_type='DEPARTMENT' AND g.scope_reference=pc.department_id::text)))`,
+         AND(g.scope_type='TENANT' OR(g.scope_type='DEPARTMENT' AND g.scope_reference=COALESCE(scoped_inventory.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id)::text)))`,
       [id, this.tenant(actor), capability, actor.user_id, this.roles(actor)],
     );
     if (!rows[0]) throw new NotFoundException('Return case not found');
@@ -270,7 +280,19 @@ export class ReturnsService {
   async queue(actor: ReturnActor) {
     await this.require(actor, 'RETURNS_VIEW');
     return this.db.query(
-      `SELECT c.*,pc.proc_case_id::text procurement_case_number,l.product_name,l.category FROM ret_cases c JOIN proc_cases pc ON pc.proc_case_id=c.proc_case_id JOIN acq_lines l ON l.line_id=c.acquisition_line_id WHERE c.tenant_id=$1 AND EXISTS(SELECT 1 FROM acq_access_grants g WHERE g.tenant_id=c.tenant_id AND g.capability='RETURNS_VIEW' AND(g.principal_user_id=$2 OR lower(g.principal_role)=ANY($3::text[])) AND(g.scope_type='TENANT' OR(g.scope_type='DEPARTMENT' AND g.scope_reference=pc.department_id::text))) ORDER BY c.updated_at DESC LIMIT 250`,
+      `SELECT c.*,pc.proc_case_id::text procurement_case_number,l.product_name,l.category
+       FROM ret_cases c
+       JOIN proc_cases pc ON pc.proc_case_id=c.proc_case_id
+       JOIN acq_lines l ON l.line_id=c.acquisition_line_id
+       LEFT JOIN acq_requests ar ON ar.acquisition_id=c.acquisition_id
+       LEFT JOIN acq_request_versions av ON av.acquisition_version_id=c.acquisition_version_id
+       LEFT JOIN LATERAL(
+         SELECT MIN(r.owner_department_id) owner_department_id
+         FROM ret_case_allocations a
+         JOIN inv_records r ON r.inventory_record_id=a.inventory_record_id
+         WHERE a.return_case_id=c.return_case_id
+       ) scoped_inventory ON TRUE
+       WHERE c.tenant_id=$1 AND EXISTS(SELECT 1 FROM acq_access_grants g WHERE g.tenant_id=c.tenant_id AND g.capability='RETURNS_VIEW' AND(g.principal_user_id=$2 OR lower(g.principal_role)=ANY($3::text[])) AND(g.scope_type='TENANT' OR(g.scope_type='DEPARTMENT' AND g.scope_reference=COALESCE(scoped_inventory.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id)::text))) ORDER BY c.updated_at DESC LIMIT 250`,
       [this.tenant(actor), actor.user_id, this.roles(actor)],
     );
   }
@@ -354,7 +376,15 @@ export class ReturnsService {
             'Duplicate inventory allocations are not allowed',
           );
         const records = await m.query(
-          `SELECT r.*,b.proc_case_id,b.acquisition_line_id,b.order_line_id,b.receipt_line_id,b.vendor_id,pc.acquisition_id,pc.acquisition_version_id,pc.department_id,s.subject_quantity,s.status subject_status FROM inv_records r JOIN inv_procurement_batches b ON b.procurement_batch_id=r.procurement_batch_id JOIN proc_cases pc ON pc.proc_case_id=b.proc_case_id JOIN pv_subjects s ON s.subject_id=r.subject_id WHERE r.inventory_record_id=ANY($1::uuid[]) AND r.tenant_id=$2 ORDER BY r.inventory_record_id FOR UPDATE OF r`,
+          `SELECT r.*,b.proc_case_id,b.acquisition_line_id,b.order_line_id,b.receipt_line_id,b.vendor_id,pc.acquisition_id,pc.acquisition_version_id,COALESCE(r.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id) department_id,s.subject_quantity,s.status subject_status
+           FROM inv_records r
+           JOIN inv_procurement_batches b ON b.procurement_batch_id=r.procurement_batch_id
+           JOIN proc_cases pc ON pc.proc_case_id=b.proc_case_id
+           LEFT JOIN acq_requests ar ON ar.acquisition_id=pc.acquisition_id
+           LEFT JOIN acq_request_versions av ON av.acquisition_version_id=pc.acquisition_version_id
+           JOIN pv_subjects s ON s.subject_id=r.subject_id
+           WHERE r.inventory_record_id=ANY($1::uuid[]) AND r.tenant_id=$2
+           ORDER BY r.inventory_record_id FOR UPDATE OF r`,
           [ids, this.tenant(actor)],
         );
         if (records.length !== ids.length)
@@ -367,11 +397,12 @@ export class ReturnsService {
             (r: any) =>
               r.receipt_line_id !== first.receipt_line_id ||
               r.order_line_id !== first.order_line_id ||
-              r.acquisition_line_id !== first.acquisition_line_id,
+              r.acquisition_line_id !== first.acquisition_line_id ||
+              r.department_id !== first.department_id,
           )
         )
           throw new ConflictException(
-            'One return case must use subjects from one receipt and acquisition line',
+            'One return case must use subjects from one receipt, acquisition line and department',
           );
         const grants = await this.grants(actor, 'RETURNS_INITIATE');
         if (

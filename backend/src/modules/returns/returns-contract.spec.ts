@@ -51,4 +51,13 @@ describe('DoFA Module 7 contract', () => {
     expect(service).toContain('workflow_status=$2,active_decision_id=$3');
     expect(service).toContain('requires_compensation');
   });
+  it('scopes historical returns by exact inventory ownership when procurement scope is absent', () => {
+    expect(service).toContain(
+      'COALESCE(r.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id) department_id',
+    );
+    expect(service).toContain(
+      'COALESCE(scoped_inventory.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id)::text',
+    );
+    expect(service).toContain('r.department_id !== first.department_id');
+  });
 });
