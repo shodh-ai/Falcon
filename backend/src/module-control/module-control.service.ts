@@ -180,6 +180,9 @@ export class ModuleControlService {
         })),
     );
     const schema = await this.hasControlSchema();
+    const missingConfiguration = definition.requiredConfiguration.filter(
+      (key) => !process.env[key]?.trim(),
+    );
     const moduleReadiness =
       moduleKeyValue === 'lms_learning'
         ? await this.lmsReadiness(scope)
@@ -190,6 +193,7 @@ export class ModuleControlService {
         ['ACTIVE', 'PILOT'].includes(item.state),
       ),
       permissions: definition.businessOwnerRoles.length > 0,
+      configuration: missingConfiguration.length === 0,
       rollbackReady: true,
       moduleAcceptance: moduleReadiness.ready,
     };
@@ -198,6 +202,7 @@ export class ModuleControlService {
       current,
       checks,
       dependencyStates,
+      missingConfiguration,
       moduleChecks: moduleReadiness.checks,
       evidence: moduleReadiness.evidence,
       ready: Object.values(checks).every(Boolean),

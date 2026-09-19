@@ -62,6 +62,7 @@ const definition = (
   apiPrefixes: string[],
   businessOwnerRoles: string[],
   dependencyEdges: ModuleDefinition['dependencyEdges'] = [],
+  requiredConfiguration: string[] = [],
 ): ModuleDefinition => ({
   moduleKey,
   displayName,
@@ -71,7 +72,7 @@ const definition = (
   apiPrefixes,
   capabilities: [],
   workers: [],
-  requiredConfiguration: [],
+  requiredConfiguration,
   dependencyEdges,
   legacyFallbackPolicy: 'EXPLICIT_ONLY',
   healthChecks: ['schema', 'permissions', 'workers', 'smoke'],
@@ -212,6 +213,14 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     ],
     ['InventoryManager', 'ProcurementHead'],
     [{ moduleKey: 'finance_procurement', kind: 'REQUIRED_AT_STEP' }],
+    [
+      'PRODUCT_VERIFICATION_ED25519_PRIVATE_KEY',
+      'PRODUCT_VERIFICATION_SIGNING_KEY_VERSION',
+      'INVENTORY_ED25519_PRIVATE_KEY',
+      'INVENTORY_SIGNING_KEY_VERSION',
+      'ASSET_RETIREMENT_ED25519_PRIVATE_KEY',
+      'ASSET_RETIREMENT_SIGNING_KEY_VERSION',
+    ],
   ),
   definition(
     'library',

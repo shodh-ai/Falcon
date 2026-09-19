@@ -47,4 +47,20 @@ describe('module catalogue', () => {
       CORE_API_PREFIXES.every((prefix) => resolveApiModule(prefix) === 'CORE'),
     ).toBe(true);
   });
+
+  it('requires every inventory lifecycle signing authority before launch', () => {
+    const inventory = MODULE_CATALOGUE.find(
+      (module) => module.moduleKey === 'inventory_assets',
+    );
+    expect(inventory?.requiredConfiguration).toEqual(
+      expect.arrayContaining([
+        'PRODUCT_VERIFICATION_ED25519_PRIVATE_KEY',
+        'PRODUCT_VERIFICATION_SIGNING_KEY_VERSION',
+        'INVENTORY_ED25519_PRIVATE_KEY',
+        'INVENTORY_SIGNING_KEY_VERSION',
+        'ASSET_RETIREMENT_ED25519_PRIVATE_KEY',
+        'ASSET_RETIREMENT_SIGNING_KEY_VERSION',
+      ]),
+    );
+  });
 });

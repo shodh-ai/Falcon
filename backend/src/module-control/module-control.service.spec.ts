@@ -112,3 +112,48 @@ describe('ModuleControlService LMS launch readiness', () => {
     });
   });
 });
+
+describe('ModuleControlService required configuration readiness', () => {
+  const requiredKeys = [
+    'PRODUCT_VERIFICATION_ED25519_PRIVATE_KEY',
+    'PRODUCT_VERIFICATION_SIGNING_KEY_VERSION',
+    'INVENTORY_ED25519_PRIVATE_KEY',
+    'INVENTORY_SIGNING_KEY_VERSION',
+    'ASSET_RETIREMENT_ED25519_PRIVATE_KEY',
+    'ASSET_RETIREMENT_SIGNING_KEY_VERSION',
+  ];
+
+  afterEach(() => {
+    for (const key of requiredKeys) delete process.env[key];
+  });
+
+  it('fails inventory lifecycle readiness when signing authorities are absent', async () => {
+    const service = new ModuleControlService({
+      query: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ present: true }]),
+    } as any);
+    const result = await service.readiness('inventory_assets', {
+      tenantId: 'tenant-a',
+    });
+    expect(result.checks.configuration).toBe(false);
+    expect(result.missingConfiguration).toEqual(requiredKeys);
+    expect(result.ready).toBe(false);
+  });
+
+  it('passes the configuration check when every signing authority is present', async () => {
+    for (const key of requiredKeys) process.env[key] = 'configured';
+    const service = new ModuleControlService({
+      query: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ present: true }]),
+    } as any);
+    const result = await service.readiness('inventory_assets', {
+      tenantId: 'tenant-a',
+    });
+    expect(result.checks.configuration).toBe(true);
+    expect(result.missingConfiguration).toEqual([]);
+  });
+});
