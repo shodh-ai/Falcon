@@ -1157,7 +1157,8 @@ export class ProductVerificationService {
             },
           );
           await manager.query(
-            `UPDATE pv_cases SET workflow_state='CAPTURING' WHERE verification_case_id=$1`,
+            `UPDATE pv_cases SET workflow_state='CAPTURING',aggregate_revision=aggregate_revision+1,
+             updated_at=NOW() WHERE verification_case_id=$1`,
             [caseId],
           );
           await this.emit(
@@ -1173,7 +1174,7 @@ export class ProductVerificationService {
           return {
             ...sessions[0],
             nonce,
-            aggregate_revision: Number(row.aggregate_revision),
+            aggregate_revision: Number(row.aggregate_revision) + 1,
           };
         },
       );
