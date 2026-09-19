@@ -1901,6 +1901,14 @@ export class InventoryService {
     const row = rows[0];
     if (!row || row.record_status !== 'ACTIVE')
       throw new ConflictException('Active inventory record required');
+    const serviceHold = await manager.query(
+      `SELECT 1 FROM svc_asset_holds WHERE inventory_record_id=$1 AND status='ACTIVE' FOR UPDATE`,
+      [input.inventory_record_id],
+    );
+    if (serviceHold[0])
+      throw new ConflictException(
+        'Return execution is blocked by an active Module 8 service hold',
+      );
     if (
       ['RETURNED', 'RETIRED', 'WRITTEN_OFF', 'DISPOSED'].includes(
         row.lifecycle_status,
@@ -2261,6 +2269,14 @@ export class InventoryService {
         throw new ConflictException(
           'Inventory state changes are blocked by an active return hold',
         );
+      const serviceHold = await manager.query(
+        `SELECT 1 FROM svc_asset_holds WHERE inventory_record_id=$1 AND status='ACTIVE' FOR UPDATE`,
+        [id],
+      );
+      if (serviceHold[0])
+        throw new ConflictException(
+          'Inventory state changes are blocked by an active Module 8 service hold',
+        );
       return this.withIdempotency(
         manager,
         row.tenant_id,
@@ -2332,6 +2348,14 @@ export class InventoryService {
       if (row.lifecycle_status === 'RETURN_PENDING')
         throw new ConflictException(
           'Inventory state changes are blocked by an active return hold',
+        );
+      const serviceHold = await manager.query(
+        `SELECT 1 FROM svc_asset_holds WHERE inventory_record_id=$1 AND status='ACTIVE' FOR UPDATE`,
+        [id],
+      );
+      if (serviceHold[0])
+        throw new ConflictException(
+          'Inventory state changes are blocked by an active Module 8 service hold',
         );
       return this.withIdempotency(
         manager,
@@ -2667,9 +2691,13 @@ export class InventoryService {
     if (!row || row.record_type !== 'ITEM' || row.record_status !== 'ACTIVE')
       throw new ConflictException('Active ITEM inventory record required');
     if (
-      ['RETURNED', 'RETIRED', 'WRITTEN_OFF', 'DISPOSED'].includes(
-        row.lifecycle_status,
-      )
+      [
+        'RETURN_PENDING',
+        'RETURNED',
+        'RETIRED',
+        'WRITTEN_OFF',
+        'DISPOSED',
+      ].includes(row.lifecycle_status)
     )
       throw new ConflictException('Asset lifecycle is not service eligible');
     const existing = await manager.query(

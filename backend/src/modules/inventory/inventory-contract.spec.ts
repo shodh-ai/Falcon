@@ -84,4 +84,18 @@ describe('Module 5 authority contracts', () => {
       /async acknowledgeStateChange[\s\S]*?lifecycle_status === 'RETURN_PENDING'[\s\S]*?withIdempotency/,
     );
   });
+  it('blocks return and normal state changes during an active Module 8 service hold', () => {
+    expect(service).toMatch(
+      /async placeReturnHold[\s\S]*?FROM svc_asset_holds[\s\S]*?Return execution is blocked by an active Module 8 service hold/,
+    );
+    expect(service).toMatch(
+      /async requestStateChange[\s\S]*?FROM svc_asset_holds[\s\S]*?Inventory state changes are blocked by an active Module 8 service hold/,
+    );
+    expect(service).toMatch(
+      /async acknowledgeStateChange[\s\S]*?FROM svc_asset_holds[\s\S]*?Inventory state changes are blocked by an active Module 8 service hold/,
+    );
+    expect(service).toMatch(
+      /async placeServiceHold[\s\S]*?'RETURN_PENDING',[\s\S]*?'RETURNED',[\s\S]*?'RETIRED',[\s\S]*?'WRITTEN_OFF',[\s\S]*?'DISPOSED'/,
+    );
+  });
 });
