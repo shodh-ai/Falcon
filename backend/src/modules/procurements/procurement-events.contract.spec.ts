@@ -52,6 +52,7 @@ describe('Module 2 event and compatibility contract', () => {
     expect(service).toContain('INSERT INTO fin_purchase_orders');
     expect(service).toContain('INSERT INTO fin_vendor_invoices');
     expect(service).toContain('INSERT INTO fin_goods_receipts');
+    expect(service).toContain("CASE WHEN $2::text='PAID'");
   });
 
   it('creates the canonical receipt before back-linking the legacy GRN', () => {

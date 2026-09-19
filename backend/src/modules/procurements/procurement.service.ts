@@ -2865,7 +2865,10 @@ export class ProcurementService {
       );
       if (invoice.legacy_invoice_id)
         await manager.query(
-          `UPDATE fin_vendor_invoices SET status=$2,paid_at=CASE WHEN $2='PAID' THEN NOW() ELSE paid_at END WHERE invoice_id=$1 AND source_system='MODULE2'`,
+          `UPDATE fin_vendor_invoices
+           SET status=$2::text,
+               paid_at=CASE WHEN $2::text='PAID' THEN NOW() ELSE paid_at END
+           WHERE invoice_id=$1 AND source_system='MODULE2'`,
           [invoice.legacy_invoice_id, status],
         );
       await this.audit(
