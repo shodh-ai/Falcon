@@ -572,7 +572,7 @@ The detailed functional cases in the source QA plan remain required. The followi
 | M1-004 | Vendor scoring and hard gates | P03 | stored raw inputs, policy version and reproducible score |
 | M1-005 | Select non-recommended vendor | P03/P04 | justification + exception; independent authority where configured |
 | M1-006 | Concurrent budget reservation | P05 | one valid result; allocation never negative |
-| M1-007 | DoFA route and decisions | P09/P10/P11 | pinned route, distinct users, hash-linked decisions |
+| M1-007 | DoFA route and decisions | Pinned amount-band approvers (₹2,46,000 journey: P04/P05; targeted L1: P09; targeted L2: P10) | pinned route, distinct users, hash-linked decisions |
 | M1-008 | Self/out-of-scope approval | P01/P09 from wrong scope | denied with no decision row |
 | M1-009 | Excel preview/atomic commit | P01 | row errors; single-use token; zero partial rows |
 | M1-010 | IRMS retry and changed replay | P43 | identical retry same result; changed retry `409` |
@@ -729,7 +729,7 @@ Each journey must be executed with the named distinct accounts and include a del
 ### J01 — Normal RFID asset purchase
 
 ```text
-P01 request → P03 vendor/order → P05 budget → P09/P10 DoFA
+P01 request → P03 vendor/order → P05 budget → pinned amount-band approvers (₹2,46,000: P04/P05)
 → P12 receipt → P06 invoice → P07 match
 → Module 3 investigator/certifier → P08 payment
 → P14 capture → P15 review → P17 inventory preparation

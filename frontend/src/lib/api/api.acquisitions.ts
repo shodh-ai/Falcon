@@ -92,6 +92,7 @@ export type AcquisitionLineRecord = {
   quantity: number | string;
   unit: string;
   acquisition_layout: string;
+  product_url?: string | null;
   technical_specifications: unknown;
   intended_use: string;
   estimated_line_total: number | string;
@@ -147,6 +148,9 @@ export type AcquisitionDraftCorrectionInput = {
   intended_use_case: string;
   lines: Array<{
     line_id: string;
+    quantity: number;
+    acquisition_layout: 'ONLINE' | 'OFFLINE' | 'GENERAL';
+    product_url?: string;
     intended_use: string;
     technical_specifications: string;
   }>;

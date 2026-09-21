@@ -10,6 +10,14 @@ describe('DoFA Module 1 migration contract', () => {
     ),
     'utf8',
   );
+  const draftValidationSql = readFileSync(
+    join(
+      process.cwd(),
+      'migrations',
+      '20260921120000_acquisition_draft_validation_inputs.sql',
+    ),
+    'utf8',
+  );
 
   it.each([
     'acq_requests',
@@ -66,5 +74,14 @@ describe('DoFA Module 1 migration contract', () => {
   it('seeds ACQUISITION as a universal, published DoFA domain', () => {
     expect(sql).toMatch(/INSERT INTO dofa_matrices[\s\S]+?'ACQUISITION'/);
     expect(sql).toMatch(/INSERT INTO dofa_policy_graphs[\s\S]+?'ACQUISITION'/);
+  });
+
+  it('allows invalid quantities only while a version remains a draft', () => {
+    expect(draftValidationSql).toContain('CHECK (quantity >= 0)');
+    expect(draftValidationSql).toContain(
+      'acq_require_valid_lines_before_draft_exit',
+    );
+    expect(draftValidationSql).toContain("OLD.status = 'DRAFT'");
+    expect(draftValidationSql).toContain('l.quantity <= 0');
   });
 });

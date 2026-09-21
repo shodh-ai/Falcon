@@ -1,7 +1,7 @@
 'use client';
 
-import { DofaPurchaseApprovalsPanel } from '@/components/dofa/DofaPurchaseApprovalsPanel';
+import { UniversalDofaInboxPanel } from '@/components/dofa/UniversalDofaInboxPanel';
 
 export default function FinanceDofaApprovalsPage() {
-  return <DofaPurchaseApprovalsPanel />;
+  return <UniversalDofaInboxPanel />;
 }

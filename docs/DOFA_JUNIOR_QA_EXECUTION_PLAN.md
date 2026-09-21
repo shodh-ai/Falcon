@@ -272,11 +272,22 @@ Expected: `BUDGET_RESERVED`, exact version link, immutable amount.
 
 ### M1.7 DoFA approvals
 
-1. Login P09, approve L1 with `QA L1 approval`, record decision ID/hash, logout.
-2. Login P10, approve L2 with `QA L2 approval`, logout.
-3. Login P11, give final approval with `QA final approval`.
+The fixed ₹2,46,000 journey resolves to the published `L3` band. Always
+confirm the pinned route shown on the acquisition before signing; do not assume
+that every amount starts with HOD.
 
-Expected: `APPROVED`; distinct, append-only hash-linked decisions; pinned route; one complete `AcquisitionApproved.v1`.
+1. Login P04 (Procurement Head), approve the first pinned step with
+   `QA L3 procurement approval`, record decision ID/hash, logout.
+2. Login P05 (Finance Controller), approve the second pinned step with
+   `QA L3 finance approval`, record decision ID/hash, logout.
+
+Expected: `APPROVED`; two distinct, append-only hash-linked decisions; pinned
+`L3` route; one complete `AcquisitionApproved.v1`.
+
+To test P09/HOD separately, create a small acquisition of ₹50,000 or less and
+confirm its pinned `L1` route. P10/Dean applies to an acquisition above ₹50,000
+and up to ₹2,00,000. P11 is used only when the published matrix resolves or
+escalates a case to that role.
 
 **Checkpoint:** Do not continue until acquisition, budget, route, decisions, snapshot and approved event all agree.
 

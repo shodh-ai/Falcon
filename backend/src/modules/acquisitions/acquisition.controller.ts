@@ -139,6 +139,9 @@ export class AcquisitionController {
       intended_use_case: string;
       lines: Array<{
         line_id: string;
+        quantity: number;
+        acquisition_layout: 'ONLINE' | 'OFFLINE' | 'GENERAL';
+        product_url?: string;
         intended_use: string;
         technical_specifications: string;
       }>;

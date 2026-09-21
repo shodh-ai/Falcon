@@ -75,6 +75,18 @@ describe('acquisition utilities', () => {
     );
   });
 
+  it('reports retained invalid draft quantity and URL values clearly', () => {
+    const invalid = structuredClone(request);
+    invalid.lines[0].quantity = 0;
+    invalid.lines[0].product_url = 'not-a-url';
+    expect(validateAcquisition(invalid).errors).toEqual(
+      expect.arrayContaining([
+        'Line 1: Quantity must be a whole number greater than zero',
+        'Line 1: product_url is invalid',
+      ]),
+    );
+  });
+
   it('normalizes PostgreSQL Date values before acquisition validation', () => {
     expect(toDateOnlyString(new Date('2099-01-01T00:00:00.000Z'))).toBe(
       '2099-01-01',

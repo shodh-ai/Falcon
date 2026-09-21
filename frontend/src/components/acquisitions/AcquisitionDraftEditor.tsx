@@ -33,6 +33,12 @@ export function AcquisitionDraftEditor({
     intended_use_case: detail.intended_use_case,
     lines: detail.lines.map((line) => ({
       line_id: line.line_id,
+      quantity: Number(line.quantity),
+      acquisition_layout: line.acquisition_layout as
+        | "ONLINE"
+        | "OFFLINE"
+        | "GENERAL",
+      product_url: line.product_url ?? "",
       intended_use: line.intended_use ?? "",
       technical_specifications: specificationText(
         line.technical_specifications,
@@ -97,6 +103,71 @@ export function AcquisitionDraftEditor({
             <strong>
               Line {index + 1}: {detail.lines[index]?.product_name}
             </strong>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1 text-sm">
+                <span>Acquisition layout</span>
+                <select
+                  aria-label={`Line ${index + 1} acquisition layout`}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={line.acquisition_layout}
+                  onChange={(event) =>
+                    setLine(index, {
+                      acquisition_layout: event.target.value as
+                        | "ONLINE"
+                        | "OFFLINE"
+                        | "GENERAL",
+                    })
+                  }
+                >
+                  <option value="GENERAL">General</option>
+                  <option value="ONLINE">Online</option>
+                  <option value="OFFLINE">Offline</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-sm">
+                <span>Quantity</span>
+                <Input
+                  aria-label={`Line ${index + 1} quantity`}
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={line.quantity}
+                  onKeyDown={(event) => {
+                    if ([".", "e", "E", "+", "-"].includes(event.key))
+                      event.preventDefault();
+                  }}
+                  onChange={(event) => {
+                    const quantity = Number(event.target.value);
+                    if (Number.isInteger(quantity) && quantity >= 0)
+                      setLine(index, { quantity });
+                  }}
+                />
+                <span className="block text-xs text-muted-foreground">
+                  Enter 0 to verify that validation blocks a non-positive
+                  quantity. Valid submissions require a whole number above 0.
+                </span>
+              </label>
+            </div>
+            {line.acquisition_layout === "ONLINE" && (
+              <label className="space-y-1 text-sm">
+                <span>Product URL</span>
+                <Input
+                  aria-label={`Line ${index + 1} product URL`}
+                  type="text"
+                  inputMode="url"
+                  placeholder="https://vendor.example/product"
+                  value={line.product_url ?? ""}
+                  onChange={(event) =>
+                    setLine(index, { product_url: event.target.value })
+                  }
+                />
+                <span className="block text-xs text-muted-foreground">
+                  Validation requires a complete HTTPS URL and reports the
+                  error without opening the address.
+                </span>
+              </label>
+            )}
             <label className="space-y-1 text-sm">
               <span>Notes and General info (optional)</span>
               <Textarea

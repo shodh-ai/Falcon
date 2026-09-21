@@ -922,6 +922,9 @@ export class AcquisitionService {
       intended_use_case: string;
       lines: Array<{
         line_id: string;
+        quantity: number;
+        acquisition_layout: 'ONLINE' | 'OFFLINE' | 'GENERAL';
+        product_url?: string;
         intended_use: string;
         technical_specifications: string;
       }>;
@@ -963,6 +966,31 @@ export class AcquisitionService {
           'Draft corrections must include every active line exactly once',
         );
 
+      for (const [index, line] of input.lines.entries()) {
+        if (
+          !Number.isFinite(Number(line.quantity)) ||
+          !Number.isInteger(Number(line.quantity)) ||
+          Number(line.quantity) < 0 ||
+          Number(line.quantity) > 1_000_000
+        ) {
+          throw new BadRequestException(
+            `Line ${index + 1}: quantity must be a whole number between 0 and 1000000`,
+          );
+        }
+        if (
+          !['ONLINE', 'OFFLINE', 'GENERAL'].includes(line.acquisition_layout)
+        ) {
+          throw new BadRequestException(
+            `Line ${index + 1}: acquisition layout is invalid`,
+          );
+        }
+        if (String(line.product_url ?? '').length > 2_048) {
+          throw new BadRequestException(
+            `Line ${index + 1}: product URL exceeds 2048 characters`,
+          );
+        }
+      }
+
       await manager.query(
         `UPDATE acq_request_versions SET required_by_date=$3,intended_use_case=$4,updated_at=NOW()
          WHERE acquisition_version_id=$1 AND tenant_id=$2`,
@@ -975,7 +1003,9 @@ export class AcquisitionService {
       );
       for (const line of input.lines) {
         await manager.query(
-          `UPDATE acq_lines SET intended_use=$4,technical_specifications=$5::jsonb,
+          `UPDATE acq_lines SET quantity=$4,acquisition_layout=$5,product_url=$6,
+             intended_use=$7,technical_specifications=$8::jsonb,
+             estimated_line_total=COALESCE(estimated_unit_price,0)*$4,
              validation_status='PENDING',validation_errors='[]'::jsonb,
              validation_warnings='[]'::jsonb
            WHERE acquisition_version_id=$1 AND tenant_id=$2 AND line_id=$3`,
@@ -983,11 +1013,43 @@ export class AcquisitionService {
             versionId,
             tenantId,
             line.line_id,
+            Number(line.quantity),
+            line.acquisition_layout,
+            line.product_url?.trim() || null,
             line.intended_use?.trim() ?? '',
             JSON.stringify(this.normalizeSpecs(line.technical_specifications)),
           ],
         );
       }
+      await manager.query(
+        `UPDATE acq_request_versions v SET
+           product_cost=t.product,
+           delivery_cost=t.delivery,
+           tax_cost=t.tax,
+           installation_cost=t.installation,
+           service_cost=t.service,
+           miscellaneous_cost=t.miscellaneous,
+           estimated_total=t.total,
+           updated_at=NOW()
+         FROM (
+           SELECT acquisition_version_id,
+             COALESCE(SUM(estimated_line_total),0) AS product,
+             COALESCE(SUM(delivery_cost),0) AS delivery,
+             COALESCE(SUM(tax_cost),0) AS tax,
+             COALESCE(SUM(installation_cost),0) AS installation,
+             COALESCE(SUM(service_cost),0) AS service,
+             COALESCE(SUM(miscellaneous_cost),0) AS miscellaneous,
+             COALESCE(SUM(
+               estimated_line_total+delivery_cost+tax_cost+installation_cost+
+               service_cost+miscellaneous_cost
+             ),0) AS total
+           FROM acq_lines
+           WHERE acquisition_version_id=$1 AND tenant_id=$2 AND line_status='ACTIVE'
+           GROUP BY acquisition_version_id
+         ) t
+         WHERE v.acquisition_version_id=t.acquisition_version_id AND v.tenant_id=$2`,
+        [versionId, tenantId],
+      );
       await this.writeAudit(
         manager,
         tenantId,
@@ -998,6 +1060,10 @@ export class AcquisitionService {
         {
           required_by_date: input.required_by_date || null,
           line_count: input.lines.length,
+          quantities: input.lines.map((line) => ({
+            line_id: line.line_id,
+            quantity: line.quantity,
+          })),
         },
       );
     });
