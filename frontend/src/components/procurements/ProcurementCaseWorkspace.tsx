@@ -204,7 +204,8 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     return (
       !["DRAFT", "CANCELLED"].includes(value(parentOrder ?? {}, "status")) &&
       ["SERVICE", "INSTALLATION"].includes(
-        value(caseLine ?? {}, "fulfillment_type"),
+        value(orderLine, "fulfillment_type") ||
+          value(caseLine ?? {}, "fulfillment_type"),
       )
     );
   });
@@ -520,6 +521,12 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
                   </option>
                 ))}
               </select>
+              {serviceLines.length === 0 && (
+                <p className="text-xs text-amber-700">
+                  No issued service or installation order is available. Create
+                  and issue the service order before recording acceptance.
+                </p>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <Input
                   aria-label="Accepted service quantity"

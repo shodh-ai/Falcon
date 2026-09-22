@@ -137,6 +137,8 @@ Normal migrations deliberately do not create known-password accounts. The guarde
 | P38 | Disposal executor | `qa.dofa.p38.disposal-execute@mygyanvihar.test` | `DofaQA!P38#2026` |
 | P39 | Internal auditor | `qa.dofa.p39.auditor@mygyanvihar.test` | `DofaQA!P39#2026` |
 | P46 | COO DoFA approver | `qa.dofa.p46.coo@mygyanvihar.test` | `DofaQA!P46#2026` |
+| P47 | Module 3 integrity analyst/investigator | `qa.dofa.p47.integrity-analyst@mygyanvihar.test` | `DofaQA!P47#2026` |
+| P48 | Module 3 independent integrity certifier | `qa.dofa.p48.integrity-certifier@mygyanvihar.test` | `DofaQA!P48#2026` |
 
 Wrong-tenant account:
 
@@ -325,6 +327,8 @@ Expected: no over-receipt; physical goods require Module 4; no Asset/RFID IDs ar
 
 ### M2.4 Service acceptance
 
+**Login:** P12.
+
 Record and independently verify installation completion.
 
 Expected: service acceptance replaces goods receipt; physical verification/RFID/inventory are not required.
@@ -359,7 +363,7 @@ Negative test: use a disposable correction with wrong currency or excess quantit
 
 ### M3.1 Integrity cases
 
-**Login:** the separately seeded Module 3 investigator/analyst, never P06 who entered the invoice. **Open:** `/finance/invoice-integrity`.
+**Login:** P47, the separately seeded Module 3 investigator/analyst; never P06 who entered the invoice. **Open:** `/finance/invoice-integrity`.
 
 Find each invoice, record case IDs, and confirm invoice revision/document hash matches Module 2.
 
@@ -377,7 +381,7 @@ Negative test: wrong currency or source account must create a blocker even if nu
 
 ### M3.3 Human certification where required
 
-Investigator recommends, logs out; independent certifier reviews the exact evidence set and certifies current invoice revision/hash.
+P47 recommends and logs out. Login as P48; the independent certifier reviews the exact evidence set and certifies the current invoice revision/hash.
 
 Expected: investigator cannot certify their own case; offline/source-unavailable cases require two people; evidence-set hash is stored.
 

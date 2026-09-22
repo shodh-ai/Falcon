@@ -411,6 +411,8 @@ POST /auth/local-login
 | P41 | `qa.dofa.p41.super-admin@mygyanvihar.test` | `DofaQA!P41#2026` | platform administration | super admin without implicit business grants |
 | P42 | `qa.dofa.p42.external-provider@provider.test` | `DofaQA!P42#2026` | Tenant A / assigned service case only | external service provider |
 | P46 | `qa.dofa.p46.coo@mygyanvihar.test` | `DofaQA!P46#2026` | Tenant A / COO DoFA cases | COO approver |
+| P47 | `qa.dofa.p47.integrity-analyst@mygyanvihar.test` | `DofaQA!P47#2026` | Tenant A / AP integrity | independent invoice-integrity analyst/investigator |
+| P48 | `qa.dofa.p48.integrity-certifier@mygyanvihar.test` | `DofaQA!P48#2026` | Tenant A / Finance integrity | independent invoice-integrity certifier |
 
 Machine and public personas do not use human passwords:
 

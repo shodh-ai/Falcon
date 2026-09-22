@@ -75,6 +75,7 @@ const detail = {
       order_line_id: "order-line-2",
       order_id: "order-1",
       proc_case_line_id: "case-line-2",
+      fulfillment_type: "INSTALLATION",
       quantity: 1,
       unit_price: 50,
     },
@@ -119,6 +120,25 @@ describe("Module 2 case operations", () => {
     expect(
       screen.getByRole("option", { name: "Service line · ordered 1" }),
     ).toBeInTheDocument();
+  });
+
+  it("uses the issued order classification for the service acceptance dropdown", async () => {
+    const caseLine = detail.lines[1];
+    const originalClassification = caseLine.fulfillment_type;
+    caseLine.fulfillment_type = "GOODS";
+
+    try {
+      render(<ProcurementCaseWorkspace caseId="case-1" />);
+      expect(await screen.findByText("ACQ-2026-000001")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "RECEIPTS" }));
+
+      expect(
+        screen.getByRole("option", { name: "Service line · ordered 1" }),
+      ).toBeInTheDocument();
+    } finally {
+      caseLine.fulfillment_type = originalClassification;
+    }
   });
 
   it("exposes document-backed invoice entry and gated payment", async () => {

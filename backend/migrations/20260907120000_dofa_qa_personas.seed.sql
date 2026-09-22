@@ -96,6 +96,8 @@ BEGIN
       {"code":"P41","email":"qa.dofa.p41.super-admin@mygyanvihar.test","name":"QA DoFA P41 Super Admin","role":"SuperAdmin","grants":[]},
       {"code":"P42","email":"qa.dofa.p42.external-provider@provider.test","name":"QA DoFA P42 External Provider","role":"ExternalServiceProvider","grants":[]},
       {"code":"P46","email":"qa.dofa.p46.coo@mygyanvihar.test","name":"QA DoFA P46 COO Approver","role":"COO","grants":[]},
+      {"code":"P47","email":"qa.dofa.p47.integrity-analyst@mygyanvihar.test","name":"QA DoFA P47 Invoice Integrity Analyst","role":"APManager","grants":["INVOICE_INTEGRITY_VIEW","INVOICE_INTEGRITY_ANALYZE","INVOICE_INTEGRITY_INVESTIGATE"]},
+      {"code":"P48","email":"qa.dofa.p48.integrity-certifier@mygyanvihar.test","name":"QA DoFA P48 Invoice Integrity Certifier","role":"FinanceController","grants":["INVOICE_INTEGRITY_VIEW","INVOICE_INTEGRITY_CERTIFY"]},
 
       {"code":"C01","email":"qa.dofa.c01.requester-hod@mygyanvihar.test","name":"QA DoFA C01 Requester HOD","role":"HOD","dept":"A","grants":["ACQUISITION_REQUESTER"]},
       {"code":"C02","email":"qa.dofa.c02.buyer-receiver@mygyanvihar.test","name":"QA DoFA C02 Buyer Receiver","role":"ProcurementBuyer","grants":["PROCUREMENT_VIEW","PROCUREMENT_ORDER_ENTRY","PROCUREMENT_RECEIPT_ENTRY"]},
