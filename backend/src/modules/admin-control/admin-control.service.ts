@@ -1573,7 +1573,9 @@ export class AdminControlService {
   async listCalendar(tenantId: string, limit = 50) {
     const tid = this.tid(tenantId);
     return this.db.query(
-      `SELECT event_id, title, event_type, starts_on, ends_on, description, is_all_day
+      `SELECT event_id, title, event_type, starts_on, ends_on, description, is_all_day,
+              academic_year, event_scope, applicable_scope_ids, coordinator,
+              activity_category, kind_of_day, source_reference, source_hash
        FROM admin_academic_calendar_events
        WHERE tenant_id = $1 AND deleted_at IS NULL
        ORDER BY starts_on ASC
@@ -1590,8 +1592,11 @@ export class AdminControlService {
     const tid = this.tid(tenantId);
     const [row] = await this.db.query(
       `INSERT INTO admin_academic_calendar_events
-         (tenant_id, title, event_type, starts_on, ends_on, description, is_all_day, created_by)
-       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8)
+         (tenant_id, title, event_type, starts_on, ends_on, description, is_all_day, created_by,
+          academic_year, event_scope, applicable_scope_ids, coordinator, activity_category,
+          kind_of_day, source_reference, source_hash)
+       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8,
+               $9, $10, $11::jsonb, $12, $13, $14, $15, $16)
        RETURNING *`,
       [
         tid,
@@ -1602,6 +1607,14 @@ export class AdminControlService {
         dto.description ?? null,
         dto.is_all_day ?? true,
         actorId,
+        dto.academic_year ?? null,
+        dto.event_scope ?? 'UNIVERSITY',
+        JSON.stringify(dto.applicable_scope_ids ?? ['UNIVERSITY']),
+        dto.coordinator ?? null,
+        dto.activity_category ?? null,
+        dto.kind_of_day ?? null,
+        dto.source_reference ?? null,
+        dto.source_hash ?? null,
       ],
     );
     await this.writeAudit(

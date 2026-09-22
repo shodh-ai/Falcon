@@ -9,6 +9,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  Matches,
   Min,
   MinLength,
   ValidateNested,
@@ -301,9 +302,14 @@ export class CalendarEventDto {
   @IsIn([
     'SEMESTER',
     'HOLIDAY',
+    'VACATION',
     'EXAM',
+    'ACADEMIC',
     'ADMISSIONS',
     'FEE_DEADLINE',
+    'PLACEMENT',
+    'CLUBS',
+    'PROFESSIONAL_DEVELOPMENT',
     'UNIVERSITY_EVENT',
   ])
   event_type!: string;
@@ -322,6 +328,48 @@ export class CalendarEventDto {
   @IsOptional()
   @IsBoolean()
   is_all_day?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(12)
+  academic_year?: string;
+
+  @IsOptional()
+  @IsIn([
+    'UNIVERSITY',
+    'CAMPUS',
+    'SCHOOL',
+    'DEPARTMENT',
+    'PROGRAMME',
+    'AUDIENCE',
+  ])
+  event_scope?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  applicable_scope_ids?: string[];
+
+  @IsOptional()
+  @IsString()
+  coordinator?: string;
+
+  @IsOptional()
+  @IsString()
+  activity_category?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  kind_of_day?: string;
+
+  @IsOptional()
+  @IsString()
+  source_reference?: string;
+
+  @IsOptional()
+  @Matches(/^[a-f0-9]{64}$/i)
+  source_hash?: string;
 }
 
 export class AiAssistDto {

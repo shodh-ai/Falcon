@@ -10,6 +10,14 @@
   "program_allocation_name": "B.Pharm",
   "default_student_batch": "B.Pharm",
   "default_section_code": "A",
+  "programmes": [
+    {"program_code": "BPHARM", "display_name": "B.Pharm", "duration_terms": 8},
+    {"program_code": "DPHARM", "display_name": "D.Pharm", "duration_terms": 4},
+    {"program_code": "MPHARM-PHARMACEUTICS", "display_name": "M.Pharm Pharmaceutics", "duration_terms": 4}
+  ],
+  "provision_missing_faculty": false,
+  "provision_missing_students": false,
+  "production_import_gate": "staging/readiness.json",
   "sources": {
     "students_pdf": null,
     "workload_pdf": null,

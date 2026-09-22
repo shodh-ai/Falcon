@@ -1937,6 +1937,8 @@ export class StudentPortalService {
       organizer: string;
       attachment_url: string | null;
       academic_year: string;
+      applicable_scope_ids?: string[];
+      kind_of_day?: string | null;
     };
 
     // Curated seed is for non-production empty tenants only — never invent events in production.
@@ -1947,6 +1949,80 @@ export class StudentPortalService {
     const merged = new Map<string, CalendarEvent>(
       seed.map((e) => [e.event_id, e]),
     );
+
+    const universityEventsResult: unknown = await this.dataSource
+      .query(
+        `SELECT event_id::text AS event_id, title, event_type,
+                starts_on::text AS date,
+                COALESCE(ends_on::text, starts_on::text) AS end_date,
+                description, academic_year, event_scope, applicable_scope_ids,
+                coordinator, activity_category, kind_of_day
+         FROM admin_academic_calendar_events
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+         ORDER BY starts_on ASC, created_at ASC`,
+        [tenantId],
+      )
+      .catch(() => []);
+
+    const universityEvents = Array.isArray(universityEventsResult)
+      ? universityEventsResult.filter(
+          (row): row is Record<string, unknown> =>
+            typeof row === 'object' && row !== null,
+        )
+      : [];
+
+    const asText = (value: unknown, fallback = '') =>
+      typeof value === 'string' || typeof value === 'number'
+        ? String(value)
+        : fallback;
+
+    const categoryFor = (eventType: unknown): CalendarEvent['category'] => {
+      switch (asText(eventType).toUpperCase()) {
+        case 'EXAM':
+          return 'EXAMINATION';
+        case 'ADMISSIONS':
+          return 'ADMISSIONS';
+        case 'FEE_DEADLINE':
+          return 'FEES';
+        case 'PLACEMENT':
+          return 'PLACEMENT';
+        case 'HOLIDAY':
+        case 'VACATION':
+          return 'HOLIDAYS';
+        case 'CLUBS':
+        case 'UNIVERSITY_EVENT':
+          return 'CLUBS';
+        default:
+          return 'ACADEMIC';
+      }
+    };
+
+    for (const row of universityEvents) {
+      const scopes = Array.isArray(row.applicable_scope_ids)
+        ? row.applicable_scope_ids.map((value) => asText(value)).filter(Boolean)
+        : ['UNIVERSITY'];
+      const id = `university-${asText(row.event_id)}`;
+      merged.set(id, {
+        event_id: id,
+        title: asText(row.title, 'University event'),
+        category: categoryFor(row.event_type),
+        date: asText(row.date).slice(0, 10),
+        end_date: row.end_date ? asText(row.end_date).slice(0, 10) : null,
+        start_time: null,
+        end_time: null,
+        description: asText(row.description, asText(row.activity_category)),
+        department:
+          asText(row.event_scope, 'UNIVERSITY') === 'UNIVERSITY'
+            ? 'University'
+            : scopes.join(', '),
+        venue: null,
+        organizer: asText(row.coordinator, 'University'),
+        attachment_url: null,
+        academic_year: asText(row.academic_year),
+        applicable_scope_ids: scopes,
+        kind_of_day: row.kind_of_day ? asText(row.kind_of_day) : null,
+      });
+    }
 
     const examEvents = await this.dataSource
       .query(
@@ -2011,7 +2087,30 @@ export class StudentPortalService {
       });
     }
 
-    let events = [...merged.values()].sort((a, b) =>
+    // Prefer the canonical multi-event calendar when the same event is also
+    // present in an exam/holiday projection or the non-production seed.
+    const sourcePriority = (event: CalendarEvent) => {
+      if (event.event_id.startsWith('university-')) return 4;
+      if (event.event_id.startsWith('exam-')) return 3;
+      if (event.event_id.startsWith('holiday-')) return 2;
+      return 1;
+    };
+    const semanticKey = (event: CalendarEvent) =>
+      [
+        event.date,
+        event.end_date ?? event.date,
+        event.title.toLowerCase().replace(/[^a-z0-9]/g, ''),
+      ].join('|');
+    const deduplicated = new Map<string, CalendarEvent>();
+    for (const event of [...merged.values()].sort(
+      (a, b) => sourcePriority(b) - sourcePriority(a),
+    )) {
+      if (!deduplicated.has(semanticKey(event))) {
+        deduplicated.set(semanticKey(event), event);
+      }
+    }
+
+    let events = [...deduplicated.values()].sort((a, b) =>
       a.date.localeCompare(b.date),
     );
 

@@ -32,6 +32,27 @@ function parseArgs(argv) {
   };
 }
 
+function assertImportReadiness(cfg, base, dryRun) {
+  if (dryRun || !cfg.production_import_gate) return;
+  const gatePath = path.join(base, cfg.production_import_gate);
+  if (!fs.existsSync(gatePath)) {
+    throw new Error(
+      `Production import blocked: readiness gate not found at ${gatePath}`,
+    );
+  }
+  const gate = JSON.parse(fs.readFileSync(gatePath, 'utf8'));
+  if (gate.ready_for_production_import !== true) {
+    const blockers = Array.isArray(gate.blockers)
+      ? gate.blockers.map((item) => item.code || item.detail).filter(Boolean)
+      : [];
+    throw new Error(
+      `Production import blocked by readiness gate${
+        blockers.length ? `: ${blockers.join(', ')}` : ''
+      }`,
+    );
+  }
+}
+
 function validateStudents(rows) {
   const errors = [];
   const duplicates = [];
@@ -653,6 +674,7 @@ async function fixKnownStudentEmailAliases(client, tenantId, slug) {
 async function runImport(slug, options) {
   const cfg = loadConfig(slug);
   const base = deptDir(slug);
+  assertImportReadiness(cfg, base, options.dryRun);
   const studentsPath = path.join(base, cfg.sources.students_csv);
   const workloadPath = path.join(base, cfg.sources.faculty_workload_csv);
 
@@ -973,4 +995,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { runImport, validateStudents, validateWorkload, writeReports };
+module.exports = {
+  runImport,
+  validateStudents,
+  validateWorkload,
+  writeReports,
+  assertImportReadiness,
+};

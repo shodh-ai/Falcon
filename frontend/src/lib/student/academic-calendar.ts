@@ -22,6 +22,8 @@ export type AcademicCalendarEvent = {
   organizer?: string | null;
   attachment_url?: string | null;
   academic_year?: string | null;
+  applicable_scope_ids?: string[];
+  kind_of_day?: string | null;
 };
 
 export const ACADEMIC_EVENT_CATEGORIES: {
