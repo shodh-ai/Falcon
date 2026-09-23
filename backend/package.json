@@ -32,6 +32,8 @@
     "prepare:pharmacy-migration": "python3 scripts/pharmacy-migration/prepare-pharmacy-migration.py",
     "test:pharmacy-migration": "python3 -m unittest scripts/pharmacy-migration/test_prepare_pharmacy_migration.py",
     "test:department-import-gate": "node --test scripts/department-import/import-readiness.spec.js",
+    "iqac:duties:review": "node scripts/import-iqac-duty-distribution.js",
+    "iqac:duties:import": "node scripts/import-iqac-duty-distribution.js --apply",
     "import:department": "node scripts/department-import/import-department.js",
     "bootstrap:departments": "node scripts/department-import/bootstrap-departments.js",
     "verify:me-login": "node scripts/verify-me-login.js",

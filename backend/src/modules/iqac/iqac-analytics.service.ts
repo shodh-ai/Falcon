@@ -116,10 +116,10 @@ export class IqacAnalyticsService {
       pending_reports: number;
     }>(
       `SELECT d.dept_id, d.dept_name AS department,
-              COUNT(ta.assignment_id) FILTER (WHERE ta.status = 'Pending')::int AS pending_reports
+              COUNT(ta.assignment_id) FILTER (WHERE ta.status IN ('OPEN','PENDING','SUBMITTED','UNDER_REVIEW','CHANGES_REQUESTED','OVERDUE'))::int AS pending_reports
        FROM departments d
        LEFT JOIN users u ON u.dept_id = d.dept_id AND u.tenant_id = $1
-       LEFT JOIN task_assignments ta ON ta.assigned_to = u.user_id AND ta.status = 'Pending'
+       LEFT JOIN task_assignments ta ON ta.assigned_to = u.user_id
        GROUP BY d.dept_id, d.dept_name
        ORDER BY d.dept_name`,
       [tenantId],

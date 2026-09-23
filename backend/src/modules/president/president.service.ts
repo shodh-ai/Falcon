@@ -69,7 +69,9 @@ export class PresidentService {
       this.taskAssignments
         .createQueryBuilder('ta')
         .innerJoin('ta.assigned_user', 'u')
-        .where('ta.status = :status', { status: 'Pending' })
+        .where(
+          "ta.status IN ('OPEN','PENDING','SUBMITTED','UNDER_REVIEW','CHANGES_REQUESTED','OVERDUE')",
+        )
         .andWhere('u.tenant_id = :tid', { tid })
         .getCount(),
       this.db
@@ -186,15 +188,17 @@ export class PresidentService {
       .leftJoinAndSelect('ta.task', 'task')
       .leftJoinAndSelect('ta.assigned_user', 'assigned_user')
       .leftJoinAndSelect('assigned_user.department', 'department')
-      .where('ta.status = :status', { status: 'Pending' })
+      .where(
+        "ta.status IN ('OPEN','PENDING','SUBMITTED','UNDER_REVIEW','CHANGES_REQUESTED','OVERDUE')",
+      )
       .andWhere('assigned_user.tenant_id = :tid', { tid })
       .orderBy('ta.due_date', 'ASC')
       .take(50)
       .getMany();
     const stats = await this.db.query(
       `SELECT
-         COUNT(*) FILTER (WHERE ta.status = 'Pending')::int AS pending,
-         COUNT(*) FILTER (WHERE ta.status = 'Completed')::int AS completed,
+         COUNT(*) FILTER (WHERE ta.status IN ('OPEN','PENDING','SUBMITTED','UNDER_REVIEW','CHANGES_REQUESTED','OVERDUE'))::int AS pending,
+         COUNT(*) FILTER (WHERE ta.status IN ('ACCEPTED','CLOSED','WAIVED'))::int AS completed,
          COUNT(*)::int AS total
        FROM task_assignments ta
        JOIN users u ON u.user_id = ta.assigned_to

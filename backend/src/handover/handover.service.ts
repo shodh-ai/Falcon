@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { HandoverLog } from '../entities/handover-log.entity';
 import { TaskAssignment } from '../entities/task-assignment.entity';
 import { User } from '../entities/user.entity';
@@ -73,7 +73,7 @@ export class HandoverService {
 
     // Transfer all pending task assignments
     const pendingAssignments = await this.taskAssignmentRepository.find({
-      where: { assigned_to: fromUserId, status: 'Pending' },
+      where: { assigned_to: fromUserId, status: In(['OPEN', 'PENDING']) },
     });
 
     for (const assignment of pendingAssignments) {

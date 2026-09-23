@@ -644,7 +644,7 @@ export class LeadershipService {
         .query(
           `SELECT
            COUNT(*) FILTER (
-             WHERE ta.completed_at IS NOT NULL OR LOWER(ta.status) IN ('completed', 'done')
+             WHERE ta.completed_at IS NOT NULL OR ta.status IN ('ACCEPTED', 'CLOSED', 'WAIVED')
            )::int AS completed_tasks,
            COUNT(*)::int AS total_tasks
          FROM task_assignments ta

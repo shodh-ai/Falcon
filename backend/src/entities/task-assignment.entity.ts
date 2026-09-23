@@ -15,6 +15,7 @@ import { User } from './user.entity';
 @Index(['assigned_to', 'status'])
 @Index(['task_id', 'status'])
 @Index(['due_date'])
+@Index(['tenant_id', 'cycle_year', 'cycle_month'])
 export class TaskAssignment extends BaseSoftDeleteEntity {
   @PrimaryGeneratedColumn('uuid')
   assignment_id: string;
@@ -25,6 +26,18 @@ export class TaskAssignment extends BaseSoftDeleteEntity {
 
   @Column()
   task_id: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  dept_id: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  cycle_year: number | null;
+
+  @Column({ type: 'smallint', nullable: true })
+  cycle_month: number | null;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'assigned_to' })
@@ -43,5 +56,20 @@ export class TaskAssignment extends BaseSoftDeleteEntity {
   assigned_at: Date;
 
   @Column({ type: 'timestamp', nullable: true })
-  completed_at: Date;
+  completed_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  submitted_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reviewed_at: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  reviewed_by: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  review_comments: string | null;
+
+  @Column({ type: 'int', default: 1 })
+  version: number;
 }

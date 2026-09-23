@@ -464,19 +464,32 @@ export class PresidentExecutiveWorkflowService {
        FROM task_assignments ta
        JOIN task_master tm ON tm.task_id = ta.task_id
        JOIN users u ON u.user_id = ta.assigned_to
-       WHERE ta.assignment_id = $1`,
-      [assignmentId],
+       WHERE ta.assignment_id = $1 AND ta.tenant_id = $2`,
+      [assignmentId, actor.tenantId],
     );
     if (!rows[0])
       throw new NotFoundException('Compliance assignment not found');
     const row = rows[0] as Record<string, unknown>;
 
     let newStatus = String(row.status);
-    if (action === 'MARK_REVIEWED') newStatus = 'Completed';
+    if (action === 'MARK_REVIEWED') {
+      if (String(row.assigned_to) === actor.userId) {
+        throw new BadRequestException(
+          'Submitter cannot review their own evidence',
+        );
+      }
+      newStatus = 'ACCEPTED';
+    }
 
     await this.db.query(
-      `UPDATE task_assignments SET status = $2 WHERE assignment_id = $1`,
-      [assignmentId, newStatus],
+      `UPDATE task_assignments
+       SET status = $2,
+           reviewed_by = CASE WHEN $2 = 'ACCEPTED' THEN $3::uuid ELSE reviewed_by END,
+           reviewed_at = CASE WHEN $2 = 'ACCEPTED' THEN NOW() ELSE reviewed_at END,
+           completed_at = CASE WHEN $2 = 'ACCEPTED' THEN NOW() ELSE completed_at END,
+           version = version + 1
+       WHERE assignment_id = $1 AND tenant_id = $4`,
+      [assignmentId, newStatus, actor.userId, actor.tenantId],
     );
 
     const hodRows = await this.db.query(
