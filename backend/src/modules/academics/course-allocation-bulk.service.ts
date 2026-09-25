@@ -334,7 +334,8 @@ export class CourseAllocationBulkService {
           `INSERT INTO academic_course_allocations
              (tenant_id, subject_id, program_name, semester, faculty_user_id, academic_year, course_id, status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')
-           ON CONFLICT (tenant_id, subject_id, program_name, semester, academic_year)
+           ON CONFLICT (tenant_id, subject_id, program_name, semester, academic_year, faculty_user_id)
+             WHERE status = 'ACTIVE'
            DO UPDATE SET
              faculty_user_id = EXCLUDED.faculty_user_id,
              course_id = EXCLUDED.course_id,

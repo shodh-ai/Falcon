@@ -57,12 +57,7 @@ const FACULTY_COURSE_ACCESS_SQL = `(
     WHERE t.course_id = e.course_id
       AND t.faculty_user_id = $2
       AND t.tenant_id = e.tenant_id
-  )
-  OR EXISTS (
-    SELECT 1 FROM academic_marks m
-    WHERE m.course_id = e.course_id
-      AND m.uploaded_by = $2
-      AND m.tenant_id = e.tenant_id
+      AND t.deleted_at IS NULL
   )
 )`;
 
@@ -123,28 +118,15 @@ export class FacultyWorkspacesService {
          c.credits
        FROM academic_courses c
        INNER JOIN academic_timetables t ON t.course_id = c.course_id AND t.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1 AND t.faculty_user_id = $2
+       WHERE c.tenant_id = $1
+         AND t.faculty_user_id = $2
+         AND t.deleted_at IS NULL
        ORDER BY c.course_code`,
       [tenantId, facultyUserId],
     );
     if (fromTimetable.length) return fromTimetable;
 
-    return this.dataSource.query(
-      `SELECT DISTINCT
-         NULL::uuid AS allocation_id,
-         NULL::text AS program_name,
-         NULL::text AS semester,
-         NULL::text AS academic_year,
-         c.course_id,
-         c.course_code,
-         c.course_name,
-         c.credits
-       FROM academic_courses c
-       INNER JOIN academic_marks m ON m.course_id = c.course_id AND m.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1 AND m.uploaded_by = $2
-       ORDER BY c.course_code`,
-      [tenantId, facultyUserId],
-    );
+    return [];
   }
 
   async getFacultyScheduleData(
@@ -2983,10 +2965,10 @@ export class FacultyWorkspacesService {
            AND status = 'ACTIVE'
        ) OR EXISTS (
          SELECT 1 FROM academic_timetables
-         WHERE tenant_id = $1 AND faculty_user_id = $2 AND course_id = $3
-       ) OR EXISTS (
-         SELECT 1 FROM academic_marks
-         WHERE tenant_id = $1 AND uploaded_by = $2 AND course_id = $3
+         WHERE tenant_id = $1
+           AND faculty_user_id = $2
+           AND course_id = $3
+           AND deleted_at IS NULL
        )`,
       [tenantId, facultyUserId, courseId],
     );
