@@ -37,4 +37,19 @@ describe('Faculty course visibility', () => {
     expect(sql).toContain('deleted_at IS NULL');
     expect(sql).not.toContain('academic_marks');
   });
+
+  it('limits directory lookup to the faculty department and published marks', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ dept_id: 17 }])
+      .mockResolvedValueOnce([]);
+    const target = service(query);
+
+    await target.searchDepartmentStudents('faculty-id', 'tenant-id', 'PH2026');
+
+    const sql = query.mock.calls[1][0] as string;
+    expect(sql).toContain('u.dept_id = $2');
+    expect(sql).toContain("m.status = 'PUBLISHED'");
+    expect(query.mock.calls[1][1]).toEqual(['tenant-id', 17, '%ph2026%', 25]);
+  });
 });

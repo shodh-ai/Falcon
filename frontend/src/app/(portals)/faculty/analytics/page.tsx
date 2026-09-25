@@ -13,25 +13,14 @@ import {
   FacultyMetricChip,
 } from '@/components/faculty';
 import { useFacultyCourses, uniqueFacultyCoursesByCourseId } from '@/components/faculty/useFacultyCourses';
-import {
-  FacultyStudentReport,
-  type FacultyStudentReportData,
-} from '@/components/faculty/FacultyStudentReport';
+import { FacultyStudentReport, type FacultyStudentReportData } from '@/components/faculty/FacultyStudentReport';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import {
-  isEmptyArray,
-  isFacultyDemoEntityId,
-  withFacultyDemoFallback,
-} from '@/lib/faculty-demo-mode';
-import {
-  facultyDemoCourses,
-  getFacultyPortalDemoPack,
-  studentsForCourse,
-} from '@/lib/mock/faculty-portal-demo';
+import { isEmptyArray, isFacultyDemoEntityId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoCourses, getFacultyPortalDemoPack, studentsForCourse } from '@/lib/mock/faculty-portal-demo';
 import type { FacultyCourse } from '@/components/faculty/useFacultyCourses';
 
 type StudentSearchResult = {
@@ -48,6 +37,7 @@ type StudentSearchResult = {
 };
 
 type ScoreFilter = 'all' | 'at-risk' | 'strong';
+type SearchScope = 'subject' | 'department';
 
 function resultKey(student: StudentSearchResult) {
   return `${student.course_id}:${student.student_user_id}`;
@@ -71,8 +61,7 @@ function buildDemoAnalyticsStudents(
   courseMeta?: Pick<FacultyCourse, 'course_id' | 'course_code' | 'course_name'>,
 ): StudentSearchResult[] {
   const demoCourses = facultyDemoCourses();
-  const packCourse =
-    demoCourses.find((c) => c.course_id === courseId) ?? demoCourses[0];
+  const packCourse = demoCourses.find((c) => c.course_id === courseId) ?? demoCourses[0];
   if (!packCourse) return [];
 
   const displayCourseId = courseMeta?.course_id ?? courseId;
@@ -126,17 +115,14 @@ function buildDemoStudentReport(
     course_code: courseMeta?.course_code ?? demoCourse.course_code,
     course_name: courseMeta?.course_name ?? demoCourse.course_name,
   };
-  const academicYear =
-    courseMeta?.academic_year ?? demoCourse.academic_year ?? '2025-26';
+  const academicYear = courseMeta?.academic_year ?? demoCourse.academic_year ?? '2025-26';
 
   const mark =
     pack.marks.find((m) => m.student_id === student.student_id && m.course_id === demoCourse.course_id) ??
     pack.marks.find((m) => m.student_id === student.student_id);
   const courseAssignments = pack.assignments.filter((a) => a.course_id === demoCourse.course_id);
   const submitted = pack.submissions.filter(
-    (s) =>
-      s.student_id === student.student_id &&
-      courseAssignments.some((a) => a.assignment_id === s.assignment_id),
+    (s) => s.student_id === student.student_id && courseAssignments.some((a) => a.assignment_id === s.assignment_id),
   );
   const internal = mark?.internal ?? student.internal_marks;
   return {
@@ -211,12 +197,7 @@ function buildDemoStudentReport(
         submitted_at: sub?.submitted_on ?? null,
         marks_awarded: sub?.marks ?? null,
         faculty_remarks: sub?.feedback ?? null,
-        status:
-          sub?.status === 'GRADED'
-            ? 'GRADED'
-            : sub && sub.status !== 'PENDING'
-              ? 'SUBMITTED'
-              : 'PENDING',
+        status: sub?.status === 'GRADED' ? 'GRADED' : sub && sub.status !== 'PENDING' ? 'SUBMITTED' : 'PENDING',
       };
     }),
     demerits: [],
@@ -257,6 +238,7 @@ export default function FacultyAnalyticsPage() {
   const courseOptions = uniqueFacultyCoursesByCourseId(courses);
   const [courseId, setCourseId] = useState('');
   const [query, setQuery] = useState('');
+  const [searchScope, setSearchScope] = useState<SearchScope>('subject');
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
   const [students, setStudents] = useState<StudentSearchResult[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -267,19 +249,25 @@ export default function FacultyAnalyticsPage() {
 
   const effectiveCourseId = courseId || courseOptions[0]?.course_id || '';
   const selectedCourse = courseOptions.find((course) => course.course_id === effectiveCourseId);
-  const courseMeta = selectedCourse
-    ? {
-        course_id: selectedCourse.course_id,
-        course_code: selectedCourse.course_code,
-        course_name: selectedCourse.course_name,
-        academic_year: selectedCourse.academic_year,
-      }
-    : undefined;
-
+  const selectedCourseId = selectedCourse?.course_id;
+  const selectedCourseCode = selectedCourse?.course_code;
+  const selectedCourseName = selectedCourse?.course_name;
+  const selectedCourseYear = selectedCourse?.academic_year;
   useEffect(() => {
-    if (!effectiveCourseId) return;
+    if (searchScope === 'subject' && !effectiveCourseId) return;
+    if (searchScope === 'department' && query.trim().length < 2) {
+      return;
+    }
 
     let active = true;
+    const currentCourseMeta = selectedCourseId
+      ? {
+          course_id: selectedCourseId,
+          course_code: selectedCourseCode ?? '',
+          course_name: selectedCourseName ?? '',
+          academic_year: selectedCourseYear,
+        }
+      : undefined;
     const params = new URLSearchParams({ courseId: effectiveCourseId });
     if (query.trim()) params.set('q', query.trim());
 
@@ -287,9 +275,9 @@ export default function FacultyAnalyticsPage() {
       setLoadingStudents(true);
       try {
         // Demo course IDs are not in Postgres — use local roster only.
-        if (isFacultyDemoEntityId(effectiveCourseId)) {
+        if (searchScope === 'subject' && isFacultyDemoEntityId(effectiveCourseId)) {
           if (!active) return;
-          const demoRows = buildDemoAnalyticsStudents(effectiveCourseId, query, courseMeta);
+          const demoRows = buildDemoAnalyticsStudents(effectiveCourseId, query, currentCourseMeta);
           setStudents(demoRows);
           setSelectedStudentId((current) => {
             if (current && demoRows.some((student) => student.student_user_id === current)) return current;
@@ -298,12 +286,15 @@ export default function FacultyAnalyticsPage() {
           return;
         }
 
-        const rows = await api.get<StudentSearchResult[]>(
-          `/api/academics/faculty/workspaces/analytics/students?${params.toString()}`,
-        );
+        const endpoint =
+          searchScope === 'department'
+            ? `/api/academics/faculty/workspaces/student-directory?q=${encodeURIComponent(query.trim())}`
+            : `/api/academics/faculty/workspaces/analytics/students?${params.toString()}`;
+        const rows = await api.get<StudentSearchResult[]>(endpoint);
         if (!active) return;
-        const demoRows = buildDemoAnalyticsStudents(effectiveCourseId, query, courseMeta);
-        const resolved = withFacultyDemoFallback(rows, demoRows, isEmptyArray);
+        const demoRows =
+          searchScope === 'subject' ? buildDemoAnalyticsStudents(effectiveCourseId, query, currentCourseMeta) : [];
+        const resolved = searchScope === 'subject' ? withFacultyDemoFallback(rows, demoRows, isEmptyArray) : rows;
         setStudents(resolved);
         setSelectedStudentId((current) => {
           if (current && resolved.some((student) => student.student_user_id === current)) return current;
@@ -311,7 +302,8 @@ export default function FacultyAnalyticsPage() {
         });
       } catch (error) {
         if (!active) return;
-        const demoRows = buildDemoAnalyticsStudents(effectiveCourseId, query, courseMeta);
+        const demoRows =
+          searchScope === 'subject' ? buildDemoAnalyticsStudents(effectiveCourseId, query, currentCourseMeta) : [];
         const resolved = withFacultyDemoFallback([], demoRows, isEmptyArray);
         setStudents(resolved);
         setSelectedStudentId((current) => {
@@ -330,26 +322,39 @@ export default function FacultyAnalyticsPage() {
     return () => {
       active = false;
     };
-  }, [api, effectiveCourseId, query, courseMeta?.course_code, courseMeta?.course_name]);
+  }, [
+    api,
+    effectiveCourseId,
+    query,
+    searchScope,
+    selectedCourseCode,
+    selectedCourseId,
+    selectedCourseName,
+    selectedCourseYear,
+  ]);
 
   useEffect(() => {
     if (!effectiveCourseId || !selectedStudentId) {
-      setReport(null);
       return;
     }
 
     let active = true;
+    const currentCourseMeta = selectedCourseId
+      ? {
+          course_id: selectedCourseId,
+          course_code: selectedCourseCode ?? '',
+          course_name: selectedCourseName ?? '',
+          academic_year: selectedCourseYear,
+        }
+      : undefined;
     const params = new URLSearchParams({ courseId: effectiveCourseId });
 
     async function loadReport() {
       setLoadingReport(true);
       try {
         // Demo smoke student/course IDs never exist in Postgres — skip the API (avoids 500).
-        if (
-          isFacultyDemoEntityId(selectedStudentId) ||
-          isFacultyDemoEntityId(effectiveCourseId)
-        ) {
-          const demo = buildDemoStudentReport(effectiveCourseId, selectedStudentId, courseMeta);
+        if (isFacultyDemoEntityId(selectedStudentId) || isFacultyDemoEntityId(effectiveCourseId)) {
+          const demo = buildDemoStudentReport(effectiveCourseId, selectedStudentId, currentCourseMeta);
           if (!active) return;
           setReport(demo);
           if (!demo) {
@@ -358,21 +363,23 @@ export default function FacultyAnalyticsPage() {
           return;
         }
 
-        const data = await api.get<FacultyStudentReportData>(
-          `/api/academics/faculty/workspaces/analytics/students/${encodeURIComponent(selectedStudentId)}/report?${params.toString()}`,
-        );
+        const endpoint =
+          searchScope === 'department'
+            ? `/api/academics/faculty/workspaces/student-directory/${encodeURIComponent(selectedStudentId)}/report?${params.toString()}`
+            : `/api/academics/faculty/workspaces/analytics/students/${encodeURIComponent(selectedStudentId)}/report?${params.toString()}`;
+        const data = await api.get<FacultyStudentReportData>(endpoint);
         if (!active) return;
         setReport(
           withFacultyDemoFallback(
             data,
-            buildDemoStudentReport(effectiveCourseId, selectedStudentId, courseMeta),
+            buildDemoStudentReport(effectiveCourseId, selectedStudentId, currentCourseMeta),
           ),
         );
       } catch (error) {
         if (!active) return;
         const demo = withFacultyDemoFallback(
           null,
-          buildDemoStudentReport(effectiveCourseId, selectedStudentId, courseMeta),
+          buildDemoStudentReport(effectiveCourseId, selectedStudentId, currentCourseMeta),
         );
         setReport(demo);
         if (!demo) {
@@ -391,9 +398,11 @@ export default function FacultyAnalyticsPage() {
     api,
     effectiveCourseId,
     selectedStudentId,
-    courseMeta?.course_code,
-    courseMeta?.course_name,
-    courseMeta?.academic_year,
+    searchScope,
+    selectedCourseCode,
+    selectedCourseId,
+    selectedCourseName,
+    selectedCourseYear,
   ]);
 
   const filteredStudents = useMemo(() => {
@@ -406,15 +415,16 @@ export default function FacultyAnalyticsPage() {
   }, [students, scoreFilter]);
 
   const selectedStudent =
-    filteredStudents.find((s) => s.student_user_id === selectedStudentId) ??
-    students.find((s) => s.student_user_id === selectedStudentId) ??
+    filteredStudents.find((s) => s.student_user_id === selectedStudentId && s.course_id === effectiveCourseId) ??
+    students.find((s) => s.student_user_id === selectedStudentId && s.course_id === effectiveCourseId) ??
     null;
 
   const atRiskCount = students.filter((s) => Number(s.internal_avg_percent) < 40).length;
   const strongCount = students.filter((s) => Number(s.internal_avg_percent) >= 75).length;
 
-  function selectStudent(studentId: string) {
-    setSelectedStudentId(studentId);
+  function selectStudent(student: StudentSearchResult) {
+    setSelectedStudentId(student.student_user_id);
+    if (searchScope === 'department') setCourseId(student.course_id);
   }
 
   function moveSelection(delta: number) {
@@ -428,7 +438,7 @@ export default function FacultyAnalyticsPage() {
         : Math.max(0, Math.min(filteredStudents.length - 1, idx + delta));
     const next = filteredStudents[nextIdx];
     if (!next) return;
-    setSelectedStudentId(next.student_user_id);
+    selectStudent(next);
     const el = listRef.current?.querySelector<HTMLElement>(`[data-student-id="${next.student_user_id}"]`);
     el?.scrollIntoView({ block: 'nearest' });
   }
@@ -437,7 +447,7 @@ export default function FacultyAnalyticsPage() {
     <FacultyPageShell>
       <FacultyPageHeader
         title="Student Analytics"
-        description="Pick a subject, select a student, and review graphical and numerical performance signals."
+        description="Review your subject rosters or find a student in your department by name or registration number."
         meta={
           <>
             <FacultyMetricChip label="Subject" value={selectedCourse?.course_code ?? 'Select'} emphasis />
@@ -454,15 +464,44 @@ export default function FacultyAnalyticsPage() {
       <div className="w-full space-y-6">
         <FacultyPanel
           title="Find Student"
-          description="Choose a subject, filter the roster, then select a student for analysis."
+          description="Use My subject roster for teaching work, or Department lookup for an authorized academic record search."
           className="w-full"
         >
+          <div className="mb-4 inline-flex rounded-lg border border-border/60 bg-muted/30 p-1">
+            {(
+              [
+                { id: 'subject', label: 'My subject roster' },
+                { id: 'department', label: 'Department student lookup' },
+              ] as const
+            ).map((scope) => (
+              <button
+                key={scope.id}
+                type="button"
+                onClick={() => {
+                  setSearchScope(scope.id);
+                  setQuery('');
+                  setStudents([]);
+                  setSelectedStudentId('');
+                  setReport(null);
+                }}
+                className={cn(
+                  'rounded-md px-3 py-2 text-xs font-semibold transition',
+                  searchScope === scope.id
+                    ? 'bg-white text-sgvu-navy shadow-sm'
+                    : 'text-muted-foreground hover:text-sgvu-navy',
+                )}
+              >
+                {scope.label}
+              </button>
+            ))}
+          </div>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-end">
-            <label className="text-sm">
+            <label className={cn('text-sm', searchScope === 'department' && 'opacity-60')}>
               <span className="mb-1.5 block font-medium text-sgvu-navy">Subject</span>
               <Select
                 className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                 value={effectiveCourseId}
+                disabled={searchScope === 'department'}
                 onChange={(event) => {
                   setCourseId(event.target.value);
                   setSelectedStudentId('');
@@ -480,15 +519,27 @@ export default function FacultyAnalyticsPage() {
             </label>
 
             <label className="text-sm">
-              <span className="mb-1.5 block font-medium text-sgvu-navy">Search roster</span>
+              <span className="mb-1.5 block font-medium text-sgvu-navy">
+                {searchScope === 'department' ? 'Student name or registration number' : 'Search roster'}
+              </span>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   className="pl-9 pr-9"
-                  placeholder="Roll no, ID, email, or name"
+                  placeholder={
+                    searchScope === 'department' ? 'Enter at least 2 characters' : 'Roll no, ID, email, or name'
+                  }
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  disabled={!effectiveCourseId}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setQuery(value);
+                    if (searchScope === 'department' && value.trim().length < 2) {
+                      setStudents([]);
+                      setSelectedStudentId('');
+                      setReport(null);
+                    }
+                  }}
+                  disabled={searchScope === 'subject' && !effectiveCourseId}
                   onKeyDown={(event) => {
                     if (event.key === 'ArrowDown') {
                       event.preventDefault();
@@ -540,11 +591,13 @@ export default function FacultyAnalyticsPage() {
 
         <div className="grid w-full gap-6 xl:grid-cols-2 xl:items-start">
           <FacultyPanel
-            title="Subject Students"
+            title={searchScope === 'department' ? 'Department Search Results' : 'Subject Students'}
             description={
-              selectedCourse
-                ? `${selectedCourse.course_code} · click a student to load analysis`
-                : 'Select a subject to load the roster'
+              searchScope === 'department'
+                ? 'Results are limited to students in your assigned department'
+                : selectedCourse
+                  ? `${selectedCourse.course_code} · click a student to load analysis`
+                  : 'Select a subject to load the roster'
             }
             count={filteredStudents.length}
             className="w-full"
@@ -557,11 +610,19 @@ export default function FacultyAnalyticsPage() {
             ) : filteredStudents.length === 0 ? (
               <div className="p-4 sm:p-5">
                 <FacultyEmptyState
-                  title={!effectiveCourseId ? 'No subject selected' : 'No students found'}
+                  title={
+                    searchScope === 'department' && query.trim().length < 2
+                      ? 'Search for a student'
+                      : !effectiveCourseId
+                        ? 'No subject selected'
+                        : 'No students found'
+                  }
                   description={
-                    effectiveCourseId
-                      ? 'Try another search or filter for this subject.'
-                      : 'Choose a subject above to browse enrolled students.'
+                    searchScope === 'department' && query.trim().length < 2
+                      ? 'Enter a student name or registration number above.'
+                      : effectiveCourseId
+                        ? 'Try another search or filter for this subject.'
+                        : 'Choose a subject above to browse enrolled students.'
                   }
                   className="py-8"
                 />
@@ -574,7 +635,8 @@ export default function FacultyAnalyticsPage() {
                 aria-label="Subject students"
               >
                 {filteredStudents.map((student) => {
-                  const selected = selectedStudentId === student.student_user_id;
+                  const selected =
+                    selectedStudentId === student.student_user_id && effectiveCourseId === student.course_id;
                   return (
                     <button
                       key={resultKey(student)}
@@ -582,19 +644,22 @@ export default function FacultyAnalyticsPage() {
                       role="option"
                       aria-selected={selected}
                       data-student-id={student.student_user_id}
-                      onClick={() => selectStudent(student.student_user_id)}
+                      onClick={() => selectStudent(student)}
                       className={cn(
                         'box-border grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border p-3 text-left text-sm transition',
                         'hover:border-sgvu-gold/70 hover:bg-sgvu-gold/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-navy/30',
-                        selected
-                          ? 'border-sgvu-gold bg-sgvu-gold/10 shadow-sm'
-                          : 'border-border/60 bg-background',
+                        selected ? 'border-sgvu-gold bg-sgvu-gold/10 shadow-sm' : 'border-border/60 bg-background',
                       )}
                     >
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-sgvu-navy">{student.name}</p>
                         <p className="truncate text-xs text-muted-foreground">{student.roll_number}</p>
                         <p className="truncate text-xs text-muted-foreground">{student.official_email}</p>
+                        {searchScope === 'department' ? (
+                          <p className="mt-1 truncate text-xs font-medium text-sgvu-navy">
+                            {student.course_code} · {student.course_name}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <Badge variant={scoreTone(student.internal_avg_percent)} className="text-[10px]">
@@ -631,7 +696,7 @@ export default function FacultyAnalyticsPage() {
                 title="Student Analysis"
                 description={
                   selectedStudent
-                    ? `${selectedStudent.name} · ${selectedCourse?.course_code ?? 'Subject'}`
+                    ? `${selectedStudent.name} · ${selectedStudent.course_code ?? selectedCourse?.course_code ?? 'Subject'}`
                     : 'Loading report'
                 }
                 className="w-full"
@@ -684,7 +749,7 @@ export default function FacultyAnalyticsPage() {
           </div>
         </div>
 
-        {!effectiveCourseId ? (
+        {searchScope === 'subject' && !effectiveCourseId ? (
           <div className="flex items-center gap-2 rounded-xl border border-dashed border-border/80 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
             <Users className="h-4 w-4 shrink-0" />
             Assign teaching courses to unlock student analytics for your subjects.

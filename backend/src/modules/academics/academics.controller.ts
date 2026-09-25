@@ -2465,6 +2465,34 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/student-directory')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  searchDepartmentStudentDirectory(
+    @Req() req: { user: AuthUser },
+    @Query('q') q: string,
+  ) {
+    return this.facultyWorkspaces.searchDepartmentStudents(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      q,
+    );
+  }
+
+  @Get('faculty/workspaces/student-directory/:studentUserId/report')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  departmentStudentReport(
+    @Req() req: { user: AuthUser },
+    @Param('studentUserId') studentUserId: string,
+    @Query('courseId') courseId: string,
+  ) {
+    return this.facultyWorkspaces.getDepartmentStudentReport(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      studentUserId,
+    );
+  }
+
   @Get('faculty/workspaces/logbook')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listLogbook(
@@ -2718,6 +2746,19 @@ export class AcademicsController {
       this.resolveTenantId(req.user),
       courseId,
       { title: body.title ?? '', module_number: body.module_number },
+    );
+  }
+
+  @Delete('faculty/courses/modules/:moduleId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  deleteCourseModule(
+    @Param('moduleId') moduleId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.deleteModule(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      moduleId,
     );
   }
 

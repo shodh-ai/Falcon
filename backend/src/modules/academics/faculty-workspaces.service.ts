@@ -2348,6 +2348,82 @@ export class FacultyWorkspacesService {
     );
   }
 
+  async searchDepartmentStudents(
+    facultyUserId: string,
+    tenantId: string,
+    query: string,
+    limit = 25,
+  ) {
+    const trimmed = query?.trim();
+    if (!trimmed || trimmed.length < 2) {
+      throw new BadRequestException(
+        'Enter at least 2 characters of the student name or registration number',
+      );
+    }
+
+    const facultyRows = await this.dataSource.query<
+      Array<{ dept_id: number | null }>
+    >(
+      `SELECT dept_id FROM users WHERE tenant_id = $1 AND user_id = $2 LIMIT 1`,
+      [tenantId, facultyUserId],
+    );
+    const deptId = facultyRows[0]?.dept_id;
+    if (!deptId) {
+      throw new ForbiddenException(
+        'A department assignment is required to search student records',
+      );
+    }
+
+    return this.dataSource.query(
+      `SELECT DISTINCT
+         u.user_id AS student_user_id,
+         u.name,
+         u.official_email,
+         ${ROLL_NUMBER_SQL} AS roll_number,
+         d.dept_name AS department,
+         c.course_id,
+         c.course_code,
+         c.course_name,
+         COALESCE((
+           SELECT ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2)
+           FROM academic_marks m
+           WHERE m.tenant_id = e.tenant_id
+             AND m.student_user_id = e.student_user_id
+             AND m.course_id = e.course_id
+             AND m.status = 'PUBLISHED'
+         ), 0) AS internal_avg_percent,
+         (
+           SELECT COUNT(*)::int
+           FROM assignment_submissions sub
+           INNER JOIN academic_assignments aa ON aa.assignment_id = sub.assignment_id
+           WHERE aa.tenant_id = e.tenant_id
+             AND aa.course_id = e.course_id
+             AND sub.student_user_id = e.student_user_id
+         ) AS assignments_submitted
+       FROM student_course_enrollments e
+       INNER JOIN users u ON u.user_id = e.student_user_id AND u.tenant_id = e.tenant_id
+       INNER JOIN academic_courses c ON c.course_id = e.course_id AND c.tenant_id = e.tenant_id
+       LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE e.tenant_id = $1
+         AND e.status = 'ENROLLED'
+         AND u.dept_id = $2
+         AND (
+           lower(u.name) LIKE $3
+           OR lower(COALESCE(u.official_email, '')) LIKE $3
+           OR lower(${ROLL_NUMBER_SQL}) LIKE $3
+         )
+       ORDER BY u.name ASC, c.course_code ASC
+       LIMIT $4`,
+      [
+        tenantId,
+        deptId,
+        `%${trimmed.toLowerCase()}%`,
+        Math.min(Math.max(limit, 1), 50),
+      ],
+    );
+  }
+
   async getFacultySubjectStudentReport(
     facultyUserId: string,
     tenantId: string,
@@ -2370,7 +2446,56 @@ export class FacultyWorkspacesService {
     }
 
     await this.assertFacultyOwnsCourse(facultyUserId, tenantId, courseId);
+    return this.buildFacultyStudentReport(tenantId, courseId, studentUserId);
+  }
 
+  async getDepartmentStudentReport(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    studentUserId: string,
+  ) {
+    const isUuid = (value: unknown) =>
+      typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.trim(),
+      );
+    if (!isUuid(courseId) || !isUuid(studentUserId)) {
+      throw new BadRequestException('Invalid course or student identifier');
+    }
+
+    const scopeRows = await this.dataSource.query(
+      `SELECT 1
+       FROM users faculty
+       INNER JOIN users student
+         ON student.tenant_id = faculty.tenant_id
+        AND student.dept_id = faculty.dept_id
+       INNER JOIN student_course_enrollments e
+         ON e.tenant_id = student.tenant_id
+        AND e.student_user_id = student.user_id
+        AND e.course_id = $4
+        AND e.status = 'ENROLLED'
+       WHERE faculty.tenant_id = $1
+         AND faculty.user_id = $2
+         AND faculty.dept_id IS NOT NULL
+         AND student.user_id = $3
+       LIMIT 1`,
+      [tenantId, facultyUserId, studentUserId, courseId],
+    );
+    if (!scopeRows.length) {
+      throw new ForbiddenException(
+        'Student records are limited to your assigned department',
+      );
+    }
+
+    return this.buildFacultyStudentReport(tenantId, courseId, studentUserId);
+  }
+
+  private async buildFacultyStudentReport(
+    tenantId: string,
+    courseId: string,
+    studentUserId: string,
+  ) {
     const [
       studentRows,
       statsRows,

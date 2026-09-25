@@ -283,6 +283,29 @@ export class CourseLmsService {
     return mod;
   }
 
+  async deleteModule(
+    facultyUserId: string,
+    tenantId: string,
+    moduleId: string,
+  ) {
+    const mod = await this.getModuleForFaculty(
+      moduleId,
+      facultyUserId,
+      tenantId,
+    );
+    const materialCount = await this.materials.count({
+      where: { tenant_id: tenantId, module_id: moduleId },
+    });
+    if (materialCount > 0) {
+      throw new BadRequestException(
+        'Delete the files in this unit before deleting the unit',
+      );
+    }
+
+    await this.modules.remove(mod);
+    return { deleted: true, module_id: moduleId };
+  }
+
   async uploadModuleMaterial(
     facultyUserId: string,
     tenantId: string,
