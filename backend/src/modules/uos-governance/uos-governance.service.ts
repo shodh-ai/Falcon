@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -366,6 +367,47 @@ export class UosGovernanceService {
       });
     }
     const tid = this.tenant(tenantId);
+    const courseAccess = await this.db.query(
+      `SELECT c.course_id, c.course_code, c.course_name
+       FROM academic_courses c
+       INNER JOIN student_course_enrollments e
+         ON e.tenant_id = c.tenant_id
+        AND e.course_id = c.course_id
+        AND e.student_user_id = $3
+        AND e.status = 'ENROLLED'
+       WHERE c.tenant_id = $1
+         AND upper(c.course_code) = upper($4)
+         AND (
+           EXISTS (
+             SELECT 1
+             FROM academic_course_allocations a
+             WHERE a.tenant_id = c.tenant_id
+               AND a.course_id = c.course_id
+               AND a.faculty_user_id = $2
+               AND a.status = 'ACTIVE'
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM academic_timetables t
+             WHERE t.tenant_id = c.tenant_id
+               AND t.course_id = c.course_id
+               AND t.faculty_user_id = $2
+               AND t.deleted_at IS NULL
+           )
+         )
+       LIMIT 1`,
+      [tid, userId, body.student_user_id, body.course_code],
+    );
+    if (!courseAccess[0]) {
+      throw new ForbiddenException({
+        message:
+          'Grade changes can only be requested for a student enrolled in a subject you currently teach.',
+        code: 'GRADE_CHANGE_TEACHING_ACCESS_REQUIRED',
+      });
+    }
+    body.course_code = String(courseAccess[0].course_code);
+    body.course_name = String(courseAccess[0].course_name);
+
     const dup = await this.db.query(
       `SELECT change_id FROM sis_grade_change_requests
        WHERE tenant_id = $1 AND student_user_id = $2 AND course_code = $3

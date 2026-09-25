@@ -1,32 +1,35 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, Loader2, Send } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/lib/notifications/falcon-toast';
-import {
-  FacultyEmptyState,
-  FacultyPageHeader,
-  FacultyPageShell,
-  FacultyPanel,
-} from '@/components/faculty';
-import {
-  isEmptyArray,
-  isFacultyDemoSmokeId,
-  withFacultyDemoFallback,
-} from '@/lib/faculty-demo-mode';
+import { FacultyEmptyState, FacultyPageHeader, FacultyPageShell, FacultyPanel } from '@/components/faculty';
+import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
 import { facultyDemoGradeChanges } from '@/lib/mock/faculty-portal-demo';
 import { cn } from '@/lib/utils';
+import { uniqueFacultyCoursesByCourseId, useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 
-function gradeStatusLabel(row: {
+type GradeChangeRow = {
+  change_id?: string;
+  request_id?: string;
+  student_user_id: string;
+  student_name?: string | null;
+  course_code: string;
+  from_grade: string;
+  to_grade: string;
+  reason?: string | null;
   status?: string;
-  dofa_awaiting_role?: string | null;
   dofa_status?: string | null;
-}) {
+  dofa_awaiting_role?: string | null;
+};
+
+function gradeStatusLabel(row: { status?: string; dofa_awaiting_role?: string | null; dofa_status?: string | null }) {
   if (row.status === 'APPLIED') return 'Applied';
   if (row.status === 'REJECTED') return 'Rejected';
   if (row.status === 'AWAITING_COE') return 'Awaiting Exam Cell (COE)';
@@ -37,10 +40,7 @@ function gradeStatusLabel(row: {
   return row.status ?? 'Unknown';
 }
 
-function statusBadgeClass(row: {
-  status?: string;
-  dofa_awaiting_role?: string | null;
-}) {
+function statusBadgeClass(row: { status?: string; dofa_awaiting_role?: string | null }) {
   if (row.status === 'APPLIED') {
     return 'border-green-200 bg-green-50 text-green-700';
   }
@@ -55,7 +55,9 @@ function statusBadgeClass(row: {
 
 export default function GradeChangePage() {
   const api = useAuthedApi();
-  const [rows, setRows] = useState<any[]>([]);
+  const { courses } = useFacultyCourses();
+  const courseOptions = uniqueFacultyCoursesByCourseId(courses);
+  const [rows, setRows] = useState<GradeChangeRow[]>([]);
   const [studentId, setStudentId] = useState('');
   const [fromG, setFromG] = useState('');
   const [toG, setToG] = useState('');
@@ -64,16 +66,19 @@ export default function GradeChangePage() {
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const reload = () =>
-    api
-      .get<any[]>('/api/uos/sis/grade-changes')
-      .then((data) => setRows(withFacultyDemoFallback(data, facultyDemoGradeChanges(), isEmptyArray)))
-      .catch(() => setRows(withFacultyDemoFallback([], facultyDemoGradeChanges(), isEmptyArray)))
-      .finally(() => setLoading(false));
+  const reload = useCallback(
+    () =>
+      api
+        .get<GradeChangeRow[]>('/api/uos/sis/grade-changes')
+        .then((data) => setRows(withFacultyDemoFallback(data, facultyDemoGradeChanges(), isEmptyArray)))
+        .catch(() => setRows(withFacultyDemoFallback([], facultyDemoGradeChanges(), isEmptyArray)))
+        .finally(() => setLoading(false)),
+    [api],
+  );
 
   useEffect(() => {
     void reload();
-  }, [api]);
+  }, [reload]);
 
   async function handleSubmit() {
     if (!studentId.trim()) {
@@ -131,8 +136,8 @@ export default function GradeChangePage() {
       setToG('');
       setReason('');
       await reload();
-    } catch (e: any) {
-      toast.error(String(e?.message ?? e));
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setSubmitting(false);
     }
@@ -148,9 +153,7 @@ export default function GradeChangePage() {
             <span className="rounded-md border border-sgvu-gold/40 bg-sgvu-gold/10 px-2.5 py-1 text-sgvu-navy">
               1. You submit
             </span>
-            <span className="rounded-md border border-border/60 bg-muted/30 px-2.5 py-1">
-              2. HOD approves
-            </span>
+            <span className="rounded-md border border-border/60 bg-muted/30 px-2.5 py-1">2. HOD approves</span>
             <span className="rounded-md border border-border/60 bg-muted/30 px-2.5 py-1">
               3. Exam Cell (COE) applies
             </span>
@@ -161,7 +164,7 @@ export default function GradeChangePage() {
       <div className="w-full space-y-6">
         <FacultyPanel
           title="Submit request"
-          description="Enter student, course, grade change, and justification"
+          description="Requests are allowed only for students enrolled in a subject you currently teach."
           className="w-full"
         >
           <div className="grid gap-5">
@@ -176,12 +179,19 @@ export default function GradeChangePage() {
               </label>
 
               <label className="text-sm">
-                <span className="mb-1.5 block font-medium text-sgvu-navy">Course code</span>
-                <Input
-                  placeholder="e.g. CSE401"
+                <span className="mb-1.5 block font-medium text-sgvu-navy">Your teaching subject</span>
+                <Select
+                  className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                   value={course}
                   onChange={(e) => setCourse(e.target.value)}
-                />
+                >
+                  <option value="">Select a subject you teach</option>
+                  {courseOptions.map((item) => (
+                    <option key={item.course_id} value={item.course_code}>
+                      {item.course_code} · {item.course_name}
+                    </option>
+                  ))}
+                </Select>
               </label>
 
               <label className="text-sm">
@@ -217,11 +227,7 @@ export default function GradeChangePage() {
 
             <div className="flex justify-end border-t border-border/40 pt-4">
               <Button onClick={() => void handleSubmit()} disabled={submitting}>
-                {submitting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="mr-2 h-4 w-4" />
-                )}
+                {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                 Request grade change
               </Button>
             </div>
@@ -249,7 +255,7 @@ export default function GradeChangePage() {
                 const status = gradeStatusLabel(r);
                 return (
                   <div
-                    key={r.change_id}
+                    key={r.change_id ?? r.request_id}
                     className="box-border grid w-full gap-3 rounded-xl border border-border/60 bg-background p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                   >
                     <div className="min-w-0 space-y-1.5">
@@ -261,12 +267,8 @@ export default function GradeChangePage() {
                           {r.to_grade}
                         </span>
                       </div>
-                      {r.student_name ? (
-                        <p className="truncate text-sm text-sgvu-navy">{r.student_name}</p>
-                      ) : null}
-                      {r.reason ? (
-                        <p className="text-xs leading-relaxed text-muted-foreground">{r.reason}</p>
-                      ) : null}
+                      {r.student_name ? <p className="truncate text-sm text-sgvu-navy">{r.student_name}</p> : null}
+                      {r.reason ? <p className="text-xs leading-relaxed text-muted-foreground">{r.reason}</p> : null}
                     </div>
 
                     <Badge

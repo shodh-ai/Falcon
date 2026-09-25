@@ -717,12 +717,18 @@ export default function FacultyAnalyticsPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button asChild size="sm" variant="outline">
-                      <Link href="/faculty/grade-change">
-                        <PenLine className="mr-1.5 h-3.5 w-3.5" />
-                        Grade change
-                      </Link>
-                    </Button>
+                    {searchScope === 'subject' ? (
+                      <Button asChild size="sm" variant="outline">
+                        <Link href="/faculty/grade-change">
+                          <PenLine className="mr-1.5 h-3.5 w-3.5" />
+                          Grade change
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-800">
+                        Read-only department report
+                      </Badge>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"
