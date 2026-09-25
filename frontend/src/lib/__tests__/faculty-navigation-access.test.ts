@@ -38,4 +38,18 @@ describe('faculty navigation access', () => {
       '/faculty/timetable',
     ]);
   });
+
+  it('exposes one canonical attendance and leave entry', () => {
+    const entries = facultyPortal.navGroups
+      .flatMap((group) => group.items)
+      .filter((item) =>
+        ['/faculty/me/workforce', '/faculty/leaves', '/faculty/hr'].includes(
+          item.href,
+        ),
+      );
+
+    expect(entries.map((item) => [item.label, item.href])).toEqual([
+      ['Attendance & Leave', '/faculty/me/workforce'],
+    ]);
+  });
 });

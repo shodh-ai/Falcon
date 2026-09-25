@@ -12,7 +12,7 @@ export function workforceStatusPathForRole(roleName: string | null | undefined):
   if (ADMISSIONS_WORKFORCE_ROLES.has(normalized)) {
     return campusAdminRoutes.myLeave;
   }
-  return '/faculty/leaves';
+  return '/faculty/me/workforce?view=leave';
 }
 
 export function usesCampusAdminAdmissionsPath(pathname?: string | null): boolean {

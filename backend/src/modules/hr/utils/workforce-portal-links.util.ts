@@ -7,7 +7,7 @@ export function workforceStatusPathForRole(
   if (roleName && ADMISSIONS_CRM_ROLES.has(roleName)) {
     return '/admissions-crm/leaves';
   }
-  return '/faculty/leaves';
+  return '/faculty/me/workforce?view=leave';
 }
 
 /** Prefer admissions CRM when any mapped role applies (primary or secondary). */

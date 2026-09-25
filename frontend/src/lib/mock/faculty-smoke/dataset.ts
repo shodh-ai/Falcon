@@ -1100,10 +1100,10 @@ function buildDataset(seed = 42_021): FacultySmokeDataset {
   const notifTemplates = [
     { category: 'EXAMS', title: 'Mid-semester seating published', message: 'Seating chart for CSE401 is available.', severity: 'warning', intent: 'action_required', link: '/faculty/invigilation' },
     { category: 'ACADEMICS', title: 'Assignment deadline tomorrow', message: 'DBMS Case Study submissions close at 11:59 PM.', severity: 'info', intent: 'reminder', link: '/faculty/courses' },
-    { category: 'HR', title: 'Holiday notice — Gandhi Jayanti', message: 'Campus closed on 2 October. Compensatory timetable applies.', severity: 'info', intent: 'informational', link: '/faculty/hr' },
+    { category: 'HR', title: 'Holiday notice — Gandhi Jayanti', message: 'Campus closed on 2 October. Compensatory timetable applies.', severity: 'info', intent: 'informational', link: '/faculty/me/workforce?view=calendar' },
     { category: 'MEETINGS', title: 'Department meeting rescheduled', message: 'CSE faculty meeting moved to Thursday 3 PM.', severity: 'info', intent: 'reminder', link: '/faculty/meetings' },
     { category: 'RESEARCH', title: 'Research deadline approaching', message: 'IQAC publication proof upload closes in 5 days.', severity: 'warning', intent: 'action_required', link: '/faculty/research' },
-    { category: 'HR', title: 'Leave request approved', message: 'Your casual leave for 12–13 Aug is approved.', severity: 'success', intent: 'informational', link: '/faculty/hr' },
+    { category: 'HR', title: 'Leave request approved', message: 'Your casual leave for 12–13 Aug is approved.', severity: 'success', intent: 'informational', link: '/faculty/me/workforce?view=leave' },
     { category: 'SYSTEM', title: 'Password rotation reminder', message: 'Update your SSO password before month end.', severity: 'warning', intent: 'action_required', link: '/faculty/settings' },
     { category: 'ACADEMICS', title: 'Attendance missing alert', message: 'Mark attendance for today\'s 10:00 OS lecture.', severity: 'warning', intent: 'action_required', link: '/faculty/attendance' },
   ];

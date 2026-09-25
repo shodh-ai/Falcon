@@ -275,6 +275,10 @@ export class HrWorkforceService {
         throw new BadRequestException('start_date and end_date are required');
     }
 
+    if (startDate && endDate && endDate < startDate) {
+      throw new BadRequestException('end_date cannot be before start_date');
+    }
+
     const actorRoles = options?.actorRoles ?? [];
 
     assertRetroactiveWorkforceLimit(

@@ -59,25 +59,42 @@ export function MyLeavesPanel() {
   const [form, setForm] = useState({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
   const [attachment, setAttachment] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [proxyLeaveRange, setProxyLeaveRange] = useState<{ start: string; end: string } | null>(null);
 
   async function load() {
     if (!user?.user_id) return;
-    try {
-      const [b, r] = await Promise.all([
-        api.get<Balance[]>('/api/hr/leaves/my-balances'),
-        api.get<Request[]>('/api/hr/workforce/my-requests'),
-      ]);
+    const [balanceResult, requestResult] = await Promise.allSettled([
+      api.get<Balance[]>('/api/hr/leaves/my-balances'),
+      api.get<Request[]>('/api/hr/workforce/my-requests'),
+    ]);
+
+    if (balanceResult.status === 'fulfilled') {
+      const b = balanceResult.value;
       setBalances(withFacultyDemoFallback(b, facultyDemoLeaveBalances() as Balance[], isEmptyArray));
-      setRequests(withFacultyDemoFallback(r, facultyDemoLeaveRequests() as Request[], isEmptyArray));
-    } catch {
+    } else {
       setBalances(
         withFacultyDemoFallback([], facultyDemoLeaveBalances() as Balance[], isEmptyArray),
       );
+    }
+
+    if (requestResult.status === 'fulfilled') {
+      const r = requestResult.value;
+      setRequests(withFacultyDemoFallback(r, facultyDemoLeaveRequests() as Request[], isEmptyArray));
+    } else {
       setRequests(
         withFacultyDemoFallback([], facultyDemoLeaveRequests() as Request[], isEmptyArray),
       );
     }
+
+    const failed = [balanceResult, requestResult].filter(
+      (result) => result.status === 'rejected',
+    );
+    setLoadError(
+      failed.length > 0
+        ? 'Some leave information could not be loaded. You can still submit a request, or retry.'
+        : null,
+    );
   }
 
   useEffect(() => {
@@ -103,6 +120,10 @@ export function MyLeavesPanel() {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (form.end_date < form.start_date) {
+      toast.error('The end date cannot be before the start date');
+      return;
+    }
     setIsSubmitting(true);
     try {
       let supporting_doc_urls: string[] | undefined;
@@ -118,7 +139,11 @@ export function MyLeavesPanel() {
         reason: form.reason,
         supporting_doc_urls,
       });
-      toast.success(applyMode === 'ON_DUTY' ? 'On Duty (OD) submitted' : 'Leave submitted');
+      toast.success(
+        applyMode === 'ON_DUTY'
+          ? 'On Duty request sent for approval'
+          : 'Leave request sent to your HOD/reporting officer',
+      );
       setForm({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
       setAttachment(null);
       if (applyMode === 'LEAVE') {
@@ -137,6 +162,14 @@ export function MyLeavesPanel() {
 
   return (
     <div className="space-y-4">
+      {loadError ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>{loadError}</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => void load()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       {balances.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {balances.map((b) => (
@@ -182,7 +215,7 @@ export function MyLeavesPanel() {
           </label>
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">To</span>
-            <Input type="date" min={workforceMinDate()} value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} required />
+            <Input type="date" min={form.start_date || workforceMinDate()} value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} required />
           </label>
           <label className="text-sm sm:col-span-2">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Reason</span>

@@ -329,21 +329,23 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
         ],
       },
       {
-        label: 'Work Calendar',
+        label: 'Attendance & Leave',
         href: prefix === 'hr' ? '/hr/me/attendance-holidays' : p.workforce,
         icon: CalendarDays,
-        keywords: ['leave', 'cl', 'sl', 'attendance', 'calendar', 'holidays', 'regularize'],
+        keywords: [
+          'leave',
+          'cl',
+          'sl',
+          'el',
+          'od',
+          'attendance',
+          'calendar',
+          'holidays',
+          'regularize',
+          'apply leave',
+          'balances',
+        ],
       },
-      ...(prefix === 'faculty'
-        ? [
-            {
-              label: 'Leave Management',
-              href: '/faculty/leaves',
-              icon: CalendarRange,
-              keywords: ['leave', 'cl', 'sl', 'el', 'apply leave', 'balances'],
-            } as NavItem,
-          ]
-        : []),
       {
         label: 'Salary & Tax',
         href: p.payslips,

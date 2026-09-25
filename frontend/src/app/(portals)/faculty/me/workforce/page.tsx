@@ -5,8 +5,8 @@ export default function FacultyWorkforcePage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Work Calendar"
-        description="View attendance, leave balances, and workforce self-service."
+        title="Attendance & Leave"
+        description="Apply for leave or On Duty, track approvals, and review your attendance calendar."
       />
       <WorkforceHubPage embedded />
     </FacultyPageShell>

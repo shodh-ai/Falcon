@@ -166,51 +166,143 @@ export class HrWorkflowBuilderService {
 
     const steps = await this.dataSource.query(
       `SELECT * FROM hr_approval_workflow_steps
-       WHERE workflow_id = $1 AND step_order > $2 ORDER BY step_order LIMIT 1`,
+       WHERE workflow_id = $1 AND step_order > $2 ORDER BY step_order`,
       [workflows[0].workflow_id, currentStepOrder],
     );
-    const step = steps[0];
-    if (!step) return null;
+    for (const step of steps) {
+      const approverUserId = await this.resolveStepApprover(
+        tenantId,
+        actionType,
+        requesterUserId,
+        step,
+      );
+      // Never leave a request parked on an unassigned or self-approval step.
+      // Continue to the next configured approval step instead.
+      if (!approverUserId || approverUserId === requesterUserId) continue;
 
-    let approverUserId: string | null = null;
+      return {
+        step_order: step.step_order,
+        approver_user_id: approverUserId,
+        approver_type: step.approver_type,
+      };
+    }
+
+    return null;
+  }
+
+  /** Fallback for entities that have not yet published a workflow definition. */
+  async resolveDefaultApprover(
+    tenantId: string,
+    requesterUserId: string,
+  ): Promise<string | null> {
+    const managerOrHod = await this.dataSource.query(
+      `SELECT COALESCE(
+          NULLIF(u.reporting_officer_id, $2::uuid),
+          NULLIF(d.hod_user_id, $2::uuid)
+        ) AS approver_user_id
+       FROM users u
+       LEFT JOIN departments d
+         ON d.dept_id = u.dept_id AND d.tenant_id = u.tenant_id
+       WHERE u.user_id = $2 AND u.tenant_id = $1
+       LIMIT 1`,
+      [tenantId, requesterUserId],
+    );
+    if (managerOrHod[0]?.approver_user_id) {
+      return managerOrHod[0].approver_user_id;
+    }
+
+    const hrApprover = await this.dataSource.query(
+      `SELECT u.user_id
+       FROM users u
+       LEFT JOIN roles primary_role ON primary_role.role_id = u.role_id
+       LEFT JOIN user_roles ur ON ur.user_id = u.user_id
+       LEFT JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+       WHERE u.tenant_id = $1
+         AND u.is_active = true
+         AND u.user_id <> $2
+         AND (
+           primary_role.role_name IN ('HRAdmin', 'HR')
+           OR secondary_role.role_name IN ('HRAdmin', 'HR')
+         )
+       ORDER BY CASE
+         WHEN primary_role.role_name = 'HRAdmin' OR secondary_role.role_name = 'HRAdmin'
+         THEN 0 ELSE 1 END, u.created_at
+       LIMIT 1`,
+      [tenantId, requesterUserId],
+    );
+    return hrApprover[0]?.user_id ?? null;
+  }
+
+  private async resolveStepApprover(
+    tenantId: string,
+    actionType: string,
+    requesterUserId: string,
+    step: { approver_type: string; approver_ref?: string | null },
+  ): Promise<string | null> {
     if (step.approver_type === 'REPORTING_MANAGER') {
-      const ro = await this.dataSource.query(
-        `SELECT reporting_officer_id FROM users WHERE user_id = $1`,
-        [requesterUserId],
+      const rows = await this.dataSource.query(
+        `SELECT COALESCE(
+            NULLIF(u.reporting_officer_id, $2::uuid),
+            NULLIF(d.hod_user_id, $2::uuid)
+          ) AS approver_user_id
+         FROM users u
+         LEFT JOIN departments d
+           ON d.dept_id = u.dept_id AND d.tenant_id = u.tenant_id
+         WHERE u.user_id = $2 AND u.tenant_id = $1
+         LIMIT 1`,
+        [tenantId, requesterUserId],
       );
-      approverUserId = ro[0]?.reporting_officer_id ?? null;
-    } else if (step.approver_type === 'DEPT_HEAD') {
-      const hod = await this.dataSource.query(
-        `SELECT d.hod_user_id FROM users u JOIN departments d ON d.dept_id = u.dept_id WHERE u.user_id = $1`,
-        [requesterUserId],
+      return rows[0]?.approver_user_id ?? null;
+    }
+
+    if (step.approver_type === 'DEPT_HEAD') {
+      const rows = await this.dataSource.query(
+        `SELECT NULLIF(d.hod_user_id, $2::uuid) AS approver_user_id
+         FROM users u
+         JOIN departments d ON d.dept_id = u.dept_id AND d.tenant_id = u.tenant_id
+         WHERE u.user_id = $2 AND u.tenant_id = $1
+         LIMIT 1`,
+        [tenantId, requesterUserId],
       );
-      approverUserId = hod[0]?.hod_user_id ?? null;
-    } else if (step.approver_type === 'SPECIFIC_USER') {
-      approverUserId = step.approver_ref;
-    } else if (step.approver_type === 'ROLE') {
+      return rows[0]?.approver_user_id ?? null;
+    }
+
+    if (step.approver_type === 'SPECIFIC_USER') {
+      return step.approver_ref ?? null;
+    }
+
+    if (step.approver_type === 'ROLE') {
       const roleUser = await this.dataSource.query(
-        `SELECT u.user_id FROM users u JOIN roles r ON r.role_id = u.role_id
-         WHERE u.tenant_id = $1 AND r.role_name = $2 AND u.is_active = true LIMIT 1`,
-        [tenantId, step.approver_ref],
+        `SELECT DISTINCT u.user_id
+         FROM users u
+         LEFT JOIN roles primary_role ON primary_role.role_id = u.role_id
+         LEFT JOIN user_roles ur ON ur.user_id = u.user_id
+         LEFT JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+         WHERE u.tenant_id = $1
+           AND u.is_active = true
+           AND u.user_id <> $3
+           AND $2 IN (primary_role.role_name, secondary_role.role_name)
+         ORDER BY u.user_id
+         LIMIT 1`,
+        [tenantId, step.approver_ref, requesterUserId],
       );
-      approverUserId = roleUser[0]?.user_id ?? null;
-    } else if (step.approver_type === 'HR_EXECUTIVE') {
+      return roleUser[0]?.user_id ?? null;
+    }
+
+    if (step.approver_type === 'HR_EXECUTIVE') {
       const module = this.accessControl.moduleForActionType(actionType);
-      approverUserId = await this.accessControl.resolveHrExecutiveApprover(
+      return this.accessControl.resolveHrExecutiveApprover(
         tenantId,
         requesterUserId,
         module,
         step.approver_ref,
       );
-    } else if (step.approver_type === 'HR_ADMIN') {
-      approverUserId =
-        await this.accessControl.resolveHrAdminApprover(tenantId);
     }
 
-    return {
-      step_order: step.step_order,
-      approver_user_id: approverUserId,
-      approver_type: step.approver_type,
-    };
+    if (step.approver_type === 'HR_ADMIN') {
+      return this.accessControl.resolveHrAdminApprover(tenantId);
+    }
+
+    return null;
   }
 }

@@ -448,7 +448,7 @@ export function leaveApprovedMessage(
       message: range
         ? `Your ${leaveLabel.toLowerCase()} request for ${range} has been approved. Your attendance calendar has been updated.`
         : `Your ${leaveLabel.toLowerCase()} request has been approved. Your attendance calendar has been updated.`,
-      actionLink: '/faculty/leaves',
+      actionLink: '/faculty/me/workforce?view=leave',
       actionLabel: 'View leave record',
       severity: 'success',
       intent: 'status_update',

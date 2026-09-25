@@ -1703,7 +1703,7 @@ export class HrService {
         title: 'Leave approved by HOD',
         message:
           'Your leave request was approved by your HOD and forwarded for final processing.',
-        actionLink: '/faculty/hr',
+        actionLink: '/faculty/me/workforce?view=leave',
       });
     }
     if (next.approver_user_id && staff) {
@@ -1785,7 +1785,7 @@ export class HrService {
         userId: leave.staff_user_id,
         title: 'Leave rejected',
         message: `Your leave request was rejected. Reason: ${remarks.trim()}`,
-        actionLink: '/faculty/hr',
+        actionLink: '/faculty/me/workforce?view=leave',
       });
     }
     return saved;
