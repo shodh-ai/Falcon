@@ -39,7 +39,7 @@ WITH tenant AS (
       PARTITION BY tt.tenant_id, tt.course_id, tt.day_of_week,
                    tt.start_time, tt.end_time, COALESCE(tt.room, ''),
                    COALESCE(tt.section, '')
-      ORDER BY tt.updated_at DESC NULLS LAST, tt.timetable_id
+      ORDER BY tt.timetable_id
     ) AS slot_rank
   FROM academic_timetables tt
   JOIN primary_allocations pa ON pa.course_id = tt.course_id
@@ -67,8 +67,7 @@ WITH tenant AS (
 )
 UPDATE academic_timetables tt
 SET faculty_user_id = r.faculty_user_id,
-    deleted_at = NULL,
-    updated_at = NOW()
+    deleted_at = NULL
 FROM restorable r
 WHERE tt.timetable_id = r.timetable_id;
 
