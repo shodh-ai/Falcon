@@ -446,7 +446,7 @@ export default function FacultyAnalyticsPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Student Analytics"
+        title="Student Performance"
         description="Review your subject rosters or find a student in your department by name or registration number."
         meta={
           <>
@@ -461,7 +461,7 @@ export default function FacultyAnalyticsPage() {
         }
       />
 
-      <div className="w-full space-y-6">
+      <div className="w-full space-y-5">
         <FacultyPanel
           title="Find Student"
           description="Use My subject roster for teaching work, or Department lookup for an authorized academic record search."
@@ -495,7 +495,7 @@ export default function FacultyAnalyticsPage() {
               </button>
             ))}
           </div>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-end">
+          <div className="grid gap-4 lg:grid-cols-[minmax(16rem,1.05fr)_minmax(18rem,1fr)_auto] lg:items-end">
             <label className={cn('text-sm', searchScope === 'department' && 'opacity-60')}>
               <span className="mb-1.5 block font-medium text-sgvu-navy">Subject</span>
               <Select
@@ -589,7 +589,7 @@ export default function FacultyAnalyticsPage() {
           </div>
         </FacultyPanel>
 
-        <div className="grid w-full gap-6 xl:grid-cols-2 xl:items-start">
+        <div className="grid w-full gap-5 xl:grid-cols-[22rem_minmax(0,1fr)] xl:items-start 2xl:grid-cols-[24rem_minmax(0,1fr)]">
           <FacultyPanel
             title={searchScope === 'department' ? 'Department Search Results' : 'Subject Students'}
             description={
@@ -600,7 +600,7 @@ export default function FacultyAnalyticsPage() {
                   : 'Select a subject to load the roster'
             }
             count={filteredStudents.length}
-            className="w-full"
+            className="w-full xl:sticky xl:top-4"
             contentClassName="p-0 sm:p-0"
           >
             {loadingStudents ? (
@@ -630,7 +630,7 @@ export default function FacultyAnalyticsPage() {
             ) : (
               <div
                 ref={listRef}
-                className="max-h-[min(70vh,40rem)] space-y-2 overflow-y-auto p-4 sm:p-5"
+                className="max-h-[min(72vh,46rem)] space-y-2 overflow-y-auto p-3 sm:p-4"
                 role="listbox"
                 aria-label="Subject students"
               >
@@ -707,16 +707,10 @@ export default function FacultyAnalyticsPage() {
                 </div>
               </FacultyPanel>
             ) : report ? (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card px-4 py-3 shadow-sm">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-sgvu-gold">Student Analysis</p>
-                    <p className="truncate text-sm font-semibold text-sgvu-navy">{report.student.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {report.student.roll_number} · {report.subject.course_code}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
+                <FacultyStudentReport
+                  report={report}
+                  actions={
+                    <>
                     {searchScope === 'subject' ? (
                       <Button asChild size="sm" variant="outline">
                         <Link href="/faculty/grade-change">
@@ -739,10 +733,9 @@ export default function FacultyAnalyticsPage() {
                     >
                       Clear
                     </Button>
-                  </div>
-                </div>
-                <FacultyStudentReport report={report} />
-              </>
+                    </>
+                  }
+                />
             ) : (
               <FacultyPanel title="Student Analysis" className="w-full">
                 <FacultyEmptyState

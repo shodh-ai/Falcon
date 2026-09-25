@@ -46,7 +46,9 @@ function FacultyShellInner({ children }: { children: ReactNode }) {
   }, [user, isPlacementCoordinator, isEventCoordinator]);
 
   const contentMaxWidthClass =
-    pathname?.startsWith('/faculty/ai-assistant') || pathname?.startsWith('/faculty/dashboard')
+    pathname?.startsWith('/faculty/analytics')
+      ? 'max-w-[1600px]'
+      : pathname?.startsWith('/faculty/ai-assistant') || pathname?.startsWith('/faculty/dashboard')
       ? 'max-w-[1400px]'
       : FACULTY_CONTENT_MAX_CLASS;
 
