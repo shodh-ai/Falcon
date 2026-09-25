@@ -458,6 +458,17 @@ export class CampusEventsService {
     return { is_coordinator: rows.length > 0 };
   }
 
+  async isFacultyCoordinator(tenantId: string, facultyUserId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT 1
+       FROM campus_clubs
+       WHERE tenant_id = $1 AND faculty_advisor_id = $2
+       LIMIT 1`,
+      [tenantId, facultyUserId],
+    );
+    return { is_coordinator: rows.length > 0 };
+  }
+
   async proposeEvent(
     tenantId: string,
     coordinatorId: string,

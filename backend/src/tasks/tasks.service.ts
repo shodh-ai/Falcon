@@ -40,6 +40,7 @@ export type TaskRequestScope = {
   userId: string;
   tenantId: string;
   deptId?: number | null;
+  roles?: string[];
 };
 
 const DEFAULT_TENANT_ID = 'a0000000-0000-4000-8000-000000000001';
@@ -358,7 +359,7 @@ export class TasksService {
       );
     }
 
-    assignment.status = 'SUBMITTED';
+    assignment.status = 'PENDING_HOD_APPROVAL';
     assignment.submitted_at = new Date();
     assignment.reviewed_at = null;
     assignment.reviewed_by = null;
@@ -552,11 +553,7 @@ export class TasksService {
         'Submitter cannot review their own evidence',
       );
     }
-    if (
-      !['SUBMITTED', 'UNDER_REVIEW', 'CHANGES_REQUESTED'].includes(
-        assignment.status,
-      )
-    ) {
+    if (!['PENDING_IQAC_REVIEW', 'UNDER_REVIEW'].includes(assignment.status)) {
       throw new BadRequestException('Assignment is not awaiting review');
     }
     assignment.status = decision;
@@ -565,6 +562,91 @@ export class TasksService {
     assignment.review_comments = comments?.trim() || null;
     assignment.completed_at =
       decision === 'ACCEPTED' || decision === 'WAIVED' ? new Date() : null;
+    assignment.version += 1;
+    return this.taskAssignmentRepository.save(assignment);
+  }
+
+  async findHodReviewQueue(scope: TaskRequestScope): Promise<any[]> {
+    const unrestricted = (scope.roles ?? []).some(
+      (role) => role.toLowerCase() === 'superadmin',
+    );
+    if (!unrestricted && !scope.deptId) {
+      throw new ForbiddenException('HOD department scope is required');
+    }
+    const query = this.taskAssignmentRepository
+      .createQueryBuilder('assignment')
+      .leftJoinAndSelect('assignment.task', 'task')
+      .leftJoinAndSelect('assignment.assigned_user', 'assigned_user')
+      .where('assignment.tenant_id = :tenantId', {
+        tenantId: scope.tenantId,
+      })
+      .andWhere('assignment.status = :status', {
+        status: 'PENDING_HOD_APPROVAL',
+      });
+    if (!unrestricted) {
+      query.andWhere('assignment.dept_id = :deptId', {
+        deptId: scope.deptId,
+      });
+    }
+    const assignments = await query
+      .orderBy('assignment.submitted_at', 'ASC')
+      .getMany();
+    const ids = assignments.map((item) => item.assignment_id);
+    if (!ids.length) return [];
+    const submissions = await this.submissionRepository.find({
+      where: { assignment_id: In(ids) },
+    });
+    return assignments.map((assignment) => ({
+      ...assignment,
+      submissions: submissions.filter(
+        (submission) => submission.assignment_id === assignment.assignment_id,
+      ),
+    }));
+  }
+
+  async reviewAssignmentByHod(
+    assignmentId: string,
+    decision: 'APPROVED' | 'CHANGES_REQUESTED',
+    comments: string | undefined,
+    scope: TaskRequestScope,
+  ): Promise<TaskAssignment> {
+    if (!['APPROVED', 'CHANGES_REQUESTED'].includes(decision)) {
+      throw new BadRequestException('Invalid HOD review decision');
+    }
+    if (decision === 'CHANGES_REQUESTED' && !comments?.trim()) {
+      throw new BadRequestException(
+        'Comments are required when requesting changes',
+      );
+    }
+    const assignment = await this.taskAssignmentRepository.findOne({
+      where: { assignment_id: assignmentId, tenant_id: scope.tenantId },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+    const unrestricted = (scope.roles ?? []).some(
+      (role) => role.toLowerCase() === 'superadmin',
+    );
+    if (!unrestricted && assignment.dept_id !== scope.deptId) {
+      throw new ForbiddenException(
+        'HOD may review IQAC submissions only for their own department',
+      );
+    }
+    if (assignment.assigned_to === scope.userId) {
+      throw new ForbiddenException(
+        'Submitter cannot approve their own evidence',
+      );
+    }
+    if (assignment.status !== 'PENDING_HOD_APPROVAL') {
+      throw new BadRequestException('Assignment is not awaiting HOD review');
+    }
+    assignment.status =
+      decision === 'APPROVED' ? 'PENDING_IQAC_REVIEW' : 'CHANGES_REQUESTED';
+    assignment.hod_reviewed_at = new Date();
+    assignment.hod_reviewed_by = scope.userId;
+    assignment.hod_review_comments = comments?.trim() || null;
+    assignment.reviewed_at = null;
+    assignment.reviewed_by = null;
+    assignment.review_comments = null;
+    assignment.completed_at = null;
     assignment.version += 1;
     return this.taskAssignmentRepository.save(assignment);
   }
@@ -616,6 +698,8 @@ export class TasksService {
           'OPEN',
           'PENDING',
           'SUBMITTED',
+          'PENDING_HOD_APPROVAL',
+          'PENDING_IQAC_REVIEW',
           'UNDER_REVIEW',
           'CHANGES_REQUESTED',
         ].includes(a.status),
@@ -635,6 +719,8 @@ export class TasksService {
           'OPEN',
           'PENDING',
           'SUBMITTED',
+          'PENDING_HOD_APPROVAL',
+          'PENDING_IQAC_REVIEW',
           'UNDER_REVIEW',
           'CHANGES_REQUESTED',
         ].includes(a.status),

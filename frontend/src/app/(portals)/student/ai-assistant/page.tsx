@@ -1,18 +1,11 @@
-'use client';
-
-import { StudentPageShell } from '@/components/student/StudentPageShell';
-import {
-  StudentAiAssistantPageHero,
-  StudentAiAssistantPanel,
-} from '@/components/student/StudentAiAssistant';
+import { ComingSoonWorkspace } from '@/components/shared/ComingSoonWorkspace';
 
 export default function StudentAiAssistantPage() {
   return (
-    <StudentPageShell width="full" className="pb-8">
-      <div className="mx-auto w-full max-w-4xl space-y-6">
-        <StudentAiAssistantPageHero />
-        <StudentAiAssistantPanel />
-      </div>
-    </StudentPageShell>
+    <ComingSoonWorkspace
+      title="Falcon AI Assistant"
+      description="This feature is being prepared for a future release. It is currently unavailable and does not accept questions or personal information."
+      backHref="/student/dashboard"
+    />
   );
 }

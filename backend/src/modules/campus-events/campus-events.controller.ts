@@ -188,6 +188,12 @@ export class CampusEventsController {
     return this.events.isClubCoordinator(this.tenant(req), req.user.user_id);
   }
 
+  @Get('me/faculty-coordinator')
+  @Roles('Faculty', 'SuperAdmin')
+  facultyCoordinator(@Req() req: { user: AuthUser }) {
+    return this.events.isFacultyCoordinator(this.tenant(req), req.user.user_id);
+  }
+
   @Post('coordinator/events')
   @Roles('Student')
   propose(@Req() req: { user: AuthUser }, @Body() dto: ProposeEventDto) {

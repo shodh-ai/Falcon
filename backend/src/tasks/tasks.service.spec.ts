@@ -26,7 +26,7 @@ describe('IQAC duty distribution cycle', () => {
     expect(() => monthNameToNumber('NotAMonth')).toThrow('Invalid month');
   });
 
-  it('moves an upload to SUBMITTED, never directly to completed', async () => {
+  it('moves an upload to HOD review, never directly to IQAC or completed', async () => {
     const assignment: Record<string, any> = {
       assignment_id: 'assignment-1',
       assigned_to: 'submitter-1',
@@ -64,7 +64,7 @@ describe('IQAC duty distribution cycle', () => {
       'tenant-1',
     );
 
-    expect(assignment.status).toBe('SUBMITTED');
+    expect(assignment.status).toBe('PENDING_HOD_APPROVAL');
     expect(assignment.completed_at).toBeUndefined();
     expect(assignment.submitted_at).toBeInstanceOf(Date);
   });
@@ -74,7 +74,7 @@ describe('IQAC duty distribution cycle', () => {
       assignment_id: 'assignment-1',
       assigned_to: 'submitter-1',
       tenant_id: 'tenant-1',
-      status: 'SUBMITTED',
+      status: 'PENDING_IQAC_REVIEW',
       version: 1,
       completed_at: null,
     };
@@ -113,7 +113,7 @@ describe('IQAC duty distribution cycle', () => {
       assignment_id: 'assignment-2',
       assigned_to: 'submitter-1',
       tenant_id: 'tenant-1',
-      status: 'SUBMITTED',
+      status: 'PENDING_IQAC_REVIEW',
       version: 1,
     };
     const service = new TasksService(
@@ -134,5 +134,77 @@ describe('IQAC duty distribution cycle', () => {
         tenantId: 'tenant-1',
       }),
     ).rejects.toThrow('Reviewer comments are required');
+  });
+
+  it('requires HOD approval before IQAC review', async () => {
+    const assignment: Record<string, any> = {
+      assignment_id: 'assignment-3',
+      assigned_to: 'faculty-1',
+      tenant_id: 'tenant-1',
+      dept_id: 9,
+      status: 'PENDING_HOD_APPROVAL',
+      version: 1,
+    };
+    const assignmentRepo = {
+      findOne: jest.fn().mockResolvedValue(assignment),
+      save: jest.fn(async (value) => value),
+    };
+    const service = new TasksService(
+      {} as never,
+      assignmentRepo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.reviewAssignmentByHod(
+      'assignment-3',
+      'APPROVED',
+      'Department evidence checked',
+      {
+        userId: 'hod-1',
+        tenantId: 'tenant-1',
+        deptId: 9,
+        roles: ['HOD'],
+      },
+    );
+
+    expect(assignment.status).toBe('PENDING_IQAC_REVIEW');
+    expect(assignment.hod_reviewed_by).toBe('hod-1');
+    expect(assignment.completed_at).toBeNull();
+  });
+
+  it('prevents an HOD from reviewing another department', async () => {
+    const assignment: Record<string, any> = {
+      assignment_id: 'assignment-4',
+      assigned_to: 'faculty-2',
+      tenant_id: 'tenant-1',
+      dept_id: 10,
+      status: 'PENDING_HOD_APPROVAL',
+      version: 1,
+    };
+    const service = new TasksService(
+      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue(assignment),
+        save: jest.fn(),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.reviewAssignmentByHod('assignment-4', 'APPROVED', undefined, {
+        userId: 'hod-1',
+        tenantId: 'tenant-1',
+        deptId: 9,
+        roles: ['HOD'],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

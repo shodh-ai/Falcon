@@ -117,6 +117,8 @@ export function createCampusEventsApi(api: AuthedApi) {
       ),
     isClubCoordinator: () =>
       api.get<{ is_coordinator: boolean }>('/api/campus-events/me/club-coordinator'),
+    isFacultyCoordinator: () =>
+      api.get<{ is_coordinator: boolean }>('/api/campus-events/me/faculty-coordinator'),
     myClubs: () => api.get<{ club_id: string; name: string }[]>('/api/campus-events/coordinator/clubs'),
     coordinatorEvents: () => api.get<CampusEvent[]>('/api/campus-events/coordinator/events'),
     proposeEvent: (body: Record<string, unknown>) =>

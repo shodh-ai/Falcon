@@ -333,7 +333,13 @@ export default function FacultyTimetablePage() {
 
       <FacultyPanel title="Weekly schedule" count={schedule.length}>
         {schedule.length === 0 ? (
-          <FacultyEmptyState description="No timetable rows assigned yet." />
+          <FacultyEmptyState
+            description={
+              courseOptions.length > 0
+                ? 'Your course allocation is active. The department has not published timetable slots for these courses yet.'
+                : 'No active courses or timetable slots are assigned yet.'
+            }
+          />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border/50">
             <table className="w-full min-w-[780px] border-collapse text-sm">

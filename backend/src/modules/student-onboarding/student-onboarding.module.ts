@@ -5,6 +5,7 @@ import { ExamCellModule } from '../exam-cell/exam-cell.module';
 import {
   StudentOnboardingController,
   StaffOnboardingController,
+  StaffVerificationController,
   StudentVerificationAdminController,
 } from './student-onboarding.controller';
 import { RegistrarIntegrationController } from './registrar-integration.controller';
@@ -16,6 +17,7 @@ import { StudentOnboardingWelcomeEmailListener } from './student-onboarding-welc
   controllers: [
     StudentOnboardingController,
     StaffOnboardingController,
+    StaffVerificationController,
     StudentVerificationAdminController,
     RegistrarIntegrationController,
   ],

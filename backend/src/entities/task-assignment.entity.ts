@@ -70,6 +70,15 @@ export class TaskAssignment extends BaseSoftDeleteEntity {
   @Column({ type: 'text', nullable: true })
   review_comments: string | null;
 
+  @Column({ type: 'timestamp', nullable: true })
+  hod_reviewed_at: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  hod_reviewed_by: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  hod_review_comments: string | null;
+
   @Column({ type: 'int', default: 1 })
   version: number;
 }

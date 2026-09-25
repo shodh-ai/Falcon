@@ -118,7 +118,7 @@ export default function FacultyIqacPage() {
         file_size: uploaded.size ?? file.size,
         file_type: uploaded.mimetype ?? file.type,
       });
-      toast.success("Evidence submitted for independent IQAC review");
+      toast.success("Evidence submitted to your HOD for review");
       setFile(null);
       await loadTasks();
     } catch (error) {

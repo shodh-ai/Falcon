@@ -159,7 +159,7 @@ export class FacultyWorkspacesService {
        SELECT
          t.timetable_id,
          t.course_id,
-         t.faculty_user_id,
+         $2::uuid AS faculty_user_id,
          c.course_code,
          c.course_name,
          u.name AS faculty_name,
@@ -171,8 +171,8 @@ export class FacultyWorkspacesService {
        FROM academic_timetables t
        INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
        INNER JOIN academic_courses c ON c.course_id = t.course_id
-       LEFT JOIN users u ON u.user_id = t.faculty_user_id
-       WHERE t.tenant_id = $1 AND t.faculty_user_id = $2 AND t.deleted_at IS NULL`,
+       LEFT JOIN users u ON u.user_id = $2
+       WHERE t.tenant_id = $1 AND t.deleted_at IS NULL`,
       [tenantId, facultyUserId, deptId ?? null],
     );
 
@@ -454,7 +454,6 @@ export class FacultyWorkspacesService {
        INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
        WHERE t.tenant_id = $1
-         AND t.faculty_user_id = $2
          AND t.deleted_at IS NULL
        ORDER BY t.day_of_week, t.start_time, c.course_code`,
       [tenantId, facultyUserId, deptId ?? null],
@@ -500,7 +499,6 @@ export class FacultyWorkspacesService {
          FROM academic_timetables t
          INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
          WHERE t.tenant_id = $1
-           AND t.faculty_user_id = $2
            AND t.deleted_at IS NULL
        ),
        expected AS (
@@ -596,7 +594,6 @@ export class FacultyWorkspacesService {
          INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
          INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
          WHERE t.tenant_id = $1
-           AND t.faculty_user_id = $2
            AND t.deleted_at IS NULL
        ),
        course_expected AS (

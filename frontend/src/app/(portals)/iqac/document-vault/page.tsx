@@ -52,10 +52,7 @@ export default function IqacDocumentVaultPage() {
   }, [load]);
 
   const reviewQueue = useMemo(
-    () =>
-      rows.filter((row) =>
-        ["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED"].includes(row.status),
-      ),
+    () => rows.filter((row) => ["PENDING_IQAC_REVIEW", "UNDER_REVIEW"].includes(row.status)),
     [rows],
   );
 
@@ -84,7 +81,7 @@ export default function IqacDocumentVaultPage() {
     <div className="mx-auto max-w-7xl space-y-5 p-4 md:p-6">
       <IqacPageHeader
         title="Evidence Review Queue"
-        description="Uploads remain submitted until an independent IQAC reviewer accepts them or requests corrections."
+        description="Only evidence already approved by the faculty member’s department HOD appears in this IQAC queue."
       />
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
@@ -138,13 +135,7 @@ export default function IqacDocumentVaultPage() {
                       · {assignment.task?.month}
                     </p>
                   </div>
-                  <Badge
-                    variant={
-                      assignment.status === "CHANGES_REQUESTED"
-                        ? "destructive"
-                        : "secondary"
-                    }
-                  >
+                  <Badge variant="secondary">
                     {assignment.status.replaceAll("_", " ")}
                   </Badge>
                 </div>

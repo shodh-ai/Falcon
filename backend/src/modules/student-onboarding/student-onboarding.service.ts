@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { DataSource, QueryRunner } from 'typeorm';
@@ -472,8 +473,86 @@ export class StudentOnboardingService {
       params,
     );
 
-    if (!portalKind || portalKind === 'all') return rows;
-    return rows.filter((row) => row.portal_kind === portalKind);
+    let filtered =
+      !portalKind || portalKind === 'all'
+        ? rows
+        : rows.filter((row) => row.portal_kind === portalKind);
+
+    if (actor && this.actorHasRole(actor, 'HOD')) {
+      const actorDeptId = await this.actorDepartmentId(actor);
+      if (!actorDeptId) return [];
+      const allowed = await this.dataSource.query<Array<{ user_id: string }>>(
+        `SELECT user_id
+         FROM users
+         WHERE tenant_id = $1 AND dept_id = $2 AND deleted_at IS NULL`,
+        [tenant, actorDeptId],
+      );
+      const allowedIds = new Set(allowed.map((row) => row.user_id));
+      filtered = filtered.filter((row) => allowedIds.has(row.user_id));
+    }
+
+    return filtered;
+  }
+
+  private actorHasRole(actor: ScopedAuthUser, expected: string): boolean {
+    return [...(actor.roles ?? []), actor.role ?? ''].some(
+      (role) => role.trim().toLowerCase() === expected.toLowerCase(),
+    );
+  }
+
+  private async actorDepartmentId(
+    actor: ScopedAuthUser,
+  ): Promise<number | null> {
+    if (actor.dept_id) return Number(actor.dept_id);
+    if (!actor.user_id) return null;
+    const [row] = await this.dataSource.query<
+      Array<{ dept_id: number | null }>
+    >(`SELECT dept_id FROM users WHERE user_id = $1 AND deleted_at IS NULL`, [
+      actor.user_id,
+    ]);
+    return row?.dept_id == null ? null : Number(row.dept_id);
+  }
+
+  private async assertVerificationKindAndDepartment(
+    tenantId: string,
+    actor: ScopedAuthUser | undefined,
+    targetUserId: string,
+    expectedKind?: OnboardingPortalKind,
+  ) {
+    const user = await this.getUserRow(tenantId, targetUserId);
+    const actualKind = resolveOnboardingPortalKind(user.role_name);
+    if (expectedKind && actualKind !== expectedKind) {
+      throw new NotFoundException('Verification request not found');
+    }
+    if (
+      expectedKind === 'staff' &&
+      actor?.user_id &&
+      actor.user_id === targetUserId
+    ) {
+      throw new ForbiddenException(
+        'Staff cannot approve their own onboarding verification',
+      );
+    }
+    if (actor && this.actorHasRole(actor, 'HOD')) {
+      const actorDeptId = await this.actorDepartmentId(actor);
+      const [target] = await this.dataSource.query<
+        Array<{ dept_id: number | null }>
+      >(
+        `SELECT dept_id FROM users
+         WHERE tenant_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+        [tenantId, targetUserId],
+      );
+      if (
+        !actorDeptId ||
+        target?.dept_id == null ||
+        Number(target.dept_id) !== actorDeptId
+      ) {
+        throw new ForbiddenException(
+          'HOD may verify faculty only in their own department',
+        );
+      }
+    }
+    return actualKind;
   }
 
   private async assertVerificationCampus(
@@ -490,9 +569,16 @@ export class StudentOnboardingService {
     tenantId: string,
     targetUserId: string,
     actor?: ScopedAuthUser,
+    expectedKind?: OnboardingPortalKind,
   ) {
     const tenant = this.resolveTenantId(tenantId);
     await this.assertVerificationCampus(actor, targetUserId);
+    await this.assertVerificationKindAndDepartment(
+      tenant,
+      actor,
+      targetUserId,
+      expectedKind,
+    );
     const user = await this.getUserRow(tenant, targetUserId);
     const kind = resolveOnboardingPortalKind(user.role_name);
     const profile = await this.getStep2Profile(tenant, targetUserId);
@@ -528,9 +614,16 @@ export class StudentOnboardingService {
     targetUserId: string,
     actor?: OnboardingAuditActor,
     scopeUser?: ScopedAuthUser,
+    expectedKind?: OnboardingPortalKind,
   ) {
     await this.assertVerificationCampus(scopeUser, targetUserId);
     const tenant = this.resolveTenantId(tenantId);
+    const verifiedKind = await this.assertVerificationKindAndDepartment(
+      tenant,
+      scopeUser,
+      targetUserId,
+      expectedKind,
+    );
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -564,7 +657,7 @@ export class StudentOnboardingService {
         );
       }
 
-      const kind = resolveOnboardingPortalKind(user.role_name);
+      const kind = verifiedKind;
       const updated = (await qr.query(
         `UPDATE users
          SET onboarding_status = 'COMPLETED', updated_at = NOW()
@@ -612,7 +705,10 @@ export class StudentOnboardingService {
           tenantId: tenant,
           userId: actor.userId,
           role: actor.role,
-          module: 'student_verifications',
+          module:
+            kind === 'staff'
+              ? 'faculty_verifications'
+              : 'student_verifications',
           action: 'VERIFY_APPROVE',
           recordId: targetUserId,
           oldValue: { onboarding_status: status },
@@ -637,12 +733,19 @@ export class StudentOnboardingService {
     remarks: string,
     actor?: OnboardingAuditActor,
     scopeUser?: ScopedAuthUser,
+    expectedKind?: OnboardingPortalKind,
   ) {
     await this.assertVerificationCampus(scopeUser, targetUserId);
     const reason = remarks?.trim();
     if (!reason) throw new BadRequestException('Rejection reason is required');
 
     const tenant = this.resolveTenantId(tenantId);
+    const verifiedKind = await this.assertVerificationKindAndDepartment(
+      tenant,
+      scopeUser,
+      targetUserId,
+      expectedKind,
+    );
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -675,7 +778,7 @@ export class StudentOnboardingService {
         );
       }
 
-      const kind = resolveOnboardingPortalKind(user.role_name);
+      const kind = verifiedKind;
       const updated = (await qr.query(
         `UPDATE users
          SET onboarding_status = 'PENDING_DOCUMENTS', updated_at = NOW()
@@ -723,7 +826,10 @@ export class StudentOnboardingService {
           tenantId: tenant,
           userId: actor.userId,
           role: actor.role,
-          module: 'student_verifications',
+          module:
+            kind === 'staff'
+              ? 'faculty_verifications'
+              : 'student_verifications',
           action: 'VERIFY_REJECT',
           recordId: targetUserId,
           oldValue: { onboarding_status: status },
@@ -750,8 +856,15 @@ export class StudentOnboardingService {
     targetUserId: string,
     docType: string,
     actor?: ScopedAuthUser,
+    expectedKind?: OnboardingPortalKind,
   ) {
     await this.assertVerificationCampus(actor, targetUserId);
+    await this.assertVerificationKindAndDepartment(
+      this.resolveTenantId(tenantId),
+      actor,
+      targetUserId,
+      expectedKind,
+    );
     const user = await this.getUserRow(tenantId, targetUserId);
     const kind = resolveOnboardingPortalKind(user.role_name);
 

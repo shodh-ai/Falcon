@@ -1,9 +1,11 @@
-'use client';
+import { ComingSoonWorkspace } from '@/components/shared/ComingSoonWorkspace';
 
-import { use } from 'react';
-import StudentLibraryBookPage from './page-inner';
-
-export default function Page({ params }: { params: Promise<{ catalogId: string }> }) {
-  const { catalogId } = use(params);
-  return <StudentLibraryBookPage catalogId={catalogId} />;
+export default function Page() {
+  return (
+    <ComingSoonWorkspace
+      title="Student Library Services"
+      description="Catalog search, renewals, holds and digital-library access are not operational yet."
+      backHref="/student/dashboard"
+    />
+  );
 }

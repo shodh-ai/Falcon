@@ -28,6 +28,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { HodIqacFacultyReview } from '@/components/hod/HodIqacFacultyReview';
 
 type CriteriaItem = {
   id: number;
@@ -263,6 +264,7 @@ export default function HodIqacPage() {
 
   return (
     <HodPageFrame>
+      <HodIqacFacultyReview />
       <input
         ref={criterionInputRef}
         type="file"

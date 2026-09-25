@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Users } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
-import { StudentAiAssistantFab } from '@/components/student/StudentAiAssistant';
 import { studentPortal } from '@/lib/navigation';
 import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi } from '@/lib/api/api.campus-events';
@@ -45,7 +44,6 @@ export function StudentShell({ children }: { children: ReactNode }) {
   return (
     <AppShell config={config} profileHref="/student/profile">
       {children}
-      <StudentAiAssistantFab />
     </AppShell>
   );
 }

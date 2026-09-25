@@ -481,6 +481,25 @@ export function filterFacultyPortalForPlacementCoordinator(
   return { ...config, navGroups, commandItems };
 }
 
+/** Event decisions are visible only to faculty assigned as a club coordinator. */
+export function filterFacultyPortalForEventCoordinator(
+  config: PortalConfig,
+  isCoordinator: boolean,
+): PortalConfig {
+  const href = '/faculty/event-approvals';
+  if (isCoordinator) return config;
+  return {
+    ...config,
+    navGroups: config.navGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.href !== href),
+      }))
+      .filter((group) => group.items.length > 0),
+    commandItems: config.commandItems.filter((item) => item.href !== href),
+  };
+}
+
 /** Hide team-approval routes from faculty unless they manage direct reports. */
 export function filterFacultyPortalForManagerAccess(
   config: PortalConfig,
@@ -508,7 +527,7 @@ export const studentPortal: PortalConfig = {
       items: [
         { label: 'Dashboard', href: '/student/dashboard', icon: LayoutDashboard, keywords: ['home', 'overview'] },
         {
-          label: 'Falcon AI',
+          label: 'Falcon AI — Coming Soon',
           href: '/student/ai-assistant',
           icon: Sparkles,
           keywords: ['ai', 'chatbot', 'assistant', 'faq', 'help', 'falcon ai', 'ai assistant'],
@@ -549,7 +568,7 @@ export const studentPortal: PortalConfig = {
         { label: 'Fees & Payments', href: '/student/finance', icon: Wallet, keywords: ['fees', 'pay', 'dues', 'razorpay'] },
         { label: 'Campus Life', href: '/student/campus-life', icon: Bus, keywords: ['hostel', 'mess', 'gate pass', 'wallet', 'campus'] },
         { label: 'Transport', href: '/student/transport', icon: BusFront, keywords: ['bus', 'route', 'transport'] },
-        { label: 'Library', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
+        { label: 'Library — Coming Soon', href: '/student/library', icon: Library, keywords: ['library', 'books', 'fines'] },
         { label: 'Events', href: '/student/falcon-events', icon: PartyPopper, keywords: ['falcon events', 'clubs', 'chapters', 'tickets', 'ncc', 'nss', 'fest', 'membership'], shortLabel: 'Events' },
         { label: 'Innovation Hub', href: '/student/e-cell', icon: Rocket, keywords: ['startup', 'pitch', 'incubation', 'grant'] },
         { label: 'Research', href: '/student/research', icon: FlaskConical, keywords: ['rnd', 'research', 'grant', 'paper', 'project'] },
@@ -575,7 +594,7 @@ export const studentPortal: PortalConfig = {
   ],
   commandItems: [
     { label: 'Dashboard', href: '/student/dashboard', icon: LayoutDashboard },
-    { label: 'Falcon AI', href: '/student/ai-assistant', icon: Sparkles },
+    { label: 'Falcon AI — Coming Soon', href: '/student/ai-assistant', icon: Sparkles },
     { label: 'My Profile', href: '/student/profile', icon: UserRoundCog },
     { label: 'My Documents', href: '/student/admission-vault', icon: Archive },
     { label: 'Calendar', href: '/student/academic-calendar', icon: CalendarRange },
@@ -590,7 +609,7 @@ export const studentPortal: PortalConfig = {
     { label: 'Fees & Payments', href: '/student/finance', icon: Wallet },
     { label: 'Campus Life', href: '/student/campus-life', icon: Bus },
     { label: 'Transport', href: '/student/transport', icon: BusFront },
-    { label: 'Library', href: '/student/library', icon: Library },
+    { label: 'Library — Coming Soon', href: '/student/library', icon: Library },
     { label: 'Events', href: '/student/falcon-events', icon: PartyPopper },
     { label: 'Innovation Hub', href: '/student/e-cell', icon: Rocket },
     { label: 'Research', href: '/student/research', icon: FlaskConical },
@@ -614,7 +633,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard },
         {
-          label: 'AI Assistant',
+          label: 'AI Assistant — Coming Soon',
           href: '/faculty/ai-assistant',
           icon: Sparkles,
           keywords: ['ai', 'copilot', 'gemini', 'lesson plan', 'quiz', 'chatbot', 'faculty ai'],
@@ -630,8 +649,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Academics & Teaching',
       items: [
-        { label: 'Schedule Classes', href: '/faculty/schedule-classes', icon: CalendarClock, keywords: ['timetable', 'slots', 'drag and drop', 'class schedule'] },
-        { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp'] },
+        { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra class'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
@@ -658,7 +676,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Research & Duties',
       items: [
-        { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
+        { label: 'Library — Coming Soon', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
         { label: 'Exam Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor', 'invigilation'] },
         { label: 'Re-evaluation', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms', 'publications'] },
@@ -686,7 +704,7 @@ export const facultyPortal: PortalConfig = {
       items: [
         { label: 'Dashboard', href: '/faculty/dashboard', icon: LayoutDashboard },
         {
-          label: 'AI Assistant',
+          label: 'AI Assistant — Coming Soon',
           href: '/faculty/ai-assistant',
           icon: Sparkles,
           keywords: ['ai', 'copilot', 'gemini', 'lesson plan', 'quiz', 'chatbot', 'faculty ai'],
@@ -702,8 +720,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Academics & Teaching',
       items: [
-        { label: 'Schedule Classes', href: '/faculty/schedule-classes', icon: CalendarClock, keywords: ['timetable', 'slots', 'drag and drop', 'class schedule'] },
-        { label: 'Timetable & Extra Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'substitute', 'cancel', 'ltp', 'extra'] },
+        { label: 'Timetable & Classes', href: '/faculty/timetable', icon: CalendarClock, keywords: ['schedule', 'slots', 'substitute', 'cancel', 'ltp', 'extra'] },
         { label: 'Mark Attendance', href: '/faculty/attendance', icon: ClipboardCheck, keywords: ['attendance', 'present', 'absent'] },
         { label: 'My Courses', href: '/faculty/courses', icon: BookOpen, keywords: ['lesson plan', 'handout', 'course page', 'workspace'] },
         { label: 'Assignments', href: '/faculty/assignments', icon: ClipboardList, keywords: ['da', 'digital assignment', 'submission', 'deadline', 'grade'] },
@@ -730,7 +747,7 @@ export const facultyPortal: PortalConfig = {
     {
       title: 'Research & Duties',
       items: [
-        { label: 'Library OPAC', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
+        { label: 'Library — Coming Soon', href: '/faculty/library', icon: Library, keywords: ['books', 'catalog', 'hold', 'borrow'] },
         { label: 'Exam Duty', href: '/faculty/invigilation', icon: Eye, keywords: ['exam cell', 'room', 'supervisor', 'invigilation'] },
         { label: 'Re-evaluation', href: '/faculty/re-evaluations', icon: FileText, keywords: ['exam cell', 'recheck', 'marks'] },
         { label: 'Research', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms', 'publications'] },
@@ -872,6 +889,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Faculty Management',
       items: [
+        { label: 'Faculty Verifications', href: '/hod/faculty-verifications', icon: FileCheck2, keywords: ['faculty', 'staff', 'onboarding', 'verify', 'documents'] },
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix', 'teaching load', 'import'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
@@ -941,6 +959,7 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Faculty Management',
       items: [
+        { label: 'Faculty Verifications', href: '/hod/faculty-verifications', icon: FileCheck2, keywords: ['faculty', 'onboarding', 'verify'] },
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },

@@ -89,34 +89,52 @@ export class OnboardingVerificationNotifyService {
       return;
     }
 
-    const admissionsRecipients = await this.listOfficersByRoleNames(
-      payload.tenantId,
-      ADMISSIONS_ROLES,
-    );
     const hrRecipients = await this.listOfficersByRoleNames(
       payload.tenantId,
       HR_ROLES,
     );
+    const hodRows = await this.dataSource.query<Array<{ user_id: string }>>(
+      `SELECT DISTINCT reviewer.user_id
+       FROM users target
+       JOIN users reviewer
+         ON reviewer.tenant_id = target.tenant_id
+        AND reviewer.dept_id = target.dept_id
+        AND reviewer.is_active = true
+        AND reviewer.deleted_at IS NULL
+       JOIN user_roles ur ON ur.user_id = reviewer.user_id
+       JOIN roles r ON r.role_id = ur.role_id AND r.role_name = 'HOD'
+       WHERE target.tenant_id = $1 AND target.user_id = $2
+       UNION
+       SELECT DISTINCT d.hod_user_id
+       FROM users target
+       JOIN departments d ON d.dept_id = target.dept_id AND d.deleted_at IS NULL
+       WHERE target.tenant_id = $1 AND target.user_id = $2
+         AND d.hod_user_id IS NOT NULL`,
+      [payload.tenantId, payload.targetUserId],
+    );
+    const hodRecipients = hodRows
+      .map((row) => row.user_id)
+      .filter((userId) => userId !== payload.targetUserId);
 
-    const pendingAdmissions = await this.filterRecipientsWithoutNotification(
+    const pendingHod = await this.filterRecipientsWithoutNotification(
       payload.tenantId,
       payload.targetUserId,
-      admissionsRecipients,
+      hodRecipients,
     );
-    if (pendingAdmissions.length) {
+    if (pendingHod.length) {
       await this.dispatch.dispatchToMany(
         payload.tenantId,
-        pendingAdmissions,
+        pendingHod,
         {
           ...baseMessage,
-          actionLink: '/admissions-crm/verifications',
+          actionLink: '/hod/faculty-verifications',
         },
         { queueDelivery: false },
       );
     }
 
     const hrOnlyRecipients = hrRecipients.filter(
-      (userId) => !admissionsRecipients.includes(userId),
+      (userId) => !hodRecipients.includes(userId),
     );
     const pendingHr = await this.filterRecipientsWithoutNotification(
       payload.tenantId,

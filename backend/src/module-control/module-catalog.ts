@@ -160,7 +160,12 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
     'hrms_ess',
     'HRMS & Employee Self-Service',
     ['/hr', '/employee', '/staff'],
-    ['/api/hr', '/api/staff/onboarding', '/api/attendance-policy'],
+    [
+      '/api/hr',
+      '/api/staff/onboarding',
+      '/api/staff/verifications',
+      '/api/attendance-policy',
+    ],
     ['HRHead', 'Registrar'],
   ),
   definition(

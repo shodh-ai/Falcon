@@ -19,7 +19,13 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 
 type AuthRequest = {
-  user: { user_id: string; tenant_id?: string; dept_id?: number | null };
+  user: {
+    user_id: string;
+    tenant_id?: string;
+    dept_id?: number | null;
+    role?: string;
+    roles?: string[];
+  };
 };
 
 const DEFAULT_TENANT_ID = 'a0000000-0000-4000-8000-000000000001';
@@ -160,6 +166,31 @@ export class TasksController {
     );
   }
 
+  @Get('assignments/hod-review')
+  @Roles('HOD', 'SuperAdmin')
+  getHodReviewQueue(@Req() req: AuthRequest) {
+    return this.tasksService.findHodReviewQueue(this.scope(req));
+  }
+
+  @Post('assignments/:assignmentId/hod-review')
+  @Roles('HOD', 'SuperAdmin')
+  hodReviewAssignment(
+    @Param('assignmentId') assignmentId: string,
+    @Body()
+    body: {
+      decision: 'APPROVED' | 'CHANGES_REQUESTED';
+      comments?: string;
+    },
+    @Req() req: AuthRequest,
+  ) {
+    return this.tasksService.reviewAssignmentByHod(
+      assignmentId,
+      body.decision,
+      body.comments,
+      this.scope(req),
+    );
+  }
+
   // Submission Endpoints (specific routes before generic :assignmentId)
   @Post('submissions/:submissionId/retry-ai')
   @Roles('IQAC', 'HR')
@@ -293,6 +324,7 @@ export class TasksController {
       userId: req.user.user_id,
       tenantId: this.tenant(req),
       deptId: req.user.dept_id,
+      roles: [...(req.user.roles ?? []), req.user.role ?? ''].filter(Boolean),
     };
   }
 }

@@ -7,6 +7,7 @@ export type ScopedAuthUser = {
   tenant_id?: string;
   role?: string;
   roles?: string[];
+  dept_id?: number | null;
 };
 
 export type HierarchyTree = {
@@ -18,7 +19,11 @@ export type HierarchyTree = {
     school_id?: number | null;
     school_ids?: number[];
   }>;
-  programs: Array<{ program_id: number; program_name: string; school_id: number }>;
+  programs: Array<{
+    program_id: number;
+    program_name: string;
+    school_id: number;
+  }>;
   batches: Array<{
     batch_id: string | number;
     batch_name: string;
@@ -115,7 +120,10 @@ export class CampusScopeService {
     return ids;
   }
 
-  assertCampusIdAllowed(campusIds: number[], campusId: number | string | undefined) {
+  assertCampusIdAllowed(
+    campusIds: number[],
+    campusId: number | string | undefined,
+  ) {
     if (campusId == null || campusId === '') return;
     const parsed = Number(campusId);
     if (!Number.isInteger(parsed) || !campusIds.includes(parsed)) {
@@ -369,7 +377,10 @@ export class CampusScopeService {
     throw new ForbiddenException('Access denied for this campus');
   }
 
-  filterHierarchy(tree: HierarchyTree, campusIds: number[] | null): HierarchyTree {
+  filterHierarchy(
+    tree: HierarchyTree,
+    campusIds: number[] | null,
+  ): HierarchyTree {
     if (!campusIds) return tree;
     if (!campusIds.length) {
       return {

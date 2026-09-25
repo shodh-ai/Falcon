@@ -8,11 +8,11 @@ import { TeachingDepartmentSwitcher } from '@/components/layout/TeachingDepartme
 import {
   facultyPortal,
   filterFacultyPortalForManagerAccess,
+  filterFacultyPortalForEventCoordinator,
   filterFacultyPortalForPlacementCoordinator,
 } from '@/lib/navigation';
 import { FACULTY_CONTENT_MAX_CLASS } from '@/components/faculty/FacultyPageShell';
 import { TeachingDepartmentProvider } from '@/components/faculty/TeachingDepartmentContext';
-import { FacultyAiAssistantFab } from '@/components/faculty/ai/FacultyAiAssistant';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
 import { canSeeFacultyTeamApprovals } from '@/lib/faculty-manager-access';
@@ -22,6 +22,7 @@ function FacultyShellInner({ children }: { children: ReactNode }) {
   const api = useAuthedApi();
   const pathname = usePathname();
   const [isPlacementCoordinator, setIsPlacementCoordinator] = useState(false);
+  const [isEventCoordinator, setIsEventCoordinator] = useState(false);
 
   useEffect(() => {
     void api
@@ -30,11 +31,19 @@ function FacultyShellInner({ children }: { children: ReactNode }) {
       .catch(() => setIsPlacementCoordinator(false));
   }, [api]);
 
+  useEffect(() => {
+    void api
+      .get<{ is_coordinator: boolean }>('/api/campus-events/me/faculty-coordinator')
+      .then((res) => setIsEventCoordinator(res.is_coordinator))
+      .catch(() => setIsEventCoordinator(false));
+  }, [api]);
+
   const config = useMemo(() => {
     let next = filterFacultyPortalForManagerAccess(facultyPortal, canSeeFacultyTeamApprovals(user));
     next = filterFacultyPortalForPlacementCoordinator(next, isPlacementCoordinator);
+    next = filterFacultyPortalForEventCoordinator(next, isEventCoordinator);
     return next;
-  }, [user, isPlacementCoordinator]);
+  }, [user, isPlacementCoordinator, isEventCoordinator]);
 
   const contentMaxWidthClass =
     pathname?.startsWith('/faculty/ai-assistant') || pathname?.startsWith('/faculty/dashboard')
@@ -48,7 +57,6 @@ function FacultyShellInner({ children }: { children: ReactNode }) {
       headerExtra={<TeachingDepartmentSwitcher />}
     >
       {children}
-      <FacultyAiAssistantFab />
     </AppShell>
   );
 }

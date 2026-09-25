@@ -105,7 +105,6 @@ export class FacultyTeachingDepartmentsService {
          LEFT JOIN academic_timetables t
            ON t.course_id = dc.course_id
           AND t.tenant_id = $1
-          AND t.faculty_user_id = $2
           AND t.deleted_at IS NULL
          GROUP BY dc.dept_id
        )

@@ -15,8 +15,7 @@ import {
   FacultyPageLoading,
   FacultyEmptyState,
 } from '@/components/faculty';
-import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
-import { facultyDemoEventApprovals } from '@/lib/mock/faculty-portal-demo';
+import { isFacultyDemoSmokeId } from '@/lib/faculty-demo-mode';
 
 function registrationBadge(ev: CampusEvent) {
   return ev.is_paid ? `Paid registration — ₹${ev.ticket_price}` : 'Free registration';
@@ -39,21 +38,10 @@ export default function FacultyEventApprovalsPage() {
   const load = useCallback(async () => {
     try {
       const rows = await eventsApi.facultyPending();
-      setPending(
-        withFacultyDemoFallback(
-          rows,
-          facultyDemoEventApprovals() as CampusEvent[],
-          isEmptyArray,
-        ),
-      );
+      setPending(Array.isArray(rows) ? rows : []);
     } catch {
-      const demo = withFacultyDemoFallback(
-        [],
-        facultyDemoEventApprovals() as CampusEvent[],
-        isEmptyArray,
-      );
-      setPending(demo);
-      if (demo.length === 0) toast.error('Could not load approvals');
+      setPending([]);
+      toast.error('Could not load approvals');
     }
   }, [eventsApi]);
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -84,8 +85,8 @@ const DOC_LABELS: Record<string, string> = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-function buildPreviewUrl(studentUserId: string, docType: string) {
-  return `${API_URL}/api/admin/student-verifications/${studentUserId}/documents/${docType}/preview`;
+function buildPreviewUrl(basePath: string, userId: string, docType: string) {
+  return `${API_URL}${basePath}/${userId}/documents/${docType}/preview`;
 }
 
 function parseApiError(err: unknown) {
@@ -103,6 +104,11 @@ function parseApiError(err: unknown) {
 export default function AdminStudentVerificationsPage() {
   const api = useAuthedApi();
   const { token } = useAuth();
+  const pathname = usePathname();
+  const staffMode = pathname.startsWith('/hr/') || pathname.startsWith('/hod/');
+  const verificationBase = staffMode
+    ? '/api/staff/verifications'
+    : '/api/admin/student-verifications';
   const [queue, setQueue] = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -115,14 +121,14 @@ export default function AdminStudentVerificationsPage() {
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await api.get<QueueRow[]>('/api/admin/student-verifications/queue');
+      const rows = await api.get<QueueRow[]>(`${verificationBase}/queue`);
       setQueue(rows);
     } catch (err) {
       toast.error(parseApiError(err));
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, verificationBase]);
 
   useEffect(() => {
     void loadQueue();
@@ -143,7 +149,7 @@ export default function AdminStudentVerificationsPage() {
           setPreviewUrl(previewDoc);
           return;
         }
-        const response = await fetch(buildPreviewUrl(selectedId, doc.doc_type), {
+        const response = await fetch(buildPreviewUrl(verificationBase, selectedId, doc.doc_type), {
           headers: {
             Authorization: `Bearer ${token}`,
             'x-tenant-subdomain': getSubdomainFromClient(),
@@ -161,14 +167,14 @@ export default function AdminStudentVerificationsPage() {
     return () => {
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [detail?.documents, previewDoc, selectedId, token]);
+  }, [detail?.documents, previewDoc, selectedId, token, verificationBase]);
 
   const openReview = async (userId: string) => {
     setSelectedId(userId);
     setRejectReason('');
     setPreviewDoc(null);
     try {
-      const data = await api.get<VerificationDetail>(`/api/admin/student-verifications/${userId}`);
+      const data = await api.get<VerificationDetail>(`${verificationBase}/${userId}`);
       setDetail(data);
       if (data.documents[0]) setPreviewDoc(data.documents[0].file_path);
       if (data.person.onboarding_status !== 'PENDING_ADMIN_APPROVAL') {
@@ -190,7 +196,7 @@ export default function AdminStudentVerificationsPage() {
     if (!selectedId) return;
     setActing(true);
     try {
-      await api.post(`/api/admin/student-verifications/${selectedId}/approve`);
+      await api.post(`${verificationBase}/${selectedId}/approve`);
       toast.success('Approved — portal unlocked');
       setSelectedId(null);
       setDetail(null);
@@ -210,7 +216,7 @@ export default function AdminStudentVerificationsPage() {
     }
     setActing(true);
     try {
-      await api.post(`/api/admin/student-verifications/${selectedId}/reject`, {
+      await api.post(`${verificationBase}/${selectedId}/reject`, {
         remarks: rejectReason.trim(),
       });
       toast.success('Sent back for corrections');
@@ -229,9 +235,13 @@ export default function AdminStudentVerificationsPage() {
     <div className="space-y-4">
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="p-5 md:p-6">
-          <h2 className="text-xl font-bold text-sgvu-navy">First-Login Onboarding Verifications</h2>
+          <h2 className="text-xl font-bold text-sgvu-navy">
+            {staffMode ? 'Faculty & Staff Verifications' : 'Student Verifications'}
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review students, faculty, and HOD submissions awaiting approval.
+            {staffMode
+              ? 'Review faculty and staff onboarding for your department. HR may review across departments.'
+              : 'Review student onboarding submissions awaiting Admissions approval.'}
           </p>
         </CardContent>
       </Card>
@@ -239,7 +249,9 @@ export default function AdminStudentVerificationsPage() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Verification Queue</CardTitle>
-          <CardDescription>{queue.length} user(s) pending admin approval</CardDescription>
+          <CardDescription>
+            {queue.length} {staffMode ? 'staff member(s)' : 'student(s)'} pending approval
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (

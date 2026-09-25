@@ -36,6 +36,7 @@ type AuthUser = {
   role?: string;
   roles?: string[];
   role_name?: string;
+  dept_id?: number | null;
 };
 
 function auditActor(req: {
@@ -322,14 +323,7 @@ export class StaffOnboardingController extends BaseOnboardingController {
 
 @Controller('api/admin/student-verifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(
-  'CampusAdmin',
-  'SuperAdmin',
-  'AdmissionsOfficer',
-  'Registrar',
-  'HR',
-  'HRAdmin',
-)
+@Roles('CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar')
 export class StudentVerificationAdminController {
   constructor(
     private readonly onboarding: StudentOnboardingService,
@@ -342,13 +336,10 @@ export class StudentVerificationAdminController {
   }
 
   @Get('queue')
-  queue(
-    @Req() req: { user: AuthUser },
-    @Query('portal_kind') portalKind?: 'student' | 'staff' | 'all',
-  ) {
+  queue(@Req() req: { user: AuthUser }) {
     return this.onboarding.getVerificationQueue(
       this.tenant(req),
-      portalKind ?? 'all',
+      'student',
       req.user,
     );
   }
@@ -374,6 +365,7 @@ export class StudentVerificationAdminController {
       this.tenant(req),
       targetUserId,
       req.user,
+      'student',
     );
   }
 
@@ -392,6 +384,7 @@ export class StudentVerificationAdminController {
       targetUserId,
       auditActor(req),
       req.user,
+      'student',
     );
   }
 
@@ -412,6 +405,7 @@ export class StudentVerificationAdminController {
       body.remarks,
       auditActor(req),
       req.user,
+      'student',
     );
   }
 
@@ -427,12 +421,139 @@ export class StudentVerificationAdminController {
       targetUserId,
       docType.toUpperCase().replace(/-/g, '_'),
       req.user,
+      'student',
     );
 
     if (filePath.startsWith('http')) {
       return res.redirect(filePath);
     }
 
+    if (this.objectStorage.isEnabled() && !filePath.startsWith('/')) {
+      const stream = await this.objectStorage.getDownloadStream(filePath);
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${basename(filePath)}"`,
+      );
+      return stream.pipe(res);
+    }
+
+    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+    const resolvedPath = resolve(filePath);
+    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
+      throw new BadRequestException('File not found');
+    }
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${basename(resolvedPath)}"`,
+    );
+    return createReadStream(resolvedPath).pipe(res);
+  }
+}
+
+@Controller('api/staff/verifications')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('HOD', 'HR', 'HRAdmin', 'SuperAdmin')
+export class StaffVerificationController {
+  constructor(
+    private readonly onboarding: StudentOnboardingService,
+    private readonly objectStorage: ObjectStorageService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
+  ) {}
+
+  private tenant(req: { user: AuthUser }) {
+    return this.onboarding.resolveTenantId(req.user.tenant_id);
+  }
+
+  @Get('queue')
+  queue(@Req() req: { user: AuthUser }) {
+    return this.onboarding.getVerificationQueue(
+      this.tenant(req),
+      'staff',
+      req.user,
+    );
+  }
+
+  @Get('audit/recent')
+  auditRecent(
+    @Req() req: { user: AuthUser },
+    @Query('module') module?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.enterpriseAudit.listForTenant(this.tenant(req), {
+      module: module ?? 'faculty_verifications',
+      limit: limit ? Number(limit) : 50,
+    });
+  }
+
+  @Get(':targetUserId')
+  detail(
+    @Req() req: { user: AuthUser },
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.onboarding.getVerificationDetail(
+      this.tenant(req),
+      targetUserId,
+      req.user,
+      'staff',
+    );
+  }
+
+  @Post(':targetUserId/approve')
+  approve(
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.onboarding.approve(
+      this.tenant(req),
+      targetUserId,
+      auditActor(req),
+      req.user,
+      'staff',
+    );
+  }
+
+  @Post(':targetUserId/reject')
+  reject(
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+    @Param('targetUserId') targetUserId: string,
+    @Body() body: { remarks: string },
+  ) {
+    return this.onboarding.reject(
+      this.tenant(req),
+      targetUserId,
+      body.remarks,
+      auditActor(req),
+      req.user,
+      'staff',
+    );
+  }
+
+  @Get(':targetUserId/documents/:docType/preview')
+  async previewDocument(
+    @Req() req: { user: AuthUser },
+    @Param('targetUserId') targetUserId: string,
+    @Param('docType') docType: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.onboarding.getDocumentPath(
+      this.tenant(req),
+      targetUserId,
+      docType.toUpperCase().replace(/-/g, '_'),
+      req.user,
+      'staff',
+    );
+
+    if (filePath.startsWith('http')) return res.redirect(filePath);
     if (this.objectStorage.isEnabled() && !filePath.startsWith('/')) {
       const stream = await this.objectStorage.getDownloadStream(filePath);
       res.setHeader(
