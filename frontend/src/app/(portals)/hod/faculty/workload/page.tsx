@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   HodDataTable,
@@ -11,6 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthedApi } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import {
   ResponsiveContainer,
   BarChart,
@@ -28,8 +29,19 @@ type Row = {
   email: string | null;
   hours_per_week: number;
   course_count: number;
-  workload_status: 'OVERLOADED' | 'UNDERUTILIZED' | 'BALANCED';
+  workload_status: 'OVERLOADED' | 'UNDERUTILIZED' | 'BALANCED' | 'NO_TEACHING_LOAD';
+  load_declaration_status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION' | null;
+  load_declaration_reason: string | null;
+  load_declaration_revision: number;
+  load_declaration_academic_year: string;
 };
+
+function currentAcademicYear() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const start = now.getUTCMonth() >= 6 ? year : year - 1;
+  return `${start}-${start + 1}`;
+}
 
 function StatusTag({ status }: { status: Row['workload_status'] }) {
   return (
@@ -39,6 +51,7 @@ function StatusTag({ status }: { status: Row['workload_status'] }) {
         status === 'OVERLOADED' && 'border-red-200 bg-red-50 text-red-700',
         status === 'UNDERUTILIZED' && 'border-slate-200 bg-slate-50 text-muted-foreground',
         status === 'BALANCED' && 'border-green-200 bg-green-50 text-green-700',
+        status === 'NO_TEACHING_LOAD' && 'border-blue-200 bg-blue-50 text-blue-700',
       )}
     >
       {status.replace('_', ' ')}
@@ -50,6 +63,7 @@ export default function HodFacultyWorkloadPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -66,14 +80,59 @@ export default function HodFacultyWorkloadPage() {
     })();
   }, [api]);
 
+  const changeLoadStatus = useCallback(
+    async (row: Row) => {
+      const markingNoLoad = row.load_declaration_status !== 'NO_TEACHING_LOAD';
+      const reason = markingNoLoad
+        ? window.prompt(
+            `Reason ${row.name} has no teaching load for ${currentAcademicYear()}:`,
+          )
+        : 'Faculty is available for course allocation';
+      if (markingNoLoad && !reason?.trim()) return;
+
+      setUpdatingUserId(row.user_id);
+      try {
+        await api.post(
+          `/api/academics/hod/faculty/${row.user_id}/teaching-load-status`,
+          {
+            academic_year: currentAcademicYear(),
+            status: markingNoLoad
+              ? 'NO_TEACHING_LOAD'
+              : 'AVAILABLE_FOR_ALLOCATION',
+            reason,
+          },
+          {
+            'If-Match': String(row.load_declaration_revision ?? 0),
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+        );
+        toast.success(
+          markingNoLoad
+            ? `${row.name} marked with no teaching load.`
+            : `${row.name} is now available for allocation.`,
+        );
+        const data = await api.get<Row[]>('/api/academics/hod/faculty-workload');
+        setRows(data);
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to update teaching-load status',
+        );
+      } finally {
+        setUpdatingUserId(null);
+      }
+    },
+    [api],
+  );
+
   const stats = useMemo(() => {
     const overloaded = rows.filter((r) => r.workload_status === 'OVERLOADED').length;
     const under = rows.filter((r) => r.workload_status === 'UNDERUTILIZED').length;
+    const noLoad = rows.filter((r) => r.workload_status === 'NO_TEACHING_LOAD').length;
     const avg =
       rows.length > 0
         ? (rows.reduce((s, r) => s + r.hours_per_week, 0) / rows.length).toFixed(1)
         : '0';
-    return { total: rows.length, overloaded, under, avg };
+    return { total: rows.length, overloaded, under, noLoad, avg };
   }, [rows]);
 
   const chartData = useMemo(() => {
@@ -96,6 +155,7 @@ export default function HodFacultyWorkloadPage() {
             <HodMetricChip label="Avg hrs/wk" value={stats.avg} />
             <HodMetricChip label="Overloaded" value={stats.overloaded} />
             <HodMetricChip label="Under-utilized" value={stats.under} />
+            <HodMetricChip label="No teaching load" value={stats.noLoad} />
           </>
         }
       />
@@ -201,8 +261,41 @@ export default function HodFacultyWorkloadPage() {
           {
             key: 'status',
             label: 'Status',
-            className: 'w-32',
-            render: (r) => <StatusTag status={r.workload_status} />,
+            className: 'w-44',
+            render: (r) => (
+              <div className="space-y-1">
+                <StatusTag status={r.workload_status} />
+                {r.load_declaration_reason ? (
+                  <p className="max-w-44 text-xs text-muted-foreground">
+                    {r.load_declaration_reason}
+                  </p>
+                ) : null}
+              </div>
+            ),
+          },
+          {
+            key: 'action',
+            label: 'Teaching load',
+            className: 'w-44',
+            render: (r) => (
+              <Button
+                type="button"
+                size="sm"
+                variant={
+                  r.load_declaration_status === 'NO_TEACHING_LOAD'
+                    ? 'outline'
+                    : 'secondary'
+                }
+                disabled={updatingUserId === r.user_id}
+                onClick={() => void changeLoadStatus(r)}
+              >
+                {updatingUserId === r.user_id
+                  ? 'Updating…'
+                  : r.load_declaration_status === 'NO_TEACHING_LOAD'
+                    ? 'Allow allocation'
+                    : 'Mark no load'}
+              </Button>
+            ),
           },
         ]}
       />

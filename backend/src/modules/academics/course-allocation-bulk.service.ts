@@ -320,6 +320,32 @@ export class CourseAllocationBulkService {
     const assignedFacultyIds = new Set<string>();
 
     try {
+      const proposedFacultyIds = [
+        ...new Set(
+          preview.rows
+            .filter((row) => !row.is_unassigned && row.faculty_user_id)
+            .map((row) => row.faculty_user_id as string),
+        ),
+      ];
+      if (proposedFacultyIds.length) {
+        const blocked = await qr.query(
+          `SELECT d.faculty_user_id, u.name, u.official_email
+           FROM academic_faculty_load_declarations d
+           JOIN users u
+             ON u.user_id = d.faculty_user_id AND u.tenant_id = d.tenant_id
+           WHERE d.tenant_id = $1
+             AND d.academic_year = $2
+             AND d.status = 'NO_TEACHING_LOAD'
+             AND d.faculty_user_id = ANY($3::uuid[])`,
+          [tenantId, academicYear.trim(), proposedFacultyIds],
+        );
+        if (blocked.length) {
+          throw new BadRequestException(
+            `${blocked[0].name} is marked No Teaching Load for ${academicYear.trim()}. Clear the declaration before allocating a course.`,
+          );
+        }
+      }
+
       for (const row of preview.rows) {
         const subjectId = await this.upsertSubject(
           qr,

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   ParseIntPipe,
   Patch,
@@ -587,6 +588,42 @@ export class AcademicsController {
     return this.academics.listHodFacultyWorkload(
       this.resolveTenantId(req.user),
       req.user.user_id,
+    );
+  }
+
+  @Post('hod/faculty/:facultyUserId/teaching-load-status')
+  @Roles('HOD', 'SuperAdmin')
+  setHodFacultyTeachingLoadStatus(
+    @Param('facultyUserId') facultyUserId: string,
+    @Req() req: { user: AuthUser },
+    @Headers('if-match') ifMatch: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body()
+    body: {
+      academic_year: string;
+      status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION';
+      reason?: string;
+    },
+  ) {
+    const expectedRevision = Number(String(ifMatch ?? '').replace(/"/g, ''));
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      throw new BadRequestException('If-Match revision is required');
+    }
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException('Idempotency-Key is required');
+    }
+    return this.academics.setHodFacultyLoadDeclaration(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role,
+      facultyUserId,
+      {
+        academicYear: body.academic_year,
+        status: body.status,
+        reason: body.reason,
+        expectedRevision,
+        idempotencyKey,
+      },
     );
   }
 

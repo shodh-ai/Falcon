@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import {
   ListQueryParams,
   parseListQuery,
@@ -1391,17 +1393,215 @@ export class AcademicsService {
     return this.listFacultyWorkloadForDepartments(tenantId, deptIds);
   }
 
+  async setHodFacultyLoadDeclaration(
+    tenantId: string,
+    actorUserId: string,
+    actorRole: string | undefined,
+    facultyUserId: string,
+    input: {
+      academicYear: string;
+      status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION';
+      reason?: string;
+      expectedRevision: number;
+      idempotencyKey: string;
+    },
+  ) {
+    if (!/^\d{4}-\d{4}$/.test(input.academicYear)) {
+      throw new BadRequestException('academic_year must use YYYY-YYYY');
+    }
+    if (
+      !['NO_TEACHING_LOAD', 'AVAILABLE_FOR_ALLOCATION'].includes(input.status)
+    ) {
+      throw new BadRequestException('Invalid teaching-load status');
+    }
+    if (input.status === 'NO_TEACHING_LOAD' && !input.reason?.trim()) {
+      throw new BadRequestException('A reason is required for no teaching load');
+    }
+
+    const requestHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          facultyUserId,
+          academicYear: input.academicYear,
+          status: input.status,
+          reason: input.reason?.trim() ?? null,
+        }),
+      )
+      .digest('hex');
+
+    return this.users.manager.transaction(async (manager) => {
+      const [retry] = await manager.query(
+        `SELECT h.request_hash, d.*
+         FROM academic_faculty_load_declaration_history h
+         JOIN academic_faculty_load_declarations d
+           ON d.declaration_id = h.declaration_id
+         WHERE h.tenant_id = $1 AND h.changed_by = $2 AND h.idempotency_key = $3`,
+        [tenantId, actorUserId, input.idempotencyKey],
+      );
+      if (retry) {
+        if (retry.request_hash !== requestHash) {
+          throw new ConflictException({ code: 'IDEMPOTENCY_PAYLOAD_CHANGED' });
+        }
+        return retry;
+      }
+
+      const [faculty] = await manager.query(
+        `SELECT u.user_id, u.dept_id
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.tenant_id = $1 AND u.user_id = $2
+           AND u.is_active = true AND u.deleted_at IS NULL
+           AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         FOR UPDATE`,
+        [tenantId, facultyUserId],
+      );
+      if (!faculty) throw new NotFoundException('Faculty member not found');
+
+      if (actorRole !== 'SuperAdmin') {
+        const departmentIds = await this.resolveHodDepartmentIds(actorUserId);
+        if (!departmentIds.includes(Number(faculty.dept_id))) {
+          throw new ForbiddenException('Faculty member is outside HOD scope');
+        }
+      }
+
+      const [current] = await manager.query(
+        `SELECT * FROM academic_faculty_load_declarations
+         WHERE tenant_id = $1 AND faculty_user_id = $2 AND academic_year = $3
+         FOR UPDATE`,
+        [tenantId, facultyUserId, input.academicYear],
+      );
+      const currentRevision = Number(current?.revision ?? 0);
+      if (currentRevision !== input.expectedRevision) {
+        throw new ConflictException({
+          code: 'STALE_TEACHING_LOAD_DECLARATION',
+          current_revision: currentRevision,
+        });
+      }
+
+      if (input.status === 'NO_TEACHING_LOAD') {
+        const affected = await manager.query(
+          `SELECT allocation_id, tenant_id, subject_id, program_name, semester,
+                  academic_year, course_id
+           FROM academic_course_allocations
+           WHERE tenant_id = $1 AND faculty_user_id = $2
+             AND academic_year = $3 AND status = 'ACTIVE'
+           FOR UPDATE`,
+          [tenantId, facultyUserId, input.academicYear],
+        );
+        if (affected.length) {
+          const allocationIds = affected.map(
+            (row: { allocation_id: string }) => row.allocation_id,
+          );
+          await manager.query(
+            `UPDATE academic_course_allocations
+             SET status = 'SUPERSEDED', updated_at = NOW()
+             WHERE allocation_id = ANY($1::uuid[])`,
+            [allocationIds],
+          );
+          for (const row of affected) {
+            await manager.query(
+              `INSERT INTO academic_course_allocations(
+                 tenant_id, subject_id, program_name, semester, faculty_user_id,
+                 academic_year, course_id, status
+               )
+               SELECT $1, $2, $3, $4, NULL, $5, $6, 'ACTIVE'
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM academic_course_allocations
+                 WHERE tenant_id = $1 AND subject_id = $2
+                   AND program_name IS NOT DISTINCT FROM $3
+                   AND semester IS NOT DISTINCT FROM $4
+                   AND academic_year = $5 AND faculty_user_id IS NULL
+                   AND status = 'ACTIVE'
+               )`,
+              [
+                row.tenant_id,
+                row.subject_id,
+                row.program_name,
+                row.semester,
+                row.academic_year,
+                row.course_id,
+              ],
+            );
+          }
+          const courseIds = [
+            ...new Set(
+              affected
+                .map((row: { course_id?: string | null }) => row.course_id)
+                .filter(Boolean),
+            ),
+          ];
+          if (courseIds.length) {
+            await manager.query(
+              `UPDATE academic_timetables SET deleted_at = NOW()
+               WHERE tenant_id = $1 AND faculty_user_id = $2
+                 AND course_id = ANY($3::uuid[]) AND deleted_at IS NULL`,
+              [tenantId, facultyUserId, courseIds],
+            );
+          }
+        }
+      }
+
+      const nextRevision = currentRevision + 1;
+      const [declaration] = await manager.query(
+        `INSERT INTO academic_faculty_load_declarations(
+           tenant_id, faculty_user_id, academic_year, status, reason,
+           revision, declared_by
+         ) VALUES($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT(tenant_id, faculty_user_id, academic_year) DO UPDATE SET
+           status = EXCLUDED.status,
+           reason = EXCLUDED.reason,
+           revision = EXCLUDED.revision,
+           declared_by = EXCLUDED.declared_by,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          tenantId,
+          facultyUserId,
+          input.academicYear,
+          input.status,
+          input.reason?.trim() || null,
+          nextRevision,
+          actorUserId,
+        ],
+      );
+      await manager.query(
+        `INSERT INTO academic_faculty_load_declaration_history(
+           declaration_id, tenant_id, faculty_user_id, academic_year, status,
+           reason, revision, changed_by, idempotency_key, request_hash
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          declaration.declaration_id,
+          tenantId,
+          facultyUserId,
+          input.academicYear,
+          input.status,
+          input.reason?.trim() || null,
+          nextRevision,
+          actorUserId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      return declaration;
+    });
+  }
+
   private async listFacultyWorkloadForDepartments(
     tenantId: string,
     deptIds: number[],
   ) {
     if (!deptIds.length) return [];
 
+    const academicYear = this.currentAcademicYear();
     const rows = await this.users.manager.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
               d.dept_name,
               hod.name AS hod_name,
               hod.official_email AS hod_email,
+              fld.status AS load_declaration_status,
+              fld.reason AS load_declaration_reason,
+              fld.revision AS load_declaration_revision,
+              fld.academic_year AS load_declaration_academic_year,
               COALESCE(SUM(
                 EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600
               ), 0)::numeric(6,1) AS hours_per_week,
@@ -1411,13 +1611,20 @@ export class AcademicsService {
        LEFT JOIN users hod ON hod.user_id = d.hod_user_id
        LEFT JOIN academic_timetables t
          ON t.faculty_user_id = u.user_id AND t.tenant_id = u.tenant_id
+        AND t.deleted_at IS NULL
+       LEFT JOIN academic_faculty_load_declarations fld
+         ON fld.tenant_id = u.tenant_id
+        AND fld.faculty_user_id = u.user_id
+        AND fld.academic_year = $3
        LEFT JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
          AND r.role_name IN ('Faculty', 'HOD', 'Dean')
-       GROUP BY u.user_id, u.name, u.official_email, u.dept_id, d.dept_name, hod.name, hod.official_email
+       GROUP BY u.user_id, u.name, u.official_email, u.dept_id, d.dept_name,
+                hod.name, hod.official_email, fld.status, fld.reason,
+                fld.revision, fld.academic_year
        ORDER BY d.dept_name ASC, hours_per_week DESC, u.name ASC`,
-      [tenantId, deptIds],
+      [tenantId, deptIds, academicYear],
     );
 
     return rows.map((row: Record<string, unknown>) => ({
@@ -1430,8 +1637,15 @@ export class AcademicsService {
       hod_email: row.hod_email,
       hours_per_week: Number(row.hours_per_week ?? 0),
       course_count: Number(row.course_count ?? 0),
+      load_declaration_status: row.load_declaration_status ?? null,
+      load_declaration_reason: row.load_declaration_reason ?? null,
+      load_declaration_revision: Number(row.load_declaration_revision ?? 0),
+      load_declaration_academic_year:
+        row.load_declaration_academic_year ?? academicYear,
       workload_status:
-        Number(row.hours_per_week ?? 0) > 18
+        row.load_declaration_status === 'NO_TEACHING_LOAD'
+          ? 'NO_TEACHING_LOAD'
+          : Number(row.hours_per_week ?? 0) > 18
           ? 'OVERLOADED'
           : Number(row.hours_per_week ?? 0) < 6
             ? 'UNDERUTILIZED'
@@ -3978,9 +4192,10 @@ export class AcademicsService {
     },
   ];
 
-  private currentAcademicYear() {
-    const year = new Date().getFullYear();
-    return `${year}-${year + 1}`;
+  private currentAcademicYear(date = new Date()) {
+    const year = date.getUTCFullYear();
+    const start = date.getUTCMonth() >= 6 ? year : year - 1;
+    return `${start}-${start + 1}`;
   }
 
   async getHodDepartmentReports(tenantId: string, hodUserId: string) {

@@ -96,8 +96,8 @@ export function FacultyCourseFeatureHub({ feature }: { feature: FacultyCourseFea
           <FacultyErrorBanner message={error!} />
         ) : (
           <FacultyEmptyState
-            title="No courses assigned"
-            description="When courses are allocated to your timetable, they will appear here."
+            title="No teaching load assigned"
+            description="Your faculty account remains active. Course tools will appear when the department assigns a teaching load."
           />
         )
       ) : (

@@ -48,8 +48,8 @@ export default function FacultyCoursesIndexPage() {
           <FacultyErrorBanner message={error!} />
         ) : (
           <FacultyEmptyState
-            title="No courses assigned"
-            description="When courses are allocated to your timetable, they will appear here as workspaces."
+            title="No teaching load assigned"
+            description="Your faculty account remains active. If the department assigns a teaching load later, the course workspaces will appear here."
           />
         )
       ) : (
