@@ -1466,6 +1466,7 @@ export class AcademicsService {
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE t.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
+         AND t.deleted_at IS NULL
        ORDER BY d.dept_name ASC, t.day_of_week ASC, t.start_time ASC, c.course_code ASC`,
       [tenantId, deptIds],
     );
@@ -1500,7 +1501,9 @@ export class AcademicsService {
        FROM academic_course_allocations a
        INNER JOIN academic_courses c ON c.course_id = a.course_id
        INNER JOIN users u ON u.user_id = a.faculty_user_id
-       WHERE a.tenant_id = $1 AND u.dept_id = ANY($2::int[])
+       WHERE a.tenant_id = $1
+         AND u.dept_id = ANY($2::int[])
+         AND a.status = 'ACTIVE'
        ORDER BY a.updated_at DESC NULLS LAST, c.course_code ASC`,
       [tenantId, deptIds],
     );
@@ -1542,7 +1545,10 @@ export class AcademicsService {
          FROM academic_course_allocations a
          INNER JOIN academic_courses c ON c.course_id = a.course_id
          INNER JOIN users u ON u.user_id = a.faculty_user_id
-         WHERE a.tenant_id = $1 AND u.dept_id = ANY($2::int[]) AND a.semester = $3`,
+         WHERE a.tenant_id = $1
+           AND u.dept_id = ANY($2::int[])
+           AND a.semester = $3
+           AND a.status = 'ACTIVE'`,
         [tenantId, deptIds, dto.semester],
       );
 
