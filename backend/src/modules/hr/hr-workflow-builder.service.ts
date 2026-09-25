@@ -201,8 +201,7 @@ export class HrWorkflowBuilderService {
           NULLIF(d.hod_user_id, $2::uuid)
         ) AS approver_user_id
        FROM users u
-       LEFT JOIN departments d
-         ON d.dept_id = u.dept_id AND d.tenant_id = u.tenant_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE u.user_id = $2 AND u.tenant_id = $1
        LIMIT 1`,
       [tenantId, requesterUserId],
@@ -246,8 +245,7 @@ export class HrWorkflowBuilderService {
             NULLIF(d.hod_user_id, $2::uuid)
           ) AS approver_user_id
          FROM users u
-         LEFT JOIN departments d
-           ON d.dept_id = u.dept_id AND d.tenant_id = u.tenant_id
+         LEFT JOIN departments d ON d.dept_id = u.dept_id
          WHERE u.user_id = $2 AND u.tenant_id = $1
          LIMIT 1`,
         [tenantId, requesterUserId],
@@ -259,7 +257,7 @@ export class HrWorkflowBuilderService {
       const rows = await this.dataSource.query(
         `SELECT NULLIF(d.hod_user_id, $2::uuid) AS approver_user_id
          FROM users u
-         JOIN departments d ON d.dept_id = u.dept_id AND d.tenant_id = u.tenant_id
+         JOIN departments d ON d.dept_id = u.dept_id
          WHERE u.user_id = $2 AND u.tenant_id = $1
          LIMIT 1`,
         [tenantId, requesterUserId],

@@ -32,7 +32,6 @@ SET current_approver_user_id = COALESCE(
 FROM users staff
 LEFT JOIN departments department
   ON department.dept_id = staff.dept_id
- AND department.tenant_id = staff.tenant_id
 WHERE request.staff_user_id = staff.user_id
   AND request.tenant_id = staff.tenant_id
   AND request.status = 'PENDING'
