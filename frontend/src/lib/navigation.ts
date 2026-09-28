@@ -126,22 +126,6 @@ export interface NavItem {
   shortLabel?: string;
 }
 
-/** Cross-portal nav — Blueprint Track 3 (Deep-Tech R&D Moonshots). */
-export const moonshotsNavItem: NavItem = {
-  label: 'Deep-Tech Moonshots',
-  href: '/research/moonshots',
-  icon: Rocket,
-  keywords: [
-    'zero-day',
-    'programmable matter',
-    'quantum',
-    'microfluidics',
-    'moonshots',
-    'deep-tech',
-    'rnd',
-  ],
-};
-
 export interface NavGroup {
   title: string;
   items: NavItem[];
@@ -705,7 +689,6 @@ export const facultyPortal: PortalConfig = {
         { label: 'Research', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms', 'publications'] },
         { label: 'Research Grants', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
         { label: 'PhD Students', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
-        { ...moonshotsNavItem, href: '/faculty/moonshots' },
       ],
     },
     {
@@ -776,7 +759,6 @@ export const facultyPortal: PortalConfig = {
         { label: 'Research', href: '/faculty/research', icon: FlaskConical, keywords: ['scopus', 'patent', 'journal', 'pms', 'publications'] },
         { label: 'Research Grants', href: '/faculty/research-approvals', icon: Microscope, keywords: ['guide', 'research grant', 'student project'] },
         { label: 'PhD Students', href: '/faculty/phd/scholars', icon: GraduationCap, keywords: ['phd', 'guide', 'scholar', 'thesis'] },
-        { ...moonshotsNavItem, href: '/faculty/moonshots' },
       ],
     },
     {
@@ -955,10 +937,6 @@ export const hodPortal: PortalConfig = {
         { label: 'Department Analytics', href: '/hod/reports', icon: LineChart, keywords: ['analytics', 'reports', 'trends', 'departmental'] },
       ],
     },
-    {
-      title: 'Research & Innovation',
-      items: [moonshotsNavItem],
-    },
     myHrOperationsNavGroup('hod'),
   ],
   commandItems: flattenNavToCommandItems([
@@ -1081,7 +1059,6 @@ export const deanPortal: PortalConfig = {
         { label: 'Faculty Leaderboard', href: '/dean/faculty/leaderboard', icon: Medal, keywords: ['performance', 'ranking', 'api'] },
         { label: 'Placement Dashboard', href: '/dean/placement', icon: Briefcase, keywords: ['placement', 'offers', 'companies'] },
         { label: 'Research Dashboard', href: '/dean/research', icon: Microscope, keywords: ['publications', 'grants', 'projects'] },
-        moonshotsNavItem,
         { label: 'Budget Monitoring', href: '/dean/budget', icon: Wallet, keywords: ['budget', 'spend', 'allocation'] },
         { label: 'Executive Reports', href: '/dean/reports', icon: FileText, keywords: ['export', 'pdf', 'excel', 'csv'] },
         { label: 'Global Search', href: '/dean/search', icon: Search, keywords: ['find', 'lookup', 'directory'] },
@@ -1141,7 +1118,6 @@ export const deanPortal: PortalConfig = {
         { label: 'Faculty Leaderboard', href: '/dean/faculty/leaderboard', icon: Medal, keywords: ['leaderboard'] },
         { label: 'Placement Dashboard', href: '/dean/placement', icon: Briefcase, keywords: ['placement'] },
         { label: 'Research Dashboard', href: '/dean/research', icon: Microscope, keywords: ['research'] },
-        moonshotsNavItem,
         { label: 'Budget Monitoring', href: '/dean/budget', icon: Wallet, keywords: ['budget'] },
         { label: 'Executive Reports', href: '/dean/reports', icon: FileText, keywords: ['reports'] },
         { label: 'Global Search', href: '/dean/search', icon: Search, keywords: ['search'] },
@@ -1542,7 +1518,6 @@ export const researchPortal: PortalConfig = {
         { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText, keywords: ['thesis', 'viva', 'synopsis'], roles: ['RRC_MEMBER', 'SuperAdmin'] },
         { label: 'Adjudicator Reviews', href: '/research/adjudicator/reviews', icon: Scale, keywords: ['synopsis', 'thesis', 'evaluation'], roles: ['PHD_ADJUDICATOR', 'SuperAdmin'] },
         { label: 'Research Grants', href: '/research/grants', icon: FlaskConical, keywords: ['grants', 'funding'], roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Chairman'] },
-        { ...moonshotsNavItem, roles: ['IQAC', 'Faculty', 'SuperAdmin', 'Dean', 'HOD', 'LabAdmin', 'Wrangler'] },
       ],
     },
   ],
@@ -1551,7 +1526,6 @@ export const researchPortal: PortalConfig = {
     { label: 'RAC Reviews', href: '/research/rac/reviews', icon: Users },
     { label: 'RRC Reviews', href: '/research/rrc/reviews', icon: FileText },
     { label: 'Scholar Pipeline', href: '/research/scholars', icon: GraduationCap },
-    moonshotsNavItem,
   ],
 };
 
@@ -2169,7 +2143,6 @@ export const labsPortal: PortalConfig = {
         { label: 'Bookings & Checkout', href: '/labs/bookings', icon: CalendarDays, keywords: ['booking', 'checkout', 'safety'] },
         { label: 'Tokamak Budget', href: '/labs/budget', icon: Wallet, keywords: ['2 lakh', 'rnd', 'fast path'] },
         { label: 'Fabless Network', href: '/labs/partners', icon: Network, keywords: ['istem', 'ceeri', 'mnit', 'work order'] },
-        moonshotsNavItem,
       ],
     },
   ],
@@ -2179,7 +2152,6 @@ export const labsPortal: PortalConfig = {
     { label: 'Bookings', href: '/labs/bookings', icon: CalendarDays },
     { label: 'Budget', href: '/labs/budget', icon: Wallet },
     { label: 'Fabless Partners', href: '/labs/partners', icon: Network },
-    moonshotsNavItem,
   ],
 };
 

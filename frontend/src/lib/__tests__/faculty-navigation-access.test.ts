@@ -52,4 +52,14 @@ describe('faculty navigation access', () => {
       ['Attendance & Leave', '/faculty/me/workforce'],
     ]);
   });
+
+  it('keeps deferred Deep-Tech Moonshots out of faculty navigation', () => {
+    const items = [
+      ...facultyPortal.navGroups.flatMap((group) => group.items),
+      ...facultyPortal.commandItems,
+    ];
+
+    expect(items.some((item) => item.href.includes('/moonshots'))).toBe(false);
+    expect(items.some((item) => /deep-tech moonshots/i.test(item.label))).toBe(false);
+  });
 });
