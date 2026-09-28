@@ -1,6 +1,6 @@
--- Reissue the approved launch credentials for the complete Pharmacy faculty
--- cohort. Only bcrypt hashes are stored in source control; plaintext temporary
--- passwords remain in the restricted handoff package outside the repository.
+-- Reissue launch credentials only for Pharmacy faculty who have never started
+-- onboarding. Accounts that have logged in or progressed beyond the initial
+-- password-reset state are deliberately left untouched.
 
 BEGIN;
 
@@ -57,6 +57,18 @@ BEGIN
   END IF;
 END $$;
 
+CREATE TEMP TABLE pharmacy_faculty_credential_targets
+ON COMMIT DROP AS
+SELECT u.user_id, r.password_hash
+FROM pharmacy_faculty_credential_reset r
+JOIN public.tenants t ON t.subdomain = 'sgvu' AND t.is_active = true
+JOIN users u
+  ON u.tenant_id = t.tenant_id
+ AND lower(u.official_email) = lower(r.official_email)
+ AND u.deleted_at IS NULL
+WHERE u.onboarding_status = 'PENDING_PASSWORD_RESET'
+  AND u.last_login_at IS NULL;
+
 INSERT INTO system_audit_logs (
   table_name, record_id, action, old_value, new_value, changed_by_user_id
 )
@@ -77,45 +89,33 @@ SELECT
     'migration', '20260928170000_reset_pharmacy_faculty_temporary_credentials.sql'
   ),
   u.user_id
-FROM pharmacy_faculty_credential_reset r
-JOIN public.tenants t ON t.subdomain = 'sgvu' AND t.is_active = true
-JOIN users u
-  ON u.tenant_id = t.tenant_id
- AND lower(u.official_email) = lower(r.official_email)
- AND u.deleted_at IS NULL;
+FROM pharmacy_faculty_credential_targets target
+JOIN users u ON u.user_id = target.user_id;
 
 UPDATE users u
 SET
-  password_hash = r.password_hash,
-  onboarding_status = 'PENDING_PASSWORD_RESET',
-  onboarding_profile = '{}'::jsonb,
+  password_hash = target.password_hash,
   account_status = 'ACTIVE',
   is_active = true,
   updated_at = NOW()
-FROM pharmacy_faculty_credential_reset r
-JOIN public.tenants t ON t.subdomain = 'sgvu' AND t.is_active = true
-WHERE u.tenant_id = t.tenant_id
-  AND lower(u.official_email) = lower(r.official_email)
-  AND u.deleted_at IS NULL;
+FROM pharmacy_faculty_credential_targets target
+WHERE u.user_id = target.user_id;
 
 DO $$
 DECLARE
   verified_count INTEGER;
 BEGIN
   SELECT COUNT(*) INTO verified_count
-  FROM pharmacy_faculty_credential_reset r
-  JOIN public.tenants t ON t.subdomain = 'sgvu' AND t.is_active = true
-  JOIN users u
-    ON u.tenant_id = t.tenant_id
-   AND lower(u.official_email) = lower(r.official_email)
-  WHERE u.password_hash = r.password_hash
+  FROM pharmacy_faculty_credential_targets target
+  JOIN users u ON u.user_id = target.user_id
+  WHERE u.password_hash = target.password_hash
     AND u.onboarding_status = 'PENDING_PASSWORD_RESET'
     AND u.account_status = 'ACTIVE'
     AND u.is_active = true
     AND u.deleted_at IS NULL;
 
-  IF verified_count <> 28 THEN
-    RAISE EXCEPTION 'Expected 28 reissued Pharmacy faculty credentials, found %', verified_count;
+  IF verified_count <> (SELECT COUNT(*) FROM pharmacy_faculty_credential_targets) THEN
+    RAISE EXCEPTION 'Not all eligible Pharmacy faculty credentials were reissued';
   END IF;
 END $$;
 
