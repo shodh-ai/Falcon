@@ -1991,6 +1991,13 @@ export const adminPortal: PortalConfig = {
         },
         { label: 'Student Verifications', href: '/admin/verifications', icon: FileCheck2, roles: ['CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar'] },
         {
+          label: 'Faculty Verifications',
+          href: '/admin/faculty-verifications',
+          icon: UserCheck,
+          roles: ['SuperAdmin'],
+          keywords: ['faculty', 'staff', 'onboarding', 'documents', 'approve'],
+        },
+        {
           label: 'Profile Corrections',
           href: '/admin/profile-corrections',
           icon: ClipboardCheck,
