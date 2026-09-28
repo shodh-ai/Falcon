@@ -36,6 +36,7 @@ export type FacultyStudentReportData = {
   };
   summary: {
     internal_avg_percent: number;
+    attendance_percent: number | null;
     class_average_percent: number;
     class_rank: number;
     class_size: number;
@@ -264,6 +265,14 @@ export function FacultyStudentReport({
             {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
             <div className="flex flex-wrap gap-2 lg:justify-end">
             <FacultyMetricChip label="Internal score" value={formatPercent(summary.internal_avg_percent)} emphasis />
+            <FacultyMetricChip
+              label="Attendance"
+              value={
+                summary.attendance_percent == null
+                  ? 'N/A'
+                  : formatPercent(summary.attendance_percent)
+              }
+            />
             <FacultyMetricChip
               label="Class rank"
               value={summary.class_size ? `${summary.class_rank}/${summary.class_size}` : 'N/A'}

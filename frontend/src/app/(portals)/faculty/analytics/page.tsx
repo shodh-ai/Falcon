@@ -33,6 +33,7 @@ type StudentSearchResult = {
   course_code: string;
   course_name: string;
   internal_avg_percent: string | number;
+  attendance_percent: string | number | null;
   assignments_submitted: number;
 };
 
@@ -90,6 +91,7 @@ function buildDemoAnalyticsStudents(
       course_code: displayCode,
       course_name: displayName,
       internal_avg_percent: s.internal_marks,
+      attendance_percent: s.attendance_percent,
       assignments_submitted: Math.round(s.assignment_score / 10),
     }));
 }
@@ -137,6 +139,7 @@ function buildDemoStudentReport(
     subject,
     summary: {
       internal_avg_percent: internal,
+      attendance_percent: student.attendance_percent,
       class_average_percent: 72.5,
       class_rank: Math.max(1, Math.round((100 - internal) / 3)),
       class_size: studentsForCourse(demoCourse.course_id).length || 60,
@@ -408,8 +411,14 @@ export default function FacultyAnalyticsPage() {
   const filteredStudents = useMemo(() => {
     return students.filter((student) => {
       const score = Number(student.internal_avg_percent ?? 0);
-      if (scoreFilter === 'at-risk') return score < 40;
-      if (scoreFilter === 'strong') return score >= 75;
+      const attendance =
+        student.attendance_percent == null
+          ? null
+          : Number(student.attendance_percent);
+      if (scoreFilter === 'at-risk')
+        return score < 40 || (attendance !== null && attendance < 75);
+      if (scoreFilter === 'strong')
+        return score >= 75 && (attendance === null || attendance >= 85);
       return true;
     });
   }, [students, scoreFilter]);
@@ -419,8 +428,26 @@ export default function FacultyAnalyticsPage() {
     students.find((s) => s.student_user_id === selectedStudentId && s.course_id === effectiveCourseId) ??
     null;
 
-  const atRiskCount = students.filter((s) => Number(s.internal_avg_percent) < 40).length;
-  const strongCount = students.filter((s) => Number(s.internal_avg_percent) >= 75).length;
+  const atRiskCount = students.filter((student) => {
+    const attendance =
+      student.attendance_percent == null
+        ? null
+        : Number(student.attendance_percent);
+    return (
+      Number(student.internal_avg_percent) < 40 ||
+      (attendance !== null && attendance < 75)
+    );
+  }).length;
+  const strongCount = students.filter((student) => {
+    const attendance =
+      student.attendance_percent == null
+        ? null
+        : Number(student.attendance_percent);
+    return (
+      Number(student.internal_avg_percent) >= 75 &&
+      (attendance === null || attendance >= 85)
+    );
+  }).length;
 
   function selectStudent(student: StudentSearchResult) {
     setSelectedStudentId(student.student_user_id);
@@ -452,7 +479,7 @@ export default function FacultyAnalyticsPage() {
           <>
             <FacultyMetricChip label="Subject" value={selectedCourse?.course_code ?? 'Select'} emphasis />
             <FacultyMetricChip label="Roster" value={students.length} />
-            <FacultyMetricChip label="At risk (<40%)" value={atRiskCount} />
+            <FacultyMetricChip label="At risk" value={atRiskCount} />
             <FacultyMetricChip
               label="Selected"
               value={selectedStudent ? scoreLabel(selectedStudent.internal_avg_percent) : '—'}
@@ -663,7 +690,21 @@ export default function FacultyAnalyticsPage() {
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <Badge variant={scoreTone(student.internal_avg_percent)} className="text-[10px]">
-                          {scoreLabel(student.internal_avg_percent)}
+                          Marks {scoreLabel(student.internal_avg_percent)}
+                        </Badge>
+                        <Badge
+                          variant={
+                            student.attendance_percent != null &&
+                            Number(student.attendance_percent) < 75
+                              ? 'destructive'
+                              : 'outline'
+                          }
+                          className="text-[10px]"
+                        >
+                          Attendance{' '}
+                          {student.attendance_percent == null
+                            ? 'N/A'
+                            : scoreLabel(student.attendance_percent)}
                         </Badge>
                         {selected ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-sgvu-navy">

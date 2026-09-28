@@ -9,6 +9,7 @@ import {
   facultyPortal,
   filterFacultyPortalForManagerAccess,
   filterFacultyPortalForEventCoordinator,
+  filterFacultyPortalForPhdGuide,
   filterFacultyPortalForPlacementCoordinator,
 } from '@/lib/navigation';
 import { FACULTY_CONTENT_MAX_CLASS } from '@/components/faculty/FacultyPageShell';
@@ -23,6 +24,7 @@ function FacultyShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [isPlacementCoordinator, setIsPlacementCoordinator] = useState(false);
   const [isEventCoordinator, setIsEventCoordinator] = useState(false);
+  const [isPhdGuide, setIsPhdGuide] = useState(false);
 
   useEffect(() => {
     void api
@@ -38,12 +40,20 @@ function FacultyShellInner({ children }: { children: ReactNode }) {
       .catch(() => setIsEventCoordinator(false));
   }, [api]);
 
+  useEffect(() => {
+    void api
+      .get<unknown[]>('/api/phd-lifecycle/guide/scholars')
+      .then((rows) => setIsPhdGuide(Array.isArray(rows) && rows.length > 0))
+      .catch(() => setIsPhdGuide(false));
+  }, [api]);
+
   const config = useMemo(() => {
     let next = filterFacultyPortalForManagerAccess(facultyPortal, canSeeFacultyTeamApprovals(user));
     next = filterFacultyPortalForPlacementCoordinator(next, isPlacementCoordinator);
     next = filterFacultyPortalForEventCoordinator(next, isEventCoordinator);
+    next = filterFacultyPortalForPhdGuide(next, isPhdGuide);
     return next;
-  }, [user, isPlacementCoordinator, isEventCoordinator]);
+  }, [user, isPlacementCoordinator, isEventCoordinator, isPhdGuide]);
 
   const contentMaxWidthClass =
     pathname?.startsWith('/faculty/analytics')

@@ -2316,6 +2316,7 @@ export class FacultyWorkspacesService {
          c.course_id,
          c.course_code,
          c.course_name,
+         e.attendance_percent,
          COALESCE((
            SELECT ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2)
            FROM academic_marks m
@@ -2384,6 +2385,7 @@ export class FacultyWorkspacesService {
          c.course_id,
          c.course_code,
          c.course_name,
+         e.attendance_percent,
          COALESCE((
            SELECT ROUND(AVG(m.marks_obtained::numeric / NULLIF(m.max_marks, 0) * 100), 2)
            FROM academic_marks m
@@ -2547,6 +2549,15 @@ export class FacultyWorkspacesService {
            )
            SELECT c.course_id, c.course_code, c.course_name,
                   r.score AS internal_avg_percent,
+                  (
+                    SELECT e.attendance_percent
+                    FROM student_course_enrollments e
+                    WHERE e.tenant_id = $1
+                      AND e.course_id = $2
+                      AND e.student_user_id = $3
+                      AND e.status = 'ENROLLED'
+                    LIMIT 1
+                  ) AS attendance_percent,
                   r.class_average_percent,
                   r.class_rank::int,
                   r.class_size::int,
@@ -2668,6 +2679,10 @@ export class FacultyWorkspacesService {
       0,
     );
     const internalAvg = Number(stats.internal_avg_percent ?? 0);
+    const attendancePercent =
+      stats.attendance_percent == null
+        ? null
+        : Number(stats.attendance_percent);
     const classAverage = Number(stats.class_average_percent ?? 0);
     const demeritPoints = (demeritRows as Array<{ points: number }>).reduce(
       (sum, row) => sum + Number(row.points ?? 0),
@@ -2699,6 +2714,19 @@ export class FacultyWorkspacesService {
         label: 'Weak internals',
         severity: 'HIGH',
         detail: 'Internal score is below the 40% academic concern threshold.',
+      });
+    }
+    if (attendancePercent !== null && attendancePercent < 75) {
+      flags.push({
+        label: 'Critical attendance',
+        severity: attendancePercent < 60 ? 'HIGH' : 'MEDIUM',
+        detail: `Attendance is ${Math.round(attendancePercent)}%; the minimum expected attendance is 75%.`,
+      });
+    } else if (attendancePercent !== null && attendancePercent < 85) {
+      flags.push({
+        label: 'Low attendance',
+        severity: 'LOW',
+        detail: `Attendance is ${Math.round(attendancePercent)}%.`,
       });
     }
     if (classAverage > 0 && internalAvg + 10 < classAverage) {
@@ -2739,6 +2767,8 @@ export class FacultyWorkspacesService {
       },
       summary: {
         internal_avg_percent: Math.round(internalAvg),
+        attendance_percent:
+          attendancePercent === null ? null : Math.round(attendancePercent),
         class_average_percent: Math.round(classAverage),
         class_rank: Number(stats.class_rank ?? 0),
         class_size: Number(stats.class_size ?? 0),

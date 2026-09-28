@@ -10,7 +10,6 @@ import {
   FacultyPageShell,
   FacultyPanel,
 } from '@/components/faculty';
-import { FacultyQuestionBankPanel } from '@/components/faculty/FacultyQuestionBankPanel';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -568,14 +567,14 @@ export default function FacultyWeeklyTestsPage() {
           )}
         </FacultyPanel>
 
-        <div className="w-full space-y-3">
-          <div className="flex justify-end">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/faculty/question-bank">Open full Question Bank</Link>
-            </Button>
-          </div>
-          <FacultyQuestionBankPanel compact />
-        </div>
+        <FacultyPanel
+          title="Question Bank — Coming Soon"
+          description="Reusable question-bank authoring is not operational yet. Weekly-test workflows remain available without it."
+        >
+          <Button asChild variant="outline" size="sm">
+            <Link href="/faculty/question-bank">View availability</Link>
+          </Button>
+        </FacultyPanel>
       </div>
 
       <Dialog open={resultsOpen} onOpenChange={setResultsOpen}>

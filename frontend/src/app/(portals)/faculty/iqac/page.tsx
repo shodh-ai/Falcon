@@ -44,6 +44,18 @@ type Assignment = {
   }[];
 };
 
+function workflowStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    PENDING_HOD_APPROVAL: 'Awaiting HOD approval',
+    PENDING_IQAC_REVIEW: 'HOD approved · awaiting IQAC',
+    CHANGES_REQUESTED: 'Changes requested',
+    ACCEPTED: 'Accepted by IQAC',
+    CLOSED: 'Closed',
+    WAIVED: 'Waived',
+  };
+  return labels[status] ?? status.replace(/_/g, ' ');
+}
+
 export default function FacultyIqacPage() {
   const { token } = useAuth();
   const api = useAuthedApi();
@@ -139,8 +151,8 @@ export default function FacultyIqacPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="IQAC Tasks"
-        description="Upload evidence and track AI audit status for your assigned compliance duties."
+        title="Event & IQAC Reports"
+        description="Upload the report and supporting documents for an assigned event or IQAC activity. Every submission goes to your department HOD first, then to IQAC."
         meta={
           !loading ? (
             <>
@@ -162,7 +174,7 @@ export default function FacultyIqacPage() {
           <FacultyPanel
             title="Task list"
             count={assignments.length}
-            description="Your assigned compliance duties"
+            description="Events and activities assigned to you"
           >
             <div className="space-y-2">
               {assignments.map((assignment) => (
@@ -195,7 +207,7 @@ export default function FacultyIqacPage() {
                         : "secondary"
                     }
                   >
-                    {assignment.status}
+                    {workflowStatusLabel(assignment.status)}
                   </Badge>
                 </button>
               ))}
@@ -209,7 +221,7 @@ export default function FacultyIqacPage() {
           </FacultyPanel>
 
           <FacultyPanel
-            title="Upload evidence"
+            title="Upload event/activity report"
             description={
               selectedAssignment?.task?.task_description ??
               "Choose a task and upload supporting files"
@@ -219,7 +231,7 @@ export default function FacultyIqacPage() {
             <div className="rounded-xl border border-dashed border-border/80 bg-muted/20 p-6 text-center">
               <Upload className="mx-auto h-8 w-8 text-sgvu-gold" />
               <p className="mt-2 text-sm font-medium text-sgvu-navy">
-                Upload compliance evidence
+                Upload report and supporting evidence
               </p>
               <Input
                 className="mt-4 max-w-md mx-auto"
@@ -240,7 +252,7 @@ export default function FacultyIqacPage() {
               ) : (
                 <Upload className="h-4 w-4" />
               )}
-              Submit evidence
+              Submit to HOD
             </Button>
             {selectedAssignment?.review_comments && (
               <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -250,9 +262,9 @@ export default function FacultyIqacPage() {
           </FacultyPanel>
 
           <FacultyPanel
-            title="AI audit status"
+            title="HOD & IQAC review trail"
             count={submissionCount}
-            description="Recent submissions and validation results"
+            description="Your report is reviewed by the HOD before IQAC can accept it"
             className="lg:col-span-3"
           >
             {submissionCount === 0 ? (

@@ -18,27 +18,44 @@ export class EarlyWarningService {
   ) {}
   async getFacultyAtRiskStudents(ctx: AuthCtx) {
     const rows = await this.db.query(
-      `WITH faculty_students AS (
+      `WITH faculty_courses AS (
+         SELECT DISTINCT a.course_id
+         FROM academic_course_allocations a
+         WHERE a.faculty_user_id = $1
+           AND a.tenant_id = $2
+           AND a.status = 'ACTIVE'
+           AND a.course_id IS NOT NULL
+         UNION
+         SELECT DISTINCT tt.course_id
+         FROM academic_timetables tt
+         WHERE tt.faculty_user_id = $1
+           AND tt.tenant_id = $2
+           AND tt.deleted_at IS NULL
+       ),
+       faculty_students AS (
          SELECT DISTINCT sce.student_user_id
          FROM student_course_enrollments sce
-         JOIN academic_timetables tt ON tt.course_id = sce.course_id
-         WHERE tt.faculty_user_id = $1 AND tt.tenant_id = $2
+         JOIN faculty_courses fc ON fc.course_id = sce.course_id
+         WHERE sce.tenant_id = $2 AND sce.status = 'ENROLLED'
        ),
        att_stats AS (
-         SELECT att.student_user_id,
-                COUNT(*) as total_sessions,
-                COUNT(*) FILTER (WHERE att.status = 'PRESENT') as present_sessions
-         FROM academic_attendance_records att
-         WHERE att.student_user_id IN (SELECT student_user_id FROM faculty_students)
-         GROUP BY att.student_user_id
+         SELECT sce.student_user_id,
+                ROUND(AVG(sce.attendance_percent)::numeric, 2) AS attendance_percent
+         FROM student_course_enrollments sce
+         JOIN faculty_courses fc ON fc.course_id = sce.course_id
+         WHERE sce.tenant_id = $2
+           AND sce.status = 'ENROLLED'
+           AND sce.attendance_percent IS NOT NULL
+         GROUP BY sce.student_user_id
        ),
        exam_stats AS (
-         SELECT ex.student_user_id,
-                SUM(ex.marks_obtained) as total_obtained,
-                SUM(ex.max_marks) as total_max
-         FROM academic_exam_results ex
-         WHERE ex.student_user_id IN (SELECT student_user_id FROM faculty_students)
-         GROUP BY ex.student_user_id
+         SELECT m.student_user_id,
+                SUM(m.marks_obtained) AS total_obtained,
+                SUM(m.max_marks) AS total_max
+         FROM academic_marks m
+         JOIN faculty_courses fc ON fc.course_id = m.course_id
+         WHERE m.tenant_id = $2 AND m.status = 'PUBLISHED'
+         GROUP BY m.student_user_id
        )
        SELECT u.user_id,
               u.name,
@@ -46,8 +63,7 @@ export class EarlyWarningService {
               sp.enrollment_no,
               d.dept_name,
               sp.batch,
-              a.total_sessions,
-              a.present_sessions,
+              a.attendance_percent,
               e.total_max,
               e.total_obtained
        FROM faculty_students fs
@@ -65,12 +81,10 @@ export class EarlyWarningService {
         let riskScore = 0;
         const riskFactors: string[] = [];
 
-        const totalSessions = Number(r.total_sessions || 0);
-        const presentSessions = Number(r.present_sessions || 0);
-        let attendancePct: number | null = null;
+        const attendancePct =
+          r.attendance_percent == null ? null : Number(r.attendance_percent);
 
-        if (totalSessions > 0) {
-          attendancePct = (presentSessions / totalSessions) * 100;
+        if (attendancePct !== null) {
           if (attendancePct !== null && attendancePct < 75) {
             riskScore += 50;
             riskFactors.push(

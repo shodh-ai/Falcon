@@ -346,12 +346,14 @@ export function myHrOperationsNavGroup(prefix: WorkspacePrefix): NavGroup {
           'balances',
         ],
       },
-      {
-        label: 'Salary & Tax',
-        href: p.payslips,
-        icon: Banknote,
-        keywords: ['payslip', 'salary', 'form 16', 'tax'],
-      },
+      ...(prefix === 'faculty'
+        ? []
+        : [{
+            label: 'Salary & Tax',
+            href: p.payslips,
+            icon: Banknote,
+            keywords: ['payslip', 'salary', 'form 16', 'tax'],
+          }]),
       {
         label: 'University Policies',
         href: p.policies,
@@ -519,6 +521,25 @@ export function filterFacultyPortalForManagerAccess(
   return { ...config, navGroups, commandItems };
 }
 
+/** PhD supervision tools are relevant only when the faculty member has an assigned scholar. */
+export function filterFacultyPortalForPhdGuide(
+  config: PortalConfig,
+  isPhdGuide: boolean,
+): PortalConfig {
+  if (isPhdGuide) return config;
+  const href = '/faculty/phd/scholars';
+  return {
+    ...config,
+    navGroups: config.navGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.href !== href),
+      }))
+      .filter((group) => group.items.length > 0),
+    commandItems: config.commandItems.filter((item) => item.href !== href),
+  };
+}
+
 export const studentPortal: PortalConfig = {
   personaLabel: 'Falcon Student',
   personaTitle: 'Falcon Student Life',
@@ -658,7 +679,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Study Materials', href: '/faculty/materials', icon: BookMarked, keywords: ['notes', 'ppt', 'syllabus', 'upload', 'modules'] },
         { label: 'Announcements', href: '/faculty/announcements', icon: Megaphone, keywords: ['notify students', 'course announcement'] },
         { label: 'Tests & Quizzes', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test', 'quiz'] },
-        { label: 'Question Bank', href: '/faculty/question-bank', icon: ListTodo, keywords: ['mcq', 'question bank', 'quiz bank'] },
+        { label: 'Question Bank — Coming Soon', href: '/faculty/question-bank', icon: ListTodo, keywords: ['mcq', 'question bank', 'quiz bank'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz', 'exams', 'grades'] },
         { label: 'Grade Requests', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe', 'grade requests'] },
         { label: 'Student Performance', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance', 'analytics', 'performance'] },
@@ -729,7 +750,7 @@ export const facultyPortal: PortalConfig = {
         { label: 'Study Materials', href: '/faculty/materials', icon: BookMarked, keywords: ['notes', 'ppt', 'syllabus', 'upload', 'modules'] },
         { label: 'Announcements', href: '/faculty/announcements', icon: Megaphone, keywords: ['notify students', 'course announcement'] },
         { label: 'Tests & Quizzes', href: '/faculty/weekly-tests', icon: Timer, keywords: ['wt1', 'wt2', 'weekly test', 'assessment', 'create test', 'quiz'] },
-        { label: 'Question Bank', href: '/faculty/question-bank', icon: ListTodo, keywords: ['mcq', 'question bank', 'quiz bank'] },
+        { label: 'Question Bank — Coming Soon', href: '/faculty/question-bank', icon: ListTodo, keywords: ['mcq', 'question bank', 'quiz bank'] },
         { label: 'Examinations & Grading', href: '/faculty/grading', icon: PenLine, keywords: ['marks', 'cat', 'fat', 'quiz', 'exams', 'grades'] },
         { label: 'Grade Requests', href: '/faculty/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'hod', 'coe', 'grade requests'] },
         { label: 'Student Performance', href: '/faculty/analytics', icon: LineChart, keywords: ['slow learners', 'remedial', 'attendance', 'analytics', 'performance'] },
