@@ -346,6 +346,46 @@ export class SuperAdminService {
     );
   }
 
+  async listImpersonationTargets(
+    tenantId: string,
+    actorUserId: string,
+    q?: string,
+  ) {
+    const term = q?.trim() ?? '';
+    return this.dataSource.query<
+      {
+        user_id: string;
+        name: string;
+        email: string;
+        role_name: string;
+        department_name: string | null;
+      }[]
+    >(
+      `SELECT u.user_id,
+              u.name,
+              u.official_email AS email,
+              r.role_name,
+              d.dept_name AS department_name
+       FROM users u
+       INNER JOIN roles r ON r.role_id = u.role_id
+       LEFT JOIN departments d ON d.dept_id = u.dept_id
+       WHERE u.tenant_id = $1
+         AND u.user_id <> $2
+         AND u.is_active = true
+         AND u.deleted_at IS NULL
+         AND (
+           $3::text = ''
+           OR u.name ILIKE '%' || $3 || '%'
+           OR u.official_email ILIKE '%' || $3 || '%'
+           OR r.role_name ILIKE '%' || $3 || '%'
+           OR COALESCE(d.dept_name, '') ILIKE '%' || $3 || '%'
+         )
+       ORDER BY r.role_name ASC, u.name ASC
+       LIMIT 75`,
+      [tenantId, actorUserId, term],
+    );
+  }
+
   private requireUuid(value: string, label: string): string {
     const trimmed = value?.trim();
     if (!trimmed) {

@@ -200,6 +200,15 @@ export class SuperAdminController {
     return this.superAdmin.listImpersonationSessions(this.tenant(req));
   }
 
+  @Get('impersonation/targets')
+  impersonationTargets(@Req() req: { user: AuthUser }, @Query('q') q?: string) {
+    return this.superAdmin.listImpersonationTargets(
+      this.tenant(req),
+      req.user.user_id,
+      q,
+    );
+  }
+
   @Post('impersonate')
   @AllowImpersonationWrite()
   startImpersonation(

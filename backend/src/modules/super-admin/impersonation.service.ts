@@ -27,6 +27,12 @@ export class ImpersonationService {
     targetUserId: string,
     reason?: string,
   ) {
+    const normalizedReason = reason?.trim();
+    if (!normalizedReason) {
+      throw new ForbiddenException(
+        'A reason is required to start a read-only persona session',
+      );
+    }
     const targets = await this.dataSource.query(
       `SELECT user_id, name, official_email, tenant_id FROM users WHERE user_id = $1 AND tenant_id = $2`,
       [targetUserId, tenantId],
@@ -36,7 +42,7 @@ export class ImpersonationService {
     const sessionRows = await this.dataSource.query(
       `INSERT INTO impersonation_sessions (tenant_id, impersonator_user_id, target_user_id, reason)
        VALUES ($1, $2, $3, $4) RETURNING session_id`,
-      [tenantId, impersonatorUserId, targetUserId, reason ?? null],
+      [tenantId, impersonatorUserId, targetUserId, normalizedReason],
     );
 
     await this.audit.log({
@@ -44,7 +50,10 @@ export class ImpersonationService {
       action: 'IMPERSONATION_START',
       entityType: 'USER',
       entityId: targetUserId,
-      details: { session_id: sessionRows[0].session_id, reason },
+      details: {
+        session_id: sessionRows[0].session_id,
+        reason: normalizedReason,
+      },
     });
 
     const target = await this.authService.findById(targetUserId, tenantId);
