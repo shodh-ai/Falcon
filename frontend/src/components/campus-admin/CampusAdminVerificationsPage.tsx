@@ -76,8 +76,14 @@ const DOC_LABELS: Record<string, string> = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-function buildPreviewUrl(userId: string, docType: string) {
-  return `${API_URL}/api/admin/student-verifications/${userId}/documents/${docType}/preview`;
+function verificationBase(portalKind: string) {
+  return portalKind === 'staff'
+    ? '/api/staff/verifications'
+    : '/api/admin/student-verifications';
+}
+
+function buildPreviewUrl(userId: string, docType: string, portalKind: string) {
+  return `${API_URL}${verificationBase(portalKind)}/${userId}/documents/${docType}/preview`;
 }
 
 function parseApiError(err: unknown) {
@@ -101,6 +107,7 @@ export function CampusAdminVerificationsPage() {
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedKind, setSelectedKind] = useState('student');
   const [detail, setDetail] = useState<VerificationDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -112,8 +119,14 @@ export function CampusAdminVerificationsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get<QueueRow[]>('/api/admin/student-verifications/queue');
-      setRows(Array.isArray(data) ? data : []);
+      const [students, staff] = await Promise.all([
+        api.get<QueueRow[]>('/api/admin/student-verifications/queue'),
+        api.get<QueueRow[]>('/api/staff/verifications/queue'),
+      ]);
+      setRows([
+        ...(Array.isArray(students) ? students : []),
+        ...(Array.isArray(staff) ? staff : []),
+      ]);
     } catch (err) {
       setRows([]);
       setError(parseApiError(err) || 'Unable to load verifications.');
@@ -140,14 +153,17 @@ export function CampusAdminVerificationsPage() {
     });
   }, [kind, q, rows]);
 
-  const openReview = async (userId: string) => {
-    setSelectedId(userId);
+  const openReview = async (row: QueueRow) => {
+    setSelectedId(row.user_id);
+    setSelectedKind(row.portal_kind);
     setRejectReason('');
     setPreviewDoc(null);
     setPreviewUrl(null);
     setDetailLoading(true);
     try {
-      const data = await api.get<VerificationDetail>(`/api/admin/student-verifications/${userId}`);
+      const data = await api.get<VerificationDetail>(
+        `${verificationBase(row.portal_kind)}/${row.user_id}`,
+      );
       setDetail(data);
       if (data.documents[0]) setPreviewDoc(data.documents[0].file_path);
     } catch (err) {
@@ -174,12 +190,15 @@ export function CampusAdminVerificationsPage() {
           setPreviewUrl(previewDoc);
           return;
         }
-        const response = await fetch(buildPreviewUrl(selectedId, doc.doc_type), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'x-tenant-subdomain': getSubdomainFromClient(),
+        const response = await fetch(
+          buildPreviewUrl(selectedId, doc.doc_type, selectedKind),
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'x-tenant-subdomain': getSubdomainFromClient(),
+            },
           },
-        });
+        );
         if (!response.ok) throw new Error('Preview failed');
         const blob = await response.blob();
         revoked = URL.createObjectURL(blob);
@@ -192,7 +211,7 @@ export function CampusAdminVerificationsPage() {
     return () => {
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [detail?.documents, previewDoc, selectedId, token]);
+  }, [detail?.documents, previewDoc, selectedId, selectedKind, token]);
 
   const canReview = detail?.person.onboarding_status === 'PENDING_ADMIN_APPROVAL';
 
@@ -200,7 +219,7 @@ export function CampusAdminVerificationsPage() {
     if (!selectedId) return;
     setActing(true);
     try {
-      await api.post(`/api/admin/student-verifications/${selectedId}/approve`);
+      await api.post(`${verificationBase(selectedKind)}/${selectedId}/approve`);
       toast.success('Approved — portal unlocked');
       setSelectedId(null);
       setDetail(null);
@@ -220,7 +239,7 @@ export function CampusAdminVerificationsPage() {
     }
     setActing(true);
     try {
-      await api.post(`/api/admin/student-verifications/${selectedId}/reject`, {
+      await api.post(`${verificationBase(selectedKind)}/${selectedId}/reject`, {
         remarks: rejectReason.trim(),
       });
       toast.success('Sent back for corrections');
@@ -328,7 +347,7 @@ export function CampusAdminVerificationsPage() {
                             <button
                               type="button"
                               className="text-sm font-semibold text-sgvu-navy hover:underline"
-                              onClick={() => void openReview(row.user_id)}
+                              onClick={() => void openReview(row)}
                             >
                               Review
                             </button>
