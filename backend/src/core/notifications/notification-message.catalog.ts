@@ -1042,7 +1042,7 @@ export function onboardingVerificationRequestedMessage(
       title: `Verification request — ${payload.submitterName}`,
       message: `${payload.submitterName} (${payload.roleName}) submitted first-login documents for review.`,
       actionLink: isStaff
-        ? '/hr/verifications'
+        ? '/admin/faculty-verifications'
         : '/admissions-crm/verifications',
       actionLabel: 'Review submission',
       severity: 'warning',

@@ -106,8 +106,6 @@ export default function AdminStudentVerificationsPage() {
   const { token } = useAuth();
   const pathname = usePathname();
   const staffMode =
-    pathname.startsWith('/hr/') ||
-    pathname.startsWith('/hod/') ||
     pathname.startsWith('/admin/faculty-verifications');
   const verificationBase = staffMode
     ? '/api/staff/verifications'
@@ -243,7 +241,7 @@ export default function AdminStudentVerificationsPage() {
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {staffMode
-              ? 'Review faculty and staff onboarding for your department. HR may review across departments.'
+              ? 'Campus Admin and Super Admin review faculty and staff onboarding submissions.'
               : 'Review student onboarding submissions awaiting Admissions approval.'}
           </p>
         </CardContent>

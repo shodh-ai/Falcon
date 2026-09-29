@@ -1,1 +1,5 @@
-export { default } from '../../admin/verifications/page';
+import { redirect } from 'next/navigation';
+
+export default function LegacyHrVerificationRedirect() {
+  redirect('/hr/dashboard');
+}

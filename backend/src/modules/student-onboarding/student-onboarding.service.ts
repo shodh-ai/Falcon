@@ -473,44 +473,9 @@ export class StudentOnboardingService {
       params,
     );
 
-    let filtered =
-      !portalKind || portalKind === 'all'
-        ? rows
-        : rows.filter((row) => row.portal_kind === portalKind);
-
-    if (actor && this.actorHasRole(actor, 'HOD')) {
-      const actorDeptId = await this.actorDepartmentId(actor);
-      if (!actorDeptId) return [];
-      const allowed = await this.dataSource.query<Array<{ user_id: string }>>(
-        `SELECT user_id
-         FROM users
-         WHERE tenant_id = $1 AND dept_id = $2 AND deleted_at IS NULL`,
-        [tenant, actorDeptId],
-      );
-      const allowedIds = new Set(allowed.map((row) => row.user_id));
-      filtered = filtered.filter((row) => allowedIds.has(row.user_id));
-    }
-
-    return filtered;
-  }
-
-  private actorHasRole(actor: ScopedAuthUser, expected: string): boolean {
-    return [...(actor.roles ?? []), actor.role ?? ''].some(
-      (role) => role.trim().toLowerCase() === expected.toLowerCase(),
-    );
-  }
-
-  private async actorDepartmentId(
-    actor: ScopedAuthUser,
-  ): Promise<number | null> {
-    if (actor.dept_id) return Number(actor.dept_id);
-    if (!actor.user_id) return null;
-    const [row] = await this.dataSource.query<
-      Array<{ dept_id: number | null }>
-    >(`SELECT dept_id FROM users WHERE user_id = $1 AND deleted_at IS NULL`, [
-      actor.user_id,
-    ]);
-    return row?.dept_id == null ? null : Number(row.dept_id);
+    return !portalKind || portalKind === 'all'
+      ? rows
+      : rows.filter((row) => row.portal_kind === portalKind);
   }
 
   private async assertVerificationKindAndDepartment(
@@ -532,25 +497,6 @@ export class StudentOnboardingService {
       throw new ForbiddenException(
         'Staff cannot approve their own onboarding verification',
       );
-    }
-    if (actor && this.actorHasRole(actor, 'HOD')) {
-      const actorDeptId = await this.actorDepartmentId(actor);
-      const [target] = await this.dataSource.query<
-        Array<{ dept_id: number | null }>
-      >(
-        `SELECT dept_id FROM users
-         WHERE tenant_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
-        [tenantId, targetUserId],
-      );
-      if (
-        !actorDeptId ||
-        target?.dept_id == null ||
-        Number(target.dept_id) !== actorDeptId
-      ) {
-        throw new ForbiddenException(
-          'HOD may verify faculty only in their own department',
-        );
-      }
     }
     return actualKind;
   }

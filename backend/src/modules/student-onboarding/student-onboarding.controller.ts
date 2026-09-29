@@ -452,7 +452,7 @@ export class StudentVerificationAdminController {
 
 @Controller('api/staff/verifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('HOD', 'HR', 'HRAdmin', 'SuperAdmin')
+@Roles('CampusAdmin', 'SuperAdmin')
 export class StaffVerificationController {
   constructor(
     private readonly onboarding: StudentOnboardingService,

@@ -820,7 +820,6 @@ export const hrPortal: PortalConfig = {
       title: 'Performance & Lifecycle',
       items: [
         { label: 'Onboarding Pipeline', href: '/hr/onboarding', icon: Kanban, keywords: ['kanban', 'hired', 'new hire'], hrModule: 'onboarding' },
-        { label: 'First-Login Verifications', href: '/hr/verifications', icon: FileCheck2, keywords: ['faculty', 'hod', 'documents', 'approve'], hrModule: 'onboarding' },
         { label: 'Offboarding & Exit', href: '/hr/offboarding', icon: DoorOpen, keywords: ['resignation', 'fnf', 'separation'], hrModule: 'offboarding' },
         { label: 'Recruitment (ATS)', href: '/hr/recruitment', icon: Briefcase, keywords: ['kanban', 'hired', 'interview'], hrModule: 'recruitment' },
         { label: 'Appraisals & API Scores', href: '/hr/appraisals', icon: Award, keywords: ['ugc', 'api', 'scopus', 'research'], hrModule: 'directory' },
@@ -894,7 +893,6 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Faculty Management',
       items: [
-        { label: 'Faculty Verifications', href: '/hod/faculty-verifications', icon: FileCheck2, keywords: ['faculty', 'staff', 'onboarding', 'verify', 'documents'] },
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix', 'teaching load', 'import'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
@@ -960,7 +958,6 @@ export const hodPortal: PortalConfig = {
     {
       title: 'Faculty Management',
       items: [
-        { label: 'Faculty Verifications', href: '/hod/faculty-verifications', icon: FileCheck2, keywords: ['faculty', 'onboarding', 'verify'] },
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
@@ -1994,7 +1991,7 @@ export const adminPortal: PortalConfig = {
           label: 'Faculty Verifications',
           href: '/admin/faculty-verifications',
           icon: UserCheck,
-          roles: ['SuperAdmin'],
+          roles: ['CampusAdmin', 'SuperAdmin'],
           keywords: ['faculty', 'staff', 'onboarding', 'documents', 'approve'],
         },
         {
