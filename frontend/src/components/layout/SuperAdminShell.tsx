@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import type { PortalConfig } from '@/lib/navigation';
-import { Building2, ClipboardList, LayoutDashboard, Network, Settings, SlidersHorizontal, UserCog } from 'lucide-react';
+import { Building2, ClipboardList, LayoutDashboard, Network, Settings, SlidersHorizontal, UserCheck, UserCog } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
@@ -27,6 +27,7 @@ export function SuperAdminShell({ children }: { children: ReactNode }) {
             ? [{ label: 'Entities', href: '/super-admin/entities', icon: Building2 }]
             : []),
           { label: 'Hierarchy', href: '/super-admin/hierarchy', icon: Network },
+          { label: 'Faculty Verifications', href: '/super-admin/faculty-verifications', icon: UserCheck },
           { label: 'Impersonation', href: '/super-admin/impersonation', icon: UserCog },
           { label: 'Override Logs', href: '/super-admin/override-logs', icon: ClipboardList },
           { label: 'Module Launch', href: '/super-admin/modules', icon: SlidersHorizontal },

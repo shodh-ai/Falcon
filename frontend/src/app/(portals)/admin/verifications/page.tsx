@@ -106,7 +106,8 @@ export default function AdminStudentVerificationsPage() {
   const { token } = useAuth();
   const pathname = usePathname();
   const staffMode =
-    pathname.startsWith('/admin/faculty-verifications');
+    pathname.startsWith('/admin/faculty-verifications') ||
+    pathname.startsWith('/super-admin/faculty-verifications');
   const verificationBase = staffMode
     ? '/api/staff/verifications'
     : '/api/admin/student-verifications';
