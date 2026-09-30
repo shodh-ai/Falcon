@@ -24,6 +24,7 @@ import { resolveTenantSubdomain } from '../tenant/resolve-tenant-subdomain';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 import { CampusScopeService } from '../common/campus-scope/campus-scope.service';
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
+import { BelongsToModule } from '../module-control/module-control.decorators';
 import { LocalLoginDto } from './dto/local-login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import {
@@ -91,6 +92,7 @@ export class AuthController {
   }
 
   @Post('change-password')
+  @BelongsToModule('CORE')
   @UseGuards(AuthGuard('jwt'))
   async changePassword(
     @Req() req: Request & { user: AuthProfileUser },

@@ -21,6 +21,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { BelongsToModule } from '../../module-control/module-control.decorators';
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { StudentOnboardingService } from './student-onboarding.service';
@@ -218,6 +219,7 @@ export class StudentOnboardingController extends BaseOnboardingController {
   }
 
   @Post('reset-password')
+  @BelongsToModule('CORE')
   resetPassword(
     @Req() req: { user: AuthUser },
     @Body()
@@ -262,6 +264,7 @@ export class StudentOnboardingController extends BaseOnboardingController {
 }
 
 @Controller('api/staff/onboarding')
+@BelongsToModule('CORE')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Faculty', 'HOD', 'Dean')
 export class StaffOnboardingController extends BaseOnboardingController {
@@ -278,6 +281,7 @@ export class StaffOnboardingController extends BaseOnboardingController {
   }
 
   @Post('reset-password')
+  @BelongsToModule('CORE')
   resetPassword(
     @Req() req: { user: AuthUser },
     @Body()
@@ -451,6 +455,7 @@ export class StudentVerificationAdminController {
 }
 
 @Controller('api/staff/verifications')
+@BelongsToModule('CORE')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('CampusAdmin', 'SuperAdmin')
 export class StaffVerificationController {
