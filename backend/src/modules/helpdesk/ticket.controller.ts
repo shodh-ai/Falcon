@@ -191,9 +191,26 @@ export class TicketController {
     @Body() dto: UpdateTicketStatusDto,
     @Req() req: { user: AuthUser },
   ) {
+    // JWTs can carry a primary role plus a roles array.  Use the effective
+    // elevated role for scope checks so an HOD who also has a faculty/admin
+    // primary role is not treated as an unrestricted actor (or rejected as
+    // the wrong workflow approver).
+    const effectiveRole =
+      req.user.roles?.find((role) =>
+        new Set([
+          'hod',
+          'dean',
+          'campusadmin',
+          'superadmin',
+          'registrar',
+          'admin',
+        ]).has(role.toLowerCase()),
+      ) ??
+      req.user.role ??
+      'UNKNOWN';
     return this.tickets.updateStatus(ticketId, dto, {
       userId: req.user.user_id,
-      role: req.user.role ?? 'UNKNOWN',
+      role: effectiveRole,
       roles: req.user.roles,
       tenantId: this.tenant(req),
     });

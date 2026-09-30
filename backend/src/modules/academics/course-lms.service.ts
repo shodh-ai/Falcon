@@ -239,14 +239,21 @@ export class CourseLmsService {
     await this.modules.save(mod);
 
     const course = await this.getCourseOrFail(mod.course_id, tenantId);
-    await this.notifyStudentsForMaterial(
-      tenantId,
-      mod.course_id,
-      course.course_name,
-      material.title,
-      material.material_id,
-      allocationIds,
-    );
+    // Notification delivery is downstream of the durable material write. A
+    // transient notification/provider failure must not report the upload as a
+    // failed operation after the file and material row have been committed.
+    try {
+      await this.notifyStudentsForMaterial(
+        tenantId,
+        mod.course_id,
+        course.course_name,
+        material.title,
+        material.material_id,
+        allocationIds,
+      );
+    } catch {
+      // The notification worker/outbox will reconcile delivery separately.
+    }
 
     return { module: mod, material };
   }
@@ -421,7 +428,7 @@ export class CourseLmsService {
           material.title,
           material.material_id,
           allocationIds,
-        ),
+        ).catch(() => undefined),
       ),
     );
 

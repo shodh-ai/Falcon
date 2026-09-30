@@ -735,16 +735,17 @@ export class AcademicsFacultyService {
       dto.course_id,
     );
 
-    if (dto.attendance_data.length > 0 && updated.length === 0) {
-      throw new BadRequestException(
-        'Attendance saved but no enrolled students were updated. Check that student IDs match course enrollments.',
-      );
-    }
-
     return {
       saved: dto.attendance_data.length,
       date,
       attendance_updated: updated,
+      // A session log is authoritative even when an old/demo roster has no
+      // matching enrollment rows.  Do not turn a successful save into a 500:
+      // callers can surface this as a reconciliation warning instead.
+      enrollment_reconciliation_warning:
+        dto.attendance_data.length > 0 && updated.length === 0
+          ? 'Attendance saved, but no enrolled student percentages matched this roster.'
+          : null,
     };
   }
 

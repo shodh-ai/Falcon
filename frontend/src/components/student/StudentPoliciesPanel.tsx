@@ -7,6 +7,9 @@ import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { withAccessToken } from '@/lib/authenticated-download-url';
 
 type Policy = {
   policy_id: string;
@@ -21,6 +24,7 @@ type Policy = {
 
 export function StudentPoliciesPanel() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,6 +52,17 @@ export function StudentPoliciesPanel() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to process request');
     }
+  }
+
+  function policyDownloadUrl(fileUrl: string) {
+    if (fileUrl.startsWith('/uploads/')) {
+      return withAccessToken(
+        `${getApiBaseUrl()}/api/uploads/download?path=${encodeURIComponent(fileUrl)}`,
+        token,
+      );
+    }
+    if (fileUrl.startsWith('/api/')) return withAccessToken(fileUrl, token);
+    return fileUrl;
   }
 
   if (loading) {
@@ -86,7 +101,7 @@ export function StudentPoliciesPanel() {
                   <p className="text-sm text-muted-foreground">Issued by: {p.category}</p>
                   {p.file_url && (
                     <a
-                      href={p.file_url}
+                      href={policyDownloadUrl(p.file_url)}
                       className="mt-1 text-sm font-medium text-sgvu-navy underline hover:text-sgvu-gold inline-block"
                       target="_blank"
                       rel="noopener noreferrer"
