@@ -28,6 +28,8 @@ type Row = {
   name: string;
   email: string | null;
   hours_per_week: number;
+  assigned_load_hours: number;
+  scheduled_hours: number;
   course_count: number;
   workload_status: 'OVERLOADED' | 'UNDERUTILIZED' | 'BALANCED' | 'NO_TEACHING_LOAD';
   load_declaration_status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION' | null;
@@ -130,7 +132,7 @@ export default function HodFacultyWorkloadPage() {
     const noLoad = rows.filter((r) => r.workload_status === 'NO_TEACHING_LOAD').length;
     const avg =
       rows.length > 0
-        ? (rows.reduce((s, r) => s + r.hours_per_week, 0) / rows.length).toFixed(1)
+        ? String(Math.round(rows.reduce((s, r) => s + r.assigned_load_hours, 0) / rows.length))
         : '0';
     return { total: rows.length, overloaded, under, noLoad, avg };
   }, [rows]);
@@ -139,7 +141,8 @@ export default function HodFacultyWorkloadPage() {
     return rows.map((r) => ({
       name: r.name.split(' ')[0], // Use first name for space optimization
       fullName: r.name,
-      hours: r.hours_per_week,
+      hours: r.assigned_load_hours,
+      scheduledHours: r.scheduled_hours,
       status: r.workload_status,
     }));
   }, [rows]);
@@ -148,7 +151,7 @@ export default function HodFacultyWorkloadPage() {
     <HodPageFrame>
       <HodPageHeader
         title="Faculty Roster & Workload"
-        description="Teaching hours per week from department timetable."
+        description="Whole-hour teaching load from approved allocations, with timetable coverage shown separately."
         meta={
           <>
             <HodMetricChip label="Faculty" value={stats.total} emphasis />
@@ -200,7 +203,8 @@ export default function HodFacultyWorkloadPage() {
                           <div className="bg-white p-3 border border-slate-100 rounded-xl shadow-lg space-y-1">
                             <p className="font-bold text-xs text-sgvu-navy">{data.fullName}</p>
                             <p className="text-xs text-muted-foreground">
-                              Workload: <span className="font-semibold text-sgvu-navy">{data.hours} hrs/week</span>
+                              Assigned load: <span className="font-semibold text-sgvu-navy">{data.hours} hrs/week</span>
+                              <br />Scheduled: <span className="font-semibold text-sgvu-navy">{data.scheduledHours} hrs/week</span>
                             </p>
                             <p className={cn(
                               "text-[10px] font-semibold uppercase tracking-wider",
@@ -248,9 +252,16 @@ export default function HodFacultyWorkloadPage() {
           },
           {
             key: 'hours',
-            label: 'Hrs / Week',
+            label: 'Assigned load',
             className: 'w-24 tabular-nums font-bold',
-            render: (r) => `${r.hours_per_week}h`,
+            render: (r) => (
+              <div>
+                <p>{Math.round(r.assigned_load_hours)}h</p>
+                <p className="text-xs font-normal text-muted-foreground">
+                  {Math.round(r.scheduled_hours)}h scheduled
+                </p>
+              </div>
+            ),
           },
           {
             key: 'courses',

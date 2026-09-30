@@ -173,6 +173,18 @@ type DepartmentTimetableRow = {
   faculty_name: string;
 };
 
+type DepartmentTimetablePayload = {
+  slots: DepartmentTimetableRow[];
+  unscheduled: Array<{
+    allocation_id: string;
+    program_name: string | null;
+    semester: string | null;
+    course_code: string;
+    course_name: string;
+    faculty_name: string;
+  }>;
+};
+
 interface AuditRecord {
   id: string;
   facultyName: string;
@@ -371,14 +383,16 @@ export function HodCommandCenter() {
               '/api/academics/hod/teaching-load/assigned',
             )
             .catch(() => ({ items: [], faculty: [] })),
-          api.get<DepartmentTimetableRow[]>('/api/academics/hod/department-timetable').catch(() => []),
+          api
+            .get<DepartmentTimetablePayload>('/api/academics/hod/department-timetable')
+            .catch(() => ({ slots: [], unscheduled: [] })),
         ]);
         setData(payload);
         setUnassignedLoad(unassigned.count);
         setRealFaculty(roster);
         setAssignedCourses(assigned.items);
         setHandoverFaculty(assigned.faculty);
-        setDepartmentTimetable(timetable);
+        setDepartmentTimetable(timetable.slots ?? []);
         if (audits && audits.length > 0) {
           setAuditRecords(audits);
         } else {

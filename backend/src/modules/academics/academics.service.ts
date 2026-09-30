@@ -1594,7 +1594,22 @@ export class AcademicsService {
 
     const academicYear = this.currentAcademicYear();
     const rows = await this.users.manager.query(
-      `SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
+      `WITH scheduled AS (
+         SELECT faculty_user_id, tenant_id,
+                ROUND(SUM(EXTRACT(EPOCH FROM (end_time::time - start_time::time)) / 3600))::int AS scheduled_hours
+         FROM academic_timetables
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+         GROUP BY tenant_id, faculty_user_id
+       ), assigned AS (
+         SELECT a.tenant_id, a.faculty_user_id,
+                COALESCE(SUM(COALESCE(c.credits, 0)), 0)::int AS assigned_load_hours,
+                COUNT(DISTINCT a.course_id)::int AS assigned_course_count
+         FROM academic_course_allocations a
+         LEFT JOIN academic_courses c ON c.course_id = a.course_id
+         WHERE a.tenant_id = $1 AND a.academic_year = $3 AND a.status = 'ACTIVE'
+         GROUP BY a.tenant_id, a.faculty_user_id
+       )
+       SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
               d.dept_name,
               hod.name AS hod_name,
               hod.official_email AS hod_email,
@@ -1602,16 +1617,17 @@ export class AcademicsService {
               fld.reason AS load_declaration_reason,
               fld.revision AS load_declaration_revision,
               fld.academic_year AS load_declaration_academic_year,
-              COALESCE(SUM(
-                EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600
-              ), 0)::numeric(6,1) AS hours_per_week,
-              COUNT(DISTINCT t.course_id)::int AS course_count
+              COALESCE(assigned.assigned_load_hours, 0)::int AS assigned_load_hours,
+              COALESCE(scheduled.scheduled_hours, 0)::int AS scheduled_hours,
+              COALESCE(assigned.assigned_load_hours, 0)::int AS hours_per_week,
+              COALESCE(assigned.assigned_course_count, 0)::int AS course_count
        FROM users u
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        LEFT JOIN users hod ON hod.user_id = d.hod_user_id
-       LEFT JOIN academic_timetables t
-         ON t.faculty_user_id = u.user_id AND t.tenant_id = u.tenant_id
-        AND t.deleted_at IS NULL
+       LEFT JOIN scheduled ON scheduled.faculty_user_id = u.user_id
+        AND scheduled.tenant_id = u.tenant_id
+       LEFT JOIN assigned ON assigned.faculty_user_id = u.user_id
+        AND assigned.tenant_id = u.tenant_id
        LEFT JOIN academic_faculty_load_declarations fld
          ON fld.tenant_id = u.tenant_id
         AND fld.faculty_user_id = u.user_id
@@ -1620,10 +1636,7 @@ export class AcademicsService {
        WHERE u.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
          AND r.role_name IN ('Faculty', 'HOD', 'Dean')
-       GROUP BY u.user_id, u.name, u.official_email, u.dept_id, d.dept_name,
-                hod.name, hod.official_email, fld.status, fld.reason,
-                fld.revision, fld.academic_year
-       ORDER BY d.dept_name ASC, hours_per_week DESC, u.name ASC`,
+       ORDER BY d.dept_name ASC, assigned_load_hours DESC, u.name ASC`,
       [tenantId, deptIds, academicYear],
     );
 
@@ -1636,6 +1649,8 @@ export class AcademicsService {
       hod_name: row.hod_name,
       hod_email: row.hod_email,
       hours_per_week: Number(row.hours_per_week ?? 0),
+      assigned_load_hours: Number(row.assigned_load_hours ?? 0),
+      scheduled_hours: Number(row.scheduled_hours ?? 0),
       course_count: Number(row.course_count ?? 0),
       load_declaration_status: row.load_declaration_status ?? null,
       load_declaration_reason: row.load_declaration_reason ?? null,
@@ -1660,7 +1675,30 @@ export class AcademicsService {
 
   async listHodDepartmentTimetable(tenantId: string, hodUserId: string) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    return this.listDepartmentTimetableForDepartments(tenantId, deptIds);
+    const slots = await this.listDepartmentTimetableForDepartments(tenantId, deptIds);
+    if (!deptIds.length) return { slots: [], unscheduled: [] };
+
+    const unscheduled = await this.users.manager.query(
+      `SELECT a.allocation_id, a.program_name, a.semester,
+              c.course_code, c.course_name,
+              u.user_id AS faculty_user_id, u.name AS faculty_name
+       FROM academic_course_allocations a
+       INNER JOIN academic_courses c ON c.course_id = a.course_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1
+         AND u.dept_id = ANY($2::int[])
+         AND a.status = 'ACTIVE'
+         AND NOT EXISTS (
+           SELECT 1 FROM academic_timetables t
+           WHERE t.tenant_id = a.tenant_id
+             AND t.course_id = a.course_id
+             AND t.faculty_user_id = a.faculty_user_id
+             AND t.deleted_at IS NULL
+         )
+       ORDER BY a.program_name ASC, a.semester ASC, c.course_code ASC, u.name ASC`,
+      [tenantId, deptIds],
+    );
+    return { slots, unscheduled };
   }
 
   private async listDepartmentTimetableForDepartments(
@@ -1672,10 +1710,14 @@ export class AcademicsService {
     return this.users.manager.query(
       `SELECT t.timetable_id, t.day_of_week, t.start_time, t.end_time, t.room,
               c.course_id, c.course_code, c.course_name,
+              a.program_name, a.semester,
               u.user_id AS faculty_user_id, u.name AS faculty_name,
               u.dept_id, d.dept_name
        FROM academic_timetables t
        INNER JOIN academic_courses c ON c.course_id = t.course_id
+       LEFT JOIN academic_course_allocations a
+         ON a.tenant_id = t.tenant_id AND a.course_id = t.course_id
+        AND a.faculty_user_id = t.faculty_user_id AND a.status = 'ACTIVE'
        INNER JOIN users u ON u.user_id = t.faculty_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE t.tenant_id = $1
