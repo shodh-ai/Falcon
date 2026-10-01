@@ -1619,7 +1619,9 @@ export class AcademicsService {
               fld.academic_year AS load_declaration_academic_year,
               COALESCE(assigned.assigned_load_hours, 0)::int AS assigned_load_hours,
               COALESCE(scheduled.scheduled_hours, 0)::int AS scheduled_hours,
-              COALESCE(assigned.assigned_load_hours, 0)::int AS hours_per_week,
+              -- hours_per_week is the actual timetable commitment.  Allocation
+              -- credits remain available separately as assigned_load_hours.
+              COALESCE(scheduled.scheduled_hours, 0)::int AS hours_per_week,
               COALESCE(assigned.assigned_course_count, 0)::int AS course_count
        FROM users u
        LEFT JOIN departments d ON d.dept_id = u.dept_id

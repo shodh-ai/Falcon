@@ -132,7 +132,7 @@ export default function HodFacultyWorkloadPage() {
     const noLoad = rows.filter((r) => r.workload_status === 'NO_TEACHING_LOAD').length;
     const avg =
       rows.length > 0
-        ? String(Math.round(rows.reduce((s, r) => s + r.assigned_load_hours, 0) / rows.length))
+        ? String(Math.round(rows.reduce((s, r) => s + r.scheduled_hours, 0) / rows.length))
         : '0';
     return { total: rows.length, overloaded, under, noLoad, avg };
   }, [rows]);
@@ -141,8 +141,9 @@ export default function HodFacultyWorkloadPage() {
     return rows.map((r) => ({
       name: r.name.split(' ')[0], // Use first name for space optimization
       fullName: r.name,
-      hours: r.assigned_load_hours,
+      hours: r.scheduled_hours,
       scheduledHours: r.scheduled_hours,
+      assignedLoadHours: r.assigned_load_hours,
       status: r.workload_status,
     }));
   }, [rows]);
@@ -151,7 +152,7 @@ export default function HodFacultyWorkloadPage() {
     <HodPageFrame>
       <HodPageHeader
         title="Faculty Roster & Workload"
-        description="Whole-hour teaching load from approved allocations, with timetable coverage shown separately."
+        description="Actual timetable hours per week, with approved allocation load shown separately."
         meta={
           <>
             <HodMetricChip label="Faculty" value={stats.total} emphasis />
@@ -170,7 +171,7 @@ export default function HodFacultyWorkloadPage() {
               Teaching Load Analysis (Hours/Week)
               {stats.overloaded > 0 && (
                 <span className="text-xs bg-red-100 border border-red-200 text-red-700 px-2 py-0.5 rounded-full font-medium">
-                  {stats.overloaded} Overloaded (&gt;12 hrs)
+                  {stats.overloaded} Overloaded (&gt;18 hrs)
                 </span>
               )}
             </CardTitle>
@@ -203,8 +204,8 @@ export default function HodFacultyWorkloadPage() {
                           <div className="bg-white p-3 border border-slate-100 rounded-xl shadow-lg space-y-1">
                             <p className="font-bold text-xs text-sgvu-navy">{data.fullName}</p>
                             <p className="text-xs text-muted-foreground">
-                              Assigned load: <span className="font-semibold text-sgvu-navy">{data.hours} hrs/week</span>
-                              <br />Scheduled: <span className="font-semibold text-sgvu-navy">{data.scheduledHours} hrs/week</span>
+                              Scheduled: <span className="font-semibold text-sgvu-navy">{data.hours} hrs/week</span>
+                              <br />Assigned load: <span className="font-semibold text-sgvu-navy">{data.assignedLoadHours} hrs/week</span>
                             </p>
                             <p className={cn(
                               "text-[10px] font-semibold uppercase tracking-wider",
@@ -252,13 +253,13 @@ export default function HodFacultyWorkloadPage() {
           },
           {
             key: 'hours',
-            label: 'Assigned load',
+            label: 'Hours / week',
             className: 'w-24 tabular-nums font-bold',
             render: (r) => (
               <div>
-                <p>{Math.round(r.assigned_load_hours)}h</p>
+                <p>{Math.round(r.scheduled_hours)}h</p>
                 <p className="text-xs font-normal text-muted-foreground">
-                  {Math.round(r.scheduled_hours)}h scheduled
+                  {Math.round(r.assigned_load_hours)}h assigned load
                 </p>
               </div>
             ),
