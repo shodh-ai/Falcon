@@ -955,73 +955,24 @@ export class AcademicsService {
     }
 
     const { limit, offset, search } = parseListQuery(query);
-    const params: unknown[] = [tenantId, departmentIds];
-    let searchSql = '';
-    if (search) {
-      params.push(`%${search.toLowerCase()}%`);
-      searchSql = ` AND (LOWER(w.name) LIKE $${params.length} OR LOWER(w.dept_name) LIKE $${params.length})`;
-    }
-
-    const baseSql = `
-      WITH workload AS (
-        SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
-               d.dept_name,
-               hod.name AS hod_name,
-               hod.official_email AS hod_email,
-               COALESCE(SUM(
-                 EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600
-               ), 0)::numeric(6,1) AS hours_per_week,
-               COUNT(DISTINCT t.course_id)::int AS course_count
-        FROM users u
-        LEFT JOIN departments d ON d.dept_id = u.dept_id
-        LEFT JOIN users hod ON hod.user_id = d.hod_user_id
-        LEFT JOIN academic_timetables t
-          ON t.faculty_user_id = u.user_id AND t.tenant_id = u.tenant_id
-        LEFT JOIN roles r ON r.role_id = u.role_id
-        WHERE u.tenant_id = $1
-          AND u.dept_id = ANY($2::int[])
-          AND r.role_name IN ('Faculty', 'HOD', 'Dean')
-        GROUP BY u.user_id, u.name, u.official_email, u.dept_id, d.dept_name, hod.name, hod.official_email
+    const all = await this.listFacultyWorkloadForDepartments(tenantId, departmentIds);
+    const needle = search.toLowerCase();
+    const filtered = needle
+      ? all.filter(
+          (row) =>
+            String(row.name ?? '').toLowerCase().includes(needle) ||
+            String(row.dept_name ?? '').toLowerCase().includes(needle),
+        )
+      : all;
+    const data = filtered
+      .sort(
+        (a, b) =>
+          String(a.dept_name ?? '').localeCompare(String(b.dept_name ?? '')) ||
+          Number(b.hours_per_week ?? 0) - Number(a.hours_per_week ?? 0) ||
+          String(a.name ?? '').localeCompare(String(b.name ?? '')),
       )
-      SELECT w.* FROM workload w WHERE 1=1${searchSql}`;
-
-    const countRows = await this.users.manager.query<Array<{ total: string }>>(
-      `SELECT COUNT(*)::int AS total FROM (${baseSql}) sub`,
-      params,
-    );
-
-    params.push(limit, offset);
-    const rows = await this.users.manager.query(
-      `${baseSql}
-       ORDER BY w.dept_name ASC, w.hours_per_week DESC, w.name ASC
-       LIMIT $${params.length - 1} OFFSET $${params.length}`,
-      params,
-    );
-
-    const data = rows.map((row: Record<string, unknown>) => ({
-      user_id: row.user_id,
-      name: row.name,
-      email: row.email,
-      dept_id: row.dept_id,
-      dept_name: row.dept_name,
-      hod_name: row.hod_name,
-      hod_email: row.hod_email,
-      hours_per_week: Number(row.hours_per_week ?? 0),
-      course_count: Number(row.course_count ?? 0),
-      workload_status:
-        Number(row.hours_per_week ?? 0) > 18
-          ? 'OVERLOADED'
-          : Number(row.hours_per_week ?? 0) < 6
-            ? 'UNDERUTILIZED'
-            : 'BALANCED',
-    }));
-
-    return toPaginatedResponse(
-      data,
-      Number(countRows[0]?.total ?? 0),
-      limit,
-      offset,
-    );
+      .slice(offset, offset + limit);
+    return toPaginatedResponse(data, filtered.length, limit, offset);
   }
 
   async listDeanGrievancesPaged(
@@ -1594,20 +1545,35 @@ export class AcademicsService {
 
     const academicYear = this.currentAcademicYear();
     const rows = await this.users.manager.query(
-      `WITH scheduled AS (
-         SELECT faculty_user_id, tenant_id,
-                ROUND(SUM(EXTRACT(EPOCH FROM (end_time::time - start_time::time)) / 3600))::int AS scheduled_hours
-         FROM academic_timetables
-         WHERE tenant_id = $1 AND deleted_at IS NULL
-         GROUP BY tenant_id, faculty_user_id
-       ), assigned AS (
+      `WITH assigned AS (
          SELECT a.tenant_id, a.faculty_user_id,
-                COALESCE(SUM(COALESCE(c.credits, 0)), 0)::int AS assigned_load_hours,
-                COUNT(DISTINCT a.course_id)::int AS assigned_course_count
+                COALESCE(SUM(COALESCE(c.credits, 0)), 0)::int AS assigned_load_credits,
+                COUNT(DISTINCT a.course_id)::int AS assigned_course_count,
+                COUNT(DISTINCT a.course_id) FILTER (WHERE NOT EXISTS (
+                  SELECT 1
+                  FROM academic_timetables t
+                  WHERE t.tenant_id = a.tenant_id
+                    AND t.course_id = a.course_id
+                    AND t.faculty_user_id = a.faculty_user_id
+                    AND t.deleted_at IS NULL
+                ))::int AS unscheduled_course_count
          FROM academic_course_allocations a
          LEFT JOIN academic_courses c ON c.course_id = a.course_id
          WHERE a.tenant_id = $1 AND a.academic_year = $3 AND a.status = 'ACTIVE'
          GROUP BY a.tenant_id, a.faculty_user_id
+       ), scheduled AS (
+         SELECT t.faculty_user_id, t.tenant_id,
+                ROUND(SUM(EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600)::numeric, 1)::numeric(6,1) AS scheduled_hours,
+                COUNT(DISTINCT t.course_id)::int AS scheduled_course_count
+         FROM academic_timetables t
+         INNER JOIN academic_course_allocations a
+           ON a.tenant_id = t.tenant_id
+          AND a.course_id = t.course_id
+          AND a.faculty_user_id = t.faculty_user_id
+          AND a.academic_year = $3
+          AND a.status = 'ACTIVE'
+         WHERE t.tenant_id = $1 AND t.deleted_at IS NULL
+         GROUP BY t.tenant_id, t.faculty_user_id
        )
        SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
               d.dept_name,
@@ -1617,12 +1583,13 @@ export class AcademicsService {
               fld.reason AS load_declaration_reason,
               fld.revision AS load_declaration_revision,
               fld.academic_year AS load_declaration_academic_year,
-              COALESCE(assigned.assigned_load_hours, 0)::int AS assigned_load_hours,
-              COALESCE(scheduled.scheduled_hours, 0)::int AS scheduled_hours,
-              -- hours_per_week is the actual timetable commitment.  Allocation
-              -- credits remain available separately as assigned_load_hours.
-              COALESCE(scheduled.scheduled_hours, 0)::int AS hours_per_week,
-              COALESCE(assigned.assigned_course_count, 0)::int AS course_count
+              COALESCE(assigned.assigned_load_credits, 0)::int AS assigned_load_credits,
+              -- Keep this alias for existing consumers; it is credits, not hours.
+              COALESCE(assigned.assigned_load_credits, 0)::int AS assigned_load_hours,
+              COALESCE(scheduled.scheduled_hours, 0)::numeric(6,1) AS scheduled_hours,
+              COALESCE(scheduled.scheduled_hours, 0)::numeric(6,1) AS hours_per_week,
+              COALESCE(assigned.assigned_course_count, 0)::int AS course_count,
+              COALESCE(assigned.unscheduled_course_count, 0)::int AS unscheduled_course_count
        FROM users u
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        LEFT JOIN users hod ON hod.user_id = d.hod_user_id
@@ -1651,9 +1618,11 @@ export class AcademicsService {
       hod_name: row.hod_name,
       hod_email: row.hod_email,
       hours_per_week: Number(row.hours_per_week ?? 0),
+      assigned_load_credits: Number(row.assigned_load_credits ?? row.assigned_load_hours ?? 0),
       assigned_load_hours: Number(row.assigned_load_hours ?? 0),
       scheduled_hours: Number(row.scheduled_hours ?? 0),
       course_count: Number(row.course_count ?? 0),
+      unscheduled_course_count: Number(row.unscheduled_course_count ?? 0),
       load_declaration_status: row.load_declaration_status ?? null,
       load_declaration_reason: row.load_declaration_reason ?? null,
       load_declaration_revision: Number(row.load_declaration_revision ?? 0),
@@ -1662,7 +1631,11 @@ export class AcademicsService {
       workload_status:
         row.load_declaration_status === 'NO_TEACHING_LOAD'
           ? 'NO_TEACHING_LOAD'
-          : Number(row.hours_per_week ?? 0) > 18
+          : Number(row.unscheduled_course_count ?? 0) > 0
+          ? 'SCHEDULE_MISSING'
+          : Number(row.course_count ?? 0) === 0 && Number(row.hours_per_week ?? 0) === 0
+          ? 'NO_ACTIVE_ALLOCATION'
+          : Number(row.hours_per_week ?? 0) > 16
           ? 'OVERLOADED'
           : Number(row.hours_per_week ?? 0) < 6
             ? 'UNDERUTILIZED'

@@ -28,10 +28,18 @@ type Row = {
   name: string;
   email: string | null;
   hours_per_week: number;
+  assigned_load_credits: number;
   assigned_load_hours: number;
   scheduled_hours: number;
   course_count: number;
-  workload_status: 'OVERLOADED' | 'UNDERUTILIZED' | 'BALANCED' | 'NO_TEACHING_LOAD';
+  unscheduled_course_count: number;
+  workload_status:
+    | 'OVERLOADED'
+    | 'UNDERUTILIZED'
+    | 'BALANCED'
+    | 'NO_TEACHING_LOAD'
+    | 'NO_ACTIVE_ALLOCATION'
+    | 'SCHEDULE_MISSING';
   load_declaration_status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION' | null;
   load_declaration_reason: string | null;
   load_declaration_revision: number;
@@ -54,6 +62,8 @@ function StatusTag({ status }: { status: Row['workload_status'] }) {
         status === 'UNDERUTILIZED' && 'border-slate-200 bg-slate-50 text-muted-foreground',
         status === 'BALANCED' && 'border-green-200 bg-green-50 text-green-700',
         status === 'NO_TEACHING_LOAD' && 'border-blue-200 bg-blue-50 text-blue-700',
+        status === 'NO_ACTIVE_ALLOCATION' && 'border-slate-200 bg-slate-50 text-slate-600',
+        status === 'SCHEDULE_MISSING' && 'border-amber-200 bg-amber-50 text-amber-700',
       )}
     >
       {status.replace('_', ' ')}
@@ -130,11 +140,13 @@ export default function HodFacultyWorkloadPage() {
     const overloaded = rows.filter((r) => r.workload_status === 'OVERLOADED').length;
     const under = rows.filter((r) => r.workload_status === 'UNDERUTILIZED').length;
     const noLoad = rows.filter((r) => r.workload_status === 'NO_TEACHING_LOAD').length;
+    const noAllocation = rows.filter((r) => r.workload_status === 'NO_ACTIVE_ALLOCATION').length;
+    const scheduleMissing = rows.filter((r) => r.workload_status === 'SCHEDULE_MISSING').length;
     const avg =
       rows.length > 0
-        ? String(Math.round(rows.reduce((s, r) => s + r.scheduled_hours, 0) / rows.length))
+        ? (rows.reduce((s, r) => s + r.scheduled_hours, 0) / rows.length).toFixed(1)
         : '0';
-    return { total: rows.length, overloaded, under, noLoad, avg };
+    return { total: rows.length, overloaded, under, noLoad, noAllocation, scheduleMissing, avg };
   }, [rows]);
 
   const chartData = useMemo(() => {
@@ -143,7 +155,7 @@ export default function HodFacultyWorkloadPage() {
       fullName: r.name,
       hours: r.scheduled_hours,
       scheduledHours: r.scheduled_hours,
-      assignedLoadHours: r.assigned_load_hours,
+      assignedLoadHours: r.assigned_load_credits,
       status: r.workload_status,
     }));
   }, [rows]);
@@ -159,6 +171,8 @@ export default function HodFacultyWorkloadPage() {
             <HodMetricChip label="Avg hrs/wk" value={stats.avg} />
             <HodMetricChip label="Overloaded" value={stats.overloaded} />
             <HodMetricChip label="Under-utilized" value={stats.under} />
+            <HodMetricChip label="Schedule missing" value={stats.scheduleMissing} />
+            <HodMetricChip label="No active allocation" value={stats.noAllocation} />
             <HodMetricChip label="No teaching load" value={stats.noLoad} />
           </>
         }
@@ -168,10 +182,10 @@ export default function HodFacultyWorkloadPage() {
         <Card className="border-gray-100 shadow-sm mb-6 bg-white overflow-hidden">
           <CardHeader className="bg-slate-50/50 pb-4 border-b border-gray-100">
             <CardTitle className="text-base font-bold text-sgvu-navy flex items-center gap-2">
-              Teaching Load Analysis (Hours/Week)
+              Teaching Load Analysis (Contact Hours / Week)
               {stats.overloaded > 0 && (
                 <span className="text-xs bg-red-100 border border-red-200 text-red-700 px-2 py-0.5 rounded-full font-medium">
-                  {stats.overloaded} Overloaded (&gt;18 hrs)
+                  {stats.overloaded} Overloaded (&gt;16 hrs)
                 </span>
               )}
             </CardTitle>
@@ -204,13 +218,14 @@ export default function HodFacultyWorkloadPage() {
                           <div className="bg-white p-3 border border-slate-100 rounded-xl shadow-lg space-y-1">
                             <p className="font-bold text-xs text-sgvu-navy">{data.fullName}</p>
                             <p className="text-xs text-muted-foreground">
-                              Scheduled: <span className="font-semibold text-sgvu-navy">{data.hours} hrs/week</span>
-                              <br />Assigned load: <span className="font-semibold text-sgvu-navy">{data.assignedLoadHours} hrs/week</span>
+                              Contact hours: <span className="font-semibold text-sgvu-navy">{Number(data.hours).toFixed(1)} hrs/week</span>
+                              <br />Assigned credits: <span className="font-semibold text-sgvu-navy">{data.assignedLoadHours}</span>
                             </p>
                             <p className={cn(
                               "text-[10px] font-semibold uppercase tracking-wider",
                               data.status === 'OVERLOADED' ? "text-red-600" :
-                              data.status === 'BALANCED' ? "text-green-600" : "text-slate-500"
+                              data.status === 'BALANCED' ? "text-green-600" :
+                              data.status === 'SCHEDULE_MISSING' ? "text-amber-600" : "text-slate-500"
                             )}>
                               {data.status}
                             </p>
@@ -224,7 +239,7 @@ export default function HodFacultyWorkloadPage() {
                     {chartData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
-                        fill={entry.hours > 12 ? '#EF4444' : '#0F172A'}
+                        fill={entry.hours > 16 ? '#EF4444' : '#0F172A'}
                       />
                     ))}
                   </Bar>
@@ -253,14 +268,19 @@ export default function HodFacultyWorkloadPage() {
           },
           {
             key: 'hours',
-            label: 'Hours / week',
-            className: 'w-24 tabular-nums font-bold',
+            label: 'Contact hours / week',
+            className: 'w-40 tabular-nums font-bold',
             render: (r) => (
               <div>
-                <p>{Math.round(r.scheduled_hours)}h</p>
+                <p>{r.scheduled_hours.toFixed(1)}h</p>
                 <p className="text-xs font-normal text-muted-foreground">
-                  {Math.round(r.assigned_load_hours)}h assigned load
+                  {r.assigned_load_credits} assigned credits
                 </p>
+                {r.unscheduled_course_count > 0 ? (
+                  <p className="text-xs font-normal text-amber-700">
+                    {r.unscheduled_course_count} course{r.unscheduled_course_count === 1 ? '' : 's'} unscheduled
+                  </p>
+                ) : null}
               </div>
             ),
           },
