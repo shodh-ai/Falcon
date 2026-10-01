@@ -23,3 +23,24 @@ describe('GVMC QA credential reset migration', () => {
     expect(migration).not.toContain('GvmcQA!');
   });
 });
+
+describe('GVMC QA credential alignment migration', () => {
+  const migration = readFileSync(
+    join(
+      __dirname,
+      '../../../migrations/20261001130000_align_gvmc_qa_credentials.sql',
+    ),
+    'utf8',
+  );
+
+  it('targets only GVMC and all eleven published QA identities', () => {
+    expect(migration).toContain("lower(subdomain) = 'gvmc'");
+    expect(migration.match(/\.gvmc@mygyanvihar\.com'/g)).toHaveLength(11);
+    expect(migration).toContain('IF v_updated <> 11 THEN');
+  });
+
+  it('contains hashes only, never plaintext QA passwords', () => {
+    expect(migration).toContain('$2b$12$');
+    expect(migration).not.toContain('Gvmc-');
+  });
+});
