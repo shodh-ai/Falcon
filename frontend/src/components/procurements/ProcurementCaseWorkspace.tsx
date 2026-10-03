@@ -99,7 +99,12 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     void reload();
   }, [reload]);
   useEffect(() => {
-    if (["procurementbuyer","procurement","procurementhead"].includes(normalizedRole))
+    // GVMC's production QA account is assigned the explicit
+    // ProcurementOperator role. It has the same order-entry capability as
+    // the legacy Procurement/Buyer roles, so it must receive the same vendor
+    // master lookup. Without this, the order form renders an empty vendor
+    // selector even though active tenant vendors exist.
+    if (["procurementbuyer", "procurement", "procurementhead", "procurementoperator"].includes(normalizedRole))
       void api.vendors().then(setVendors).catch((error)=>toast.error(error.message));
   }, [api, normalizedRole]);
   async function action(operation: () => Promise<unknown>, message: string) {
@@ -214,7 +219,11 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     return detail.integrity_projections.some(
       (projection) =>
         value(projection, "invoice_id") === invoiceId &&
-        projection.payment_eligible === true,
+        // JSON clients may receive booleans from the projection as either a
+        // native boolean or a string when an older API/proxy serializes the
+        // read model. Treat only an explicit true value as eligible.
+        (projection.payment_eligible === true ||
+          String(projection.payment_eligible).toLowerCase() === "true"),
     );
   });
   return (

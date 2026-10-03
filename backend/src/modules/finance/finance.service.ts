@@ -74,6 +74,65 @@ export class FinanceService {
       [tenantId],
     );
 
+    // Progressive Procurement and Invoice Integrity are authoritative for
+    // B2B invoices. Surface their read-only projections here so the legacy
+    // Finance dashboard does not silently disagree with the Module 2/3
+    // workspaces. During an expand-only rollout these tables may not exist;
+    // in that case preserve the existing dashboard response shape.
+    let procurement = {
+      cleared_invoice_count: 0,
+      procurement_invoice_count: 0,
+      cleared_invoice_amount: 0,
+      procurement_paid_amount: 0,
+      procurement_outstanding_amount: 0,
+      recent_payments: [] as Array<Record<string, unknown>>,
+    };
+    try {
+      const [summary, recentPayments] = await Promise.all([
+        this.demands.manager.query(
+          `SELECT COUNT(*)::int AS procurement_invoice_count,
+                  COUNT(*) FILTER (WHERE p.payment_eligible=true)::int AS cleared_invoice_count,
+                  COALESCE(SUM(i.total_amount) FILTER (WHERE p.payment_eligible=true),0) AS cleared_invoice_amount,
+                  COALESCE(SUM(pay.paid_amount),0) AS procurement_paid_amount,
+                  COALESCE(SUM(CASE WHEN p.payment_eligible=true
+                                    THEN GREATEST(i.total_amount-COALESCE(pay.paid_amount,0),0)
+                                    ELSE 0 END),0) AS procurement_outstanding_amount
+           FROM proc_invoices i
+           LEFT JOIN proc_invoice_integrity_projections p ON p.invoice_id=i.invoice_id
+           LEFT JOIN LATERAL (
+             SELECT COALESCE(SUM(amount) FILTER (WHERE status='POSTED'),0) AS paid_amount
+             FROM proc_payments pp WHERE pp.invoice_id=i.invoice_id
+           ) pay ON true
+           WHERE i.tenant_id=$1`,
+          [tenantId],
+        ),
+        this.demands.manager.query(
+          `SELECT p.payment_id,p.invoice_id,p.amount,p.status,p.payment_reference,
+                  p.payment_date,v.business_name AS vendor_name
+           FROM proc_payments p
+           JOIN proc_invoices i ON i.invoice_id=p.invoice_id AND i.tenant_id=$1
+           LEFT JOIN fin_vendors v ON v.vendor_id=i.vendor_id
+           ORDER BY p.created_at DESC LIMIT 8`,
+          [tenantId],
+        ),
+      ]);
+      const row = summary[0] ?? {};
+      procurement = {
+        cleared_invoice_count: Number(row.cleared_invoice_count ?? 0),
+        procurement_invoice_count: Number(row.procurement_invoice_count ?? 0),
+        cleared_invoice_amount: Number(row.cleared_invoice_amount ?? 0),
+        procurement_paid_amount: Number(row.procurement_paid_amount ?? 0),
+        procurement_outstanding_amount: Number(
+          row.procurement_outstanding_amount ?? 0,
+        ),
+        recent_payments: recentPayments,
+      };
+    } catch (error) {
+      // Module 2/3 are expand-only integrations. A dashboard request must
+      // remain available while their migrations are being rolled out.
+      if ((error as { code?: string }).code !== '42P01') throw error;
+    }
+
     return {
       todays_collection: successfulToday.reduce(
         (sum, row) => sum + Number(row.amount),
@@ -88,6 +147,7 @@ export class FinanceService {
       recent_transactions: recentTransactions,
       transaction_count_today: successfulToday.length,
       budget_utilization: budgets,
+      procurement,
     };
   }
 

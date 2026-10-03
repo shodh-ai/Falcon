@@ -8,7 +8,7 @@ const authedApi = { get, post };
 vi.mock("@/lib/api", () => ({ useAuthedApi: () => authedApi }));
 vi.mock("@/context/AuthContext", () => ({
   useAuth: () => ({
-    user: { role: "ProcurementBuyer", primaryRole: "ProcurementBuyer" },
+    user: { role: "ProcurementOperator", primaryRole: "ProcurementOperator" },
   }),
 }));
 vi.mock("@/lib/notifications/falcon-toast", () => ({
@@ -108,6 +108,7 @@ describe("Module 2 case operations", () => {
   it("exposes goods receipt and independent service acceptance actions", async () => {
     render(<ProcurementCaseWorkspace caseId="case-1" />);
     expect(await screen.findByText("ACQ-2026-000001")).toBeInTheDocument();
+    expect(get).toHaveBeenCalledWith("/api/procurements/v1/vendors");
 
     fireEvent.click(screen.getByRole("button", { name: "RECEIPTS" }));
 

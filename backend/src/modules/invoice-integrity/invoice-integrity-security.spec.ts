@@ -29,6 +29,7 @@ describe('Module 3 security boundaries', () => {
       service.get(actor, '30000000-0000-4000-8000-000000000001'),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(String(query.mock.calls[1][0])).toContain('c.tenant_id=$2');
+    expect(String(query.mock.calls[1][0])).toContain('c.invoice_id=$1');
     expect(String(query.mock.calls[1][0])).toContain('c.department_id=ANY');
     expect(query).toHaveBeenCalledTimes(2);
   });

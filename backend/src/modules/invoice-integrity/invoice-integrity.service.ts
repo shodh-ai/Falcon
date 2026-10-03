@@ -86,8 +86,9 @@ export class InvoiceIntegrityService {
       .filter(Number.isInteger);
     const rows = await this.db.query(
       `SELECT c.* FROM inv_integrity_cases c
-       WHERE c.integrity_case_id=$1 AND c.tenant_id=$2
-         AND ($3::boolean OR c.department_id=ANY($4::int[]) OR c.invoice_submitter_id=$5::uuid)`,
+       WHERE (c.integrity_case_id=$1 OR c.invoice_id=$1 OR c.proc_case_id=$1) AND c.tenant_id=$2
+         AND ($3::boolean OR c.department_id=ANY($4::int[]) OR c.invoice_submitter_id=$5::uuid)
+       ORDER BY c.updated_at DESC LIMIT 1`,
       [caseId, this.tenant(actor), tenantWide, departments, actor.user_id],
     );
     if (!rows?.[0])
