@@ -51,6 +51,7 @@ import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
 import { HodPortalExtService } from './hod-portal-ext.service';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
+import { BelongsToModule } from '../../module-control/module-control.decorators';
 
 type AuthUser = { user_id: string; role?: string; tenant_id?: string };
 
@@ -2357,6 +2358,10 @@ export class AcademicsController {
 
   @Get('hod/funding-requests')
   @Roles('HOD', 'Dean', 'SuperAdmin')
+  // This workspace is launched with Finance for finance-only tenants.  The
+  // implementation remains in the academics controller for compatibility,
+  // but its business owner is Finance/Procurement rather than SIS.
+  @BelongsToModule('finance_procurement')
   listHodFundingRequests(@Req() req: { user: AuthUser }) {
     return this.facultyWorkspaces.listHodFundingRequests(
       req.user.user_id,
@@ -2366,6 +2371,7 @@ export class AcademicsController {
 
   @Patch('hod/funding-requests/:requestId')
   @Roles('HOD', 'Dean', 'SuperAdmin')
+  @BelongsToModule('finance_procurement')
   updateHodFundingRequest(
     @Req() req: { user: AuthUser },
     @Param('requestId') requestId: string,

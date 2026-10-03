@@ -184,6 +184,10 @@ export const MODULE_CATALOGUE: readonly ModuleDefinition[] = [
       '/api/acquisitions/v1',
       '/api/procurements/v1',
       '/api/invoice-integrity/v1',
+      // The HOD project-funding review workspace is exposed from the
+      // academics controller for legacy compatibility, but it is a Finance
+      // operation and must remain usable when SIS is not launched.
+      '/api/academics/hod/funding-requests',
       '/api/campus-wallet',
       '/api/wallet',
     ],

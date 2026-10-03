@@ -22,6 +22,9 @@ describe('module catalogue', () => {
     expect(resolveApiModule('/api/procurements/v1/cases')).toBe(
       'finance_procurement',
     );
+    expect(resolveApiModule('/api/academics/hod/funding-requests')).toBe(
+      'finance_procurement',
+    );
     expect(resolveApiModule('/api/operations/esm/queues')).toBe('helpdesk_esm');
     expect(resolveApiModule('/api/operations/hostel/rooms')).toBe(
       'hostel_mess',
