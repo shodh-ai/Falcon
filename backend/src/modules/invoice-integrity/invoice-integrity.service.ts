@@ -1693,7 +1693,23 @@ export class InvoiceIntegrityService {
               integrityHash(assessment),
             ],
           );
-          const nextState = eligible ? 'DECISION_PENDING' : 'MANUAL_REVIEW';
+          // A manual investigation recommendation is the decision gate for
+          // cases that are not eligible for automated clearance. Re-running
+          // deterministic analysis must not demote that case back to
+          // MANUAL_REVIEW, otherwise the independent certifier cannot act
+          // even though the investigation is already RECOMMENDED.
+          const recommendedInvestigation = await manager.query(
+            `SELECT investigation_id
+             FROM inv_investigations
+             WHERE integrity_case_id=$1 AND status='RECOMMENDED'
+             ORDER BY recommended_at DESC NULLS LAST, updated_at DESC
+             LIMIT 1`,
+            [caseId],
+          );
+          const nextState =
+            eligible || recommendedInvestigation[0]
+              ? 'DECISION_PENDING'
+              : 'MANUAL_REVIEW';
           await manager.query(
             `UPDATE inv_integrity_cases SET workflow_state=$2,analysis_result=$3,
            trust_level=$4,updated_at=NOW() WHERE integrity_case_id=$1`,
