@@ -25,7 +25,9 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
   const api = useMemo(() => createProcurementsApi(authed), [authed]);
   const [detail, setDetail] = useState<ProcurementCaseDetail | null>(null);
   const [loadError, setLoadError] = useState("");
-  const normalizedRole = String(user?.primaryRole ?? user?.role ?? "").toLowerCase();
+  const normalizedRole = String(
+    user?.primaryRole ?? user?.role ?? "",
+  ).toLowerCase();
   const defaultTab =
     normalizedRole === "receivingclerk" || normalizedRole === "stores"
       ? "receipts"
@@ -39,7 +41,9 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     string,
     unknown
   > | null>(null);
-  const [vendors, setVendors] = useState<Array<{vendor_id:string;business_name:string;gstin?:string}>>([]);
+  const [vendors, setVendors] = useState<
+    Array<{ vendor_id: string; business_name: string; gstin?: string }>
+  >([]);
   const [order, setOrder] = useState({
     proc_case_line_id: "",
     vendor_id: "",
@@ -53,21 +57,38 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     unit: "unit",
     fulfillment_type: "ASSET",
   });
-  const [receipt, setReceipt] = useState({ order_id: "", order_line_id: "", received_quantity: 0, evidence_upload_id: "", latitude: 0, longitude: 0, accuracy: 0 });
+  const [receipt, setReceipt] = useState({
+    order_id: "",
+    order_line_id: "",
+    received_quantity: 0,
+    evidence_upload_id: "",
+    latitude: 0,
+    longitude: 0,
+    accuracy: 0,
+  });
   const [serviceAcceptance, setServiceAcceptance] = useState({
     order_line_id: "",
     accepted_quantity: 1,
     acceptance_date: "",
     milestone: "Installation completed",
   });
-  const [invoice, setInvoice] = useState({ order_id: "", order_line_id: "", invoice_number: "QA-INV-2026-0001", invoice_date: new Date().toISOString().slice(0,10), quantity: 1, unit_price: 0, document_upload_id: "" });
+  const [invoice, setInvoice] = useState({
+    order_id: "",
+    order_line_id: "",
+    invoice_number: "QA-INV-2026-0001",
+    invoice_date: new Date().toISOString().slice(0, 10),
+    quantity: 1,
+    unit_price: 0,
+    document_upload_id: "",
+  });
   const [payment, setPayment] = useState({
     invoice_id: "",
     amount: 0,
     payment_reference: "",
     payment_date: "",
   });
-  const [productEvidenceReceiptLine, setProductEvidenceReceiptLine] = useState("");
+  const [productEvidenceReceiptLine, setProductEvidenceReceiptLine] =
+    useState("");
   const [productEvidenceUploadId, setProductEvidenceUploadId] = useState("");
   const reload = useCallback(
     () =>
@@ -89,7 +110,8 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
             }));
         })
         .catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           setLoadError(message);
           toast.error(message);
         }),
@@ -104,8 +126,18 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     // the legacy Procurement/Buyer roles, so it must receive the same vendor
     // master lookup. Without this, the order form renders an empty vendor
     // selector even though active tenant vendors exist.
-    if (["procurementbuyer", "procurement", "procurementhead", "procurementoperator"].includes(normalizedRole))
-      void api.vendors().then(setVendors).catch((error)=>toast.error(error.message));
+    if (
+      [
+        "procurementbuyer",
+        "procurement",
+        "procurementhead",
+        "procurementoperator",
+      ].includes(normalizedRole)
+    )
+      void api
+        .vendors()
+        .then(setVendors)
+        .catch((error) => toast.error(error.message));
   }, [api, normalizedRole]);
   async function action(operation: () => Promise<unknown>, message: string) {
     setBusy(true);
@@ -146,29 +178,49 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
   }
   async function uploadInvoice(file?: File) {
     if (!file) return;
-    const form = new FormData(); form.set("file", file);
+    const form = new FormData();
+    form.set("file", file);
     await action(async () => {
       const result = await api.uploadInvoiceDocument(caseId, form);
-      setInvoice((current) => ({ ...current, document_upload_id: result.document_upload_id }));
+      setInvoice((current) => ({
+        ...current,
+        document_upload_id: result.document_upload_id,
+      }));
       return result;
     }, "Invoice document uploaded and scanned");
   }
-  async function uploadGeoEvidence(file: File, purpose: "PACKAGE_RECEIPT" | "RECEIVED_PRODUCT", receiptLineId?: string) {
-    if (!navigator.geolocation) throw new Error("Location is required for receipt evidence");
+  async function uploadGeoEvidence(
+    file: File,
+    purpose: "PACKAGE_RECEIPT" | "RECEIVED_PRODUCT",
+    receiptLineId?: string,
+  ) {
+    if (!navigator.geolocation)
+      throw new Error("Location is required for receipt evidence");
     const position = await new Promise<GeolocationPosition>((resolve, reject) =>
-      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 }),
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+      }),
     );
     const form = new FormData();
-    form.set("file", file); form.set("purpose", purpose);
+    form.set("file", file);
+    form.set("purpose", purpose);
     form.set("latitude", String(position.coords.latitude));
     form.set("longitude", String(position.coords.longitude));
     form.set("accuracy_metres", String(position.coords.accuracy));
     form.set("captured_at", new Date(position.timestamp).toISOString());
     if (receiptLineId) form.set("receipt_line_id", receiptLineId);
     const result = await api.uploadReceiptEvidence(caseId, form);
-    if (purpose === "PACKAGE_RECEIPT") setReceipt((current) => ({ ...current, evidence_upload_id: result.document_upload_id, latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }));
+    if (purpose === "PACKAGE_RECEIPT")
+      setReceipt((current) => ({
+        ...current,
+        evidence_upload_id: result.document_upload_id,
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      }));
     else setProductEvidenceUploadId(result.document_upload_id);
-    toast.success(purpose === "PACKAGE_RECEIPT" ? "Geo-tagged package evidence ready" : "Geo-tagged received-product evidence saved");
+    return result;
   }
   if (!detail)
     return (
@@ -192,10 +244,27 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
     "inventory",
     "audit",
   ];
-  const receivableOrders = detail.orders.filter((item) => ["ISSUED","PARTIALLY_RECEIVED"].includes(value(item,"status")));
-  const receiptOrderLines = detail.order_lines.filter((item) => value(item,"order_id") === receipt.order_id);
-  const invoiceOrders = detail.orders.filter((item) => ["ISSUED","PARTIALLY_RECEIVED","RECEIVED","CLOSED"].includes(value(item,"status")));
-  const invoiceOrderLines = detail.order_lines.filter((item) => value(item,"order_id") === invoice.order_id);
+  const receivableOrders = detail.orders.filter((item) =>
+    ["ISSUED", "PARTIALLY_RECEIVED"].includes(value(item, "status")),
+  );
+  const receiptOrderLines = detail.order_lines.filter(
+    (item) => value(item, "order_id") === receipt.order_id,
+  );
+  const receiptBlocker = !receipt.order_id
+    ? "Select an issued order."
+    : !receipt.order_line_id
+      ? "Select the package's order line."
+      : !receipt.evidence_upload_id
+        ? "Capture and upload the geo-tagged package image with the shipping label visible."
+        : "";
+  const invoiceOrders = detail.orders.filter((item) =>
+    ["ISSUED", "PARTIALLY_RECEIVED", "RECEIVED", "CLOSED"].includes(
+      value(item, "status"),
+    ),
+  );
+  const invoiceOrderLines = detail.order_lines.filter(
+    (item) => value(item, "order_id") === invoice.order_id,
+  );
   const serviceLines = detail.order_lines.filter((orderLine) => {
     const caseLine = detail.lines.find(
       (candidate) =>
@@ -236,7 +305,17 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void download(api.workbook(caseId), `${detail.acquisition_number}-procurement.xlsx`)}>Export Excel</Button>
+          <Button
+            variant="outline"
+            onClick={() =>
+              void download(
+                api.workbook(caseId),
+                `${detail.acquisition_number}-procurement.xlsx`,
+              )
+            }
+          >
+            Export Excel
+          </Button>
           <label className="inline-flex h-10 cursor-pointer items-center rounded-md border px-4 text-sm font-medium">
             Upload Excel and preview changes
             <input
@@ -321,42 +400,103 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-xs text-muted-foreground">Vendor, specification, quantity and price changes are allowed within the controlled budget workflow. Every difference is permanently logged and requires justification.</p>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={order.add_unplanned} onChange={(e) => setOrder({...order,add_unplanned:e.target.checked})}/> Add a product not in the original request</label>
-              {!order.add_unplanned ? <>
-              <select
-                className="h-10 w-full rounded-md border px-3 text-sm"
-                value={order.proc_case_line_id}
-                onChange={(e) => {
-                  const line = detail.lines.find(
-                    (item) =>
-                      value(item, "proc_case_line_id") === e.target.value,
-                  ) as Record<string, unknown> | undefined;
-                  setOrder({
-                    ...order,
-                    proc_case_line_id: e.target.value,
-                    vendor_id: value(line ?? {}, "approved_vendor_id"),
-                    unit_price: Number(line?.approved_unit_price ?? 0),
-                  });
-                }}
-              >
-                {detail.lines.map((line) => (
-                  <option
-                    key={value(line, "proc_case_line_id")}
-                    value={value(line, "proc_case_line_id")}
+              <p className="text-xs text-muted-foreground">
+                Vendor, specification, quantity and price changes are allowed
+                within the controlled budget workflow. Every difference is
+                permanently logged and requires justification.
+              </p>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={order.add_unplanned}
+                  onChange={(e) =>
+                    setOrder({ ...order, add_unplanned: e.target.checked })
+                  }
+                />{" "}
+                Add a product not in the original request
+              </label>
+              {!order.add_unplanned ? (
+                <>
+                  <select
+                    className="h-10 w-full rounded-md border px-3 text-sm"
+                    value={order.proc_case_line_id}
+                    onChange={(e) => {
+                      const line = detail.lines.find(
+                        (item) =>
+                          value(item, "proc_case_line_id") === e.target.value,
+                      ) as Record<string, unknown> | undefined;
+                      setOrder({
+                        ...order,
+                        proc_case_line_id: e.target.value,
+                        vendor_id: value(line ?? {}, "approved_vendor_id"),
+                        unit_price: Number(line?.approved_unit_price ?? 0),
+                      });
+                    }}
                   >
-                    {value(line, "product_name")} ·{" "}
-                    {value(line, "approved_quantity")} {value(line, "unit")}
+                    {detail.lines.map((line) => (
+                      <option
+                        key={value(line, "proc_case_line_id")}
+                        value={value(line, "proc_case_line_id")}
+                      >
+                        {value(line, "product_name")} ·{" "}
+                        {value(line, "approved_quantity")} {value(line, "unit")}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <div className="space-y-2 rounded border border-amber-200 bg-amber-50 p-3">
+                  <Input
+                    placeholder="New product name"
+                    value={order.product_name}
+                    onChange={(e) =>
+                      setOrder({ ...order, product_name: e.target.value })
+                    }
+                  />
+                  <Input
+                    placeholder="Category"
+                    value={order.category}
+                    onChange={(e) =>
+                      setOrder({ ...order, category: e.target.value })
+                    }
+                  />
+                  <Input
+                    placeholder="Unit (for example: unit, box)"
+                    value={order.unit}
+                    onChange={(e) =>
+                      setOrder({ ...order, unit: e.target.value })
+                    }
+                  />
+                  <select
+                    className="h-10 w-full rounded-md border px-3"
+                    value={order.fulfillment_type}
+                    onChange={(e) =>
+                      setOrder({ ...order, fulfillment_type: e.target.value })
+                    }
+                  >
+                    <option>ASSET</option>
+                    <option>CONSUMABLE</option>
+                    <option>SERVICE</option>
+                    <option>INSTALLATION</option>
+                  </select>
+                </div>
+              )}
+              <select
+                aria-label="Order vendor"
+                className="h-10 w-full rounded-md border px-3"
+                value={order.vendor_id}
+                onChange={(e) =>
+                  setOrder({ ...order, vendor_id: e.target.value })
+                }
+              >
+                <option value="">Select vendor</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.vendor_id} value={vendor.vendor_id}>
+                    {vendor.business_name}
+                    {vendor.gstin ? ` · ${vendor.gstin}` : ""}
                   </option>
                 ))}
               </select>
-              </> : <div className="space-y-2 rounded border border-amber-200 bg-amber-50 p-3">
-                <Input placeholder="New product name" value={order.product_name} onChange={(e)=>setOrder({...order,product_name:e.target.value})}/>
-                <Input placeholder="Category" value={order.category} onChange={(e)=>setOrder({...order,category:e.target.value})}/>
-                <Input placeholder="Unit (for example: unit, box)" value={order.unit} onChange={(e)=>setOrder({...order,unit:e.target.value})}/>
-                <select className="h-10 w-full rounded-md border px-3" value={order.fulfillment_type} onChange={(e)=>setOrder({...order,fulfillment_type:e.target.value})}><option>ASSET</option><option>CONSUMABLE</option><option>SERVICE</option><option>INSTALLATION</option></select>
-              </div>}
-              <select aria-label="Order vendor" className="h-10 w-full rounded-md border px-3" value={order.vendor_id} onChange={(e)=>setOrder({...order,vendor_id:e.target.value})}><option value="">Select vendor</option>{vendors.map((vendor)=><option key={vendor.vendor_id} value={vendor.vendor_id}>{vendor.business_name}{vendor.gstin ? ` · ${vendor.gstin}` : ""}</option>)}</select>
               <Input
                 type="number"
                 min="0.001"
@@ -366,8 +506,22 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
                   setOrder({ ...order, quantity: Number(e.target.value) })
                 }
               />
-              <Input placeholder="Required justification for any vendor/product/quantity/price change" value={order.discrepancy_justification} onChange={(e)=>setOrder({...order,discrepancy_justification:e.target.value})}/>
-              <p className="text-xs text-muted-foreground">Up to 10% over the approved envelope may be recorded as a controlled exception, but Finance approval is required before the order can be issued. Larger overruns require a Module 1 amendment.</p>
+              <Input
+                placeholder="Required justification for any vendor/product/quantity/price change"
+                value={order.discrepancy_justification}
+                onChange={(e) =>
+                  setOrder({
+                    ...order,
+                    discrepancy_justification: e.target.value,
+                  })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Up to 10% over the approved envelope may be recorded as a
+                controlled exception, but Finance approval is required before
+                the order can be issued. Larger overruns require a Module 1
+                amendment.
+              </p>
               <Input
                 type="number"
                 min="0"
@@ -391,19 +545,29 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
                     () =>
                       api.createOrder(caseId, revision, {
                         vendor_id: order.vendor_id,
-                        discrepancy_justification: order.discrepancy_justification || undefined,
+                        discrepancy_justification:
+                          order.discrepancy_justification || undefined,
                         expected_delivery_date:
                           order.expected_delivery_date || undefined,
                         lines: [
                           {
-                            proc_case_line_id: order.add_unplanned ? undefined : order.proc_case_line_id,
-                            product_name: order.add_unplanned ? order.product_name : undefined,
-                            category: order.add_unplanned ? order.category : undefined,
+                            proc_case_line_id: order.add_unplanned
+                              ? undefined
+                              : order.proc_case_line_id,
+                            product_name: order.add_unplanned
+                              ? order.product_name
+                              : undefined,
+                            category: order.add_unplanned
+                              ? order.category
+                              : undefined,
                             unit: order.add_unplanned ? order.unit : undefined,
-                            fulfillment_type: order.add_unplanned ? order.fulfillment_type : undefined,
+                            fulfillment_type: order.add_unplanned
+                              ? order.fulfillment_type
+                              : undefined,
                             quantity: order.quantity,
                             unit_price: order.unit_price,
-                            discrepancy_justification: order.discrepancy_justification || undefined,
+                            discrepancy_justification:
+                              order.discrepancy_justification || undefined,
                           },
                         ],
                       }),
@@ -433,7 +597,15 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
                           {value(item, "status")} ·{" "}
                           {money(item.total_amount, detail.currency)}
                         </p>
-                        {Boolean(item.has_discrepancy) && <p className="text-xs font-medium text-amber-700">Logged deviation · {value(item,"exception_status").replaceAll("_"," ")}</p>}
+                        {Boolean(item.has_discrepancy) && (
+                          <p className="text-xs font-medium text-amber-700">
+                            Logged deviation ·{" "}
+                            {value(item, "exception_status").replaceAll(
+                              "_",
+                              " ",
+                            )}
+                          </p>
+                        )}
                       </div>
                       {value(item, "status") === "DRAFT" && (
                         <Button
@@ -483,176 +655,364 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
       )}
 
       {tab === "receipts" && (
-        <div className="grid gap-4 lg:grid-cols-[380px_1fr]"><Card>
-          <CardHeader>
-            <CardTitle>Receive sealed package</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              P12: photograph the unopened package with the shipping label and relevant delivery information clearly visible. Location is captured with the image. Do not open the package at this stage.
-            </p>
-            <select className="h-10 w-full rounded-md border px-3" value={receipt.order_id} onChange={(e)=>setReceipt({...receipt,order_id:e.target.value,order_line_id:""})}><option value="">Select issued order</option>{receivableOrders.map((item)=><option key={value(item,"order_id")} value={value(item,"order_id")}>{value(item,"order_number")}</option>)}</select>
-            <select className="h-10 w-full rounded-md border px-3" value={receipt.order_line_id} onChange={(e)=>{const line=receiptOrderLines.find((item)=>value(item,"order_line_id")===e.target.value);setReceipt({...receipt,order_line_id:e.target.value,received_quantity:Number(line?.quantity ?? 0) - Number(line?.cancelled_quantity ?? 0)})}}><option value="">Select order line</option>{receiptOrderLines.map((item)=><option key={value(item,"order_line_id")} value={value(item,"order_line_id")}>{value(item,"product_name") || "Order item"} · {value(item,"quantity")} {value(item,"unit")}</option>)}</select>
-            {receipt.order_line_id && <p className="rounded bg-slate-50 p-2 text-sm">Package quantity from issued order: <strong>{receipt.received_quantity}</strong>. Stores does not inspect or accept the product at this stage.</p>}
-            <label className="block rounded-md border border-dashed p-3 text-sm font-medium">Capture package + shipping label image<input className="mt-2 block w-full" type="file" accept="image/*" capture="environment" onChange={(e)=>{const file=e.target.files?.[0]; if(file) void uploadGeoEvidence(file,"PACKAGE_RECEIPT").catch((error)=>toast.error(error.message))}}/></label>
-            {receipt.evidence_upload_id && <p className="text-xs text-emerald-700">Geo evidence ready · accuracy {Math.round(receipt.accuracy)} m</p>}
-            <Button disabled={busy || !receipt.order_id || !receipt.order_line_id || !receipt.evidence_upload_id} onClick={()=>void action(()=>api.recordReceipt(caseId,receipt.order_id,revision,{actual_delivery_date:new Date().toISOString().slice(0,10),package_evidence_upload_id:receipt.evidence_upload_id,capture_latitude:receipt.latitude,capture_longitude:receipt.longitude,capture_accuracy_metres:receipt.accuracy,evidence_captured_at:new Date().toISOString(),lines:[{order_line_id:receipt.order_line_id,received_quantity:receipt.received_quantity,accepted_quantity:0,rejected_quantity:0}]}),"Sealed package received; requester confirmation is pending")}>Mark sealed package received</Button>
-          </CardContent>
-        </Card><Card><CardHeader><CardTitle>Receipt history and requester product evidence</CardTitle></CardHeader><CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">After opening, the original requester may add geo-tagged images of the exact products here. These images supplement—not replace—the Stores package receipt.</p>
-            <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-4">
-              <div>
-                <strong>Service or installation acceptance</strong>
-                <p className="text-xs text-muted-foreground">
-                  Record the completed milestone. Finance verification must be
-                  completed by a different user.
-                </p>
-              </div>
+        <div className="grid gap-4 lg:grid-cols-[380px_1fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle>Receive sealed package</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                P12: photograph the unopened package with the shipping label and
+                relevant delivery information clearly visible. Location is
+                captured with the image. Do not open the package at this stage.
+              </p>
               <select
-                aria-label="Service or installation line"
-                className="h-10 w-full rounded-md border px-3 text-sm"
-                value={serviceAcceptance.order_line_id}
-                onChange={(event) =>
-                  setServiceAcceptance({
-                    ...serviceAcceptance,
-                    order_line_id: event.target.value,
+                className="h-10 w-full rounded-md border px-3"
+                value={receipt.order_id}
+                onChange={(e) =>
+                  setReceipt({
+                    ...receipt,
+                    order_id: e.target.value,
+                    order_line_id: "",
                   })
                 }
               >
-                <option value="">Select a service or installation line</option>
-                {serviceLines.map((line) => (
+                <option value="">Select issued order</option>
+                {receivableOrders.map((item) => (
                   <option
-                    key={value(line, "order_line_id")}
-                    value={value(line, "order_line_id")}
+                    key={value(item, "order_id")}
+                    value={value(item, "order_id")}
                   >
-                    {value(line, "product_name") || "Service line"} · ordered{" "}
-                    {value(line, "quantity")}
+                    {value(item, "order_number")}
                   </option>
                 ))}
               </select>
-              {serviceLines.length === 0 && (
-                <p className="text-xs text-amber-700">
-                  No issued service or installation order is available. Create
-                  and issue the service order before recording acceptance.
+              <select
+                className="h-10 w-full rounded-md border px-3"
+                value={receipt.order_line_id}
+                onChange={(e) => {
+                  const line = receiptOrderLines.find(
+                    (item) => value(item, "order_line_id") === e.target.value,
+                  );
+                  setReceipt({
+                    ...receipt,
+                    order_line_id: e.target.value,
+                    received_quantity:
+                      Number(line?.quantity ?? 0) -
+                      Number(line?.cancelled_quantity ?? 0),
+                  });
+                }}
+              >
+                <option value="">Select order line</option>
+                {receiptOrderLines.map((item) => (
+                  <option
+                    key={value(item, "order_line_id")}
+                    value={value(item, "order_line_id")}
+                  >
+                    {value(item, "product_name") || "Order item"} ·{" "}
+                    {value(item, "quantity")} {value(item, "unit")}
+                  </option>
+                ))}
+              </select>
+              {receipt.order_line_id && (
+                <p className="rounded bg-slate-50 p-2 text-sm">
+                  Package quantity from issued order:{" "}
+                  <strong>{receipt.received_quantity}</strong>. Stores does not
+                  inspect or accept the product at this stage.
                 </p>
               )}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input
-                  aria-label="Accepted service quantity"
-                  type="number"
-                  min="0.001"
-                  step="0.001"
-                  value={serviceAcceptance.accepted_quantity}
-                  onChange={(event) =>
-                    setServiceAcceptance({
-                      ...serviceAcceptance,
-                      accepted_quantity: Number(event.target.value),
-                    })
-                  }
+              <label className="block rounded-md border border-dashed p-3 text-sm font-medium">
+                Capture package + shipping label image
+                <input
+                  className="mt-2 block w-full"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file)
+                      void action(
+                        () => uploadGeoEvidence(file, "PACKAGE_RECEIPT"),
+                        "Geo-tagged package evidence ready",
+                      );
+                    e.currentTarget.value = "";
+                  }}
                 />
-                <Input
-                  aria-label="Service acceptance date"
-                  type="date"
-                  value={serviceAcceptance.acceptance_date}
-                  onChange={(event) =>
-                    setServiceAcceptance({
-                      ...serviceAcceptance,
-                      acceptance_date: event.target.value,
-                    })
-                  }
-                />
-              </div>
-              <Input
-                aria-label="Service milestone"
-                value={serviceAcceptance.milestone}
-                onChange={(event) =>
-                  setServiceAcceptance({
-                    ...serviceAcceptance,
-                    milestone: event.target.value,
-                  })
-                }
-              />
+              </label>
+              {receipt.evidence_upload_id && (
+                <p className="text-xs text-emerald-700">
+                  Geo evidence ready · accuracy {Math.round(receipt.accuracy)} m
+                </p>
+              )}
+              {receiptBlocker && (
+                <p role="status" className="text-xs text-amber-700">
+                  {receiptBlocker}
+                </p>
+              )}
               <Button
-                disabled={
-                  busy ||
-                  !serviceAcceptance.order_line_id ||
-                  !serviceAcceptance.acceptance_date ||
-                  serviceAcceptance.accepted_quantity <= 0
-                }
+                title={receiptBlocker || undefined}
+                disabled={busy || Boolean(receiptBlocker)}
                 onClick={() =>
                   void action(
                     () =>
-                      api.serviceAcceptance(caseId, revision, {
-                        order_line_id: serviceAcceptance.order_line_id,
-                        accepted_quantity:
-                          serviceAcceptance.accepted_quantity,
-                        acceptance_date: serviceAcceptance.acceptance_date,
-                        milestone: serviceAcceptance.milestone || undefined,
+                      api.recordReceipt(caseId, receipt.order_id, revision, {
+                        actual_delivery_date: new Date()
+                          .toISOString()
+                          .slice(0, 10),
+                        package_evidence_upload_id: receipt.evidence_upload_id,
+                        capture_latitude: receipt.latitude,
+                        capture_longitude: receipt.longitude,
+                        capture_accuracy_metres: receipt.accuracy,
+                        evidence_captured_at: new Date().toISOString(),
+                        lines: [
+                          {
+                            order_line_id: receipt.order_line_id,
+                            received_quantity: receipt.received_quantity,
+                            accepted_quantity: 0,
+                            rejected_quantity: 0,
+                          },
+                        ],
                       }),
-                    "Service acceptance recorded",
+                    "Sealed package received; requester confirmation is pending",
                   )
                 }
               >
-                Record service acceptance
+                Mark sealed package received
               </Button>
-            </div>
-            <select aria-label="Receipt line for product evidence" className="h-10 w-full rounded-md border px-3 text-sm" value={productEvidenceReceiptLine} onChange={(e)=>setProductEvidenceReceiptLine(e.target.value)}><option value="">Select the received item</option>{detail.receipt_lines.map((line)=><option key={value(line,"receipt_line_id")} value={value(line,"receipt_line_id")}>{value(line,"receipt_number") || "Receipt"} · {value(line,"product_name") || "Received item"} · {value(line,"received_quantity")}</option>)}</select>
-            <label className={`inline-flex rounded-md border px-3 py-2 text-sm font-medium ${productEvidenceReceiptLine ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>Capture exact received-product image<input disabled={!productEvidenceReceiptLine} className="hidden" type="file" accept="image/*" capture="environment" onChange={(e)=>{const file=e.target.files?.[0]; if(file) void uploadGeoEvidence(file,"RECEIVED_PRODUCT",productEvidenceReceiptLine).catch((error)=>toast.error(error.message))}}/></label>
-            {productEvidenceUploadId && <Button disabled={busy} onClick={()=>void action(()=>api.confirmReceivedProduct(caseId,productEvidenceReceiptLine,revision,productEvidenceUploadId),"Received product confirmed and forwarded for physical verification").then((completed)=>{if(completed)setProductEvidenceUploadId("")})}>Confirm exact received product</Button>}
-            {detail.receipts.map((item) => (
-              <div
-                className="rounded border p-3"
-                key={value(item, "receipt_id")}
-              >
-                <strong>{value(item, "receipt_number")}</strong>
-                <p className="text-sm text-muted-foreground">
-                  Delivered {value(item, "actual_delivery_date")} ·{" "}
-                  {value(item, "status")}
-                </p>
-              </div>
-            ))}
-            {detail.service_acceptances.map((item) => (
-              <div
-                className="flex flex-wrap items-center justify-between gap-3 rounded border p-3"
-                key={value(item, "service_acceptance_id")}
-              >
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                Receipt history and requester product evidence
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                After opening, the original requester may add geo-tagged images
+                of the exact products here. These images supplement—not
+                replace—the Stores package receipt.
+              </p>
+              <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-4">
                 <div>
-                  <strong>
-                    Service milestone {value(item, "milestone") || "completion"}
-                  </strong>
+                  <strong>Service or installation acceptance</strong>
+                  <p className="text-xs text-muted-foreground">
+                    Record the completed milestone. Finance verification must be
+                    completed by a different user.
+                  </p>
+                </div>
+                <select
+                  aria-label="Service or installation line"
+                  className="h-10 w-full rounded-md border px-3 text-sm"
+                  value={serviceAcceptance.order_line_id}
+                  onChange={(event) =>
+                    setServiceAcceptance({
+                      ...serviceAcceptance,
+                      order_line_id: event.target.value,
+                    })
+                  }
+                >
+                  <option value="">
+                    Select a service or installation line
+                  </option>
+                  {serviceLines.map((line) => (
+                    <option
+                      key={value(line, "order_line_id")}
+                      value={value(line, "order_line_id")}
+                    >
+                      {value(line, "product_name") || "Service line"} · ordered{" "}
+                      {value(line, "quantity")}
+                    </option>
+                  ))}
+                </select>
+                {serviceLines.length === 0 && (
+                  <p className="text-xs text-amber-700">
+                    No issued service or installation order is available. Create
+                    and issue the service order before recording acceptance.
+                  </p>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input
+                    aria-label="Accepted service quantity"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={serviceAcceptance.accepted_quantity}
+                    onChange={(event) =>
+                      setServiceAcceptance({
+                        ...serviceAcceptance,
+                        accepted_quantity: Number(event.target.value),
+                      })
+                    }
+                  />
+                  <Input
+                    aria-label="Service acceptance date"
+                    type="date"
+                    value={serviceAcceptance.acceptance_date}
+                    onChange={(event) =>
+                      setServiceAcceptance({
+                        ...serviceAcceptance,
+                        acceptance_date: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <Input
+                  aria-label="Service milestone"
+                  value={serviceAcceptance.milestone}
+                  onChange={(event) =>
+                    setServiceAcceptance({
+                      ...serviceAcceptance,
+                      milestone: event.target.value,
+                    })
+                  }
+                />
+                <Button
+                  disabled={
+                    busy ||
+                    !serviceAcceptance.order_line_id ||
+                    !serviceAcceptance.acceptance_date ||
+                    serviceAcceptance.accepted_quantity <= 0
+                  }
+                  onClick={() =>
+                    void action(
+                      () =>
+                        api.serviceAcceptance(caseId, revision, {
+                          order_line_id: serviceAcceptance.order_line_id,
+                          accepted_quantity:
+                            serviceAcceptance.accepted_quantity,
+                          acceptance_date: serviceAcceptance.acceptance_date,
+                          milestone: serviceAcceptance.milestone || undefined,
+                        }),
+                      "Service acceptance recorded",
+                    )
+                  }
+                >
+                  Record service acceptance
+                </Button>
+              </div>
+              <select
+                aria-label="Receipt line for product evidence"
+                className="h-10 w-full rounded-md border px-3 text-sm"
+                value={productEvidenceReceiptLine}
+                onChange={(e) => setProductEvidenceReceiptLine(e.target.value)}
+              >
+                <option value="">Select the received item</option>
+                {detail.receipt_lines.map((line) => (
+                  <option
+                    key={value(line, "receipt_line_id")}
+                    value={value(line, "receipt_line_id")}
+                  >
+                    {value(line, "receipt_number") || "Receipt"} ·{" "}
+                    {value(line, "product_name") || "Received item"} ·{" "}
+                    {value(line, "received_quantity")}
+                  </option>
+                ))}
+              </select>
+              <label
+                className={`inline-flex rounded-md border px-3 py-2 text-sm font-medium ${productEvidenceReceiptLine ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+              >
+                Capture exact received-product image
+                <input
+                  disabled={!productEvidenceReceiptLine}
+                  className="hidden"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file)
+                      void action(
+                        () =>
+                          uploadGeoEvidence(
+                            file,
+                            "RECEIVED_PRODUCT",
+                            productEvidenceReceiptLine,
+                          ),
+                        "Geo-tagged received-product evidence saved",
+                      );
+                    e.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              {productEvidenceUploadId && (
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    void action(
+                      () =>
+                        api.confirmReceivedProduct(
+                          caseId,
+                          productEvidenceReceiptLine,
+                          revision,
+                          productEvidenceUploadId,
+                        ),
+                      "Received product confirmed and forwarded for physical verification",
+                    ).then((completed) => {
+                      if (completed) setProductEvidenceUploadId("");
+                    })
+                  }
+                >
+                  Confirm exact received product
+                </Button>
+              )}
+              {detail.receipts.map((item) => (
+                <div
+                  className="rounded border p-3"
+                  key={value(item, "receipt_id")}
+                >
+                  <strong>{value(item, "receipt_number")}</strong>
                   <p className="text-sm text-muted-foreground">
-                    {value(item, "accepted_quantity")} accepted ·{" "}
+                    Delivered {value(item, "actual_delivery_date")} ·{" "}
                     {value(item, "status")}
                   </p>
                 </div>
-                {value(item, "status") === "ENTERED" && (
-                  <Button
-                    size="sm"
-                    disabled={busy}
-                    onClick={() =>
-                      void action(
-                        () =>
-                          api.verifyServiceAcceptance(
-                            caseId,
-                            value(item, "service_acceptance_id"),
-                            revision,
-                          ),
-                        "Service acceptance independently verified",
-                      )
-                    }
-                  >
-                    Verify acceptance
-                  </Button>
+              ))}
+              {detail.service_acceptances.map((item) => (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 rounded border p-3"
+                  key={value(item, "service_acceptance_id")}
+                >
+                  <div>
+                    <strong>
+                      Service milestone{" "}
+                      {value(item, "milestone") || "completion"}
+                    </strong>
+                    <p className="text-sm text-muted-foreground">
+                      {value(item, "accepted_quantity")} accepted ·{" "}
+                      {value(item, "status")}
+                    </p>
+                  </div>
+                  {value(item, "status") === "ENTERED" && (
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        void action(
+                          () =>
+                            api.verifyServiceAcceptance(
+                              caseId,
+                              value(item, "service_acceptance_id"),
+                              revision,
+                            ),
+                          "Service acceptance independently verified",
+                        )
+                      }
+                    >
+                      Verify acceptance
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {!detail.receipts.length &&
+                !detail.service_acceptances.length && (
+                  <p className="py-8 text-center text-muted-foreground">
+                    No receipt or service-acceptance records.
+                  </p>
                 )}
-              </div>
-            ))}
-            {!detail.receipts.length && !detail.service_acceptances.length && (
-              <p className="py-8 text-center text-muted-foreground">
-                No receipt or service-acceptance records.
-              </p>
-            )}
-          </CardContent>
-        </Card></div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {tab === "invoices" && (
@@ -662,16 +1022,159 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid gap-3 rounded-lg border border-blue-200 bg-blue-50/40 p-4 lg:grid-cols-2">
-              <div className="space-y-2 lg:col-span-2"><strong>P06 invoice entry</strong><p className="text-xs text-muted-foreground">Invoice entry is independent of Stores receiving. Upload the PDF or scan, select its order line, and enter the document values. The three-way match will record any receipt discrepancy later.</p></div>
-              <select aria-label="Invoice order" className="h-10 rounded-md border px-3" value={invoice.order_id} onChange={(e)=>setInvoice({...invoice,order_id:e.target.value,order_line_id:""})}><option value="">Select issued order</option>{invoiceOrders.map((item)=><option key={value(item,"order_id")} value={value(item,"order_id")}>{value(item,"order_number")}</option>)}</select>
-              <select aria-label="Invoice order line" className="h-10 rounded-md border px-3" value={invoice.order_line_id} onChange={(e)=>{const line=invoiceOrderLines.find((item)=>value(item,"order_line_id")===e.target.value);setInvoice({...invoice,order_line_id:e.target.value,quantity:Number(line?.quantity??1),unit_price:Number(line?.unit_price??0)})}}><option value="">Select order line</option>{invoiceOrderLines.map((item)=><option key={value(item,"order_line_id")} value={value(item,"order_line_id")}>{value(item,"product_name") || "Order item"} · {value(item,"quantity")}</option>)}</select>
-              <Input aria-label="Invoice number" placeholder="Invoice number" value={invoice.invoice_number} onChange={(e)=>setInvoice({...invoice,invoice_number:e.target.value})}/>
-              <Input aria-label="Invoice date" type="date" value={invoice.invoice_date} onChange={(e)=>setInvoice({...invoice,invoice_date:e.target.value})}/>
-              <Input aria-label="Invoice quantity" type="number" min="0.001" step="0.001" value={invoice.quantity} onChange={(e)=>setInvoice({...invoice,quantity:Number(e.target.value)})}/>
-              <Input aria-label="Invoice unit price" type="number" min="0" step="0.01" value={invoice.unit_price} onChange={(e)=>setInvoice({...invoice,unit_price:Number(e.target.value)})}/>
-              <label className="rounded-md border border-dashed bg-white p-3 text-sm font-medium">Upload invoice PDF or scan<input className="mt-2 block w-full" type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e)=>void uploadInvoice(e.target.files?.[0])}/></label>
-              <div className="space-y-2"><Button variant="outline" onClick={()=>void download(api.sampleInvoice(),"falcon-module2-test-invoice.pdf")}>Download test invoice PDF</Button>{invoice.document_upload_id && <p className="text-xs text-emerald-700">Invoice upload ready</p>}</div>
-              <Button className="lg:col-span-2" disabled={busy || !invoice.order_id || !invoice.order_line_id || !invoice.document_upload_id || !invoice.invoice_number} onClick={()=>void action(()=>api.createInvoice(caseId,invoice.order_id,revision,{invoice_number:invoice.invoice_number,invoice_date:invoice.invoice_date,currency:detail.currency,document_upload_id:invoice.document_upload_id,invoice_type:"ONLINE_INSTITUTIONAL",lines:[{order_line_id:invoice.order_line_id,quantity:invoice.quantity,unit_price:invoice.unit_price}]}),"Invoice entered; integrity and match checks can now proceed")}>Create invoice</Button>
+              <div className="space-y-2 lg:col-span-2">
+                <strong>P06 invoice entry</strong>
+                <p className="text-xs text-muted-foreground">
+                  Invoice entry is independent of Stores receiving. Upload the
+                  PDF or scan, select its order line, and enter the document
+                  values. The three-way match will record any receipt
+                  discrepancy later.
+                </p>
+              </div>
+              <select
+                aria-label="Invoice order"
+                className="h-10 rounded-md border px-3"
+                value={invoice.order_id}
+                onChange={(e) =>
+                  setInvoice({
+                    ...invoice,
+                    order_id: e.target.value,
+                    order_line_id: "",
+                  })
+                }
+              >
+                <option value="">Select issued order</option>
+                {invoiceOrders.map((item) => (
+                  <option
+                    key={value(item, "order_id")}
+                    value={value(item, "order_id")}
+                  >
+                    {value(item, "order_number")}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Invoice order line"
+                className="h-10 rounded-md border px-3"
+                value={invoice.order_line_id}
+                onChange={(e) => {
+                  const line = invoiceOrderLines.find(
+                    (item) => value(item, "order_line_id") === e.target.value,
+                  );
+                  setInvoice({
+                    ...invoice,
+                    order_line_id: e.target.value,
+                    quantity: Number(line?.quantity ?? 1),
+                    unit_price: Number(line?.unit_price ?? 0),
+                  });
+                }}
+              >
+                <option value="">Select order line</option>
+                {invoiceOrderLines.map((item) => (
+                  <option
+                    key={value(item, "order_line_id")}
+                    value={value(item, "order_line_id")}
+                  >
+                    {value(item, "product_name") || "Order item"} ·{" "}
+                    {value(item, "quantity")}
+                  </option>
+                ))}
+              </select>
+              <Input
+                aria-label="Invoice number"
+                placeholder="Invoice number"
+                value={invoice.invoice_number}
+                onChange={(e) =>
+                  setInvoice({ ...invoice, invoice_number: e.target.value })
+                }
+              />
+              <Input
+                aria-label="Invoice date"
+                type="date"
+                value={invoice.invoice_date}
+                onChange={(e) =>
+                  setInvoice({ ...invoice, invoice_date: e.target.value })
+                }
+              />
+              <Input
+                aria-label="Invoice quantity"
+                type="number"
+                min="0.001"
+                step="0.001"
+                value={invoice.quantity}
+                onChange={(e) =>
+                  setInvoice({ ...invoice, quantity: Number(e.target.value) })
+                }
+              />
+              <Input
+                aria-label="Invoice unit price"
+                type="number"
+                min="0"
+                step="0.01"
+                value={invoice.unit_price}
+                onChange={(e) =>
+                  setInvoice({ ...invoice, unit_price: Number(e.target.value) })
+                }
+              />
+              <label className="rounded-md border border-dashed bg-white p-3 text-sm font-medium">
+                Upload invoice PDF or scan
+                <input
+                  className="mt-2 block w-full"
+                  type="file"
+                  accept="application/pdf,image/png,image/jpeg"
+                  onChange={(e) => void uploadInvoice(e.target.files?.[0])}
+                />
+              </label>
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    void download(
+                      api.sampleInvoice(),
+                      "falcon-module2-test-invoice.pdf",
+                    )
+                  }
+                >
+                  Download test invoice PDF
+                </Button>
+                {invoice.document_upload_id && (
+                  <p className="text-xs text-emerald-700">
+                    Invoice upload ready
+                  </p>
+                )}
+              </div>
+              <Button
+                className="lg:col-span-2"
+                disabled={
+                  busy ||
+                  !invoice.order_id ||
+                  !invoice.order_line_id ||
+                  !invoice.document_upload_id ||
+                  !invoice.invoice_number
+                }
+                onClick={() =>
+                  void action(
+                    () =>
+                      api.createInvoice(caseId, invoice.order_id, revision, {
+                        invoice_number: invoice.invoice_number,
+                        invoice_date: invoice.invoice_date,
+                        currency: detail.currency,
+                        document_upload_id: invoice.document_upload_id,
+                        invoice_type: "ONLINE_INSTITUTIONAL",
+                        lines: [
+                          {
+                            order_line_id: invoice.order_line_id,
+                            quantity: invoice.quantity,
+                            unit_price: invoice.unit_price,
+                          },
+                        ],
+                      }),
+                    "Invoice entered; integrity and match checks can now proceed",
+                  )
+                }
+              >
+                Create invoice
+              </Button>
             </div>
             <div className="grid gap-4 rounded-lg border p-4 lg:grid-cols-[minmax(0,360px)_1fr]">
               <div className="space-y-3">
@@ -759,8 +1262,7 @@ export function ProcurementCaseWorkspace({ caseId }: { caseId: string }) {
                           key(`payment:${payment.payment_reference.trim()}`),
                           {
                             amount: payment.amount,
-                            payment_reference:
-                              payment.payment_reference.trim(),
+                            payment_reference: payment.payment_reference.trim(),
                             payment_date: payment.payment_date,
                           },
                         ),

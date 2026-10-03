@@ -29,7 +29,7 @@ describe('Module 3 security boundaries', () => {
       service.get(actor, '30000000-0000-4000-8000-000000000001'),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(String(query.mock.calls[1][0])).toContain('c.tenant_id=$2');
-    expect(String(query.mock.calls[1][0])).toContain('c.invoice_id=$1');
+    expect(String(query.mock.calls[1][0])).toContain('c.invoice_id::text=$1');
     expect(String(query.mock.calls[1][0])).toContain('c.department_id=ANY');
     expect(query).toHaveBeenCalledTimes(2);
   });
@@ -116,8 +116,7 @@ describe('Module 3 security boundaries', () => {
           queueDelivery: false,
           metadata: expect.objectContaining({
             type: 'INVOICE_INTEGRITY_STEP_UP',
-            integrity_case_id:
-              '30000000-0000-4000-8000-000000000001',
+            integrity_case_id: '30000000-0000-4000-8000-000000000001',
           }),
         }),
       );

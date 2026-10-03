@@ -140,9 +140,10 @@ export class ProcurementService {
       .map((grant: Record<string, any>) => Number(grant.scope_reference))
       .filter(Number.isInteger);
     const rows = await this.db.query(
-      `SELECT * FROM proc_cases
-       WHERE proc_case_id=$1 AND tenant_id=$2
-         AND ($3::boolean OR department_id=ANY($4::int[]) OR requester_id=$5::uuid)`,
+      `SELECT c.* FROM proc_cases c
+       JOIN acq_requests a ON a.acquisition_id=c.acquisition_id
+       WHERE (c.proc_case_id::text=$1 OR a.acquisition_number=$1) AND c.tenant_id=$2
+         AND ($3::boolean OR c.department_id=ANY($4::int[]) OR c.requester_id=$5::uuid)`,
       [caseId, this.tenant(actor), tenantWide, departments, actor.user_id],
     );
     if (!rows[0]) throw new NotFoundException('Procurement case not found');
@@ -205,7 +206,11 @@ export class ProcurementService {
     tenantId: string,
   ) {
     const rows = await manager.query(
-      `SELECT * FROM proc_cases WHERE proc_case_id=$1 AND tenant_id=$2 FOR UPDATE`,
+      `SELECT c.* FROM proc_cases c
+       JOIN acq_requests a ON a.acquisition_id=c.acquisition_id
+       WHERE (c.proc_case_id::text=$1 OR a.acquisition_number=$1)
+         AND c.tenant_id=$2
+       FOR UPDATE OF c`,
       [caseId, tenantId],
     );
     if (!rows[0]) throw new NotFoundException('Procurement case not found');
@@ -920,6 +925,7 @@ export class ProcurementService {
 
   async get(actor: ProcurementActor, caseId: string) {
     const row = await this.accessibleCase(actor, caseId);
+    caseId = row.proc_case_id;
     const [
       lines,
       orders,
@@ -1148,7 +1154,12 @@ export class ProcurementService {
             candidate.proc_case_line_id === line.proc_case_line_id,
         );
         if (!source) {
-          if (!line.product_name?.trim() || !line.category?.trim() || !line.unit?.trim() || !line.fulfillment_type)
+          if (
+            !line.product_name?.trim() ||
+            !line.category?.trim() ||
+            !line.unit?.trim() ||
+            !line.fulfillment_type
+          )
             throw new BadRequestException(
               'New products require product name, category, unit and classification',
             );
@@ -1192,7 +1203,9 @@ export class ProcurementService {
       );
       const overrunPercent = Math.max(
         0,
-        ((total - Number(row.available_amount)) / Number(row.approved_allocation)) * 100,
+        ((total - Number(row.available_amount)) /
+          Number(row.approved_allocation)) *
+          100,
       );
       if (overrunPercent > 10.0001)
         throw new ConflictException({
@@ -1200,9 +1213,12 @@ export class ProcurementService {
           code: 'MODULE1_AMENDMENT_REQUIRED',
         });
       if (overrunPercent > 0) discrepancies.add('BUDGET_OVERRUN');
-      const exceptionStatus = overrunPercent > 0
-        ? 'FINANCE_APPROVAL_REQUIRED'
-        : discrepancies.size ? 'JUSTIFIED' : 'NOT_REQUIRED';
+      const exceptionStatus =
+        overrunPercent > 0
+          ? 'FINANCE_APPROVAL_REQUIRED'
+          : discrepancies.size
+            ? 'JUSTIFIED'
+            : 'NOT_REQUIRED';
       await manager.query(
         `INSERT INTO proc_orders
            (order_id,proc_case_id,tenant_id,order_number,external_order_id,vendor_id,currency,
@@ -1240,9 +1256,17 @@ export class ProcurementService {
         );
         const lineDiscrepancies = [
           ...(!source ? ['UNPLANNED_PRODUCT'] : []),
-          ...(source && source.approved_vendor_id !== input.vendor_id ? ['VENDOR_CHANGED'] : []),
-          ...(source && Number(item.input.quantity) > Number(source.approved_quantity) ? ['QUANTITY_CHANGED'] : []),
-          ...(source && money(item.input.unit_price) !== money(source.approved_unit_price) ? ['UNIT_PRICE_CHANGED'] : []),
+          ...(source && source.approved_vendor_id !== input.vendor_id
+            ? ['VENDOR_CHANGED']
+            : []),
+          ...(source &&
+          Number(item.input.quantity) > Number(source.approved_quantity)
+            ? ['QUANTITY_CHANGED']
+            : []),
+          ...(source &&
+          money(item.input.unit_price) !== money(source.approved_unit_price)
+            ? ['UNIT_PRICE_CHANGED']
+            : []),
         ];
         await manager.query(
           `INSERT INTO proc_order_lines
@@ -1270,7 +1294,7 @@ export class ProcurementService {
             !source,
             JSON.stringify(lineDiscrepancies),
             lineDiscrepancies.length
-              ? item.input.discrepancy_justification?.trim() ?? justification
+              ? (item.input.discrepancy_justification?.trim() ?? justification)
               : null,
           ],
         );
@@ -1357,7 +1381,8 @@ export class ProcurementService {
           (a: Record<string, any>) =>
             quantityUnits(a.active) + quantityUnits(a.proposed) >
             quantityUnits(a.approved_quantity),
-        ) && !order.discrepancy_justification
+        ) &&
+        !order.discrepancy_justification
       ) {
         throw new ConflictException({
           message: 'Quantity deviation requires justification',
@@ -1658,6 +1683,7 @@ export class ProcurementService {
       caseId,
       'PROCUREMENT_RECEIPT_ENTRY',
     );
+    caseId = access.proc_case_id;
     if (!input.lines?.length)
       throw new BadRequestException('Receipt lines are required');
     return this.db.transaction(async (manager) => {
@@ -1715,12 +1741,48 @@ export class ProcurementService {
       // a compatibility link in both directions. Create the nullable legacy
       // projection first, then link it back after the canonical receipt exists;
       // inserting both references up front violates the immediate FK.
+      // Older issued orders may predate the compatibility PO projection (or
+      // may have been imported with legacy_po_id unset). Repair that projection
+      // inside the same locked transaction so receipt capture cannot fail with
+      // a NOT NULL/foreign-key error in the legacy GRN table.
+      let legacyPoId = order.legacy_po_id as string | null;
+      if (!legacyPoId) {
+        const existingPo = await manager.query(
+          `SELECT po_id FROM fin_purchase_orders
+           WHERE proc_order_id=$1 AND tenant_id=$2
+           FOR UPDATE`,
+          [orderId, row.tenant_id],
+        );
+        legacyPoId = existingPo[0]?.po_id ?? null;
+        if (!legacyPoId) {
+          const createdPo = await manager.query(
+            `INSERT INTO fin_purchase_orders
+               (tenant_id,vendor_id,description,amount,status,requested_by,approved_at,proc_order_id,source_system)
+             VALUES ($1,$2,$3,$4,'APPROVED',$5,NOW(),$6,'MODULE2')
+             RETURNING po_id`,
+            [
+              row.tenant_id,
+              order.vendor_id,
+              `Module 2 order ${order.order_number}`,
+              order.total_amount,
+              actor.user_id,
+              orderId,
+            ],
+          );
+          legacyPoId = createdPo[0].po_id;
+        }
+        await manager.query(
+          `UPDATE proc_orders SET legacy_po_id=$2,updated_at=NOW()
+           WHERE order_id=$1 AND tenant_id=$3`,
+          [orderId, legacyPoId, row.tenant_id],
+        );
+      }
       const legacy = await manager.query(
         `INSERT INTO fin_goods_receipts (tenant_id,po_id,received_by,received_at,notes,source_system)
          VALUES ($1,$2,$3,$4,$5,'MODULE2') RETURNING grn_id`,
         [
           row.tenant_id,
-          order.legacy_po_id,
+          legacyPoId,
           actor.user_id,
           input.actual_delivery_date,
           input.notes ?? null,
@@ -1762,7 +1824,10 @@ export class ProcurementService {
           throw new BadRequestException(
             'Received package quantity must be positive',
           );
-        if (incoming.accepted_quantity !== 0 || (incoming.rejected_quantity ?? 0) !== 0)
+        if (
+          incoming.accepted_quantity !== 0 ||
+          (incoming.rejected_quantity ?? 0) !== 0
+        )
           throw new BadRequestException(
             'Stores records sealed-package custody only; product acceptance is completed later by the requester',
           );
@@ -1872,6 +1937,7 @@ export class ProcurementService {
     documentUploadId: string,
   ) {
     const access = await this.accessibleCase(actor, caseId);
+    caseId = access.proc_case_id;
     if (String(access.requester_id) !== actor.user_id)
       throw new ForbiddenException({
         message: 'Only the original requester can confirm the opened product',
@@ -1904,7 +1970,9 @@ export class ProcurementService {
         [documentUploadId, receiptLineId, caseId, row.tenant_id, actor.user_id],
       );
       if (!evidence[0])
-        throw new ConflictException('A clean geo-tagged product image for this receipt line is required');
+        throw new ConflictException(
+          'A clean geo-tagged product image for this receipt line is required',
+        );
       const acceptedQuantity = Number(line.received_quantity);
       const priorAccepted = await manager.query(
         `SELECT COALESCE(SUM(accepted_quantity),0) AS accepted,
@@ -1913,13 +1981,16 @@ export class ProcurementService {
          FROM proc_receipt_lines WHERE order_line_id=$1 AND receipt_line_id<>$2`,
         [line.order_line_id, receiptLineId],
       );
-      const activeOrdered = Number(line.ordered_quantity) - Number(line.cancelled_quantity);
+      const activeOrdered =
+        Number(line.ordered_quantity) - Number(line.cancelled_quantity);
       const netAccepted =
         Number(priorAccepted[0].accepted) -
         Number(priorAccepted[0].returned) +
         acceptedQuantity;
       if (netAccepted > activeOrdered + 0.0005)
-        throw new ConflictException('Product acceptance exceeds active ordered quantity');
+        throw new ConflictException(
+          'Product acceptance exceeds active ordered quantity',
+        );
       await manager.query(
         `UPDATE proc_receipt_lines SET accepted_quantity=$2,acceptance_status='PRODUCT_CONFIRMED',
            product_evidence_upload_id=$3,accepted_by=$4,accepted_at=NOW()
@@ -1941,19 +2012,31 @@ export class ProcurementService {
         'RECEIVED_PRODUCT_CONFIRMED',
         actor.user_id,
         { accepted_quantity: 0, acceptance_status: 'PACKAGE_RECEIVED' },
-        { accepted_quantity: acceptedQuantity, acceptance_status: 'PRODUCT_CONFIRMED', document_upload_id: documentUploadId },
-      );
-      const event = await this.emit(manager, row, 'GoodsReceiptRecorded.v1', line.receipt_id, {
-        order_id: line.order_id,
-        receipt_number: line.receipt_number,
-        lines: [{
-          receipt_line_id: receiptLineId,
-          order_line_id: line.order_line_id,
-          received_quantity: acceptedQuantity,
+        {
           accepted_quantity: acceptedQuantity,
-          rejected_quantity: 0,
-        }],
-      });
+          acceptance_status: 'PRODUCT_CONFIRMED',
+          document_upload_id: documentUploadId,
+        },
+      );
+      const event = await this.emit(
+        manager,
+        row,
+        'GoodsReceiptRecorded.v1',
+        line.receipt_id,
+        {
+          order_id: line.order_id,
+          receipt_number: line.receipt_number,
+          lines: [
+            {
+              receipt_line_id: receiptLineId,
+              order_line_id: line.order_line_id,
+              received_quantity: acceptedQuantity,
+              accepted_quantity: acceptedQuantity,
+              rejected_quantity: 0,
+            },
+          ],
+        },
+      );
       return {
         receipt_line_id: receiptLineId,
         acceptance_status: 'PRODUCT_CONFIRMED',
@@ -1975,6 +2058,7 @@ export class ProcurementService {
       caseId,
       'PROCUREMENT_RECEIPT_ENTRY',
     );
+    caseId = access.proc_case_id;
     return this.db.transaction(async (manager) => {
       const row = await this.lockedCase(manager, caseId, access.tenant_id);
       this.assertRevision(row, expectedRevision);

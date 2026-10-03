@@ -25,6 +25,7 @@ export type IntegrityDashboard = {
 };
 
 export type IntegrityCaseDetail = IntegrityCaseSummary & {
+  can_analyze?: boolean;
   document_hash: string;
   invoice_submitter_id: string;
   invoice: Record<string, unknown>;

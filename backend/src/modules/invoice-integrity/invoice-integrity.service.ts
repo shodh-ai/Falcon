@@ -77,6 +77,15 @@ export class InvoiceIntegrityService {
     capability = 'INVOICE_INTEGRITY_VIEW',
   ) {
     const grants = await this.grants(actor, capability);
+    if (capability !== 'INVOICE_INTEGRITY_VIEW' && !grants.length) {
+      // Confirm view scope first so an absent action grant is not reported as
+      // a missing case, without revealing another tenant/department's case.
+      await this.accessibleCase(actor, caseId);
+      throw new ForbiddenException({
+        message: `Missing scoped capability ${capability}`,
+        code: 'INVOICE_INTEGRITY_CAPABILITY_REQUIRED',
+      });
+    }
     const tenantWide = grants.some(
       (grant: Record<string, any>) => grant.scope_type === 'TENANT',
     );
@@ -86,7 +95,10 @@ export class InvoiceIntegrityService {
       .filter(Number.isInteger);
     const rows = await this.db.query(
       `SELECT c.* FROM inv_integrity_cases c
-       WHERE (c.integrity_case_id=$1 OR c.invoice_id=$1 OR c.proc_case_id=$1) AND c.tenant_id=$2
+       LEFT JOIN proc_cases pc ON pc.proc_case_id=c.proc_case_id
+       LEFT JOIN acq_requests ar ON ar.acquisition_id=pc.acquisition_id
+       WHERE (c.integrity_case_id::text=$1 OR c.invoice_id::text=$1 OR
+              c.proc_case_id::text=$1 OR ar.acquisition_number=$1) AND c.tenant_id=$2
          AND ($3::boolean OR c.department_id=ANY($4::int[]) OR c.invoice_submitter_id=$5::uuid)
        ORDER BY c.updated_at DESC LIMIT 1`,
       [caseId, this.tenant(actor), tenantWide, departments, actor.user_id],
@@ -114,6 +126,10 @@ export class InvoiceIntegrityService {
     },
   ) {
     const access = await this.accessibleCase(actor, caseId);
+    // Child tables are keyed by the immutable integrity case UUID. The UI may
+    // arrive here through an invoice or procurement-case deep link, so carry
+    // the canonical ID forward after the scoped lookup.
+    caseId = access.integrity_case_id;
     return this.db.transaction(async (manager) => {
       const row = await this.lockedCase(manager, caseId, access.tenant_id);
       if (['CLOSED', 'CANCELLED', 'SUPERSEDED'].includes(row.workflow_state))
@@ -180,7 +196,17 @@ export class InvoiceIntegrityService {
   ) {
     const rows = await this.db.query(
       `SELECT challenge_id FROM inv_integrity_step_up_challenges
-       WHERE tenant_id=$1 AND user_id=$2 AND integrity_case_id=$3 AND purpose=$4
+       WHERE tenant_id=$1 AND user_id=$2
+         AND (integrity_case_id::text=$3 OR EXISTS (
+           SELECT 1 FROM inv_integrity_cases c
+            WHERE c.integrity_case_id=inv_integrity_step_up_challenges.integrity_case_id
+              AND (c.invoice_id::text=$3 OR c.proc_case_id::text=$3 OR EXISTS (
+                SELECT 1 FROM proc_cases pc
+                JOIN acq_requests ar ON ar.acquisition_id=pc.acquisition_id
+                WHERE pc.proc_case_id=c.proc_case_id AND ar.acquisition_number=$3
+              ))
+         ))
+         AND purpose=$4
          AND verified_at>=NOW()-INTERVAL '10 minutes' AND expires_at>NOW() AND locked_at IS NULL
        ORDER BY verified_at DESC LIMIT 1`,
       [this.tenant(actor), actor.user_id, caseId, purpose],
@@ -197,13 +223,14 @@ export class InvoiceIntegrityService {
     caseId: string,
     purpose: 'ATTENDED_RETRIEVAL' | 'CERTIFICATION',
   ) {
-    await this.accessibleCase(
+    const access = await this.accessibleCase(
       actor,
       caseId,
       purpose === 'ATTENDED_RETRIEVAL'
         ? 'INVOICE_SOURCE_RETRIEVE'
         : 'INVOICE_INTEGRITY_CERTIFY',
     );
+    caseId = access.integrity_case_id;
     const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const otpHash = createHash('sha256').update(otp).digest('hex');
     const rows = await this.db.query(
@@ -288,7 +315,17 @@ export class InvoiceIntegrityService {
     const result = await this.db.transaction(async (manager) => {
       const rows = await manager.query(
         `SELECT * FROM inv_integrity_step_up_challenges
-         WHERE challenge_id=$1 AND tenant_id=$2 AND user_id=$3 AND integrity_case_id=$4 FOR UPDATE`,
+         WHERE challenge_id=$1 AND tenant_id=$2 AND user_id=$3
+           AND (integrity_case_id::text=$4 OR EXISTS (
+             SELECT 1 FROM inv_integrity_cases c
+              WHERE c.integrity_case_id=inv_integrity_step_up_challenges.integrity_case_id
+                AND (c.invoice_id::text=$4 OR c.proc_case_id::text=$4 OR EXISTS (
+                  SELECT 1 FROM proc_cases pc
+                  JOIN acq_requests ar ON ar.acquisition_id=pc.acquisition_id
+                  WHERE pc.proc_case_id=c.proc_case_id AND ar.acquisition_number=$4
+                ))
+           ))
+         FOR UPDATE`,
         [challengeId, this.tenant(actor), actor.user_id, caseId],
       );
       const challenge = rows[0];
@@ -337,7 +374,14 @@ export class InvoiceIntegrityService {
     tenantId: string,
   ) {
     const rows = await manager.query(
-      `SELECT * FROM inv_integrity_cases WHERE integrity_case_id=$1 AND tenant_id=$2 FOR UPDATE`,
+      `SELECT c.* FROM inv_integrity_cases c
+       LEFT JOIN proc_cases pc ON pc.proc_case_id=c.proc_case_id
+       LEFT JOIN acq_requests ar ON ar.acquisition_id=pc.acquisition_id
+       WHERE (c.integrity_case_id::text=$1 OR c.invoice_id::text=$1 OR
+              c.proc_case_id::text=$1 OR ar.acquisition_number=$1)
+         AND c.tenant_id=$2
+       ORDER BY c.updated_at DESC LIMIT 1
+       FOR UPDATE OF c`,
       [caseId, tenantId],
     );
     if (!rows[0])
@@ -619,6 +663,14 @@ export class InvoiceIntegrityService {
 
   async get(actor: IntegrityActor, caseId: string) {
     const row = await this.accessibleCase(actor, caseId);
+    caseId = row.integrity_case_id;
+    const analysisGrants = await this.grants(actor, 'INVOICE_INTEGRITY_ANALYZE');
+    const canAnalyze = analysisGrants.some(
+      (grant: Record<string, any>) =>
+        grant.scope_type === 'TENANT' ||
+        (grant.scope_type === 'DEPARTMENT' &&
+          Number(grant.scope_reference) === Number(row.department_id)),
+    );
     const [
       invoice,
       evidence,
@@ -693,6 +745,7 @@ export class InvoiceIntegrityService {
     ]);
     return {
       ...row,
+      can_analyze: canAnalyze,
       invoice: invoice[0],
       evidence,
       source_snapshots: snapshots,
@@ -813,6 +866,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_SOURCE_RETRIEVE',
     );
+    caseId = access.integrity_case_id;
     if (input.retrieval_method === 'ATTENDED_BROWSER')
       await this.assertStepUp(actor, caseId, 'ATTENDED_RETRIEVAL');
     return this.db.transaction(async (manager) => {
@@ -930,6 +984,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_SOURCE_RETRIEVE',
     );
+    caseId = access.integrity_case_id;
     return this.db.transaction(async (manager) => {
       const row = await this.lockedCase(manager, caseId, access.tenant_id);
       this.assertRevision(row, expectedRevision);
@@ -1010,6 +1065,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_SOURCE_RETRIEVE',
     );
+    caseId = access.integrity_case_id;
     if (
       !input.external_transaction_id?.trim() ||
       !Object.keys(input.payload ?? {}).length
@@ -1184,6 +1240,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_INTEGRITY_ANALYZE',
     );
+    caseId = access.integrity_case_id;
     if (
       !/^https:\/\//i.test(input.source_url_or_reference) &&
       !input.source_url_or_reference.startsWith('internal:')
@@ -1306,6 +1363,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_INTEGRITY_ANALYZE',
     );
+    caseId = access.integrity_case_id;
     return this.db.transaction(async (manager) => {
       const row = await this.lockedCase(manager, caseId, access.tenant_id);
       this.assertRevision(row, expectedRevision);
@@ -1834,6 +1892,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_INTEGRITY_INVESTIGATE',
     );
+    caseId = access.integrity_case_id;
     if (!input.public_reason?.trim())
       throw new BadRequestException('Public evidence reason is required');
     return this.db.transaction(async (manager) => {
@@ -1901,6 +1960,7 @@ export class InvoiceIntegrityService {
     responseText: string,
   ) {
     const access = await this.accessibleCase(actor, caseId);
+    caseId = access.integrity_case_id;
     if (!responseText?.trim())
       throw new BadRequestException('Evidence response is required');
     return this.db.transaction(async (manager) => {
@@ -1957,6 +2017,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_INTEGRITY_INVESTIGATE',
     );
+    caseId = access.integrity_case_id;
     return this.db.transaction(async (manager) => {
       const row = await this.lockedCase(manager, caseId, access.tenant_id);
       this.assertRevision(row, expectedRevision);
@@ -2038,6 +2099,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_INTEGRITY_INVESTIGATE',
     );
+    caseId = access.integrity_case_id;
     if (!input.reason?.trim())
       throw new BadRequestException('Recommendation reason is required');
     return this.db.transaction(async (manager) => {
@@ -2101,6 +2163,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_INTEGRITY_CERTIFY',
     );
+    caseId = access.integrity_case_id;
     if (!input.decision_reason?.trim())
       throw new BadRequestException('Decision reason is required');
     return this.db.transaction(async (manager) => {
@@ -2297,6 +2360,7 @@ export class InvoiceIntegrityService {
       caseId,
       'INVOICE_INTEGRITY_POLICY_ADMIN',
     );
+    caseId = row.integrity_case_id;
     return this.db.query(
       `SELECT integrity_policy_id,policy_version,category,invoice_type,status,
               factor_weights,low_risk_max,medium_risk_max,automated_min_coverage,

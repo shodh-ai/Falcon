@@ -98,6 +98,9 @@ export class ProcurementDocumentService {
         : purpose === 'PACKAGE_RECEIPT'
           ? await this.procurements.authorizeReceiptEntry(actor, caseId)
           : await this.procurements.authorizeProductEvidence(actor, caseId);
+    // Persist documents against the canonical procurement UUID even when a
+    // user arrived through the human-facing acquisition number.
+    caseId = access.proc_case_id;
     if (!file?.buffer?.length || !ALLOWED_MIME.has(file.mimetype))
       throw new BadRequestException('Invoice must be a PDF, PNG, or JPEG');
     const extension = extname(file.originalname).toLowerCase();
@@ -220,6 +223,7 @@ export class ProcurementDocumentService {
     invoiceId: string,
   ): Promise<InvoiceDownload> {
     const access = await this.procurements.authorizeView(actor, caseId);
+    caseId = access.proc_case_id;
     const rows = await this.db.query<InvoiceDocumentRow[]>(
       `SELECT i.document_object_key,u.mime_type,u.original_filename
        FROM proc_invoices i

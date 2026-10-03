@@ -18,10 +18,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const text = (value: unknown) =>
   value == null ? "—" : String(value).replaceAll("_", " ");
 
-export function InvoiceIntegrityCaseWorkspace({ caseId }: { caseId: string }) {
+export function InvoiceIntegrityCaseWorkspace({
+  caseId: routeCaseId,
+}: {
+  caseId: string;
+}) {
   const authed = useAuthedApi();
   const api = useMemo(() => createInvoiceIntegrityApi(authed), [authed]);
   const [detail, setDetail] = useState<IntegrityCaseDetail | null>(null);
+  const caseId = detail?.integrity_case_id || routeCaseId;
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");
   const [challengeId, setChallengeId] = useState("");
@@ -59,11 +64,9 @@ export function InvoiceIntegrityCaseWorkspace({ caseId }: { caseId: string }) {
   const investigation = [...detail.investigations]
     .reverse()
     .find((item) => item.status !== "CANCELLED") as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const risk = detail.risk_assessments.at(-1) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   return (
     <div className="space-y-6 p-6">
       <Link
@@ -95,6 +98,7 @@ export function InvoiceIntegrityCaseWorkspace({ caseId }: { caseId: string }) {
         <Button
           disabled={
             busy ||
+            detail.can_analyze === false ||
             ["CLOSED", "SUPERSEDED", "CANCELLED"].includes(
               detail.workflow_state,
             )
@@ -110,6 +114,12 @@ export function InvoiceIntegrityCaseWorkspace({ caseId }: { caseId: string }) {
           Run analysis
         </Button>
       </div>
+      {detail.can_analyze === false && (
+        <p className="text-sm text-muted-foreground">
+          Analysis requires an independently authorized invoice analyst. Your
+          account can view this case but cannot run analysis.
+        </p>
+      )}
       <div className="grid gap-3 md:grid-cols-4">
         {(
           [

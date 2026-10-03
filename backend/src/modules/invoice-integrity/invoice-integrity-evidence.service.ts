@@ -103,6 +103,9 @@ export class InvoiceIntegrityEvidenceService {
     const access = await this.integrity.authorizeView(actor, caseId);
     const extension = this.validate(file);
     await this.scan(file.buffer, extension);
+    // Evidence storage and child rows use the immutable integrity-case UUID,
+    // even when a deep link was opened with an invoice/procurement alias.
+    caseId = access.integrity_case_id;
     const contentHash = integrityHash(file.buffer.toString('base64'));
     const objectKey = this.storage.buildKey(
       access.tenant_id,
@@ -134,6 +137,7 @@ export class InvoiceIntegrityEvidenceService {
     evidenceId: string,
   ): Promise<{ stream: Readable; mimeType: string; filename: string }> {
     const access = await this.integrity.authorizeView(actor, caseId);
+    caseId = access.integrity_case_id;
     const rows = await this.db.query<EvidenceDownloadRow[]>(
       `SELECT object_key,evidence_type,metadata FROM inv_evidence
        WHERE evidence_id=$1 AND integrity_case_id=$2 AND tenant_id=$3`,
