@@ -672,8 +672,16 @@ export class ProcurementService {
          WHERE b.integrity_case_id=$1 AND r.blocker_resolution_id IS NULL LIMIT 1`,
         [event.integrity_case_id, decision.integrity_decision_id],
       );
+      // Keep the projection gate aligned with postPayment(). A three-way
+      // match is successful both when it passes immediately (MATCHED) and
+      // when an authorised discrepancy resolution has moved it to RESOLVED.
+      // Treating RESOLVED as ineligible here leaves a certified invoice
+      // permanently absent from G07's cleared-invoice selector even though
+      // the payment endpoint would accept it.
       const paymentEligible =
-        cleared && matches[0]?.status === 'MATCHED' && blockers.length === 0;
+        cleared &&
+        ['MATCHED', 'RESOLVED'].includes(String(matches[0]?.status)) &&
+        blockers.length === 0;
       await manager.query(
         `UPDATE proc_invoice_integrity_projections SET superseded_at=NOW(),payment_eligible=false
          WHERE invoice_id=$1 AND integrity_decision_id<>$2`,
