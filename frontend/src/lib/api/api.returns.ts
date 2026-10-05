@@ -31,12 +31,32 @@ export type ReturnDashboard = {
   in_execution: number;
   doa: number;
 };
+export type ReturnableInventoryRecord = {
+  inventory_record_id: string;
+  record_type: "ITEM" | "LOT";
+  university_asset_id?: string;
+  lot_id?: string;
+  logical_rfid_code?: string;
+  record_status: string;
+  lifecycle_status: string;
+  product_model_code: string;
+  product_name: string;
+  category: string;
+  brand?: string;
+  model_number?: string;
+  batch_code: string;
+  location_text?: string;
+  condition: string;
+  aggregate_revision: number;
+};
 export function createReturnsApi(api: Api) {
   const root = "/api/returns/v1",
     idem = () => ({ "Idempotency-Key": crypto.randomUUID() }),
     mut = (revision: number) => ({ ...idem(), "If-Match": String(revision) });
   return {
     dashboard: () => api.get<ReturnDashboard>(`${root}/dashboard`),
+    eligibleInventory: () =>
+      api.get<ReturnableInventoryRecord[]>(`${root}/eligible-inventory`),
     cases: () => api.get<ReturnCase[]>(`${root}/cases`),
     detail: (id: string) => api.get<ReturnCase>(`${root}/cases/${id}`),
     create: (body: Record<string, unknown>) =>

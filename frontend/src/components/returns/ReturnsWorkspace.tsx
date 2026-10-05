@@ -11,13 +11,10 @@ import {
 } from "lucide-react";
 import { useAuthedApi } from "@/lib/api";
 import {
-  createInventoryApi,
-  type InventorySummary,
-} from "@/lib/api/api.inventory";
-import {
   createReturnsApi,
   type ReturnCase,
   type ReturnDashboard,
+  type ReturnableInventoryRecord,
 } from "@/lib/api/api.returns";
 import { toast } from "@/lib/notifications/falcon-toast";
 import { Badge } from "@/components/ui/badge";
@@ -28,11 +25,10 @@ import { Input } from "@/components/ui/input";
 const label = (value: string) => value.replaceAll("_", " ");
 export function ReturnsWorkspace() {
   const authed = useAuthedApi(),
-    api = useMemo(() => createReturnsApi(authed), [authed]),
-    inventoryApi = useMemo(() => createInventoryApi(authed), [authed]);
+    api = useMemo(() => createReturnsApi(authed), [authed]);
   const [dashboard, setDashboard] = useState<ReturnDashboard | null>(null),
     [cases, setCases] = useState<ReturnCase[]>([]),
-    [inventory, setInventory] = useState<InventorySummary[]>([]),
+    [inventory, setInventory] = useState<ReturnableInventoryRecord[]>([]),
     [selected, setSelected] = useState<ReturnCase | null>(null),
     [tab, setTab] = useState<"cases" | "rma" | "finance">("cases"),
     [creating, setCreating] = useState(false),
@@ -45,26 +41,15 @@ export function ReturnsWorkspace() {
       Promise.all([
         api.dashboard(),
         api.cases(),
-        inventoryApi.list(undefined, "ACTIVE"),
+        api.eligibleInventory(),
       ])
         .then(([d, c, i]) => {
           setDashboard(d);
           setCases(c);
-          setInventory(
-            i.filter(
-              (x) =>
-                ![
-                  "RETURN_PENDING",
-                  "RETURNED",
-                  "RETIRED",
-                  "WRITTEN_OFF",
-                  "DISPOSED",
-                ].includes(x.lifecycle_status),
-            ),
-          );
+          setInventory(i);
         })
         .catch((e: Error) => toast.error(e.message)),
-    [api, inventoryApi],
+    [api],
   );
   useEffect(() => void reload(), [reload]);
   const open = async (id: string) => {

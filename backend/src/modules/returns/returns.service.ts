@@ -277,6 +277,36 @@ export class ReturnsService {
     );
     return rows[0];
   }
+  async eligibleInventory(actor: ReturnActor) {
+    const grants = await this.grants(actor, 'RETURNS_INITIATE');
+    if (!grants.length)
+      throw new ForbiddenException('Missing RETURNS_INITIATE');
+    const tenantWide = grants.some((g: any) => g.scope_type === 'TENANT');
+    const departments = grants
+      .filter((g: any) => g.scope_type === 'DEPARTMENT')
+      .map((g: any) => String(g.scope_reference))
+      .filter(Boolean);
+    return this.db.query(
+      `SELECT r.inventory_record_id,r.record_type,r.university_asset_id,r.lot_id,
+              r.record_status,r.lifecycle_status,r.owner_department_id,r.location_text,
+              r.condition,r.aggregate_revision,m.product_model_code,m.product_name,
+              m.category,m.brand,m.model_number,b.batch_code,lr.logical_rfid_code
+       FROM inv_records r
+       JOIN pv_subjects s ON s.subject_id=r.subject_id AND s.status='ACTIVE'
+       JOIN inv_product_models m ON m.product_model_id=r.product_model_id
+       JOIN inv_procurement_batches b ON b.procurement_batch_id=r.procurement_batch_id
+       JOIN proc_cases pc ON pc.proc_case_id=b.proc_case_id
+       LEFT JOIN acq_requests ar ON ar.acquisition_id=pc.acquisition_id
+       LEFT JOIN acq_request_versions av ON av.acquisition_version_id=pc.acquisition_version_id
+       LEFT JOIN inv_logical_rfids lr ON lr.inventory_record_id=r.inventory_record_id
+       WHERE r.tenant_id=$1
+         AND r.record_status='ACTIVE'
+         AND r.lifecycle_status NOT IN('RETURN_PENDING','RETURNED','RETIRED','WRITTEN_OFF','DISPOSED')
+         AND ($2::boolean OR COALESCE(r.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id)::text=ANY($3::text[]))
+       ORDER BY r.updated_at DESC LIMIT 200`,
+      [this.tenant(actor), tenantWide, departments],
+    );
+  }
   async queue(actor: ReturnActor) {
     await this.require(actor, 'RETURNS_VIEW');
     return this.db.query(
