@@ -539,7 +539,7 @@ export const DOFA_FINANCE_MODULE_PATH_ROLES: Readonly<
     'internalauditor', 'tenantadmin', 'superadmin', 'campusadmin',
   ],
   '/finance/product-verification': [
-    'stores', 'receivingclerk', 'procurementhead', 'internalauditor',
+    'stores', 'receivingclerk', 'inventoryverifier', 'procurementhead', 'internalauditor',
     'tenantadmin', 'superadmin',
   ],
   '/finance/inventory': [
