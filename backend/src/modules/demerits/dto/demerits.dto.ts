@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  IsNotEmpty,
   Max,
   MaxLength,
   Min,
@@ -27,10 +28,14 @@ export const DEMERIT_REVIEW_STATUSES = [
 export class SubmitDemeritIncidentDto {
   /** Student user UUID, enrollment number, or email */
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
   student_id: string;
 
   /** Course UUID or course code (subject scope) */
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   subject_id: string;
 
   @IsIn(DEMERIT_CATEGORIES)

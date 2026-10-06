@@ -2003,6 +2003,12 @@ export class AcademicsService {
             await manager.query(
               `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)
+               ON CONFLICT (tenant_id, course_id, day_of_week, start_time, end_time)
+                 WHERE deleted_at IS NULL
+               DO UPDATE SET
+                 faculty_user_id = EXCLUDED.faculty_user_id,
+                 room = EXCLUDED.room,
+                 deleted_at = NULL
                `,
               [
                 tenantId,

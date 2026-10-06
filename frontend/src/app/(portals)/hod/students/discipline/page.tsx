@@ -1,6 +1,6 @@
 'use client';
 
-import { FacultyDisciplineIncidentsPage } from '@/app/(portals)/faculty/discipline/incidents/page';
+import FacultyDisciplineIncidentsPage from '@/app/(portals)/faculty/discipline/incidents/page';
 
 export default function HodStudentDisciplinePage() {
   // Render the same scoped incident form used by faculty inside the HOD

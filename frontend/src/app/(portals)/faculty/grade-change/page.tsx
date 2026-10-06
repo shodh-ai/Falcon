@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { ArrowRight, Loader2, Send } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,14 @@ type GradeChangeRow = {
   dofa_awaiting_role?: string | null;
 };
 
+type DepartmentStudent = {
+  user_id: string;
+  name: string;
+  enrollment_number?: string | null;
+  enrollment_no?: string | null;
+  admission_number?: string | null;
+};
+
 function gradeStatusLabel(row: { status?: string; dofa_awaiting_role?: string | null; dofa_status?: string | null }) {
   if (row.status === 'APPLIED') return 'Applied';
   if (row.status === 'REJECTED') return 'Rejected';
@@ -55,8 +64,12 @@ function statusBadgeClass(row: { status?: string; dofa_awaiting_role?: string | 
 
 export default function GradeChangePage() {
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const isHod = pathname.startsWith('/hod/');
   const { courses } = useFacultyCourses();
   const courseOptions = uniqueFacultyCoursesByCourseId(courses);
+  const [departmentStudents, setDepartmentStudents] = useState<DepartmentStudent[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
   const [rows, setRows] = useState<GradeChangeRow[]>([]);
   const [studentId, setStudentId] = useState('');
   const [fromG, setFromG] = useState('');
@@ -79,6 +92,26 @@ export default function GradeChangePage() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (!isHod) return;
+    let cancelled = false;
+    setStudentsLoading(true);
+    api
+      .get<DepartmentStudent[]>('/api/academics/hod/student-monitor')
+      .then((data) => {
+        if (!cancelled) setDepartmentStudents(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setDepartmentStudents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setStudentsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, isHod]);
 
   async function handleSubmit() {
     if (!studentId.trim()) {
@@ -146,8 +179,10 @@ export default function GradeChangePage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Grade Change DOFA"
-        description="Faculty submits → HOD approves → Exam Cell (COE) applies. You cannot approve your own request."
+        title={isHod ? 'Department Grade Change Requests' : 'Grade Change DOFA'}
+        description={isHod
+          ? 'Submit a correction for an enrolled student in your department. Requests route through DOFA and Exam Cell.'
+          : 'Faculty submits → HOD approves → Exam Cell (COE) applies. You cannot approve your own request.'}
         meta={
           <div className="flex flex-wrap gap-2 text-xs font-medium text-muted-foreground">
             <span className="rounded-md border border-sgvu-gold/40 bg-sgvu-gold/10 px-2.5 py-1 text-sgvu-navy">
@@ -164,22 +199,40 @@ export default function GradeChangePage() {
       <div className="w-full space-y-6">
         <FacultyPanel
           title="Submit request"
-          description="Requests are allowed only for students enrolled in a subject you currently teach."
+          description={isHod
+            ? 'Only students and subjects within your department are available.'
+            : 'Requests are allowed only for students enrolled in a subject you currently teach.'}
           className="w-full"
         >
           <div className="grid gap-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm">
-                <span className="mb-1.5 block font-medium text-sgvu-navy">Student user ID</span>
-                <Input
-                  placeholder="e.g. student UUID or enrollment ID"
-                  value={studentId}
-                  onChange={(e) => setStudentId(e.target.value)}
-                />
+                <span className="mb-1.5 block font-medium text-sgvu-navy">{isHod ? 'Department student' : 'Student user ID'}</span>
+                {isHod ? (
+                  <Select
+                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                    value={studentId}
+                    onChange={(e) => setStudentId(e.target.value)}
+                    disabled={studentsLoading}
+                  >
+                    <option value="">{studentsLoading ? 'Loading students…' : 'Select a student'}</option>
+                    {departmentStudents.map((student) => (
+                      <option key={student.user_id} value={student.user_id}>
+                        {student.name} · {student.enrollment_number ?? student.enrollment_no ?? student.admission_number ?? student.user_id}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
+                    placeholder="e.g. student UUID or enrollment ID"
+                    value={studentId}
+                    onChange={(e) => setStudentId(e.target.value)}
+                  />
+                )}
               </label>
 
               <label className="text-sm">
-                <span className="mb-1.5 block font-medium text-sgvu-navy">Your teaching subject</span>
+                <span className="mb-1.5 block font-medium text-sgvu-navy">{isHod ? 'Department subject' : 'Your teaching subject'}</span>
                 <Select
                   className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                   value={course}

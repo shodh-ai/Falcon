@@ -10,7 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { basename, extname, resolve } from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
 import { assignmentPublishedMessage } from '../../core/notifications/notification-message.catalog';
 import { AcademicAssignment } from '../../entities/academic-assignment.entity';
@@ -56,6 +56,58 @@ export class AssignmentsService {
     tenantId: string,
     courseId?: string,
   ) {
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    if (hodDepartmentIds.length) {
+      const scoped = await this.timetable.query(
+        `SELECT DISTINCT a.assignment_id
+         FROM academic_assignments a
+         WHERE a.tenant_id = $1
+           AND (
+             EXISTS (
+               SELECT 1
+               FROM academic_course_allocations ca
+               JOIN users assigned ON assigned.user_id = ca.faculty_user_id
+               WHERE ca.tenant_id = a.tenant_id
+                 AND ca.course_id = a.course_id
+                 AND ca.status = 'ACTIVE'
+                 AND assigned.dept_id = ANY($2::int[])
+             )
+             OR EXISTS (
+               SELECT 1
+               FROM student_course_enrollments e
+               JOIN users student ON student.user_id = e.student_user_id
+               WHERE e.tenant_id = a.tenant_id
+                 AND e.course_id = a.course_id
+                 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                 AND student.dept_id = ANY($2::int[])
+             )
+           )
+           AND ($3::uuid IS NULL OR a.course_id = $3::uuid)
+         ORDER BY a.assignment_id`,
+        [tenantId, hodDepartmentIds, courseId ?? null],
+      );
+      const ids = scoped.map(
+        (row: { assignment_id: string }) => row.assignment_id,
+      );
+      if (!ids.length) return [];
+      const rows = await this.assignments.find({
+        where: { tenant_id: tenantId, assignment_id: In(ids) },
+        relations: ['course'],
+        order: { due_date: 'ASC' },
+      });
+      const counts = await Promise.all(
+        rows.map((row) =>
+          this.submissions.count({
+            where: { tenant_id: tenantId, assignment_id: row.assignment_id },
+          }),
+        ),
+      );
+      return rows.map((row, index) => ({
+        ...row,
+        submission_count: counts[index] ?? 0,
+      }));
+    }
+
     const qb = this.assignments
       .createQueryBuilder('assignment')
       .leftJoinAndSelect('assignment.course', 'course')
@@ -173,10 +225,14 @@ export class AssignmentsService {
       where: {
         tenant_id: tenantId,
         assignment_id: assignmentId,
-        faculty_user_id: facultyUserId,
       },
     });
     if (!assignment) throw new NotFoundException('Assignment not found');
+    await this.assertFacultyMayManageAssignment(
+      facultyUserId,
+      tenantId,
+      assignment,
+    );
 
     if (dto.title?.trim()) assignment.title = dto.title.trim();
     if (dto.description !== undefined)
@@ -249,13 +305,17 @@ export class AssignmentsService {
       where: {
         tenant_id: tenantId,
         assignment_id: assignmentId,
-        faculty_user_id: facultyUserId,
       },
       relations: ['course'],
     });
     if (!assignment) throw new NotFoundException('Assignment not found');
+    await this.assertFacultyMayManageAssignment(
+      facultyUserId,
+      tenantId,
+      assignment,
+    );
 
-    const enrolled = await this.enrollments.find({
+    let enrolled = await this.enrollments.find({
       where: {
         tenant_id: tenantId,
         course_id: assignment.course_id,
@@ -264,10 +324,26 @@ export class AssignmentsService {
       relations: ['student'],
       order: { student_user_id: 'ASC' },
     });
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    if (hodDepartmentIds.length) {
+      enrolled = enrolled.filter(
+        (row) =>
+          row.student?.dept_id != null &&
+          hodDepartmentIds.includes(Number(row.student.dept_id)),
+      );
+    }
 
-    const submissions = await this.submissions.find({
+    let submissions = await this.submissions.find({
       where: { tenant_id: tenantId, assignment_id: assignmentId },
     });
+    if (hodDepartmentIds.length) {
+      const allowedStudentIds = new Set(
+        enrolled.map((row) => row.student_user_id),
+      );
+      submissions = submissions.filter((row) =>
+        allowedStudentIds.has(row.student_user_id),
+      );
+    }
     const byStudent = new Map(submissions.map((s) => [s.student_user_id, s]));
 
     return {
@@ -332,17 +408,29 @@ export class AssignmentsService {
       where: {
         tenant_id: tenantId,
         assignment_id: assignmentId,
-        faculty_user_id: facultyUserId,
       },
       relations: ['course'],
     });
     if (!assignment) throw new NotFoundException('Assignment not found');
+    await this.assertFacultyMayManageAssignment(
+      facultyUserId,
+      tenantId,
+      assignment,
+    );
 
-    const rows = await this.submissions.find({
+    let rows = await this.submissions.find({
       where: { tenant_id: tenantId, assignment_id: assignmentId },
       relations: ['student'],
       order: { submitted_at: 'ASC' },
     });
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    if (hodDepartmentIds.length) {
+      rows = rows.filter(
+        (row) =>
+          row.student?.dept_id != null &&
+          hodDepartmentIds.includes(Number(row.student.dept_id)),
+      );
+    }
 
     return {
       assignment,
@@ -379,11 +467,16 @@ export class AssignmentsService {
       relations: ['assignment'],
     });
     if (!submission) throw new NotFoundException('Submission not found');
-    if (submission.assignment.faculty_user_id !== facultyUserId) {
-      throw new ForbiddenException(
-        'You can return only your assignment submissions',
-      );
-    }
+    await this.assertStudentInHodScope(
+      facultyUserId,
+      tenantId,
+      submission.student_user_id,
+    );
+    await this.assertFacultyMayManageAssignment(
+      facultyUserId,
+      tenantId,
+      submission.assignment,
+    );
 
     const extensionDays =
       dto.revision_days && dto.revision_days > 0 ? dto.revision_days : 3;
@@ -427,11 +520,16 @@ export class AssignmentsService {
       relations: ['assignment'],
     });
     if (!submission) throw new NotFoundException('Submission not found');
-    if (submission.assignment.faculty_user_id !== facultyUserId) {
-      throw new ForbiddenException(
-        'You can grade only your assignment submissions',
-      );
-    }
+    await this.assertStudentInHodScope(
+      facultyUserId,
+      tenantId,
+      submission.student_user_id,
+    );
+    await this.assertFacultyMayManageAssignment(
+      facultyUserId,
+      tenantId,
+      submission.assignment,
+    );
 
     const marks = Number(dto.marks_awarded);
     if (
@@ -607,11 +705,16 @@ export class AssignmentsService {
       relations: ['assignment'],
     });
     if (!submission) throw new NotFoundException('Submission not found');
-    if (submission.assignment.faculty_user_id !== facultyUserId) {
-      throw new ForbiddenException(
-        'You can download only your assignment submissions',
-      );
-    }
+    await this.assertStudentInHodScope(
+      facultyUserId,
+      tenantId,
+      submission.student_user_id,
+    );
+    await this.assertFacultyMayManageAssignment(
+      facultyUserId,
+      tenantId,
+      submission.assignment,
+    );
     return submission;
   }
 
@@ -722,6 +825,55 @@ export class AssignmentsService {
       throw new ForbiddenException(
         'This assignment is not assigned to your section',
       );
+    }
+  }
+
+  /**
+   * Faculty can manage only assignments they created. HODs may additionally
+   * manage assignments created by lecturers whose course is in the HOD's own
+   * department scope. The check is tenant and course scoped to prevent using
+   * an assignment id to cross department boundaries.
+   */
+  private async assertFacultyMayManageAssignment(
+    facultyUserId: string,
+    tenantId: string,
+    assignment: AcademicAssignment,
+  ) {
+    if (assignment.tenant_id !== tenantId) {
+      throw new NotFoundException('Assignment not found');
+    }
+    if (assignment.faculty_user_id === facultyUserId) return;
+
+    try {
+      await this.assertFacultyTeachesCourse(
+        assignment.course_id,
+        facultyUserId,
+        tenantId,
+      );
+    } catch {
+      // Do not leak whether an assignment exists outside the caller's scope.
+      throw new NotFoundException('Assignment not found');
+    }
+  }
+
+  private async assertStudentInHodScope(
+    userId: string,
+    tenantId: string,
+    studentUserId: string,
+  ): Promise<void> {
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(userId);
+    if (!hodDepartmentIds.length) return;
+    const rows = await this.timetable.query(
+      `SELECT 1
+       FROM users
+       WHERE user_id = $1
+         AND tenant_id = $2
+         AND dept_id = ANY($3::int[])
+       LIMIT 1`,
+      [studentUserId, tenantId, hodDepartmentIds],
+    );
+    if (!rows.length) {
+      throw new ForbiddenException('Student is outside your department scope');
     }
   }
 
@@ -1071,7 +1223,49 @@ export class AssignmentsService {
     );
     if (marks.length) return;
 
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    if (hodDepartmentIds.length) {
+      const scoped = await this.timetable.query(
+        `SELECT 1
+         WHERE EXISTS (
+           SELECT 1 FROM academic_course_allocations ca
+           JOIN users assigned ON assigned.user_id = ca.faculty_user_id
+           WHERE ca.tenant_id = $1 AND ca.course_id = $2
+             AND ca.status = 'ACTIVE'
+             AND assigned.dept_id = ANY($3::int[])
+         )
+         OR EXISTS (
+           SELECT 1 FROM academic_timetables t
+           JOIN users assigned ON assigned.user_id = t.faculty_user_id
+           WHERE t.tenant_id = $1 AND t.course_id = $2
+             AND t.deleted_at IS NULL
+             AND assigned.dept_id = ANY($3::int[])
+         )
+         OR EXISTS (
+           SELECT 1 FROM student_course_enrollments e
+           JOIN users student ON student.user_id = e.student_user_id
+           WHERE e.tenant_id = $1 AND e.course_id = $2
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+             AND student.dept_id = ANY($3::int[])
+         )`,
+        [tenantId, courseId, hodDepartmentIds],
+      );
+      if (scoped.length) return;
+    }
+
     throw new NotFoundException('Course not found in your teaching timetable');
+  }
+
+  private async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
+    const rows = await this.timetable.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1 AND deleted_at IS NULL
+       UNION
+       SELECT u.dept_id FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
+      [hodUserId],
+    );
+    return [...new Set(rows.map((row) => Number(row.dept_id)).filter(Boolean))];
   }
 
   private async persistAssignmentFile(

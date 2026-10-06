@@ -92,6 +92,12 @@ const ENHANCED_ERRORS: Array<{
   category?: string;
 }> = [
   {
+    pattern: /timetable (?:collision|conflict)|overlapping timetable/i,
+    title: 'Timetable conflict',
+    body: (raw) => raw,
+    category: 'ACADEMICS',
+  },
+  {
     pattern: PENDING_REQUEST_RE,
     title: 'You already have a pending request',
     body: () =>

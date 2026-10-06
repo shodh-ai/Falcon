@@ -247,7 +247,7 @@ export class UosGovernanceService {
 
   // --- SIS ---
 
-  listGradeChanges(
+  async listGradeChanges(
     tenantId?: string,
     userId?: string,
     userRoles?: string | string[],
@@ -270,6 +270,22 @@ export class UosGovernanceService {
           'labadmin',
         ].includes(r),
       );
+
+    const hodScoped = roles.includes('hod');
+    const hodDepartmentIds = hodScoped && userId
+      ? await this.resolveHodDepartmentIds(userId)
+      : [];
+    const scopeParams: unknown[] = [tid, facultyOnly && userId ? userId : null];
+    const scopeClause = hodScoped
+      ? (() => {
+          scopeParams.push(hodDepartmentIds);
+          // A HOD may see and act on requests for students in their own
+          // department only.  Do not broaden this to every request for a
+          // course taught by the department: the student is the protected
+          // object and is the authoritative scope boundary.
+          return ` AND s.dept_id = ANY($${scopeParams.length}::int[])`;
+        })()
+      : '';
 
     return this.db.query(
       `SELECT
@@ -308,9 +324,10 @@ export class UosGovernanceService {
           AND ds.decision IS NULL
          WHERE g.tenant_id = $1
            AND ($2::uuid IS NULL OR g.requested_by = $2::uuid)
+           ${scopeClause}
        ) q
        ORDER BY q.created_at DESC`,
-      [tid, facultyOnly && userId ? userId : null],
+      scopeParams,
     );
   }
 
@@ -358,6 +375,7 @@ export class UosGovernanceService {
       to_grade: string;
       reason: string;
     },
+    userRoles: string | string[] = [],
   ) {
     if (body.student_user_id === userId) {
       throw new BadRequestException({
@@ -367,6 +385,12 @@ export class UosGovernanceService {
       });
     }
     const tid = this.tenant(tenantId);
+    const normalizedRoles = (Array.isArray(userRoles) ? userRoles : [userRoles])
+      .map((role) => String(role).toLowerCase());
+    const hodScope = normalizedRoles.includes('hod');
+    const hodDepartmentIds = hodScope
+      ? await this.resolveHodDepartmentIds(userId)
+      : [];
     const courseAccess = await this.db.query(
       `SELECT c.course_id, c.course_code, c.course_name
        FROM academic_courses c
@@ -393,10 +417,36 @@ export class UosGovernanceService {
                AND t.course_id = c.course_id
                AND t.faculty_user_id = $2
                AND t.deleted_at IS NULL
+             )
+           OR (
+             $5::boolean = true
+             AND EXISTS (
+               SELECT 1
+               FROM academic_course_allocations ha
+               JOIN users hf ON hf.user_id = ha.faculty_user_id
+               WHERE ha.tenant_id = c.tenant_id
+                 AND ha.course_id = c.course_id
+                 AND ha.status = 'ACTIVE'
+                 AND hf.dept_id = ANY($6::int[])
+             )
+             AND EXISTS (
+               SELECT 1
+               FROM users hs
+               WHERE hs.user_id = $3::uuid
+                 AND hs.tenant_id = c.tenant_id
+                 AND hs.dept_id = ANY($6::int[])
+             )
            )
          )
        LIMIT 1`,
-      [tid, userId, body.student_user_id, body.course_code],
+      [
+        tid,
+        userId,
+        body.student_user_id,
+        body.course_code,
+        hodScope,
+        hodDepartmentIds,
+      ],
     );
     if (!courseAccess[0]) {
       throw new ForbiddenException({
@@ -494,6 +544,26 @@ export class UosGovernanceService {
     changeId: string,
   ) {
     const tid = this.tenant(tenantId);
+    const roles = (Array.isArray(userRoles) ? userRoles : [userRoles])
+      .map((role) => String(role).toLowerCase());
+    if (roles.includes('hod')) {
+      const departmentIds = await this.resolveHodDepartmentIds(userId);
+      const scoped = await this.db.query(
+        `SELECT 1
+         FROM sis_grade_change_requests g
+         JOIN users s ON s.user_id = g.student_user_id
+         WHERE g.tenant_id = $1 AND g.change_id = $2
+           AND s.dept_id = ANY($3::int[])
+         LIMIT 1`,
+        [tid, changeId, departmentIds],
+      );
+      if (!scoped[0]) {
+        throw new ForbiddenException({
+          message: 'Grade change is outside your department scope.',
+          code: 'GRADE_CHANGE_DEPARTMENT_SCOPE_REQUIRED',
+        });
+      }
+    }
     const cases = await this.db.query(
       `SELECT case_id FROM dofa_cases
        WHERE tenant_id = $1 AND domain = 'GRADE_CHANGE' AND source_id = $2
@@ -528,6 +598,21 @@ export class UosGovernanceService {
       [changeId],
     );
     return { ...out[0], dofa: decided };
+  }
+
+  private async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
+    const direct = await this.db.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+      [hodUserId],
+    );
+    const user = await this.db.query<Array<{ dept_id: number | null }>>(
+      `SELECT dept_id FROM users WHERE user_id = $1 LIMIT 1`,
+      [hodUserId],
+    );
+    return Array.from(new Set([
+      ...direct.map((row) => Number(row.dept_id)),
+      ...(user[0]?.dept_id ? [Number(user[0].dept_id)] : []),
+    ]));
   }
 
   listCurriculum(tenantId?: string) {

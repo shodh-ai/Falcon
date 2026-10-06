@@ -90,6 +90,7 @@ export class CourseLmsService {
   ) {
     await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
     const course = await this.getCourseOrFail(courseId, tenantId);
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
     const rows = await this.dataSource.query<
       Array<{
         allocation_id: string;
@@ -103,11 +104,19 @@ export class CourseLmsService {
        FROM academic_course_allocations a
        JOIN academic_subjects s ON s.subject_id = a.subject_id
        WHERE a.tenant_id = $1
-         AND a.faculty_user_id = $2
          AND a.course_id = $3
          AND a.status = 'ACTIVE'
+           AND (
+             a.faculty_user_id = $2
+             OR EXISTS (
+             SELECT 1
+             FROM users assigned
+             WHERE assigned.user_id = a.faculty_user_id
+               AND assigned.dept_id = ANY($4::int[])
+           )
+         )
        ORDER BY a.program_name NULLS LAST, a.semester NULLS LAST`,
-      [tenantId, facultyUserId, courseId],
+      [tenantId, facultyUserId, courseId, hodDepartmentIds],
     );
 
     return {
@@ -696,7 +705,55 @@ export class CourseLmsService {
     );
     if (allocation.length) return;
 
+    // HODs may manage courses offered by their own department even when they
+    // are not the assigned lecturer. Faculty users remain restricted to the
+    // direct timetable/allocation checks above.
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    if (hodDepartmentIds.length) {
+      const scoped = await this.dataSource.query(
+        `SELECT 1
+         WHERE EXISTS (
+           SELECT 1
+           FROM academic_course_allocations a
+           JOIN users assigned ON assigned.user_id = a.faculty_user_id
+           WHERE a.tenant_id = $1 AND a.course_id = $2
+             AND a.status = 'ACTIVE'
+             AND assigned.dept_id = ANY($3::int[])
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM academic_timetables t
+           JOIN users assigned ON assigned.user_id = t.faculty_user_id
+           WHERE t.tenant_id = $1 AND t.course_id = $2
+             AND t.deleted_at IS NULL
+             AND assigned.dept_id = ANY($3::int[])
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM student_course_enrollments e
+           JOIN users student ON student.user_id = e.student_user_id
+           WHERE e.tenant_id = $1 AND e.course_id = $2
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+             AND student.dept_id = ANY($3::int[])
+         )`,
+        [tenantId, courseId, hodDepartmentIds],
+      );
+      if (scoped.length) return;
+    }
+
     throw new NotFoundException('Course not found in your teaching timetable');
+  }
+
+  private async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
+    const rows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1 AND deleted_at IS NULL
+       UNION
+       SELECT u.dept_id FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
+      [hodUserId],
+    );
+    return [...new Set(rows.map((row) => Number(row.dept_id)).filter(Boolean))];
   }
 
   private async getModuleForFaculty(
@@ -708,10 +765,14 @@ export class CourseLmsService {
       where: {
         module_id: moduleId,
         tenant_id: tenantId,
-        faculty_user_id: facultyUserId,
       },
     });
     if (!mod) throw new NotFoundException('Module not found');
+    // Preserve direct faculty ownership while allowing an HOD to manage
+    // modules created by lecturers in the HOD's department.
+    if (mod.faculty_user_id !== facultyUserId) {
+      await this.assertFacultyTeaches(mod.course_id, facultyUserId, tenantId);
+    }
     return mod;
   }
 
@@ -808,13 +869,29 @@ export class CourseLmsService {
   ) {
     if (!allocationIds.length) return;
 
-    const valid = await this.allocations
-      .createQueryBuilder('a')
-      .where('a.tenant_id = :tenantId', { tenantId })
-      .andWhere('a.faculty_user_id = :facultyUserId', { facultyUserId })
-      .andWhere('a.course_id = :courseId', { courseId })
-      .andWhere('a.allocation_id IN (:...allocationIds)', { allocationIds })
-      .getMany();
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    const validIds = await this.dataSource.query<Array<{ allocation_id: string }>>(
+      `SELECT a.allocation_id
+       FROM academic_course_allocations a
+       LEFT JOIN users assigned ON assigned.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1
+         AND a.course_id = $2
+         AND a.allocation_id = ANY($3::uuid[])
+         AND (
+           a.faculty_user_id = $4
+           OR assigned.dept_id = ANY($5::int[])
+         )`,
+      [tenantId, courseId, allocationIds, facultyUserId, hodDepartmentIds],
+    );
+    const valid = validIds.length
+      ? await this.allocations.find({
+          where: {
+            tenant_id: tenantId,
+            course_id: courseId,
+            allocation_id: In(validIds.map((row) => row.allocation_id)),
+          },
+        })
+      : [];
 
     if (!valid.length) {
       throw new BadRequestException(

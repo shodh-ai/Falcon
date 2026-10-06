@@ -30,6 +30,7 @@ export class WeeklyTestsService {
       end_time: string;
     },
   ) {
+    await this.assertCourseAccess(tenantId, facultyId, data.course_id);
     const res = await this.dataSource.query(
       `INSERT INTO weekly_tests (tenant_id, course_id, test_type, question_paper_url, answer_key, start_time, end_time, created_by, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'SCHEDULED')
@@ -65,6 +66,35 @@ export class WeeklyTestsService {
   }
 
   async getFacultyTests(tenantId: string, facultyId: string) {
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyId);
+    if (hodDepartmentIds.length) {
+      return this.dataSource.query(
+        `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type,
+                t.start_time, t.end_time, t.status, t.is_active,
+                (SELECT COUNT(*)::int FROM weekly_test_responses r WHERE r.test_id = t.test_id) AS response_count,
+                (SELECT ROUND(AVG(r.score)::numeric, 2) FROM weekly_test_responses r WHERE r.test_id = t.test_id) AS avg_score
+         FROM weekly_tests t
+         JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+         WHERE t.tenant_id = $1
+           AND (
+             EXISTS (
+               SELECT 1 FROM academic_course_allocations a
+               JOIN users f ON f.user_id = a.faculty_user_id
+               WHERE a.tenant_id = t.tenant_id AND a.course_id = t.course_id
+                 AND a.status = 'ACTIVE' AND f.dept_id = ANY($2::int[])
+             )
+             OR EXISTS (
+               SELECT 1 FROM student_course_enrollments e
+               JOIN users s ON s.user_id = e.student_user_id
+               WHERE e.tenant_id = t.tenant_id AND e.course_id = t.course_id
+                 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                 AND s.dept_id = ANY($2::int[])
+             )
+           )
+         ORDER BY t.created_at DESC`,
+        [tenantId, hodDepartmentIds],
+      );
+    }
     return this.dataSource.query(
       `SELECT t.test_id, t.course_id, c.course_code, c.course_name, t.test_type, t.start_time, t.end_time, t.status, t.is_active,
               (SELECT COUNT(*)::int FROM weekly_test_responses r WHERE r.test_id = t.test_id) AS response_count,
@@ -82,13 +112,14 @@ export class WeeklyTestsService {
     facultyId: string,
     testId: string,
   ) {
+    await this.assertTestAccess(tenantId, facultyId, testId);
     const test = await this.dataSource.query(
       `SELECT t.test_id, t.course_id, t.test_type, t.start_time, t.end_time, t.status, t.is_active,
               c.course_code, c.course_name
        FROM weekly_tests t
        JOIN academic_courses c ON c.course_id = t.course_id
-       WHERE t.test_id = $1 AND t.tenant_id = $2 AND t.created_by = $3`,
-      [testId, tenantId, facultyId],
+       WHERE t.test_id = $1 AND t.tenant_id = $2`,
+      [testId, tenantId],
     );
     if (!test.length) {
       throw new NotFoundException('Test not found or unauthorized');
@@ -108,9 +139,10 @@ export class WeeklyTestsService {
   }
 
   async deleteTest(tenantId: string, facultyId: string, testId: string) {
+    await this.assertTestAccess(tenantId, facultyId, testId);
     const test = await this.dataSource.query(
-      `SELECT start_time FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2 AND created_by = $3`,
-      [testId, tenantId, facultyId],
+      `SELECT start_time FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2`,
+      [testId, tenantId],
     );
     if (!test.length) {
       throw new NotFoundException('Test not found or unauthorized');
@@ -132,10 +164,11 @@ export class WeeklyTestsService {
     testId: string,
     isActive: boolean,
   ) {
+    await this.assertTestAccess(tenantId, facultyId, testId);
     const test = await this.dataSource.query(
       `SELECT test_id, course_id, test_type, start_time, end_time
-       FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2 AND created_by = $3`,
-      [testId, tenantId, facultyId],
+       FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2`,
+      [testId, tenantId],
     );
     if (!test.length) {
       throw new NotFoundException('Test not found or unauthorized');
@@ -353,5 +386,100 @@ export class WeeklyTestsService {
       );
       return 0;
     }
+  }
+
+  private async assertCourseAccess(
+    tenantId: string,
+    userId: string,
+    courseId: string,
+  ) {
+    const direct = await this.dataSource.query(
+      `SELECT 1
+       WHERE EXISTS (
+         SELECT 1 FROM academic_course_allocations
+         WHERE tenant_id = $1 AND course_id = $2
+           AND faculty_user_id = $3 AND status = 'ACTIVE'
+       )
+       OR EXISTS (
+         SELECT 1 FROM academic_timetables
+         WHERE tenant_id = $1 AND course_id = $2
+           AND faculty_user_id = $3 AND deleted_at IS NULL
+       )`,
+      [tenantId, courseId, userId],
+    );
+    if (direct.length) return;
+
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(userId);
+    if (hodDepartmentIds.length) {
+      const scoped = await this.dataSource.query(
+        `SELECT 1
+         WHERE EXISTS (
+           SELECT 1 FROM academic_course_allocations a
+           JOIN users f ON f.user_id = a.faculty_user_id
+           WHERE a.tenant_id = $1 AND a.course_id = $2
+             AND a.status = 'ACTIVE' AND f.dept_id = ANY($3::int[])
+         )
+         OR EXISTS (
+           SELECT 1 FROM student_course_enrollments e
+           JOIN users s ON s.user_id = e.student_user_id
+           WHERE e.tenant_id = $1 AND e.course_id = $2
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+             AND s.dept_id = ANY($3::int[])
+         )`,
+        [tenantId, courseId, hodDepartmentIds],
+      );
+      if (scoped.length) return;
+    }
+    throw new NotFoundException('Course not found in your teaching scope');
+  }
+
+  private async assertTestAccess(
+    tenantId: string,
+    userId: string,
+    testId: string,
+  ) {
+    const direct = await this.dataSource.query(
+      `SELECT 1 FROM weekly_tests WHERE test_id = $1 AND tenant_id = $2 AND created_by = $3`,
+      [testId, tenantId, userId],
+    );
+    if (direct.length) return;
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(userId);
+    if (!hodDepartmentIds.length)
+      throw new NotFoundException('Test not found or unauthorized');
+    const scoped = await this.dataSource.query(
+      `SELECT 1
+       FROM weekly_tests t
+       WHERE t.test_id = $1 AND t.tenant_id = $2
+         AND (
+           EXISTS (
+             SELECT 1 FROM academic_course_allocations a
+             JOIN users f ON f.user_id = a.faculty_user_id
+             WHERE a.tenant_id = t.tenant_id AND a.course_id = t.course_id
+               AND a.status = 'ACTIVE' AND f.dept_id = ANY($3::int[])
+           )
+           OR EXISTS (
+             SELECT 1 FROM student_course_enrollments e
+             JOIN users s ON s.user_id = e.student_user_id
+             WHERE e.tenant_id = t.tenant_id AND e.course_id = t.course_id
+               AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+               AND s.dept_id = ANY($3::int[])
+           )
+         )`,
+      [testId, tenantId, hodDepartmentIds],
+    );
+    if (!scoped.length)
+      throw new NotFoundException('Test not found or unauthorized');
+  }
+
+  private async resolveHodDepartmentIds(userId: string): Promise<number[]> {
+    const rows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1 AND deleted_at IS NULL
+       UNION
+       SELECT u.dept_id FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
+      [userId],
+    );
+    return [...new Set(rows.map((row) => Number(row.dept_id)).filter(Boolean))];
   }
 }

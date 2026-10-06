@@ -53,7 +53,12 @@ import { HodPortalExtService } from './hod-portal-ext.service';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
 import { BelongsToModule } from '../../module-control/module-control.decorators';
 
-type AuthUser = { user_id: string; role?: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  role?: string;
+  roles?: string[];
+  tenant_id?: string;
+};
 
 @Controller('api/academics')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -1964,6 +1969,7 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       deptId,
+      this.isHod(req.user),
     );
   }
 
@@ -3003,5 +3009,10 @@ export class AcademicsController {
       );
     }
     return deptId;
+  }
+
+  private isHod(user: AuthUser) {
+    return [...(user.roles ?? []), user.role ?? '']
+      .some((role) => String(role).toLowerCase() === 'hod');
   }
 }
