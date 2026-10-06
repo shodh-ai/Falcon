@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -214,6 +215,30 @@ export class TicketController {
       roles: req.user.roles,
       tenantId: this.tenant(req),
     });
+  }
+
+  // Compatibility route for clients that model a ticket state change as a
+  // resource replacement. Keep the same scoped service path and idempotent
+  // state rules as PATCH /:ticketId/status.
+  @Put(':ticketId')
+  @Roles(
+    'CampusAdmin',
+    'SuperAdmin',
+    'AdmissionsOfficer',
+    'Registrar',
+    ...FINANCE_HELPDESK_ROLES,
+    'Warden',
+    'HOD',
+    'Dean',
+    'HR',
+    'HRAdmin',
+  )
+  updateTicket(
+    @Param('ticketId') ticketId: string,
+    @Body() dto: UpdateTicketStatusDto,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.updateStatus(ticketId, dto, req);
   }
 
   @Post(':ticketId/messages')

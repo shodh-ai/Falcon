@@ -191,6 +191,18 @@ export default function FacultyDisciplineIncidentsPage() {
       toast.error('Select a student');
       return;
     }
+    if (form.student_ref.trim()) {
+      const ref = form.student_ref.trim();
+      const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ref);
+      const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref);
+      const knownEnrollment = students.some(
+        (student) => student.enrollment_number?.toLowerCase() === ref.toLowerCase(),
+      );
+      if (!looksLikeEmail && !looksLikeUuid && !knownEnrollment) {
+        toast.error('Enter a valid university email, UUID, or listed enrollment number');
+        return;
+      }
+    }
     if (!form.subject_id) {
       toast.error('Select a subject/course');
       return;

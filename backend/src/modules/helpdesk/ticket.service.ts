@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -31,8 +33,16 @@ const TICKET_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TICKET_REF_RE = /^TKT-/i;
 
+function databaseErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 @Injectable()
 export class TicketService {
+  private readonly logger = new Logger(TicketService.name);
+
   constructor(
     @Inject(TICKET_PROVIDER)
     private readonly ticketProvider: ITicketProvider,
@@ -477,17 +487,39 @@ export class TicketService {
     dto: UpdateTicketStatusDto,
     actor?: { userId: string; role: string; tenantId: string; roles?: string[] },
   ) {
+    if (!TICKET_UUID_RE.test(ticketId) && !TICKET_REF_RE.test(ticketId)) {
+      throw new BadRequestException('Invalid ticket ID');
+    }
+    if (!['PENDING', 'IN_PROGRESS', 'RESOLVED', 'REJECTED'].includes(dto?.status)) {
+      throw new BadRequestException('Invalid ticket status');
+    }
     if (dto.status === 'REJECTED' && !dto.rejection_reason?.trim()) {
       throw new BadRequestException(
         'rejection_reason is required when rejecting a ticket',
       );
     }
 
-    const ticket = await this.tickets.findOne({
-      where: { ticket_id: ticketId },
+    let saved: HelpdeskTicket;
+    let changed = false;
+    try {
+      saved = await this.dataSource.transaction(async (manager) => {
+    const repository = manager.getRepository(HelpdeskTicket);
+    const ticket = await repository.findOne({
+      where: TICKET_UUID_RE.test(ticketId)
+        ? { ticket_id: ticketId }
+        : { ticket_ref: ticketId },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!ticket) throw new NotFoundException('Ticket not found');
-
+    if (actor?.tenantId) {
+      const [owner] = await this.dataSource.query<{ tenant_id: string }[]>(
+        `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
+        [ticket.student_user_id],
+      );
+      if (!owner || owner.tenant_id !== actor.tenantId) {
+        throw new ForbiddenException('Ticket is outside your tenant scope');
+      }
+    }
     if (actor) {
       await this.assertTicketCampus(
         {
@@ -499,6 +531,16 @@ export class TicketService {
         ticket.student_user_id,
       );
       await this.assertTicketActorScope(ticket, actor);
+    }
+
+    if (ticket.status !== 'PENDING' && ticket.status !== 'IN_PROGRESS') {
+      // Retrying the same decision must not reopen/extend the unlock window.
+      if (
+        ticket.status === dto.status &&
+        (dto.status !== 'REJECTED' || ticket.rejection_reason === dto.rejection_reason?.trim()) &&
+        (dto.assigned_to_user_id === undefined || ticket.assigned_to_user_id === dto.assigned_to_user_id)
+      ) return ticket;
+      throw new ConflictException('Ticket has already been decided. Refresh the queue.');
     }
 
     ticket.status = dto.status;
@@ -514,34 +556,67 @@ export class TicketService {
       ticket.rejection_reason = null;
     }
 
-    const saved = await this.tickets.save(ticket);
+    if (actor?.userId) ticket.resolved_by = actor.userId;
 
+    const result = await repository.save(ticket);
     if (dto.status === 'RESOLVED' && ticket.category === 'STUDENT_PROFILE') {
-      await this.dataSource.query(
+      const unlocked = await manager.query(
         `UPDATE student_profiles
          SET profile_unlocked_until = NOW() + INTERVAL '15 minutes'
-         WHERE user_id = $1`,
+         WHERE user_id = $1
+         RETURNING user_id`,
         [ticket.student_user_id],
       );
+      if (!unlocked.length) {
+        throw new BadRequestException('Student profile is missing; approval was not committed');
+      }
+    }
+    changed = true;
+    return result;
+      });
+    } catch (error) {
+      const code = databaseErrorCode(error);
+      if (code === '23514') {
+        throw new BadRequestException(
+          'This helpdesk status is not enabled in the database. Run the helpdesk status migration and retry.',
+        );
+      }
+      if (code === '23505') {
+        throw new ConflictException(
+          'This helpdesk ticket was updated by another operator. Refresh and retry.',
+        );
+      }
+      if (code === '42703' || code === '42P01') {
+        throw new BadRequestException('Helpdesk storage is not migrated. Apply the latest migrations and retry.');
+      }
+      throw error;
     }
 
-    if (dto.status === 'REJECTED') {
-      const student = await this.users.findOne({
-        where: { user_id: ticket.student_user_id },
-      });
-      const tenantId =
-        student?.tenant_id ??
-        ticket.tenant_id ??
-        'a0000000-0000-4000-8000-000000000001';
-      this.notify.ticketReply({
-        tenantId,
-        userId: ticket.student_user_id,
-        ticketId: ticket.ticket_id,
-        subject: ticket.subject,
-        title: 'Helpdesk request rejected',
-        message: dto.rejection_reason!.trim(),
-        actionLink: '/student/helpdesk',
-      });
+    // Notifications are best effort after commit. The unlock is not optional:
+    // it commits atomically with the approval above.
+    try {
+      if (changed && dto.status === 'REJECTED') {
+        const student = await this.users.findOne({
+          where: { user_id: saved.student_user_id },
+        });
+        const tenantId =
+          student?.tenant_id ??
+          saved.tenant_id ??
+          'a0000000-0000-4000-8000-000000000001';
+        await this.notify.ticketReply({
+          tenantId,
+          userId: saved.student_user_id,
+          ticketId: saved.ticket_id,
+          subject: saved.subject,
+          title: 'Helpdesk request rejected',
+          message: dto.rejection_reason!.trim(),
+          actionLink: '/student/helpdesk',
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Helpdesk post-status side effect failed for ${saved.ticket_id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     return saved;

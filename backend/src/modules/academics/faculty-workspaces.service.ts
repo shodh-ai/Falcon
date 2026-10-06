@@ -189,6 +189,9 @@ export class FacultyWorkspacesService {
     tenantId: string,
     dto: { slots: Array<any> },
   ) {
+    if (!Array.isArray(dto?.slots)) {
+      throw new BadRequestException('Timetable slots must be an array');
+    }
     const isUuid = (value: unknown) =>
       typeof value === 'string' &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -197,6 +200,7 @@ export class FacultyWorkspacesService {
 
     const normalizeTime = (value: unknown) => {
       const raw = String(value ?? '').trim();
+      if (!/^\d{1,2}:\d{2}(?::\d{2})?$/.test(raw)) return raw;
       const parts = raw.split(':');
       if (parts.length < 2) return raw;
       const hour = (parts[0] ?? '00').padStart(2, '0');
@@ -205,26 +209,49 @@ export class FacultyWorkspacesService {
       return `${hour}:${minute}:${second}`;
     };
 
+    const timeToMinutes = (value: string) => {
+      const match = /^(\d{2}):(\d{2}):(\d{2})$/.exec(value);
+      if (!match) return Number.NaN;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      const second = Number(match[3]);
+      if (hour > 23 || minute > 59 || second > 59) return Number.NaN;
+      return hour * 3600 + minute * 60 + second;
+    };
+
+    const overlaps = (left: any, right: any) =>
+      left.day_of_week === right.day_of_week &&
+      timeToMinutes(left.start_time) < timeToMinutes(right.end_time) &&
+      timeToMinutes(left.end_time) > timeToMinutes(right.start_time);
+
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
 
     try {
-      const deduped = new Map<string, any>();
-      for (const slot of dto.slots ?? []) {
-        if (!slot?.course_id) continue;
-        // Keep one preferred slot per course (matches faculty schedule UI).
-        deduped.set(String(slot.course_id), {
+      await runner.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [`timetable:${tenantId}`],
+      );
+      const slots = dto.slots.map((slot) => {
+        if (!slot || typeof slot.course_id !== 'string') {
+          throw new BadRequestException('Every slot requires a valid course ID');
+        }
+        // Faculty identity comes from authentication, never from the payload.
+        if (slot.faculty_user_id && slot.faculty_user_id !== facultyUserId) {
+          throw new BadRequestException('Cannot schedule another faculty member');
+        }
+        return {
           ...slot,
+          faculty_user_id: facultyUserId,
           course_id: String(slot.course_id).trim(),
           day_of_week: Number(slot.day_of_week),
           start_time: normalizeTime(slot.start_time),
           end_time: normalizeTime(slot.end_time),
           room: slot.room ? String(slot.room).trim() : null,
           section: slot.section ? String(slot.section).trim() || 'A' : 'A',
-        });
-      }
-      const slots = [...deduped.values()];
+        };
+      });
 
       for (const slot of slots) {
         if (!isUuid(slot.course_id)) {
@@ -244,14 +271,39 @@ export class FacultyWorkspacesService {
         if (!slot.start_time || !slot.end_time) {
           throw new BadRequestException('Start time and end time are required');
         }
-        if (slot.start_time >= slot.end_time) {
+        const startMinutes = timeToMinutes(slot.start_time);
+        const endMinutes = timeToMinutes(slot.end_time);
+        if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) {
+          throw new BadRequestException(
+            `Invalid time for course ${slot.course_id}; use HH:MM or HH:MM:SS`,
+          );
+        }
+        if (startMinutes >= endMinutes) {
           throw new BadRequestException('Start time must be before end time');
+        }
+      }
+
+      for (let index = 0; index < slots.length; index += 1) {
+        const slot = slots[index];
+        for (let otherIndex = index + 1; otherIndex < slots.length; otherIndex += 1) {
+          const other = slots[otherIndex];
+          if (overlaps(slot, other)) {
+            const sameFaculty =
+              !slot.faculty_user_id ||
+              !other.faculty_user_id ||
+              slot.faculty_user_id === other.faculty_user_id;
+            if (sameFaculty) {
+              throw new BadRequestException(
+                `Slot conflict detected on day ${slot.day_of_week}: ${slot.start_time.slice(0, 5)} - ${slot.end_time.slice(0, 5)}`,
+              );
+            }
+          }
         }
       }
 
       const facultySlotKeys = new Set<string>();
       for (const slot of slots) {
-        const key = `${slot.day_of_week}|${slot.start_time}|${slot.end_time}`;
+        const key = `${slot.day_of_week}|${slot.start_time}|${slot.end_time}|${slot.faculty_user_id ?? facultyUserId}`;
         if (facultySlotKeys.has(key)) {
           throw new BadRequestException(
             `You cannot teach two classes at ${slot.start_time} - ${slot.end_time} on day ${slot.day_of_week}`,
@@ -259,16 +311,6 @@ export class FacultyWorkspacesService {
         }
         facultySlotKeys.add(key);
       }
-
-      // Soft-delete existing slots (zero-deletion policy + safer with FKs).
-      await runner.query(
-        `UPDATE academic_timetables
-         SET deleted_at = NOW()
-         WHERE tenant_id = $1
-           AND faculty_user_id = $2
-           AND deleted_at IS NULL`,
-        [tenantId, facultyUserId],
-      );
 
       for (const slot of slots) {
         // Ensure the course exists and is allocated to this faculty (or already taught by them).
@@ -293,6 +335,7 @@ export class FacultyWorkspacesService {
                  WHERE t.tenant_id = c.tenant_id
                    AND t.course_id = c.course_id
                    AND t.faculty_user_id = $3
+                   AND t.deleted_at IS NULL
                )
              )
            LIMIT 1`,
@@ -303,6 +346,17 @@ export class FacultyWorkspacesService {
             `Course ${slot.course_id} is not allocated to you, so it cannot be scheduled.`,
           );
         }
+      }
+
+      // Validate permission before archiving current rows; never use historical
+      // teaching assignments to authorize a new schedule.
+      await runner.query(
+        `UPDATE academic_timetables SET deleted_at = NOW()
+         WHERE tenant_id = $1 AND faculty_user_id = $2 AND deleted_at IS NULL`,
+        [tenantId, facultyUserId],
+      );
+
+      for (const slot of slots) {
 
         const params: any[] = [
           tenantId,
@@ -323,6 +377,7 @@ export class FacultyWorkspacesService {
             AND t.end_time > $3
             AND (
               t.faculty_user_id = $5
+              OR (t.course_id = $6::uuid AND t.section = $7)
               OR EXISTS (
                 SELECT 1
                 FROM academic_course_allocations alloc_existing
@@ -385,6 +440,20 @@ export class FacultyWorkspacesService {
       if (/uuid|foreign key|violates|invalid input/i.test(message)) {
         throw new BadRequestException(
           'Could not save timetable. Use allocated live courses (not demo sample IDs) and resolve any conflicts.',
+        );
+      }
+      const errorCode =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code ?? '')
+          : '';
+      if (errorCode === '23P01' || errorCode === '23505') {
+        throw new BadRequestException(
+          'Timetable slot conflicts with another saved slot. Refresh the schedule and choose another time.',
+        );
+      }
+      if (errorCode === '42703' || errorCode === '42P01') {
+        throw new BadRequestException(
+          'Timetable storage is not migrated. Run the latest database migrations and retry.',
         );
       }
       throw error;

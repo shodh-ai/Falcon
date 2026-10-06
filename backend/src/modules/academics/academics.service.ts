@@ -38,6 +38,36 @@ import { resolveDeanScope as resolveDeanScopeUtil } from './dean-scope.util';
 import { DeanAuditService } from './dean-audit.service';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 
+type TimetableRange = {
+  timetable_id?: string;
+  course_id: string;
+  faculty_user_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+};
+
+function timeToMinutes(value: string): number {
+  const match = String(value ?? '').match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return Number.NaN;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function timetableRangesOverlap(left: TimetableRange, right: TimetableRange) {
+  if (left.day_of_week !== right.day_of_week) return false;
+  const leftStart = timeToMinutes(left.start_time);
+  const leftEnd = timeToMinutes(left.end_time);
+  const rightStart = timeToMinutes(right.start_time);
+  const rightEnd = timeToMinutes(right.end_time);
+  return leftStart < rightEnd && rightStart < leftEnd;
+}
+
+function databaseErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 /**
  * NOTE: `markAttendance` writes straight to Postgres for now. When traffic
  * picks up at 9:00 AM lecture starts, swap the body to enqueue a BullMQ job
@@ -1380,7 +1410,8 @@ export class AcademicsService {
       )
       .digest('hex');
 
-    return this.users.manager.transaction(async (manager) => {
+    try {
+      return await this.users.manager.transaction(async (manager) => {
       const [retry] = await manager.query(
         `SELECT h.request_hash, d.*
          FROM academic_faculty_load_declaration_history h
@@ -1408,7 +1439,7 @@ export class AcademicsService {
       );
       if (!faculty) throw new NotFoundException('Faculty member not found');
 
-      if (actorRole !== 'SuperAdmin') {
+      if ((actorRole ?? '').trim().toLowerCase() !== 'superadmin') {
         const departmentIds = await this.resolveHodDepartmentIds(actorUserId);
         if (!departmentIds.includes(Number(faculty.dept_id))) {
           throw new ForbiddenException('Faculty member is outside HOD scope');
@@ -1534,7 +1565,21 @@ export class AcademicsService {
         ],
       );
       return declaration;
-    });
+      });
+    } catch (error) {
+      const code = databaseErrorCode(error);
+      if (code === '23505') {
+        throw new ConflictException(
+          'Teaching-load update was already committed by another request. Refresh the workload list.',
+        );
+      }
+      if (code === '42P01' || code === '42703') {
+        throw new BadRequestException(
+          'Teaching-load storage is not migrated. Run the latest database migrations and retry.',
+        );
+      }
+      throw error;
+    }
   }
 
   private async listFacultyWorkloadForDepartments(
@@ -1768,9 +1813,72 @@ export class AcademicsService {
     },
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
-    if (!deptIds.length) throw new Error('No departments found for HOD');
+    if (!deptIds.length) {
+      throw new ForbiddenException('No departments found for HOD');
+    }
+    if (!dto.semester?.trim()) {
+      throw new BadRequestException('Semester is required');
+    }
+    if (!Array.isArray(dto.slots)) {
+      throw new BadRequestException('Timetable slots must be an array');
+    }
 
-    await this.users.manager.transaction(async (manager) => {
+    const timeRe = /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+    const seen = new Set<string>();
+    const requestedRanges: TimetableRange[] = [];
+    for (const slot of dto.slots) {
+      if (!slot.course_id || !slot.faculty_user_id) {
+        throw new BadRequestException(
+          'Each timetable slot must include a course and faculty member',
+        );
+      }
+      if (!Number.isInteger(Number(slot.day_of_week)) || slot.day_of_week < 1 || slot.day_of_week > 7) {
+        throw new BadRequestException('day_of_week must be between 1 and 7');
+      }
+      if (!timeRe.test(slot.start_time) || !timeRe.test(slot.end_time)) {
+        throw new BadRequestException('Timetable times must use HH:MM or HH:MM:SS');
+      }
+      if (
+        timeToMinutes(slot.start_time) >= timeToMinutes(slot.end_time)
+      ) {
+        throw new BadRequestException('Timetable end time must be after start time');
+      }
+      const key = `${slot.course_id}:${slot.day_of_week}:${slot.start_time}:${slot.end_time}`;
+      if (seen.has(key)) {
+        throw new BadRequestException('Duplicate timetable slot in request');
+      }
+      seen.add(key);
+      requestedRanges.push(slot);
+    }
+
+    for (let index = 0; index < requestedRanges.length; index += 1) {
+      const current = requestedRanges[index];
+      for (
+        let otherIndex = index + 1;
+        otherIndex < requestedRanges.length;
+        otherIndex += 1
+      ) {
+        const other = requestedRanges[otherIndex];
+        if (
+          timetableRangesOverlap(current, other) &&
+          (current.faculty_user_id === other.faculty_user_id ||
+            current.course_id === other.course_id)
+        ) {
+          throw new BadRequestException(
+            'Timetable collision: a faculty member or course already has an overlapping slot',
+          );
+        }
+      }
+    }
+
+    try {
+      await this.users.manager.transaction(async (manager) => {
+      // Serialize schedule replacements within a tenant before reading existing
+      // slots. All batch timetable writers use this same transaction lock.
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [`timetable:${tenantId}`],
+      );
       const allocations = await manager.query(
         `SELECT c.course_id, u.user_id as faculty_user_id
          FROM academic_course_allocations a
@@ -1779,30 +1887,98 @@ export class AcademicsService {
          WHERE a.tenant_id = $1
            AND u.dept_id = ANY($2::int[])
            AND a.semester = $3
+           AND a.academic_year = $4
            AND a.status = 'ACTIVE'`,
-        [tenantId, deptIds, dto.semester],
+        [tenantId, deptIds, dto.semester, this.currentAcademicYear()],
       );
 
       const courseIds = allocations.map((a: any) => a.course_id);
-      if (!courseIds.length) return;
+      const allowedPairs = new Set(
+        allocations.map((a: any) => `${a.course_id}:${a.faculty_user_id}`),
+      );
+      if (!courseIds.length && dto.slots.length) {
+        throw new BadRequestException(
+          'No active allocations found for the selected semester',
+        );
+      }
+
+      const facultyIds = [
+        ...new Set(dto.slots.map((slot) => slot.faculty_user_id)),
+      ];
+      if (facultyIds.length) {
+        const existingSlots = await manager.query(
+          `SELECT t.timetable_id, t.course_id, t.faculty_user_id,
+                  t.day_of_week, t.start_time, t.end_time
+             FROM academic_timetables t
+            WHERE t.tenant_id = $1
+              AND t.deleted_at IS NULL
+              AND t.faculty_user_id = ANY($2::uuid[])
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM academic_course_allocations a
+                 WHERE a.tenant_id = t.tenant_id
+                   AND a.course_id = t.course_id
+                   AND a.faculty_user_id = t.faculty_user_id
+                   AND a.semester = $3
+                   AND a.academic_year = $4
+                   AND a.status = 'ACTIVE'
+              )`,
+          [
+            tenantId,
+            facultyIds,
+            dto.semester,
+            this.currentAcademicYear(),
+          ],
+        );
+        for (const existing of existingSlots as TimetableRange[]) {
+          const conflicting = requestedRanges.find(
+            (requested) =>
+              requested.faculty_user_id === existing.faculty_user_id &&
+              timetableRangesOverlap(requested, existing),
+          );
+          if (conflicting) {
+            throw new BadRequestException(
+              'Timetable collision: the faculty member is already scheduled in that time range',
+            );
+          }
+        }
+      }
 
       await manager.query(
-        `DELETE FROM academic_timetables
-         WHERE tenant_id = $1 AND course_id = ANY($2::uuid[])`,
-        [tenantId, courseIds],
+        `UPDATE academic_timetables t
+            SET deleted_at = NOW()
+          WHERE t.tenant_id = $1
+            AND t.deleted_at IS NULL
+            AND EXISTS (
+              SELECT 1
+                FROM academic_course_allocations a
+                JOIN users u ON u.user_id = a.faculty_user_id
+               WHERE a.tenant_id = t.tenant_id
+                 AND a.course_id = t.course_id
+                 AND a.faculty_user_id = t.faculty_user_id
+                 AND a.semester = $2
+                 AND a.academic_year = $3
+                 AND a.status = 'ACTIVE'
+                 AND u.dept_id = ANY($4::int[])
+            )`,
+        [tenantId, dto.semester, this.currentAcademicYear(), deptIds],
       );
 
       if (dto.slots && dto.slots.length > 0) {
         for (const slot of dto.slots) {
-          const valid = allocations.some(
-            (a: any) =>
-              a.course_id === slot.course_id &&
-              a.faculty_user_id === slot.faculty_user_id,
+          const valid = allowedPairs.has(
+            `${slot.course_id}:${slot.faculty_user_id}`,
           );
+          if (!valid) {
+            throw new BadRequestException(
+              'Timetable slot is outside your department allocation scope',
+            );
+          }
           if (valid) {
             await manager.query(
               `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
-               VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)`,
+               VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)
+               `,
               [
                 tenantId,
                 slot.course_id,
@@ -1815,7 +1991,16 @@ export class AcademicsService {
           }
         }
       }
-    });
+      });
+    } catch (error) {
+      const code = databaseErrorCode(error);
+      if (code === '23P01' || code === '23505') {
+        throw new BadRequestException(
+          'Timetable collision: another schedule was saved for the same slot',
+        );
+      }
+      throw error;
+    }
     return { success: true };
   }
 
@@ -3164,6 +3349,38 @@ export class AcademicsService {
     };
   }
 
+  private async assertTimetableSlotAvailable(
+    tenantId: string,
+    candidate: TimetableRange,
+    excludeTimetableId?: string,
+  ) {
+    const rows = await this.users.manager.query(
+      `SELECT timetable_id, course_id, faculty_user_id,
+              day_of_week, start_time, end_time
+         FROM academic_timetables
+        WHERE tenant_id = $1
+          AND deleted_at IS NULL
+          AND day_of_week = $2
+          AND (faculty_user_id = $3 OR course_id = $4)
+          AND ($5::text IS NULL OR timetable_id::text <> $5::text)`,
+      [
+        tenantId,
+        candidate.day_of_week,
+        candidate.faculty_user_id,
+        candidate.course_id,
+        excludeTimetableId ?? null,
+      ],
+    );
+    const conflict = (rows as TimetableRange[]).find((row) =>
+      timetableRangesOverlap(candidate, row),
+    );
+    if (conflict) {
+      throw new ConflictException(
+        'Timetable collision: the faculty member or course is already scheduled in that time range',
+      );
+    }
+  }
+
   async allocateHodCourse(
     tenantId: string,
     hodUserId: string,
@@ -3182,7 +3399,43 @@ export class AcademicsService {
       relations: ['role'],
     });
     if (!faculty || !deptIds.includes(faculty.dept_id)) {
-      throw new Error('Faculty member is outside this HOD department scope');
+      throw new ForbiddenException(
+        'Faculty member is outside this HOD department scope',
+      );
+    }
+
+    if (!dto.timetable_id && !dto.course_id) {
+      throw new BadRequestException('A timetable or course is required');
+    }
+    if (
+      dto.timetable_id &&
+      !dto.timetable_id.startsWith('draft-') &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        dto.timetable_id,
+      )
+    ) {
+      throw new BadRequestException('Invalid timetable id');
+    }
+    if (dto.day_of_week !== undefined && (dto.day_of_week < 1 || dto.day_of_week > 7)) {
+      throw new BadRequestException('day_of_week must be between 1 and 7');
+    }
+    const hasStart = dto.start_time !== undefined;
+    const hasEnd = dto.end_time !== undefined;
+    if (hasStart !== hasEnd) {
+      throw new BadRequestException(
+        'start_time and end_time must be supplied together',
+      );
+    }
+    if (dto.start_time && dto.end_time && dto.start_time >= dto.end_time) {
+      throw new BadRequestException('Timetable end time must be after start time');
+    }
+    if (
+      dto.start_time &&
+      dto.end_time &&
+      (Number.isNaN(timeToMinutes(dto.start_time)) ||
+        Number.isNaN(timeToMinutes(dto.end_time)))
+    ) {
+      throw new BadRequestException('Timetable times must use HH:MM or HH:MM:SS');
     }
 
     const updatePayload: any = { faculty_user_id: dto.faculty_user_id };
@@ -3200,8 +3453,29 @@ export class AcademicsService {
           !dto.start_time ||
           !dto.end_time
         ) {
-          throw new Error('Missing required fields for new timetable slot');
+          throw new BadRequestException('Missing required fields for new timetable slot');
         }
+        const [allocation] = await this.users.manager.query(
+          `SELECT 1
+             FROM academic_course_allocations a
+             JOIN users u ON u.user_id = a.faculty_user_id
+            WHERE a.tenant_id = $1 AND a.course_id = $2
+              AND a.faculty_user_id = $3 AND a.status = 'ACTIVE'
+              AND u.dept_id = ANY($4::int[])
+              AND a.academic_year = $5
+            LIMIT 1`,
+          [tenantId, dto.course_id, dto.faculty_user_id, deptIds, this.currentAcademicYear()],
+        );
+        if (!allocation) {
+          throw new ForbiddenException('Course is outside this HOD department scope');
+        }
+        await this.assertTimetableSlotAvailable(tenantId, {
+          course_id: dto.course_id,
+          faculty_user_id: dto.faculty_user_id,
+          day_of_week: dto.day_of_week,
+          start_time: dto.start_time,
+          end_time: dto.end_time,
+        });
         const insertResult = await this.users.manager.query(
           `INSERT INTO academic_timetables (timetable_id, tenant_id, course_id, day_of_week, start_time, end_time, room, faculty_user_id)
            VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NULL, $6)
@@ -3217,6 +3491,27 @@ export class AcademicsService {
         );
         slot = insertResult[0];
       } else {
+        const [existing] = await this.users.manager.query(
+          `SELECT t.timetable_id, t.course_id, t.faculty_user_id,
+                  t.day_of_week, t.start_time, t.end_time
+             FROM academic_timetables t
+             JOIN users u ON u.user_id = t.faculty_user_id
+            WHERE t.timetable_id = $1 AND t.tenant_id = $2
+              AND t.deleted_at IS NULL AND u.dept_id = ANY($3::int[])`,
+          [dto.timetable_id, tenantId, deptIds],
+        );
+        if (!existing) throw new NotFoundException('Timetable slot not found in your scope');
+        await this.assertTimetableSlotAvailable(
+          tenantId,
+          {
+            course_id: existing.course_id,
+            faculty_user_id: dto.faculty_user_id,
+            day_of_week: dto.day_of_week ?? existing.day_of_week,
+            start_time: dto.start_time ?? existing.start_time,
+            end_time: dto.end_time ?? existing.end_time,
+          },
+          dto.timetable_id,
+        );
         await this.timetables.update(
           { timetable_id: dto.timetable_id, tenant_id: tenantId },
           updatePayload,
@@ -3246,6 +3541,19 @@ export class AcademicsService {
 
     const courseIdToUpdate = slot?.course_id || dto.course_id;
     if (courseIdToUpdate) {
+      const [allocation] = await this.users.manager.query(
+        `SELECT 1
+           FROM academic_course_allocations a
+           JOIN users u ON u.user_id = a.faculty_user_id
+          WHERE a.tenant_id = $1 AND a.course_id = $2
+            AND a.status = 'ACTIVE' AND u.dept_id = ANY($3::int[])
+            AND a.academic_year = $4
+          LIMIT 1`,
+        [tenantId, courseIdToUpdate, deptIds, this.currentAcademicYear()],
+      );
+      if (!allocation) {
+        throw new ForbiddenException('Course is outside this HOD department scope');
+      }
       await this.users.manager.query(
         `UPDATE academic_course_allocations
             SET faculty_user_id = $3, updated_at = NOW()
@@ -3291,6 +3599,34 @@ export class AcademicsService {
       relations: ['course'],
     });
     if (!slot) throw new NotFoundException('Timetable slot not found');
+
+    const nextDay = dto.day_of_week ?? slot.day_of_week;
+    const nextStart = dto.start_time ?? slot.start_time;
+    const nextEnd = dto.end_time ?? slot.end_time;
+    if (!Number.isInteger(nextDay) || nextDay < 1 || nextDay > 7) {
+      throw new BadRequestException('day_of_week must be between 1 and 7');
+    }
+    if (
+      Number.isNaN(timeToMinutes(nextStart)) ||
+      Number.isNaN(timeToMinutes(nextEnd)) ||
+      timeToMinutes(nextStart) >= timeToMinutes(nextEnd)
+    ) {
+      throw new BadRequestException('Timetable times must use HH:MM or HH:MM:SS');
+    }
+    if (slot.faculty_user_id) {
+      await this.assertTimetableSlotAvailable(
+        tenantId,
+        {
+          timetable_id: timetableId,
+          course_id: slot.course_id,
+          faculty_user_id: slot.faculty_user_id,
+          day_of_week: nextDay,
+          start_time: nextStart,
+          end_time: nextEnd,
+        },
+        timetableId,
+      );
+    }
 
     if (dto.day_of_week !== undefined) slot.day_of_week = dto.day_of_week;
     if (dto.start_time !== undefined) slot.start_time = dto.start_time;

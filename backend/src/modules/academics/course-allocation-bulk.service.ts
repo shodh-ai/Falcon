@@ -69,6 +69,90 @@ const HEADER_ALIASES: Record<string, string> = {
 
 const NF_VALUES = new Set(['nf', 'n/f', 'no faculty', 'unassigned', '-', '']);
 
+function normalizeProgramKey(value: string | null | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[._-]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/^bacheloroftechnology/, 'btech');
+}
+
+function isUnassignedFaculty(value: string | null | undefined): boolean {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[—–]/g, '-')
+    .replace(/\s+/g, ' ');
+  return (
+    NF_VALUES.has(normalized) ||
+    normalized === 'nf - unassigned' ||
+    normalized === 'n/f - unassigned' ||
+    normalized.includes('no faculty') ||
+    normalized.includes('unassigned')
+  );
+}
+
+function departmentAcronym(value: string | null | undefined): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((part) => part && !['and', 'of', 'the'].includes(part))
+    .map((part) => part[0])
+    .join('');
+}
+
+/**
+ * Legacy programme rows are not always linked to a department. Keep the
+ * scope check strict by deriving only well-known aliases from the department
+ * name, rather than treating every unowned programme as in-scope.
+ */
+function departmentProgramKeys(value: string | null | undefined): string[] {
+  const normalized = normalizeProgramKey(value);
+  const acronym = departmentAcronym(value);
+  const keys = new Set<string>();
+  if (normalized) keys.add(normalized);
+  if (acronym) keys.add(acronym);
+
+  const aliases: Array<[string, string]> = [
+    ['computerscience', 'cse'],
+    ['informationtechnology', 'it'],
+    ['electronicsandcommunication', 'ece'],
+    ['electronicsandelectrical', 'eee'],
+    ['electricalandelectronics', 'eee'],
+    ['mechanicalengineering', 'me'],
+    ['civilengineering', 'ce'],
+    ['pharmacy', 'pharmacy'],
+    ['physiotherapy', 'bpt'],
+    ['agriculture', 'agri'],
+  ];
+  for (const [name, alias] of aliases) {
+    if (normalized.includes(name)) keys.add(alias);
+  }
+  return [...keys];
+}
+
+function programBelongsToDepartment(
+  programName: string | null | undefined,
+  programCode: string | null | undefined,
+  departmentName: string | null | undefined,
+): boolean {
+  const programKeys = [
+    normalizeProgramKey(programName),
+    normalizeProgramKey(programCode),
+  ].filter(Boolean);
+  const departmentKeys = departmentProgramKeys(departmentName);
+  return departmentKeys.some((departmentKey) =>
+    programKeys.some(
+      (programKey) =>
+        programKey === departmentKey ||
+        programKey.includes(departmentKey) ||
+        (programKey.startsWith('btech') &&
+          programKey.slice('btech'.length) === departmentKey),
+    ),
+  );
+}
+
 @Injectable()
 export class CourseAllocationBulkService {
   private readonly logger = new Logger(CourseAllocationBulkService.name);
@@ -204,9 +288,7 @@ export class CourseAllocationBulkService {
       const codeKey = this.normalizeCourseCode(row.subject_code);
       const existingId = subjectByCode.get(codeKey) ?? null;
       const isNew = existingId === null;
-      const isUnassigned = NF_VALUES.has(
-        row.faculty_username.trim().toLowerCase(),
-      );
+      const isUnassigned = isUnassignedFaculty(row.faculty_username);
       const warnings: string[] = [];
 
       let facultyUserId: string | null = null;
@@ -236,7 +318,7 @@ export class CourseAllocationBulkService {
       }
 
       if (allowedPrograms) {
-        const programKey = row.program_name?.trim().toLowerCase() ?? '';
+        const programKey = normalizeProgramKey(row.program_name);
         if (!programKey || !allowedPrograms.has(programKey)) {
           warnings.push(
             `Program "${row.program_name || '(empty)'}" is outside your department scope`,
@@ -303,7 +385,10 @@ export class CourseAllocationBulkService {
       );
     }
 
-    const defaultProgramId = await this.resolveDefaultProgramId();
+    const scopedDeptIds = hodUserId
+      ? await this.resolveHodDepartmentIds(hodUserId)
+      : undefined;
+    const defaultProgramId = await this.resolveDefaultProgramId(scopedDeptIds);
 
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -936,25 +1021,140 @@ export class CourseAllocationBulkService {
     );
   }
 
-  private async resolveDefaultProgramId(): Promise<number> {
-    const rows = await this.dataSource.query<{ program_id: number }[]>(
-      `SELECT program_id FROM iam_programs WHERE deleted_at IS NULL ORDER BY program_id LIMIT 1`,
+  private async resolveDefaultProgramId(deptIds?: number[]): Promise<number> {
+    const rows = await this.dataSource.query<
+      { program_id: number; program_name: string; program_code: string; dept_name: string | null }[]
+    >(
+      `SELECT program_id
+              , program_name
+              , program_code
+              , d.dept_name
+       FROM iam_programs p
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE p.deleted_at IS NULL
+         AND ($1::int[] IS NULL OR p.dept_id = ANY($1::int[]))
+       ORDER BY program_id
+       LIMIT 1`,
+      [deptIds?.length ? deptIds : null],
     );
-    return rows[0]?.program_id ?? 1;
+    if (rows[0]?.program_id) return rows[0].program_id;
+
+    if (deptIds?.length) {
+      const fallback = await this.dataSource.query<
+        { program_id: number; program_name: string; program_code: string; dept_name: string | null }[]
+      >(
+        `SELECT p.program_id, p.program_name, p.program_code, d.dept_name
+         FROM iam_programs p
+         LEFT JOIN departments d ON d.dept_id = p.dept_id
+         WHERE p.deleted_at IS NULL
+         ORDER BY p.program_id`,
+      );
+      const departments = await this.dataSource.query<
+        { dept_name: string }[]
+      >(
+        `SELECT dept_name FROM departments WHERE dept_id = ANY($1::int[])`,
+        [deptIds],
+      );
+      const departmentNames = departments.map((row) => row.dept_name);
+      const match = fallback.find((program) =>
+        departmentNames.some((deptName) =>
+          programBelongsToDepartment(
+            program.program_name,
+            program.program_code,
+            deptName,
+          ),
+        ),
+      );
+      if (match?.program_id) return match.program_id;
+    }
+    return 1;
   }
 
   private async resolveAllowedProgramNames(
     deptIds: number[],
   ): Promise<Set<string>> {
     if (!deptIds.length) return new Set();
-    const rows = await this.dataSource.query<{ program_name: string }[]>(
-      `SELECT DISTINCT program_name
-       FROM iam_programs
-       WHERE deleted_at IS NULL
-         AND dept_id = ANY($1::int[])`,
+    const departments = await this.dataSource.query<
+      { dept_name: string }[]
+    >(
+      `SELECT dept_name FROM departments WHERE dept_id = ANY($1::int[])`,
       [deptIds],
     );
-    return new Set(rows.map((row) => row.program_name.trim().toLowerCase()));
+    const departmentNames = departments.map((row) => row.dept_name);
+    const rows = await this.dataSource.query<
+      {
+        program_name: string;
+        program_code: string;
+        dept_name: string | null;
+        scope_proven: boolean;
+      }[]
+    >(
+      `SELECT DISTINCT p.program_name,
+                       p.program_code,
+                       d.dept_name,
+                       (p.dept_id = ANY($1::int[])) AS scope_proven
+       FROM iam_programs p
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE p.deleted_at IS NULL
+         AND (p.dept_id = ANY($1::int[]) OR p.dept_id IS NULL)`,
+      [deptIds],
+    );
+    const allocationRows = await this.dataSource.query<
+      {
+        program_name: string;
+        program_code: string;
+        dept_name: string | null;
+        scope_proven: boolean;
+      }[]
+    >(
+      `SELECT DISTINCT a.program_name,
+                       p.program_code,
+                       d.dept_name,
+                       true AS scope_proven
+       FROM academic_course_allocations a
+       JOIN academic_subjects s ON s.subject_id = a.subject_id
+       JOIN iam_programs p ON p.program_id = s.program_id
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE a.program_name IS NOT NULL
+         AND a.status = 'ACTIVE'
+         AND p.deleted_at IS NULL
+         AND (
+           p.dept_id = ANY($1::int[])
+           OR EXISTS (
+             SELECT 1 FROM users faculty
+             WHERE faculty.user_id = a.faculty_user_id
+               AND faculty.dept_id = ANY($1::int[])
+           )
+         )`,
+      [deptIds],
+    );
+    rows.push(...allocationRows);
+    const keys = new Set<string>();
+    for (const row of rows) {
+      const programKey = normalizeProgramKey(row.program_name);
+      const codeKey = normalizeProgramKey(row.program_code);
+      if (row.scope_proven) {
+        if (programKey) keys.add(programKey);
+        if (codeKey) keys.add(codeKey);
+      }
+      for (const departmentName of departmentNames) {
+        if (
+          programBelongsToDepartment(
+            row.program_name,
+            row.program_code,
+            departmentName,
+          )
+        ) {
+          if (programKey) keys.add(programKey);
+          if (codeKey) keys.add(codeKey);
+          for (const departmentKey of departmentProgramKeys(departmentName)) {
+            keys.add(departmentKey);
+            keys.add(`btech${departmentKey}`);
+          }
+        }
+      }
+    }
+    return keys;
   }
 
   private allocationScopedToDepartmentsSql(
@@ -1091,13 +1291,14 @@ export class CourseAllocationBulkService {
     }
     const headers = lines[0].split(',').map((h) => this.normalizeHeader(h));
     this.validateHeaders(headers);
-    return lines.slice(1).map((line, idx) => {
+    return lines.slice(1).flatMap((line, idx) => {
       const values = line.split(',').map((v) => v.trim());
+      if (values.every((value) => !value)) return [];
       const row: Record<string, string> = {};
       headers.forEach((h, i) => {
         row[h] = values[i] ?? '';
       });
-      return this.normalizeRow(row, idx + 2);
+      return [this.normalizeRow(row, idx + 2)];
     });
   }
 
