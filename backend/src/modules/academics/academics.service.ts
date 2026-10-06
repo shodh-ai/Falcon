@@ -1698,6 +1698,8 @@ export class AcademicsService {
     const slots = await this.listDepartmentTimetableForDepartments(tenantId, deptIds);
     if (!deptIds.length) return { slots: [], unscheduled: [] };
 
+    const academicYear = this.currentAcademicYear();
+
     const unscheduled = await this.users.manager.query(
       `SELECT a.allocation_id, a.program_name, a.semester,
               c.course_code, c.course_name,
@@ -1707,6 +1709,7 @@ export class AcademicsService {
        INNER JOIN users u ON u.user_id = a.faculty_user_id
        WHERE a.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
+         AND a.academic_year = $3
          AND a.status = 'ACTIVE'
          AND NOT EXISTS (
            SELECT 1 FROM academic_timetables t
@@ -1716,7 +1719,7 @@ export class AcademicsService {
              AND t.deleted_at IS NULL
          )
        ORDER BY a.program_name ASC, a.semester ASC, c.course_code ASC, u.name ASC`,
-      [tenantId, deptIds],
+      [tenantId, deptIds, academicYear],
     );
     return { slots, unscheduled };
   }
@@ -1727,6 +1730,8 @@ export class AcademicsService {
   ) {
     if (!deptIds.length) return [];
 
+    const academicYear = this.currentAcademicYear();
+
     return this.users.manager.query(
       `SELECT t.timetable_id, t.day_of_week, t.start_time, t.end_time, t.room,
               c.course_id, c.course_code, c.course_name,
@@ -1735,16 +1740,33 @@ export class AcademicsService {
               u.dept_id, d.dept_name
        FROM academic_timetables t
        INNER JOIN academic_courses c ON c.course_id = t.course_id
-       LEFT JOIN academic_course_allocations a
-         ON a.tenant_id = t.tenant_id AND a.course_id = t.course_id
-        AND a.faculty_user_id = t.faculty_user_id AND a.status = 'ACTIVE'
+       LEFT JOIN LATERAL (
+         SELECT a.program_name, a.semester
+         FROM academic_course_allocations a
+         WHERE a.tenant_id = t.tenant_id
+           AND a.course_id = t.course_id
+           AND a.faculty_user_id = t.faculty_user_id
+           AND a.academic_year = $3
+           AND a.status = 'ACTIVE'
+         ORDER BY a.updated_at DESC NULLS LAST, a.allocation_id DESC
+         LIMIT 1
+       ) a ON TRUE
        INNER JOIN users u ON u.user_id = t.faculty_user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE t.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
+         AND EXISTS (
+           SELECT 1
+           FROM academic_course_allocations current_allocation
+           WHERE current_allocation.tenant_id = t.tenant_id
+             AND current_allocation.course_id = t.course_id
+             AND current_allocation.faculty_user_id = t.faculty_user_id
+             AND current_allocation.academic_year = $3
+             AND current_allocation.status = 'ACTIVE'
+         )
          AND t.deleted_at IS NULL
        ORDER BY d.dept_name ASC, t.day_of_week ASC, t.start_time ASC, c.course_code ASC`,
-      [tenantId, deptIds],
+      [tenantId, deptIds, academicYear],
     );
   }
 
@@ -1771,6 +1793,8 @@ export class AcademicsService {
     if (!deptIds.length)
       return { allocations: [], timetables: [], faculty: [] };
 
+    const academicYear = this.currentAcademicYear();
+
     const allocations = await this.users.manager.query(
       `SELECT a.allocation_id, a.semester, c.course_id, c.course_code, c.course_name,
               u.user_id AS faculty_user_id, u.name AS faculty_name
@@ -1779,9 +1803,10 @@ export class AcademicsService {
        INNER JOIN users u ON u.user_id = a.faculty_user_id
        WHERE a.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
+         AND a.academic_year = $3
          AND a.status = 'ACTIVE'
        ORDER BY a.updated_at DESC NULLS LAST, c.course_code ASC`,
-      [tenantId, deptIds],
+      [tenantId, deptIds, academicYear],
     );
 
     const [timetables, faculty] = await Promise.all([
