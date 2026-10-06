@@ -9,9 +9,20 @@ test.describe('Dean workspace E2E', () => {
 
   for (const [name, path] of Object.entries(DEAN_ROUTES)) {
     test(`loads ${name} page`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      const serverErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      page.on('response', (response) => {
+        if (response.status() >= 500) {
+          serverErrors.push(`${response.status()} ${response.url()}`);
+        }
+      });
+
       await page.goto(path);
       await expect(page.locator('body')).toBeVisible();
       expect(page.url()).toContain('/dean');
+      expect(pageErrors, `uncaught page errors on ${path}`).toEqual([]);
+      expect(serverErrors, `server errors while loading ${path}`).toEqual([]);
     });
   }
 });

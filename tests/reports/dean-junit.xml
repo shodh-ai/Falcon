@@ -1,0 +1,94 @@
+<testsuites id="" name="" tests="44" failures="0" skipped="0" errors="0" time="11.50332">
+<testsuite name="dean/search-filters.spec.ts" timestamp="2026-10-05T08:42:45.290Z" hostname="chromium" tests="2" failures="0" skipped="0" time="1.888" errors="0">
+<testcase name="Dean filters and search E2E › dean search page accepts query input" classname="dean/search-filters.spec.ts" time="0.953">
+</testcase>
+<testcase name="Dean filters and search E2E › dean inbox loads approval workflow surface" classname="dean/search-filters.spec.ts" time="0.935">
+</testcase>
+</testsuite>
+<testsuite name="dean/workspace.spec.ts" timestamp="2026-10-05T08:42:45.290Z" hostname="chromium" tests="42" failures="0" skipped="0" time="49.829" errors="0">
+<testcase name="Dean workspace E2E › loads dashboard page" classname="dean/workspace.spec.ts" time="0.934">
+</testcase>
+<testcase name="Dean workspace E2E › loads bos page" classname="dean/workspace.spec.ts" time="1.789">
+</testcase>
+<testcase name="Dean workspace E2E › loads courseAllocation page" classname="dean/workspace.spec.ts" time="1.812">
+</testcase>
+<testcase name="Dean workspace E2E › loads resultAnalytics page" classname="dean/workspace.spec.ts" time="1.546">
+</testcase>
+<testcase name="Dean workspace E2E › loads syllabusTracking page" classname="dean/workspace.spec.ts" time="1.17">
+</testcase>
+<testcase name="Dean workspace E2E › loads timetable page" classname="dean/workspace.spec.ts" time="1.141">
+</testcase>
+<testcase name="Dean workspace E2E › loads dofaApprovals page" classname="dean/workspace.spec.ts" time="1.161">
+</testcase>
+<testcase name="Dean workspace E2E › loads dofaInbox page" classname="dean/workspace.spec.ts" time="1.103">
+</testcase>
+<testcase name="Dean workspace E2E › loads attendance page" classname="dean/workspace.spec.ts" time="1.841">
+</testcase>
+<testcase name="Dean workspace E2E › loads attendancePolicy page" classname="dean/workspace.spec.ts" time="1.534">
+</testcase>
+<testcase name="Dean workspace E2E › loads auditLog page" classname="dean/workspace.spec.ts" time="1.517">
+</testcase>
+<testcase name="Dean workspace E2E › loads budget page" classname="dean/workspace.spec.ts" time="0.789">
+</testcase>
+<testcase name="Dean workspace E2E › loads departments page" classname="dean/workspace.spec.ts" time="0.864">
+</testcase>
+<testcase name="Dean workspace E2E › loads departmentDetail page" classname="dean/workspace.spec.ts" time="1.651">
+</testcase>
+<testcase name="Dean workspace E2E › loads events page" classname="dean/workspace.spec.ts" time="0.835">
+</testcase>
+<testcase name="Dean workspace E2E › loads appraisals page" classname="dean/workspace.spec.ts" time="1.184">
+</testcase>
+<testcase name="Dean workspace E2E › loads facultyLeaderboard page" classname="dean/workspace.spec.ts" time="1.202">
+</testcase>
+<testcase name="Dean workspace E2E › loads facultyWorkload page" classname="dean/workspace.spec.ts" time="1.475">
+</testcase>
+<testcase name="Dean workspace E2E › loads facultyApproval page" classname="dean/workspace.spec.ts" time="0.771">
+</testcase>
+<testcase name="Dean workspace E2E › loads payslips page" classname="dean/workspace.spec.ts" time="1.068">
+</testcase>
+<testcase name="Dean workspace E2E › loads policies page" classname="dean/workspace.spec.ts" time="0.906">
+</testcase>
+<testcase name="Dean workspace E2E › loads tickets page" classname="dean/workspace.spec.ts" time="1.227">
+</testcase>
+<testcase name="Dean workspace E2E › loads ticketDetail page" classname="dean/workspace.spec.ts" time="1.537">
+</testcase>
+<testcase name="Dean workspace E2E › loads meetings page" classname="dean/workspace.spec.ts" time="0.233">
+</testcase>
+<testcase name="Dean workspace E2E › loads meetingAnalytics page" classname="dean/workspace.spec.ts" time="1.255">
+</testcase>
+<testcase name="Dean workspace E2E › loads notifications page" classname="dean/workspace.spec.ts" time="0.409">
+</testcase>
+<testcase name="Dean workspace E2E › loads onboardingStep1 page" classname="dean/workspace.spec.ts" time="1.059">
+</testcase>
+<testcase name="Dean workspace E2E › loads onboardingStep2 page" classname="dean/workspace.spec.ts" time="0.932">
+</testcase>
+<testcase name="Dean workspace E2E › loads onboardingStep3 page" classname="dean/workspace.spec.ts" time="0.955">
+</testcase>
+<testcase name="Dean workspace E2E › loads phdApprovals page" classname="dean/workspace.spec.ts" time="0.847">
+</testcase>
+<testcase name="Dean workspace E2E › loads placement page" classname="dean/workspace.spec.ts" time="1.749">
+</testcase>
+<testcase name="Dean workspace E2E › loads procurementRequisitions page" classname="dean/workspace.spec.ts" time="1.549">
+</testcase>
+<testcase name="Dean workspace E2E › loads profile page" classname="dean/workspace.spec.ts" time="1.997">
+</testcase>
+<testcase name="Dean workspace E2E › loads reports page" classname="dean/workspace.spec.ts" time="1.903">
+</testcase>
+<testcase name="Dean workspace E2E › loads research page" classname="dean/workspace.spec.ts" time="0.427">
+</testcase>
+<testcase name="Dean workspace E2E › loads students page" classname="dean/workspace.spec.ts" time="0.971">
+</testcase>
+<testcase name="Dean workspace E2E › loads grievances page" classname="dean/workspace.spec.ts" time="1.599">
+</testcase>
+<testcase name="Dean workspace E2E › loads safetyConcerns page" classname="dean/workspace.spec.ts" time="1.608">
+</testcase>
+<testcase name="Dean workspace E2E › loads search page" classname="dean/workspace.spec.ts" time="0.726">
+</testcase>
+<testcase name="Dean workspace E2E › loads settings page" classname="dean/workspace.spec.ts" time="1.202">
+</testcase>
+<testcase name="Dean workspace E2E › loads resultApproval page" classname="dean/workspace.spec.ts" time="0.674">
+</testcase>
+<testcase name="Dean workspace E2E › loads analytics page" classname="dean/workspace.spec.ts" time="0.677">
+</testcase>
+</testsuite>
+</testsuites>

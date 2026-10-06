@@ -29,6 +29,67 @@ export type DeanFilterQuery = {
   status?: string;
 };
 
+export type DeanMeetingAnalyticsMeetingRow = {
+  status: string;
+  has_mom: boolean;
+  participant_count: string | number;
+};
+
+export type DeanMeetingAnalyticsDepartmentRow = {
+  dept_name: string | null;
+  participant_count: string | number;
+};
+
+/** Summarize one row per meeting, then aggregate department participation separately. */
+export function summarizeDeanMeetingAnalytics(
+  meetings: DeanMeetingAnalyticsMeetingRow[],
+  departmentRows: DeanMeetingAnalyticsDepartmentRow[],
+) {
+  const scheduled = meetings.filter((row) =>
+    ['SCHEDULED', 'UPCOMING', 'PENDING', 'CONFIRMED'].includes(
+      String(row.status).toUpperCase(),
+    ),
+  ).length;
+  const completed = meetings.filter(
+    (row) => String(row.status).toUpperCase() === 'COMPLETED',
+  ).length;
+  const cancelled = meetings.filter(
+    (row) => String(row.status).toUpperCase() === 'CANCELLED',
+  ).length;
+  const pendingMom = meetings.filter((row) => !row.has_mom).length;
+  const averageParticipants =
+    meetings.length > 0
+      ? Number(
+          (
+            meetings.reduce(
+              (sum, row) => sum + Number(row.participant_count ?? 0),
+              0,
+            ) / meetings.length
+          ).toFixed(1),
+        )
+      : 0;
+
+  const deptParticipation = new Map<string, number>();
+  for (const row of departmentRows) {
+    const key = row.dept_name ?? 'School-wide';
+    deptParticipation.set(
+      key,
+      (deptParticipation.get(key) ?? 0) + Number(row.participant_count ?? 0),
+    );
+  }
+
+  return {
+    meetings_scheduled: scheduled,
+    meetings_completed: completed,
+    meetings_cancelled: cancelled,
+    pending_mom: pendingMom,
+    average_attendance: averageParticipants,
+    department_participation: Array.from(deptParticipation.entries()).map(
+      ([department, count]) => ({ department, count }),
+    ),
+  };
+}
+
 @Injectable()
 export class DeanIntelligenceService {
   constructor(
@@ -552,13 +613,13 @@ export class DeanIntelligenceService {
             }>
           >(
             `SELECT u.user_id, u.name, d.dept_name,
-                    COUNT(l.log_id)::text AS score
+                    COUNT(l.research_id)::text AS score
              FROM users u
              LEFT JOIN departments d ON d.dept_id = u.dept_id
              LEFT JOIN faculty_research_logs l ON l.faculty_user_id = u.user_id
              WHERE u.tenant_id = $1 AND u.dept_id = ANY($2::int[])
              GROUP BY u.user_id, u.name, d.dept_name
-             ORDER BY COUNT(l.log_id) DESC, u.name ASC
+             ORDER BY COUNT(l.research_id) DESC, u.name ASC
              LIMIT 20`,
             [tenantId, deptIds],
           ),
@@ -566,7 +627,7 @@ export class DeanIntelligenceService {
             Array<{ dept_name: string; publications: string; projects: string }>
           >(
             `SELECT d.dept_name,
-                    COUNT(DISTINCT l.log_id)::text AS publications,
+                    COUNT(DISTINCT l.research_id)::text AS publications,
                     COUNT(DISTINCT p.research_project_id)::text AS projects
              FROM departments d
              LEFT JOIN users u ON u.dept_id = d.dept_id
@@ -575,7 +636,7 @@ export class DeanIntelligenceService {
                ON p.principal_investigator_user_id = u.user_id
              WHERE d.dept_id = ANY($1::int[])
              GROUP BY d.dept_name
-             ORDER BY COUNT(DISTINCT l.log_id) DESC`,
+             ORDER BY COUNT(DISTINCT l.research_id) DESC`,
             [deptIds],
           ),
         ]);
@@ -634,73 +695,38 @@ export class DeanIntelligenceService {
     const deptIds = this.parseDeptFilter(scope.departmentIds, filters.dept_id);
 
     try {
-      const rows = await this.db.query<
-        Array<{
-          status: string;
-          has_mom: boolean;
-          dept_name: string | null;
-          participant_count: string;
-        }>
-      >(
-        `SELECT m.status,
-                (pm.notes IS NOT NULL AND length(trim(pm.notes)) > 0) AS has_mom,
-                d.dept_name,
-                COUNT(DISTINCT mp.user_id)::text AS participant_count
-         FROM portal_meetings m
-         LEFT JOIN portal_meeting_participants mp ON mp.meeting_id = m.meeting_id
-         LEFT JOIN portal_meeting_minutes pm ON pm.meeting_id = m.meeting_id
-         LEFT JOIN users u ON u.user_id = mp.user_id
-         LEFT JOIN departments d ON d.dept_id = u.dept_id
-         WHERE m.tenant_id = $1
-           AND (u.dept_id IS NULL OR u.dept_id = ANY($2::int[]))
-         GROUP BY m.meeting_id, m.status, pm.notes, d.dept_name`,
-        [tenantId, deptIds],
-      );
-
-      const scheduled = rows.filter((row) =>
-        ['SCHEDULED', 'UPCOMING', 'PENDING', 'CONFIRMED'].includes(
-          String(row.status).toUpperCase(),
+      // Keep overall KPIs at one row per meeting. Department participation is
+      // intentionally queried separately because a single meeting can span
+      // several departments.
+      const [meetingRows, departmentRows] = await Promise.all([
+        this.db.query<DeanMeetingAnalyticsMeetingRow[]>(
+          `SELECT m.status,
+                  (pm.notes IS NOT NULL AND length(trim(pm.notes)) > 0) AS has_mom,
+                  COUNT(DISTINCT mp.user_id)::text AS participant_count
+           FROM portal_meetings m
+           LEFT JOIN portal_meeting_participants mp ON mp.meeting_id = m.meeting_id
+           LEFT JOIN portal_meeting_minutes pm ON pm.meeting_id = m.meeting_id
+           LEFT JOIN users u ON u.user_id = mp.user_id
+           WHERE m.tenant_id = $1
+             AND (u.dept_id IS NULL OR u.dept_id = ANY($2::int[]))
+           GROUP BY m.meeting_id, m.status, pm.notes`,
+          [tenantId, deptIds],
         ),
-      ).length;
-      const completed = rows.filter(
-        (row) => String(row.status).toUpperCase() === 'COMPLETED',
-      ).length;
-      const cancelled = rows.filter(
-        (row) => String(row.status).toUpperCase() === 'CANCELLED',
-      ).length;
-      const pendingMom = rows.filter((row) => !row.has_mom).length;
-      const avgAttendance =
-        rows.length > 0
-          ? Number(
-              (
-                rows.reduce(
-                  (sum, row) => sum + Number(row.participant_count ?? 0),
-                  0,
-                ) / rows.length
-              ).toFixed(1),
-            )
-          : 0;
-
-      const deptParticipation = new Map<string, number>();
-      for (const row of rows) {
-        const key = row.dept_name ?? 'School-wide';
-        deptParticipation.set(
-          key,
-          (deptParticipation.get(key) ?? 0) +
-            Number(row.participant_count ?? 0),
-        );
-      }
-
-      return {
-        meetings_scheduled: scheduled,
-        meetings_completed: completed,
-        meetings_cancelled: cancelled,
-        pending_mom: pendingMom,
-        average_attendance: avgAttendance,
-        department_participation: Array.from(deptParticipation.entries()).map(
-          ([department, count]) => ({ department, count }),
+        this.db.query<DeanMeetingAnalyticsDepartmentRow[]>(
+          `SELECT d.dept_name,
+                  COUNT(DISTINCT mp.user_id)::text AS participant_count
+           FROM portal_meetings m
+           LEFT JOIN portal_meeting_participants mp ON mp.meeting_id = m.meeting_id
+           LEFT JOIN users u ON u.user_id = mp.user_id
+           LEFT JOIN departments d ON d.dept_id = u.dept_id
+           WHERE m.tenant_id = $1
+             AND (u.dept_id IS NULL OR u.dept_id = ANY($2::int[]))
+           GROUP BY m.meeting_id, d.dept_name`,
+          [tenantId, deptIds],
         ),
-      };
+      ]);
+
+      return summarizeDeanMeetingAnalytics(meetingRows, departmentRows);
     } catch {
       return {
         meetings_scheduled: 0,
@@ -1871,7 +1897,7 @@ export class DeanIntelligenceService {
         }>
       >(
         `SELECT u.user_id AS faculty_user_id,
-                COUNT(DISTINCT l.log_id)::text AS publications,
+                COUNT(DISTINCT l.research_id)::text AS publications,
                 COUNT(DISTINCT p.research_project_id)::text AS projects
          FROM users u
          LEFT JOIN faculty_research_logs l ON l.faculty_user_id = u.user_id

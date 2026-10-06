@@ -20,8 +20,9 @@ type Criterion = {
 type Row = {
   appraisal_record_id: string;
   appraisal_year: number;
-  auto_api_score: number | null;
-  hod_rating: number | null;
+  // PostgreSQL numeric columns may be serialized as strings by the API.
+  auto_api_score: number | string | null;
+  hod_rating: number | string | null;
   hr_final_status: string;
   name: string;
   email: string | null;
@@ -37,6 +38,12 @@ function statusLabel(status: string) {
   if (status === 'HOD_REVIEW' || status === 'PENDING') return 'Pending HOD review';
   if (status === 'HR_APPROVED') return 'Submitted to HR';
   return status.replace(/_/g, ' ');
+}
+
+function formatScore(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === '') return '—';
+  const score = Number(value);
+  return Number.isFinite(score) ? score.toFixed(2) : '—';
 }
 
 export default function DeanAppraisalsPage() {
@@ -119,12 +126,12 @@ export default function DeanAppraisalsPage() {
             {
               key: 'api',
               label: 'Auto API',
-              render: (r) => (r.auto_api_score != null ? r.auto_api_score.toFixed(2) : '—'),
+              render: (r) => formatScore(r.auto_api_score),
             },
             {
               key: 'hod',
               label: 'HOD Rating',
-              render: (r) => (r.hod_rating != null ? r.hod_rating.toFixed(2) : '—'),
+              render: (r) => formatScore(r.hod_rating),
             },
             {
               key: 'status',
