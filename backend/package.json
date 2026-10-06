@@ -23,8 +23,6 @@
     "db:migrate": "node scripts/run-migrations.js",
     "db:migrate:repair": "node scripts/run-migrations.js --repair",
     "db:seed": "node scripts/run-migrations.js --seed",
-    "db:seed:dean-smoke": "node scripts/seed-dean-smoke.js",
-    "db:clean:dean-smoke": "node scripts/clean-dean-smoke.js",
     "db:seed:dofa-qa": "node scripts/run-migrations.js --dofa-qa-seed",
     "tenant:provision:gvmc-finance": "node scripts/provision-gvmc-finance.js",
     "migration:run": "npm run db:migrate",
