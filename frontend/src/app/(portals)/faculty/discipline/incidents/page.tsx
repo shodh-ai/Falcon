@@ -65,7 +65,7 @@ function statusBadge(status: string) {
   return { label: status, variant: 'outline' as const };
 }
 
-export default function FacultyDisciplineIncidentsPage() {
+export function FacultyDisciplineIncidentsPage() {
   const api = useAuthedApi();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
   const [loading, setLoading] = useState(true);
@@ -437,3 +437,5 @@ export default function FacultyDisciplineIncidentsPage() {
     </FacultyPageShell>
   );
 }
+
+export default FacultyDisciplineIncidentsPage;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import {
@@ -25,6 +25,8 @@ type WorkspaceTab = 'materials' | 'assignments' | 'announcements' | 'live';
 export default function FacultyCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
   const [workspace, setWorkspace] = useState<FacultyWorkspace | null>(null);
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<WorkspaceTab>('materials');
@@ -79,7 +81,7 @@ export default function FacultyCourseWorkspacePage() {
         }
         actions={
           <Link
-            href="/faculty/courses"
+            href={`${workspacePrefix}/courses`}
             className="inline-flex items-center gap-1.5 text-sm font-medium text-sgvu-navy hover:underline"
           >
             <ArrowLeft className="h-4 w-4" />

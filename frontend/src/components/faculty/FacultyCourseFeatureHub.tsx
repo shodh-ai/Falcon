@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { BookOpen, ChevronRight, Search } from 'lucide-react';
 import {
@@ -48,6 +49,8 @@ const META: Record<
 
 export function FacultyCourseFeatureHub({ feature }: { feature: FacultyCourseFeature }) {
   const meta = META[feature];
+  const pathname = usePathname();
+  const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
   const { courses, loading, error } = useFacultyCourses();
   const teachingDept = useOptionalTeachingDepartment();
   const activeDepartment = teachingDept?.activeDepartment;
@@ -149,7 +152,7 @@ export function FacultyCourseFeatureHub({ feature }: { feature: FacultyCourseFea
                       Work here
                     </button>
                     <Link
-                      href={`/faculty/courses/${c.course_id}?tab=${meta.tab}`}
+                      href={`${workspacePrefix}/courses/${c.course_id}?tab=${meta.tab}`}
                       className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-semibold text-sgvu-navy hover:bg-sgvu-gold/10"
                     >
                       {meta.workspaceLabel}
@@ -185,7 +188,7 @@ export function FacultyCourseFeatureHub({ feature }: { feature: FacultyCourseFea
               description="Open the full workspace to upload modules, files, and syllabus."
             >
               <Link
-                href={`/faculty/courses/${selected.course_id}?tab=materials`}
+                href={`${workspacePrefix}/courses/${selected.course_id}?tab=materials`}
                 className="inline-flex items-center gap-2 rounded-lg border border-sgvu-navy/20 bg-sgvu-navy px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#123A6D]"
               >
                 Open materials workspace

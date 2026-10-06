@@ -894,6 +894,9 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
+        { label: 'Courses & Subjects', href: '/hod/academics/courses', icon: BookMarked, keywords: ['courses', 'subjects', 'catalogue', 'lms'] },
+        { label: 'Assignment Generation', href: '/hod/academics/assignments', icon: ClipboardList, keywords: ['assignments', 'digital assignment', 'da', 'generate'] },
+        { label: 'Weekly Tests (WT)', href: '/hod/academics/weekly-tests', icon: FileCheck2, keywords: ['wt', 'weekly test', 'test', 'marks'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix', 'teaching load', 'import'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
@@ -919,6 +922,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
+        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request', 'sis'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'dofa', 'coe', 'approve'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'grade change', 'approvals'] },
       ],
@@ -959,6 +963,9 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
+        { label: 'Courses & Subjects', href: '/hod/academics/courses', icon: BookMarked, keywords: ['courses', 'subjects', 'catalogue'] },
+        { label: 'Assignment Generation', href: '/hod/academics/assignments', icon: ClipboardList, keywords: ['assignments', 'digital assignment'] },
+        { label: 'Weekly Tests (WT)', href: '/hod/academics/weekly-tests', icon: FileCheck2, keywords: ['wt', 'weekly test'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
@@ -981,6 +988,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
+        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['grade change', 'dofa'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa inbox'] },
       ],
