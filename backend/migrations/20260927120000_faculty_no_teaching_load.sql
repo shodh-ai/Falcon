@@ -76,6 +76,10 @@ INSERT INTO pharmacy_no_load_faculty VALUES
   ('preeti.khulbe@mygyanvihar.com', 'Department-confirmed faculty without teaching load'),
   ('vivek.gupta@mygyanvihar.com', 'Department-confirmed faculty without teaching load');
 
+-- This migration must be safe for a fresh tenant or for a production database
+-- where the optional Pharmacy seed identities have not been provisioned yet.
+-- The declaration storage and guard above are authoritative; the two named
+-- faculty records below are only a best-effort seed when both identities exist.
 DO $$
 DECLARE resolved_count INTEGER;
 BEGIN
@@ -87,12 +91,44 @@ BEGIN
    AND lower(u.official_email) = lower(n.official_email)
    AND u.is_active = true
    AND u.deleted_at IS NULL;
-  IF resolved_count <> 2 THEN
-    RAISE EXCEPTION 'Expected both Pharmacy no-load faculty identities; resolved %', resolved_count;
-  END IF;
+  RAISE NOTICE 'Optional Pharmacy no-load seed identities resolved: %/2', resolved_count;
 END $$;
 
 -- Preserve the affected courses as active, unassigned teaching needs.
+DO $$
+BEGIN
+  IF to_regclass('public.academic_timetables') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'academic_timetables'
+         AND column_name = 'deleted_at'
+     ) THEN
+    EXECUTE $sql$
+      WITH ctx AS (
+        SELECT t.tenant_id, u.user_id
+        FROM public.tenants t
+        JOIN pharmacy_no_load_faculty n ON true
+        JOIN users u
+          ON u.tenant_id = t.tenant_id
+         AND lower(u.official_email) = lower(n.official_email)
+        WHERE t.subdomain = 'sgvu' AND t.is_active = true
+      )
+      UPDATE academic_timetables tt
+      SET deleted_at = NOW()
+      FROM ctx
+      WHERE tt.tenant_id = ctx.tenant_id
+        AND tt.faculty_user_id = ctx.user_id
+        AND tt.deleted_at IS NULL
+    $sql$;
+  END IF;
+END $$;
+
+/*
+ * Timetable cleanup is intentionally guarded above.  The declaration seed
+ * remains independent of timetable storage so a partially upgraded database
+ * can still complete this migration.
+ */
 WITH ctx AS (
   SELECT t.tenant_id, u.user_id
   FROM public.tenants t
@@ -131,22 +167,6 @@ WHERE NOT EXISTS (
     AND existing.faculty_user_id IS NULL
     AND existing.status = 'ACTIVE'
 );
-
-WITH ctx AS (
-  SELECT t.tenant_id, u.user_id
-  FROM public.tenants t
-  JOIN pharmacy_no_load_faculty n ON true
-  JOIN users u
-    ON u.tenant_id = t.tenant_id
-   AND lower(u.official_email) = lower(n.official_email)
-  WHERE t.subdomain = 'sgvu' AND t.is_active = true
-)
-UPDATE academic_timetables tt
-SET deleted_at = NOW()
-FROM ctx
-WHERE tt.tenant_id = ctx.tenant_id
-  AND tt.faculty_user_id = ctx.user_id
-  AND tt.deleted_at IS NULL;
 
 WITH resolved AS (
   SELECT t.tenant_id, u.user_id, n.reason
@@ -196,8 +216,17 @@ WHERE d.academic_year = '2026-2027'
 ON CONFLICT(declaration_id, revision) DO NOTHING;
 
 DO $$
-DECLARE assigned_count INTEGER; declaration_count INTEGER;
+DECLARE assigned_count INTEGER; declaration_count INTEGER; resolved_count INTEGER;
 BEGIN
+  SELECT COUNT(*) INTO resolved_count
+  FROM pharmacy_no_load_faculty n
+  JOIN public.tenants t ON t.subdomain = 'sgvu' AND t.is_active = true
+  JOIN users u
+    ON u.tenant_id = t.tenant_id
+   AND lower(u.official_email) = lower(n.official_email)
+   AND u.is_active = true
+   AND u.deleted_at IS NULL;
+
   SELECT COUNT(*) INTO assigned_count
   FROM academic_course_allocations a
   JOIN public.tenants t ON t.tenant_id = a.tenant_id AND t.subdomain = 'sgvu'
@@ -211,7 +240,7 @@ BEGIN
   FROM academic_faculty_load_declarations d
   JOIN public.tenants t ON t.tenant_id = d.tenant_id AND t.subdomain = 'sgvu'
   WHERE d.academic_year = '2026-2027' AND d.status = 'NO_TEACHING_LOAD';
-  IF assigned_count <> 0 OR declaration_count < 2 THEN
+  IF resolved_count > 0 AND (assigned_count <> 0 OR declaration_count < resolved_count) THEN
     RAISE EXCEPTION 'Pharmacy no-load reconciliation failed: assigned %, declarations %',
       assigned_count, declaration_count;
   END IF;

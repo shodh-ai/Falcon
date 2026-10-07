@@ -1486,13 +1486,14 @@ export class AcademicsService {
                  tenant_id, subject_id, program_name, semester, faculty_user_id,
                  academic_year, course_id, status
                )
-               SELECT $1, $2, $3, $4, NULL, $5, $6, 'ACTIVE'
+               SELECT $1::uuid, $2::int, $3::varchar(100), $4::varchar(20),
+                      NULL, $5::varchar(20), $6::uuid, 'ACTIVE'
                WHERE NOT EXISTS (
                  SELECT 1 FROM academic_course_allocations
-                 WHERE tenant_id = $1 AND subject_id = $2
-                   AND program_name IS NOT DISTINCT FROM $3
-                   AND semester IS NOT DISTINCT FROM $4
-                   AND academic_year = $5 AND faculty_user_id IS NULL
+                 WHERE tenant_id = $1::uuid AND subject_id = $2::int
+                   AND program_name IS NOT DISTINCT FROM $3::varchar(100)
+                   AND semester IS NOT DISTINCT FROM $4::varchar(20)
+                   AND academic_year = $5::varchar(20) AND faculty_user_id IS NULL
                    AND status = 'ACTIVE'
                )`,
               [
