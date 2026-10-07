@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
+import * as nodemailer from 'nodemailer';
 import { User } from '../entities/user.entity';
 import { UserRole } from '../entities/user-role.entity';
 import {
@@ -21,6 +22,7 @@ import { HrEntityContextService } from '../modules/hr/hr-entity-context.service'
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { isStudentEnrollmentEmail } from './utils/student-enrollment-email.util';
 import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
+import { wrapFalconEmailHtml } from '../common/email/falcon-email.template';
 
 type LoginCredentialRow = {
   user_id: string;
@@ -384,9 +386,60 @@ export class AuthService {
     } catch {
       return { sent: true };
     }
-    return process.env.NODE_ENV === 'production'
-      ? { sent: true }
-      : { sent: true, reset_token: raw };
+
+    // Deliver the one-hour link through the configured SMTP provider.  The
+    // endpoint remains deliberately non-enumerating: callers never learn
+    // whether an address exists or whether SMTP is configured.
+    await this.sendPasswordResetEmail(email.trim(), raw);
+
+    // A reset token is only returned when a developer explicitly opts into
+    // local smoke testing.  NODE_ENV alone is not a safe gate because a
+    // production deployment may omit or override it.
+    return process.env.FALCON_EXPOSE_DEV_RESET_TOKEN === 'true' &&
+      process.env.NODE_ENV !== 'production'
+      ? { sent: true, reset_token: raw }
+      : { sent: true };
+  }
+
+  private async sendPasswordResetEmail(email: string, token: string) {
+    const host = process.env.EMAIL_HOST;
+    const user = process.env.EMAIL_USER;
+    const pass = process.env.EMAIL_PASSWORD;
+    if (!host || !user || !pass) {
+      this.logger.warn(
+        'Password reset token stored but SMTP is not configured; configure EMAIL_HOST, EMAIL_USER and EMAIL_PASSWORD.',
+      );
+      return;
+    }
+
+    const frontend = process.env.FRONTEND_URL || 'https://falcon.jataka.io';
+    const resetUrl = `${frontend}/reset-password?token=${encodeURIComponent(token)}`;
+    const html = wrapFalconEmailHtml(
+      `<h2 style="margin:0 0 12px;color:#08234a;">Reset your Falcon password</h2>
+       <p>This link is valid for one hour and can be used once.</p>
+       <p style="margin:24px 0;"><a href="${resetUrl}" style="display:inline-block;background:#08234a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Reset password</a></p>
+       <p style="font-size:13px;color:#64748b;">If you did not request this, you can ignore this message.</p>`,
+      frontend,
+    );
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port: Number(process.env.EMAIL_PORT || 587),
+        secure: String(process.env.EMAIL_SECURE || '').toLowerCase() === 'true',
+        auth: { user, pass },
+      });
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || user,
+        to: email,
+        subject: 'Reset your Falcon password',
+        html,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Password reset email delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async resetPasswordWithToken(
