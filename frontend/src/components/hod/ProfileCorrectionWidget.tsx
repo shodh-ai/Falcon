@@ -28,6 +28,8 @@ export function ProfileCorrectionWidget({
   const api = useAuthedApi();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actingId, setActingId] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
@@ -35,17 +37,24 @@ export function ProfileCorrectionWidget({
   const [bulkWorking, setBulkWorking] = useState(false);
 
   async function load() {
+    setLoadError(null);
     try {
       const data = await api.get<Ticket[]>('/api/helpdesk/tickets/profile-corrections');
-      setTickets(data);
+      // The endpoint is a pending queue. Keep the client defensive if an
+      // older backend returns a resolved row during a rolling deployment.
+      setTickets((data ?? []).filter((ticket) =>
+        ticket.status === 'PENDING' || ticket.status === 'IN_PROGRESS',
+      ));
     } catch (e) {
       const message = e instanceof Error ? e.message : '';
+      setLoadError(message || 'Failed to load profile corrections');
       const forbidden =
         /^Forbidden resource$/i.test(message) ||
         /API 403|status 403|forbidden/i.test(message);
       if (!forbidden) {
         toast.error(message || 'Failed to load profile corrections');
       } else {
+        // A stale queue must never be presented as actionable after a 403.
         setTickets([]);
       }
     } finally {
@@ -58,14 +67,29 @@ export function ProfileCorrectionWidget({
   }, [api]);
 
   async function resolve(ticketId: string, status: 'RESOLVED' | 'REJECTED', rejection_reason?: string) {
+    if (actingId) return;
+    setActingId(ticketId);
+    setLoadError(null);
     try {
-      await api.patch(`/api/helpdesk/tickets/${ticketId}/status`, { status, rejection_reason });
+      const saved = await api.patch<Ticket>(`/api/helpdesk/tickets/${ticketId}/status`, {
+        status,
+        rejection_reason,
+      });
+      // Remove the item optimistically only after the API has acknowledged the
+      // committed transition. The subsequent reload confirms persistence.
+      if (saved?.status === status || status === 'RESOLVED' || status === 'REJECTED') {
+        setTickets((current) => current.filter((ticket) => ticket.ticket_id !== ticketId));
+      }
       toast.success(status === 'RESOLVED' ? 'Approved — 15-minute edit window opened' : 'Rejected with reason sent to student');
       setRejectId(null);
       setRejectReason('');
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed');
+      const message = e instanceof Error ? e.message : 'Action failed';
+      setLoadError(message);
+      toast.error(message);
+    } finally {
+      setActingId(null);
     }
   }
 
@@ -74,21 +98,40 @@ export function ProfileCorrectionWidget({
     if (!pending.length) return;
     setBulkWorking(true);
     try {
-      let ok = 0;
-      for (const t of pending) {
-        await api.patch(`/api/helpdesk/tickets/${t.ticket_id}/status`, { status, rejection_reason });
-        ok += 1;
-      }
-      toast.success(
-        status === 'RESOLVED'
-          ? `Approved ${ok} request${ok === 1 ? '' : 's'} — edit windows opened`
-          : `Rejected ${ok} request${ok === 1 ? '' : 's'}`,
+      const results = await Promise.allSettled(
+        pending.map((t) =>
+          api.patch(`/api/helpdesk/tickets/${t.ticket_id}/status`, {
+            status,
+            rejection_reason,
+          }),
+        ),
       );
+      const ok = results.filter((result) => result.status === 'fulfilled').length;
+      const failed = results.length - ok;
+      const bulkError = failed > 0
+        ? `${failed} request${failed === 1 ? '' : 's'} could not be updated. Refresh and retry.`
+        : null;
+      if (ok > 0) {
+        toast.success(
+          status === 'RESOLVED'
+            ? `Approved ${ok} request${ok === 1 ? '' : 's'} — edit windows opened${failed ? ` (${failed} already handled or failed)` : ''}`
+            : `Rejected ${ok} request${ok === 1 ? '' : 's'}${failed ? ` (${failed} already handled or failed)` : ''}`,
+        );
+      }
+      if (failed > 0) {
+        setLoadError(bulkError);
+        if (ok === 0) toast.error('No requests were updated. Refresh and retry.');
+      }
       setBulkRejectOpen(false);
       setBulkRejectReason('');
       await load();
+      // `load` clears transient fetch errors; retain a partial-batch warning so
+      // the operator does not mistake a partial commit for full success.
+      if (bulkError) setLoadError(bulkError);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Bulk action failed');
+      const message = e instanceof Error ? e.message : 'Bulk action failed';
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setBulkWorking(false);
     }
@@ -145,7 +188,15 @@ export function ProfileCorrectionWidget({
           </div>
         ) : null}
         {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-        {!loading && tickets.length === 0 && (
+        {!loading && loadError ? (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
+            {loadError}
+            <Button size="sm" variant="outline" className="ml-3 h-7" onClick={() => void load()}>
+              Retry
+            </Button>
+          </div>
+        ) : null}
+        {!loading && !loadError && tickets.length === 0 && (
           <p className="text-sm text-muted-foreground">No pending profile correction requests.</p>
         )}
         {!loading &&
@@ -165,7 +216,7 @@ export function ProfileCorrectionWidget({
                     <Button
                       size="sm"
                       variant="destructive"
-                      disabled={rejectReason.trim().length < 10}
+                      disabled={actingId !== null || rejectReason.trim().length < 10}
                       onClick={() => void resolve(t.ticket_id, 'REJECTED', rejectReason.trim())}
                     >
                       Confirm reject
@@ -177,10 +228,10 @@ export function ProfileCorrectionWidget({
                 </div>
               ) : (
                 <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={() => void resolve(t.ticket_id, 'RESOLVED')}>
+                  <Button size="sm" disabled={actingId !== null} onClick={() => void resolve(t.ticket_id, 'RESOLVED')}>
                     Approve (15 min unlock)
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setRejectId(t.ticket_id)}>
+                  <Button size="sm" variant="outline" disabled={actingId !== null} onClick={() => setRejectId(t.ticket_id)}>
                     Reject
                   </Button>
                 </div>

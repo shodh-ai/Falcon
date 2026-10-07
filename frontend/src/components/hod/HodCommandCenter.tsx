@@ -320,6 +320,7 @@ export function HodCommandCenter() {
   const [unassignedLoad, setUnassignedLoad] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [sectionErrors, setSectionErrors] = useState<string[]>([]);
   const [actingId, setActingId] = useState<string | null>(null);
 
   const [assignedCourses, setAssignedCourses] = useState<AssignedCourse[]>([]);
@@ -366,27 +367,57 @@ export function HodCommandCenter() {
     async (silent = false) => {
       if (!silent) setLoading(true);
       else setRefreshing(true);
+      setSectionErrors([]);
+      const optionalErrors: string[] = [];
+      async function optional<T>(label: string, request: Promise<T>, fallback: T): Promise<T> {
+        try {
+          return await request;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'request failed';
+          optionalErrors.push(`${label}: ${message}`);
+          return fallback;
+        }
+      }
       try {
         const [payload, unassigned, roster, audits, attendanceMatrix, assigned, timetable] =
           await Promise.all([
           api.get<CommandCenterPayload>('/api/academics/hod/command-center'),
-          api.get<{ count: number }>('/api/academics/hod/teaching-load/unassigned/count').catch(() => ({ count: 0 })),
-          api.get<FacultyRosterItem[]>('/api/academics/hod/faculty-roster').catch(() => []),
-          api.get<AuditRecord[]>('/api/academics/hod/faculty-audit').catch(() => []),
-          api
-            .get<{ employees: Array<{ user_id: string; name: string; days: AttendanceMatrixDay[] }> }>(
+          optional(
+            'Unassigned teaching load',
+            api.get<{ count: number }>('/api/academics/hod/teaching-load/unassigned/count'),
+            { count: 0 },
+          ),
+          optional(
+            'Faculty roster',
+            api.get<FacultyRosterItem[]>('/api/academics/hod/faculty-roster'),
+            [],
+          ),
+          optional(
+            'Faculty audit',
+            api.get<AuditRecord[]>('/api/academics/hod/faculty-audit'),
+            [],
+          ),
+          optional(
+            'Team attendance',
+            api.get<{ employees: Array<{ user_id: string; name: string; days: AttendanceMatrixDay[] }> }>(
               `/api/hr/ess/team/attendance?scope=dept&month=${new Date().toISOString().slice(0, 7)}`,
-            )
-            .catch(() => null),
-          api
-            .get<{ items: AssignedCourse[]; faculty: HandoverFacultyOption[] }>(
+            ),
+            null,
+          ),
+          optional(
+            'Assigned teaching load',
+            api.get<{ items: AssignedCourse[]; faculty: HandoverFacultyOption[] }>(
               '/api/academics/hod/teaching-load/assigned',
-            )
-            .catch(() => ({ items: [], faculty: [] })),
-          api
-            .get<DepartmentTimetablePayload>('/api/academics/hod/department-timetable')
-            .catch(() => ({ slots: [], unscheduled: [] })),
+            ),
+            { items: [], faculty: [] },
+          ),
+          optional(
+            'Department timetable',
+            api.get<DepartmentTimetablePayload>('/api/academics/hod/department-timetable'),
+            { slots: [], unscheduled: [] },
+          ),
         ]);
+        setSectionErrors(optionalErrors);
         setData(payload);
         setUnassignedLoad(unassigned.count);
         setRealFaculty(roster);
@@ -404,6 +435,7 @@ export function HodCommandCenter() {
             : [],
         );
       } catch (e) {
+        setSectionErrors([e instanceof Error ? e.message : 'Failed to load command center']);
         toast.error(e instanceof Error ? e.message : 'Failed to load command center');
         if (!silent) setData(null);
       } finally {
@@ -617,6 +649,36 @@ export function HodCommandCenter() {
           </Button>
         }
       />
+
+      {sectionErrors.length > 0 ? (
+        <div
+          role="alert"
+          className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-950 shadow-sm sm:flex-row sm:items-start sm:justify-between"
+        >
+          <div>
+            <p className="font-semibold">Some HOD data could not be loaded.</p>
+            <p className="mt-1 text-amber-900/80">
+              The command center is showing the last available values for the affected sections. Retry to fetch the
+              latest data.
+            </p>
+            <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-amber-900/90">
+              {sectionErrors.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0 border-amber-300 bg-white text-amber-950 hover:bg-amber-100"
+            disabled={refreshing}
+            onClick={() => void load(true)}
+          >
+            <RefreshCw className={cn('mr-2 h-4 w-4', refreshing && 'animate-spin')} />
+            Retry failed sections
+          </Button>
+        </div>
+      ) : null}
 
       <div className="space-y-4">
         {(m.pending_profile_corrections ?? 0) > 0 ? (
