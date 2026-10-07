@@ -65,6 +65,11 @@ type VerificationDetail = {
   }>;
 };
 
+type QueueLoadResult = {
+  rows: QueueRow[];
+  error: string | null;
+};
+
 const DOC_LABELS: Record<string, string> = {
   PHOTO: 'Passport Photo',
   AADHAAR: 'Aadhaar Card',
@@ -98,6 +103,38 @@ function parseApiError(err: unknown) {
   return err.message;
 }
 
+/**
+ * Student and faculty queues are independent. A failure in one endpoint must
+ * not hide a healthy queue from the campus administrator.
+ */
+export function mergeVerificationQueueResults(
+  results: Readonly<[
+    PromiseSettledResult<QueueRow[]>,
+    PromiseSettledResult<QueueRow[]>,
+  ]>,
+): QueueLoadResult {
+  const rows = results.flatMap((result) =>
+    result.status === 'fulfilled' && Array.isArray(result.value) ? result.value : [],
+  );
+  const failures = results
+    .map((result, index) =>
+      result.status === 'rejected'
+        ? `${index === 0 ? 'student' : 'faculty'} queue: ${parseApiError(result.reason)}`
+        : null,
+    )
+    .filter((message): message is string => Boolean(message));
+
+  return {
+    rows,
+    error:
+      failures.length > 0
+        ? rows.length > 0
+          ? `Some verification queues could not be loaded. ${failures.join(' ')}.`
+          : failures.join(' ')
+        : null,
+  };
+}
+
 export function CampusAdminVerificationsPage() {
   const api = useAuthedApi();
   const { token } = useAuth();
@@ -118,21 +155,14 @@ export function CampusAdminVerificationsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const [students, staff] = await Promise.all([
-        api.get<QueueRow[]>('/api/admin/student-verifications/queue'),
-        api.get<QueueRow[]>('/api/staff/verifications/queue'),
-      ]);
-      setRows([
-        ...(Array.isArray(students) ? students : []),
-        ...(Array.isArray(staff) ? staff : []),
-      ]);
-    } catch (err) {
-      setRows([]);
-      setError(parseApiError(err) || 'Unable to load verifications.');
-    } finally {
-      setLoading(false);
-    }
+    const results = await Promise.allSettled([
+      api.get<QueueRow[]>('/api/admin/student-verifications/queue'),
+      api.get<QueueRow[]>('/api/staff/verifications/queue'),
+    ] as const);
+    const merged = mergeVerificationQueueResults(results);
+    setRows(merged.rows);
+    setError(merged.error);
+    setLoading(false);
   }, [api]);
 
   useEffect(() => {
@@ -276,14 +306,14 @@ export function CampusAdminVerificationsPage() {
       <Card className="border-sgvu-navy/10 bg-white shadow-sm">
         <CardContent className="space-y-4 p-4 md:p-5">
           {error ? (
-            <div className="py-8 text-center">
-              <p className="text-sm text-destructive">{error}</p>
-              <Button className="mt-3 h-9" variant="outline" onClick={() => void load()}>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-sm text-amber-900">{error}</p>
+              <Button className="h-8 shrink-0" variant="outline" onClick={() => void load()}>
                 Retry
               </Button>
             </div>
-          ) : (
-            <>
+          ) : null}
+          <>
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
                 <div className="relative min-w-0 flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -358,8 +388,7 @@ export function CampusAdminVerificationsPage() {
                   </tbody>
                 </table>
               </div>
-            </>
-          )}
+          </>
         </CardContent>
       </Card>
 
