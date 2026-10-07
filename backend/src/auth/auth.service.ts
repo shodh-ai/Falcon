@@ -36,6 +36,7 @@ type LoginUserRow = {
   role_id: number | null;
   dept_id: number | null;
   onboarding_status: string | null;
+  account_status: string | null;
   role_name: string | null;
   dept_name: string | null;
 };
@@ -108,6 +109,7 @@ export class AuthService {
               u.role_id,
               u.dept_id,
               u.onboarding_status,
+              u.account_status,
               r.role_name,
               d.dept_name
        FROM users u
@@ -136,6 +138,7 @@ export class AuthService {
       role_id: row.role_id,
       dept_id: row.dept_id,
       onboarding_status: row.onboarding_status,
+      account_status: row.account_status,
       role: row.role_name
         ? ({
             role_id: row.role_id ?? undefined,
@@ -309,6 +312,9 @@ export class AuthService {
           tokenUser.onboarding_status,
           roleClaims.primaryRole,
         ),
+        password_reset_required:
+          (tokenUser as User & { account_status?: string | null }).account_status ===
+          'PASSWORD_RESET_REQUIRED',
         has_direct_reports: directReports,
         is_department_hod: isDepartmentHod,
         last_login_at: new Date().toISOString(),
@@ -392,18 +398,34 @@ export class AuthService {
     }
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const [row] = await this.dataSource.query<
-      Array<{ token_id: string; user_id: string; tenant_id: string }>
+      Array<{
+        token_id: string;
+        user_id: string;
+        tenant_id: string;
+        onboarding_status: string | null;
+      }>
     >(
-      `SELECT token_id, user_id, tenant_id
-       FROM admin_password_reset_tokens
-       WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+      `SELECT t.token_id, t.user_id, t.tenant_id, u.onboarding_status
+       FROM admin_password_reset_tokens t
+       INNER JOIN users u ON u.user_id = t.user_id AND u.tenant_id = t.tenant_id
+       WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > NOW()
        LIMIT 1`,
       [tokenHash],
     );
     if (!row) throw new BadRequestException('Reset link expired or invalid');
     const hash = await bcrypt.hash(newPassword, 10);
     await this.dataSource.query(
-      `UPDATE users SET password_hash = $1, onboarding_status = 'COMPLETED', updated_at = NOW()
+      `UPDATE users
+       SET password_hash = $1,
+           onboarding_status = CASE
+             WHEN onboarding_status = 'PENDING_PASSWORD_RESET' THEN 'PENDING_DOCUMENTS'
+             ELSE onboarding_status
+           END,
+           account_status = CASE
+             WHEN account_status = 'PASSWORD_RESET_REQUIRED' THEN 'ACTIVE'
+             ELSE account_status
+           END,
+           updated_at = NOW()
        WHERE user_id = $2 AND tenant_id = $3`,
       [hash, row.user_id, row.tenant_id],
     );

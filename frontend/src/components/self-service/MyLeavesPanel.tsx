@@ -37,6 +37,8 @@ type Request = {
   request_type?: string;
   start_date: string;
   end_date: string;
+  start_time?: string | null;
+  end_time?: string | null;
   status: string;
   reason: string | null;
 };
@@ -56,7 +58,8 @@ export function MyLeavesPanel() {
   const [balances, setBalances] = useState<Balance[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [applyMode, setApplyMode] = useState<ApplyMode>('LEAVE');
-  const [form, setForm] = useState({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
+  const [form, setForm] = useState({ leave_type: 'CL', start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
+  const [partialDay, setPartialDay] = useState(false);
   const [attachment, setAttachment] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -136,6 +139,7 @@ export function MyLeavesPanel() {
         leave_type: applyMode === 'ON_DUTY' ? 'OD' : form.leave_type,
         start_date: form.start_date,
         end_date: form.end_date,
+        ...(partialDay ? { start_time: form.start_time, end_time: form.end_time } : {}),
         reason: form.reason,
         supporting_doc_urls,
       });
@@ -144,7 +148,8 @@ export function MyLeavesPanel() {
           ? 'On Duty request sent for approval'
           : 'Leave request sent to your HOD/reporting officer',
       );
-      setForm({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
+      setForm({ leave_type: 'CL', start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
+      setPartialDay(false);
       setAttachment(null);
       if (applyMode === 'LEAVE') {
         setProxyLeaveRange({ start: form.start_date, end: form.end_date });
@@ -206,6 +211,7 @@ export function MyLeavesPanel() {
                 <option value="SL">Sick (SL)</option>
                 <option value="EL">Earned (EL)</option>
                 <option value="RH">Restricted Holiday (RH)</option>
+                <option value="CCL">Compulsory Casual Leave (CCL)</option>
               </Select>
             </label>
           )}
@@ -213,6 +219,26 @@ export function MyLeavesPanel() {
             <span className="mb-1.5 block font-medium text-sgvu-navy">From</span>
             <Input type="date" min={workforceMinDate()} value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} required />
           </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={partialDay}
+              onChange={(e) => setPartialDay(e.target.checked)}
+            />
+            Apply for selected hours only
+          </label>
+          {partialDay ? (
+            <>
+              <label className="text-sm">
+                <span className="mb-1.5 block font-medium text-sgvu-navy">From time</span>
+                <Input type="time" value={form.start_time} onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))} required />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1.5 block font-medium text-sgvu-navy">To time</span>
+                <Input type="time" value={form.end_time} onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))} required />
+              </label>
+            </>
+          ) : null}
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">To</span>
             <Input type="date" min={form.start_date || workforceMinDate()} value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} required />
@@ -251,7 +277,10 @@ export function MyLeavesPanel() {
                     <p className="font-medium text-sgvu-navy">
                       {r.request_type === 'ON_DUTY' ? 'On Duty (OD)' : leaveTypeLabel(r.leave_type)}
                     </p>
-                    <p className="text-xs text-muted-foreground">{formatWorkforceDateRange(r.start_date, r.end_date)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatWorkforceDateRange(r.start_date, r.end_date)}
+                      {r.start_time && r.end_time ? ` · ${r.start_time.slice(0, 5)}–${r.end_time.slice(0, 5)}` : ''}
+                    </p>
                     {r.reason ? <p className="mt-0.5 text-xs text-muted-foreground truncate max-w-md">{r.reason}</p> : null}
                   </div>
                   <Badge variant={statusBadgeVariant(r.status)} className="shrink-0 text-[10px]">{leaveStatusLabel(r.status)}</Badge>

@@ -14,6 +14,7 @@ import {
   FacultyEmptyState,
   FacultyInlineLoading,
   FacultyMetricChip,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,62 +22,14 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
-import {
-  isEmptyArray,
-  isFacultyDemoSmokeId,
-  withFacultyDemoFallback,
-} from '@/lib/faculty-demo-mode';
-import {
-  facultyDemoAttendanceAnalytics,
-  facultyDemoAttendanceState,
-  facultyDemoCourseStudents,
-  facultyDemoTodayClasses,
-} from '@/lib/mock/faculty-portal-demo';
 
-type UiStatus = 'PRESENT' | 'ABSENT';
-
-function demoAttendanceStorageKey(
-  courseId: string,
-  date: string,
-  timetableId: string | null | undefined,
-) {
-  return `falcon-faculty-demo-attendance:${courseId}:${date}:${timetableId ?? 'none'}`;
-}
-
-function readDemoAttendance(
-  courseId: string,
-  date: string,
-  timetableId: string | null | undefined,
-): { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] } | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.sessionStorage.getItem(demoAttendanceStorageKey(courseId, date, timetableId));
-    if (!raw) return null;
-    return JSON.parse(raw) as {
-      locked: boolean;
-      attendance_data: { student_id: string; status: UiStatus }[];
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeDemoAttendance(
-  courseId: string,
-  date: string,
-  timetableId: string | null | undefined,
-  payload: { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] },
-) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.sessionStorage.setItem(
-      demoAttendanceStorageKey(courseId, date, timetableId),
-      JSON.stringify(payload),
-    );
-  } catch {
-    // ignore quota / private mode
-  }
-}
+/**
+ * The attendance form deliberately starts every student as ABSENT.  A blank
+ * or PRESENT default is unsafe because an unreviewed student would silently
+ * receive credit for attending.  LEAVE is the faculty-facing label for the
+ * academic EXCUSED status persisted by the API.
+ */
+type UiStatus = 'PRESENT' | 'ABSENT' | 'LEAVE';
 
 type FacultyClass = {
   timetable_id: string;
@@ -87,12 +40,15 @@ type FacultyClass = {
   start_time: string;
   end_time: string;
   student_count: number;
+  section?: string | null;
+  is_practical?: boolean;
 };
 
 type Student = {
   student_id: string;
   name: string;
   roll_number: string;
+  section_code?: string | null;
 };
 
 type AttendanceAnalytics = {
@@ -134,12 +90,15 @@ function MarkAttendanceContent() {
   const [students, setStudents] = useState<Student[]>([]);
   const [analytics, setAnalytics] = useState<AttendanceAnalytics | null>(null);
   const [attendance, setAttendance] = useState<Record<string, UiStatus>>({});
+  const [selectedBatch, setSelectedBatch] = useState<string>('ALL');
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [classesError, setClassesError] = useState<string | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
   const selectedClass = useMemo(
     () => classes.find((c) => c.timetable_id === selectedTimetableId) ?? classes.find((c) => c.course_id === selectedCourseId) ?? null,
@@ -147,58 +106,72 @@ function MarkAttendanceContent() {
   );
 
   const filteredStudents = useMemo(
-    () =>
-      students.filter(
-        (s) =>
-          !searchQuery.trim() ||
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.roll_number?.toLowerCase().includes(searchQuery.toLowerCase()),
-      ),
-    [students, searchQuery],
+    () => {
+      const query = searchQuery.trim().toLowerCase();
+      return students.filter((s) => {
+        const inBatch =
+          !selectedClass?.is_practical ||
+          selectedBatch === 'ALL' ||
+          (s.section_code ?? 'UNASSIGNED') === selectedBatch;
+        const matchesSearch =
+          !query ||
+          s.name.toLowerCase().includes(query) ||
+          s.roll_number?.toLowerCase().includes(query);
+        return inBatch && matchesSearch;
+      });
+    },
+    [students, searchQuery, selectedBatch, selectedClass?.is_practical],
   );
 
   const presentCount = useMemo(
-    () => students.filter((s) => attendance[s.student_id] === 'PRESENT').length,
-    [students, attendance],
+    () => filteredStudents.filter((s) => attendance[s.student_id] === 'PRESENT').length,
+    [filteredStudents, attendance],
   );
   const absentCount = useMemo(
-    () => students.filter((s) => attendance[s.student_id] === 'ABSENT').length,
-    [students, attendance],
+    () => filteredStudents.filter((s) => attendance[s.student_id] === 'ABSENT').length,
+    [filteredStudents, attendance],
+  );
+  const leaveCount = useMemo(
+    () => filteredStudents.filter((s) => attendance[s.student_id] === 'LEAVE').length,
+    [filteredStudents, attendance],
   );
 
   useEffect(() => {
     if (deptLoading) return;
+    setClassesError(null);
     void api
       .get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId))
       .then((data) => {
-        const classesResolved = withFacultyDemoFallback(data, facultyDemoTodayClasses(), isEmptyArray);
-        setClasses(classesResolved);
-        if (classesResolved.length === 0) {
+        if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
+        setClasses(data);
+        if (data.length === 0) {
           setSelectedCourseId(null);
           return;
         }
         const fromUrl = initialCourseId
-          ? classesResolved.find((c) => c.course_id === initialCourseId)
+          ? data.find((c) => c.course_id === initialCourseId)
           : undefined;
-        const pick = fromUrl ?? classesResolved[0]!;
+        const pick = fromUrl ?? data[0]!;
         setSelectedCourseId(pick.course_id);
         setSelectedTimetableId(pick.timetable_id);
       })
-      .catch(() => {
-        const classesResolved = withFacultyDemoFallback([], facultyDemoTodayClasses(), isEmptyArray);
-        setClasses(classesResolved);
-        if (classesResolved[0]) {
-          setSelectedCourseId(classesResolved[0].course_id);
-          setSelectedTimetableId(classesResolved[0].timetable_id);
-        }
+      .catch((error: unknown) => {
+        setClasses([]);
+        setSelectedCourseId(null);
+        setClassesError(error instanceof Error ? error.message : 'Failed to load classes');
       })
       .finally(() => setLoading(false));
   }, [api, initialCourseId, activeDeptId, deptLoading]);
 
   useEffect(() => {
-    if (!selectedCourseId) return;
+    if (!selectedCourseId) {
+      setStudents([]);
+      setRosterError(null);
+      return;
+    }
     let cancelled = false;
     setRosterLoading(true);
+    setRosterError(null);
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
 
     function applyRoster(
@@ -211,33 +184,23 @@ function MarkAttendanceContent() {
       setAnalytics(analyticsResolved);
       setLocked(Boolean(stateResolved.locked));
       const map: Record<string, UiStatus> = {};
-      for (const s of rosterResolved) map[s.student_id] = 'PRESENT';
+      for (const s of rosterResolved) map[s.student_id] = 'ABSENT';
       for (const row of stateResolved.attendance_data ?? []) {
         if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
+        if ((row.status as string) === 'EXCUSED') map[row.student_id] = 'LEAVE';
       }
       setAttendance(map);
       setSearchQuery('');
+      setSelectedBatch('ALL');
     }
 
     (async () => {
-      // Smoke course IDs are not in Postgres — never call the API (avoids 500 noise).
-      if (isFacultyDemoSmokeId(selectedCourseId)) {
-        const rosterResolved = facultyDemoCourseStudents(selectedCourseId);
-        const stored = readDemoAttendance(selectedCourseId, selectedDate, timetableId);
-        const stateResolved = stored ?? facultyDemoAttendanceState(selectedCourseId);
-        applyRoster(
-          rosterResolved,
-          stateResolved,
-          facultyDemoAttendanceAnalytics(selectedCourseId),
-        );
-        if (!cancelled) setRosterLoading(false);
-        return;
-      }
-
       try {
         const timetableQuery = timetableId ? `&timetableId=${timetableId}` : '';
         const [roster, state] = await Promise.all([
-          api.get<Student[]>(`/api/academics/faculty/course/${selectedCourseId}/students`),
+          api.get<Student[]>(
+            `/api/academics/faculty/course/${selectedCourseId}/students${timetableId ? `?timetableId=${encodeURIComponent(timetableId)}` : ''}`,
+          ),
           api.get<{ locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null }>(
             `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableQuery}`,
           ),
@@ -247,38 +210,14 @@ function MarkAttendanceContent() {
             `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
           )
           .catch(() => null);
-        const rosterResolved = withFacultyDemoFallback(
-          roster,
-          facultyDemoCourseStudents(selectedCourseId),
-          isEmptyArray,
-        );
-        const stateResolved = withFacultyDemoFallback(
-          state,
-          facultyDemoAttendanceState(selectedCourseId),
-          (v) => !v?.attendance_data?.length,
-        );
-        applyRoster(
-          rosterResolved,
-          stateResolved,
-          withFacultyDemoFallback(
-            courseAnalytics,
-            facultyDemoAttendanceAnalytics(selectedCourseId),
-          ),
-        );
-      } catch (e) {
-        const rosterResolved = withFacultyDemoFallback(
-          [],
-          facultyDemoCourseStudents(selectedCourseId),
-          isEmptyArray,
-        );
-        if (rosterResolved.length === 0) {
-          toast.error(e instanceof Error ? e.message : 'Failed to load roster');
+        if (!Array.isArray(roster)) throw new Error('Student roster API returned an invalid response');
+        if (!state || typeof state !== 'object') throw new Error('Attendance API returned an invalid response');
+        applyRoster(roster, state, courseAnalytics);
+      } catch (error: unknown) {
+        if (!cancelled) {
+          setStudents([]);
+          setRosterError(error instanceof Error ? error.message : 'Failed to load roster');
         }
-        applyRoster(
-          rosterResolved,
-          facultyDemoAttendanceState(selectedCourseId),
-          facultyDemoAttendanceAnalytics(selectedCourseId),
-        );
       } finally {
         if (!cancelled) setRosterLoading(false);
       }
@@ -291,16 +230,6 @@ function MarkAttendanceContent() {
   async function copyPreviousAttendance() {
     if (!selectedCourseId || !selectedTimetableId || locked) return;
 
-    if (isFacultyDemoSmokeId(selectedCourseId)) {
-      const map: Record<string, UiStatus> = {};
-      students.forEach((s, i) => {
-        map[s.student_id] = i % 6 === 0 ? 'ABSENT' : 'PRESENT';
-      });
-      setAttendance(map);
-      toast.success('Copied attendance from previous hour (demo)');
-      return;
-    }
-
     try {
       const prev = await api.get<{ attendance_data: { student_id: string; status: UiStatus }[] | null }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/previous-session?date=${selectedDate}&timetableId=${selectedTimetableId}`,
@@ -312,6 +241,7 @@ function MarkAttendanceContent() {
       const map: Record<string, UiStatus> = {};
       for (const row of prev.attendance_data) {
         if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
+        if ((row.status as string) === 'EXCUSED') map[row.student_id] = 'LEAVE';
       }
       setAttendance(map);
       toast.success('Copied attendance from previous hour');
@@ -323,7 +253,7 @@ function MarkAttendanceContent() {
   function markAll(status: UiStatus) {
     if (locked) return;
     const next: Record<string, UiStatus> = {};
-    for (const s of students) next[s.student_id] = status;
+    for (const s of filteredStudents) next[s.student_id] = status;
     setAttendance(next);
   }
 
@@ -333,10 +263,13 @@ function MarkAttendanceContent() {
       toast.error('No students on the roster — cannot save attendance.');
       return;
     }
-    const payload = Object.entries(attendance).map(([student_id, status]) => ({
-      student_id,
-      status,
-    })) as { student_id: string; status: UiStatus }[];
+    const visibleIds = new Set(filteredStudents.map((s) => s.student_id));
+    const payload = Object.entries(attendance)
+      .filter(([student_id]) => visibleIds.has(student_id))
+      .map(([student_id, status]) => ({
+        student_id,
+        status: status === 'LEAVE' ? 'EXCUSED' : status,
+      })) as { student_id: string; status: 'PRESENT' | 'ABSENT' | 'EXCUSED' }[];
     if (payload.length === 0) {
       toast.error('Mark at least one student before saving.');
       return;
@@ -344,20 +277,6 @@ function MarkAttendanceContent() {
     setSaving(true);
     try {
       const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
-
-      // Demo smoke courses must not hit the backend (IDs are not in the database).
-      if (isFacultyDemoSmokeId(selectedCourseId)) {
-        writeDemoAttendance(selectedCourseId, selectedDate, timetableId, {
-          locked: true,
-          attendance_data: payload,
-        });
-        setLocked(true);
-        setAnalytics(facultyDemoAttendanceAnalytics(selectedCourseId));
-        toast.success(
-          `Attendance saved · ${payload.length} student${payload.length === 1 ? '' : 's'} synced (demo)`,
-        );
-        return;
-      }
 
       const result = await api.post<{ saved: number; attendance_updated?: { attendance_percent: string }[] }>(
         '/api/academics/faculty/attendance',
@@ -394,13 +313,6 @@ function MarkAttendanceContent() {
   async function sendWarnings() {
     if (!selectedCourseId || !analytics?.defaulters.length) return;
 
-    if (isFacultyDemoSmokeId(selectedCourseId)) {
-      toast.success(
-        `Warning sent to ${analytics.defaulters.length} student${analytics.defaulters.length === 1 ? '' : 's'} and linked parents (demo)`,
-      );
-      return;
-    }
-
     try {
       const result = await api.post<{ notified: number }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/warnings`,
@@ -431,7 +343,8 @@ function MarkAttendanceContent() {
         }
       />
 
-      {classes.length === 0 ? (
+      {classesError ? <FacultyErrorBanner message={classesError} /> : null}
+      {!classesError && classes.length === 0 ? (
         <FacultyEmptyState
           title="No classes today"
           description="When you have sessions on the timetable, they will appear here for attendance marking."
@@ -477,6 +390,8 @@ function MarkAttendanceContent() {
               <FacultyEmptyState description="Select a class from the list to load the roster." />
             ) : rosterLoading ? (
               <FacultyInlineLoading label="Loading roster…" />
+            ) : rosterError ? (
+              <FacultyErrorBanner message={rosterError} />
             ) : (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -497,8 +412,25 @@ function MarkAttendanceContent() {
                     {locked ? <Badge variant="secondary">Locked</Badge> : null}
                     <FacultyMetricChip label="Present" value={presentCount} emphasis />
                     <FacultyMetricChip label="Absent" value={absentCount} />
+                    <FacultyMetricChip label="Leave" value={leaveCount} />
                   </div>
                 </div>
+
+                {selectedClass.is_practical ? (
+                  <label className="flex max-w-xs flex-col gap-1 text-sm">
+                    <span className="font-medium text-sgvu-navy">Practical batch</span>
+                    <select
+                      className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                      value={selectedBatch}
+                      onChange={(e) => setSelectedBatch(e.target.value)}
+                    >
+                      <option value="ALL">All batches</option>
+                      {Array.from(new Set(students.map((s) => s.section_code || 'UNASSIGNED'))).map((batch) => (
+                        <option key={batch} value={batch}>{batch === 'UNASSIGNED' ? 'Unassigned batch' : batch}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
 
                 {!locked && students.length > 0 && (
                   <div className="flex flex-wrap gap-2">
@@ -551,6 +483,15 @@ function MarkAttendanceContent() {
                             >
                               Absent
                             </Button>
+                            <Button
+                              size="sm"
+                              className="min-w-[5.5rem]"
+                              variant={attendance[s.student_id] === 'LEAVE' ? 'secondary' : 'outline'}
+                              disabled={locked}
+                              onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'LEAVE' }))}
+                            >
+                              Leave
+                            </Button>
                           </div>
                         </li>
                       ))}
@@ -561,7 +502,7 @@ function MarkAttendanceContent() {
                 <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-xs text-muted-foreground">
                     {students.length > 0
-                      ? `${presentCount} present · ${absentCount} absent · ${students.length} total`
+                      ? `${presentCount} present · ${absentCount} absent · ${leaveCount} leave · ${filteredStudents.length} shown`
                       : 'Save syncs attendance to enrollment percentages.'}
                   </p>
                   <Button

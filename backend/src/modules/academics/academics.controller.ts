@@ -206,12 +206,14 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getFacultyCourseStudents(
     @Param('courseId') courseId: string,
+    @Query('timetableId') timetableId: string | undefined,
     @Req() req: { user: AuthUser },
   ) {
     return this.facultyAcademics.getCourseStudents(
       courseId,
       req.user.user_id,
       this.resolveTenantId(req.user),
+      timetableId,
     );
   }
 

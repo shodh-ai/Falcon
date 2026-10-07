@@ -19,7 +19,7 @@ describe('UOS grade-change teaching access', () => {
     const sql = db.query.mock.calls[0][0] as string;
     expect(sql).toContain("a.status = 'ACTIVE'");
     expect(sql).toContain('t.deleted_at IS NULL');
-    expect(sql).toContain("e.status = 'ENROLLED'");
+    expect(sql).toContain("e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')");
   });
 
   it('allows a HOD to request a change for an enrolled student in the HOD department', async () => {

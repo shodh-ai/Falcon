@@ -117,4 +117,42 @@ describe('HOD workload declaration reliability', () => {
       ['tenant-1', 'faculty-1', ['course-1']],
     );
   });
+
+  it('counts published course slots for every active co-teaching allocation', async () => {
+    const manager = {
+      query: jest.fn().mockResolvedValue([
+        {
+          user_id: 'faculty-2',
+          name: 'Co-teacher',
+          email: 'co.teacher@example.edu',
+          dept_id: 10,
+          dept_name: 'Pharmacy',
+          assigned_load_credits: 4,
+          assigned_load_hours: 4,
+          scheduled_hours: '3.3',
+          hours_per_week: '3.3',
+          course_count: 1,
+          unscheduled_course_count: 0,
+          load_declaration_status: null,
+          load_declaration_revision: 0,
+        },
+      ]),
+    };
+    const service = makeService(manager as any);
+
+    const result = await (service as any).listFacultyWorkloadForDepartments(
+      'tenant-1',
+      [10],
+    );
+
+    const sql = manager.query.mock.calls[0][0] as string;
+    expect(sql).toContain('faculty_courses AS');
+    expect(sql).toContain('SELECT DISTINCT tenant_id, faculty_user_id, course_id');
+    expect(sql).not.toContain('a.faculty_user_id = t.faculty_user_id');
+    expect(result[0]).toMatchObject({
+      scheduled_hours: 3.3,
+      hours_per_week: 3.3,
+      unscheduled_course_count: 0,
+    });
+  });
 });

@@ -127,7 +127,7 @@ export class AuthController {
     const primaryRole = roleClaims.primaryRole ?? roles[0];
     const dbUser = await this.userRepository.findOne({
       where: { user_id: user.user_id },
-      select: ['onboarding_status'],
+      select: ['onboarding_status', 'account_status'],
     });
     const caps = user.tenant_id
       ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
@@ -168,6 +168,7 @@ export class AuthController {
         dbUser?.onboarding_status,
         primaryRole,
       ),
+      password_reset_required: dbUser?.account_status === 'PASSWORD_RESET_REQUIRED',
       hr_capabilities: caps ?? {},
       permissions,
       allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),

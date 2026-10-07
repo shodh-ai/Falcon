@@ -2529,7 +2529,7 @@ export class FacultyWorkspacesService {
        FROM student_course_enrollments e
        INNER JOIN users u ON u.user_id = e.student_user_id
        INNER JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.tenant_id = $1 AND e.status = 'ENROLLED'
+       WHERE e.tenant_id = $1 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
          AND ${FACULTY_COURSE_ACCESS_SQL}
          ${courseFilter}
        ORDER BY e.attendance_percent ASC, internal_avg_percent ASC`,
@@ -2604,7 +2604,7 @@ export class FacultyWorkspacesService {
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
          AND e.course_id = $3
          AND ${FACULTY_COURSE_ACCESS_SQL}
          ${searchFilter}
@@ -2673,7 +2673,7 @@ export class FacultyWorkspacesService {
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
          AND u.dept_id = $2
          AND (
            lower(u.name) LIKE $3
@@ -2741,7 +2741,7 @@ export class FacultyWorkspacesService {
          ON e.tenant_id = student.tenant_id
         AND e.student_user_id = student.user_id
         AND e.course_id = $4
-        AND e.status = 'ENROLLED'
+        AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
        WHERE faculty.tenant_id = $1
          AND faculty.user_id = $2
          AND faculty.dept_id IS NOT NULL
@@ -2783,7 +2783,7 @@ export class FacultyWorkspacesService {
            WHERE e.tenant_id = $1
              AND e.course_id = $2
              AND e.student_user_id = $3
-             AND e.status = 'ENROLLED'
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
            LIMIT 1`,
         [tenantId, courseId, studentUserId],
       ),
@@ -2802,7 +2802,7 @@ export class FacultyWorkspacesService {
               AND m.status = 'PUBLISHED'
              WHERE e.tenant_id = $1
                AND e.course_id = $2
-               AND e.status = 'ENROLLED'
+               AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
              GROUP BY e.student_user_id
            ),
            ranked AS (
@@ -2820,7 +2820,7 @@ export class FacultyWorkspacesService {
                     WHERE e.tenant_id = $1
                       AND e.course_id = $2
                       AND e.student_user_id = $3
-                      AND e.status = 'ENROLLED'
+                      AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
                     LIMIT 1
                   ) AS attendance_percent,
                   r.class_average_percent,

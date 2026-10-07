@@ -319,7 +319,7 @@ export class AssignmentsService {
       where: {
         tenant_id: tenantId,
         course_id: assignment.course_id,
-        status: 'ENROLLED',
+        status: In(['ENROLLED', 'COMPLETED', 'FAILED']),
       },
       relations: ['student'],
       order: { student_user_id: 'ASC' },

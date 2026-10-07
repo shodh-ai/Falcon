@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import { useAuthedApi } from '@/lib/api';
 import { useOptionalTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
-import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
-import { facultyDemoCourses } from '@/lib/mock/faculty-portal-demo';
 
 export type FacultyCourse = {
   allocation_id?: string | null;
@@ -46,27 +44,23 @@ export function useFacultyCourses() {
           withTeachingDeptId('/api/academics/faculty/workspaces/courses', activeDeptId),
         );
         if (!cancelled) {
+          if (!Array.isArray(data)) {
+            throw new Error('Courses API returned an invalid response');
+          }
           const uniqueMap = new Map<string, FacultyCourse>();
           for (const c of data) {
-            if (!uniqueMap.has(c.course_id)) {
+            if (c?.course_id && !uniqueMap.has(c.course_id)) {
               uniqueMap.set(c.course_id, c);
             }
           }
-          const uniqueData = withFacultyDemoFallback(
-            Array.from(uniqueMap.values()),
-            facultyDemoCourses(),
-            isEmptyArray,
-          );
+          const uniqueData = Array.from(uniqueMap.values());
           setCourses(uniqueData);
           setError(uniqueData.length === 0 ? 'No courses allocated to your timetable yet.' : null);
         }
       } catch (e) {
         if (!cancelled) {
-          const demo = withFacultyDemoFallback([], facultyDemoCourses(), isEmptyArray);
-          setCourses(demo);
-          setError(
-            demo.length > 0 ? null : e instanceof Error ? e.message : 'Failed to load courses',
-          );
+          setCourses([]);
+          setError(e instanceof Error ? e.message : 'Failed to load courses');
         }
       } finally {
         if (!cancelled) setLoading(false);

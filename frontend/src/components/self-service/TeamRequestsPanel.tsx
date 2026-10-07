@@ -95,6 +95,10 @@ type RequestItem = {
   leave_type: string | null;
   applied_date: string | null;
   raised_on: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
   reason: string | null;
   status: string;
   supporting_doc_urls?: string[];
@@ -485,6 +489,9 @@ function RequestsContent({ defaultScope }: Props) {
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-medium">{row.leave_type ?? row.request_type}</span>
+                    {(row.start_time && row.end_time) ? (
+                      <p className="text-xs text-muted-foreground">{row.start_time.slice(0, 5)}–{row.end_time.slice(0, 5)}</p>
+                    ) : null}
                     {row.reason && (
                       <p className="mt-0.5 max-w-xs truncate text-xs text-muted-foreground">{row.reason}</p>
                     )}

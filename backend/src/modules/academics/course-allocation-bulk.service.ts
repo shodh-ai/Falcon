@@ -216,11 +216,16 @@ export class CourseAllocationBulkService {
   ): Promise<CourseAllocationRowInput[]> {
     const lower = filename.toLowerCase();
     if (lower.endsWith('.csv')) return this.parseCsv(buffer);
-    if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+    if (lower.endsWith('.xlsx')) {
       return this.parseExcel(buffer);
     }
+    if (lower.endsWith('.xls')) {
+      throw new BadRequestException(
+        'Legacy .xls files are not supported. Save the workbook as .xlsx or CSV and upload it again.',
+      );
+    }
     throw new BadRequestException(
-      'Only .xlsx, .xls, or .csv files are supported',
+      'Only .xlsx or .csv files are supported',
     );
   }
 
@@ -1067,7 +1072,9 @@ export class CourseAllocationBulkService {
       );
       if (match?.program_id) return match.program_id;
     }
-    return 1;
+    throw new BadRequestException(
+      'No active programme is configured for the selected department. Configure the programme before importing this matrix.',
+    );
   }
 
   private async resolveAllowedProgramNames(
@@ -1289,10 +1296,12 @@ export class CourseAllocationBulkService {
         'CSV must include a header row and at least one data row',
       );
     }
-    const headers = lines[0].split(',').map((h) => this.normalizeHeader(h));
+    const headers = this.parseCsvLine(lines[0]).map((h) =>
+      this.normalizeHeader(h),
+    );
     this.validateHeaders(headers);
     return lines.slice(1).flatMap((line, idx) => {
-      const values = line.split(',').map((v) => v.trim());
+      const values = this.parseCsvLine(line).map((v) => v.trim());
       if (values.every((value) => !value)) return [];
       const row: Record<string, string> = {};
       headers.forEach((h, i) => {
@@ -1300,6 +1309,42 @@ export class CourseAllocationBulkService {
       });
       return [this.normalizeRow(row, idx + 2)];
     });
+  }
+
+  /**
+   * Parse one RFC 4180-style CSV record. A hand-written split(',') parser
+   * corrupts valid matrix rows when a subject/program name contains a comma.
+   * We intentionally keep this dependency-free because uploads are parsed in
+   * the request path and the supported file formats are already constrained to
+   * CSV and XLSX.
+   */
+  private parseCsvLine(line: string): string[] {
+    const values: string[] = [];
+    let value = '';
+    let quoted = false;
+
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      if (char === '"') {
+        if (quoted && line[index + 1] === '"') {
+          value += '"';
+          index += 1;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (char === ',' && !quoted) {
+        values.push(value);
+        value = '';
+      } else {
+        value += char;
+      }
+    }
+
+    if (quoted) {
+      throw new BadRequestException('CSV contains an unterminated quoted field');
+    }
+    values.push(value);
+    return values;
   }
 
   private async parseExcel(

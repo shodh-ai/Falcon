@@ -1600,26 +1600,31 @@ export class AcademicsService {
                   FROM academic_timetables t
                   WHERE t.tenant_id = a.tenant_id
                     AND t.course_id = a.course_id
-                    AND t.faculty_user_id = a.faculty_user_id
                     AND t.deleted_at IS NULL
                 ))::int AS unscheduled_course_count
          FROM academic_course_allocations a
          LEFT JOIN academic_courses c ON c.course_id = a.course_id
          WHERE a.tenant_id = $1 AND a.academic_year = $3 AND a.status = 'ACTIVE'
          GROUP BY a.tenant_id, a.faculty_user_id
+       ), faculty_courses AS (
+         -- Timetable rows are course/section schedules, not permanent faculty
+         -- ownership records.  Share published slots with every active
+         -- co-teaching allocation and dedupe course/faculty pairs so repeated
+         -- programme rows cannot multiply the weekly hours.
+         SELECT DISTINCT tenant_id, faculty_user_id, course_id
+         FROM academic_course_allocations
+         WHERE tenant_id = $1 AND academic_year = $3 AND status = 'ACTIVE'
+           AND faculty_user_id IS NOT NULL AND course_id IS NOT NULL
        ), scheduled AS (
-         SELECT t.faculty_user_id, t.tenant_id,
+         SELECT fc.faculty_user_id, fc.tenant_id,
                 ROUND(SUM(EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600)::numeric, 1)::numeric(6,1) AS scheduled_hours,
                 COUNT(DISTINCT t.course_id)::int AS scheduled_course_count
-         FROM academic_timetables t
-         INNER JOIN academic_course_allocations a
-           ON a.tenant_id = t.tenant_id
-          AND a.course_id = t.course_id
-          AND a.faculty_user_id = t.faculty_user_id
-          AND a.academic_year = $3
-          AND a.status = 'ACTIVE'
-         WHERE t.tenant_id = $1 AND t.deleted_at IS NULL
-         GROUP BY t.tenant_id, t.faculty_user_id
+         FROM faculty_courses fc
+         INNER JOIN academic_timetables t
+           ON t.tenant_id = fc.tenant_id
+          AND t.course_id = fc.course_id
+          AND t.deleted_at IS NULL
+         GROUP BY fc.tenant_id, fc.faculty_user_id
        )
        SELECT u.user_id, u.name, u.official_email AS email, u.dept_id,
               d.dept_name,

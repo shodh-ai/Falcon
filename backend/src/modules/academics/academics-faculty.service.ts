@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { mkdirSync, writeFileSync } from 'fs';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -37,6 +37,7 @@ export interface ClassStudentDto {
   name: string;
   roll_number: string;
   photo_url: string | null;
+  section_code?: string | null;
 }
 
 const DAY_NAMES = [
@@ -247,6 +248,8 @@ export class AcademicsFacultyService {
         room: string | null;
         start_time: string;
         end_time: string;
+        section: string | null;
+        is_practical: boolean;
       }>
     >(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
@@ -257,7 +260,13 @@ export class AcademicsFacultyService {
          c.course_name,
          t.room,
          t.start_time,
-         t.end_time
+         t.end_time,
+         t.section,
+         (
+           UPPER(c.course_code) ~ '(P|LAB)$'
+           OR c.course_name ILIKE '%practical%'
+           OR c.course_name ILIKE '%lab%'
+         ) AS is_practical
        FROM academic_timetables t
        INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
        INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
@@ -278,6 +287,8 @@ export class AcademicsFacultyService {
         room: row.room,
         start_time: row.start_time,
         end_time: row.end_time,
+        section: row.section,
+        is_practical: Boolean(row.is_practical),
         student_count: await this.enrollmentRepo.count({
           where: {
             tenant_id: tenantId,
@@ -293,13 +304,43 @@ export class AcademicsFacultyService {
     courseId: string,
     facultyUserId: string,
     tenantId: string,
+    timetableId?: string,
   ) {
     await this.assertFacultyTeachesCourse(courseId, facultyUserId, tenantId);
+
+    // Practical sessions are scheduled per batch/section.  Scope the roster
+    // to the exact timetable slot when one is supplied so marking Batch A
+    // cannot accidentally include or overwrite Batch B.
+    let sectionCode: string | null = null;
+    if (timetableId) {
+      const [slot] = await this.dataSource.query<
+        Array<{ section: string | null }>
+      >(
+        `SELECT section
+           FROM academic_timetables
+          WHERE tenant_id = $1
+            AND timetable_id = $2::uuid
+            AND course_id = $3
+            AND faculty_user_id = $4
+            AND deleted_at IS NULL
+          LIMIT 1`,
+        [tenantId, timetableId, courseId, facultyUserId],
+      );
+      if (!slot) throw new NotFoundException('Timetable slot not found');
+      sectionCode = slot.section?.trim() || null;
+    }
+
     const rows = await this.enrollmentRepo.find({
       where: {
         tenant_id: tenantId,
         course_id: courseId,
-        status: 'ENROLLED',
+        // The roster is also used to review submissions and correct grades
+        // after a semester closes.  Those records remain valid course
+        // memberships when their status moves to COMPLETED or FAILED; using
+        // only ENROLLED made a faculty roster appear empty as soon as the
+        // enrollment sync finalized a semester.
+        status: In(['ENROLLED', 'COMPLETED', 'FAILED']),
+        ...(sectionCode ? { section_code: sectionCode } : {}),
       },
       relations: ['student'],
       order: { student_user_id: 'ASC' },
@@ -324,6 +365,7 @@ export class AcademicsFacultyService {
       name: row.student?.name ?? 'Student',
       roll_number: rollById.get(row.student_user_id) ?? row.student_user_id,
       email: row.student?.email ?? null,
+      section_code: row.section_code ?? null,
     }));
   }
 

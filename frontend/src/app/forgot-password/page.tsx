@@ -8,13 +8,28 @@ import { FalconLogo } from '@/components/brand/FalconLogo';
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const res = await api.forgotPassword(email.trim());
-    setMessage('If that account exists, a reset was issued.');
-    setToken(res.reset_token ?? null);
+    setError(null);
+    setMessage(null);
+    setLoading(true);
+    try {
+      const res = await api.forgotPassword(email.trim());
+      setMessage(
+        res.reset_token
+          ? 'A reset token was generated for this development environment.'
+          : 'If the account exists, a reset link has been sent. If it does not arrive, contact Campus Admin.',
+      );
+      setToken(res.reset_token ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start password reset');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -30,10 +45,11 @@ export default function ForgotPasswordPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <button type="submit" className="w-full rounded-xl bg-sgvu-navy py-3 font-semibold text-white">
-          Send reset
+        <button type="submit" disabled={loading} className="w-full rounded-xl bg-sgvu-navy py-3 font-semibold text-white disabled:opacity-60">
+          {loading ? 'Sending…' : 'Send reset'}
         </button>
         {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
         {token ? (
           <p className="break-all text-xs text-muted-foreground">
             Dev token: {token} — use{' '}

@@ -42,6 +42,7 @@ export function formatWorkforceDateRange(start: string, end: string): string {
 
 export const LEAVE_TYPE_LABELS: Record<string, string> = {
   CL: 'Casual leave',
+  CCL: 'Compulsory casual leave',
   SL: 'Sick leave',
   EL: 'Earned leave',
   PL: 'Privilege leave',

@@ -67,6 +67,9 @@ export class User extends BaseTenantEntity {
   @Column({ type: 'varchar', length: 50, nullable: true })
   onboarding_status: string | null;
 
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  account_status: string | null;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone: string | null;
 

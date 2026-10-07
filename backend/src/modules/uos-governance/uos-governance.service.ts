@@ -398,7 +398,7 @@ export class UosGovernanceService {
          ON e.tenant_id = c.tenant_id
         AND e.course_id = c.course_id
         AND e.student_user_id = $3
-        AND e.status = 'ENROLLED'
+        AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
        WHERE c.tenant_id = $1
          AND upper(c.course_code) = upper($4)
          AND (

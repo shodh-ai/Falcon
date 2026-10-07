@@ -35,6 +35,8 @@ export type ApplyWorkforceRequestDto = {
   leave_type?: string;
   start_date?: string;
   end_date?: string;
+  start_time?: string;
+  end_time?: string;
   regularization_date?: string;
   missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
   reason?: string;
@@ -250,6 +252,24 @@ export class HrWorkforceService {
     let endDate = dto.end_date;
     let leaveType = dto.leave_type ?? 'CL';
 
+    const hasStartTime = Boolean(dto.start_time?.trim());
+    const hasEndTime = Boolean(dto.end_time?.trim());
+    if (hasStartTime !== hasEndTime) {
+      throw new BadRequestException('Both start_time and end_time are required for a partial-day request');
+    }
+    if (hasStartTime && hasEndTime) {
+      if (!startDate || !endDate || startDate !== endDate) {
+        throw new BadRequestException('Partial-day leave/on-duty must be for one date');
+      }
+      const timePattern = /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+      if (!timePattern.test(dto.start_time!.trim()) || !timePattern.test(dto.end_time!.trim())) {
+        throw new BadRequestException('Times must use HH:MM format');
+      }
+      if (dto.start_time!.trim() >= dto.end_time!.trim()) {
+        throw new BadRequestException('end_time must be after start_time');
+      }
+    }
+
     if (requestType === 'REGULARIZATION') {
       if (!dto.regularization_date) {
         throw new BadRequestException('regularization_date is required');
@@ -314,6 +334,8 @@ export class HrWorkforceService {
       leave_type: leaveType,
       start_date: startDate,
       end_date: endDate,
+      start_time: hasStartTime ? dto.start_time!.trim() : null,
+      end_time: hasEndTime ? dto.end_time!.trim() : null,
       reason: dto.reason?.trim() ?? null,
       regularization_date: dto.regularization_date ?? null,
       missed_punch_type: dto.missed_punch_type ?? null,
@@ -393,6 +415,8 @@ export class HrWorkforceService {
         start_date: string;
         end_date: string;
         regularization_date: string | null;
+        start_time: string | null;
+        end_time: string | null;
         missed_punch_type: string | null;
         reason: string | null;
         status: string;
@@ -405,7 +429,7 @@ export class HrWorkforceService {
       }>
     >(
       `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
-              r.regularization_date, r.missed_punch_type, r.reason, r.status, r.applied_at,
+              r.start_time, r.end_time, r.regularization_date, r.missed_punch_type, r.reason, r.status, r.applied_at,
               r.staff_user_id, r.current_step_order,
               u.name AS employee_name, u.official_email AS employee_email, d.dept_name AS employee_dept
        FROM staff_leave_requests r
@@ -426,6 +450,8 @@ export class HrWorkforceService {
       leave_type: r.leave_type,
       start_date: r.start_date,
       end_date: r.end_date,
+      start_time: r.start_time,
+      end_time: r.end_time,
       regularization_date: r.regularization_date,
       missed_punch_type: r.missed_punch_type,
       reason: r.reason,
@@ -947,7 +973,7 @@ export class HrWorkforceService {
     if (row.request_type === 'ON_DUTY') return true;
     if (row.request_type === 'LEAVE') {
       const leaveType = (row.leave_type ?? '').toUpperCase();
-      return ['CL', 'OD', 'RH'].includes(leaveType);
+      return ['CL', 'CCL', 'OD', 'RH'].includes(leaveType);
     }
     return false;
   }

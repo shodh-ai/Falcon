@@ -4,11 +4,11 @@ import { Select } from '@/components/ui/select';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Loader2, PenLine, Search, Users, X } from 'lucide-react';
-import { toast } from '@/lib/notifications/falcon-toast';
 import {
   FacultyPageHeader,
   FacultyPageShell,
   FacultyEmptyState,
+  FacultyErrorBanner,
   FacultyPanel,
   FacultyMetricChip,
 } from '@/components/faculty';
@@ -19,9 +19,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { isEmptyArray, isFacultyDemoEntityId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
-import { facultyDemoCourses, getFacultyPortalDemoPack, studentsForCourse } from '@/lib/mock/faculty-portal-demo';
-import type { FacultyCourse } from '@/components/faculty/useFacultyCourses';
 
 type StudentSearchResult = {
   student_user_id: string;
@@ -56,185 +53,6 @@ function scoreTone(value: string | number | null | undefined) {
   return 'outline' as const;
 }
 
-function buildDemoAnalyticsStudents(
-  courseId: string,
-  query: string,
-  courseMeta?: Pick<FacultyCourse, 'course_id' | 'course_code' | 'course_name'>,
-): StudentSearchResult[] {
-  const demoCourses = facultyDemoCourses();
-  const packCourse = demoCourses.find((c) => c.course_id === courseId) ?? demoCourses[0];
-  if (!packCourse) return [];
-
-  const displayCourseId = courseMeta?.course_id ?? courseId;
-  const displayCode = courseMeta?.course_code ?? packCourse.course_code;
-  const displayName = courseMeta?.course_name ?? packCourse.course_name;
-
-  // When a live course UUID has an empty roster, reuse the matching/fallback demo roster.
-  const rosterSourceId = packCourse.course_id;
-  const q = query.trim().toLowerCase();
-  return studentsForCourse(rosterSourceId)
-    .filter(
-      (s) =>
-        !q ||
-        s.name.toLowerCase().includes(q) ||
-        s.roll_number.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q),
-    )
-    .slice(0, 80)
-    .map((s) => ({
-      student_user_id: s.user_id,
-      name: s.name,
-      official_email: s.email,
-      roll_number: s.roll_number,
-      department: s.department,
-      course_id: displayCourseId,
-      course_code: displayCode,
-      course_name: displayName,
-      internal_avg_percent: s.internal_marks,
-      attendance_percent: s.attendance_percent,
-      assignments_submitted: Math.round(s.assignment_score / 10),
-    }));
-}
-
-function buildDemoStudentReport(
-  courseId: string,
-  studentUserId: string,
-  courseMeta?: Pick<FacultyCourse, 'course_id' | 'course_code' | 'course_name' | 'academic_year'>,
-): FacultyStudentReportData | null {
-  const pack = getFacultyPortalDemoPack();
-  const student = pack.students.find((s) => s.user_id === studentUserId);
-  if (!student) return null;
-
-  const demoCourse =
-    pack.courses.find((c) => c.course_id === courseId) ??
-    pack.courses.find((c) => student.course_ids.includes(c.course_id)) ??
-    pack.courses[0];
-  if (!demoCourse) return null;
-
-  // Prefer the subject currently selected in the UI (may be a live UUID with demo roster).
-  const subject = {
-    course_id: courseMeta?.course_id ?? courseId ?? demoCourse.course_id,
-    course_code: courseMeta?.course_code ?? demoCourse.course_code,
-    course_name: courseMeta?.course_name ?? demoCourse.course_name,
-  };
-  const academicYear = courseMeta?.academic_year ?? demoCourse.academic_year ?? '2025-26';
-
-  const mark =
-    pack.marks.find((m) => m.student_id === student.student_id && m.course_id === demoCourse.course_id) ??
-    pack.marks.find((m) => m.student_id === student.student_id);
-  const courseAssignments = pack.assignments.filter((a) => a.course_id === demoCourse.course_id);
-  const submitted = pack.submissions.filter(
-    (s) => s.student_id === student.student_id && courseAssignments.some((a) => a.assignment_id === s.assignment_id),
-  );
-  const internal = mark?.internal ?? student.internal_marks;
-  return {
-    student: {
-      student_user_id: student.user_id,
-      name: student.name,
-      official_email: student.email,
-      roll_number: student.roll_number,
-      batch: student.program,
-      department: student.department,
-    },
-    subject,
-    summary: {
-      internal_avg_percent: internal,
-      attendance_percent: student.attendance_percent,
-      class_average_percent: 72.5,
-      class_rank: Math.max(1, Math.round((100 - internal) / 3)),
-      class_size: studentsForCourse(demoCourse.course_id).length || 60,
-      cumulative_demerit_points: student.attendance_percent < 60 ? 4 : 0,
-      course_demerit_points: student.attendance_percent < 60 ? 2 : 0,
-      is_subject_back_triggered: student.overall_grade === 'F',
-      assignments_submitted: submitted.length,
-      assignments_total: Math.max(courseAssignments.length, 4),
-      assignments_graded: submitted.filter((s) => s.status === 'GRADED').length,
-      pending_assignments: Math.max(0, courseAssignments.length - submitted.length),
-      assignment_completion_percent: student.assignment_score,
-      graded_assignment_avg_percent: student.assignment_score,
-    },
-    academic: {
-      academic_year: academicYear,
-      semester: student.semester,
-      sgpa: Number((student.internal_marks / 20).toFixed(2)),
-      cgpa: Number((student.internal_marks / 22).toFixed(2)),
-      backlog_count: student.overall_grade === 'F' ? 1 : 0,
-      progression_status: student.academic_status,
-      remarks: null,
-    },
-    marks: [
-      {
-        exam_type: 'INTERNAL',
-        marks_obtained: internal,
-        max_marks: 40,
-        percent: (internal / 40) * 100,
-      },
-      {
-        exam_type: 'ASSIGNMENT',
-        marks_obtained: mark?.assignment ?? Math.round(student.assignment_score / 5),
-        max_marks: 20,
-        percent: student.assignment_score,
-      },
-      {
-        exam_type: 'QUIZ',
-        marks_obtained: mark?.quiz ?? 10,
-        max_marks: 15,
-        percent: ((mark?.quiz ?? 10) / 15) * 100,
-      },
-      {
-        exam_type: 'LAB',
-        marks_obtained: mark?.lab ?? Math.round(student.practical_marks / 5),
-        max_marks: 20,
-        percent: student.practical_marks,
-      },
-    ],
-    assignments: courseAssignments.slice(0, 6).map((a) => {
-      const sub = pack.submissions.find(
-        (s) => s.assignment_id === a.assignment_id && s.student_id === student.student_id,
-      );
-      return {
-        assignment_id: a.assignment_id,
-        title: a.title,
-        max_marks: a.max_marks,
-        due_date: a.due_date,
-        submitted_at: sub?.submitted_on ?? null,
-        marks_awarded: sub?.marks ?? null,
-        faculty_remarks: sub?.feedback ?? null,
-        status: sub?.status === 'GRADED' ? 'GRADED' : sub && sub.status !== 'PENDING' ? 'SUBMITTED' : 'PENDING',
-      };
-    }),
-    demerits: [],
-    risk_flags:
-      student.attendance_percent < 75
-        ? [
-            {
-              label: 'Low attendance',
-              severity: student.attendance_percent < 55 ? 'HIGH' : 'MEDIUM',
-              detail: `Attendance at ${student.attendance_percent}% (minimum 75%).`,
-            },
-          ]
-        : [],
-    gpa_history: [
-      {
-        semester: student.semester - 1,
-        sgpa: 7.2,
-        cgpa: 7.4,
-        status: 'PASS',
-        academic_year: academicYear,
-        source: 'demo',
-      },
-      {
-        semester: student.semester,
-        sgpa: Number((student.internal_marks / 20).toFixed(2)),
-        cgpa: Number((student.internal_marks / 22).toFixed(2)),
-        status: 'PASS',
-        academic_year: academicYear,
-        source: 'demo',
-      },
-    ],
-  };
-}
-
 export default function FacultyAnalyticsPage() {
   const api = useAuthedApi();
   const { courses } = useFacultyCourses();
@@ -248,14 +66,12 @@ export default function FacultyAnalyticsPage() {
   const [report, setReport] = useState<FacultyStudentReportData | null>(null);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [studentsError, setStudentsError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const effectiveCourseId = courseId || courseOptions[0]?.course_id || '';
   const selectedCourse = courseOptions.find((course) => course.course_id === effectiveCourseId);
-  const selectedCourseId = selectedCourse?.course_id;
-  const selectedCourseCode = selectedCourse?.course_code;
-  const selectedCourseName = selectedCourse?.course_name;
-  const selectedCourseYear = selectedCourse?.academic_year;
   useEffect(() => {
     if (searchScope === 'subject' && !effectiveCourseId) return;
     if (searchScope === 'department' && query.trim().length < 2) {
@@ -263,59 +79,30 @@ export default function FacultyAnalyticsPage() {
     }
 
     let active = true;
-    const currentCourseMeta = selectedCourseId
-      ? {
-          course_id: selectedCourseId,
-          course_code: selectedCourseCode ?? '',
-          course_name: selectedCourseName ?? '',
-          academic_year: selectedCourseYear,
-        }
-      : undefined;
     const params = new URLSearchParams({ courseId: effectiveCourseId });
     if (query.trim()) params.set('q', query.trim());
 
     async function loadStudents() {
       setLoadingStudents(true);
+      setStudentsError(null);
       try {
-        // Demo course IDs are not in Postgres — use local roster only.
-        if (searchScope === 'subject' && isFacultyDemoEntityId(effectiveCourseId)) {
-          if (!active) return;
-          const demoRows = buildDemoAnalyticsStudents(effectiveCourseId, query, currentCourseMeta);
-          setStudents(demoRows);
-          setSelectedStudentId((current) => {
-            if (current && demoRows.some((student) => student.student_user_id === current)) return current;
-            return '';
-          });
-          return;
-        }
-
         const endpoint =
           searchScope === 'department'
             ? `/api/academics/faculty/workspaces/student-directory?q=${encodeURIComponent(query.trim())}`
             : `/api/academics/faculty/workspaces/analytics/students?${params.toString()}`;
         const rows = await api.get<StudentSearchResult[]>(endpoint);
         if (!active) return;
-        const demoRows =
-          searchScope === 'subject' ? buildDemoAnalyticsStudents(effectiveCourseId, query, currentCourseMeta) : [];
-        const resolved = searchScope === 'subject' ? withFacultyDemoFallback(rows, demoRows, isEmptyArray) : rows;
-        setStudents(resolved);
+        if (!Array.isArray(rows)) throw new Error('Student roster API returned an invalid response');
+        setStudents(rows);
         setSelectedStudentId((current) => {
-          if (current && resolved.some((student) => student.student_user_id === current)) return current;
+          if (current && rows.some((student) => student.student_user_id === current)) return current;
           return '';
         });
       } catch (error) {
         if (!active) return;
-        const demoRows =
-          searchScope === 'subject' ? buildDemoAnalyticsStudents(effectiveCourseId, query, currentCourseMeta) : [];
-        const resolved = withFacultyDemoFallback([], demoRows, isEmptyArray);
-        setStudents(resolved);
-        setSelectedStudentId((current) => {
-          if (current && resolved.some((student) => student.student_user_id === current)) return current;
-          return '';
-        });
-        if (resolved.length === 0) {
-          toast.error(error instanceof Error ? error.message : 'Failed to search students');
-        }
+        setStudents([]);
+        setSelectedStudentId('');
+        setStudentsError(error instanceof Error ? error.message : 'Failed to search students');
       } finally {
         if (active) setLoadingStudents(false);
       }
@@ -330,10 +117,6 @@ export default function FacultyAnalyticsPage() {
     effectiveCourseId,
     query,
     searchScope,
-    selectedCourseCode,
-    selectedCourseId,
-    selectedCourseName,
-    selectedCourseYear,
   ]);
 
   useEffect(() => {
@@ -342,52 +125,24 @@ export default function FacultyAnalyticsPage() {
     }
 
     let active = true;
-    const currentCourseMeta = selectedCourseId
-      ? {
-          course_id: selectedCourseId,
-          course_code: selectedCourseCode ?? '',
-          course_name: selectedCourseName ?? '',
-          academic_year: selectedCourseYear,
-        }
-      : undefined;
     const params = new URLSearchParams({ courseId: effectiveCourseId });
 
     async function loadReport() {
       setLoadingReport(true);
+      setReportError(null);
       try {
-        // Demo smoke student/course IDs never exist in Postgres — skip the API (avoids 500).
-        if (isFacultyDemoEntityId(selectedStudentId) || isFacultyDemoEntityId(effectiveCourseId)) {
-          const demo = buildDemoStudentReport(effectiveCourseId, selectedStudentId, currentCourseMeta);
-          if (!active) return;
-          setReport(demo);
-          if (!demo) {
-            toast.error('Could not build demo analysis for this student');
-          }
-          return;
-        }
-
         const endpoint =
           searchScope === 'department'
             ? `/api/academics/faculty/workspaces/student-directory/${encodeURIComponent(selectedStudentId)}/report?${params.toString()}`
             : `/api/academics/faculty/workspaces/analytics/students/${encodeURIComponent(selectedStudentId)}/report?${params.toString()}`;
         const data = await api.get<FacultyStudentReportData>(endpoint);
         if (!active) return;
-        setReport(
-          withFacultyDemoFallback(
-            data,
-            buildDemoStudentReport(effectiveCourseId, selectedStudentId, currentCourseMeta),
-          ),
-        );
+        if (!data?.student || !data.subject) throw new Error('Student report API returned an invalid response');
+        setReport(data);
       } catch (error) {
         if (!active) return;
-        const demo = withFacultyDemoFallback(
-          null,
-          buildDemoStudentReport(effectiveCourseId, selectedStudentId, currentCourseMeta),
-        );
-        setReport(demo);
-        if (!demo) {
-          toast.error(error instanceof Error ? error.message : 'Failed to load student analysis');
-        }
+        setReport(null);
+        setReportError(error instanceof Error ? error.message : 'Failed to load student analysis');
       } finally {
         if (active) setLoadingReport(false);
       }
@@ -402,10 +157,6 @@ export default function FacultyAnalyticsPage() {
     effectiveCourseId,
     selectedStudentId,
     searchScope,
-    selectedCourseCode,
-    selectedCourseId,
-    selectedCourseName,
-    selectedCourseYear,
   ]);
 
   const filteredStudents = useMemo(() => {
@@ -634,6 +385,8 @@ export default function FacultyAnalyticsPage() {
               <div className="flex justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
+            ) : studentsError ? (
+              <div className="p-4 sm:p-5"><FacultyErrorBanner message={studentsError} /></div>
             ) : filteredStudents.length === 0 ? (
               <div className="p-4 sm:p-5">
                 <FacultyEmptyState
@@ -746,6 +499,10 @@ export default function FacultyAnalyticsPage() {
                   <Loader2 className="h-7 w-7 animate-spin text-sgvu-navy" />
                   <p className="text-sm text-muted-foreground">Preparing student analysis…</p>
                 </div>
+              </FacultyPanel>
+            ) : reportError ? (
+              <FacultyPanel title="Student Analysis" className="w-full">
+                <FacultyErrorBanner message={reportError} />
               </FacultyPanel>
             ) : report ? (
                 <FacultyStudentReport

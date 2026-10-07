@@ -29,6 +29,8 @@ type QueueRow = {
   portal_kind: string;
   submitted_at: string | null;
   doc_count: string;
+  tenant_subdomain?: string;
+  tenant_name?: string;
 };
 
 type VerificationDetail = {
@@ -114,6 +116,7 @@ export default function AdminStudentVerificationsPage() {
   const [queue, setQueue] = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedTenant, setSelectedTenant] = useState<string | null>(null);
   const [detail, setDetail] = useState<VerificationDetail | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
@@ -154,7 +157,7 @@ export default function AdminStudentVerificationsPage() {
         const response = await fetch(buildPreviewUrl(verificationBase, selectedId, doc.doc_type), {
           headers: {
             Authorization: `Bearer ${token}`,
-            'x-tenant-subdomain': getSubdomainFromClient(),
+            'x-tenant-subdomain': selectedTenant ?? getSubdomainFromClient(),
           },
         });
         if (!response.ok) throw new Error('Preview failed');
@@ -169,14 +172,19 @@ export default function AdminStudentVerificationsPage() {
     return () => {
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [detail?.documents, previewDoc, selectedId, token, verificationBase]);
+  }, [detail?.documents, previewDoc, selectedId, selectedTenant, token, verificationBase]);
 
-  const openReview = async (userId: string) => {
+  const openReview = async (row: QueueRow) => {
+    const userId = row.user_id;
+    const tenant = row.tenant_subdomain ?? getSubdomainFromClient();
     setSelectedId(userId);
+    setSelectedTenant(tenant);
     setRejectReason('');
     setPreviewDoc(null);
     try {
-      const data = await api.get<VerificationDetail>(`${verificationBase}/${userId}`);
+      const data = await api.get<VerificationDetail>(`${verificationBase}/${userId}`, {
+        'x-tenant-subdomain': tenant,
+      });
       setDetail(data);
       if (data.documents[0]) setPreviewDoc(data.documents[0].file_path);
       if (data.person.onboarding_status !== 'PENDING_ADMIN_APPROVAL') {
@@ -189,6 +197,7 @@ export default function AdminStudentVerificationsPage() {
     } catch (err) {
       toast.error(parseApiError(err));
       setSelectedId(null);
+      setSelectedTenant(null);
     }
   };
 
@@ -198,9 +207,12 @@ export default function AdminStudentVerificationsPage() {
     if (!selectedId) return;
     setActing(true);
     try {
-      await api.post(`${verificationBase}/${selectedId}/approve`);
+      await api.post(`${verificationBase}/${selectedId}/approve`, undefined, {
+        'x-tenant-subdomain': selectedTenant ?? getSubdomainFromClient(),
+      });
       toast.success('Approved — portal unlocked');
       setSelectedId(null);
+      setSelectedTenant(null);
       setDetail(null);
       await loadQueue();
       window.dispatchEvent(new Event('falcon:notifications-refresh'));
@@ -220,9 +232,12 @@ export default function AdminStudentVerificationsPage() {
     try {
       await api.post(`${verificationBase}/${selectedId}/reject`, {
         remarks: rejectReason.trim(),
+      }, {
+        'x-tenant-subdomain': selectedTenant ?? getSubdomainFromClient(),
       });
       toast.success('Sent back for corrections');
       setSelectedId(null);
+      setSelectedTenant(null);
       setDetail(null);
       await loadQueue();
       window.dispatchEvent(new Event('falcon:notifications-refresh'));
@@ -268,6 +283,7 @@ export default function AdminStudentVerificationsPage() {
                     <th className="py-2 pr-4 font-medium">Name</th>
                     <th className="py-2 pr-4 font-medium">Role</th>
                     <th className="py-2 pr-4 font-medium">Email</th>
+                    {staffMode ? <th className="py-2 pr-4 font-medium">Institution</th> : null}
                     <th className="py-2 pr-4 font-medium">Docs</th>
                     <th className="py-2 pr-4 font-medium">Submitted</th>
                     <th className="py-2 font-medium">Action</th>
@@ -275,12 +291,17 @@ export default function AdminStudentVerificationsPage() {
                 </thead>
                 <tbody>
                   {queue.map((row) => (
-                    <tr key={row.user_id} className="border-b last:border-0">
+                    <tr key={`${row.tenant_subdomain ?? 'current'}:${row.user_id}`} className="border-b last:border-0">
                       <td className="py-3 pr-4 font-medium">{row.name}</td>
                       <td className="py-3 pr-4">
                         <Badge variant="outline">{row.role_name}</Badge>
                       </td>
                       <td className="py-3 pr-4">{row.official_email}</td>
+                      {staffMode ? (
+                        <td className="py-3 pr-4 text-muted-foreground">
+                          {row.tenant_name ?? row.tenant_subdomain ?? 'Current institution'}
+                        </td>
+                      ) : null}
                       <td className="py-3 pr-4">
                         <Badge variant="outline">{row.doc_count} files</Badge>
                       </td>
@@ -288,7 +309,7 @@ export default function AdminStudentVerificationsPage() {
                         {row.submitted_at ? new Date(row.submitted_at).toLocaleString() : '—'}
                       </td>
                       <td className="py-3">
-                        <Button size="sm" variant="outline" onClick={() => void openReview(row.user_id)}>
+                        <Button size="sm" variant="outline" onClick={() => void openReview(row)}>
                           <Eye className="mr-1 h-4 w-4" />
                           Review
                         </Button>
@@ -302,7 +323,16 @@ export default function AdminStudentVerificationsPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={Boolean(selectedId && detail)} onOpenChange={(open) => !open && setSelectedId(null)}>
+      <Dialog
+        open={Boolean(selectedId && detail)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedId(null);
+            setSelectedTenant(null);
+            setDetail(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-6xl">
           <DialogHeader>
             <DialogTitle>{detail?.person.name}</DialogTitle>

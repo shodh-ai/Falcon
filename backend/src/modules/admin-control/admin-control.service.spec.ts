@@ -261,4 +261,41 @@ describe('AdminControlService department hierarchy', () => {
       expect.anything(),
     );
   });
+
+  it('preserves completed onboarding when issuing an admin temporary password', async () => {
+    db.query
+      .mockResolvedValueOnce([{ user_id: 'hod-1', onboarding_status: 'COMPLETED' }])
+      .mockResolvedValueOnce([]);
+
+    const result = await service.resetPassword('tenant', 'actor-1', 'hod-1', {
+      temporary_password: 'Temp-Hod-123!',
+    });
+
+    expect(result).toMatchObject({
+      user_id: 'hod-1',
+      temporary_password: 'Temp-Hod-123!',
+      onboarding_preserved: true,
+      password_reset_required: true,
+    });
+    expect(db.query).toHaveBeenCalledWith(
+      expect.stringContaining("WHEN $4::boolean THEN onboarding_status"),
+      expect.arrayContaining(['hod-1', true]),
+    );
+  });
+
+  it('keeps first-login onboarding for accounts that have not completed it', async () => {
+    db.query
+      .mockResolvedValueOnce([{ user_id: 'faculty-1', onboarding_status: 'PENDING_DOCUMENTS' }])
+      .mockResolvedValueOnce([]);
+
+    const result = await service.resetPassword('tenant', 'actor-1', 'faculty-1', {
+      temporary_password: 'Temp-Faculty-123!',
+    });
+
+    expect(result.onboarding_preserved).toBe(false);
+    expect(db.query).toHaveBeenCalledWith(
+      expect.stringContaining("ELSE 'PENDING_PASSWORD_RESET'"),
+      expect.arrayContaining(['faculty-1', false]),
+    );
+  });
 });
