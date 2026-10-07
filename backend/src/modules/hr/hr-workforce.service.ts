@@ -819,7 +819,16 @@ export class HrWorkforceService {
     } else if (row.request_type === 'ON_DUTY') {
       const dates = this.expandDates(row.start_date, row.end_date);
       for (const date of dates) {
-        await this.markPresentForOd(row.staff_user_id, date);
+        if (row.start_time && row.end_time && dates.length === 1) {
+          await this.markPresentForOdWindow(
+            row.staff_user_id,
+            date,
+            row.start_time,
+            row.end_time,
+          );
+        } else {
+          await this.markPresentForOd(row.staff_user_id, date);
+        }
       }
     } else if (row.request_type === 'COMP_OFF_CREDIT') {
       await this.creditCompOff(row.staff_user_id, 1);
@@ -878,6 +887,33 @@ export class HrWorkforceService {
     await this.attendanceCalc.calculateAndPersist(userId, date);
   }
 
+  /** Apply a partial OD window without manufacturing a full 8-hour day. */
+  private async markPresentForOdWindow(
+    userId: string,
+    date: string,
+    startTime: string,
+    endTime: string,
+  ) {
+    let row = await this.dailyAttendance.findOne({ where: { user_id: userId, date } });
+    if (!row) {
+      row = this.dailyAttendance.create({
+        user_id: userId,
+        date,
+        status: 'PRESENT',
+        is_regularized: false,
+      });
+    }
+    if (!row.first_in_time) row.first_in_time = new Date(`${date}T${startTime}`);
+    if (!row.last_out_time) row.last_out_time = new Date(`${date}T${endTime}`);
+    row.status = 'PRESENT';
+    // Keep this false so the attendance calculator reports the actual partial
+    // hours instead of converting the request into FULL_DAY.
+    row.is_regularized = false;
+    row.total_hours = this.computeHours(row.first_in_time, row.last_out_time).toFixed(2);
+    await this.dailyAttendance.save(row);
+    await this.attendanceCalc.calculateAndPersist(userId, date);
+  }
+
   private async creditCompOff(userId: string, days: number) {
     const year = new Date().getFullYear();
     let balance = await this.balances.findOne({
@@ -904,13 +940,32 @@ export class HrWorkforceService {
     });
     if (!balance) return;
 
-    const days = this.expandDates(row.start_date, row.end_date).filter((d) => {
+    const dates = this.expandDates(row.start_date, row.end_date).filter((d) => {
       const dow = new Date(d).getDay();
       return dow !== 0 && dow !== 6;
-    }).length;
+    });
+    let days = dates.length;
+    if (row.start_time && row.end_time && dates.length === 1) {
+      let fullDayHours = 8;
+      try {
+        const shift = await this.attendanceCalc.getEmployeeShift(row.staff_user_id);
+        fullDayHours = Number(shift.full_day_min_hours || 8);
+      } catch {
+        // The configured default is explicit and keeps balance deduction safe
+        // when an employee has no shift assignment yet.
+      }
+      const partialHours = this.hoursBetweenClocks(row.start_time, row.end_time);
+      days = Math.min(1, Math.max(0, partialHours / fullDayHours));
+    }
 
     balance.used = Number(balance.used) + days;
     await this.balances.save(balance);
+  }
+
+  private hoursBetweenClocks(start: string, end: string): number {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
   }
 
   private async upsertDailyFromPunches(

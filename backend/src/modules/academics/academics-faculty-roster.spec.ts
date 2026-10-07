@@ -33,7 +33,7 @@ describe('AcademicsFacultyService course roster', () => {
   it('scopes a practical roster to the selected timetable batch', async () => {
     const enrollmentRepo = { find: jest.fn().mockResolvedValue([]) };
     const dataSource = {
-      query: jest.fn().mockResolvedValue([{ section: 'B' }]),
+      query: jest.fn().mockResolvedValue([{ section: 'B', is_practical: true }]),
     };
     const service = new AcademicsFacultyService(
       dataSource as any,

@@ -1600,6 +1600,7 @@ export class AcademicsService {
                   FROM academic_timetables t
                   WHERE t.tenant_id = a.tenant_id
                     AND t.course_id = a.course_id
+                    AND t.faculty_user_id = a.faculty_user_id
                     AND t.deleted_at IS NULL
                 ))::int AS unscheduled_course_count
          FROM academic_course_allocations a
@@ -1607,22 +1608,22 @@ export class AcademicsService {
          WHERE a.tenant_id = $1 AND a.academic_year = $3 AND a.status = 'ACTIVE'
          GROUP BY a.tenant_id, a.faculty_user_id
        ), faculty_courses AS (
-         -- Timetable rows are course/section schedules, not permanent faculty
-         -- ownership records.  Share published slots with every active
-         -- co-teaching allocation and dedupe course/faculty pairs so repeated
-         -- programme rows cannot multiply the weekly hours.
+         -- Dedupe allocation rows before joining the faculty's own slots.
+         -- A co-teaching allocation alone does not assign every other
+         -- teacher's contact hours to this faculty member.
          SELECT DISTINCT tenant_id, faculty_user_id, course_id
          FROM academic_course_allocations
          WHERE tenant_id = $1 AND academic_year = $3 AND status = 'ACTIVE'
            AND faculty_user_id IS NOT NULL AND course_id IS NOT NULL
        ), scheduled AS (
          SELECT fc.faculty_user_id, fc.tenant_id,
-                ROUND(SUM(EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 3600)::numeric, 1)::numeric(6,1) AS scheduled_hours,
+                SUM(EXTRACT(EPOCH FROM (t.end_time::time - t.start_time::time)) / 60)::numeric AS scheduled_minutes,
                 COUNT(DISTINCT t.course_id)::int AS scheduled_course_count
          FROM faculty_courses fc
          INNER JOIN academic_timetables t
-           ON t.tenant_id = fc.tenant_id
+          ON t.tenant_id = fc.tenant_id
           AND t.course_id = fc.course_id
+          AND t.faculty_user_id = fc.faculty_user_id
           AND t.deleted_at IS NULL
          GROUP BY fc.tenant_id, fc.faculty_user_id
        )
@@ -1637,8 +1638,9 @@ export class AcademicsService {
               COALESCE(assigned.assigned_load_credits, 0)::int AS assigned_load_credits,
               -- Keep this alias for existing consumers; it is credits, not hours.
               COALESCE(assigned.assigned_load_credits, 0)::int AS assigned_load_hours,
-              COALESCE(scheduled.scheduled_hours, 0)::numeric(6,1) AS scheduled_hours,
-              COALESCE(scheduled.scheduled_hours, 0)::numeric(6,1) AS hours_per_week,
+              COALESCE(scheduled.scheduled_minutes, 0)::numeric AS scheduled_minutes,
+              (COALESCE(scheduled.scheduled_minutes, 0) / 60)::numeric AS scheduled_hours,
+              (COALESCE(scheduled.scheduled_minutes, 0) / 60)::numeric AS hours_per_week,
               COALESCE(assigned.assigned_course_count, 0)::int AS course_count,
               COALESCE(assigned.unscheduled_course_count, 0)::int AS unscheduled_course_count
        FROM users u
@@ -1672,6 +1674,7 @@ export class AcademicsService {
       assigned_load_credits: Number(row.assigned_load_credits ?? row.assigned_load_hours ?? 0),
       assigned_load_hours: Number(row.assigned_load_hours ?? 0),
       scheduled_hours: Number(row.scheduled_hours ?? 0),
+      scheduled_minutes: Number(row.scheduled_minutes ?? 0),
       course_count: Number(row.course_count ?? 0),
       unscheduled_course_count: Number(row.unscheduled_course_count ?? 0),
       load_declaration_status: row.load_declaration_status ?? null,
@@ -2950,14 +2953,64 @@ export class AcademicsService {
       }
     }
 
-    const allocations =
+    const scheduleRows =
       facultyIds.length === 0
         ? []
-        : await this.timetables.find({
-            where: { tenant_id: tenantId, faculty_user_id: In(facultyIds) },
-            relations: ['course'],
-            order: { day_of_week: 'ASC', start_time: 'ASC' },
-          });
+        : await this.users.manager.query<
+            Array<{
+              timetable_id: string;
+              course_id: string;
+              faculty_user_id: string;
+              course_code: string;
+              course_name: string;
+              day_of_week: number;
+              start_time: string;
+              end_time: string;
+              room: string | null;
+            }>
+          >(
+            `SELECT t.timetable_id, t.course_id, t.faculty_user_id,
+                    c.course_code, c.course_name,
+                    t.day_of_week, t.start_time::text, t.end_time::text, t.room
+             FROM academic_timetables t
+             INNER JOIN academic_courses c
+               ON c.tenant_id = t.tenant_id AND c.course_id = t.course_id
+             WHERE t.tenant_id = $1
+               AND t.faculty_user_id = ANY($2::uuid[])
+               AND t.deleted_at IS NULL
+             ORDER BY t.day_of_week, t.start_time, c.course_code`,
+            [tenantId, facultyIds],
+          );
+
+    const assignedRows =
+      facultyIds.length === 0
+        ? []
+        : await this.users.manager.query<
+            Array<{
+              allocation_id: string;
+              faculty_user_id: string;
+              course_id: string;
+              course_code: string;
+              course_name: string;
+              program_name: string | null;
+              semester: string | null;
+              academic_year: string;
+            }>
+          >(
+            `SELECT DISTINCT ON (a.allocation_id)
+                    a.allocation_id, a.faculty_user_id, a.course_id,
+                    c.course_code, c.course_name, a.program_name,
+                    a.semester, a.academic_year
+             FROM academic_course_allocations a
+             INNER JOIN academic_courses c
+               ON c.tenant_id = a.tenant_id AND c.course_id = a.course_id
+             WHERE a.tenant_id = $1
+               AND a.faculty_user_id = ANY($2::uuid[])
+               AND a.academic_year = $3
+               AND a.status = 'ACTIVE'
+             ORDER BY a.allocation_id, a.updated_at DESC NULLS LAST`,
+            [tenantId, facultyIds, this.currentAcademicYear()],
+          );
 
     return faculty.map((row) => {
       const profile = profileByUser.get(row.user_id);
@@ -2976,17 +3029,36 @@ export class AcademicsService {
         joined_at: profile?.joining_date ?? row.created_at ?? null,
         shift_timing: profile?.shift_timing ?? null,
         employee_id: profile?.employee_id ?? null,
-        courses: allocations
+        // `courses` remains the published schedule for compatibility.  A
+        // faculty allocation is independent from scheduling, so callers must
+        // use assigned_courses when a course has not received a slot yet.
+        courses: scheduleRows
+          .filter((slot) => slot.faculty_user_id === row.user_id)
+          .map((slot) => ({
+            timetable_id: slot.timetable_id,
+            course_id: slot.course_id,
+            course_code: slot.course_code,
+            course_name: slot.course_name,
+            day_of_week: slot.day_of_week,
+            start_time: slot.start_time,
+            end_time: slot.end_time,
+            room: slot.room,
+          })),
+        assigned_courses: assignedRows
           .filter((allocation) => allocation.faculty_user_id === row.user_id)
           .map((allocation) => ({
-            timetable_id: allocation.timetable_id,
+            allocation_id: allocation.allocation_id,
             course_id: allocation.course_id,
-            course_code: allocation.course?.course_code,
-            course_name: allocation.course?.course_name,
-            day_of_week: allocation.day_of_week,
-            start_time: allocation.start_time,
-            end_time: allocation.end_time,
-            room: allocation.room,
+            course_code: allocation.course_code,
+            course_name: allocation.course_name,
+            program_name: allocation.program_name,
+            semester: allocation.semester,
+            academic_year: allocation.academic_year,
+            scheduled: scheduleRows.some(
+              (slot) =>
+                slot.faculty_user_id === row.user_id &&
+                slot.course_id === allocation.course_id,
+            ),
           })),
       };
     });

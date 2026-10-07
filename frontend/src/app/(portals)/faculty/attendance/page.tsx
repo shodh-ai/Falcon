@@ -22,6 +22,11 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
+import {
+  completeAttendancePayload,
+  initializeAttendanceForm,
+  type AttendanceFormStatus,
+} from '@/lib/faculty/attendance-form';
 
 /**
  * The attendance form deliberately starts every student as ABSENT.  A blank
@@ -29,7 +34,7 @@ import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
  * receive credit for attending.  LEAVE is the faculty-facing label for the
  * academic EXCUSED status persisted by the API.
  */
-type UiStatus = 'PRESENT' | 'ABSENT' | 'LEAVE';
+type UiStatus = AttendanceFormStatus;
 
 type FacultyClass = {
   timetable_id: string;
@@ -90,7 +95,6 @@ function MarkAttendanceContent() {
   const [students, setStudents] = useState<Student[]>([]);
   const [analytics, setAnalytics] = useState<AttendanceAnalytics | null>(null);
   const [attendance, setAttendance] = useState<Record<string, UiStatus>>({});
-  const [selectedBatch, setSelectedBatch] = useState<string>('ALL');
   const [selectedDate, setSelectedDate] = useState(todayIso());
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -109,31 +113,27 @@ function MarkAttendanceContent() {
     () => {
       const query = searchQuery.trim().toLowerCase();
       return students.filter((s) => {
-        const inBatch =
-          !selectedClass?.is_practical ||
-          selectedBatch === 'ALL' ||
-          (s.section_code ?? 'UNASSIGNED') === selectedBatch;
         const matchesSearch =
           !query ||
           s.name.toLowerCase().includes(query) ||
           s.roll_number?.toLowerCase().includes(query);
-        return inBatch && matchesSearch;
+        return matchesSearch;
       });
     },
-    [students, searchQuery, selectedBatch, selectedClass?.is_practical],
+    [students, searchQuery],
   );
 
   const presentCount = useMemo(
-    () => filteredStudents.filter((s) => attendance[s.student_id] === 'PRESENT').length,
-    [filteredStudents, attendance],
+    () => students.filter((s) => attendance[s.student_id] === 'PRESENT' || attendance[s.student_id] === 'LATE').length,
+    [students, attendance],
   );
   const absentCount = useMemo(
-    () => filteredStudents.filter((s) => attendance[s.student_id] === 'ABSENT').length,
-    [filteredStudents, attendance],
+    () => students.filter((s) => attendance[s.student_id] === 'ABSENT').length,
+    [students, attendance],
   );
   const leaveCount = useMemo(
-    () => filteredStudents.filter((s) => attendance[s.student_id] === 'LEAVE').length,
-    [filteredStudents, attendance],
+    () => students.filter((s) => attendance[s.student_id] === 'LEAVE').length,
+    [students, attendance],
   );
 
   useEffect(() => {
@@ -183,15 +183,8 @@ function MarkAttendanceContent() {
       setStudents(rosterResolved);
       setAnalytics(analyticsResolved);
       setLocked(Boolean(stateResolved.locked));
-      const map: Record<string, UiStatus> = {};
-      for (const s of rosterResolved) map[s.student_id] = 'ABSENT';
-      for (const row of stateResolved.attendance_data ?? []) {
-        if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
-        if ((row.status as string) === 'EXCUSED') map[row.student_id] = 'LEAVE';
-      }
-      setAttendance(map);
+      setAttendance(initializeAttendanceForm(rosterResolved, stateResolved.attendance_data));
       setSearchQuery('');
-      setSelectedBatch('ALL');
     }
 
     (async () => {
@@ -199,7 +192,7 @@ function MarkAttendanceContent() {
         const timetableQuery = timetableId ? `&timetableId=${timetableId}` : '';
         const [roster, state] = await Promise.all([
           api.get<Student[]>(
-            `/api/academics/faculty/course/${selectedCourseId}/students${timetableId ? `?timetableId=${encodeURIComponent(timetableId)}` : ''}`,
+            `/api/academics/faculty/course/${selectedCourseId}/students?date=${selectedDate}${timetableQuery}`,
           ),
           api.get<{ locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null }>(
             `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableQuery}`,
@@ -238,12 +231,7 @@ function MarkAttendanceContent() {
         toast.error('No previous session attendance found for this batch today.');
         return;
       }
-      const map: Record<string, UiStatus> = {};
-      for (const row of prev.attendance_data) {
-        if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
-        if ((row.status as string) === 'EXCUSED') map[row.student_id] = 'LEAVE';
-      }
-      setAttendance(map);
+      setAttendance(initializeAttendanceForm(students, prev.attendance_data));
       toast.success('Copied attendance from previous hour');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not copy previous attendance');
@@ -252,9 +240,11 @@ function MarkAttendanceContent() {
 
   function markAll(status: UiStatus) {
     if (locked) return;
-    const next: Record<string, UiStatus> = {};
-    for (const s of filteredStudents) next[s.student_id] = status;
-    setAttendance(next);
+    setAttendance((current) => {
+      const next = { ...current };
+      for (const s of filteredStudents) next[s.student_id] = status;
+      return next;
+    });
   }
 
   async function save() {
@@ -263,13 +253,7 @@ function MarkAttendanceContent() {
       toast.error('No students on the roster — cannot save attendance.');
       return;
     }
-    const visibleIds = new Set(filteredStudents.map((s) => s.student_id));
-    const payload = Object.entries(attendance)
-      .filter(([student_id]) => visibleIds.has(student_id))
-      .map(([student_id, status]) => ({
-        student_id,
-        status: status === 'LEAVE' ? 'EXCUSED' : status,
-      })) as { student_id: string; status: 'PRESENT' | 'ABSENT' | 'EXCUSED' }[];
+    const payload = completeAttendancePayload(students, attendance);
     if (payload.length === 0) {
       toast.error('Mark at least one student before saving.');
       return;
@@ -288,7 +272,7 @@ function MarkAttendanceContent() {
         },
       );
       const state = await api.get<{ locked: boolean }>(
-        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
+        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
       );
       setLocked(state.locked);
       const synced = result.attendance_updated?.length ?? 0;
@@ -417,19 +401,11 @@ function MarkAttendanceContent() {
                 </div>
 
                 {selectedClass.is_practical ? (
-                  <label className="flex max-w-xs flex-col gap-1 text-sm">
-                    <span className="font-medium text-sgvu-navy">Practical batch</span>
-                    <select
-                      className="rounded-lg border border-input bg-background px-3 py-2 text-sm"
-                      value={selectedBatch}
-                      onChange={(e) => setSelectedBatch(e.target.value)}
-                    >
-                      <option value="ALL">All batches</option>
-                      {Array.from(new Set(students.map((s) => s.section_code || 'UNASSIGNED'))).map((batch) => (
-                        <option key={batch} value={batch}>{batch === 'UNASSIGNED' ? 'Unassigned batch' : batch}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                    <span className="font-medium text-sgvu-navy">Practical batch: </span>
+                    {selectedClass.section || 'Not mapped — contact your HOD'}.
+                    Select the scheduled batch session from the class list; attendance applies only to its mapped students.
+                  </p>
                 ) : null}
 
                 {!locked && students.length > 0 && (
@@ -502,7 +478,7 @@ function MarkAttendanceContent() {
                 <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-xs text-muted-foreground">
                     {students.length > 0
-                      ? `${presentCount} present · ${absentCount} absent · ${leaveCount} leave · ${filteredStudents.length} shown`
+                      ? `${presentCount} present · ${absentCount} absent · ${leaveCount} leave · ${students.length} in scheduled roster (${filteredStudents.length} shown)`
                       : 'Save syncs attendance to enrollment percentages.'}
                   </p>
                   <Button

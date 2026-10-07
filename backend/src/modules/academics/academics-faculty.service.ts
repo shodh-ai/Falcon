@@ -294,6 +294,9 @@ export class AcademicsFacultyService {
             tenant_id: tenantId,
             course_id: row.course_id,
             status: 'ENROLLED',
+            ...(row.is_practical && row.section
+              ? { section_code: row.section }
+              : {}),
           },
         }),
       })),
@@ -314,20 +317,24 @@ export class AcademicsFacultyService {
     let sectionCode: string | null = null;
     if (timetableId) {
       const [slot] = await this.dataSource.query<
-        Array<{ section: string | null }>
+        Array<{ section: string | null; is_practical: boolean }>
       >(
-        `SELECT section
-           FROM academic_timetables
-          WHERE tenant_id = $1
-            AND timetable_id = $2::uuid
-            AND course_id = $3
-            AND faculty_user_id = $4
-            AND deleted_at IS NULL
+        `SELECT t.section,
+                (UPPER(c.course_code) ~ '(P|LAB)$'
+                 OR c.course_name ILIKE '%practical%'
+                 OR c.course_name ILIKE '%lab%') AS is_practical
+           FROM academic_timetables t
+           INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+          WHERE t.tenant_id = $1
+            AND t.timetable_id = $2::uuid
+            AND t.course_id = $3
+            AND t.faculty_user_id = $4
+            AND t.deleted_at IS NULL
           LIMIT 1`,
         [tenantId, timetableId, courseId, facultyUserId],
       );
       if (!slot) throw new NotFoundException('Timetable slot not found');
-      sectionCode = slot.section?.trim() || null;
+      sectionCode = slot.is_practical ? slot.section?.trim() || null : null;
     }
 
     const rows = await this.enrollmentRepo.find({
@@ -735,15 +742,71 @@ export class AcademicsFacultyService {
     }
 
     const timetableId = dto.timetable_id ?? null;
-    if (timetableId) {
-      await this.dataSource.query(
+    // The selected timetable is the authority for a practical batch.  Never
+    // accept a student from another section, and require the complete slot
+    // roster so a search result cannot silently reset everyone else to absent.
+    const slotRows = timetableId
+      ? await this.dataSource.query<
+          Array<{ section: string | null; faculty_user_id: string | null; is_practical: boolean }>
+        >(
+          `SELECT t.section, t.faculty_user_id,
+                  (UPPER(c.course_code) ~ '(P|LAB)$'
+                   OR c.course_name ILIKE '%practical%'
+                   OR c.course_name ILIKE '%lab%') AS is_practical
+             FROM academic_timetables t
+             INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+            WHERE t.tenant_id = $1
+              AND t.timetable_id = $2::uuid
+              AND t.course_id = $3
+              AND t.faculty_user_id = $4
+              AND t.deleted_at IS NULL
+            LIMIT 1`,
+          [tenantId, timetableId, dto.course_id, effectiveFacultyId],
+        )
+      : [];
+    if (timetableId && !slotRows[0]) {
+      throw new ForbiddenException('Attendance slot is not assigned to this faculty/course');
+    }
+    const section = slotRows[0]?.is_practical
+      ? slotRows[0]?.section?.trim() || null
+      : null;
+    const rosterRows = await this.dataSource.query<Array<{ student_user_id: string }>>(
+      `SELECT student_user_id
+         FROM student_course_enrollments
+        WHERE tenant_id = $1
+          AND course_id = $2
+          AND status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+          AND ($3::varchar IS NULL OR section_code = $3::varchar)`,
+      [tenantId, dto.course_id, section],
+    );
+    const roster = new Set(rosterRows.map((row) => row.student_user_id));
+    const submitted = dto.attendance_data.map((row) => row.student_id);
+    const duplicate = submitted.find(
+      (studentId, index) => submitted.indexOf(studentId) !== index,
+    );
+    const outside = submitted.filter((studentId) => !roster.has(studentId));
+    const missing = [...roster].filter((studentId) => !submitted.includes(studentId));
+    if (duplicate) throw new BadRequestException('Attendance contains duplicate students');
+    if (outside.length) throw new BadRequestException('Attendance contains students outside this scheduled batch');
+    if (missing.length) throw new BadRequestException('Attendance must include every student in this scheduled batch');
+
+    await this.dataSource.transaction(async (manager) => {
+      // Serialize the exact slot/day so two browser tabs cannot overwrite a
+      // practical batch with a stale roster.
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1))`,
+        [`${tenantId}:${dto.course_id}:${effectiveFacultyId}:${date}:${timetableId ?? 'none'}`],
+      );
+      await manager.query(
         `DELETE FROM course_attendance_logs
-         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND date = $4::date AND timetable_id = $5::uuid`,
+         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3
+           AND date = $4::date
+           AND (($5::uuid IS NULL AND timetable_id IS NULL) OR timetable_id = $5::uuid)`,
         [tenantId, dto.course_id, effectiveFacultyId, date, timetableId],
       );
-      await this.dataSource.query(
+      await manager.query(
         `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, timetable_id, attendance_data)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+         VALUES ($1, $2, $3, $4, $5::uuid, $6::jsonb)`,
         [
           tenantId,
           dto.course_id,
@@ -753,24 +816,7 @@ export class AcademicsFacultyService {
           JSON.stringify(dto.attendance_data),
         ],
       );
-    } else {
-      await this.dataSource.query(
-        `DELETE FROM course_attendance_logs
-         WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3 AND date = $4::date AND timetable_id IS NULL`,
-        [tenantId, dto.course_id, effectiveFacultyId, date],
-      );
-      await this.dataSource.query(
-        `INSERT INTO course_attendance_logs (tenant_id, course_id, faculty_user_id, date, attendance_data)
-         VALUES ($1, $2, $3, $4, $5::jsonb)`,
-        [
-          tenantId,
-          dto.course_id,
-          effectiveFacultyId,
-          date,
-          JSON.stringify(dto.attendance_data),
-        ],
-      );
-    }
+    });
 
     const updated = await this.recalculateCourseAttendancePercents(
       tenantId,

@@ -118,7 +118,7 @@ describe('HOD workload declaration reliability', () => {
     );
   });
 
-  it('counts published course slots for every active co-teaching allocation', async () => {
+  it('returns exact scheduled minutes for a faculty\'s own published slots', async () => {
     const manager = {
       query: jest.fn().mockResolvedValue([
         {
@@ -129,6 +129,7 @@ describe('HOD workload declaration reliability', () => {
           dept_name: 'Pharmacy',
           assigned_load_credits: 4,
           assigned_load_hours: 4,
+          scheduled_minutes: '200',
           scheduled_hours: '3.3',
           hours_per_week: '3.3',
           course_count: 1,
@@ -148,8 +149,10 @@ describe('HOD workload declaration reliability', () => {
     const sql = manager.query.mock.calls[0][0] as string;
     expect(sql).toContain('faculty_courses AS');
     expect(sql).toContain('SELECT DISTINCT tenant_id, faculty_user_id, course_id');
-    expect(sql).not.toContain('a.faculty_user_id = t.faculty_user_id');
+    expect(sql).toContain('t.faculty_user_id = fc.faculty_user_id');
+    expect(sql).toContain('t.faculty_user_id = a.faculty_user_id');
     expect(result[0]).toMatchObject({
+      scheduled_minutes: 200,
       scheduled_hours: 3.3,
       hours_per_week: 3.3,
       unscheduled_course_count: 0,

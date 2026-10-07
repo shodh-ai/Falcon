@@ -446,46 +446,58 @@ export class AuthService {
     token: string,
     newPassword: string,
   ): Promise<{ success: true }> {
-    if (!token || newPassword.length < 8) {
+    if (!token || !newPassword || newPassword.length < 8) {
       throw new BadRequestException('Invalid token or password');
     }
     const tokenHash = createHash('sha256').update(token).digest('hex');
-    const [row] = await this.dataSource.query<
-      Array<{
-        token_id: string;
-        user_id: string;
-        tenant_id: string;
-        onboarding_status: string | null;
-      }>
-    >(
-      `SELECT t.token_id, t.user_id, t.tenant_id, u.onboarding_status
-       FROM admin_password_reset_tokens t
-       INNER JOIN users u ON u.user_id = t.user_id AND u.tenant_id = t.tenant_id
-       WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > NOW()
-       LIMIT 1`,
-      [tokenHash],
-    );
-    if (!row) throw new BadRequestException('Reset link expired or invalid');
     const hash = await bcrypt.hash(newPassword, 10);
-    await this.dataSource.query(
-      `UPDATE users
-       SET password_hash = $1,
-           onboarding_status = CASE
-             WHEN onboarding_status = 'PENDING_PASSWORD_RESET' THEN 'PENDING_DOCUMENTS'
-             ELSE onboarding_status
-           END,
-           account_status = CASE
-             WHEN account_status = 'PASSWORD_RESET_REQUIRED' THEN 'ACTIVE'
-             ELSE account_status
-           END,
-           updated_at = NOW()
-       WHERE user_id = $2 AND tenant_id = $3`,
-      [hash, row.user_id, row.tenant_id],
-    );
-    await this.dataSource.query(
-      `UPDATE admin_password_reset_tokens SET used_at = NOW() WHERE token_id = $1`,
-      [row.token_id],
-    );
+    await this.dataSource.transaction(async (manager) => {
+      // Lock both records. A second request waits for this transaction and
+      // rechecks used_at after commit, so the same token cannot be replayed.
+      const [row] = await manager.query<
+        Array<{ token_id: string; user_id: string; tenant_id: string }>
+      >(
+        `SELECT t.token_id, t.user_id, t.tenant_id
+         FROM admin_password_reset_tokens t
+         INNER JOIN users u ON u.user_id = t.user_id AND u.tenant_id = t.tenant_id
+         WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > NOW()
+           AND u.is_active = true
+         LIMIT 1
+         FOR UPDATE OF t, u`,
+        [tokenHash],
+      );
+      if (!row) throw new BadRequestException('Reset link expired or invalid');
+      const updated = await manager.query<Array<{ user_id: string }>>(
+        `UPDATE users
+         SET password_hash = $1,
+             onboarding_status = CASE
+               WHEN onboarding_status = 'PENDING_PASSWORD_RESET' THEN 'PENDING_DOCUMENTS'
+               ELSE onboarding_status
+             END,
+             account_status = CASE
+               WHEN account_status = 'PASSWORD_RESET_REQUIRED' THEN 'ACTIVE'
+               ELSE account_status
+             END,
+             updated_at = NOW()
+         WHERE user_id = $2 AND tenant_id = $3 AND is_active = true
+         RETURNING user_id`,
+        [hash, row.user_id, row.tenant_id],
+      );
+      if (updated.length !== 1) {
+        throw new BadRequestException('Reset link expired or invalid');
+      }
+      const consumed = await manager.query<Array<{ token_id: string }>>(
+        `UPDATE admin_password_reset_tokens
+         SET used_at = NOW()
+         WHERE token_id = $1 AND user_id = $2 AND tenant_id = $3
+           AND used_at IS NULL AND expires_at > NOW()
+         RETURNING token_id`,
+        [row.token_id, row.user_id, row.tenant_id],
+      );
+      if (consumed.length !== 1) {
+        throw new BadRequestException('Reset link expired or invalid');
+      }
+    });
     return { success: true };
   }
 
@@ -700,9 +712,13 @@ export class AuthService {
     }
 
     const [row] = await this.dataSource.query<
-      Array<{ password_hash: string | null; onboarding_status: string | null }>
+      Array<{
+        password_hash: string | null;
+        onboarding_status: string | null;
+        account_status: string | null;
+      }>
     >(
-      `SELECT password_hash, onboarding_status
+      `SELECT password_hash, onboarding_status, account_status
        FROM users
        WHERE user_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)`,
       [userId, tenantId ?? null],
@@ -724,9 +740,15 @@ export class AuthService {
 
     await this.dataSource.query(
       `UPDATE users
-       SET password_hash = $1, onboarding_status = $2, updated_at = NOW()
-       WHERE user_id = $3`,
-      [hash, onboardingStatus, userId],
+       SET password_hash = $1,
+           onboarding_status = $2,
+           account_status = CASE
+             WHEN account_status = 'PASSWORD_RESET_REQUIRED' THEN 'ACTIVE'
+             ELSE account_status
+           END,
+           updated_at = NOW()
+       WHERE user_id = $3 AND ($4::uuid IS NULL OR tenant_id = $4)`,
+      [hash, onboardingStatus, userId, tenantId ?? null],
     );
 
     return { success: true, onboarding_status: onboardingStatus };
