@@ -2,14 +2,16 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProfileCorrectionWidget } from '@/components/hod/ProfileCorrectionWidget';
 
-const { get, patch, api, toast } = vi.hoisted(() => ({
-  get: vi.fn(),
-  patch: vi.fn(),
-  api: {} as { get: (...args: any[]) => unknown; patch: (...args: any[]) => unknown },
-  toast: { error: vi.fn(), success: vi.fn() },
-}));
-api.get = get;
-api.patch = patch;
+const { get, patch, api, toast } = vi.hoisted(() => {
+  const get = vi.fn();
+  const patch = vi.fn();
+  return {
+    get,
+    patch,
+    api: { get, patch },
+    toast: { error: vi.fn(), success: vi.fn() },
+  };
+});
 
 vi.mock('@/lib/api', () => ({
   useAuthedApi: () => api,
