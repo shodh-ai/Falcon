@@ -2,7 +2,7 @@
 
 import { Select } from '@/components/ui/select';
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Download, Eye, Upload } from 'lucide-react';
+import { Check, Download, Eye, FileText, Upload } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -231,7 +231,15 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
       })}
 
       {!vault.documents.length && (
-        <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center px-6 py-10 text-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy">
+              <FileText className="h-5 w-5" />
+            </div>
+            <p className="mt-3 font-semibold text-sgvu-navy">No documents uploaded yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">Choose a document type above to upload your first file.</p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

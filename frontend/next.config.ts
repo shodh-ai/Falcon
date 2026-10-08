@@ -1,13 +1,14 @@
 import type { NextConfig } from 'next';
-import path from 'path';
 
 const nextConfig: NextConfig = {
+  // Keep generated Next output separate from the OneDrive-managed legacy .next folder.
+  distDir: '.next-local',
   output: 'standalone',
   compress: true,
   poweredByHeader: false,
   turbopack: {
     // Pin root to frontend/ — avoids picking up stray lockfiles (e.g. ~/package-lock.json)
-    root: path.resolve(__dirname),
+    root: process.cwd(),
   },
   experimental: {
     optimizePackageImports: [

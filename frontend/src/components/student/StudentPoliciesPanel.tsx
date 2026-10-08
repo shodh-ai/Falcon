@@ -7,6 +7,7 @@ import { StudentEmptyState } from '@/components/student/StudentEmptyState';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 
 type Policy = {
   policy_id: string;
@@ -50,6 +51,12 @@ export function StudentPoliciesPanel() {
     }
   }
 
+  function policyUrl(fileUrl: string) {
+    return /^https?:\/\//i.test(fileUrl)
+      ? fileUrl
+      : `${getApiBaseUrl()}${fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`}`;
+  }
+
   if (loading) {
     return <p className="text-sm text-muted-foreground p-4">Loading policies…</p>;
   }
@@ -86,7 +93,7 @@ export function StudentPoliciesPanel() {
                   <p className="text-sm text-muted-foreground">Issued by: {p.category}</p>
                   {p.file_url && (
                     <a
-                      href={p.file_url}
+                      href={policyUrl(p.file_url)}
                       className="mt-1 text-sm font-medium text-sgvu-navy underline hover:text-sgvu-gold inline-block"
                       target="_blank"
                       rel="noopener noreferrer"

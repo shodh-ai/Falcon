@@ -24,6 +24,7 @@ import {
   Banknote,
   BookOpen,
   FileText,
+  FileDown,
   PenLine,
   Eye,
   FlaskConical,
@@ -475,6 +476,7 @@ export const hrPortal: PortalConfig = {
       items: [
         { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, keywords: ['basic', 'hra', 'da', 'pf', 'tds'], hrModule: 'payroll' },
         { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, keywords: ['run payroll', 'payslip', 'lwp'], hrModule: 'payroll' },
+        { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: FileDown, keywords: ['payslip', 'download', 'request', 'pdf'], hrModule: 'payroll' },
       ],
     },
     {
@@ -518,6 +520,7 @@ export const hrPortal: PortalConfig = {
     { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, hrModule: 'leaves' },
     { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, hrModule: 'payroll' },
     { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, hrModule: 'payroll' },
+    { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: FileDown, hrModule: 'payroll' },
     { label: 'Recruitment ATS', href: '/hr/recruitment', icon: Briefcase, hrModule: 'recruitment' },
     { label: 'Appraisals & API', href: '/hr/appraisals', icon: Award, hrModule: 'directory' },
     { label: 'Promotions', href: '/hr/promotions', icon: ArrowUpCircle, hrModule: 'directory' },
