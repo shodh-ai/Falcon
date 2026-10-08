@@ -328,7 +328,11 @@ export class TicketService {
 
     const saved = await this.tickets.save(ticket);
 
-    if (dto.status === 'RESOLVED' && ticket.category === 'STUDENT_PROFILE') {
+    const isProfileCorrection =
+      ticket.category === 'STUDENT_PROFILE' ||
+      (ticket.category === 'ACADEMICS' && /profile/i.test(ticket.subject));
+
+    if (dto.status === 'RESOLVED' && isProfileCorrection) {
       await this.dataSource.query(
         `UPDATE student_profiles
          SET profile_unlocked_until = NOW() + INTERVAL '15 minutes'

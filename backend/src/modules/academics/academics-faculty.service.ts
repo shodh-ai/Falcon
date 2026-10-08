@@ -249,7 +249,7 @@ export class AcademicsFacultyService {
            AND a.course_id IS NOT NULL
        )
        SELECT
-         COALESCE(t.timetable_id, fc.course_id) AS timetable_id,
+         t.timetable_id,
          fc.course_id,
          c.course_code,
          c.course_name,

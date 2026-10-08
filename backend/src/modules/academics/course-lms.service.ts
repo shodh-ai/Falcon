@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -30,6 +31,8 @@ import { NotificationEmitterService } from '../../core/notifications/notificatio
 
 @Injectable()
 export class CourseLmsService {
+  private readonly logger = new Logger(CourseLmsService.name);
+
   constructor(
     @InjectRepository(CourseModule)
     private readonly modules: Repository<CourseModule>,
@@ -235,7 +238,7 @@ export class CourseLmsService {
     await this.modules.save(mod);
 
     const course = await this.getCourseOrFail(mod.course_id, tenantId);
-    await this.notifyStudentsForMaterial(
+    await this.notifyStudentsForMaterialBestEffort(
       tenantId,
       mod.course_id,
       course.course_name,
@@ -318,7 +321,7 @@ export class CourseLmsService {
       mod.course_id,
     );
 
-    await this.notifyStudentsForMaterial(
+    await this.notifyStudentsForMaterialBestEffort(
       tenantId,
       mod.course_id,
       course.course_name,
@@ -379,7 +382,7 @@ export class CourseLmsService {
 
     await Promise.all(
       materials.map((material) =>
-        this.notifyStudentsForMaterial(
+        this.notifyStudentsForMaterialBestEffort(
           tenantId,
           mod.course_id,
           course.course_name,
@@ -424,7 +427,7 @@ export class CourseLmsService {
       tenantId,
       courseId,
     );
-    await this.notifyStudentsForMaterial(
+    await this.notifyStudentsForMaterialBestEffort(
       tenantId,
       courseId,
       course.course_name,
@@ -976,6 +979,35 @@ export class CourseLmsService {
         courseName,
         materialTitle,
       });
+    }
+  }
+
+  /**
+   * Material persistence is the primary operation. A notification failure must
+   * never turn a completed upload into a misleading 500 response for faculty.
+   */
+  private async notifyStudentsForMaterialBestEffort(
+    tenantId: string,
+    courseId: string,
+    courseName: string,
+    materialTitle: string,
+    materialId: string,
+    allocationIds: string[],
+  ) {
+    try {
+      await this.notifyStudentsForMaterial(
+        tenantId,
+        courseId,
+        courseName,
+        materialTitle,
+        materialId,
+        allocationIds,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Material ${materialId} was uploaded, but student notifications could not be sent: ${message}`,
+      );
     }
   }
 
