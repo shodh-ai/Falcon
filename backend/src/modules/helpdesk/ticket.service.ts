@@ -661,45 +661,16 @@ export class TicketService {
     return saved;
   }
 
-  private async assertTicketActorScope(
-    ticket: HelpdeskTicket,
-    actor: { userId: string; role: string; tenantId: string },
-  ) {
-    const role = actor.role.trim().toLowerCase();
-    if (!['dean', 'hod'].includes(role)) return;
+    const isProfileCorrection =
+      ticket.category === 'STUDENT_PROFILE' ||
+      (ticket.category === 'ACADEMICS' && /profile/i.test(ticket.subject));
 
-    const [student] = await this.dataSource.query<
-      Array<{ dept_id: number | null; tenant_id: string }>
-    >(`SELECT dept_id, tenant_id FROM users WHERE user_id = $1 LIMIT 1`, [
-      ticket.student_user_id,
-    ]);
-    if (!student || student.tenant_id !== actor.tenantId) {
-      throw new ForbiddenException('Ticket is outside your tenant scope');
-    }
-
-    if (role === 'dean') {
-      if (
-        ticket.category === 'ACADEMICS' &&
-        (ticket.escalation_level ?? 0) < 1
-      ) {
-        throw new ForbiddenException(
-          'Only escalated academic grievances can be updated by Dean',
-        );
-      }
-      const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
-        `SELECT DISTINCT dept_id
-         FROM (
-           SELECT p.dept_id
-           FROM iam_programs p
-           INNER JOIN schools s ON s.school_id = p.school_id
-           WHERE p.deleted_at IS NULL AND p.dept_id IS NOT NULL
-             AND (s.dean_user_id = $1 OR EXISTS (
-               SELECT 1 FROM departments hd WHERE hd.hod_user_id = $1 AND hd.school_id = s.school_id
-             ))
-           UNION SELECT dept_id FROM departments WHERE hod_user_id = $1
-           UNION SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL
-         ) scoped WHERE dept_id IS NOT NULL`,
-        [actor.userId],
+    if (dto.status === 'RESOLVED' && isProfileCorrection) {
+      await this.dataSource.query(
+        `UPDATE student_profiles
+         SET profile_unlocked_until = NOW() + INTERVAL '15 minutes'
+         WHERE user_id = $1`,
+        [ticket.student_user_id],
       );
       const deptIds = deptRows.map((row) => Number(row.dept_id));
       if (

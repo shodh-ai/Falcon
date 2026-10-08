@@ -58,28 +58,29 @@ export default function HrDirectoryPage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="space-y-3">
         <HrPageHeader
           title="Employee Directory"
           description="Master roster of all staff — open any profile for the full 360° view."
         />
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full flex-1">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="border-gray-200 bg-white pl-9 shadow-sm"
+              placeholder="Search name, ID, department…"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setOffset(0);
+              }}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2 sm:justify-end">
           <BulkDocumentExportDialog />
           <AddEmployeeDialog onCreated={() => void mutate()} />
+          </div>
         </div>
-      </div>
-
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          className="border-gray-200 bg-white pl-9 shadow-sm"
-          placeholder="Search name, ID, department…"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOffset(0);
-          }}
-        />
       </div>
 
       {filtered.length === 0 ? (

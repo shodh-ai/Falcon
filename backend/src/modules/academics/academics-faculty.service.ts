@@ -255,7 +255,7 @@ export class AcademicsFacultyService {
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
          t.timetable_id,
-         t.course_id,
+         fc.course_id,
          c.course_code,
          c.course_name,
          t.room,

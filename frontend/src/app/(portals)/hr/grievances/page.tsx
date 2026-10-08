@@ -1,18 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
   CheckCircle2,
   Clock,
   Loader2,
+  Search,
   XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { useAuthedApi } from '@/lib/api';
+import { HrPageHeader } from '@/components/hr/HrPageHeader';
 
 type Grievance = {
   ticket_id: string;
@@ -77,7 +79,8 @@ export default function HrGrievancesPage() {
   const api = useAuthedApi();
   const [tickets, setTickets] = useState<Grievance[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'RESOLVED'>('ALL');
+  const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'RESOLVED'>('ALL');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     void api
@@ -91,8 +94,11 @@ export default function HrGrievancesPage() {
       .finally(() => setLoading(false));
   }, [api]);
 
-  const filtered =
-    filter === 'ALL' ? tickets : tickets.filter((t) => t.status === filter);
+  const filtered = useMemo(() => tickets.filter((t) => {
+    const statusMatches = filter === 'ALL' || (filter === 'OPEN' ? ['PENDING', 'IN_PROGRESS'].includes(t.status) : t.status === filter);
+    const value = `${t.ticket_ref} ${t.subject} ${t.category} ${t.raised_by_name}`.toLowerCase();
+    return statusMatches && value.includes(query.trim().toLowerCase());
+  }), [filter, query, tickets]);
 
   const pendingCount = tickets.filter((t) => t.status === 'PENDING').length;
   const resolvedCount = tickets.filter((t) => t.status === 'RESOLVED').length;
@@ -102,14 +108,7 @@ export default function HrGrievancesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black tracking-tight text-sgvu-navy">
-          Grievances Escalation
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          HR / Payroll & Facilities tickets raised by staff across the university.
-        </p>
-      </div>
+      <HrPageHeader title="Grievances Escalation" description="Manage HR, payroll, and facilities tickets raised by staff across the university." />
 
       {/* Summary cards */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -142,22 +141,15 @@ export default function HrGrievancesPage() {
         </Card>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-2">
-        {(['ALL', 'PENDING', 'RESOLVED'] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${
-              filter === f
-                ? 'bg-sgvu-navy text-white shadow-md'
-                : 'bg-sgvu-surface text-sgvu-navy hover:bg-sgvu-navy/10'
-            }`}
-          >
-            {f === 'ALL' ? 'All Tickets' : f === 'PENDING' ? 'Open' : 'Resolved'}
-          </button>
-        ))}
-      </div>
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div><h2 className="font-semibold text-sgvu-navy">Ticket queue</h2><p className="text-sm text-muted-foreground">Select a ticket to view details and escalation history.</p></div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label className="relative"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-sgvu-navy" /><input aria-label="Search grievance tickets" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tickets" className="h-10 rounded-xl border-2 border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-sgvu-gold sm:w-52" /></label>
+            <div className="flex gap-1 rounded-xl bg-muted/50 p-1">{(['ALL', 'OPEN', 'RESOLVED'] as const).map((f) => <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${filter === f ? 'bg-sgvu-navy text-white shadow-sm' : 'text-sgvu-navy hover:bg-white'}`}>{f === 'ALL' ? 'All' : f === 'OPEN' ? 'Open' : 'Resolved'}</button>)}</div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Ticket list */}
       {loading ? (

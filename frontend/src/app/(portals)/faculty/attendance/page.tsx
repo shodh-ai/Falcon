@@ -37,7 +37,7 @@ import {
 type UiStatus = AttendanceFormStatus;
 
 type FacultyClass = {
-  timetable_id: string;
+  timetable_id: string | null;
   course_id: string;
   course_code: string;
   course_name: string;
@@ -105,7 +105,12 @@ function MarkAttendanceContent() {
   const [rosterError, setRosterError] = useState<string | null>(null);
 
   const selectedClass = useMemo(
-    () => classes.find((c) => c.timetable_id === selectedTimetableId) ?? classes.find((c) => c.course_id === selectedCourseId) ?? null,
+    () =>
+      (selectedTimetableId
+        ? classes.find((c) => c.timetable_id === selectedTimetableId)
+        : undefined) ??
+      classes.find((c) => c.course_id === selectedCourseId) ??
+      null,
     [classes, selectedCourseId, selectedTimetableId],
   );
 
