@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Download, FileText, Loader2 } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { Download, FileText, Loader2, Send } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
