@@ -272,12 +272,19 @@ export class CourseAllocationBulkService {
        WHERE u.tenant_id = $1
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND EXISTS (
-           SELECT 1
-           FROM user_roles ur
-           INNER JOIN roles r ON r.role_id = ur.role_id
-           WHERE ur.user_id = u.user_id
-             AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         AND (
+           EXISTS (
+             SELECT 1 FROM roles primary_role
+             WHERE primary_role.role_id = u.role_id
+               AND primary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
          )`,
       [tenantId],
     );
@@ -475,12 +482,9 @@ export class CourseAllocationBulkService {
 
         if (facultyId && courseId) {
           assignedFacultyIds.add(facultyId);
-          await this.ensureFacultyTimetableSlot(
-            qr,
-            tenantId,
-            courseId,
-            facultyId,
-          );
+          // Allocation establishes teaching access, not a schedule. A teaching
+          // matrix has no approved day/time/batch, so it must neither invent a
+          // slot nor replace another faculty member's existing timetable.
           result.workspaces_assigned += 1;
           this.notify.timetableChanged({
             tenantId,
@@ -706,12 +710,20 @@ export class CourseAllocationBulkService {
       `SELECT u.user_id, u.name, u.dept_id
        FROM users u
        WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true
-         AND EXISTS (
-           SELECT 1
-           FROM user_roles ur
-           INNER JOIN roles r ON r.role_id = ur.role_id
-           WHERE ur.user_id = u.user_id
-             AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         AND u.deleted_at IS NULL
+         AND (
+           EXISTS (
+             SELECT 1 FROM roles primary_role
+             WHERE primary_role.role_id = u.role_id
+               AND primary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
          )`,
       [facultyUserId, tenantId],
     );
@@ -1224,12 +1236,19 @@ export class CourseAllocationBulkService {
          AND u.dept_id = ANY($2::int[])
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND EXISTS (
-           SELECT 1
-           FROM user_roles ur
-           INNER JOIN roles r ON r.role_id = ur.role_id
-           WHERE ur.user_id = u.user_id
-             AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         AND (
+           EXISTS (
+             SELECT 1 FROM roles primary_role
+             WHERE primary_role.role_id = u.role_id
+               AND primary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
          )
        ORDER BY u.name`,
       [tenantId, deptIds],

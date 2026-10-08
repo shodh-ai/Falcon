@@ -77,6 +77,30 @@ describe('CourseAllocationBulkService department programme scope', () => {
     });
   });
 
+  it('keeps primary-role-only legacy accounts eligible while checking secondary roles', async () => {
+    const calls: Array<[string, unknown[] | undefined]> = [];
+    const dataSource = {
+      query: jest.fn(async (sql: string, params?: unknown[]) => {
+        calls.push([sql, params]);
+        return calls.length === 1 ? [] : [];
+      }),
+    };
+    const service = new CourseAllocationBulkService(
+      dataSource as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await service.buildPreview('tenant-1', []);
+
+    const facultySql = calls[1]?.[0] ?? '';
+    expect(facultySql).toContain('primary_role.role_id = u.role_id');
+    expect(facultySql).toContain('FROM user_roles ur');
+    expect(facultySql).toContain('secondary_role.role_name IN');
+  });
+
   it('does not treat an unrelated unscoped programme as in-scope', async () => {
     const service = makeService([
       [],
