@@ -461,9 +461,16 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
 
       {createOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-digital-assignment-title"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl"
+          >
             <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-5 py-4">
-              <p className="text-sm font-bold text-sgvu-navy">Create digital assignment</p>
+              <p id="create-digital-assignment-title" className="text-sm font-bold text-sgvu-navy">
+                Create digital assignment
+              </p>
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
@@ -473,7 +480,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <form onSubmit={createDa} className="space-y-4 p-5">
+            <form onSubmit={createDa} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Assignment title</label>
                 <Input
@@ -553,7 +560,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
                 <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
               </div>
-              <div className="flex gap-2 pt-1">
+              <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-2 border-t border-border/50 bg-card/95 px-5 py-4 backdrop-blur supports-[backdrop-filter]:bg-card/80">
                 <Button type="submit">Publish Assignment</Button>
                 <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
                   Cancel
@@ -566,10 +573,17 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-digital-assignment-title"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl"
+          >
             <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-5 py-4">
               <div>
-                <p className="text-sm font-bold text-sgvu-navy">Edit digital assignment</p>
+                <p id="edit-digital-assignment-title" className="text-sm font-bold text-sgvu-navy">
+                  Edit digital assignment
+                </p>
                 <p className="text-xs text-muted-foreground">{editing.title}</p>
               </div>
               <button
@@ -581,7 +595,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <form onSubmit={saveEdit} className="space-y-4 p-5">
+            <form onSubmit={saveEdit} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Publish Date (Visible to Students)</label>
                 <Input
@@ -609,7 +623,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
                 <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
               </div>
-              <div className="flex gap-2 pt-1">
+              <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-2 border-t border-border/50 bg-card/95 px-5 py-4 backdrop-blur supports-[backdrop-filter]:bg-card/80">
                 <Button type="submit">Save changes</Button>
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   Cancel
