@@ -49,6 +49,34 @@ describe('CourseAllocationBulkService department programme scope', () => {
     );
   });
 
+  it('recognizes a faculty user whose primary role is SuperAdmin but has a secondary Faculty role', async () => {
+    const service = makeService([
+      [],
+      [{
+        user_id: 'riya-user',
+        name: 'Riya',
+        official_email: 'riya.pharmacy@mygyanvihar.com',
+      }],
+    ]);
+
+    const preview = await service.buildPreview('tenant-1', [{
+      faculty_username: 'riya.pharmacy',
+      subject_fullname: 'General Pharmacy',
+      subject_code: 'BP102T',
+      sub_type: 'TH',
+      semester: 'I',
+      program_name: 'B.Pharm',
+      credits: 3,
+    }]);
+
+    expect(preview.rows[0]).toMatchObject({
+      faculty_user_id: 'riya-user',
+      faculty_name: 'Riya',
+      faculty_email: 'riya.pharmacy@mygyanvihar.com',
+      is_unassigned: false,
+    });
+  });
+
   it('does not treat an unrelated unscoped programme as in-scope', async () => {
     const service = makeService([
       [],

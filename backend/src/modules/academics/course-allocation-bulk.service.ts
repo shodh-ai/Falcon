@@ -269,11 +269,16 @@ export class CourseAllocationBulkService {
     >(
       `SELECT u.user_id, u.name, u.official_email
        FROM users u
-       INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean')`,
+         AND EXISTS (
+           SELECT 1
+           FROM user_roles ur
+           INNER JOIN roles r ON r.role_id = ur.role_id
+           WHERE ur.user_id = u.user_id
+             AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         )`,
       [tenantId],
     );
     const facultyByUsername = this.buildFacultyUsernameIndex(facultyRows);
@@ -700,9 +705,14 @@ export class CourseAllocationBulkService {
     >(
       `SELECT u.user_id, u.name, u.dept_id
        FROM users u
-       INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean')`,
+         AND EXISTS (
+           SELECT 1
+           FROM user_roles ur
+           INNER JOIN roles r ON r.role_id = ur.role_id
+           WHERE ur.user_id = u.user_id
+             AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         )`,
       [facultyUserId, tenantId],
     );
     if (!faculty[0]) throw new NotFoundException('Faculty member not found');
@@ -1210,12 +1220,17 @@ export class CourseAllocationBulkService {
     >(
       `SELECT u.user_id, u.name, u.official_email AS email
        FROM users u
-       INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         AND EXISTS (
+           SELECT 1
+           FROM user_roles ur
+           INNER JOIN roles r ON r.role_id = ur.role_id
+           WHERE ur.user_id = u.user_id
+             AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         )
        ORDER BY u.name`,
       [tenantId, deptIds],
     );
