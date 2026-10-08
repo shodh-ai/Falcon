@@ -3772,15 +3772,18 @@ export class AcademicsService {
     deptIds: number[],
     lowAttendance = false,
   ) {
+    // An empty Dean scope must stay empty. Falling back to `1=1` here would
+    // expose every student in the tenant when the Dean has no assigned school
+    // or department.
+    if (deptIds.length === 0) return [];
+
     const students = await this.users
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.department', 'department')
       .leftJoinAndSelect('user.role', 'role')
       .where('user.tenant_id = :tenantId', { tenantId })
       .andWhere("role.role_name = 'Student'")
-      .andWhere(deptIds.length ? 'user.dept_id IN (:...deptIds)' : '1=1', {
-        deptIds,
-      })
+      .andWhere('user.dept_id IN (:...deptIds)', { deptIds })
       .orderBy('user.name', 'ASC')
       .getMany();
 

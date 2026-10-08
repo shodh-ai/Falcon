@@ -1,0 +1,119 @@
+{
+  "audit_date": "2026-10-05",
+  "repository": "/Users/apple/Desktop/Falcon/Falcon",
+  "score": 55,
+  "counts": {
+    "pass": 62,
+    "fail": 0,
+    "warn": 8,
+    "skip": 19,
+    "p0": 0,
+    "p1": 3,
+    "p2": 1,
+    "p3": 0
+  },
+  "route_discovery": {
+    "discovered": 41,
+    "playwright_registry": 41,
+    "uncovered": 0,
+    "unauthenticated_status": "307 redirect"
+  },
+  "tests": [
+    {
+      "name": "backend Dean unit",
+      "status": "passed",
+      "suites": 2,
+      "tests": 6
+    },
+    {
+      "name": "backend Dean integration",
+      "status": "passed",
+      "suites": 1,
+      "tests": 3,
+      "mode": "mock gateway"
+    },
+    {
+      "name": "frontend Dean utilities",
+      "status": "passed",
+      "files": 4,
+      "tests": 11
+    },
+    {
+      "name": "Dean Playwright",
+      "status": "passed",
+      "tests": 44,
+      "mode": "mock auth; expanded route coverage"
+    },
+    {
+      "name": "TypeScript typecheck",
+      "status": "passed",
+      "scope": "tests, backend, frontend"
+    }
+  ],
+  "live_checks": [
+    {
+      "endpoint": "/api/academics/dean/command-center",
+      "method": "GET",
+      "status": 401,
+      "classification": "expected unauthenticated rejection"
+    },
+    {
+      "endpoint": "/api/academics/dean/intelligence/dashboard",
+      "method": "GET",
+      "status": 401,
+      "classification": "expected unauthenticated rejection"
+    },
+    {
+      "endpoint": "/api/academics/dean/intelligence/result-approvals",
+      "method": "GET",
+      "status": 401,
+      "classification": "expected unauthenticated rejection"
+    },
+    {
+      "endpoint": "/api/academics/dean/departments",
+      "method": "GET",
+      "status": 401,
+      "classification": "expected unauthenticated rejection"
+    },
+    {
+      "endpoint": "/api/attendance-policy/dean/threshold-requests",
+      "method": "GET",
+      "status": 401,
+      "classification": "expected unauthenticated rejection"
+    },
+    {
+      "endpoint": "/api/phd-lifecycle/dean/candidates",
+      "method": "GET",
+      "status": 401,
+      "classification": "expected unauthenticated rejection"
+    },
+    {
+      "endpoint": "/api/student-safety/dean/concerns",
+      "method": "GET",
+      "status": 401,
+      "classification": "expected unauthenticated rejection"
+    }
+  ],
+  "issues": [
+    {
+      "id": 1,
+      "severity": "P1",
+      "title": "Live persistence and workflow chain unverified"
+    },
+    {
+      "id": 2,
+      "severity": "P1",
+      "title": "RBAC and tenant matrix not executed"
+    },
+    {
+      "id": 3,
+      "severity": "P1",
+      "title": "Notification and audit side effects unverified"
+    },
+    {
+      "id": 4,
+      "severity": "P2",
+      "title": "Authenticated performance baseline missing"
+    }
+  ]
+}
