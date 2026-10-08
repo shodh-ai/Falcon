@@ -1,10 +1,51 @@
 'use client';
 
-import { Clock3, Mail, ShieldCheck } from 'lucide-react';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Clock3, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
 import { OnboardingPanel } from '@/components/onboarding/onboarding-ui';
 import type { PortalOnboardingConfig } from '@/lib/onboarding/portal-onboarding';
+import {
+  getOnboardingStepPath,
+  isFirstLoginOnboardingComplete,
+} from '@/lib/onboarding/portal-onboarding';
+import { useAuth } from '@/context/AuthContext';
+import { Button } from '@/components/ui/button';
 
 export function OnboardingStep3({ config }: { config: PortalOnboardingConfig }) {
+  const router = useRouter();
+  const { user, refreshUser } = useAuth();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      const fresh = await refreshUser().catch(() => null);
+      if (cancelled || !fresh) return;
+
+      if (isFirstLoginOnboardingComplete(fresh.onboarding_status, fresh.primaryRole ?? fresh.role)) {
+        router.replace(config.dashboardPath);
+        return;
+      }
+
+      const nextPath = getOnboardingStepPath(
+        config.portalPrefix,
+        fresh.onboarding_status,
+        fresh.primaryRole ?? fresh.role,
+      );
+      if (nextPath && nextPath !== `${config.portalPrefix}/onboarding/step-3`) {
+        router.replace(nextPath);
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [config.dashboardPath, config.portalPrefix, refreshUser, router]);
+
   return (
     <OnboardingPanel
       icon={Clock3}
@@ -17,9 +58,19 @@ export function OnboardingStep3({ config }: { config: PortalOnboardingConfig }) 
         </div>
 
         <p className="text-sm leading-relaxed text-muted-foreground">
-          The university administration is verifying your documents. You&apos;ll receive an email once
-          your portal access is approved.
+          The university administration is verifying your documents. This page refreshes automatically
+          every 15 seconds — you&apos;ll be redirected when access is approved.
         </p>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2"
+          onClick={() => void refreshUser()}
+        >
+          <RefreshCw className="h-4 w-4" />
+          Check status now
+        </Button>
 
         <div className="space-y-3 text-left">
           <div className="flex items-start gap-3 rounded-xl border border-border/60 bg-sgvu-surface/50 px-4 py-3">
@@ -27,7 +78,7 @@ export function OnboardingStep3({ config }: { config: PortalOnboardingConfig }) 
             <div>
               <p className="text-sm font-medium text-sgvu-navy">Check your email</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Approval updates are sent to your official university email.
+                Approval updates are sent to {user?.email ?? 'your official university email'}.
               </p>
             </div>
           </div>

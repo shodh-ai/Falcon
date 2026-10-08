@@ -15,6 +15,8 @@ import {
   FacultyInlineLoading,
   FacultyEmptyState,
 } from '@/components/faculty';
+import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoTeamRequests } from '@/lib/mock/faculty-portal-demo';
 
 type Tab = 'LEAVE' | 'ON_DUTY' | 'REGULARIZATION' | 'COMP_OFF_CREDIT';
 
@@ -48,10 +50,43 @@ export default function FacultyTeamRequestsPage() {
     setLoading(true);
     try {
       const data = await api.get<TeamRow[]>(`/api/hr/workforce/team/pending?type=${active}`);
-      setRows(data);
+      const demo = facultyDemoTeamRequests()
+        .filter((r) => r.request_type === active || (active === 'LEAVE' && r.request_type === 'LEAVE'))
+        .map((r) => ({
+          leave_id: r.leave_id,
+          request_type: r.request_type,
+          leave_type: r.leave_type,
+          start_date: r.start_date,
+          end_date: r.end_date,
+          regularization_date: r.regularization_date,
+          reason: r.reason,
+          employee: {
+            user_id: r.employee.user_id,
+            name: r.employee.name,
+            email: r.employee.email,
+          },
+        }));
+      setRows(withFacultyDemoFallback(data, demo as TeamRow[], isEmptyArray));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load team queue');
-      setRows([]);
+      const demo = facultyDemoTeamRequests().map((r) => ({
+        leave_id: r.leave_id,
+        request_type: r.request_type,
+        leave_type: r.leave_type,
+        start_date: r.start_date,
+        end_date: r.end_date,
+        regularization_date: r.regularization_date,
+        reason: r.reason,
+        employee: {
+          user_id: r.employee.user_id,
+          name: r.employee.name,
+          email: r.employee.email,
+        },
+      }));
+      const resolved = withFacultyDemoFallback([], demo as TeamRow[], isEmptyArray);
+      setRows(resolved);
+      if (resolved.length === 0) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load team queue');
+      }
     } finally {
       setLoading(false);
     }
@@ -71,6 +106,11 @@ export default function FacultyTeamRequestsPage() {
       return;
     }
     try {
+      if (isFacultyDemoSmokeId(leaveId)) {
+        toast.success(action === 'APPROVE' ? 'Approved (demo)' : 'Rejected (demo)');
+        setRows((prev) => prev.filter((r) => r.leave_id !== leaveId));
+        return;
+      }
       await api.patch(`/api/hr/workforce/team/${leaveId}/action`, { action, comment });
       toast.success(action === 'APPROVE' ? 'Approved' : 'Rejected');
       await load(tab);
@@ -82,7 +122,7 @@ export default function FacultyTeamRequestsPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        title="Team requests — Pending on me"
+        title="DOFA Requests"
         description="Approve or reject requests from employees who report to you."
       />
 
@@ -119,7 +159,7 @@ export default function FacultyTeamRequestsPage() {
                   {rows.map((row) => (
                     <tr key={row.leave_id} className="border-b border-border/40">
                       <td className="px-3 py-3 pr-4">
-                        <p className="font-medium">{row.employee.name}</p>
+                        <p className="font-medium">{row.employee?.name ?? 'Employee'}</p>
                         <p className="text-xs text-muted-foreground">{row.employee.email}</p>
                       </td>
                       <td className="px-3 py-3 pr-4">

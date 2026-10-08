@@ -18,11 +18,19 @@ const Command = React.forwardRef<
 ));
 Command.displayName = CommandPrimitive.displayName;
 
-const CommandDialog = ({ children, ...props }: React.ComponentProps<typeof Dialog>) => (
+type CommandDialogProps = React.ComponentProps<typeof Dialog> & {
+  /** When false, cmdk will not client-filter items (use for server-driven results). Default true. */
+  shouldFilter?: boolean;
+};
+
+const CommandDialog = ({ children, shouldFilter = true, ...props }: CommandDialogProps) => (
   <Dialog {...props}>
     <DialogContent className="overflow-hidden p-0 shadow-2xl sm:max-w-xl" hideCloseButton>
       <DialogTitle className="sr-only">Universal search</DialogTitle>
-      <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-3">
+      <Command
+        shouldFilter={shouldFilter}
+        className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-3"
+      >
         {children}
       </Command>
     </DialogContent>

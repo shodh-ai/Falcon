@@ -164,6 +164,7 @@ export class HrAdminService {
   ) {
     const rows = await this.dataSource.query(
       `SELECT u.user_id, u.name, u.official_email AS email, u.is_active, u.reporting_officer_id,
+              u.role_id, u.dept_id, u.salary_base,
               r.role_name AS role, d.dept_name AS department,
               p.profile_id, p.employee_id, p.designation, p.joining_date, p.org_unit_id,
               p.pan_encrypted, p.aadhaar_encrypted, p.bank_account_encrypted, p.ifsc_code, p.pf_uan,
@@ -204,11 +205,15 @@ export class HrAdminService {
       name: row.name,
       email: row.email,
       role: row.role,
+      role_id: row.role_id != null ? Number(row.role_id) : null,
       department: row.department,
+      dept_id: row.dept_id != null ? Number(row.dept_id) : null,
+      salary_base: row.salary_base ?? null,
       is_active: row.is_active,
       employee_id: row.employee_id,
       designation: row.designation ?? row.role,
       joining_date: row.joining_date,
+      reporting_officer_id: row.reporting_officer_id ?? null,
       reporting_officer_name: row.reporting_officer_name,
       org_unit_id: row.org_unit_id,
       org_unit_name: row.org_unit_name,
@@ -335,7 +340,12 @@ export class HrAdminService {
       `UPDATE users SET entity_id = $2 WHERE user_id = $1 AND (entity_id IS NULL OR entity_id IS DISTINCT FROM $2)`,
       [userId, entityId],
     );
+    await this.cache.delByPrefix(`hr_dir:${tenantId}:`);
     return rows[0];
+  }
+
+  async invalidateDirectoryCache(tenantId: string) {
+    await this.cache.delByPrefix(`hr_dir:${tenantId}:`);
   }
 
   async listLeaveBalancesGrid(

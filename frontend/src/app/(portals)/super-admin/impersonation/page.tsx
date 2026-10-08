@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,20 +17,60 @@ type LogRow = {
   reason: string | null;
 };
 
+type ImpersonationTarget = {
+  user_id: string;
+  name: string;
+  email: string;
+  role_name: string;
+  department_name: string | null;
+};
+
 export default function SuperAdminImpersonationPage() {
   const api = useAuthedApi();
   const { login } = useAuth();
   const [targetUserId, setTargetUserId] = useState('');
+  const [targetQuery, setTargetQuery] = useState('');
+  const [targets, setTargets] = useState<ImpersonationTarget[]>([]);
+  const [loadingTargets, setLoadingTargets] = useState(false);
   const [reason, setReason] = useState('');
   const [logs, setLogs] = useState<LogRow[]>([]);
 
-  const load = () => void api.get<LogRow[]>('/api/super-admin/impersonation/logs').then(setLogs);
+  const load = useCallback(
+    () => void api.get<LogRow[]>('/api/super-admin/impersonation/logs').then(setLogs),
+    [api],
+  );
 
   useEffect(() => {
     load();
-  }, [api]);
+  }, [load]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setLoadingTargets(true);
+      api
+        .get<ImpersonationTarget[]>(
+          `/api/super-admin/impersonation/targets?q=${encodeURIComponent(targetQuery)}`,
+        )
+        .then((rows) => {
+          setTargets(rows);
+          setTargetUserId((current) =>
+            current && rows.some((row) => row.user_id === current) ? current : '',
+          );
+        })
+        .catch((error) => {
+          toast.error(error instanceof Error ? error.message : 'Unable to load personas');
+        })
+        .finally(() => setLoadingTargets(false));
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [api, targetQuery]);
 
   async function impersonate() {
+    if (!targetUserId) {
+      toast.error('Select a persona to continue');
+      return;
+    }
     try {
       const res = await api.post<{ token: string; target: { name: string; role: string } }>(
         '/api/super-admin/impersonate',
@@ -57,12 +97,51 @@ export default function SuperAdminImpersonationPage() {
       </p>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Start impersonation</CardTitle>
+          <CardTitle className="text-base">Choose a persona</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3 md:flex-row">
-          <Input placeholder="Target user UUID" value={targetUserId} onChange={(e) => setTargetUserId(e.target.value)} />
-          <Input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
-          <Button onClick={() => void impersonate()}>Log in as user</Button>
+        <CardContent className="grid gap-3">
+          <Input
+            aria-label="Search personas"
+            placeholder="Search by name, email, role, or department"
+            value={targetQuery}
+            onChange={(e) => setTargetQuery(e.target.value)}
+          />
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+            <select
+              aria-label="Persona"
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={targetUserId}
+              onChange={(event) => setTargetUserId(event.target.value)}
+              disabled={loadingTargets}
+            >
+              <option value="">
+                {loadingTargets ? 'Loading personas…' : 'Select a persona…'}
+              </option>
+              {targets.map((target) => (
+                <option key={target.user_id} value={target.user_id}>
+                  {target.name} — {target.role_name}
+                  {target.department_name ? ` · ${target.department_name}` : ''}
+                  {` · ${target.email}`}
+                </option>
+              ))}
+            </select>
+            <Input
+              aria-label="Impersonation reason"
+              placeholder="Reason for access (required)"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <Button
+              className="w-full shrink-0 whitespace-nowrap md:w-auto"
+              disabled={!targetUserId || !reason.trim() || loadingTargets}
+              onClick={() => void impersonate()}
+            >
+              View persona
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Persona sessions are read-only, expire after two hours, and are recorded in the audit log.
+          </p>
         </CardContent>
       </Card>
       <Card>

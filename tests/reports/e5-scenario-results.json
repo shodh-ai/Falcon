@@ -1,0 +1,248 @@
+{
+  "pass": 30,
+  "warn": 4,
+  "fail": 0,
+  "total": 34,
+  "score": 94,
+  "results": [
+    {
+      "scenario": "AUTH",
+      "step": "Registrar login",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:44:49.041Z"
+    },
+    {
+      "scenario": "AUTH",
+      "step": "President login",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:44:49.099Z"
+    },
+    {
+      "scenario": "S1-NewStudentLifecycle",
+      "step": "Verification queue API",
+      "status": "PASS",
+      "detail": "status=200",
+      "at": "2026-07-18T08:44:49.117Z"
+    },
+    {
+      "scenario": "S1-NewStudentLifecycle",
+      "step": "Directory API",
+      "status": "PASS",
+      "detail": "total=5287",
+      "at": "2026-07-18T08:44:49.151Z"
+    },
+    {
+      "scenario": "S1-NewStudentLifecycle",
+      "step": "Roll assignment API",
+      "status": "WARN",
+      "detail": "No enrollments found for the given semester",
+      "at": "2026-07-18T08:44:49.160Z"
+    },
+    {
+      "scenario": "S1-NewStudentLifecycle",
+      "step": "Warehouse admissions",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:44:49.190Z"
+    },
+    {
+      "scenario": "S1-NewStudentLifecycle",
+      "step": "Transcript registrar view",
+      "status": "PASS",
+      "detail": "rows=1",
+      "at": "2026-07-18T08:44:49.197Z"
+    },
+    {
+      "scenario": "S1-NewStudentLifecycle",
+      "step": "Course registration / attendance / exam / result",
+      "status": "WARN",
+      "detail": "Owned by Student/Faculty/Exam Cell — chain verified via API surface",
+      "at": "2026-07-18T08:44:49.197Z"
+    },
+    {
+      "scenario": "S2-RejectionResubmit",
+      "step": "Audit API",
+      "status": "PASS",
+      "detail": "rows=5",
+      "at": "2026-07-18T08:44:49.214Z"
+    },
+    {
+      "scenario": "S2-RejectionResubmit",
+      "step": "Reject flow",
+      "status": "WARN",
+      "detail": "No pending verification in queue — skip live reject",
+      "at": "2026-07-18T08:44:49.214Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "Bulk upload 50",
+      "status": "PASS",
+      "detail": "imported=50, failed=0, 2731ms",
+      "at": "2026-07-18T08:44:51.945Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "Bulk upload 500",
+      "status": "PASS",
+      "detail": "imported=500, failed=0, 27326ms",
+      "at": "2026-07-18T08:45:19.271Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "Bulk upload 2000",
+      "status": "PASS",
+      "detail": "imported=2000, failed=0, 107186ms",
+      "at": "2026-07-18T08:47:06.457Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "Duplicate detection",
+      "status": "PASS",
+      "detail": "{\"run_id\":\"3605fbcb-66d8-48a6-89f2-055e3d7f0011\",\"created\":1,\"rows_failed\":1,\"duplicate_rows\":1,\"status\":\"PARTIAL\",\"erro",
+      "at": "2026-07-18T08:47:06.577Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "Upload history API",
+      "status": "PASS",
+      "detail": "runs=8",
+      "at": "2026-07-18T08:47:06.584Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "Rollback latest run",
+      "status": "PASS",
+      "detail": 1,
+      "at": "2026-07-18T08:47:06.593Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "Warehouse bulk_upload",
+      "status": "PASS",
+      "detail": "rows=8",
+      "at": "2026-07-18T08:47:06.600Z"
+    },
+    {
+      "scenario": "S3-BulkIntake",
+      "step": "President KPI live",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.606Z"
+    },
+    {
+      "scenario": "S4-Convocation",
+      "step": "List cert events",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.614Z"
+    },
+    {
+      "scenario": "S4-Convocation",
+      "step": "Pending verification queue",
+      "status": "PASS",
+      "detail": "count=0",
+      "at": "2026-07-18T08:47:06.622Z"
+    },
+    {
+      "scenario": "S4-Convocation",
+      "step": "President convocation live",
+      "status": "PASS",
+      "detail": "pending=0",
+      "at": "2026-07-18T08:47:06.629Z"
+    },
+    {
+      "scenario": "S4-Convocation",
+      "step": "No-dues / QR / alumni chain",
+      "status": "WARN",
+      "detail": "Requires student payment + clearance seed — APIs verified in E4",
+      "at": "2026-07-18T08:47:06.629Z"
+    },
+    {
+      "scenario": "S5-Transcript",
+      "step": "Generate transcripts sem 4",
+      "status": "PASS",
+      "detail": "requested=1",
+      "at": "2026-07-18T08:47:06.654Z"
+    },
+    {
+      "scenario": "S5-Transcript",
+      "step": "Registrar transcript list",
+      "status": "PASS",
+      "detail": "rows=2",
+      "at": "2026-07-18T08:47:06.659Z"
+    },
+    {
+      "scenario": "S5-Transcript",
+      "step": "Public verify API",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.660Z"
+    },
+    {
+      "scenario": "S5-Transcript",
+      "step": "Warehouse transcripts",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.666Z"
+    },
+    {
+      "scenario": "S6-PhD",
+      "step": "Registrar PhD queue",
+      "status": "PASS",
+      "detail": "candidates=0",
+      "at": "2026-07-18T08:47:06.672Z"
+    },
+    {
+      "scenario": "S6-PhD",
+      "step": "Warehouse phd",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.676Z"
+    },
+    {
+      "scenario": "S7-Governance",
+      "step": "My governance assignments",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.680Z"
+    },
+    {
+      "scenario": "S7-Governance",
+      "step": "President compliance live",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.684Z"
+    },
+    {
+      "scenario": "S7-Governance",
+      "step": "Warehouse governance",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.689Z"
+    },
+    {
+      "scenario": "STRESS",
+      "step": "Concurrent queue reads",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:06.701Z"
+    },
+    {
+      "scenario": "STRESS",
+      "step": "Parallel bulk uploads",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:07.349Z"
+    },
+    {
+      "scenario": "STRESS",
+      "step": "Parallel transcript generate",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T08:47:07.576Z"
+    }
+  ],
+  "generatedAt": "2026-07-18T08:47:07.576Z"
+}

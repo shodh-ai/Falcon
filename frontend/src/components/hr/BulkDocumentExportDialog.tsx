@@ -118,17 +118,23 @@ export function BulkDocumentExportDialog() {
             <label className="text-xs font-medium text-muted-foreground">
               Document type <span className="text-destructive">*</span>
             </label>
-            <Select
-              className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-              value={documentType}
-              onChange={(e) => setDocumentType(e.target.value)}
-            >
-              {EXPORT_DOC_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {c === 'ALL' ? 'ALL — every document type' : c.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </Select>
+            <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Document type">
+              {EXPORT_DOC_OPTIONS.map((c) => {
+                const selected = documentType === c;
+                return (
+                  <Button
+                    key={c}
+                    type="button"
+                    size="sm"
+                    variant={selected ? 'default' : 'outline'}
+                    aria-pressed={selected}
+                    onClick={() => setDocumentType(c)}
+                  >
+                    {c === 'ALL' ? 'ALL' : c.replace(/_/g, ' ')}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
 
           <div>

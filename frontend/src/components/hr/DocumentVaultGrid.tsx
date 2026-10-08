@@ -13,6 +13,8 @@ import { useHrApi } from '@/lib/api/use-hr-api';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import type { VaultDocument, VaultResponse } from '@/lib/api/api.hr-documents';
 import { HR_DOCUMENT_CATEGORIES } from '@/lib/api/api.hr-documents';
+import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoEssDocuments } from '@/lib/mock/faculty-portal-demo';
 
 type Props = {
   userId?: string;
@@ -47,9 +49,30 @@ function DocumentVaultGridInner({ userId, mode, api }: Props & { api: VaultApi }
           ? `/api/hr/employees/${userId}/documents`
           : '/api/hr/ess/documents';
       const data = await api.get<VaultResponse>(path);
-      setVault(data);
+      if (mode === 'ess') {
+        setVault(
+          withFacultyDemoFallback(
+            data,
+            facultyDemoEssDocuments() as VaultResponse,
+            (v) => !v?.documents?.length,
+          ),
+        );
+      } else {
+        setVault(data);
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load documents');
+      if (mode === 'ess') {
+        const demo = withFacultyDemoFallback(
+          null,
+          facultyDemoEssDocuments() as VaultResponse,
+        );
+        setVault(demo);
+        if (!demo?.documents?.length) {
+          toast.error(e instanceof Error ? e.message : 'Failed to load documents');
+        }
+      } else {
+        toast.error(e instanceof Error ? e.message : 'Failed to load documents');
+      }
     } finally {
       setLoading(false);
     }

@@ -10,7 +10,7 @@ import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
-import { RazorpayMockCheckout, type PaymentOrder } from '@/components/finance/RazorpayMockCheckout';
+import { RazorpayCheckout, type PaymentOrder } from '@/components/finance/RazorpayCheckout';
 
 type HoldDetail = {
   hold_id: string;
@@ -124,7 +124,7 @@ export default function HostelBookingCheckoutPage() {
       payment_ref: paymentId,
     });
     toast.success('Room booked — allocation confirmed!');
-    router.replace('/student/hostel');
+    router.replace('/student/campus-life');
   }
 
   if (loading || !hold) {
@@ -136,7 +136,7 @@ export default function HostelBookingCheckoutPage() {
       <StudentPageShell width="4xl" className="max-w-lg text-center">
         <p className="text-lg font-semibold text-sgvu-navy">Booking confirmed</p>
         <Button asChild className="bg-sgvu-navy">
-          <a href="/student/hostel">Go to my hostel</a>
+          <a href="/student/campus-life">Go to Campus Life</a>
         </Button>
       </StudentPageShell>
     );
@@ -190,7 +190,7 @@ export default function HostelBookingCheckoutPage() {
       </Button>
 
       {checkout && (
-        <RazorpayMockCheckout
+        <RazorpayCheckout
           open
           order={checkout}
           onClose={() => setCheckout(null)}

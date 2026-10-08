@@ -93,6 +93,7 @@ export class CourseLmsService {
   ) {
     await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
     const course = await this.getCourseOrFail(courseId, tenantId);
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
     const rows = await this.dataSource.query<
       Array<{
         allocation_id: string;
@@ -106,11 +107,19 @@ export class CourseLmsService {
        FROM academic_course_allocations a
        JOIN academic_subjects s ON s.subject_id = a.subject_id
        WHERE a.tenant_id = $1
-         AND a.faculty_user_id = $2
          AND a.course_id = $3
          AND a.status = 'ACTIVE'
+           AND (
+             a.faculty_user_id = $2
+             OR EXISTS (
+             SELECT 1
+             FROM users assigned
+             WHERE assigned.user_id = a.faculty_user_id
+               AND assigned.dept_id = ANY($4::int[])
+           )
+         )
        ORDER BY a.program_name NULLS LAST, a.semester NULLS LAST`,
-      [tenantId, facultyUserId, courseId],
+      [tenantId, facultyUserId, courseId, hodDepartmentIds],
     );
 
     return {
@@ -196,7 +205,11 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     file: Express.Multer.File,
-    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    dto: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -282,12 +295,39 @@ export class CourseLmsService {
     return mod;
   }
 
+  async deleteModule(
+    facultyUserId: string,
+    tenantId: string,
+    moduleId: string,
+  ) {
+    const mod = await this.getModuleForFaculty(
+      moduleId,
+      facultyUserId,
+      tenantId,
+    );
+    const materialCount = await this.materials.count({
+      where: { tenant_id: tenantId, module_id: moduleId },
+    });
+    if (materialCount > 0) {
+      throw new BadRequestException(
+        'Delete the files in this unit before deleting the unit',
+      );
+    }
+
+    await this.modules.remove(mod);
+    return { deleted: true, module_id: moduleId };
+  }
+
   async uploadModuleMaterial(
     facultyUserId: string,
     tenantId: string,
     moduleId: string,
     file: Express.Multer.File,
-    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    dto: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -338,7 +378,11 @@ export class CourseLmsService {
     tenantId: string,
     moduleId: string,
     files: Express.Multer.File[],
-    dto: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    dto: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     const mod = await this.getModuleForFaculty(
       moduleId,
@@ -389,7 +433,7 @@ export class CourseLmsService {
           material.title,
           material.material_id,
           allocationIds,
-        ),
+        ).catch(() => undefined),
       ),
     );
 
@@ -558,7 +602,9 @@ export class CourseLmsService {
       enrolled,
     );
     if (!canAccess)
-      throw new ForbiddenException('This material is not published to your section');
+      throw new ForbiddenException(
+        'This material is not published to your section',
+      );
 
     return material;
   }
@@ -655,17 +701,55 @@ export class CourseLmsService {
     );
     if (allocation.length) return;
 
-    const marks = await this.dataSource.query(
-      `SELECT 1 FROM academic_marks
-       WHERE tenant_id = $1 AND course_id = $2 AND uploaded_by = $3
-       LIMIT 1`,
-      [tenantId, courseId, facultyUserId],
-    );
-    if (marks.length) return;
+    // HODs may manage courses offered by their own department even when they
+    // are not the assigned lecturer. Faculty users remain restricted to the
+    // direct timetable/allocation checks above.
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    if (hodDepartmentIds.length) {
+      const scoped = await this.dataSource.query(
+        `SELECT 1
+         WHERE EXISTS (
+           SELECT 1
+           FROM academic_course_allocations a
+           JOIN users assigned ON assigned.user_id = a.faculty_user_id
+           WHERE a.tenant_id = $1 AND a.course_id = $2
+             AND a.status = 'ACTIVE'
+             AND assigned.dept_id = ANY($3::int[])
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM academic_timetables t
+           JOIN users assigned ON assigned.user_id = t.faculty_user_id
+           WHERE t.tenant_id = $1 AND t.course_id = $2
+             AND t.deleted_at IS NULL
+             AND assigned.dept_id = ANY($3::int[])
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM student_course_enrollments e
+           JOIN users student ON student.user_id = e.student_user_id
+           WHERE e.tenant_id = $1 AND e.course_id = $2
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+             AND student.dept_id = ANY($3::int[])
+         )`,
+        [tenantId, courseId, hodDepartmentIds],
+      );
+      if (scoped.length) return;
+    }
 
-    throw new NotFoundException(
-      'Course not found in your teaching timetable',
+    throw new NotFoundException('Course not found in your teaching timetable');
+  }
+
+  private async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
+    const rows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1 AND deleted_at IS NULL
+       UNION
+       SELECT u.dept_id FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
+      [hodUserId],
     );
+    return [...new Set(rows.map((row) => Number(row.dept_id)).filter(Boolean))];
   }
 
   private async getModuleForFaculty(
@@ -677,10 +761,14 @@ export class CourseLmsService {
       where: {
         module_id: moduleId,
         tenant_id: tenantId,
-        faculty_user_id: facultyUserId,
       },
     });
     if (!mod) throw new NotFoundException('Module not found');
+    // Preserve direct faculty ownership while allowing an HOD to manage
+    // modules created by lecturers in the HOD's department.
+    if (mod.faculty_user_id !== facultyUserId) {
+      await this.assertFacultyTeaches(mod.course_id, facultyUserId, tenantId);
+    }
     return mod;
   }
 
@@ -720,7 +808,10 @@ export class CourseLmsService {
         return [];
       }
     }
-    return trimmed.split(',').map((v) => v.trim()).filter(Boolean);
+    return trimmed
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
   }
 
   private formatAllocationLabel(
@@ -774,13 +865,29 @@ export class CourseLmsService {
   ) {
     if (!allocationIds.length) return;
 
-    const valid = await this.allocations
-      .createQueryBuilder('a')
-      .where('a.tenant_id = :tenantId', { tenantId })
-      .andWhere('a.faculty_user_id = :facultyUserId', { facultyUserId })
-      .andWhere('a.course_id = :courseId', { courseId })
-      .andWhere('a.allocation_id IN (:...allocationIds)', { allocationIds })
-      .getMany();
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    const validIds = await this.dataSource.query<Array<{ allocation_id: string }>>(
+      `SELECT a.allocation_id
+       FROM academic_course_allocations a
+       LEFT JOIN users assigned ON assigned.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1
+         AND a.course_id = $2
+         AND a.allocation_id = ANY($3::uuid[])
+         AND (
+           a.faculty_user_id = $4
+           OR assigned.dept_id = ANY($5::int[])
+         )`,
+      [tenantId, courseId, allocationIds, facultyUserId, hodDepartmentIds],
+    );
+    const valid = validIds.length
+      ? await this.allocations.find({
+          where: {
+            tenant_id: tenantId,
+            course_id: courseId,
+            allocation_id: In(validIds.map((row) => row.allocation_id)),
+          },
+        })
+      : [];
 
     if (!valid.length) {
       throw new BadRequestException(
@@ -850,10 +957,9 @@ export class CourseLmsService {
 
     const profileRows = await this.dataSource.query<
       Array<{ batch: string | null }>
-    >(
-      `SELECT batch FROM student_profiles WHERE user_id = $1 LIMIT 1`,
-      [studentUserId],
-    );
+    >(`SELECT batch FROM student_profiles WHERE user_id = $1 LIMIT 1`, [
+      studentUserId,
+    ]);
     const studentProgram = this.normalizeProgram(profileRows[0]?.batch);
 
     const allocationIds = [
@@ -875,7 +981,11 @@ export class CourseLmsService {
       return scopedIds.some((allocationId) => {
         const allocation = allocationMap.get(allocationId);
         if (!allocation) return false;
-        return this.enrollmentMatchesAllocation(enrollment, allocation, studentProgram);
+        return this.enrollmentMatchesAllocation(
+          enrollment,
+          allocation,
+          studentProgram,
+        );
       });
     });
   }
@@ -904,7 +1014,8 @@ export class CourseLmsService {
     const { semesterNum, sectionCode } = this.parseAllocationSemester(
       allocation.semester,
     );
-    if (semesterNum != null && enrollment.semester !== semesterNum) return false;
+    if (semesterNum != null && enrollment.semester !== semesterNum)
+      return false;
 
     const allocationProgram = this.normalizeProgram(allocation.program_name);
     if (
@@ -915,7 +1026,8 @@ export class CourseLmsService {
       return false;
     }
 
-    const enrollmentSection = enrollment.section_code?.trim().toUpperCase() ?? null;
+    const enrollmentSection =
+      enrollment.section_code?.trim().toUpperCase() ?? null;
     if (sectionCode && enrollmentSection && enrollmentSection !== sectionCode) {
       return false;
     }
@@ -941,7 +1053,9 @@ export class CourseLmsService {
       return;
     }
 
-    const rows = await this.dataSource.query<Array<{ student_user_id: string }>>(
+    const rows = await this.dataSource.query<
+      Array<{ student_user_id: string }>
+    >(
       `SELECT DISTINCT e.student_user_id
        FROM student_course_enrollments e
        LEFT JOIN student_profiles sp ON sp.user_id = e.student_user_id
@@ -1188,5 +1302,187 @@ export class CourseLmsService {
       }),
     );
     return material;
+  }
+
+  async listAnnouncements(
+    tenantId: string,
+    courseId: string,
+    viewer: { userId: string; role: 'faculty' | 'student' },
+  ) {
+    if (viewer.role === 'faculty') {
+      await this.assertFacultyTeaches(courseId, viewer.userId, tenantId);
+    } else {
+      const enrollment = await this.enrollments.findOne({
+        where: {
+          tenant_id: tenantId,
+          course_id: courseId,
+          student_user_id: viewer.userId,
+          status: 'ENROLLED',
+        },
+      });
+      if (!enrollment) {
+        throw new ForbiddenException('You are not enrolled in this course');
+      }
+    }
+
+    return this.dataSource.query(
+      `SELECT a.announcement_id, a.course_id, a.faculty_user_id, a.title, a.body, a.created_at,
+              u.name AS faculty_name
+       FROM course_announcements a
+       JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1 AND a.course_id = $2 AND a.deleted_at IS NULL
+       ORDER BY a.created_at DESC`,
+      [tenantId, courseId],
+    );
+  }
+
+  async createAnnouncement(
+    facultyUserId: string,
+    tenantId: string,
+    courseId: string,
+    dto: { title?: string; body?: string },
+  ) {
+    await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    const title = dto.title?.trim();
+    const body = dto.body?.trim();
+    if (!title || !body) {
+      throw new BadRequestException('Title and body are required');
+    }
+
+    const rows = await this.dataSource.query(
+      `INSERT INTO course_announcements (tenant_id, course_id, faculty_user_id, title, body)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING announcement_id, course_id, faculty_user_id, title, body, created_at`,
+      [tenantId, courseId, facultyUserId, title, body],
+    );
+    const announcement = rows[0] as {
+      announcement_id: string;
+      title: string;
+      body: string;
+    };
+
+    const course = await this.courses.findOne({
+      where: { tenant_id: tenantId, course_id: courseId },
+    });
+    const enrolled = await this.enrollments.find({
+      where: { tenant_id: tenantId, course_id: courseId, status: 'ENROLLED' },
+      select: ['student_user_id'],
+    });
+    const preview =
+      body.length > 240 ? `${body.slice(0, 237).trimEnd()}...` : body;
+
+    for (const row of enrolled) {
+      this.notificationEmitter.courseAnnouncement({
+        tenantId,
+        userId: row.student_user_id,
+        courseId,
+        courseName: course?.course_name ?? 'Course',
+        courseCode: course?.course_code,
+        announcementId: announcement.announcement_id,
+        title: announcement.title,
+        bodyPreview: preview,
+      });
+    }
+
+    return { ...announcement, notified_count: enrolled.length };
+  }
+
+  async listQuestionBank(
+    facultyUserId: string,
+    tenantId: string,
+    courseId?: string,
+  ) {
+    if (courseId) {
+      await this.assertFacultyTeaches(courseId, facultyUserId, tenantId);
+    }
+    if (courseId) {
+      return this.dataSource.query(
+        `SELECT * FROM faculty_question_bank
+         WHERE tenant_id = $1 AND faculty_user_id = $2 AND deleted_at IS NULL
+           AND (course_id = $3 OR course_id IS NULL)
+         ORDER BY created_at DESC`,
+        [tenantId, facultyUserId, courseId],
+      );
+    }
+    return this.dataSource.query(
+      `SELECT * FROM faculty_question_bank
+       WHERE tenant_id = $1 AND faculty_user_id = $2 AND deleted_at IS NULL
+       ORDER BY created_at DESC`,
+      [tenantId, facultyUserId],
+    );
+  }
+
+  async createQuestionBankItem(
+    facultyUserId: string,
+    tenantId: string,
+    dto: {
+      course_id?: string;
+      question_text?: string;
+      option_a?: string;
+      option_b?: string;
+      option_c?: string;
+      option_d?: string;
+      correct_option?: string;
+      tags?: string;
+    },
+  ) {
+    if (dto.course_id) {
+      await this.assertFacultyTeaches(dto.course_id, facultyUserId, tenantId);
+    }
+    const questionText = dto.question_text?.trim();
+    const optionA = dto.option_a?.trim();
+    const optionB = dto.option_b?.trim();
+    const optionC = dto.option_c?.trim();
+    const optionD = dto.option_d?.trim();
+    const correct = (dto.correct_option ?? '').trim().toUpperCase();
+    if (
+      !questionText ||
+      !optionA ||
+      !optionB ||
+      !optionC ||
+      !optionD ||
+      !['A', 'B', 'C', 'D'].includes(correct)
+    ) {
+      throw new BadRequestException(
+        'Question, options A–D, and correct option (A–D) are required',
+      );
+    }
+
+    const rows = await this.dataSource.query(
+      `INSERT INTO faculty_question_bank (
+         tenant_id, faculty_user_id, course_id, question_text,
+         option_a, option_b, option_c, option_d, correct_option, tags
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [
+        tenantId,
+        facultyUserId,
+        dto.course_id ?? null,
+        questionText,
+        optionA,
+        optionB,
+        optionC,
+        optionD,
+        correct,
+        dto.tags?.trim() || null,
+      ],
+    );
+    return rows[0];
+  }
+
+  async deleteQuestionBankItem(
+    facultyUserId: string,
+    tenantId: string,
+    questionId: string,
+  ) {
+    const result = await this.dataSource.query(
+      `UPDATE faculty_question_bank
+       SET deleted_at = NOW()
+       WHERE question_id = $1 AND tenant_id = $2 AND faculty_user_id = $3 AND deleted_at IS NULL
+       RETURNING question_id`,
+      [questionId, tenantId, facultyUserId],
+    );
+    if (!result.length) throw new NotFoundException('Question not found');
+    return { deleted: true };
   }
 }

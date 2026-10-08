@@ -1,0 +1,29 @@
+{
+  "slug": "agriculture",
+  "department_name": "Agriculture",
+  "school_code": "AGR",
+  "academic_year": "2026-2027",
+  "session_label": "July-December 2026",
+  "tenant_subdomain": "sgvu",
+  "program_code": "BTECH-AGRI",
+  "program_display_name": "B.Tech Agriculture",
+  "program_allocation_name": "B.Tech Agri",
+  "default_student_batch": "B.Tech Agriculture",
+  "default_section_code": "A",
+  "sources": {
+    "students_pdf": null,
+    "workload_pdf": "ME & Agri Workload Distribution for Session(July-Dec 2026) 15.7.26_compressed.pdf",
+    "students_csv": "students.csv",
+    "faculty_workload_csv": "faculty-workload.csv",
+    "faculty_email_map": "faculty-email-map.json",
+    "course_catalog_csv": "course-catalog.csv"
+  },
+  "provision_missing_faculty": true,
+  "provision_missing_students": true,
+  "workload_extract_mode": "programme_scan",
+  "workload_programme_match": "Agri",
+  "default_faculty": {
+    "name": "Mr. Manoranjan Kumar",
+    "designation": "Assistant Professor"
+  }
+}

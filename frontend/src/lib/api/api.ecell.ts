@@ -171,6 +171,20 @@ export function createEcellApi(api: AuthedApi) {
       api.post(`/api/ecell/mentor/meetings/${id}/decline`, { decline_reason }),
     submitMentorFeedback: (id: string, mentor_feedback: string) =>
       api.post(`/api/ecell/mentor/meetings/${id}/feedback`, { mentor_feedback }),
+    listIpAgreements: () => api.get<any[]>('/api/ecell/ip-agreements'),
+    upsertIpAgreement: (body: Record<string, unknown>) =>
+      api.post('/api/ecell/ip-agreements', body),
+    listFellowships: () => api.get<any[]>('/api/ecell/fellowships'),
+    applyFellowship: (body?: Record<string, unknown>) =>
+      api.post('/api/ecell/fellowships/apply', body ?? {}),
+    decideFellowship: (id: string, body: { decision: string; notes?: string }) =>
+      api.post(`/api/ecell/fellowships/${id}/decide`, body),
+    listProductVivaPanelists: (courseOfferingId?: string) =>
+      api.get<any[]>(
+        `/api/ecell/product-viva/panelists${courseOfferingId ? `?course_offering_id=${courseOfferingId}` : ''}`,
+      ),
+    addProductVivaPanelist: (body: Record<string, unknown>) =>
+      api.post('/api/ecell/product-viva/panelists', body),
   };
 }
 

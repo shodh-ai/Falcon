@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import { useAuth } from '@/context/AuthContext';
 import { useLeadershipApi, type FeedEvent, type IntelligenceTicker } from '@/lib/api/api.leadership';
 
 type IntelligenceContextValue = {
@@ -19,6 +20,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export function LeadershipIntelligenceProvider({ children }: { children: ReactNode }) {
   const api = useLeadershipApi();
+  const { user } = useAuth();
+  const tenantId = user?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   const [ticker, setTicker] = useState<IntelligenceTicker | null>(null);
   const [feed, setFeed] = useState<FeedEvent[]>([]);
   const [alertCount, setAlertCount] = useState(0);
@@ -49,7 +52,7 @@ export function LeadershipIntelligenceProvider({ children }: { children: ReactNo
     const socket: Socket = io(`${API_URL}/leadership`, { transports: ['websocket'] });
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
-    socket.emit('joinLeadershipFeed', { tenant_id: 'a0000000-0000-4000-8000-000000000001' });
+    socket.emit('joinLeadershipFeed', { tenant_id: tenantId });
     socket.on('feed_event', (event: FeedEvent) => {
       setFeed((prev) => [event, ...prev].slice(0, 100));
       if (event.event_type === 'ALERT') {
@@ -60,7 +63,7 @@ export function LeadershipIntelligenceProvider({ children }: { children: ReactNo
     return () => {
       socket.disconnect();
     };
-  }, [refreshTicker]);
+  }, [refreshTicker, tenantId]);
 
   const value = useMemo(
     () => ({ ticker, feed, alertCount, connected, refreshTicker, refreshFeed }),

@@ -1,0 +1,103 @@
+name: Falcon CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: falcon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: falcon_test
+      FALCON_TEST_DB: 1
+      JWT_SECRET: test-jwt-secret-do-not-use-in-production
+      JWT_EXPIRATION: 1d
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            tests/package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Copy test environment
+        run: cp tests/.env.test.example tests/.env.test
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix frontend
+          npm ci --prefix tests
+
+      - name: Migrate test database
+        working-directory: tests
+        run: npm run db:migrate:test
+
+      - name: Install Playwright browsers
+        working-directory: tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Typecheck, lint, test, build
+        working-directory: tests
+        run: npm run test:ci
+
+      - name: Upload coverage (unit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: tests/coverage/unit
+          if-no-files-found: ignore
+
+      - name: Upload coverage (integration)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration
+          path: tests/coverage/integration
+          if-no-files-found: ignore
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          path: frontend/coverage
+          if-no-files-found: ignore
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/playwright-report
+          if-no-files-found: ignore

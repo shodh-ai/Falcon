@@ -1,5 +1,7 @@
-import { WorkspaceRoutePage } from '@/components/workspaces/WorkspaceRoutePage';
+'use client';
+
+import { PresidentExecutiveOrdersWorkspace } from '@/components/president/PresidentWorkspaceWithActions';
 
 export default function PresidentExecutiveOrdersPage() {
-  return <WorkspaceRoutePage portal="president" page="executiveOrders" />;
+  return <PresidentExecutiveOrdersWorkspace />;
 }

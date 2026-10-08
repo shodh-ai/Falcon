@@ -9,9 +9,23 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { createCampusEventsApi } from '@/lib/api/api.campus-events';
+import { useAuth } from '@/context/AuthContext';
+
+function canEditMasterCalendar(role?: string, roles?: string[]) {
+  const names = [...(roles ?? []), role ?? '']
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return !(
+    names.includes('campusadmin') &&
+    !names.includes('superadmin') &&
+    !names.includes('registrar')
+  );
+}
 
 export default function AdminOpsMasterCalendarPage() {
   const api = useAuthedApi();
+  const { user } = useAuth();
+  const canEdit = canEditMasterCalendar(user?.role, user?.roles);
   const eventsApi = useMemo(() => createCampusEventsApi(api), [api]);
   const [rows, setRows] = useState<
     { calendar_id: string; date: string; title: string; description?: string }[]
@@ -74,10 +88,13 @@ export default function AdminOpsMasterCalendarPage() {
           Master Academic Calendar
         </h1>
         <p className="text-sm text-muted-foreground">
-          Block exam days, holidays, and convocation so clubs cannot propose events on those dates.
+          {canEdit
+            ? 'Block exam days, holidays, and convocation so clubs cannot propose events on those dates.'
+            : 'University academic calendar for your campus. Campus Admin can view dates but cannot change this university calendar.'}
         </p>
       </div>
 
+      {canEdit ? (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -96,6 +113,7 @@ export default function AdminOpsMasterCalendarPage() {
           </form>
         </CardContent>
       </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -110,9 +128,11 @@ export default function AdminOpsMasterCalendarPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant="secondary">Blocked</Badge>
+                {canEdit ? (
                 <Button size="icon" variant="ghost" onClick={() => void remove(r.calendar_id)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
+                ) : null}
               </div>
             </div>
           ))}

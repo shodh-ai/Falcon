@@ -1,0 +1,1882 @@
+{
+  "academic_year": "2026-2027",
+  "program_name": "B.Tech ME",
+  "program_code": "BTECH-ME",
+  "dept_name": "Mech Engg",
+  "faculty": {
+    "NEERAJ": "neeraj.kumar1@mygyanvihar.com",
+    "AMIT": "amit.tiwari@mygyanvihar.com",
+    "HIMANSHU": "himanshu.vasnani@mygyanvihar.com",
+    "RAJ": "raj.kumar@mygyanvihar.com",
+    "HOD": "neeraj.kumar1@mygyanvihar.com"
+  },
+  "hod_email": "neeraj.kumar1@mygyanvihar.com",
+  "mentorship_by_semester": {
+    "3": "NEERAJ",
+    "5": "AMIT",
+    "7": "RAJ"
+  },
+  "semesters": {
+    "III": {
+      "room": "LT-14",
+      "section": "A",
+      "courses": [
+        {
+          "code": "ME3002",
+          "name": "Engineering Thermodynamics",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "NEERAJ",
+          "semester": "III"
+        },
+        {
+          "code": "ME3703",
+          "name": "Material Science Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "AMIT",
+          "semester": "III"
+        },
+        {
+          "code": "ME3003",
+          "name": "Applied Material Science",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "AMIT",
+          "semester": "III"
+        },
+        {
+          "code": "ME3702",
+          "name": "Thermal Engineering Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HIMANSHU",
+          "semester": "III"
+        },
+        {
+          "code": "ME3005",
+          "name": "Industrial Engineering",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HIMANSHU",
+          "semester": "III"
+        },
+        {
+          "code": "ME3704",
+          "name": "Manufacturing Technology Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "RAJ",
+          "semester": "III"
+        },
+        {
+          "code": "ME3001",
+          "name": "Mechanics of Solids",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HOD",
+          "semester": "III"
+        },
+        {
+          "code": "ME3705",
+          "name": "Programming Using MATLAB",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "AMIT",
+          "semester": "III"
+        },
+        {
+          "code": "ME3004",
+          "name": "Manufacturing Technology",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "RAJ",
+          "semester": "III"
+        },
+        {
+          "code": "ME3701",
+          "name": "Mechanics of Solid Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HOD",
+          "semester": "III"
+        },
+        {
+          "code": "UC3002",
+          "name": "Economics and Social Sciences",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "RAJ",
+          "semester": "III"
+        },
+        {
+          "code": "UCFV1",
+          "name": "Field Visit-I",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HIMANSHU",
+          "semester": "III"
+        },
+        {
+          "code": "UCEEPI",
+          "name": "Election and Electoral Processes in India",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HOD",
+          "semester": "III"
+        }
+      ],
+      "slots": [
+        {
+          "course": "ME3002",
+          "day": 1,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME3001",
+          "day": 1,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME3004",
+          "day": 1,
+          "start": "11:40",
+          "end": "12:30",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "ME3701",
+          "day": 1,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME3005",
+          "day": 2,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "ME3001",
+          "day": 2,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "UC201",
+          "day": 2,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME3002",
+          "day": 2,
+          "start": "11:40",
+          "end": "12:30",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME3702",
+          "day": 2,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "ME3005",
+          "day": 3,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "ME3002",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME3003",
+          "day": 3,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME3001",
+          "day": 3,
+          "start": "11:40",
+          "end": "12:30",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME3004",
+          "day": 3,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "ME3003",
+          "day": 4,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME3002",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME3705",
+          "day": 4,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "UC201",
+          "day": 4,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME3704",
+          "day": 4,
+          "start": "14:20",
+          "end": "15:10",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "ME3003",
+          "day": 5,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME3004",
+          "day": 5,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "UC201",
+          "day": 5,
+          "start": "11:40",
+          "end": "12:30",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME3703",
+          "day": 5,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME3005",
+          "day": 6,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "LT-14",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        }
+      ]
+    },
+    "V": {
+      "room": "ME Computer Lab",
+      "section": "A",
+      "courses": [
+        {
+          "code": "ME305",
+          "name": "Heat & Mass Transfer",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "NEERAJ",
+          "semester": "V"
+        },
+        {
+          "code": "ME351",
+          "name": "Production Process Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "AMIT",
+          "semester": "V"
+        },
+        {
+          "code": "ME303",
+          "name": "Mechanical Vibration Engineering",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "NEERAJ",
+          "semester": "V"
+        },
+        {
+          "code": "PT303",
+          "name": "Industrial Training Seminar",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HOD",
+          "semester": "V"
+        },
+        {
+          "code": "ME301",
+          "name": "Machining Science and Machine Tools",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "AMIT",
+          "semester": "V"
+        },
+        {
+          "code": "UC351",
+          "name": "Field Project/Field Visit-5",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HIMANSHU",
+          "semester": "V"
+        },
+        {
+          "code": "ME313",
+          "name": "Micro Electro & Mechanical Systems (MEMS) and Microsystems",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HOD",
+          "semester": "V"
+        },
+        {
+          "code": "ME355",
+          "name": "Heat & Mass Transfer Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "RAJ",
+          "semester": "V"
+        },
+        {
+          "code": "EM301",
+          "name": "Employability Skill-III",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HOD",
+          "semester": "V"
+        },
+        {
+          "code": "ME353",
+          "name": "Mechanical Vibration Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HOD",
+          "semester": "V"
+        }
+      ],
+      "slots": [
+        {
+          "course": "ME303",
+          "day": 1,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME355",
+          "day": 1,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "ME303",
+          "day": 2,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME301",
+          "day": 2,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME305",
+          "day": 2,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME305",
+          "day": 3,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME301",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME305",
+          "day": 3,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME303",
+          "day": 3,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME303",
+          "day": 4,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        },
+        {
+          "course": "ME301",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "UCTION",
+          "day": 4,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME301",
+          "day": 5,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME353",
+          "day": 5,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME305",
+          "day": 6,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "ME Computer Lab",
+          "section": "A",
+          "faculty": "NEERAJ"
+        }
+      ]
+    },
+    "VII": {
+      "room": "Old Computer Lab",
+      "section": "A",
+      "courses": [
+        {
+          "code": "ME405",
+          "name": "CAD, CAM & CIM",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HOD",
+          "semester": "VII"
+        },
+        {
+          "code": "SM401",
+          "name": "Seminar",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HIMANSHU",
+          "semester": "VII"
+        },
+        {
+          "code": "ME407",
+          "name": "Renewable Energy Technology",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HIMANSHU",
+          "semester": "VII"
+        },
+        {
+          "code": "PE403",
+          "name": "Major Project",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "AMIT",
+          "semester": "VII"
+        },
+        {
+          "code": "ME411",
+          "name": "Robotics Engineering",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "RAJ",
+          "semester": "VII"
+        },
+        {
+          "code": "ME453",
+          "name": "CNC Machines and Programming Lab",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "HOD",
+          "semester": "VII"
+        },
+        {
+          "code": "UC401",
+          "name": "Intellectual Property Rights",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "AMIT",
+          "semester": "VII"
+        },
+        {
+          "code": "EM401",
+          "name": "Group Discussion, Aptitude & Reasoning- I",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HIMANSHU",
+          "semester": "VII"
+        }
+      ],
+      "slots": [
+        {
+          "course": "ME405",
+          "day": 1,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "UC401",
+          "day": 1,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME407",
+          "day": 1,
+          "start": "11:40",
+          "end": "12:30",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "ME405",
+          "day": 2,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME407",
+          "day": 2,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "EM401",
+          "day": 2,
+          "start": "11:40",
+          "end": "12:30",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "ME411",
+          "day": 3,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "ME407",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "UC401",
+          "day": 3,
+          "start": "11:40",
+          "end": "12:30",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "AMIT"
+        },
+        {
+          "course": "ME405",
+          "day": 3,
+          "start": "13:30",
+          "end": "14:20",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "ME405",
+          "day": 4,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "EM401",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HIMANSHU"
+        },
+        {
+          "course": "ME411",
+          "day": 4,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "ME411",
+          "day": 5,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "RAJ"
+        },
+        {
+          "course": "ME453",
+          "day": 5,
+          "start": "10:50",
+          "end": "11:40",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "HOD"
+        },
+        {
+          "course": "UC401",
+          "day": 6,
+          "start": "09:00",
+          "end": "10:00",
+          "room": "Old Computer Lab",
+          "section": "A",
+          "faculty": "AMIT"
+        }
+      ]
+    }
+  },
+  "faculty_timetable_slots": [
+    {
+      "course": "ME407",
+      "semester": "VII",
+      "day": 1,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3005",
+      "semester": "III",
+      "day": 2,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME407",
+      "semester": "VII",
+      "day": 2,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "EM401",
+      "semester": "VII",
+      "day": 2,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3705",
+      "semester": "III",
+      "day": 2,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3005",
+      "semester": "III",
+      "day": 3,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME407",
+      "semester": "VII",
+      "day": 3,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "EM401",
+      "semester": "VII",
+      "day": 4,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME215",
+      "semester": "V",
+      "day": 4,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "SM401",
+      "semester": "VII",
+      "day": 5,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3005",
+      "semester": "III",
+      "day": 6,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "HIMANSHU",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3002",
+      "semester": "III",
+      "day": 1,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME303",
+      "semester": "III",
+      "day": 1,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME303",
+      "semester": "III",
+      "day": 2,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME305",
+      "semester": "III",
+      "day": 2,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3002",
+      "semester": "III",
+      "day": 2,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME305",
+      "semester": "III",
+      "day": 3,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3002",
+      "semester": "III",
+      "day": 3,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME305",
+      "semester": "III",
+      "day": 3,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME303",
+      "semester": "III",
+      "day": 3,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME303",
+      "semester": "III",
+      "day": 4,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3002",
+      "semester": "III",
+      "day": 4,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME305",
+      "semester": "III",
+      "day": 6,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "NEERAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UC401",
+      "semester": "VII",
+      "day": 1,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME301",
+      "semester": "III",
+      "day": 2,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME301",
+      "semester": "III",
+      "day": 3,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3003",
+      "semester": "III",
+      "day": 3,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UC401",
+      "semester": "VII",
+      "day": 3,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3003",
+      "semester": "III",
+      "day": 4,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME301",
+      "semester": "III",
+      "day": 4,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3705",
+      "semester": "III",
+      "day": 4,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3705",
+      "semester": "III",
+      "day": 4,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UCTION",
+      "semester": "V",
+      "day": 4,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UCTION",
+      "semester": "V",
+      "day": 4,
+      "start": "02:20",
+      "end": "03:10",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME301",
+      "semester": "III",
+      "day": 5,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3003",
+      "semester": "III",
+      "day": 5,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3703",
+      "semester": "III",
+      "day": 5,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3703",
+      "semester": "III",
+      "day": 5,
+      "start": "02:20",
+      "end": "03:10",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UC401",
+      "semester": "VII",
+      "day": 6,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AMIT",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "AE3001",
+      "semester": "V",
+      "day": 1,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3004",
+      "semester": "III",
+      "day": 1,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME355",
+      "semester": "III",
+      "day": 1,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME355",
+      "semester": "III",
+      "day": 1,
+      "start": "02:20",
+      "end": "03:10",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "AE3001",
+      "semester": "V",
+      "day": 2,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UC201",
+      "semester": "V",
+      "day": 2,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME307",
+      "semester": "V",
+      "day": 2,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME307",
+      "semester": "V",
+      "day": 2,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DHS231",
+      "semester": "V",
+      "day": 2,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DHS231",
+      "semester": "V",
+      "day": 2,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME411",
+      "semester": "VII",
+      "day": 3,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "AE3001",
+      "semester": "V",
+      "day": 3,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "AE3001",
+      "semester": "V",
+      "day": 3,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME307",
+      "semester": "V",
+      "day": 3,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME307",
+      "semester": "V",
+      "day": 3,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DHS231",
+      "semester": "V",
+      "day": 3,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3004",
+      "semester": "III",
+      "day": 3,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME321",
+      "semester": "V",
+      "day": 4,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME321",
+      "semester": "V",
+      "day": 4,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME321",
+      "semester": "V",
+      "day": 4,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME411",
+      "semester": "VII",
+      "day": 4,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME411",
+      "semester": "VII",
+      "day": 4,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DHS231",
+      "semester": "V",
+      "day": 4,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UC201",
+      "semester": "V",
+      "day": 4,
+      "start": "01:30",
+      "end": "02:20",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3704",
+      "semester": "III",
+      "day": 4,
+      "start": "02:20",
+      "end": "03:10",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3704",
+      "semester": "III",
+      "day": 4,
+      "start": "03:10",
+      "end": "04:00",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME411",
+      "semester": "VII",
+      "day": 5,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3004",
+      "semester": "III",
+      "day": 5,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "ME3004",
+      "semester": "III",
+      "day": 5,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UC201",
+      "semester": "V",
+      "day": 5,
+      "start": "10:50",
+      "end": "11:40",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "UC201",
+      "semester": "V",
+      "day": 5,
+      "start": "11:40",
+      "end": "12:30",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    },
+    {
+      "course": "DME307",
+      "semester": "V",
+      "day": 6,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RAJ",
+      "room": "ME Faculty Room",
+      "section": "A"
+    }
+  ],
+  "catalog": [
+    {
+      "code": "ME3002",
+      "name": "Engineering Thermodynamics",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "NEERAJ",
+      "semester": "III"
+    },
+    {
+      "code": "ME3703",
+      "name": "Material Science Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "AMIT",
+      "semester": "III"
+    },
+    {
+      "code": "ME3003",
+      "name": "Applied Material Science",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AMIT",
+      "semester": "III"
+    },
+    {
+      "code": "ME3702",
+      "name": "Thermal Engineering Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HIMANSHU",
+      "semester": "III"
+    },
+    {
+      "code": "ME3005",
+      "name": "Industrial Engineering",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HIMANSHU",
+      "semester": "III"
+    },
+    {
+      "code": "ME3704",
+      "name": "Manufacturing Technology Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "RAJ",
+      "semester": "III"
+    },
+    {
+      "code": "ME3001",
+      "name": "Mechanics of Solids",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HOD",
+      "semester": "III"
+    },
+    {
+      "code": "ME3705",
+      "name": "Programming Using MATLAB",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "AMIT",
+      "semester": "III"
+    },
+    {
+      "code": "ME3004",
+      "name": "Manufacturing Technology",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "III"
+    },
+    {
+      "code": "ME3701",
+      "name": "Mechanics of Solid Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HOD",
+      "semester": "III"
+    },
+    {
+      "code": "UC3002",
+      "name": "Economics and Social Sciences",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "III"
+    },
+    {
+      "code": "UCFV1",
+      "name": "Field Visit-I",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HIMANSHU",
+      "semester": "III"
+    },
+    {
+      "code": "UCEEPI",
+      "name": "Election and Electoral Processes in India",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HOD",
+      "semester": "III"
+    },
+    {
+      "code": "ME305",
+      "name": "Heat & Mass Transfer",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "NEERAJ",
+      "semester": "V"
+    },
+    {
+      "code": "ME351",
+      "name": "Production Process Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "AMIT",
+      "semester": "V"
+    },
+    {
+      "code": "ME303",
+      "name": "Mechanical Vibration Engineering",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "NEERAJ",
+      "semester": "V"
+    },
+    {
+      "code": "PT303",
+      "name": "Industrial Training Seminar",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HOD",
+      "semester": "V"
+    },
+    {
+      "code": "ME301",
+      "name": "Machining Science and Machine Tools",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AMIT",
+      "semester": "V"
+    },
+    {
+      "code": "UC351",
+      "name": "Field Project/Field Visit-5",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HIMANSHU",
+      "semester": "V"
+    },
+    {
+      "code": "ME313",
+      "name": "Micro Electro & Mechanical Systems (MEMS) and Microsystems",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HOD",
+      "semester": "V"
+    },
+    {
+      "code": "ME355",
+      "name": "Heat & Mass Transfer Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "RAJ",
+      "semester": "V"
+    },
+    {
+      "code": "EM301",
+      "name": "Employability Skill-III",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HOD",
+      "semester": "V"
+    },
+    {
+      "code": "ME353",
+      "name": "Mechanical Vibration Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HOD",
+      "semester": "V"
+    },
+    {
+      "code": "ME405",
+      "name": "CAD, CAM & CIM",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HOD",
+      "semester": "VII"
+    },
+    {
+      "code": "SM401",
+      "name": "Seminar",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HIMANSHU",
+      "semester": "VII"
+    },
+    {
+      "code": "ME407",
+      "name": "Renewable Energy Technology",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HIMANSHU",
+      "semester": "VII"
+    },
+    {
+      "code": "PE403",
+      "name": "Major Project",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "AMIT",
+      "semester": "VII"
+    },
+    {
+      "code": "ME411",
+      "name": "Robotics Engineering",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "VII"
+    },
+    {
+      "code": "ME453",
+      "name": "CNC Machines and Programming Lab",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "HOD",
+      "semester": "VII"
+    },
+    {
+      "code": "UC401",
+      "name": "Intellectual Property Rights",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AMIT",
+      "semester": "VII"
+    },
+    {
+      "code": "EM401",
+      "name": "Group Discussion, Aptitude & Reasoning- I",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HIMANSHU",
+      "semester": "VII"
+    },
+    {
+      "code": "ME215",
+      "name": "ME215",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HIMANSHU",
+      "semester": "V"
+    },
+    {
+      "code": "UCTION",
+      "name": "UCTION",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AMIT",
+      "semester": "V"
+    },
+    {
+      "code": "AE3001",
+      "name": "AE3001",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "V"
+    },
+    {
+      "code": "UC201",
+      "name": "UC201",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "V"
+    },
+    {
+      "code": "DME307",
+      "name": "DME307",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "V"
+    },
+    {
+      "code": "DHS231",
+      "name": "DHS231",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "V"
+    },
+    {
+      "code": "DME321",
+      "name": "DME321",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RAJ",
+      "semester": "V"
+    }
+  ],
+  "students": [
+    {
+      "email": "anshuman.2549873@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Anshuman Singh"
+    },
+    {
+      "email": "jalaj.2550454@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Jalaj Bansal"
+    },
+    {
+      "email": "sunil.2455672@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Sunil Kumar"
+    },
+    {
+      "email": "raviraj.2455903@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Ravi Raj"
+    },
+    {
+      "email": "yash.23180717@mygyanvihar.com",
+      "semester": 7,
+      "section": "A",
+      "name": "Yash Singh"
+    },
+    {
+      "email": "ravi.2345541@mygyanvihar.com",
+      "semester": 7,
+      "section": "A",
+      "name": "Ravi Kumar"
+    }
+  ],
+  "student_users_to_ensure": [
+    {
+      "email": "anshuman.2549873@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Anshuman Singh"
+    },
+    {
+      "email": "jalaj.2550454@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Jalaj Bansal"
+    },
+    {
+      "email": "sunil.2455672@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Sunil Kumar"
+    },
+    {
+      "email": "raviraj.2455903@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Ravi Raj"
+    },
+    {
+      "email": "yash.23180717@mygyanvihar.com",
+      "semester": 7,
+      "section": "A",
+      "name": "Yash Singh"
+    },
+    {
+      "email": "ravi.2345541@mygyanvihar.com",
+      "semester": 7,
+      "section": "A",
+      "name": "Ravi Kumar"
+    }
+  ]
+}

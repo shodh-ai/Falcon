@@ -31,14 +31,34 @@ export type HrAccessLevel = 'none' | 'read' | 'write';
 
 export type HrCapabilities = Partial<Record<HrModuleKey, HrAccessLevel>>;
 
-const MASTER_ROLES = new Set(['HRAdmin', 'SuperAdmin', 'HR', 'President']);
+const MASTER_ROLES = new Set([
+  'HRAdmin',
+  'SuperAdmin',
+  'CampusAdmin',
+  'HR',
+  'President',
+  'Registrar',
+]);
 /** Roles that may list and scope all tenant entities without per-user access rows. */
 const UNIVERSAL_ENTITY_ROLES = new Set([
   'SuperAdmin',
+  'CampusAdmin',
   'HRAdmin',
   'HR',
   'President',
+  'Registrar',
 ]);
+
+function roleSetHas(set: Set<string>, roles: string[]): boolean {
+  const normalized = new Set([...set].map((r) => r.trim().toLowerCase()));
+  return roles.some((r) =>
+    normalized.has(
+      String(r ?? '')
+        .trim()
+        .toLowerCase(),
+    ),
+  );
+}
 
 export type AllowedEntity = { id: number; name: string; code: string };
 
@@ -86,27 +106,31 @@ export class HrEntityContextService {
     userId: string,
     roles: string[] = [],
   ) {
-    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
-      return this.listEntities(tenantId);
-    }
+    try {
+      if (roleSetHas(UNIVERSAL_ENTITY_ROLES, roles)) {
+        return this.listEntities(tenantId);
+      }
 
-    return this.dataSource.query(
-      `SELECT DISTINCT oe.entity_id, oe.entity_code, oe.entity_name, oe.is_active
-       FROM org_entities oe
-       WHERE oe.tenant_id = $1 AND oe.is_active = true
-         AND (
-           oe.entity_id IN (
-             SELECT uea.entity_id FROM user_entity_access uea WHERE uea.user_id = $2
+      return await this.dataSource.query(
+        `SELECT DISTINCT oe.entity_id, oe.entity_code, oe.entity_name, oe.is_active
+         FROM org_entities oe
+         WHERE oe.tenant_id = $1 AND oe.is_active = true
+           AND (
+             oe.entity_id IN (
+               SELECT uea.entity_id FROM user_entity_access uea WHERE uea.user_id = $2
+             )
+             OR oe.entity_id = (
+               SELECT u.entity_id
+               FROM users u
+               WHERE u.user_id = $2 AND u.tenant_id = $1
+             )
            )
-           OR oe.entity_id = (
-             SELECT u.entity_id
-             FROM users u
-             WHERE u.user_id = $2 AND u.tenant_id = $1
-           )
-         )
-       ORDER BY oe.entity_id ASC`,
-      [tenantId, userId],
-    );
+         ORDER BY oe.entity_id ASC`,
+        [tenantId, userId],
+      );
+    } catch {
+      return [];
+    }
   }
 
   formatAllowedEntities(
@@ -129,7 +153,7 @@ export class HrEntityContextService {
     roles: string[],
     entityId: number,
   ): Promise<void> {
-    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+    if (roleSetHas(UNIVERSAL_ENTITY_ROLES, roles)) {
       await this.resolveEntityId(tenantId, entityId);
       return;
     }
@@ -174,7 +198,7 @@ export class HrEntityContextService {
     if (allowed.length === 1) {
       return Number(allowed[0].entity_id);
     }
-    if (roles.some((r) => UNIVERSAL_ENTITY_ROLES.has(r))) {
+    if (roleSetHas(UNIVERSAL_ENTITY_ROLES, roles)) {
       return Number(allowed[0].entity_id);
     }
 
@@ -226,7 +250,7 @@ export class HrEntityContextService {
     module: HrModuleKey,
     level: 'read' | 'write',
   ) {
-    if (roles.some((r) => MASTER_ROLES.has(r))) return;
+    if (roleSetHas(MASTER_ROLES, roles)) return;
 
     const caps = await this.getPermissions(tenantId, userId);
     if (!caps) {

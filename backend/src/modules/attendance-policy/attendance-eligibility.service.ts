@@ -107,20 +107,25 @@ export class AttendanceEligibilityService {
       this.resolveThreshold(tenantId, deptId),
     ]);
 
-    const enrollments = await this.db.query(
-      `SELECT e.attendance_percent, c.course_code, c.min_attendance
+    const enrollments = await this.db
+      .query(
+        `SELECT e.attendance_percent, c.course_code, c.min_attendance
        FROM student_course_enrollments e
        JOIN academic_courses c ON c.course_id = e.course_id
        WHERE e.student_user_id = $1 AND e.attendance_percent IS NOT NULL`,
-      [studentUserId],
-    ).catch(() => []);
+        [studentUserId],
+      )
+      .catch(() => []);
 
     const shortfalls: string[] = [];
     for (const e of enrollments) {
-      const courseMin = e.min_attendance != null ? Number(e.min_attendance) : threshold;
+      const courseMin =
+        e.min_attendance != null ? Number(e.min_attendance) : threshold;
       const att = Number(e.attendance_percent);
       if (att < courseMin) {
-        shortfalls.push(`${e.course_code} (${Math.round(att)}% < ${courseMin}%)`);
+        shortfalls.push(
+          `${e.course_code} (${Math.round(att)}% < ${courseMin}%)`,
+        );
       }
     }
 

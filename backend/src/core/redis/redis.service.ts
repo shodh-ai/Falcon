@@ -12,7 +12,9 @@ export class RedisService implements OnModuleDestroy {
       host: config.get('REDIS_HOST', '127.0.0.1'),
       port: config.get<number>('REDIS_PORT', 6379),
       password: config.get<string>('REDIS_PASSWORD') || undefined,
-      maxRetriesPerRequest: null,
+      // Bound retries so cache/auth paths fail fast when Redis is unreachable.
+      maxRetriesPerRequest: 2,
+      connectTimeout: 3000,
     });
   }
 

@@ -1,14 +1,51 @@
 const DEFAULT_SUBDOMAIN = 'sgvu';
 
+/** Hostname subdomains that map to DEFAULT_TENANT_SUBDOMAIN (not real tenants). */
+const TENANT_SUBDOMAIN_ALIASES = new Set(['falcon', 'apifalcon']);
+
+/** App URLs that are not tenant subdomains (e.g. falcon.jataka.io → sgvu). */
+export function isDedicatedAppHost(hostname: string): boolean {
+  const host = hostname.split(':')[0].trim().toLowerCase();
+  const dedicated = (
+    process.env.DEDICATED_APP_HOSTS ?? 'falcon.jataka.io,apifalcon.jataka.io'
+  )
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  return dedicated.includes(host);
+}
+
 export function resolveTenantSubdomain(
   value?: string | null,
   fallback?: string | null,
 ): string {
-  const trimmed = (value ?? '').trim();
-  if (trimmed) return trimmed.toLowerCase();
+  const trimmed = (value ?? '').trim().toLowerCase();
+  if (trimmed && !TENANT_SUBDOMAIN_ALIASES.has(trimmed)) return trimmed;
 
-  const fb = (fallback ?? process.env.DEFAULT_TENANT_SUBDOMAIN ?? DEFAULT_SUBDOMAIN).trim();
+  const fb = (
+    fallback ??
+    process.env.DEFAULT_TENANT_SUBDOMAIN ??
+    DEFAULT_SUBDOMAIN
+  ).trim();
   return fb || DEFAULT_SUBDOMAIN;
+}
+
+/** Resolve tenant from hostname + optional header/cookie override. */
+export function resolveTenantFromHost(
+  hostname: string,
+  explicitSubdomain?: string | null,
+): string {
+  const host = hostname.split(':')[0].trim().toLowerCase();
+  // Shared application hosts (for example apifalcon.jataka.io) serve multiple
+  // tenants. Honour the trusted request header/cookie selection first; tenant
+  // isolation is still enforced by the tenant-bound JWT and database scope.
+  if (explicitSubdomain?.trim()) {
+    return resolveTenantSubdomain(explicitSubdomain);
+  }
+  if (isDedicatedAppHost(host)) {
+    return resolveTenantSubdomain(null);
+  }
+  return resolveTenantSubdomain(extractSubdomainFromHost(host));
 }
 
 export function extractSubdomainFromHost(
@@ -16,7 +53,11 @@ export function extractSubdomainFromHost(
   baseDomain?: string | null,
 ): string | null {
   const host = hostname.split(':')[0].trim().toLowerCase();
-  const base = (baseDomain ?? process.env.SAAS_BASE_DOMAIN ?? 'localhost').trim();
+  const base = (
+    baseDomain ??
+    process.env.SAAS_BASE_DOMAIN ??
+    'localhost'
+  ).trim();
 
   if (!host || !base) return null;
 

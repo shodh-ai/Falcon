@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { useAuthedApi } from '@/lib/api';
 import type { ThresholdRequest } from '@/lib/attendance-policy';
 
@@ -21,6 +22,7 @@ export default function DeanAttendancePolicyPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
+  const [deptFilter, setDeptFilter] = useState('ALL');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -37,6 +39,24 @@ export default function DeanAttendancePolicyPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const departments = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of rows) {
+      if (row.dept_name) names.add(row.dept_name);
+    }
+    return Array.from(names).sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    if (deptFilter === 'ALL') return rows;
+    return rows.filter((row) => row.dept_name === deptFilter);
+  }, [rows, deptFilter]);
+
+  const pendingCount = useMemo(
+    () => filteredRows.filter((row) => row.status === 'PENDING_DEAN').length,
+    [filteredRows],
+  );
 
   async function decide(id: string, decision: 'APPROVE' | 'REJECT') {
     setBusyId(id);
@@ -59,20 +79,47 @@ export default function DeanAttendancePolicyPage() {
       <div>
         <h1 className="text-2xl font-bold text-sgvu-navy">Attendance Policy Approvals</h1>
         <p className="text-sm text-muted-foreground">
-          HOD requests to relax the minimum attendance bar. Approving updates the effective threshold for that department.
+          HOD requests to relax the minimum attendance bar for departments in your school.
+          Approving updates the effective threshold for that department.
         </p>
       </div>
+
+      {!loading && departments.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Select
+            className="rounded-lg border px-3 py-2 text-sm"
+            value={deptFilter}
+            onChange={(e) => setDeptFilter(e.target.value)}
+          >
+            <option value="ALL">All departments in your school</option>
+            {departments.map((dept) => (
+              <option key={dept} value={dept}>
+                {dept}
+              </option>
+            ))}
+          </Select>
+          {pendingCount > 0 ? (
+            <span className="text-sm text-muted-foreground">
+              {pendingCount} pending in this view
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </p>
-      ) : rows.length === 0 ? (
+      ) : filteredRows.length === 0 ? (
         <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">No requests.</CardContent>
+          <CardContent className="p-6 text-sm text-muted-foreground">
+            {rows.length === 0
+              ? 'No attendance policy requests for your school.'
+              : 'No requests match the selected department.'}
+          </CardContent>
         </Card>
       ) : (
-        rows.map((r) => (
+        filteredRows.map((r) => (
           <Card key={r.request_id}>
             <CardHeader className="flex flex-row items-start justify-between gap-3">
               <div>

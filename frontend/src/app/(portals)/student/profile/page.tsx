@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  AlertCircle,
   CalendarDays,
   CheckCircle2,
+  ClipboardCheck,
+  FileText,
   GraduationCap,
   IdCard,
+  ImageIcon,
   LockKeyhole,
   Mail,
-  Pen,
   Phone,
   Send,
   ShieldCheck,
@@ -18,19 +21,18 @@ import {
   UserRound,
 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
-import {
-  AuthenticatedProfilePhoto,
-  validateProfilePhotoFile,
-} from '@/components/profile/AuthenticatedProfilePhoto';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentLoadingState } from '@/components/student/StudentLoadingState';
 import { StudentInfoTile } from '@/components/student/StudentInfoTile';
+import { StudentAvatar } from '@/components/student/StudentAvatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { DEMO_STUDENT } from '@/lib/mock/student-portal-demo';
+import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
 
 type ParentDetails = {
   father_name?: string | null;
@@ -168,7 +170,7 @@ function ProfileDetailSection({
   return (
     <div>
       <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
-      <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/15">
+      <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-sgvu-navy/10 bg-white">
         {children}
       </div>
     </div>
@@ -180,6 +182,13 @@ const ONBOARDING_DOC_LABELS: Record<string, string> = {
   AADHAAR: 'Aadhaar Card',
   '10TH_MARKSHEET': '10th Marksheet',
   '12TH_MARKSHEET': '12th Marksheet',
+};
+
+const ONBOARDING_DOC_ICONS: Record<string, typeof FileText> = {
+  PHOTO: ImageIcon,
+  AADHAAR: IdCard,
+  '10TH_MARKSHEET': FileText,
+  '12TH_MARKSHEET': FileText,
 };
 
 export default function StudentProfilePage() {
@@ -195,11 +204,7 @@ export default function StudentProfilePage() {
   const [isEditable, setIsEditable] = useState(false);
   const autoSavedRef = useRef(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-
-  const loadProfile = useCallback(async () => {
-    const data = await api.get<MasterProfile>('/api/student/profile');
+  const applyProfileState = useCallback((data: MasterProfile) => {
     setProfile(data);
     setIsEditable(data.is_profile_editable);
     if (data.bank_details) {
@@ -211,12 +216,133 @@ export default function StudentProfilePage() {
     }
     if (data.parent_details) setParentForm(data.parent_details);
     if (data.address) setAddressForm(data.address);
-    return data;
-  }, [api]);
+  }, []);
+
+  const buildDemoProfile = useCallback((): MasterProfile => {
+    return {
+      student_id: DEMO_STUDENT.student_id,
+      enrollment_no: DEMO_STUDENT.enrollment_no,
+      name: DEMO_STUDENT.name,
+      email: DEMO_STUDENT.email,
+      mobile: DEMO_STUDENT.mobile,
+      blood_group: DEMO_STUDENT.blood_group,
+      abc_id: 'ABC123456789012',
+      category: DEMO_STUDENT.category,
+      gender: DEMO_STUDENT.gender,
+      date_of_birth: '2005-04-18',
+      nationality: 'Indian',
+      program: DEMO_STUDENT.program,
+      branch: DEMO_STUDENT.branch,
+      session: DEMO_STUDENT.session,
+      semester: DEMO_STUDENT.semester,
+      scholarship: { name: 'Merit Scholarship', amount: 18000 },
+      parent_details: {
+        father_name: DEMO_STUDENT.guardian_name,
+        mother_name: 'Priya Sharma',
+        parent_occupation: 'Government Service',
+        annual_income: '850000',
+        emergency_contact_name: DEMO_STUDENT.guardian_name,
+        emergency_contact_phone: '+91 98100 22334',
+        emergency_contact_priority: 'Primary',
+      },
+      address: {
+        permanent: DEMO_STUDENT.address,
+        current: 'Tagore Boys Hostel — Block B, Room B-214, SGVU Main Campus, Jaipur',
+      },
+      aadhaar_masked: 'XXXX-XXXX-2142',
+      passport_masked: null,
+      profile_photo_url: DEMO_STUDENT.profile_photo_url,
+      bank_details: {
+        bank_name: 'State Bank of India',
+        account_number: 'XXXXXXXX4521',
+        ifsc_code: 'SBIN0001234',
+      },
+      onboarding_status: 'COMPLETED',
+      onboarding_documents: [
+        { doc_type: 'PHOTO', status: 'APPROVED', uploaded_at: '2023-07-12T10:00:00.000Z' },
+        { doc_type: 'AADHAAR', status: 'APPROVED', uploaded_at: '2023-07-12T10:05:00.000Z' },
+        { doc_type: '10TH_MARKSHEET', status: 'APPROVED', uploaded_at: '2023-07-12T10:08:00.000Z' },
+        { doc_type: '12TH_MARKSHEET', status: 'APPROVED', uploaded_at: '2023-07-12T10:10:00.000Z' },
+      ],
+      profile_unlocked_until: null,
+      is_profile_editable: false,
+    };
+  }, []);
+
+  const mergeWithDemo = useCallback(
+    (data: MasterProfile): MasterProfile => {
+      const demo = buildDemoProfile();
+      const pick = <T,>(live: T, fallback: T) =>
+        live === null || live === undefined || live === '' ? fallback : live;
+      return {
+        ...data,
+        student_id: pick(data.student_id, demo.student_id),
+        enrollment_no: pick(data.enrollment_no, demo.enrollment_no),
+        name: pick(data.name, demo.name),
+        email: pick(data.email, demo.email),
+        mobile: pick(data.mobile, demo.mobile),
+        blood_group: pick(data.blood_group, demo.blood_group),
+        abc_id: pick(data.abc_id, demo.abc_id),
+        category: pick(data.category, demo.category),
+        gender: pick(data.gender, demo.gender),
+        date_of_birth: pick(data.date_of_birth, demo.date_of_birth),
+        program: pick(data.program, demo.program),
+        branch: pick(data.branch, demo.branch),
+        session: pick(data.session, demo.session),
+        semester: data.semester || demo.semester,
+        parent_details: {
+          father_name: pick(data.parent_details?.father_name, demo.parent_details?.father_name),
+          mother_name: pick(data.parent_details?.mother_name, demo.parent_details?.mother_name),
+          parent_occupation: pick(
+            data.parent_details?.parent_occupation,
+            demo.parent_details?.parent_occupation,
+          ),
+          annual_income: pick(data.parent_details?.annual_income, demo.parent_details?.annual_income),
+          emergency_contact_name: pick(
+            data.parent_details?.emergency_contact_name,
+            demo.parent_details?.emergency_contact_name,
+          ),
+          emergency_contact_phone: pick(
+            data.parent_details?.emergency_contact_phone,
+            demo.parent_details?.emergency_contact_phone,
+          ),
+          emergency_contact_priority: pick(
+            data.parent_details?.emergency_contact_priority,
+            demo.parent_details?.emergency_contact_priority,
+          ),
+        },
+        address: {
+          permanent: pick(data.address?.permanent, demo.address?.permanent),
+          current: pick(data.address?.current, demo.address?.current),
+        },
+        bank_details: data.bank_details?.bank_name
+          ? data.bank_details
+          : demo.bank_details,
+        onboarding_documents:
+          data.onboarding_documents && data.onboarding_documents.length > 0
+            ? data.onboarding_documents
+            : demo.onboarding_documents,
+      };
+    },
+    [buildDemoProfile],
+  );
+
+  const loadProfile = useCallback(async () => {
+    const data = await api.get<MasterProfile>('/api/student/profile');
+    const merged = isStudentDemoModeEnabled() ? mergeWithDemo(data) : data;
+    applyProfileState(merged);
+    return merged;
+  }, [api, applyProfileState, mergeWithDemo]);
 
   useEffect(() => {
-    void loadProfile().catch(() => { }).finally(() => setLoading(false));
-  }, [loadProfile]);
+    void loadProfile()
+      .catch(() => {
+        if (isStudentDemoModeEnabled()) {
+          applyProfileState(buildDemoProfile());
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [loadProfile, applyProfileState, buildDemoProfile]);
 
   useEffect(() => {
     if (!profile?.profile_unlocked_until || !isEditable) {
@@ -251,37 +377,6 @@ export default function StudentProfilePage() {
       await loadProfile();
     } catch (e) {
       if (!silent) toast.error(e instanceof Error ? e.message : 'Save failed');
-    }
-  }
-
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const validationError = validateProfilePhotoFile(file);
-    if (validationError) {
-      toast.warning('Photo not uploaded', { description: validationError, category: 'ACADEMICS' });
-      e.target.value = '';
-      return;
-    }
-
-    setUploadingPhoto(true);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const updated = await api.post<MasterProfile>('/api/student/profile/photo', form);
-      setProfile((prev) => (prev ? { ...prev, profile_photo_url: updated.profile_photo_url } : updated));
-      toast.success('Profile photo updated', {
-        description: 'Your photo is saved on your master record.',
-        category: 'ACADEMICS',
-      });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to upload photo', {
-        category: 'ACADEMICS',
-      });
-    } finally {
-      setUploadingPhoto(false);
-      e.target.value = '';
     }
   }
 
@@ -338,18 +433,13 @@ export default function StudentProfilePage() {
   if (!profile) return <p className="p-8 text-center text-sm text-destructive">Profile unavailable.</p>;
 
   const correctionReady = requestNote.trim().length >= 10;
+  const enrollmentNo = profile.enrollment_no ?? profile.student_id;
 
   return (
     <StudentPageShell>
       <StudentPageHeader
-        title="My Profile & Master Data"
-        description="Official Falcon identity record with time-gated correction workflow."
-        actions={
-          <Badge variant="success" className="gap-1.5 px-3 py-1">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Verified master record
-          </Badge>
-        }
+        title="My Profile"
+        description="Your official Falcon identity — update photo anytime; master fields stay locked until a correction is approved."
       />
 
       <AnimatePresence>
@@ -363,7 +453,7 @@ export default function StudentProfilePage() {
             <div className="flex items-center gap-3">
               <Timer className="h-5 w-5 text-sgvu-navy animate-pulse" />
               <p className="text-sm font-semibold text-sgvu-navy">
-                ⏱️ You have {countdown} to make your changes.
+                You have {countdown} to make your changes.
               </p>
             </div>
             <Button size="sm" onClick={() => void saveProfileEdits()}>
@@ -373,39 +463,39 @@ export default function StudentProfilePage() {
         )}
       </AnimatePresence>
 
-      <section className="overflow-hidden rounded-[2rem] border border-sgvu-navy/10 bg-gradient-to-br from-sgvu-navy via-sgvu-navy to-slate-900 text-white shadow-xl shadow-sgvu-navy/15">
-        <div className="relative p-6 md:p-8">
-          <div className="absolute right-0 top-0 h-56 w-56 rounded-full bg-sgvu-gold/20 blur-3xl" />
+      <section className="overflow-hidden rounded-[1.75rem] border border-sgvu-navy/10 bg-gradient-to-br from-sgvu-navy via-[#123A6D] to-slate-900 text-white shadow-xl shadow-sgvu-navy/15">
+        <div className="relative p-5 md:p-7">
+          <div className="pointer-events-none absolute -right-10 -top-16 h-56 w-56 rounded-full bg-sgvu-gold/20 blur-3xl" />
           <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
-            <div className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-white/20 bg-white/15 text-3xl font-black">
-              <AuthenticatedProfilePhoto
-                photoUrl={profile.profile_photo_url}
-                alt="Profile"
-                className="h-full w-full"
-                fallback={profile.name?.slice(0, 1).toUpperCase() ?? 'S'}
-              />
-              <div
-                className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
-                onClick={() => !uploadingPhoto && fileInputRef.current?.click()}
-              >
-                <Pen className="h-5 w-5 text-white" />
+            <StudentAvatar
+              photoUrl={profile.profile_photo_url}
+              name={profile.name}
+              alt="Profile"
+              frameClassName="h-24 w-24 rounded-[1.35rem] border-2 border-white/25 text-3xl shadow-lg shadow-black/20 md:h-28 md:w-28"
+              editable
+              onPhotoUpdated={(url) =>
+                setProfile((prev) =>
+                  prev ? { ...prev, profile_photo_url: url } : prev,
+                )
+              }
+            />
+            <div className="min-w-0">
+              <h2 className="truncate text-2xl font-black tracking-tight md:text-3xl">
+                {profile.name}
+              </h2>
+              <p className="mt-1 text-sm text-white/75">{profile.program}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+                  <IdCard className="h-3.5 w-3.5 text-sgvu-gold" />
+                  {enrollmentNo}
+                </span>
+                {profile.email ? (
+                  <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
+                    <Mail className="h-3.5 w-3.5 shrink-0 text-sgvu-gold/80" />
+                    <span className="truncate">{profile.email}</span>
+                  </span>
+                ) : null}
               </div>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                ref={fileInputRef}
-                className="hidden"
-                disabled={uploadingPhoto}
-                onChange={handleFileSelect}
-              />
-            </div>
-            <div>
-              <h2 className="text-3xl font-black tracking-tight">{profile.name}</h2>
-              <p className="mt-2 text-sm text-white/75">{profile.program} — {profile.branch}</p>
-              <p className="mt-2 flex items-center gap-2 text-sm text-white/80">
-                <IdCard className="h-4 w-4 text-sgvu-gold" />
-                {profile.enrollment_no ?? profile.student_id}
-              </p>
             </div>
           </div>
         </div>
@@ -419,21 +509,34 @@ export default function StudentProfilePage() {
         <StudentInfoTile label="Gender" value={formatGender(profile.gender)} icon={UserRound} className="h-full" />
         <StudentInfoTile label="Date of birth" value={formatDateOfBirth(profile.date_of_birth)} icon={CalendarDays} className="h-full" />
         <StudentInfoTile
-          label="Session"
-          value={profile.session ?? 'Not on file'}
+          label="Session / Batch"
+          value={
+            isStudentDemoModeEnabled()
+              ? `${profile.session ?? DEMO_STUDENT.session} · Sec ${DEMO_STUDENT.section}`
+              : (profile.session ?? 'Not on file')
+          }
           icon={GraduationCap}
           className="h-full"
         />
-        <StudentInfoTile label="Semester" value={`Semester ${profile.semester}`} icon={GraduationCap} className="h-full" />
+        <StudentInfoTile
+          label="Semester"
+          value={
+            isStudentDemoModeEnabled()
+              ? `Semester ${profile.semester || DEMO_STUDENT.semester} · Adm. ${DEMO_STUDENT.admission_year}`
+              : `Semester ${profile.semester || '—'}`
+          }
+          icon={GraduationCap}
+          className="h-full"
+        />
       </section>
 
       <div className="space-y-6">
-        <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-          <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
-            <CardHeader className="border-b border-border/70 bg-white/80 pb-4">
+        <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
+          <Card className="flex h-full flex-col overflow-hidden border-sgvu-navy/10 bg-white shadow-sm">
+            <CardHeader className="border-b border-sgvu-navy/8 bg-white pb-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
-                  <CardTitle className="text-base">Parent & address details</CardTitle>
+                  <CardTitle className="text-base text-sgvu-navy">Parent & address details</CardTitle>
                   <p className="text-sm text-muted-foreground">
                     {isEditable
                       ? 'Editing enabled — save before the timer expires.'
@@ -448,7 +551,7 @@ export default function StudentProfilePage() {
                 ) : null}
               </div>
             </CardHeader>
-            <CardContent className="space-y-5 pt-5">
+            <CardContent className="flex-1 space-y-5 pt-5">
               <ProfileDetailSection title="Parents">
                 {[
                   { key: 'father_name', label: "Father's name" },
@@ -525,12 +628,12 @@ export default function StudentProfilePage() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
-            <Card className="overflow-hidden border-sgvu-navy/10 shadow-lg">
-              <CardHeader className="border-b border-border/70 bg-slate-50/50 pb-4">
+          <div className="flex h-full min-h-0 flex-col gap-6">
+            <Card className="overflow-hidden border-sgvu-navy/10 bg-white shadow-sm">
+              <CardHeader className="border-b border-sgvu-navy/8 bg-white pb-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <CardTitle className="text-base">Bank details</CardTitle>
+                    <CardTitle className="text-base text-sgvu-navy">Bank details</CardTitle>
                     <p className="mt-1 text-xs text-muted-foreground">Used for refunds and scholarship disbursements</p>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => (editingBank ? void saveBankDetails() : setEditingBank(true))}>
@@ -570,50 +673,168 @@ export default function StudentProfilePage() {
               </CardContent>
             </Card>
 
-            <Card className="overflow-hidden border-emerald-200/70 bg-emerald-50/40 shadow-sm">
-              <CardHeader className="border-b border-emerald-200/60 pb-4">
-                <CardTitle className="text-base">Identity & documents</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 pt-5">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
-                    <span className="font-medium text-sgvu-navy">Onboarding</span>
-                    <Badge variant={profile.onboarding_status === 'COMPLETED' ? 'success' : 'warning'}>
-                      {profile.onboarding_status ?? 'Not started'}
-                    </Badge>
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border-sgvu-navy/10 bg-white shadow-sm">
+              <CardHeader className="border-b border-sgvu-navy/8 bg-white pb-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy">
+                    <ClipboardCheck className="h-4 w-4" />
                   </div>
-                  <div className="flex items-center justify-between rounded-xl border border-emerald-200/60 bg-white/80 px-4 py-3 text-sm">
-                    <span className="font-medium text-sgvu-navy">Aadhaar</span>
-                    <Badge variant={profile.aadhaar_masked || profile.onboarding_documents?.some((doc) => doc.doc_type === 'AADHAAR') ? 'success' : 'warning'}>
-                      {profile.aadhaar_masked ?? profile.onboarding_documents?.find((doc) => doc.doc_type === 'AADHAAR')?.status ?? 'Not on file'}
-                    </Badge>
+                  <div className="min-w-0">
+                    <CardTitle className="text-base text-sgvu-navy">Identity & documents</CardTitle>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Onboarding vault status and verified identity records
+                    </p>
                   </div>
                 </div>
-                <ProfileDetailSection title="Onboarding documents">
-                  {(profile.onboarding_documents ?? []).length > 0 ? (
-                    profile.onboarding_documents?.map((doc) => (
-                      <ProfileFieldRow key={doc.doc_type} label={ONBOARDING_DOC_LABELS[doc.doc_type] ?? doc.doc_type}>
-                        <Badge variant={doc.status === 'APPROVED' ? 'success' : doc.status === 'REJECTED' ? 'destructive' : 'outline'}>
-                          {doc.status}
-                        </Badge>
-                      </ProfileFieldRow>
-                    ))
-                  ) : (
-                    <div className="px-4 py-3 text-sm text-muted-foreground">No onboarding documents uploaded.</div>
-                  )}
-                </ProfileDetailSection>
-                <p className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-white/70 px-3 py-2.5 text-xs text-muted-foreground">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                  Scholarship eligibility uses annual income on file.
-                </p>
+              </CardHeader>
+              <CardContent className="flex flex-1 flex-col gap-4 pt-5">
+                {(() => {
+                  const docs = profile.onboarding_documents ?? [];
+                  const aadhaarDoc = docs.find((d) => d.doc_type === 'AADHAAR');
+                  const aadhaarOnFile = Boolean(profile.aadhaar_masked || aadhaarDoc);
+                  const onboardingDone = profile.onboarding_status === 'COMPLETED';
+                  const approvedCount = docs.filter((d) => d.status === 'APPROVED').length;
+
+                  return (
+                    <>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {[
+                          {
+                            key: 'onboarding',
+                            label: 'Onboarding',
+                            value: profile.onboarding_status ?? 'Not started',
+                            ok: onboardingDone,
+                            icon: ClipboardCheck,
+                          },
+                          {
+                            key: 'aadhaar',
+                            label: 'Aadhaar',
+                            value: profile.aadhaar_masked
+                              ? profile.aadhaar_masked
+                              : (aadhaarDoc?.status ?? 'Not on file'),
+                            ok: aadhaarOnFile,
+                            icon: IdCard,
+                          },
+                          {
+                            key: 'passport',
+                            label: 'Passport',
+                            value: profile.passport_masked ?? 'Not on file',
+                            ok: Boolean(profile.passport_masked),
+                            icon: FileText,
+                          },
+                          {
+                            key: 'docs',
+                            label: 'Documents',
+                            value: docs.length ? `${approvedCount}/${docs.length} approved` : 'None on file',
+                            ok: approvedCount > 0,
+                            icon: ShieldCheck,
+                          },
+                        ].map((tile) => {
+                          const Icon = tile.icon;
+                          return (
+                            <div
+                              key={tile.key}
+                              className="flex min-h-[4.75rem] items-start justify-between gap-2 rounded-2xl border border-sgvu-navy/10 bg-white p-3.5"
+                            >
+                              <div className="flex min-w-0 items-start gap-2.5">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy">
+                                  <Icon className="h-4 w-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                                    {tile.label}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-sm font-bold text-sgvu-navy">{tile.value}</p>
+                                </div>
+                              </div>
+                              <Badge variant={tile.ok ? 'success' : 'warning'} className="shrink-0">
+                                {tile.ok ? 'Ready' : 'Pending'}
+                              </Badge>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex min-h-0 flex-1 flex-col">
+                        <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                          Onboarding documents
+                        </h3>
+                        {docs.length > 0 ? (
+                          <ul className="flex flex-1 flex-col gap-2">
+                            {docs.map((doc) => {
+                              const DocIcon = ONBOARDING_DOC_ICONS[doc.doc_type] ?? FileText;
+                              const approved = doc.status === 'APPROVED';
+                              const rejected = doc.status === 'REJECTED';
+                              return (
+                                <li
+                                  key={doc.doc_type}
+                                  className="flex items-center gap-3 rounded-xl border border-sgvu-navy/10 bg-white px-3 py-3"
+                                >
+                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sgvu-navy/5 text-sgvu-navy">
+                                    <DocIcon className="h-4 w-4" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold text-sgvu-navy">
+                                      {ONBOARDING_DOC_LABELS[doc.doc_type] ?? doc.doc_type}
+                                    </p>
+                                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                      {doc.uploaded_at
+                                        ? `Uploaded ${new Date(doc.uploaded_at).toLocaleDateString('en-IN', {
+                                            day: 'numeric',
+                                            month: 'short',
+                                            year: 'numeric',
+                                          })}`
+                                        : 'Upload date unavailable'}
+                                    </p>
+                                  </div>
+                                  <Badge
+                                    variant={
+                                      approved ? 'success' : rejected ? 'destructive' : 'outline'
+                                    }
+                                    className="shrink-0"
+                                  >
+                                    {doc.status}
+                                  </Badge>
+                                </li>
+                              );
+                            })}
+                            <li className="mt-auto flex items-start gap-2.5 rounded-xl border border-sgvu-navy/10 bg-white px-3.5 py-3 text-xs text-muted-foreground">
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-sgvu-navy" />
+                              <p>
+                                Scholarship eligibility uses annual income on file. Keep parent income
+                                and bank details current for disbursements.
+                              </p>
+                            </li>
+                          </ul>
+                        ) : (
+                          <div className="flex flex-1 flex-col gap-3">
+                            <div className="flex flex-1 items-start gap-3 rounded-xl border border-dashed border-sgvu-navy/15 bg-white px-4 py-5">
+                              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                              <div>
+                                <p className="text-sm font-semibold text-sgvu-navy">No documents on file</p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                  Passport photo and Aadhaar are collected during student onboarding.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-start gap-2.5 rounded-xl border border-sgvu-navy/10 bg-white px-3.5 py-3 text-xs text-muted-foreground">
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-sgvu-navy" />
+                              <p>Scholarship eligibility uses annual income on file.</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
               </CardContent>
             </Card>
           </div>
         </div>
 
-        <Card className="border-sgvu-gold/30 shadow-lg">
-          <CardHeader className="border-b border-sgvu-gold/20 bg-gradient-to-r from-sgvu-gold/15 to-white pb-4">
-            <CardTitle className="text-base">Request profile correction</CardTitle>
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardHeader className="border-b border-sgvu-navy/8 bg-white pb-4">
+            <CardTitle className="text-base text-sgvu-navy">Request profile correction</CardTitle>
             <p className="text-sm text-muted-foreground">
               Describe what needs to change. An admin can unlock a 15-minute edit window after review.
             </p>
@@ -625,10 +846,16 @@ export default function StudentProfilePage() {
               value={requestNote}
               onChange={(e) => setRequestNote(e.target.value)}
             />
-            <Button onClick={() => void submitUpdateRequest()} disabled={!correctionReady}>
-              <Send className="h-4 w-4" />
-              Submit to Admin
-            </Button>
+            <div className="flex justify-center">
+              <Button
+                onClick={() => void submitUpdateRequest()}
+                disabled={!correctionReady}
+                className="bg-[#0B2447] px-8 text-white shadow-md hover:bg-[#123A6D] hover:text-white active:bg-sgvu-gold active:text-sgvu-navy active:shadow-sm disabled:bg-[#0B2447] disabled:text-white disabled:opacity-55"
+              >
+                <Send className="h-4 w-4" />
+                Submit to Admin
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

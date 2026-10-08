@@ -3,12 +3,16 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationDispatchService } from './notification-dispatch.service';
+import { OnboardingVerificationNotifyService } from './onboarding-verification-notify.service';
 import {
   admitCardLockedMessage,
   alumniConversionRequestedMessage,
   attendanceWarningMessage,
+  assignmentPublishedMessage,
+  courseAnnouncementMessage,
   courseMaterialAddedMessage,
   liveClassScheduledMessage,
+  weeklyTestPublishedMessage,
   eventPendingEstateMessage,
   eventPendingFinanceMessage,
   eventPendingHodMessage,
@@ -54,6 +58,13 @@ import {
   venueBookingRejectedMessage,
   academicRndStatusUpdatedMessage,
   certificateStatusUpdatedMessage,
+  examDutySwapPeerRequestMessage,
+  examDutySwapPeerRejectedMessage,
+  examDutySwapExamCellPendingMessage,
+  examDutySwapResolvedMessage,
+  gradeChangeHodPendingMessage,
+  gradeChangeCoePendingMessage,
+  gradeChangeResolvedMessage,
 } from './notification-message.catalog';
 import {
   NotificationEvents,
@@ -66,8 +77,11 @@ import {
   type LeaveApprovedPayload,
   type LibraryOverduePayload,
   type LibraryReservationReadyPayload,
+  type AssignmentPublishedPayload,
+  type CourseAnnouncementPayload,
   type CourseMaterialAddedPayload,
   type LiveClassScheduledPayload,
+  type WeeklyTestPublishedPayload,
   type ExamRevaluationPayload,
   type MarksPublishedPayload,
   type MeetingRequestedPayload,
@@ -86,6 +100,10 @@ import {
   type HrExportReadyPayload,
   type HrExportFailedPayload,
   type AlumniConversionRequestedPayload,
+  type StudentOnboardingApprovedPayload,
+  type StudentOnboardingRejectedPayload,
+  type TranscriptGeneratedPayload,
+  type OnboardingVerificationRequestedPayload,
   type EcellStatusUpdatedPayload,
   type EcellMentorMeetingRequestedPayload,
   type EcellMentorMeetingRespondedPayload,
@@ -93,12 +111,15 @@ import {
   type VenueBookingPayload,
   type AcademicRndStatusUpdatedPayload,
   type CertificateStatusUpdatedPayload,
+  type ExamDutySwapPayload,
+  type GradeChangePayload,
 } from './notification.events';
 
 @Injectable()
 export class NotificationEventsListener {
   constructor(
     private readonly dispatch: NotificationDispatchService,
+    private readonly onboardingVerificationNotify: OnboardingVerificationNotifyService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -163,6 +184,36 @@ export class NotificationEventsListener {
   @OnEvent(NotificationEvents.ACADEMICS_COURSE_MATERIAL_ADDED)
   async onCourseMaterialAdded(payload: CourseMaterialAddedPayload) {
     const msg = courseMaterialAddedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ACADEMICS_ASSIGNMENT_PUBLISHED)
+  async onAssignmentPublished(payload: AssignmentPublishedPayload) {
+    const msg = assignmentPublishedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ACADEMICS_WEEKLY_TEST_PUBLISHED)
+  async onWeeklyTestPublished(payload: WeeklyTestPublishedPayload) {
+    const msg = weeklyTestPublishedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.ACADEMICS_COURSE_ANNOUNCEMENT)
+  async onCourseAnnouncement(payload: CourseAnnouncementPayload) {
+    const msg = courseAnnouncementMessage(payload, {
       title: payload.title,
       message: payload.message,
       actionLink: payload.actionLink,
@@ -640,5 +691,131 @@ export class NotificationEventsListener {
       msg,
       { queueDelivery: false },
     );
+  }
+
+  @OnEvent(NotificationEvents.ONBOARDING_VERIFICATION_REQUESTED)
+  async onOnboardingVerificationRequested(
+    payload: OnboardingVerificationRequestedPayload,
+  ) {
+    await this.onboardingVerificationNotify.notifyVerificationRequested(
+      payload,
+    );
+  }
+
+  @OnEvent(NotificationEvents.STUDENT_ONBOARDING_APPROVED)
+  async onStudentOnboardingApproved(payload: StudentOnboardingApprovedPayload) {
+    await this.dispatch.dispatch({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'ACADEMICS',
+      intent: 'status_update',
+      title: 'Portal unlocked',
+      message: `${payload.studentName}, your documents have been verified. Your portal is now active.`,
+      actionLink: payload.dashboardPath ?? '/student/dashboard',
+      severity: 'success',
+      queueDelivery: false,
+    });
+  }
+
+  @OnEvent(NotificationEvents.STUDENT_ONBOARDING_REJECTED)
+  async onStudentOnboardingRejected(payload: StudentOnboardingRejectedPayload) {
+    await this.dispatch.dispatch({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'ACADEMICS',
+      intent: 'action_required',
+      title: 'Verification requires correction',
+      message: `Your submission was returned by the Registrar: ${payload.remarks}`,
+      actionLink: payload.dashboardPath ?? '/student/onboarding',
+      severity: 'warning',
+      queueDelivery: true,
+    });
+  }
+
+  @OnEvent(NotificationEvents.TRANSCRIPT_GENERATED)
+  async onTranscriptGenerated(payload: TranscriptGeneratedPayload) {
+    await this.dispatch.dispatch({
+      tenantId: payload.tenantId,
+      userId: payload.userId,
+      category: 'EXAMS',
+      intent: 'status_update',
+      title: payload.title ?? 'Official transcript ready',
+      message:
+        payload.message ??
+        `Your official transcript for semester ${payload.semester} is available.`,
+      actionLink: payload.actionLink ?? '/student/transcripts',
+      severity: 'success',
+      queueDelivery: true,
+    });
+  }
+
+  @OnEvent(NotificationEvents.EXAM_DUTY_SWAP_PEER_REQUEST)
+  async onExamDutySwapPeerRequest(payload: ExamDutySwapPayload) {
+    const msg = examDutySwapPeerRequestMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EXAM_DUTY_SWAP_PEER_REJECTED)
+  async onExamDutySwapPeerRejected(payload: ExamDutySwapPayload) {
+    const msg = examDutySwapPeerRejectedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EXAM_DUTY_SWAP_EXAM_CELL_PENDING)
+  async onExamDutySwapExamCellPending(payload: ExamDutySwapPayload) {
+    const msg = examDutySwapExamCellPendingMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.EXAM_DUTY_SWAP_RESOLVED)
+  async onExamDutySwapResolved(payload: ExamDutySwapPayload) {
+    const msg = examDutySwapResolvedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.GRADE_CHANGE_HOD_PENDING)
+  async onGradeChangeHodPending(payload: GradeChangePayload) {
+    const msg = gradeChangeHodPendingMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.GRADE_CHANGE_COE_PENDING)
+  async onGradeChangeCoePending(payload: GradeChangePayload) {
+    const msg = gradeChangeCoePendingMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
+  }
+
+  @OnEvent(NotificationEvents.GRADE_CHANGE_RESOLVED)
+  async onGradeChangeResolved(payload: GradeChangePayload) {
+    const msg = gradeChangeResolvedMessage(payload, {
+      title: payload.title,
+      message: payload.message,
+      actionLink: payload.actionLink,
+    });
+    await this.emitFromPayload(payload.tenantId, payload.userId, msg);
   }
 }

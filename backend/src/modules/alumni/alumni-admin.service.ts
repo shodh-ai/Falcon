@@ -4,8 +4,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AlumniEvent } from '../../entities/alumni-event.entity';
 import { AlumniConversionService } from './alumni-conversion.service';
 
-/** Resolve alumni row id across legacy (alumni_profile_id) and new (alumni_id) columns. */
-const ALUMNI_ID = `COALESCE(p.alumni_id, p.alumni_profile_id)`;
+const ALUMNI_ID = `p.alumni_id`;
 
 @Injectable()
 export class AlumniAdminService {
@@ -100,14 +99,14 @@ export class AlumniAdminService {
     const rows = await this.dataSource.query(
       `SELECT student_user_id, ${ALUMNI_ID} AS alumni_id
        FROM alumni_profiles p
-       WHERE p.tenant_id = $1 AND (${ALUMNI_ID} = $2 OR p.alumni_profile_id = $2)`,
+       WHERE p.tenant_id = $1 AND ${ALUMNI_ID} = $2`,
       [tenantId, alumniId],
     );
     if (!rows[0]) throw new NotFoundException('Alumni profile not found');
 
     await this.dataSource.query(
       `UPDATE alumni_profiles p SET verification_status = 'REJECTED', approved_at = NOW()
-       WHERE p.tenant_id = $1 AND (${ALUMNI_ID} = $2 OR p.alumni_profile_id = $2)`,
+       WHERE p.tenant_id = $1 AND ${ALUMNI_ID} = $2`,
       [tenantId, alumniId],
     );
     return { alumni_id: rows[0].alumni_id, verification_status: 'REJECTED' };

@@ -1,0 +1,72 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+describe('DoFA Module 7 contract', () => {
+  const migration = readFileSync(
+      join(
+        process.cwd(),
+        'migrations/20260903120000_dofa_module7_returns_doa.sql',
+      ),
+      'utf8',
+    ),
+    service = readFileSync(
+      join(process.cwd(), 'src/modules/returns/returns.service.ts'),
+      'utf8',
+    ),
+    inventory = readFileSync(
+      join(process.cwd(), 'src/modules/inventory/inventory.service.ts'),
+      'utf8',
+    ),
+    verification = readFileSync(
+      join(
+        process.cwd(),
+        'src/modules/product-verification/product-verification.service.ts',
+      ),
+      'utf8',
+    );
+  it('holds exact ITEM/LOT subjects without reducing inventory', () => {
+    expect(migration).toContain('uq_ret_active_item_allocation');
+    expect(migration).toContain('ret_check_allocation_conservation');
+    expect(service).toContain('placeReturnHold');
+    expect(service).not.toMatch(/submit[\s\S]{0,4000}postConsumableMovement/);
+  });
+  it('changes authoritative inventory only when shipment occurs', () => {
+    expect(service).toContain('shipReturnAllocation');
+    expect(inventory).toContain("movement_type: 'RETURN'");
+    expect(inventory).toContain("lifecycle_status='RETURNED'");
+  });
+  it('uses exact Module 2 allocations for Module 4 invalidation', () => {
+    expect(migration).toContain('proc_return_subject_allocations');
+    expect(verification).toContain('RETURN_SUBJECT_ALLOCATION_REQUIRED');
+    expect(verification).toContain('JOIN proc_return_subject_allocations');
+  });
+  it('separates repaired originals and replacement units', () => {
+    expect(migration).toContain(
+      "lineage_type IN('REPAIR_RETURN','REPLACEMENT_UNIT')",
+    );
+    expect(service).toMatch(/\['REPAIR_RETURN',\s*'REPLACEMENT_UNIT'\]/);
+    expect(service).toContain('resulting_subject_id');
+    expect(service).toContain(
+      'A replacement unit must have new physical and university identities',
+    );
+    expect(service).toContain('pr.replacement_for_return_id=$4');
+    expect(service).toContain(
+      'A repaired original must preserve its physical and university identities',
+    );
+    expect(service).toContain('ir.identity_revision>1');
+    expect(service).toContain('completeRepairReturn');
+  });
+  it('prevents superseded decisions from executing', () => {
+    expect(service).toContain('ReturnCaseSuperseded.v1');
+    expect(service).toContain('workflow_status=$2,active_decision_id=$3');
+    expect(service).toContain('requires_compensation');
+  });
+  it('scopes historical returns by exact inventory ownership when procurement scope is absent', () => {
+    expect(service).toContain(
+      'COALESCE(r.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id) department_id',
+    );
+    expect(service).toContain(
+      'COALESCE(scoped_inventory.owner_department_id,pc.department_id,av.intended_department_id,ar.requesting_department_id)::text',
+    );
+    expect(service).toContain('r.department_id !== first.department_id');
+  });
+});

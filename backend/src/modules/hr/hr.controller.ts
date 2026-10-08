@@ -228,6 +228,78 @@ export class HrController {
     );
   }
 
+  @Get('payslips/download-requests/mine')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  myPayslipDownloadRequests(@Req() req: { user: AuthUser }) {
+    return this.hr.listMyPayslipDownloadRequests(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Get('payslips/download-requests/pending')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('payroll', 'read')
+  pendingPayslipDownloadRequests(@Req() req: { user: AuthUser }) {
+    return this.hr.listPendingPayslipDownloadRequests(
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Post('payslips/request-download')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  requestPayslipDownload(
+    @Req() req: { user: AuthUser },
+    @Body() body: { period_from: string; period_to: string; reason: string },
+  ) {
+    return this.hr.requestPayslipDownload(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body,
+    );
+  }
+
+  @Patch('payslips/download-requests/:requestId')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin')
+  @HrPermission('payroll', 'write')
+  actOnPayslipDownloadRequest(
+    @Req() req: { user: AuthUser },
+    @Param('requestId') requestId: string,
+    @Body() body: { approved: boolean; remarks?: string },
+  ) {
+    return this.hr.actOnPayslipDownloadRequest(
+      requestId,
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      body.approved,
+      body.remarks,
+    );
+  }
+
+  @Get('payslips/download-requests/:requestId/download')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  async downloadApprovedPayslipRequest(
+    @Req() req: { user: AuthUser },
+    @Res({ passthrough: true }) res: Response,
+    @Param('requestId') requestId: string,
+    @Query('inline') inline?: string,
+  ) {
+    const { buffer, filename } = await this.hr.downloadApprovedPayslipRequest(
+      requestId,
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+    const disposition = inline === '1' ? 'inline' : 'attachment';
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `${disposition}; filename="${filename}"`,
+    });
+    return new StreamableFile(buffer);
+  }
+
   @Post('gate-passes')
   @SkipEntityScope()
   @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
@@ -284,8 +356,20 @@ export class HrController {
     );
   }
 
+  @Get('dashboard')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar')
+  @HrPermission('dashboard', 'read')
+  async dashboardHome(
+    @Req() req: { user: AuthUser },
+    @Query('entity_id') entityId?: string,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    const entity = await this.entityCtx.resolveEntityId(tenantId, entityId);
+    return this.dashboard.getMasterDashboard(tenantId, entity);
+  }
+
   @Get('dashboard/metrics')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar')
   @HrPermission('dashboard', 'read')
   async dashboardMetrics(
     @Req() req: { user: AuthUser },
@@ -297,7 +381,7 @@ export class HrController {
   }
 
   @Get('dashboard/master')
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President')
+  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'CampusAdmin', 'Registrar')
   @HrPermission('dashboard', 'read')
   async masterDashboard(
     @Req() req: { user: AuthUser },
@@ -453,7 +537,17 @@ export class HrController {
 
   @Get('entities')
   @SkipEntityScope()
-  @Roles('HR', 'HRAdmin', 'SuperAdmin', 'President', 'Faculty', 'HOD', 'Dean')
+  @Roles(
+    'HR',
+    'HRAdmin',
+    'SuperAdmin',
+    'President',
+    'CampusAdmin',
+    'Registrar',
+    'Faculty',
+    'HOD',
+    'Dean',
+  )
   listEntities(@Req() req: { user: AuthUser }) {
     const roles = req.user.roles?.length
       ? req.user.roles
@@ -934,12 +1028,15 @@ export class HrController {
 
   @Patch('employees/:userId')
   @Roles('HR', 'HRAdmin', 'SuperAdmin')
-  updateEmployee(
+  async updateEmployee(
     @Param('userId') userId: string,
     @Req() req: { user: AuthUser },
     @Body() dto: UpdateEmployeeDto,
   ) {
-    return this.hr.updateEmployee(this.resolveTenantId(req.user), userId, dto);
+    const tenantId = this.resolveTenantId(req.user);
+    const result = await this.hr.updateEmployee(tenantId, userId, dto);
+    await this.hrAdmin.invalidateDirectoryCache(tenantId);
+    return result;
   }
 
   @Get('attendance/matrix')
@@ -1405,6 +1502,34 @@ export class HrController {
       this.resolveTenantId(req.user),
       scope,
       month,
+    );
+  }
+
+  @Get('ess/team/attendance/today')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  teamAttendanceToday(
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+  ) {
+    return this.team.getTodayAttendance(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      scope,
+    );
+  }
+
+  @Get('ess/resignations/pending-hod')
+  @SkipEntityScope()
+  @Roles('Faculty', 'HOD', 'Dean', 'HR', 'HRAdmin', 'SuperAdmin')
+  pendingHodResignations(
+    @Req() req: { user: AuthUser },
+    @Query('scope') scope?: string,
+  ) {
+    return this.ess.listPendingHodResignations(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      scope === 'direct' ? 'direct' : 'dept',
     );
   }
 
@@ -2004,9 +2129,12 @@ export class HrController {
       leave_type?: string;
       start_date?: string;
       end_date?: string;
+      start_time?: string;
+      end_time?: string;
       regularization_date?: string;
       missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
       reason?: string;
+      supporting_doc_urls?: string[];
     },
   ) {
     const roles = this.resolveRoles(req.user);
@@ -2186,7 +2314,7 @@ export class HrController {
   }
 
   @Get('admin/workflows')
-  @Roles('HRAdmin', 'SuperAdmin')
+  @Roles('HRAdmin', 'SuperAdmin', 'CampusAdmin', 'Registrar')
   async listWorkflows(
     @Req() req: { user: AuthUser },
     @Query('entity_id') entityId?: string,

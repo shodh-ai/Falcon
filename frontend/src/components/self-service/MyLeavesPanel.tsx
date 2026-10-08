@@ -1,8 +1,7 @@
 'use client';
 
-import { Select } from '@/components/ui/select';
-import { FormEvent, useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { Loader2, Paperclip } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   FacultyPanel,
@@ -12,8 +11,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { getSubdomainFromClient } from '@/lib/tenant';
 import {
   workforceMinDate,
   formatWorkforceDateRange,
@@ -22,16 +24,26 @@ import {
 } from '@/lib/workforce-dates';
 import { useShowMoreList, ShowMoreButton } from '@/components/self-service/ShowMoreList';
 import { ProxyTeachingDialog } from '@/components/faculty/ProxyTeachingDialog';
+import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import {
+  facultyDemoLeaveBalances,
+  facultyDemoLeaveRequests,
+} from '@/lib/mock/faculty-portal-demo';
 
 type Balance = { leave_type: string; entitled: string | number; used: string | number };
 type Request = {
   leave_id: string;
   leave_type: string;
+  request_type?: string;
   start_date: string;
   end_date: string;
+  start_time?: string | null;
+  end_time?: string | null;
   status: string;
   reason: string | null;
 };
+
+type ApplyMode = 'LEAVE' | 'ON_DUTY';
 
 function statusBadgeVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'HR_APPROVED' || status === 'HOD_APPROVED') return 'default';
@@ -42,38 +54,106 @@ function statusBadgeVariant(status: string): 'default' | 'secondary' | 'destruct
 
 export function MyLeavesPanel() {
   const api = useAuthedApi();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [balances, setBalances] = useState<Balance[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
-  const [form, setForm] = useState({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
+  const [applyMode, setApplyMode] = useState<ApplyMode>('LEAVE');
+  const [form, setForm] = useState({ leave_type: 'CL', start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
+  const [partialDay, setPartialDay] = useState(false);
+  const [attachment, setAttachment] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [proxyLeaveRange, setProxyLeaveRange] = useState<{ start: string; end: string } | null>(null);
 
   async function load() {
     if (!user?.user_id) return;
-    const [b, r] = await Promise.all([
+    const [balanceResult, requestResult] = await Promise.allSettled([
       api.get<Balance[]>('/api/hr/leaves/my-balances'),
       api.get<Request[]>('/api/hr/workforce/my-requests'),
     ]);
-    setBalances(b);
-    setRequests(r.filter((x) => x.leave_type));
+
+    if (balanceResult.status === 'fulfilled') {
+      const b = balanceResult.value;
+      setBalances(withFacultyDemoFallback(b, facultyDemoLeaveBalances() as Balance[], isEmptyArray));
+    } else {
+      setBalances(
+        withFacultyDemoFallback([], facultyDemoLeaveBalances() as Balance[], isEmptyArray),
+      );
+    }
+
+    if (requestResult.status === 'fulfilled') {
+      const r = requestResult.value;
+      setRequests(withFacultyDemoFallback(r, facultyDemoLeaveRequests() as Request[], isEmptyArray));
+    } else {
+      setRequests(
+        withFacultyDemoFallback([], facultyDemoLeaveRequests() as Request[], isEmptyArray),
+      );
+    }
+
+    const failed = [balanceResult, requestResult].filter(
+      (result) => result.status === 'rejected',
+    );
+    setLoadError(
+      failed.length > 0
+        ? 'Some leave information could not be loaded. You can still submit a request, or retry.'
+        : null,
+    );
   }
 
   useEffect(() => {
     void load();
   }, [user?.user_id]);
 
+  async function uploadAttachment(file: File): Promise<string | undefined> {
+    if (!token) return undefined;
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${getApiBaseUrl()}/uploads/single`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-tenant-subdomain': getSubdomainFromClient(),
+      },
+      body: formData,
+    });
+    if (!res.ok) throw new Error('Attachment upload failed');
+    const json = await res.json();
+    return json.path ?? json.url;
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (form.end_date < form.start_date) {
+      toast.error('The end date cannot be before the start date');
+      return;
+    }
     setIsSubmitting(true);
     try {
+      let supporting_doc_urls: string[] | undefined;
+      if (attachment) {
+        const path = await uploadAttachment(attachment);
+        if (path) supporting_doc_urls = [path];
+      }
       await api.post('/api/hr/workforce/requests', {
-        request_type: 'LEAVE',
-        ...form,
+        request_type: applyMode,
+        leave_type: applyMode === 'ON_DUTY' ? 'OD' : form.leave_type,
+        start_date: form.start_date,
+        end_date: form.end_date,
+        ...(partialDay ? { start_time: form.start_time, end_time: form.end_time } : {}),
+        reason: form.reason,
+        supporting_doc_urls,
       });
-      toast.success('Leave submitted');
-      setForm({ leave_type: 'CL', start_date: '', end_date: '', reason: '' });
-      setProxyLeaveRange({ start: form.start_date, end: form.end_date });
+      toast.success(
+        applyMode === 'ON_DUTY'
+          ? 'On Duty request sent for approval'
+          : 'Leave request sent to your HOD/reporting officer',
+      );
+      setForm({ leave_type: 'CL', start_date: '', end_date: '', start_time: '', end_time: '', reason: '' });
+      setPartialDay(false);
+      setAttachment(null);
+      if (applyMode === 'LEAVE') {
+        setProxyLeaveRange({ start: form.start_date, end: form.end_date });
+      }
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
@@ -87,6 +167,14 @@ export function MyLeavesPanel() {
 
   return (
     <div className="space-y-4">
+      {loadError ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>{loadError}</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => void load()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       {balances.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {balances.map((b) => (
@@ -101,62 +189,79 @@ export function MyLeavesPanel() {
         </div>
       )}
 
-      <FacultyPanel title="Apply for leave" description="Submit casual, sick, or earned leave">
+      <FacultyPanel title="Apply leave / On Duty" description="Zimyo-style requests — CL, SL, EL, RH, or OD with optional proof">
+        <div className="mb-3 flex gap-2">
+          <Button type="button" size="sm" variant={applyMode === 'LEAVE' ? 'default' : 'outline'} onClick={() => setApplyMode('LEAVE')}>
+            Leave
+          </Button>
+          <Button type="button" size="sm" variant={applyMode === 'ON_DUTY' ? 'default' : 'outline'} onClick={() => setApplyMode('ON_DUTY')}>
+            On Duty (OD)
+          </Button>
+        </div>
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
-          <label className="text-sm sm:col-span-2 lg:col-span-1">
-            <span className="mb-1.5 block font-medium text-sgvu-navy">Leave type</span>
-            <Select
-              className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
-              value={form.leave_type}
-              onChange={(e) => setForm((f) => ({ ...f, leave_type: e.target.value }))}
-            >
-              <option value="CL">Casual (CL)</option>
-              <option value="SL">Sick (SL)</option>
-              <option value="EL">Earned (EL)</option>
-            </Select>
-          </label>
+          {applyMode === 'LEAVE' && (
+            <label className="text-sm sm:col-span-2 lg:col-span-1">
+              <span className="mb-1.5 block font-medium text-sgvu-navy">Leave type</span>
+              <Select
+                className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                value={form.leave_type}
+                onChange={(e) => setForm((f) => ({ ...f, leave_type: e.target.value }))}
+              >
+                <option value="CL">Casual (CL)</option>
+                <option value="SL">Sick (SL)</option>
+                <option value="EL">Earned (EL)</option>
+                <option value="RH">Restricted Holiday (RH)</option>
+                <option value="CCL">Compulsory Casual Leave (CCL)</option>
+              </Select>
+            </label>
+          )}
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">From</span>
-            <Input
-              type="date"
-              min={workforceMinDate()}
-              value={form.start_date}
-              onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
-              required
-            />
+            <Input type="date" min={workforceMinDate()} value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} required />
           </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={partialDay}
+              onChange={(e) => setPartialDay(e.target.checked)}
+            />
+            Apply for selected hours only
+          </label>
+          {partialDay ? (
+            <>
+              <label className="text-sm">
+                <span className="mb-1.5 block font-medium text-sgvu-navy">From time</span>
+                <Input type="time" value={form.start_time} onChange={(e) => setForm((f) => ({ ...f, start_time: e.target.value }))} required />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1.5 block font-medium text-sgvu-navy">To time</span>
+                <Input type="time" value={form.end_time} onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))} required />
+              </label>
+            </>
+          ) : null}
           <label className="text-sm">
             <span className="mb-1.5 block font-medium text-sgvu-navy">To</span>
-            <Input
-              type="date"
-              min={workforceMinDate()}
-              value={form.end_date}
-              onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))}
-              required
-            />
+            <Input type="date" min={form.start_date || workforceMinDate()} value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} required />
           </label>
           <label className="text-sm sm:col-span-2">
             <span className="mb-1.5 block font-medium text-sgvu-navy">Reason</span>
-            <Input
-              placeholder="Brief reason for leave"
-              value={form.reason}
-              onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-              required
-            />
+            <Input placeholder="Brief reason" value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} required />
+          </label>
+          <label className="text-sm sm:col-span-2">
+            <span className="mb-1.5 flex items-center gap-1 font-medium text-sgvu-navy">
+              <Paperclip className="h-3.5 w-3.5" /> Supporting document (optional)
+            </span>
+            <Input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e: ChangeEvent<HTMLInputElement>) => setAttachment(e.target.files?.[0] ?? null)} />
           </label>
           <div className="sm:col-span-2">
             <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Submit leave request
+              Submit {applyMode === 'ON_DUTY' ? 'OD' : 'leave'}
             </Button>
           </div>
         </form>
         {proxyLeaveRange ? (
-          <ProxyTeachingDialog
-            startDate={proxyLeaveRange.start}
-            endDate={proxyLeaveRange.end}
-            onDone={() => setProxyLeaveRange(null)}
-          />
+          <ProxyTeachingDialog startDate={proxyLeaveRange.start} endDate={proxyLeaveRange.end} onDone={() => setProxyLeaveRange(null)} />
         ) : null}
       </FacultyPanel>
 
@@ -167,30 +272,22 @@ export function MyLeavesPanel() {
           <>
             <ul className="space-y-2">
               {requestsList.visible.map((r) => (
-                <li
-                  key={r.leave_id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-4 py-3 text-sm"
-                >
+                <li key={r.leave_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-4 py-3 text-sm">
                   <div className="min-w-0">
-                    <p className="font-medium text-sgvu-navy">{leaveTypeLabel(r.leave_type)}</p>
+                    <p className="font-medium text-sgvu-navy">
+                      {r.request_type === 'ON_DUTY' ? 'On Duty (OD)' : leaveTypeLabel(r.leave_type)}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {formatWorkforceDateRange(r.start_date, r.end_date)}
+                      {r.start_time && r.end_time ? ` · ${r.start_time.slice(0, 5)}–${r.end_time.slice(0, 5)}` : ''}
                     </p>
-                    {r.reason ? (
-                      <p className="mt-0.5 text-xs text-muted-foreground truncate max-w-md">{r.reason}</p>
-                    ) : null}
+                    {r.reason ? <p className="mt-0.5 text-xs text-muted-foreground truncate max-w-md">{r.reason}</p> : null}
                   </div>
-                  <Badge variant={statusBadgeVariant(r.status)} className="shrink-0 text-[10px]">
-                    {leaveStatusLabel(r.status)}
-                  </Badge>
+                  <Badge variant={statusBadgeVariant(r.status)} className="shrink-0 text-[10px]">{leaveStatusLabel(r.status)}</Badge>
                 </li>
               ))}
             </ul>
-            <ShowMoreButton
-              expanded={requestsList.expanded}
-              hiddenCount={requestsList.hiddenCount}
-              onClick={requestsList.toggle}
-            />
+            <ShowMoreButton expanded={requestsList.expanded} hiddenCount={requestsList.hiddenCount} onClick={requestsList.toggle} />
           </>
         )}
       </FacultyPanel>

@@ -47,6 +47,13 @@ export class StaffLeaveRequest extends BaseTenantEntity {
   @Column({ type: 'date' })
   end_date: string;
 
+  /** Optional same-day partial leave / on-duty window (HH:MM:SS). */
+  @Column({ type: 'time', nullable: true })
+  start_time: string | null;
+
+  @Column({ type: 'time', nullable: true })
+  end_time: string | null;
+
   @Column({ type: 'text', nullable: true })
   reason: string | null;
 
@@ -73,6 +80,9 @@ export class StaffLeaveRequest extends BaseTenantEntity {
 
   @Column({ type: 'text', nullable: true })
   approver_remarks: string | null;
+
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  supporting_doc_urls: string[];
 
   @CreateDateColumn()
   applied_at: Date;

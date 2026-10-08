@@ -18,10 +18,15 @@ import {
 import { RedisService } from '../../core/redis/redis.service';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { FinanceService } from '../finance/finance.service';
+import { GatewayPaymentService } from '../finance/gateway-payment.service';
 import { ProposeEventDto } from './dto/propose-event.dto';
 import { UpsertMasterCalendarDto } from './dto/master-calendar.dto';
 import { EstateApproveDto } from './dto/estate-approve.dto';
 import { FundTransferDto } from './dto/fund-transfer.dto';
+import {
+  CampusScopeService,
+  type ScopedAuthUser,
+} from '../../common/campus-scope/campus-scope.service';
 
 const HELD_VENUE_STATUSES = [
   'PENDING_HOD',
@@ -38,9 +43,23 @@ export class CampusEventsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly redis: RedisService,
     private readonly finance: FinanceService,
+    private readonly gatewayPayments: GatewayPaymentService,
     private readonly notify: NotificationEmitterService,
     private readonly events: EventEmitter2,
+    private readonly campusScope: CampusScopeService,
   ) {}
+
+  private assertCalendarWritable(user?: ScopedAuthUser) {
+    if (!user) return;
+    if (
+      this.campusScope.isCampusAdmin(user) &&
+      !this.campusScope.isUnrestricted(user)
+    ) {
+      throw new ForbiddenException(
+        'Campus Admin cannot modify the university academic calendar',
+      );
+    }
+  }
 
   private qrCode(registrationId: string) {
     return `FALCON-EVT-${registrationId.replace(/-/g, '').slice(0, 16).toUpperCase()}`;
@@ -89,7 +108,9 @@ export class CampusEventsService {
   async upsertMasterCalendarEntry(
     tenantId: string,
     dto: UpsertMasterCalendarDto,
+    actor?: ScopedAuthUser,
   ) {
+    this.assertCalendarWritable(actor);
     const rows = await this.dataSource.query(
       `INSERT INTO campus_master_calendar (tenant_id, date, title, description, is_blocked_for_events, academic_year)
        VALUES ($1, $2::date, $3, $4, COALESCE($5, true), $6)
@@ -111,7 +132,12 @@ export class CampusEventsService {
     return rows[0];
   }
 
-  async deleteMasterCalendarEntry(tenantId: string, calendarId: string) {
+  async deleteMasterCalendarEntry(
+    tenantId: string,
+    calendarId: string,
+    actor?: ScopedAuthUser,
+  ) {
+    this.assertCalendarWritable(actor);
     const rows = await this.dataSource.query(
       `DELETE FROM campus_master_calendar WHERE calendar_id = $1 AND tenant_id = $2 RETURNING calendar_id`,
       [calendarId, tenantId],
@@ -355,7 +381,8 @@ export class CampusEventsService {
     if (!e) return null;
     const fundsNeeded = Number(e.funds_needed ?? 0);
     const financeOk = fundsNeeded <= 0 || e.finance_approval === 'APPROVED';
-    const estateOk = e.estate_approval === 'APPROVED' || e.estate_approval === 'NOT_REQUIRED';
+    const estateOk =
+      e.estate_approval === 'APPROVED' || e.estate_approval === 'NOT_REQUIRED';
     if (
       e.advisor_approval === 'APPROVED' &&
       e.hod_approval === 'APPROVED' &&
@@ -431,6 +458,17 @@ export class CampusEventsService {
     return { is_coordinator: rows.length > 0 };
   }
 
+  async isFacultyCoordinator(tenantId: string, facultyUserId: string) {
+    const rows = await this.dataSource.query(
+      `SELECT 1
+       FROM campus_clubs
+       WHERE tenant_id = $1 AND faculty_advisor_id = $2
+       LIMIT 1`,
+      [tenantId, facultyUserId],
+    );
+    return { is_coordinator: rows.length > 0 };
+  }
+
   async proposeEvent(
     tenantId: string,
     coordinatorId: string,
@@ -443,91 +481,96 @@ export class CampusEventsService {
         [dto.club_id, tenantId, coordinatorId],
       );
       const club = clubRows[0];
-    if (!club)
-      throw new ForbiddenException('You are not the coordinator for this club');
+      if (!club)
+        throw new ForbiddenException(
+          'You are not the coordinator for this club',
+        );
 
-    await this.assertDateNotBlocked(tenantId, dto.event_date);
+      await this.assertDateNotBlocked(tenantId, dto.event_date);
 
-    const price = dto.is_paid ? Number(dto.ticket_price ?? 0) : 0;
-    if (dto.is_paid && price <= 0) {
-      throw new BadRequestException(
-        'Paid events require a ticket price greater than zero',
-      );
-    }
-
-    const fundsNeeded = Number(dto.funds_needed ?? 0);
-    if (fundsNeeded < 0) {
-      throw new BadRequestException('Funds needed cannot be negative');
-    }
-
-    let venueLabel = dto.venue ?? null;
-    if (dto.venue_id) {
-      const venueRows = await this.dataSource.query(
-        `SELECT name FROM university_assets WHERE asset_id = $1 AND tenant_id = $2`,
-        [dto.venue_id, tenantId],
-      );
-      if (!venueRows[0])
-        throw new BadRequestException('Selected venue not found');
-      venueLabel = venueRows[0].name;
-      const clash = await this.checkVenueClash(
-        tenantId,
-        dto.venue_id,
-        dto.event_date,
-      );
-      if (clash.has_clash) {
-        throw new ConflictException(
-          `${venueLabel} may already be booked on this date. Estate will review availability.`,
+      const price = dto.is_paid ? Number(dto.ticket_price ?? 0) : 0;
+      if (dto.is_paid && price <= 0) {
+        throw new BadRequestException(
+          'Paid events require a ticket price greater than zero',
         );
       }
-    }
 
-    const financeApproval = fundsNeeded > 0 ? 'PENDING' : 'NOT_REQUIRED';
+      const fundsNeeded = Number(dto.funds_needed ?? 0);
+      if (fundsNeeded < 0) {
+        throw new BadRequestException('Funds needed cannot be negative');
+      }
 
-    const inserted = await this.dataSource.query(
-      `INSERT INTO campus_events (
+      let venueLabel = dto.venue ?? null;
+      if (dto.venue_id) {
+        const venueRows = await this.dataSource.query(
+          `SELECT name FROM university_assets WHERE asset_id = $1 AND tenant_id = $2`,
+          [dto.venue_id, tenantId],
+        );
+        if (!venueRows[0])
+          throw new BadRequestException('Selected venue not found');
+        venueLabel = venueRows[0].name;
+        const clash = await this.checkVenueClash(
+          tenantId,
+          dto.venue_id,
+          dto.event_date,
+        );
+        if (clash.has_clash) {
+          throw new ConflictException(
+            `${venueLabel} may already be booked on this date. Estate will review availability.`,
+          );
+        }
+      }
+
+      const financeApproval = fundsNeeded > 0 ? 'PENDING' : 'NOT_REQUIRED';
+
+      const inserted = await this.dataSource.query(
+        `INSERT INTO campus_events (
         tenant_id, club_id, title, description, venue, venue_id, guest_speakers, event_date,
         total_slots, available_slots, is_paid, ticket_price, funds_needed, status,
         advisor_approval, hod_approval, dean_approval, estate_approval, finance_approval
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$11,$12,'PENDING_ADVISOR','PENDING','PENDING','PENDING','NOT_REQUIRED',$13)
       RETURNING *`,
-      [
+        [
+          tenantId,
+          dto.club_id,
+          dto.title,
+          dto.description ?? null,
+          venueLabel,
+          dto.venue_id ?? null,
+          dto.guest_speakers ?? null,
+          dto.event_date,
+          dto.total_slots,
+          dto.is_paid,
+          price,
+          fundsNeeded,
+          financeApproval,
+        ],
+      );
+      const event = inserted[0];
+      const advisorUserId = await this.resolveAdvisorUserId(
         tenantId,
         dto.club_id,
-        dto.title,
-        dto.description ?? null,
-        venueLabel,
-        dto.venue_id ?? null,
-        dto.guest_speakers ?? null,
-        dto.event_date,
-        dto.total_slots,
-        dto.is_paid,
-        price,
-        fundsNeeded,
-        financeApproval,
-      ],
-    );
-    const event = inserted[0];
-    const advisorUserId = await this.resolveAdvisorUserId(
-      tenantId,
-      dto.club_id,
-    );
-    if (advisorUserId) {
-      this.notify.eventProposed({
-        tenantId,
-        userId: advisorUserId,
-        eventId: event.event_id,
-        clubId: dto.club_id,
-        eventTitle: dto.title,
-        clubName: club.name,
-        title: 'New club event proposal',
-        message: `${club.name} proposed "${dto.title}" for faculty coordinator approval.`,
-        actionLink: '/faculty/event-approvals',
-      });
-    }
+      );
+      if (advisorUserId) {
+        this.notify.eventProposed({
+          tenantId,
+          userId: advisorUserId,
+          eventId: event.event_id,
+          clubId: dto.club_id,
+          eventTitle: dto.title,
+          clubName: club.name,
+          title: 'New club event proposal',
+          message: `${club.name} proposed "${dto.title}" for faculty coordinator approval.`,
+          actionLink: '/faculty/event-approvals',
+        });
+      }
 
-    return event;
+      return event;
     } catch (e: any) {
-      require('fs').writeFileSync('d:\\Falcon\\backend\\propose_error.log', e.stack || e.message);
+      require('fs').writeFileSync(
+        'd:\\Falcon\\backend\\propose_error.log',
+        e.stack || e.message,
+      );
       throw e;
     }
   }
@@ -832,13 +875,7 @@ export class CampusEventsService {
            finance_approval = CASE WHEN $5 > 0 THEN 'PENDING' ELSE finance_approval END
        WHERE event_id = $1 AND tenant_id = $2 AND status = 'PENDING_DEAN' AND dean_approval = 'PENDING'
        RETURNING *`,
-      [
-        eventId,
-        tenantId,
-        userId,
-        'PENDING_ESTATE',
-        fundsNeeded,
-      ],
+      [eventId, tenantId, userId, 'PENDING_ESTATE', fundsNeeded],
     );
     if (!rows[0])
       throw new BadRequestException('Event not found or already processed');
@@ -1288,27 +1325,41 @@ export class CampusEventsService {
         tenantId,
       );
 
-      const orderId = `evt_${registration.registration_id.replace(/-/g, '').slice(0, 12)}_${Date.now()}`;
+      const gatewayOrder = await this.gatewayPayments.createOrder({
+        amountInr: amount,
+        receipt: `evt_${registration.registration_id.replace(/-/g, '').slice(0, 20)}`,
+        notes: {
+          demand_id: demand.demand_id,
+          fee_head: 'EVENTS_CLUB',
+          event_id: event.event_id,
+          registration_id: registration.registration_id,
+          student_user_id: studentId,
+          tenant_id: tenantId,
+        },
+      });
       await this.dataSource.query(
         `UPDATE event_registrations SET gateway_order_id = $2 WHERE registration_id = $1`,
-        [registration.registration_id, orderId],
+        [registration.registration_id, gatewayOrder.order_id],
       );
 
       return {
-        registration: { ...registration, gateway_order_id: orderId },
+        registration: {
+          ...registration,
+          gateway_order_id: gatewayOrder.order_id,
+        },
         checkout_required: true,
         expires_at: expiresAt.toISOString(),
         server_now: serverNow.toISOString(),
         lock_ttl_seconds: BED_LOCK_TTL_SEC,
         order: {
-          order_id: orderId,
+          order_id: gatewayOrder.order_id,
           registration_id: registration.registration_id,
           amount_inr: amount,
-          amount_paise: Math.round(amount * 100),
+          amount_paise: gatewayOrder.amount_paise,
           currency: 'INR',
           fee_head: 'EVENTS_CLUB',
-          razorpay_key: process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
-          mock: true,
+          razorpay_key: gatewayOrder.razorpay_key,
+          mock: gatewayOrder.mock,
           demand_id: demand.demand_id,
           notes: {
             demand_id: demand.demand_id,
@@ -1355,6 +1406,7 @@ export class CampusEventsService {
       : 0;
 
     const amount = Number(reg.ticket_price ?? 0);
+    const mockAllowed = this.gatewayPayments.mockPaymentsAllowed();
     const order =
       reg.status === 'PENDING_PAYMENT' && reg.gateway_order_id
         ? {
@@ -1364,9 +1416,11 @@ export class CampusEventsService {
             amount_paise: Math.round(amount * 100),
             currency: 'INR',
             fee_head: 'EVENTS_CLUB',
-            razorpay_key:
-              process.env.RAZORPAY_KEY_ID ?? 'rzp_test_FALCON_CAMPUS',
-            mock: true,
+            razorpay_key: mockAllowed
+              ? process.env.RAZORPAY_KEY_ID?.trim() || 'sandbox_falcon'
+              : (process.env.RAZORPAY_KEY_ID ?? ''),
+            mock:
+              mockAllowed && !(process.env.RAZORPAY_KEY_SECRET ?? '').trim(),
             notes: {
               fee_head: 'EVENTS_CLUB',
               event_id: reg.event_id,
@@ -1407,9 +1461,10 @@ export class CampusEventsService {
     studentId: string,
     registrationId: string,
     paymentRef: string,
+    options?: { skipGatewayVerify?: boolean },
   ) {
     const rows = await this.dataSource.query(
-      `SELECT r.*, e.event_id, e.ticket_price
+      `SELECT r.*, e.event_id, e.ticket_price, r.gateway_order_id
        FROM event_registrations r
        JOIN campus_events e ON e.event_id = r.event_id
        WHERE r.registration_id = $1 AND r.student_user_id = $2 AND r.tenant_id = $3`,
@@ -1434,6 +1489,23 @@ export class CampusEventsService {
       );
     }
 
+    const ticketPaise = Math.round(Number(reg.ticket_price ?? 0) * 100);
+    const paymentId = (paymentRef ?? '').trim();
+    if (ticketPaise > 0) {
+      if (!paymentId) {
+        throw new BadRequestException('payment_ref is required');
+      }
+      // Webhook path already verified the gateway event.
+      if (!options?.skipGatewayVerify) {
+        await this.gatewayPayments.verifyPayment({
+          paymentId,
+          expectedAmountPaise: ticketPaise,
+          expectedOrderId: reg.gateway_order_id ?? null,
+          expectedStudentUserId: studentId,
+        });
+      }
+    }
+
     await this.dataSource.query('BEGIN');
     try {
       const slotRows = await this.dataSource.query(
@@ -1456,7 +1528,7 @@ export class CampusEventsService {
          SET status = 'PAID', payment_status = 'PAID', transaction_id = $2, qr_code = $3
          WHERE registration_id = $1
          RETURNING *`,
-        [registrationId, paymentRef, qr],
+        [registrationId, paymentId || paymentRef, qr],
       );
       await this.dataSource.query('COMMIT');
       await this.redis.releaseEventPayLock(reg.event_id, studentId);
@@ -1478,6 +1550,7 @@ export class CampusEventsService {
       studentUserId,
       registrationId,
       paymentId,
+      { skipGatewayVerify: true },
     );
   }
 
@@ -1547,7 +1620,9 @@ export class CampusEventsService {
       throw new BadRequestException('You are already a member');
     }
     if (row?.status === 'PENDING') {
-      throw new BadRequestException('Your application is already pending review');
+      throw new BadRequestException(
+        'Your application is already pending review',
+      );
     }
 
     const motivationText = motivation?.trim() || null;

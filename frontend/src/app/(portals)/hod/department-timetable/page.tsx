@@ -22,6 +22,17 @@ type Row = {
   course_code: string;
   course_name: string;
   faculty_name: string;
+  program_name?: string | null;
+  semester?: string | null;
+};
+
+type UnscheduledRow = {
+  allocation_id: string;
+  program_name: string | null;
+  semester: string | null;
+  course_code: string;
+  course_name: string;
+  faculty_name: string;
 };
 
 const DAYS = [
@@ -42,6 +53,7 @@ function formatTime(t: string) {
 export default function HodDepartmentTimetablePage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Row[]>([]);
+  const [unscheduled, setUnscheduled] = useState<UnscheduledRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dayFilter, setDayFilter] = useState<number | 'all'>('all');
 
@@ -49,11 +61,15 @@ export default function HodDepartmentTimetablePage() {
     void (async () => {
       setLoading(true);
       try {
-        const data = await api.get<Row[]>('/api/academics/hod/department-timetable');
-        setRows(data);
+        const data = await api.get<{ slots: Row[]; unscheduled: UnscheduledRow[] }>(
+          '/api/academics/hod/department-timetable',
+        );
+        setRows(data.slots ?? []);
+        setUnscheduled(data.unscheduled ?? []);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load timetable');
         setRows([]);
+        setUnscheduled([]);
       } finally {
         setLoading(false);
       }
@@ -155,6 +171,12 @@ export default function HodDepartmentTimetablePage() {
                   render: (r) => r.faculty_name,
                 },
                 {
+                  key: 'semester',
+                  label: 'Programme / sem',
+                  className: 'w-36',
+                  render: (r) => `${r.program_name ?? '—'} · ${r.semester ?? '—'}`,
+                },
+                {
                   key: 'room',
                   label: 'Room',
                   className: 'w-28',
@@ -218,6 +240,42 @@ export default function HodDepartmentTimetablePage() {
             Open Course Allocation
           </Link>
         </p>
+      ) : null}
+
+      {!loading && unscheduled.length > 0 ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-amber-950">Assigned classes without timetable slots</h2>
+              <p className="text-xs text-amber-800">
+                These official allocations are included in workload but need a day, time and room before they appear in the weekly grid.
+              </p>
+            </div>
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+              {unscheduled.length} pending
+            </span>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-amber-200 bg-white">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-amber-50 text-xs uppercase tracking-wide text-amber-900">
+                <tr>
+                  <th className="px-3 py-2">Programme / sem</th>
+                  <th className="px-3 py-2">Course</th>
+                  <th className="px-3 py-2">Faculty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unscheduled.map((row) => (
+                  <tr key={row.allocation_id} className="border-t border-amber-100">
+                    <td className="px-3 py-2">{row.program_name ?? '—'} · {row.semester ?? '—'}</td>
+                    <td className="px-3 py-2 font-semibold">{row.course_code} <span className="font-normal text-muted-foreground">· {row.course_name}</span></td>
+                    <td className="px-3 py-2">{row.faculty_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : null}
     </HodPageFrame>
   );

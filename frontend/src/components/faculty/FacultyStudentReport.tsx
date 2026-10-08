@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import {
   CartesianGrid,
   Line,
@@ -35,6 +36,7 @@ export type FacultyStudentReportData = {
   };
   summary: {
     internal_avg_percent: number;
+    attendance_percent: number | null;
     class_average_percent: number;
     class_rank: number;
     class_size: number;
@@ -107,8 +109,17 @@ function formatPercent(value: number) {
   return `${Math.round(Number(value ?? 0))}%`;
 }
 
-export function FacultyStudentReport({ report }: { report: FacultyStudentReportData }) {
-  const { student, subject, summary, academic, assignments, demerits, risk_flags } = report;
+export function FacultyStudentReport({
+  report,
+  actions,
+}: {
+  report: FacultyStudentReportData;
+  actions?: ReactNode;
+}) {
+  const { student, subject, summary, academic } = report;
+  const assignments = report.assignments ?? [];
+  const demerits = report.demerits ?? [];
+  const risk_flags = report.risk_flags ?? [];
   const gpaHistory = report.gpa_history ?? [];
   const latestGpa = gpaHistory.length ? gpaHistory[gpaHistory.length - 1] : null;
   const academicSnapshot = academic ?? (latestGpa
@@ -134,7 +145,7 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
     (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime(),
   );
 
-  const matchedPanelBodyClass = 'flex h-[24rem] flex-col';
+  const matchedPanelBodyClass = 'flex min-h-[20rem] flex-col 2xl:min-h-[22rem]';
 
   const gpaHistoryPanel = (
     <>
@@ -212,11 +223,22 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-sgvu-gold/30 bg-gradient-to-br from-sgvu-gold/10 via-white to-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl font-bold text-sgvu-navy">{student.name}</h2>
+      <div className="overflow-hidden rounded-2xl border border-sgvu-navy/10 bg-white shadow-sm">
+        <div className="h-1.5 bg-gradient-to-r from-sgvu-gold via-amber-300 to-sgvu-navy" />
+        <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:p-6">
+          <div className="flex min-w-0 items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sgvu-navy text-base font-black text-white shadow-sm">
+              {student.name
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((part) => part[0])
+                .join('')
+                .toUpperCase() || 'ST'}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-xl font-bold text-sgvu-navy sm:text-2xl">{student.name}</h2>
               {hasConcerns ? (
                 <Badge variant="destructive" className="gap-1">
                   <AlertTriangle className="h-3 w-3" />
@@ -227,19 +249,30 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
               )}
               {summary.is_subject_back_triggered ? <Badge variant="destructive">Subject back</Badge> : null}
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 truncate text-sm text-muted-foreground">
               {student.roll_number} · {student.official_email}
             </p>
-            <p className="text-xs text-muted-foreground">
+              <p className="mt-1 text-xs font-semibold text-sgvu-navy/80">
               {subject.course_code} · {subject.course_name}
             </p>
-            <p className="text-xs text-muted-foreground">
+              <p className="mt-0.5 text-xs text-muted-foreground">
               {[student.department, student.batch ? `Batch ${student.batch}` : null].filter(Boolean).join(' · ') ||
                 'Department not set'}
             </p>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col items-start gap-3 lg:items-end">
+            {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
+            <div className="flex flex-wrap gap-2 lg:justify-end">
             <FacultyMetricChip label="Internal score" value={formatPercent(summary.internal_avg_percent)} emphasis />
+            <FacultyMetricChip
+              label="Attendance"
+              value={
+                summary.attendance_percent == null
+                  ? 'N/A'
+                  : formatPercent(summary.attendance_percent)
+              }
+            />
             <FacultyMetricChip
               label="Class rank"
               value={summary.class_size ? `${summary.class_rank}/${summary.class_size}` : 'N/A'}
@@ -247,6 +280,7 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
             <FacultyMetricChip label="Assignments" value={`${summary.assignments_submitted}/${summary.assignments_total}`} />
             <FacultyMetricChip label="Demerits" value={summary.course_demerit_points} />
             {academicSnapshot ? <FacultyMetricChip label="CGPA" value={academicSnapshot.cgpa || 'N/A'} /> : null}
+            </div>
           </div>
         </div>
       </div>
@@ -256,7 +290,7 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
           title="Semester-wise SGPA & CGPA"
           description="Grade point trend for each semester across the student's program"
           count={gpaHistory.length}
-          className="flex h-full flex-col"
+          className="flex h-full min-h-0 flex-col"
           contentClassName={matchedPanelBodyClass}
         >
           {gpaHistoryPanel}
@@ -266,7 +300,7 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
           title="Assignment Status"
           description="Submitted assignments in green, pending in red"
           count={sortedAssignments.length}
-          className="flex h-full flex-col"
+          className="flex h-full min-h-0 flex-col"
           contentClassName={cn(matchedPanelBodyClass, 'min-h-0')}
         >
           {sortedAssignments.length === 0 ? (
@@ -357,21 +391,29 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
         </FacultyPanel>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <FacultyPanel title="Key Faculty Signals" count={risk_flags.length}>
+      {/* Bottom row: equal width + equal height cards */}
+      <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <FacultyPanel
+          title="Key Faculty Signals"
+          count={risk_flags.length}
+          className="flex h-full min-h-[14rem] flex-col"
+          contentClassName="flex flex-1 flex-col"
+        >
           {risk_flags.length === 0 ? (
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900">
+            <div className="flex flex-1 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900">
               <GraduationCap className="h-4 w-4 shrink-0" />
               No non-attendance concern flags for this subject.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="flex-1 space-y-3 overflow-y-auto">
               {risk_flags.map((flag) => (
                 <div key={flag.label} className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm">
                   <div className="flex flex-wrap items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                     <span className="font-semibold text-sgvu-navy">{flag.label}</span>
-                    <Badge variant={flagVariant(flag.severity)} className="text-[10px]">{flag.severity}</Badge>
+                    <Badge variant={flagVariant(flag.severity)} className="text-[10px]">
+                      {flag.severity}
+                    </Badge>
                   </div>
                   <p className="mt-1 text-muted-foreground">{flag.detail}</p>
                 </div>
@@ -380,74 +422,97 @@ export function FacultyStudentReport({ report }: { report: FacultyStudentReportD
           )}
         </FacultyPanel>
 
-        <FacultyPanel title="Academic Record" description="Latest overall academic snapshot, excluding attendance">
+        <FacultyPanel
+          title="Academic Record"
+          description="Latest overall academic snapshot, excluding attendance"
+          className="flex h-full min-h-[14rem] flex-col"
+          contentClassName="flex flex-1 flex-col"
+        >
           {academicSnapshot ? (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid flex-1 content-start gap-3 sm:grid-cols-2">
               <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">Backlogs</p>
-                <p className={cn('text-lg font-bold', academicSnapshot.backlog_count > 0 ? 'text-red-700' : 'text-sgvu-navy')}>
+                <p
+                  className={cn(
+                    'text-lg font-bold',
+                    academicSnapshot.backlog_count > 0 ? 'text-red-700' : 'text-sgvu-navy',
+                  )}
+                >
                   {academicSnapshot.backlog_count}
                 </p>
               </div>
               <div className="rounded-xl bg-muted/40 p-4">
                 <p className="text-xs text-muted-foreground">Progression</p>
-                <p className="font-semibold text-sgvu-navy">{academicSnapshot.progression_status || 'N/A'}</p>
+                <p className="font-semibold text-sgvu-navy">
+                  {academicSnapshot.progression_status || 'N/A'}
+                </p>
               </div>
               <div className="rounded-xl bg-muted/40 p-4 sm:col-span-2">
-                <p className="text-xs text-muted-foreground">Record</p>
+                <p className="text-xs text-muted-foreground">Period</p>
                 <p className="font-semibold text-sgvu-navy">
                   Sem {academicSnapshot.semester} · {academicSnapshot.academic_year}
                 </p>
               </div>
               {academicSnapshot.remarks ? (
-                <p className="sm:col-span-2 rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground">
+                <p className="rounded-xl border border-border/60 bg-background p-3 text-sm text-muted-foreground sm:col-span-2">
                   {academicSnapshot.remarks}
                 </p>
               ) : null}
             </div>
           ) : (
-            <FacultyEmptyState description="No academic record is available for this student yet." className="py-6" />
+            <FacultyEmptyState
+              description="No academic record is available for this student yet."
+              className="flex-1 py-6"
+            />
+          )}
+        </FacultyPanel>
+
+        <FacultyPanel
+          title="Discipline / Black Dots"
+          count={demerits.length}
+          description="DC-approved demerit incidents for this subject"
+          className="flex h-full min-h-[14rem] flex-col md:col-span-2 xl:col-span-1"
+          contentClassName="flex flex-1 flex-col"
+        >
+          {summary.course_demerit_points === 0 && demerits.length === 0 ? (
+            <div className="flex flex-1 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900">
+              <ShieldAlert className="h-4 w-4 shrink-0" />
+              No approved demerit incidents in this subject.
+            </div>
+          ) : (
+            <div className="flex-1 space-y-3 overflow-y-auto">
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50/50 px-4 py-3">
+                <Circle className="h-4 w-4 fill-red-700 text-red-700" />
+                <span className="text-sm font-semibold text-red-950">
+                  {summary.course_demerit_points} subject demerit point
+                  {summary.course_demerit_points === 1 ? '' : 's'}
+                </span>
+                {summary.is_subject_back_triggered ? (
+                  <Badge variant="destructive">Subject back triggered</Badge>
+                ) : null}
+              </div>
+              {demerits.map((d) => (
+                <div key={d.incident_id} className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Circle className="h-3 w-3 fill-red-600 text-red-600" />
+                    <span className="font-semibold text-sgvu-navy">{d.category.replace(/_/g, ' ')}</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {d.course_code}
+                    </Badge>
+                    <Badge variant="secondary" className="text-[10px]">
+                      +{d.points} pts
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-muted-foreground">{d.description}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {new Date(d.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              ))}
+            </div>
           )}
         </FacultyPanel>
       </div>
-
-      <FacultyPanel
-        title="Discipline / Black Dots"
-        count={demerits.length}
-        description="DC-approved demerit incidents for this subject"
-      >
-        {summary.course_demerit_points === 0 && demerits.length === 0 ? (
-          <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900">
-            <ShieldAlert className="h-4 w-4 shrink-0" />
-            No approved demerit incidents in this subject.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50/50 px-4 py-3">
-              <Circle className="h-4 w-4 fill-red-700 text-red-700" />
-              <span className="text-sm font-semibold text-red-950">
-                {summary.course_demerit_points} subject demerit point
-                {summary.course_demerit_points === 1 ? '' : 's'}
-              </span>
-              {summary.is_subject_back_triggered ? <Badge variant="destructive">Subject back triggered</Badge> : null}
-            </div>
-            {demerits.map((d) => (
-              <div key={d.incident_id} className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Circle className="h-3 w-3 fill-red-600 text-red-600" />
-                  <span className="font-semibold text-sgvu-navy">{d.category.replace(/_/g, ' ')}</span>
-                  <Badge variant="outline" className="text-[10px]">{d.course_code}</Badge>
-                  <Badge variant="secondary" className="text-[10px]">+{d.points} pts</Badge>
-                </div>
-                <p className="mt-2 text-muted-foreground">{d.description}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(d.created_at).toLocaleDateString()}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </FacultyPanel>
     </div>
   );
 }

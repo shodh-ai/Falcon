@@ -168,7 +168,7 @@ export const LEADERSHIP_ACADEMICS_ROUTES: LeadershipHubRoute[] = [
     href: '/leadership/admissions-funnel',
     icon: TrendingUp,
     description: 'Leads, applications, enrolled, and conversion rates',
-    keywords: ['admissions', 'funnel', 'enrollment'],
+    keywords: ['admissions', 'funnel', 'enrollment', 'golden ticket', 'gladiator'],
   },
   {
     label: 'Academic Health',

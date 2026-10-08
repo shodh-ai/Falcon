@@ -136,8 +136,9 @@ export function HodDataTable<T>({
 }) {
   if (loading) {
     return (
-      <div className="flex justify-center py-16">
-        <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" />
+      <div className="flex justify-center py-16" role="status" aria-live="polite" aria-busy="true">
+        <Loader2 className="h-8 w-8 animate-spin text-sgvu-navy" aria-hidden="true" />
+        <span className="sr-only">Loading table data</span>
       </div>
     );
   }
@@ -160,6 +161,7 @@ export function HodDataTable<T>({
               {columns.map((col) => (
                 <th
                   key={col.key}
+                  scope="col"
                   className={cn('px-4 py-3 text-xs font-semibold uppercase tracking-wide', col.className)}
                 >
                   {col.label}
@@ -215,9 +217,11 @@ export function HodDayTabs({
   counts?: Record<number, number>;
 }) {
   return (
-    <div className="flex flex-wrap gap-2 border-b border-gray-100 pb-3">
+    <div className="flex flex-wrap gap-2 border-b border-gray-100 pb-3" role="tablist" aria-label="Day filter">
       <button
         type="button"
+        role="tab"
+        aria-selected={active === 'all'}
         onClick={() => onChange('all')}
         className={cn(
           'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
@@ -232,6 +236,8 @@ export function HodDayTabs({
         <button
           key={d.id}
           type="button"
+          role="tab"
+          aria-selected={active === d.id}
           onClick={() => onChange(d.id)}
           className={cn(
             'rounded-lg px-4 py-2 text-sm font-medium transition-colors',

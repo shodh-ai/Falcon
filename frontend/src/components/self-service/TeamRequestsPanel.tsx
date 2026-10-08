@@ -11,6 +11,15 @@ import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { TeamScopeBar, useTeamScope, type TeamScope } from '@/components/self-service/TeamScopeBar';
 import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { getApiBaseUrl } from '@/lib/api-base-url';
+import { HodGatePassApprovalsPanel } from '@/components/hod/HodGatePassApprovalsPanel';
+import { isEmptyArray, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoTeamRequests } from '@/lib/mock/faculty-portal-demo-modules';
+
+function leaveDocHref(path: string): string {
+  if (path.startsWith('http')) return path;
+  return `${getApiBaseUrl()}/api/uploads/download?path=${encodeURIComponent(path)}`;
+}
 
 type FundingApprovalRole = 'hod' | 'dean';
 
@@ -25,6 +34,10 @@ function fundingApprovalRole(user: { role?: string; roles?: string[]; primaryRol
   if (roles.some((r) => ['SuperAdmin', 'HOD'].includes(r))) return 'hod';
   if (roles.includes('Dean')) return 'dean';
   return null;
+}
+
+function hodApprovalRole(user: { role?: string; roles?: string[]; primaryRole?: string } | null): boolean {
+  return resolveUserRoles(user).some((r) => ['SuperAdmin', 'HOD'].includes(r));
 }
 
 async function fetchPendingFundingRequests(
@@ -54,6 +67,7 @@ function mapFundingRows(rows: any[], role: FundingApprovalRole): RequestItem[] {
 
 type TabId =
   | 'LEAVE'
+  | 'GATE_PASS'
   | 'REGULARIZATION'
   | 'ON_DUTY'
   | 'COMP_OFF_CREDIT'
@@ -64,6 +78,7 @@ type TabId =
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'LEAVE', label: 'Leaves' },
+  { id: 'GATE_PASS', label: 'Gate Pass' },
   { id: 'REGULARIZATION', label: 'Regularisation' },
   { id: 'ON_DUTY', label: 'On Duty' },
   { id: 'COMP_OFF_CREDIT', label: 'Comp-Off' },
@@ -80,8 +95,13 @@ type RequestItem = {
   leave_type: string | null;
   applied_date: string | null;
   raised_on: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
   reason: string | null;
   status: string;
+  supporting_doc_urls?: string[];
   employee: { name: string; email?: string | null; employee_id?: string | null };
 };
 
@@ -93,6 +113,7 @@ type RequestsPayload = {
 
 type PendingCounts = {
   leaves: number;
+  gatePasses: number;
   regularization: number;
   onDuty: number;
   compOff: number;
@@ -104,6 +125,7 @@ type PendingCounts = {
 
 const PENDING_COUNT_KEYS: (keyof PendingCounts)[] = [
   'leaves',
+  'gatePasses',
   'regularization',
   'onDuty',
   'compOff',
@@ -118,6 +140,7 @@ function sumPendingCounts(counts: PendingCounts): number {
 
 const TAB_COUNT_KEY: Record<TabId, keyof PendingCounts> = {
   LEAVE: 'leaves',
+  GATE_PASS: 'gatePasses',
   REGULARIZATION: 'regularization',
   ON_DUTY: 'onDuty',
   COMP_OFF_CREDIT: 'compOff',
@@ -135,7 +158,12 @@ function RequestsContent({ defaultScope }: Props) {
   const api = useAuthedApi();
   const { user } = useAuth();
   const fundingRole = fundingApprovalRole(user);
-  const visibleTabs = TABS.filter((t) => t.id !== 'FUNDING_REQUESTS' || fundingRole);
+  const showGatePassTab = hodApprovalRole(user);
+  const visibleTabs = TABS.filter((t) => {
+    if (t.id === 'FUNDING_REQUESTS') return Boolean(fundingRole);
+    if (t.id === 'GATE_PASS') return showGatePassTab;
+    return true;
+  });
   const scope = useTeamScope(defaultScope);
   const [tab, setTab] = useState<TabId>('LEAVE');
   const [data, setData] = useState<RequestsPayload | null>(null);
@@ -148,6 +176,7 @@ function RequestsContent({ defaultScope }: Props) {
     try {
       const res = await api.get<PendingCounts & { scope?: string }>(`/api/hr/team/pending-counts?scope=${scope}`);
       let pendingFunding = 0;
+      let pendingGatePasses = 0;
       if (fundingRole) {
         try {
           const fundingRows = await fetchPendingFundingRequests(api, fundingRole);
@@ -156,9 +185,18 @@ function RequestsContent({ defaultScope }: Props) {
           pendingFunding = 0;
         }
       }
+      if (showGatePassTab) {
+        try {
+          const gatePassRows = await api.get<unknown[]>('/api/academics/hod/approvals/gate-passes');
+          pendingGatePasses = gatePassRows?.length ?? 0;
+        } catch {
+          pendingGatePasses = 0;
+        }
+      }
 
       setCounts({
         leaves: Number(res.leaves) || 0,
+        gatePasses: pendingGatePasses,
         regularization: Number(res.regularization) || 0,
         onDuty: Number(res.onDuty) || 0,
         compOff: Number(res.compOff) || 0,
@@ -170,6 +208,7 @@ function RequestsContent({ defaultScope }: Props) {
     } catch {
       setCounts({
         leaves: 0,
+        gatePasses: 0,
         regularization: 0,
         onDuty: 0,
         compOff: 0,
@@ -197,11 +236,49 @@ function RequestsContent({ defaultScope }: Props) {
         const res = await api.get<RequestsPayload>(
           `/api/hr/ess/team/requests?scope=${scope}&tab=${active}`,
         );
-        setData(res);
+        const demoItems = facultyDemoTeamRequests()
+          .filter((r) => r.request_type === active)
+          .map((r) => ({
+            id: r.id,
+            leave_id: r.leave_id,
+            request_type: r.request_type,
+            leave_type: r.leave_type,
+            applied_date: r.applied_date,
+            raised_on: r.raised_on,
+            reason: r.reason,
+            status: r.status,
+            employee: {
+              name: r.employee?.name ?? 'Employee',
+              email: r.employee?.email,
+              employee_id: r.employee?.employee_id,
+            },
+          }));
+        const items = withFacultyDemoFallback(res.items, demoItems, isEmptyArray);
+        setData({ ...res, count: items.length, items });
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load requests');
-      setData({ count: 0, tab: active, items: [] });
+      const demoItems = facultyDemoTeamRequests()
+        .filter((r) => r.request_type === active)
+        .map((r) => ({
+          id: r.id,
+          leave_id: r.leave_id,
+          request_type: r.request_type,
+          leave_type: r.leave_type,
+          applied_date: r.applied_date,
+          raised_on: r.raised_on,
+          reason: r.reason,
+          status: r.status,
+          employee: {
+            name: r.employee?.name ?? 'Employee',
+            email: r.employee?.email,
+            employee_id: r.employee?.employee_id,
+          },
+        }));
+      const items = withFacultyDemoFallback([], demoItems, isEmptyArray);
+      setData({ count: items.length, tab: active, items });
+      if (!items.length) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load requests');
+      }
     } finally {
       setLoading(false);
     }
@@ -209,15 +286,23 @@ function RequestsContent({ defaultScope }: Props) {
 
   useEffect(() => {
     void loadCounts();
-  }, [api, scope, fundingRole]);
+  }, [api, scope, fundingRole, showGatePassTab]);
 
   useEffect(() => {
     if (tab === 'FUNDING_REQUESTS' && !fundingRole && visibleTabs.length) {
       setTab(visibleTabs[0].id);
       return;
     }
+    if (tab === 'GATE_PASS' && !showGatePassTab && visibleTabs.length) {
+      setTab(visibleTabs[0].id);
+      return;
+    }
+    if (tab === 'GATE_PASS') {
+      setLoading(false);
+      return;
+    }
     void load(tab);
-  }, [api, scope, tab, fundingRole]);
+  }, [api, scope, tab, fundingRole, showGatePassTab]);
 
   function tabLabel(t: (typeof TABS)[number]) {
     const n = counts?.[TAB_COUNT_KEY[t.id]] ?? 0;
@@ -331,7 +416,7 @@ function RequestsContent({ defaultScope }: Props) {
           <Inbox className="h-5 w-5 text-sgvu-gold" />
           <FacultyMetricChip label="Pending in scope" value={totalPending} emphasis={totalPending > 0} />
         </div>
-        {data && data.items.length > 0 && (
+        {data && data.items.length > 0 && tab !== 'GATE_PASS' && (
           <div className="flex gap-2">
             <Button size="sm" disabled={bulkActing || !selected.size} onClick={() => void bulkAction('APPROVE')}>
               Bulk Approve
@@ -348,6 +433,10 @@ function RequestsContent({ defaultScope }: Props) {
         )}
       </div>
 
+      {tab === 'GATE_PASS' ? (
+        <HodGatePassApprovalsPanel onUpdated={() => void loadCounts()} />
+      ) : (
+        <>
       {loading && (
         <div className="flex justify-center py-16">
           <Loader2 className="h-8 w-8 animate-spin text-sgvu-gold" />
@@ -393,12 +482,33 @@ function RequestsContent({ defaultScope }: Props) {
                     />
                   </td>
                   <td className="px-3 py-3">
-                    <HrPersonCell name={row.employee.name} subtitle={row.employee.employee_id ?? undefined} />
+                    <HrPersonCell
+                      name={row.employee?.name ?? 'Employee'}
+                      subtitle={row.employee?.employee_id ?? undefined}
+                    />
                   </td>
                   <td className="px-3 py-3">
                     <span className="font-medium">{row.leave_type ?? row.request_type}</span>
+                    {(row.start_time && row.end_time) ? (
+                      <p className="text-xs text-muted-foreground">{row.start_time.slice(0, 5)}–{row.end_time.slice(0, 5)}</p>
+                    ) : null}
                     {row.reason && (
                       <p className="mt-0.5 max-w-xs truncate text-xs text-muted-foreground">{row.reason}</p>
+                    )}
+                    {row.supporting_doc_urls && row.supporting_doc_urls.length > 0 && (
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {row.supporting_doc_urls.map((url, i) => (
+                          <a
+                            key={`${row.id}-doc-${i}`}
+                            href={leaveDocHref(url)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-emerald-700 underline"
+                          >
+                            📎 Attachment {i + 1}
+                          </a>
+                        ))}
+                      </div>
                     )}
                   </td>
                   <td className="px-3 py-3">{row.applied_date ?? '—'}</td>
@@ -413,6 +523,8 @@ function RequestsContent({ defaultScope }: Props) {
             </tbody>
           </table>
         </div>
+      )}
+        </>
       )}
     </div>
   );

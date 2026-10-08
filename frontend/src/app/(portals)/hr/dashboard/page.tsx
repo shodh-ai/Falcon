@@ -72,12 +72,20 @@ export default function HrMasterDashboardPage() {
   if (!entityReady) {
     return (
       <>
-        <p className="text-lg font-semibold text-sgvu-navy">Organization entity required</p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {entities.length === 0
-            ? 'No organization entity is assigned to your account. Contact your Super Admin.'
-            : 'Select an organization from the entity switcher in the header, then reload this page.'}
-        </p>
+        <HrPageHeader
+          title="HR Master Dashboard"
+          description="Headcount, attendance, and pending HR actions for the selected organization."
+        />
+        <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+          <CardContent className="p-5 md:p-6">
+            <p className="text-lg font-semibold text-sgvu-navy">Organization entity required</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {entities.length === 0
+                ? 'No organization entity is assigned to your account. Contact your Super Admin, or ensure your Management role can list HR entities.'
+                : 'Select an organization from the entity switcher in the header, then reload this page.'}
+            </p>
+          </CardContent>
+        </Card>
       </>
     );
   }
@@ -85,10 +93,18 @@ export default function HrMasterDashboardPage() {
   if (error) {
     return (
       <>
-        <p className="text-lg font-semibold text-red-700">Could not load dashboard</p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {error instanceof Error ? error.message : 'Failed to load dashboard'}
-        </p>
+        <HrPageHeader
+          title="HR Master Dashboard"
+          description="Headcount, attendance, and pending HR actions for the selected organization."
+        />
+        <Card className="border-red-200 bg-white shadow-sm">
+          <CardContent className="p-5 md:p-6">
+            <p className="text-lg font-semibold text-red-700">Could not load dashboard</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {error instanceof Error ? error.message : 'Failed to load dashboard'}
+            </p>
+          </CardContent>
+        </Card>
       </>
     );
   }

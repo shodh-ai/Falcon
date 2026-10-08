@@ -21,15 +21,71 @@ import { v4 as uuidv4 } from 'uuid';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { BelongsToModule } from '../../module-control/module-control.decorators';
 import { ObjectStorageService } from '../../storage/object-storage.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { StudentOnboardingService } from './student-onboarding.service';
+import { TenantService } from '../../tenant/tenant.service';
 import {
   getRequiredDocTypes,
   STAFF_ONBOARDING_DOC_TYPES,
   STUDENT_ONBOARDING_DOC_TYPES,
 } from './onboarding-portal.util';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+  role_name?: string;
+  dept_id?: number | null;
+};
+
+/**
+ * Explicitly set the response type for uploaded documents. Without this,
+ * Express may default to text/plain and browsers render PDF bytes as text
+ * instead of opening the document viewer.
+ */
+function documentContentType(filePath: string): string {
+  const extension = extname(filePath.split('?')[0] ?? '').toLowerCase();
+  switch (extension) {
+    case '.pdf':
+      return 'application/pdf';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function auditActor(req: {
+  user: AuthUser;
+  ip?: string;
+  headers?: Record<string, string | string[] | undefined>;
+}) {
+  const forwarded = req.headers?.['x-forwarded-for'];
+  const ip =
+    req.ip ??
+    (typeof forwarded === 'string'
+      ? forwarded.split(',')[0]?.trim()
+      : undefined);
+  return {
+    userId: req.user.user_id,
+    role: req.user.role ?? req.user.role_name,
+    ip,
+    sessionId:
+      typeof req.headers?.['x-session-id'] === 'string'
+        ? req.headers['x-session-id']
+        : undefined,
+  };
+}
 
 type ProfileBody = {
   blood_group?: string;
@@ -188,6 +244,7 @@ export class StudentOnboardingController extends BaseOnboardingController {
   }
 
   @Post('reset-password')
+  @BelongsToModule('CORE')
   resetPassword(
     @Req() req: { user: AuthUser },
     @Body()
@@ -232,6 +289,7 @@ export class StudentOnboardingController extends BaseOnboardingController {
 }
 
 @Controller('api/staff/onboarding')
+@BelongsToModule('CORE')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Faculty', 'HOD', 'Dean')
 export class StaffOnboardingController extends BaseOnboardingController {
@@ -248,6 +306,7 @@ export class StaffOnboardingController extends BaseOnboardingController {
   }
 
   @Post('reset-password')
+  @BelongsToModule('CORE')
   resetPassword(
     @Req() req: { user: AuthUser },
     @Body()
@@ -293,11 +352,12 @@ export class StaffOnboardingController extends BaseOnboardingController {
 
 @Controller('api/admin/student-verifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SuperAdmin', 'AdmissionsOfficer', 'Registrar', 'HR', 'HRAdmin')
+@Roles('CampusAdmin', 'SuperAdmin', 'AdmissionsOfficer', 'Registrar')
 export class StudentVerificationAdminController {
   constructor(
     private readonly onboarding: StudentOnboardingService,
     private readonly objectStorage: ObjectStorageService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   private tenant(req: { user: AuthUser }) {
@@ -305,14 +365,24 @@ export class StudentVerificationAdminController {
   }
 
   @Get('queue')
-  queue(
-    @Req() req: { user: AuthUser },
-    @Query('portal_kind') portalKind?: 'student' | 'staff' | 'all',
-  ) {
+  queue(@Req() req: { user: AuthUser }) {
     return this.onboarding.getVerificationQueue(
       this.tenant(req),
-      portalKind ?? 'all',
+      'student',
+      req.user,
     );
+  }
+
+  @Get('audit/recent')
+  auditRecent(
+    @Req() req: { user: AuthUser },
+    @Query('module') module?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.enterpriseAudit.listForTenant(this.tenant(req), {
+      module,
+      limit: limit ? Number(limit) : 50,
+    });
   }
 
   @Get(':targetUserId')
@@ -323,24 +393,49 @@ export class StudentVerificationAdminController {
     return this.onboarding.getVerificationDetail(
       this.tenant(req),
       targetUserId,
+      req.user,
+      'student',
     );
   }
 
   @Post(':targetUserId/approve')
   approve(
-    @Req() req: { user: AuthUser },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
   ) {
-    return this.onboarding.approve(this.tenant(req), targetUserId);
+    return this.onboarding.approve(
+      this.tenant(req),
+      targetUserId,
+      auditActor(req),
+      req.user,
+      'student',
+    );
   }
 
   @Post(':targetUserId/reject')
   reject(
-    @Req() req: { user: AuthUser },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
     @Body() body: { remarks: string },
   ) {
-    return this.onboarding.reject(this.tenant(req), targetUserId, body.remarks);
+    return this.onboarding.reject(
+      this.tenant(req),
+      targetUserId,
+      body.remarks,
+      auditActor(req),
+      req.user,
+      'student',
+    );
   }
 
   @Get(':targetUserId/documents/:docType/preview')
@@ -354,6 +449,8 @@ export class StudentVerificationAdminController {
       this.tenant(req),
       targetUserId,
       docType.toUpperCase().replace(/-/g, '_'),
+      req.user,
+      'student',
     );
 
     if (filePath.startsWith('http')) {
@@ -362,6 +459,7 @@ export class StudentVerificationAdminController {
 
     if (this.objectStorage.isEnabled() && !filePath.startsWith('/')) {
       const stream = await this.objectStorage.getDownloadStream(filePath);
+      res.setHeader('Content-Type', documentContentType(filePath));
       res.setHeader(
         'Content-Disposition',
         `inline; filename="${basename(filePath)}"`,
@@ -374,6 +472,186 @@ export class StudentVerificationAdminController {
     if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
       throw new BadRequestException('File not found');
     }
+    res.setHeader('Content-Type', documentContentType(resolvedPath));
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${basename(resolvedPath)}"`,
+    );
+    return createReadStream(resolvedPath).pipe(res);
+  }
+}
+
+@Controller('api/staff/verifications')
+@BelongsToModule('CORE')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('CampusAdmin', 'SuperAdmin')
+export class StaffVerificationController {
+  constructor(
+    private readonly onboarding: StudentOnboardingService,
+    private readonly objectStorage: ObjectStorageService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
+    private readonly tenantService: TenantService,
+  ) {}
+
+  private isSuperAdmin(user: AuthUser) {
+    return [...(user.roles ?? []), user.role ?? ''].some(
+      (role) => String(role).trim().toLowerCase() === 'superadmin',
+    );
+  }
+
+  /**
+   * A global Super Admin may select the institution being reviewed. The
+   * header is only a selector: the active JWT role is still required and the
+   * tenant is resolved from the canonical tenant table. Other reviewers stay
+   * bound to the tenant in their token.
+   */
+  private async tenant(req: {
+    user: AuthUser;
+    headers?: Record<string, string | string[] | undefined>;
+  }) {
+    const requested = req.headers?.['x-tenant-subdomain'];
+    if (
+      this.isSuperAdmin(req.user) &&
+      typeof requested === 'string' &&
+      requested.trim()
+    ) {
+      const tenant = await this.tenantService.findBySubdomain(requested);
+      return tenant.tenant_id;
+    }
+    return this.onboarding.resolveTenantId(req.user.tenant_id);
+  }
+
+  private isGlobalQueueRequest(req: { user: AuthUser }) {
+    return this.isSuperAdmin(req.user);
+  }
+
+  @Get('queue')
+  async queue(
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+  ) {
+    if (this.isGlobalQueueRequest(req)) {
+      return this.onboarding.getVerificationQueue('*', 'staff', req.user);
+    }
+    return this.onboarding.getVerificationQueue(
+      await this.tenant(req),
+      'staff',
+      req.user,
+    );
+  }
+
+  @Get('audit/recent')
+  async auditRecent(
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+    @Query('module') module?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.enterpriseAudit.listForTenant(await this.tenant(req), {
+      module: module ?? 'faculty_verifications',
+      limit: limit ? Number(limit) : 50,
+    });
+  }
+
+  @Get(':targetUserId')
+  async detail(
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.onboarding.getVerificationDetail(
+      await this.tenant(req),
+      targetUserId,
+      req.user,
+      'staff',
+    );
+  }
+
+  @Post(':targetUserId/approve')
+  async approve(
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+    @Param('targetUserId') targetUserId: string,
+  ) {
+    return this.onboarding.approve(
+      await this.tenant(req),
+      targetUserId,
+      auditActor(req),
+      req.user,
+      'staff',
+    );
+  }
+
+  @Post(':targetUserId/reject')
+  async reject(
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+    @Param('targetUserId') targetUserId: string,
+    @Body() body: { remarks: string },
+  ) {
+    return this.onboarding.reject(
+      await this.tenant(req),
+      targetUserId,
+      body.remarks,
+      auditActor(req),
+      req.user,
+      'staff',
+    );
+  }
+
+  @Get(':targetUserId/documents/:docType/preview')
+  async previewDocument(
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+    @Param('targetUserId') targetUserId: string,
+    @Param('docType') docType: string,
+    @Res() res: Response,
+  ) {
+    const filePath = await this.onboarding.getDocumentPath(
+      await this.tenant(req),
+      targetUserId,
+      docType.toUpperCase().replace(/-/g, '_'),
+      req.user,
+      'staff',
+    );
+
+    if (filePath.startsWith('http')) return res.redirect(filePath);
+    if (this.objectStorage.isEnabled() && !filePath.startsWith('/')) {
+      const stream = await this.objectStorage.getDownloadStream(filePath);
+      res.setHeader('Content-Type', documentContentType(filePath));
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${basename(filePath)}"`,
+      );
+      return stream.pipe(res);
+    }
+
+    const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+    const resolvedPath = resolve(filePath);
+    if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
+      throw new BadRequestException('File not found');
+    }
+    res.setHeader('Content-Type', documentContentType(resolvedPath));
     res.setHeader(
       'Content-Disposition',
       `inline; filename="${basename(resolvedPath)}"`,

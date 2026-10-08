@@ -15,6 +15,13 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
 import { Select } from '@/components/ui/select';
+import {
+  isEmptyArray,
+  isFacultyDemoEntityId,
+  isFacultyDemoModeEnabled,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoResearch } from '@/lib/mock/faculty-portal-demo';
 
 type ResearchLog = {
   research_id: string;
@@ -23,12 +30,14 @@ type ResearchLog = {
   indexing_type: string | null;
   publication_type: string;
   published_date: string | null;
+  proof_file_path?: string | null;
 };
 
 export default function FacultyResearchPage() {
   const api = useAuthedApi();
   const [logs, setLogs] = useState<ResearchLog[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [proofFile, setProofFile] = useState<File | null>(null);
   const [form, setForm] = useState({
     publication_title: '',
     journal_name: '',
@@ -38,14 +47,57 @@ export default function FacultyResearchPage() {
   });
 
   useEffect(() => {
-    void api.get<ResearchLog[]>('/api/academics/faculty/workspaces/research').then(setLogs);
+    void api
+      .get<ResearchLog[]>('/api/academics/faculty/workspaces/research')
+      .then((rows) => setLogs(withFacultyDemoFallback(rows, facultyDemoResearch(), isEmptyArray)))
+      .catch(() => setLogs(withFacultyDemoFallback([], facultyDemoResearch(), isEmptyArray)));
   }, [api]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    const demoOnly =
+      isFacultyDemoModeEnabled() &&
+      (logs.length === 0 || logs.every((l) => isFacultyDemoEntityId(l.research_id)));
+    if (demoOnly) {
+      setLogs((prev) => [
+        {
+          research_id: `res-${Date.now()}`,
+          publication_title: form.publication_title,
+          journal_name: form.journal_name || null,
+          indexing_type: form.indexing_type || null,
+          publication_type: form.publication_type,
+          published_date: form.published_date || null,
+          proof_file_path: proofFile ? 'demo://proof' : null,
+        },
+        ...prev,
+      ]);
+      toast.success('Research entry logged (demo)');
+      setForm({
+        publication_title: '',
+        journal_name: '',
+        indexing_type: 'SCOPUS',
+        publication_type: 'JOURNAL',
+        published_date: '',
+      });
+      setProofFile(null);
+      return;
+    }
     setSubmitting(true);
     try {
-      await api.post('/api/academics/faculty/workspaces/research', form);
+      let proof_file_path: string | undefined;
+      if (proofFile) {
+        const fd = new FormData();
+        fd.append('file', proofFile);
+        const uploaded = await api.post<{ url?: string; path?: string }>(
+          '/api/uploads/single',
+          fd,
+        );
+        proof_file_path = uploaded.url ?? uploaded.path;
+      }
+      await api.post('/api/academics/faculty/workspaces/research', {
+        ...form,
+        proof_file_path,
+      });
       toast.success('Research entry logged (feeds HR PMS & IQAC)');
       setLogs(await api.get<ResearchLog[]>('/api/academics/faculty/workspaces/research'));
       setForm({
@@ -55,6 +107,7 @@ export default function FacultyResearchPage() {
         publication_type: 'JOURNAL',
         published_date: '',
       });
+      setProofFile(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -65,7 +118,8 @@ export default function FacultyResearchPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Log Scopus papers, patents, and book chapters — data flows to HR appraisals and NAAC SSR."
+        title="Research"
+        description="Manage publications, research projects, and academic contributions."
         meta={<FacultyMetricChip label="Publications" value={logs.length} emphasis />}
       />
 
@@ -109,6 +163,16 @@ export default function FacultyResearchPage() {
             value={form.published_date}
             onChange={(e) => setForm({ ...form, published_date: e.target.value })}
           />
+          <div className="space-y-1.5 sm:col-span-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              Proof document (optional PDF/image)
+            </label>
+            <Input
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*"
+              onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
           <div className="sm:col-span-2">
             <Button type="submit" disabled={submitting} className="gap-1.5">
               <Plus className="h-4 w-4" />
@@ -135,11 +199,18 @@ export default function FacultyResearchPage() {
                     {l.publication_type.replace('_', ' ')} · {l.indexing_type ?? '—'}
                     {l.journal_name ? ` · ${l.journal_name}` : ''}
                   </p>
-                  {l.published_date && (
-                    <Badge variant="outline" className="mt-2 text-[10px]">
-                      {new Date(l.published_date).toLocaleDateString('en-IN')}
-                    </Badge>
-                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {l.published_date ? (
+                      <Badge variant="outline" className="text-[10px]">
+                        {new Date(l.published_date).toLocaleDateString('en-IN')}
+                      </Badge>
+                    ) : null}
+                    {l.proof_file_path ? (
+                      <Badge variant="outline" className="text-[10px]">
+                        Proof attached
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             ))}

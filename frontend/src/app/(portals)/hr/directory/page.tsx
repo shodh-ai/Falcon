@@ -8,6 +8,7 @@ import { HrPersonCell } from '@/components/hr/HrAvatar';
 import { HrStatusBadge } from '@/components/hr/HrStatusBadge';
 import { HrEmptyState } from '@/components/hr/HrEmptyState';
 import { AddEmployeeDialog } from '@/components/hr/AddEmployeeDialog';
+import { EditEmployeeDialog } from '@/components/hr/EditEmployeeDialog';
 import { BulkDocumentExportDialog } from '@/components/hr/BulkDocumentExportDialog';
 import { HrDataTable, HrTable, HrTableHead, HrTh, HrTableBody, HrTr, HrTd } from '@/components/hr/HrDataTable';
 import { Input } from '@/components/ui/input';
@@ -99,6 +100,7 @@ export default function HrDirectoryPage() {
                 <HrTh>Department</HrTh>
                 <HrTh>Reporting Officer</HrTh>
                 <HrTh>Status</HrTh>
+                <HrTh className="w-14 text-right">Actions</HrTh>
               </HrTableHead>
               <HrTableBody>
                 {filtered.map((r) => (
@@ -116,6 +118,9 @@ export default function HrDirectoryPage() {
                     <HrTd>{r.reporting_officer_name ?? '—'}</HrTd>
                     <HrTd>
                       <HrStatusBadge status={r.is_active ? 'ACTIVE' : 'INACTIVE'} />
+                    </HrTd>
+                    <HrTd className="text-right">
+                      <EditEmployeeDialog employee={r} onUpdated={() => void mutate()} />
                     </HrTd>
                   </HrTr>
                 ))}

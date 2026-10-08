@@ -11,6 +11,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { useAuthedApi } from '@/lib/api';
 import { ChevronDown, ChevronUp, Calendar, DollarSign, Users, Plus, CheckCircle, Search, Clock, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  isEmptyArray,
+  isFacultyDemoEntityId,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoDirectoryStudents, facultyDemoProjects } from '@/lib/mock/faculty-portal-demo';
 
 const formatDate = (isoString: string) => 
   new Date(isoString).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -78,15 +85,35 @@ export default function FacultyProjectsPage() {
   const fetchGuides = () => {
     setLoading(true);
     api.get<Guide[]>('/api/academics/faculty/workspaces/projects')
-      .then(res => setGuides(res || []))
-      .catch(err => toast.error(err.message))
+      .then((res) =>
+        setGuides(
+          withFacultyDemoFallback(res || [], facultyDemoProjects() as Guide[], isEmptyArray),
+        ),
+      )
+      .catch((err) => {
+        const demo = withFacultyDemoFallback([], facultyDemoProjects() as Guide[], isEmptyArray);
+        setGuides(demo);
+        if (demo.length === 0) toast.error(err.message);
+      })
       .finally(() => setLoading(false));
   };
 
   const fetchDirectory = () => {
-    api.get<any>('/api/search/directory?role=Student&limit=1000')
-      .then(res => setDirectory(res?.items || []))
-      .catch(console.error);
+    api.get<{ items?: DirectoryUser[] }>('/api/search/directory?role=Student&limit=1000')
+      .then((res) =>
+        setDirectory(
+          withFacultyDemoFallback(
+            res?.items || [],
+            facultyDemoDirectoryStudents().items,
+            isEmptyArray,
+          ),
+        ),
+      )
+      .catch(() =>
+        setDirectory(
+          withFacultyDemoFallback([], facultyDemoDirectoryStudents().items, isEmptyArray),
+        ),
+      );
   };
 
   useEffect(() => {
@@ -96,6 +123,13 @@ export default function FacultyProjectsPage() {
 
   const handleCreateProject = async () => {
     if (!newProject.title) return toast.error('Title is required');
+    if (selectedStudents.some((s) => isFacultyDemoEntityId(s.id))) {
+      toast.success('Project created successfully (demo)');
+      setCreateModalOpen(false);
+      setNewProject({ title: '', program: 'B.Tech CSE', amount: '' });
+      setSelectedStudents([]);
+      return;
+    }
     try {
       await api.post('/api/academics/faculty/workspaces/projects/assign', {
         project_title: newProject.title,
@@ -114,6 +148,12 @@ export default function FacultyProjectsPage() {
   };
 
   const handleUpdateStudents = async (guideId: string) => {
+    if (isFacultyDemoSmokeId(guideId)) {
+      toast.success('Students and grades updated successfully (demo)');
+      setStudentModalOpen(null);
+      setSelectedStudents([]);
+      return;
+    }
     try {
       await api.patch(`/api/academics/faculty/workspaces/projects/${guideId}/students`, {
         students: selectedStudents.map(s => ({ student_user_id: s.id, grade: s.grade || undefined }))
@@ -129,6 +169,12 @@ export default function FacultyProjectsPage() {
 
   const handleRequestFunding = async (guideId: string) => {
     if (!newFunding.amount || !newFunding.purpose) return toast.error('All fields are required');
+    if (isFacultyDemoSmokeId(guideId)) {
+      toast.success('Funding requested successfully (demo)');
+      setFundingModalOpen(null);
+      setNewFunding({ amount: '', purpose: '' });
+      return;
+    }
     try {
       await api.post(`/api/academics/faculty/workspaces/projects/${guideId}/funding`, {
         amount: Number(newFunding.amount),
@@ -144,6 +190,10 @@ export default function FacultyProjectsPage() {
   };
 
   const handleMarkComplete = async (guideId: string) => {
+    if (isFacultyDemoSmokeId(guideId)) {
+      toast.success('Project marked as completed (demo)');
+      return;
+    }
     try {
       await api.patch(`/api/academics/faculty/workspaces/projects/${guideId}/complete`);
       toast.success('Project marked as completed');
@@ -239,24 +289,27 @@ export default function FacultyProjectsPage() {
 
   return (
     <FacultyPageShell>
-      <div className="flex justify-between items-center mb-6">
-        <FacultyPageHeader description="Final-year B.Tech/MBA project supervision — track progress, students, and funding." />
-        <Button 
-          onClick={() => setCreateModalOpen(true)} 
-          disabled={ongoingProjects.length >= 4}
-          className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white shadow-lg shadow-sgvu-navy/20 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Project
-        </Button>
-      </div>
+      <FacultyPageHeader
+        title="Projects & Labs"
+        description="Supervise final-year projects and lab work — track progress, students, and funding."
+        actions={
+          <Button
+            onClick={() => setCreateModalOpen(true)}
+            disabled={ongoingProjects.length >= 4}
+            className="bg-sgvu-navy hover:bg-sgvu-navy/90 text-white shadow-lg shadow-sgvu-navy/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Create Project
+          </Button>
+        }
+      />
 
       {guides.length === 0 ? (
         <FacultyEmptyState description="No guided projects assigned currently." />
       ) : (
-        <div className="space-y-10">
+        <div className="w-full space-y-10">
           {/* Ongoing Projects Section */}
-          <section>
+          <section className="w-full">
             <h2 className="text-lg font-bold text-sgvu-navy mb-4 flex items-center">
               <div className="w-2 h-2 rounded-full bg-emerald-500 mr-2" />
               Ongoing Projects ({ongoingProjects.length}/4)
@@ -264,9 +317,9 @@ export default function FacultyProjectsPage() {
             {ongoingProjects.length === 0 ? (
               <p className="text-sm text-slate-500 italic px-4">No active projects.</p>
             ) : (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="grid w-full grid-cols-1 gap-6">
                 {ongoingProjects.map((g) => (
-                  <Card key={g.guide_id} className="border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 bg-white overflow-hidden group">
+                  <Card key={g.guide_id} className="w-full border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 bg-white overflow-hidden group">
                     <CardHeader className="pb-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100">
                       <div className="flex justify-between items-start">
                         <div>
@@ -372,14 +425,14 @@ export default function FacultyProjectsPage() {
 
           {/* Completed Projects Section */}
           {completedProjects.length > 0 && (
-            <section>
+            <section className="w-full">
               <h2 className="text-lg font-bold text-slate-600 mb-4 flex items-center">
                 <div className="w-2 h-2 rounded-full bg-slate-400 mr-2" />
                 Completed Projects ({completedProjects.length})
               </h2>
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 opacity-80 hover:opacity-100 transition-opacity">
+              <div className="grid w-full grid-cols-1 gap-6 opacity-80 hover:opacity-100 transition-opacity">
                 {completedProjects.map((g) => (
-                  <Card key={g.guide_id} className="border-slate-200 bg-slate-50/50">
+                  <Card key={g.guide_id} className="w-full border-slate-200 bg-slate-50/50">
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start">
                         <div>

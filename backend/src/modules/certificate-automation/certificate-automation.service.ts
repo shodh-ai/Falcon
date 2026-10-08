@@ -10,6 +10,7 @@ import { Queue } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { FinanceService } from '../finance/finance.service';
 import { AlumniConversionService } from '../alumni/alumni-conversion.service';
 import { ObjectStorageService } from '../../storage/object-storage.service';
@@ -33,6 +34,7 @@ export class CertificateAutomationService {
     private readonly notify: NotificationEmitterService,
     private readonly pdf: DegreeCertificatePdfService,
     private readonly storage: ObjectStorageService,
+    private readonly enterpriseAudit: EnterpriseAuditService,
   ) {}
 
   private tenant(tenantId?: string) {
@@ -65,11 +67,11 @@ export class CertificateAutomationService {
        JOIN user_roles ur ON ur.user_id = u.user_id
        JOIN roles r ON r.role_id = ur.role_id
        JOIN student_profiles sp ON sp.user_id = u.user_id
-       JOIN batches b ON b.batch_id = sp.batch_id
        WHERE u.tenant_id = $1
          AND r.role_name = 'Student'
          AND u.is_active = true
-         AND b.current_semester >= 8`,
+         AND sp.deleted_at IS NULL
+         AND COALESCE(sp.current_semester, 0) >= 8`,
       [tenantId],
     );
     for (const row of students as { user_id: string }[]) {
@@ -211,35 +213,55 @@ export class CertificateAutomationService {
     }
 
     const dueDate = ev.application_end_date;
-    const demand = await this.finance.createDemand(
-      {
-        student_user_id: studentUserId,
-        fee_head: 'DEGREE_CERTIFICATE',
-        academic_year: new Date().getFullYear().toString(),
-        semester: 8,
-        total_amount: Number(ev.base_fee),
-        due_date: String(dueDate).slice(0, 10),
-        fee_breakup: {
-          event_id: eventId,
-          event_name: ev.event_name,
-          cert_type: 'DEGREE',
+    let demandId: string | null = null;
+    try {
+      const demand = await this.finance.createDemand(
+        {
+          student_user_id: studentUserId,
+          fee_head: 'DEGREE_CERTIFICATE',
+          academic_year: new Date().getFullYear().toString(),
+          semester: 8,
+          total_amount: Number(ev.base_fee),
+          due_date: String(dueDate).slice(0, 10),
+          fee_breakup: {
+            event_id: eventId,
+            event_name: ev.event_name,
+            cert_type: 'DEGREE',
+          },
         },
-      },
-      tid,
-    );
+        tid,
+      );
+      demandId = demand.demand_id ?? null;
+    } catch {
+      // Still accept the degree application if fee demand creation fails.
+      demandId = null;
+    }
+
+    const verificationStatus = demandId
+      ? 'PAYMENT_PENDING'
+      : 'PENDING_VERIFICATION';
 
     const rows = await this.db.query(
       `INSERT INTO cert_applications (
          tenant_id, event_id, student_user_id, finance_demand_id, verification_status
-       ) VALUES ($1, $2, $3, $4, 'PAYMENT_PENDING')
+       ) VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [tid, eventId, studentUserId, demand.demand_id],
+      [tid, eventId, studentUserId, demandId, verificationStatus],
+    );
+
+    await this.notifyStudent(
+      tid,
+      studentUserId,
+      'Degree Application Submitted',
+      demandId
+        ? 'Your degree application is recorded. Complete the fee payment to send it for registrar verification.'
+        : 'Your degree application is recorded and pending registrar verification.',
     );
 
     return {
       ...rows[0],
-      finance_demand_id: demand.demand_id,
-      payment_required: true,
+      finance_demand_id: demandId,
+      payment_required: Boolean(demandId),
     };
   }
 
@@ -315,6 +337,7 @@ export class CertificateAutomationService {
     applicationId: string,
     adminUserId: string,
     action: 'approve' | 'reject',
+    actorMeta?: { role?: string; ip?: string; sessionId?: string },
   ) {
     const tid = this.tenant(tenantId);
     const app = await this.db.query(
@@ -350,7 +373,9 @@ export class CertificateAutomationService {
     const newStatus = action === 'approve' ? 'VERIFIED' : 'REJECTED';
     const updated = await this.db.query(
       `UPDATE cert_applications
-       SET verification_status = $3, updated_at = NOW()
+       SET verification_status = $3,
+           president_ratification_status = CASE WHEN $3 = 'VERIFIED' THEN 'PENDING' ELSE president_ratification_status END,
+           updated_at = NOW()
        WHERE application_id = $1 AND tenant_id = $2 AND verification_status = 'PENDING_VERIFICATION'
        RETURNING *`,
       [applicationId, tid, newStatus],
@@ -367,6 +392,20 @@ export class CertificateAutomationService {
         : 'Your degree application was rejected during verification. Contact the Registrar office.',
     );
 
+    await this.enterpriseAudit.log({
+      tenantId: tid,
+      userId: adminUserId,
+      role: actorMeta?.role,
+      module: 'cert_applications',
+      action:
+        action === 'approve' ? 'DEGREE_VERIFY_APPROVE' : 'DEGREE_VERIFY_REJECT',
+      recordId: applicationId,
+      oldValue: { verification_status: row.verification_status },
+      newValue: { verification_status: newStatus },
+      ip: actorMeta?.ip,
+      sessionId: actorMeta?.sessionId,
+    });
+
     return updated[0];
   }
 
@@ -380,6 +419,7 @@ export class CertificateAutomationService {
       `SELECT application_id FROM cert_applications
        WHERE tenant_id = $1 AND event_id = $2
          AND verification_status = 'VERIFIED'
+         AND president_ratification_status IN ('RATIFIED', 'NOT_REQUIRED')
          AND certificate_generated = false`,
       [tid, eventId],
     );
@@ -410,6 +450,7 @@ export class CertificateAutomationService {
        FROM cert_applications
        WHERE tenant_id = $1 AND event_id = $2
          AND verification_status = 'VERIFIED'
+         AND president_ratification_status IN ('RATIFIED', 'NOT_REQUIRED')
          AND certificate_generated = false`,
       [job.tenantId, job.eventId],
     );
@@ -419,51 +460,14 @@ export class CertificateAutomationService {
       application_id: string;
       student_user_id: string;
     }[]) {
-      try {
-        const { buffer, verificationCode } = await this.pdf.generate(
-          job.tenantId,
-          app.application_id,
-        );
-        const key = this.storage.buildKey(
-          job.tenantId,
-          `certificates/${app.application_id}.pdf`,
-        );
-        const stored = await this.storage.upload(
-          job.tenantId,
-          key,
-          buffer,
-          'application/pdf',
-        );
-        const url = stored.url;
-
-        await this.db.query(
-          `UPDATE cert_applications
-           SET certificate_generated = true,
-               certificate_url = $3,
-               digilocker_pushed_at = NOW(),
-               updated_at = NOW()
-           WHERE application_id = $1 AND tenant_id = $2`,
-          [app.application_id, job.tenantId, url],
-        );
-
-        await this.pushToDigilockerNad(
-          app.application_id,
-          verificationCode,
-          url,
-        );
-
-        await this.notifyStudent(
-          job.tenantId,
-          app.student_user_id,
-          'Degree Certificate Ready',
-          'Your official degree certificate has been generated and is available for download.',
-        );
-        generated += 1;
-      } catch (err) {
-        this.logger.error(
-          `Certificate generation failed for ${app.application_id}: ${err instanceof Error ? err.message : err}`,
-        );
-      }
+      const ok = await this.generateOneCertificate(
+        job.tenantId,
+        app.application_id,
+        app.student_user_id,
+        job.requestedBy,
+        job.eventId,
+      );
+      if (ok) generated += 1;
     }
 
     this.notify.certificateStatusUpdated({
@@ -475,6 +479,125 @@ export class CertificateAutomationService {
     });
 
     return { generated, total: apps.length };
+  }
+
+  async releaseCertificateAfterRatification(
+    tenantId: string | undefined,
+    applicationId: string,
+    requestedBy: string,
+  ) {
+    const tid = this.tenant(tenantId);
+    const rows = await this.db.query(
+      `SELECT application_id, student_user_id, event_id, verification_status, president_ratification_status
+       FROM cert_applications
+       WHERE tenant_id = $1 AND application_id = $2`,
+      [tid, applicationId],
+    );
+    if (!rows[0]) throw new NotFoundException('Application not found');
+    const app = rows[0] as {
+      student_user_id: string;
+      event_id: string;
+      verification_status: string;
+      president_ratification_status: string;
+    };
+    if (app.verification_status !== 'VERIFIED') {
+      throw new BadRequestException(
+        'Application must be verified before certificate release',
+      );
+    }
+    if (
+      !['RATIFIED', 'NOT_REQUIRED'].includes(app.president_ratification_status)
+    ) {
+      throw new BadRequestException(
+        'President ratification required before certificate release',
+      );
+    }
+
+    const generated = await this.generateOneCertificate(
+      tid,
+      applicationId,
+      app.student_user_id,
+      requestedBy,
+      app.event_id,
+    );
+    return { generated: generated ? 1 : 0, application_id: applicationId };
+  }
+
+  private async generateOneCertificate(
+    tenantId: string,
+    applicationId: string,
+    studentUserId: string,
+    requestedBy: string,
+    eventId: string,
+  ): Promise<boolean> {
+    try {
+      const { buffer, verificationCode } = await this.pdf.generate(
+        tenantId,
+        applicationId,
+      );
+      const key = this.storage.buildKey(
+        tenantId,
+        `certificates/${applicationId}.pdf`,
+      );
+      const stored = await this.storage.upload(
+        tenantId,
+        key,
+        buffer,
+        'application/pdf',
+      );
+      const url = stored.url;
+
+      await this.db.query(
+        `UPDATE cert_applications
+         SET certificate_generated = true,
+             certificate_url = $3,
+             digilocker_pushed_at = NOW(),
+             updated_at = NOW()
+         WHERE application_id = $1 AND tenant_id = $2`,
+        [applicationId, tenantId, url],
+      );
+
+      await this.pushToDigilockerNad(applicationId, verificationCode, url);
+
+      await this.notifyStudent(
+        tenantId,
+        studentUserId,
+        'Degree Certificate Ready',
+        'Your official degree certificate has been generated and is available for download.',
+      );
+
+      await this.alumniConversion
+        .enqueueConversion({
+          tenantId,
+          studentUserId,
+          autoVerify: true,
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `Alumni conversion queue failed for ${studentUserId}: ${err instanceof Error ? err.message : err}`,
+          ),
+        );
+
+      await this.enterpriseAudit.log({
+        tenantId,
+        userId: requestedBy,
+        module: 'cert_applications',
+        action: 'CERTIFICATE_GENERATED',
+        recordId: applicationId,
+        newValue: {
+          certificate_url: url,
+          verification_code: verificationCode,
+          event_id: eventId,
+        },
+      });
+
+      return true;
+    } catch (err) {
+      this.logger.error(
+        `Certificate generation failed for ${applicationId}: ${err instanceof Error ? err.message : err}`,
+      );
+      return false;
+    }
   }
 
   /** Stub for DigiLocker / NAD integration — records push timestamp. */

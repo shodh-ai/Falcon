@@ -59,6 +59,8 @@ export class SearchController {
     @Query('status') status?: string,
     @Query('batch') batch?: string,
     @Query('q') q?: string,
+    @Query('sort_by') sortBy?: string,
+    @Query('sort_dir') sortDir?: string,
   ) {
     const { userId, tenantId, role } = this.ctx(req);
     const csv = await this.search.exportDirectoryCsv(userId, tenantId, role, {
@@ -67,11 +69,13 @@ export class SearchController {
       department,
       status,
       batch,
+      sort_by: sortBy,
+      sort_dir: sortDir,
     });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
-      'attachment; filename="university-directory.csv"',
+      `attachment; filename="university-directory-${new Date().toISOString().slice(0, 10)}.csv"`,
     );
     res.send(csv);
   }
@@ -86,6 +90,8 @@ export class SearchController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('q') q?: string,
+    @Query('sort_by') sortBy?: string,
+    @Query('sort_dir') sortDir?: string,
   ) {
     const { userId, tenantId, role } = this.ctx(req);
     return this.search.browseDirectory(userId, tenantId, role, {
@@ -96,6 +102,8 @@ export class SearchController {
       batch,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 25,
+      sort_by: sortBy,
+      sort_dir: sortDir,
     });
   }
 

@@ -471,7 +471,11 @@ export class AttendanceCalculationService {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const date = yesterday.toISOString().slice(0, 10);
-    const rows = await this.daily.find({ where: { date } });
+    const rows = await this.daily.query(
+      `SELECT d.* FROM hr_daily_attendance d JOIN users u ON u.user_id=d.user_id
+       WHERE d.date=$1 AND platform_module_is_available('hrms_ess',u.tenant_id,NULL,u.dept_id::text)`,
+      [date],
+    );
     for (const row of rows) {
       try {
         const result = await this.calculateAndPersist(row.user_id, date);

@@ -46,6 +46,7 @@ export function FalconLogo({
       width={width}
       height={height}
       loading="eager"
+      style={{ width: 'auto', height: 'auto' }}
       className="object-contain drop-shadow-[0_2px_12px_rgba(214,182,93,0.35)]"
     />
   );

@@ -8,6 +8,8 @@ import {
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { existsSync, mkdirSync, writeFileSync, createReadStream } from 'fs';
+import { resolve } from 'path';
 import { Readable } from 'stream';
 
 export interface StoredObject {
@@ -80,6 +82,20 @@ export class ObjectStorageService implements OnModuleInit {
     body: Buffer,
     contentType: string,
   ): Promise<StoredObject> {
+    if (!this.enabled) {
+      const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+      const fullPath = resolve(uploadRoot, key);
+      mkdirSync(resolve(fullPath, '..'), { recursive: true });
+      writeFileSync(fullPath, body);
+      return {
+        key,
+        bucket: 'disk',
+        url: `/uploads/${key}`,
+        size: body.length,
+        contentType,
+      };
+    }
+
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -98,6 +114,15 @@ export class ObjectStorageService implements OnModuleInit {
   }
 
   async getDownloadStream(key: string): Promise<Readable> {
+    if (!this.enabled) {
+      const uploadRoot = resolve(process.env.UPLOAD_PATH || './uploads');
+      const fullPath = resolve(uploadRoot, key);
+      if (!fullPath.startsWith(uploadRoot) || !existsSync(fullPath)) {
+        throw new Error(`File not found: ${key}`);
+      }
+      return createReadStream(fullPath);
+    }
+
     const response = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
     );

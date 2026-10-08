@@ -64,31 +64,58 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
         ...Array.from(uniqueByValue.entries()).map(([value, label]) => ({ value, label })),
       ];
 
+      const EMPTY_SENTINEL = '__falcon_select_empty__';
       const activeValue = value !== undefined && value !== null ? String(value) : undefined;
-      const activeDefaultValue = props.defaultValue !== undefined && props.defaultValue !== null ? String(props.defaultValue) : undefined;
+      const activeDefaultValue =
+        props.defaultValue !== undefined && props.defaultValue !== null
+          ? String(props.defaultValue)
+          : undefined;
+      const { defaultValue: _ignoredDefaultValue, ...rootProps } = props;
+      const isControlled = activeValue !== undefined;
+      // Radix forbids empty-string item values; map '' ↔ sentinel so controlled
+      // selects never flip between undefined and a real value.
+      const radixValue = isControlled
+        ? activeValue === ''
+          ? EMPTY_SENTINEL
+          : activeValue
+        : undefined;
+      const selectableOptions = dedupedOptions.filter((opt) => opt.value !== '');
+      const placeholderLabel = placeholderOption?.label ?? placeholder ?? 'Select...';
+
       return (
         <SelectPrimitive.Root
-          value={activeValue}
-          defaultValue={activeDefaultValue}
+          value={radixValue}
+          defaultValue={
+            isControlled
+              ? undefined
+              : activeDefaultValue === '' || activeDefaultValue === undefined
+                ? undefined
+                : activeDefaultValue
+          }
           disabled={disabled}
           onValueChange={(val) => {
             if (onChange) {
               onChange({
                 target: {
-                  value: val,
+                  value: val === EMPTY_SENTINEL ? '' : val,
                   name: name,
                 },
               });
             }
           }}
-          {...props}
+          {...rootProps}
         >
           <SelectTrigger ref={ref} className={className} id={id}>
-            <SelectValue placeholder={placeholderOption?.label ?? placeholder ?? 'Select...'} />
+            <SelectValue placeholder={placeholderLabel} />
           </SelectTrigger>
           <SelectContent>
-            {dedupedOptions.map((opt) => (
-              <SelectItem key={opt.value === '' ? '__placeholder__' : opt.value} value={opt.value}>
+            {isControlled ? (
+              <SelectItem value={EMPTY_SENTINEL} className="text-muted-foreground">
+                {placeholderLabel}
+              </SelectItem>
+            ) : null}
+            {selectableOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
               </SelectItem>
             ))}
@@ -97,8 +124,13 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
       );
     }
 
+    const rootValue =
+      value === undefined || value === null || value === ''
+        ? undefined
+        : value;
+
     return (
-      <SelectPrimitive.Root value={value} disabled={disabled} {...props}>
+      <SelectPrimitive.Root value={rootValue} disabled={disabled} {...props}>
         {children}
       </SelectPrimitive.Root>
     );
@@ -165,7 +197,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
+        'relative z-[100] max-h-96 min-w-[8rem] overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
         position === 'popper' &&
           'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
         className
@@ -178,7 +210,7 @@ const SelectContent = React.forwardRef<
         className={cn(
           'p-1',
           position === 'popper' &&
-            'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]'
+            'max-h-[min(20rem,var(--radix-select-content-available-height))] w-full min-w-[var(--radix-select-trigger-width)]'
         )}
       >
         {children}
@@ -208,7 +240,9 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex w-full cursor-default select-none items-center rounded-lg py-2.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 touch-target',
+      'relative flex w-full cursor-default select-none items-center rounded-lg py-2.5 pl-8 pr-2 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-50 touch-target',
+      'data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground',
+      'data-[state=checked]:bg-accent/60 data-[state=checked]:font-semibold',
       className
     )}
     {...props}

@@ -11,6 +11,9 @@ import { TenantService } from '../tenant/tenant.service';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 
 jest.mock('bcrypt');
+jest.mock('nodemailer', () => ({
+  createTransport: jest.fn(),
+}));
 
 const PASSWORD_HASH =
   '$2b$10$3M.gdiob7z.LbjCitlN4DuM//mv4oNU1x1yGYD51wXFw30qVt8MoO';
@@ -21,26 +24,49 @@ const TENANT = {
   subdomain: 'sgvu',
 };
 
-function buildUser(overrides: Partial<User> & { roleName: string }): User {
-  const { roleName, ...rest } = overrides;
+function buildLoginFixture(overrides: {
+  user_id?: string;
+  email?: string;
+  name?: string;
+  role_id?: number;
+  roleName: string;
+  dept_id?: number | null;
+  dept_name?: string | null;
+  onboarding_status?: string | null;
+}) {
+  const user_id = overrides.user_id ?? 'user-1';
+  const email = overrides.email ?? 'library@mygyanvihar.com';
+  const name = overrides.name ?? 'Chief Librarian';
+  const role_id = overrides.role_id ?? 9;
+  const roleName = overrides.roleName;
+  const dept_id = overrides.dept_id ?? null;
+  const dept_name = overrides.dept_name ?? null;
+  const onboarding_status = overrides.onboarding_status ?? 'ACTIVE';
+
   return {
-    user_id: rest.user_id ?? 'user-1',
-    tenant_id: rest.tenant_id ?? TENANT.tenant_id,
-    email: rest.email ?? 'library@mygyanvihar.com',
-    name: rest.name ?? 'Chief Librarian',
-    role_id: rest.role_id ?? 9,
-    is_active: rest.is_active ?? true,
-    onboarding_status: rest.onboarding_status ?? 'ACTIVE',
-    role: { role_id: rest.role_id ?? 9, role_name: roleName } as User['role'],
-    userRoles: [
+    credential: {
+      user_id,
+      password_hash: PASSWORD_HASH,
+      is_active: true,
+    },
+    userRow: {
+      user_id,
+      name,
+      email,
+      role_id,
+      dept_id,
+      onboarding_status,
+      role_name: roleName,
+      dept_name,
+    },
+    roleRows: [
       {
+        role_id,
         is_primary: true,
-        role: { role_name: roleName },
-      } as UserRole,
+        role_name: roleName,
+      },
     ],
-    department: undefined,
-    dept_id: null,
-  } as User;
+  };
 }
 
 describe('AuthService.localLogin', () => {
@@ -48,6 +74,7 @@ describe('AuthService.localLogin', () => {
 
   const mockDataSource = {
     query: jest.fn(),
+    transaction: jest.fn(),
   };
 
   const mockUserRepository = {
@@ -62,6 +89,7 @@ describe('AuthService.localLogin', () => {
 
   const mockTenantService = {
     findBySubdomain: jest.fn(),
+    findById: jest.fn(),
   };
 
   const mockHrEntityCtx = {
@@ -76,6 +104,31 @@ describe('AuthService.localLogin', () => {
     signToken: jest.fn(),
   };
 
+  function mockSuccessfulLoginQueries(
+    fixture: ReturnType<typeof buildLoginFixture>,
+  ) {
+    mockDataSource.query.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      if (text.includes('password_hash')) {
+        return [fixture.credential];
+      }
+      if (text.includes('official_email AS email')) {
+        return [fixture.userRow];
+      }
+      if (text.includes('FROM user_roles ur')) {
+        return fixture.roleRows;
+      }
+      if (text.includes('COUNT(*)')) {
+        return [{ count: '0' }];
+      }
+      if (text.includes('EXISTS')) {
+        return [{ is_hod: false }];
+      }
+      return [];
+    });
+    mockDataSource.transaction.mockReset();
+  }
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -87,6 +140,7 @@ describe('AuthService.localLogin', () => {
     });
 
     mockTenantService.findBySubdomain.mockResolvedValue(TENANT);
+    mockTenantService.findById.mockResolvedValue(TENANT);
     mockHrEntityCtx.getPermissions.mockResolvedValue({});
     mockHrEntityCtx.capabilitiesToPermissionList.mockReturnValue([]);
     mockHrEntityCtx.listAllowedEntities.mockResolvedValue([]);
@@ -114,15 +168,11 @@ describe('AuthService.localLogin', () => {
   });
 
   it('returns token and Librarian role for library@ master persona', async () => {
-    const user = buildUser({
+    const fixture = buildLoginFixture({
       email: 'library@mygyanvihar.com',
       roleName: 'Librarian',
     });
-
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    mockUserRepository.findOne.mockResolvedValue(user);
+    mockSuccessfulLoginQueries(fixture);
 
     const result = await service.localLogin(
       'library@mygyanvihar.com',
@@ -134,40 +184,113 @@ describe('AuthService.localLogin', () => {
     expect(result.user.role).toBe('Librarian');
     expect(result.user.roles).toContain('Librarian');
     expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
+    expect(mockUserRepository.findOne).not.toHaveBeenCalled();
+  });
+
+  it('casts the login audit resource id so PostgreSQL does not infer conflicting types', async () => {
+    const fixture = buildLoginFixture({
+      user_id: '00000000-0000-4000-8000-000000000001',
+      email: 'library@mygyanvihar.com',
+      roleName: 'Librarian',
+    });
+    mockSuccessfulLoginQueries(fixture);
+
+    await service.localLogin(
+      'library@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    const auditCall = mockDataSource.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO admin_control_audit'),
+    );
+    expect(auditCall?.[0]).toContain('$2::text');
   });
 
   it('falls back to sgvu when tenant subdomain header is empty', async () => {
-    const user = buildUser({
-      user_id: 'user-1',
+    const fixture = buildLoginFixture({
       email: 'library@mygyanvihar.com',
       name: 'Library',
       role_id: 11,
       roleName: 'Librarian',
     });
-
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    mockUserRepository.findOne.mockResolvedValue(user);
+    mockSuccessfulLoginQueries(fixture);
 
     await service.localLogin('library@mygyanvihar.com', 'password123', '   ');
 
     expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
   });
 
+  it('resolves a unique account in another tenant from the shared login page', async () => {
+    const gvmcTenant = {
+      tenant_id: 'b0000000-0000-4000-8000-000000000002',
+      pg_schema: 'public',
+      subdomain: 'gvmc',
+    };
+    const fixture = buildLoginFixture({
+      email: 'requester.gvmc@mygyanvihar.com',
+      roleName: 'Faculty',
+    });
+    mockTenantService.findById.mockResolvedValue(gvmcTenant);
+    mockDataSource.query.mockImplementation(async (sql: string) => {
+      const text = String(sql);
+      if (text.includes('INNER JOIN tenants t')) {
+        return [{ ...fixture.credential, tenant_id: gvmcTenant.tenant_id }];
+      }
+      if (text.includes('password_hash')) return [];
+      if (text.includes('official_email AS email')) return [fixture.userRow];
+      if (text.includes('FROM user_roles ur')) return fixture.roleRows;
+      if (text.includes('COUNT(*)')) return [{ count: '0' }];
+      if (text.includes('EXISTS')) return [{ is_hod: false }];
+      return [];
+    });
+
+    const result = await service.localLogin(
+      'requester.gvmc@mygyanvihar.com',
+      'temporary-password',
+      'sgvu',
+    );
+
+    expect(mockTenantService.findById).toHaveBeenCalledWith(
+      gvmcTenant.tenant_id,
+    );
+    expect(result.user.tenant_subdomain).toBe('gvmc');
+    expect(result.token).toBe('signed-jwt');
+  });
+
+  it('fails closed when the same email belongs to multiple tenants', async () => {
+    mockDataSource.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          user_id: 'user-1',
+          password_hash: PASSWORD_HASH,
+          is_active: true,
+          tenant_id: TENANT.tenant_id,
+        },
+        {
+          user_id: 'user-2',
+          password_hash: PASSWORD_HASH,
+          is_active: true,
+          tenant_id: 'b0000000-0000-4000-8000-000000000002',
+        },
+      ]);
+
+    await expect(
+      service.localLogin('shared@mygyanvihar.com', 'password123', 'sgvu'),
+    ).rejects.toThrow('Invalid email or password');
+    expect(mockTenantService.findById).not.toHaveBeenCalled();
+  });
+
   it('returns token and Registrar role for dev.registrar@ persona', async () => {
-    const user = buildUser({
+    const fixture = buildLoginFixture({
       user_id: 'user-registrar',
       email: 'dev.registrar@mygyanvihar.com',
       name: 'Dev Registrar',
       role_id: 12,
       roleName: 'Registrar',
     });
-
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: user.user_id, password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    mockUserRepository.findOne.mockResolvedValue(user);
+    mockSuccessfulLoginQueries(fixture);
 
     const result = await service.localLogin(
       'dev.registrar@mygyanvihar.com',
@@ -197,14 +320,189 @@ describe('AuthService.localLogin', () => {
     ).rejects.toThrow('Invalid email or password');
   });
 
-  it('throws when password does not match hash', async () => {
-    mockDataSource.query.mockResolvedValueOnce([
-      { user_id: 'user-1', password_hash: PASSWORD_HASH, is_active: true },
-    ]);
-    (bcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
+  it('still returns a token when HR enrichment throws', async () => {
+    const fixture = buildLoginFixture({
+      email: 'dev.president@mygyanvihar.com',
+      roleName: 'President',
+    });
+    mockSuccessfulLoginQueries(fixture);
+    mockHrEntityCtx.getPermissions.mockRejectedValueOnce(
+      new Error('Redis connection refused'),
+    );
+    mockHrEntityCtx.listAllowedEntities.mockRejectedValueOnce(
+      new Error('relation org_entities does not exist'),
+    );
 
-    await expect(
-      service.localLogin('library@mygyanvihar.com', 'wrong-password'),
-    ).rejects.toThrow('Invalid email or password');
+    const result = await service.localLogin(
+      'dev.president@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    expect(result.token).toBe('signed-jwt');
+    expect(result.user.role).toBe('President');
+    expect(result.user.permissions).toEqual([]);
+    expect(result.user.allowed_entities).toEqual([]);
+  });
+
+  it('still returns token when HR enrichment fails', async () => {
+    const fixture = buildLoginFixture({
+      email: 'library@mygyanvihar.com',
+      roleName: 'Librarian',
+    });
+    mockSuccessfulLoginQueries(fixture);
+    mockHrEntityCtx.getPermissions.mockRejectedValueOnce(
+      new Error('Redis connection refused'),
+    );
+
+    const result = await service.localLogin(
+      'library@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    expect(result.token).toBe('signed-jwt');
+    expect(result.user.role).toBe('Librarian');
+    expect(result.user.permissions).toEqual([]);
+  });
+
+  it('returns the new primary role after a role change when user_roles is synchronized', async () => {
+    const fixture = buildLoginFixture({
+      email: 'dev.registrar@mygyanvihar.com',
+      role_id: 12,
+      roleName: 'Registrar',
+    });
+    fixture.roleRows = [
+      {
+        role_id: 12,
+        is_primary: true,
+        role_name: 'Registrar',
+      },
+      {
+        role_id: 2,
+        is_primary: false,
+        role_name: 'Faculty',
+      },
+    ];
+    mockSuccessfulLoginQueries(fixture);
+
+    const result = await service.localLogin(
+      'dev.registrar@mygyanvihar.com',
+      'password123',
+      'sgvu',
+    );
+
+    expect(result.user.role).toBe('Registrar');
+    expect(result.user.primaryRole).toBe('Registrar');
+    expect(result.user.roles).toEqual(['Registrar', 'Faculty']);
+  });
+});
+
+describe('AuthService password recovery', () => {
+  let service: AuthService;
+  const mockDataSource = {
+    query: jest.fn(),
+    transaction: jest.fn(),
+  };
+  const mockUserRepository = { findOne: jest.fn() };
+  const mockUserRolesRepository = { findOne: jest.fn(), save: jest.fn() };
+  const mockTenantService = {
+    findBySubdomain: jest.fn().mockResolvedValue(TENANT),
+  };
+  const mockHrEntityCtx = {
+    getPermissions: jest.fn().mockResolvedValue({}),
+    capabilitiesToPermissionList: jest.fn().mockReturnValue([]),
+    listAllowedEntities: jest.fn().mockResolvedValue([]),
+    formatAllowedEntities: jest.fn().mockReturnValue([]),
+  };
+  const mockAuthProvider = { signToken: jest.fn() };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
+    delete process.env.NODE_ENV;
+    delete process.env.EMAIL_HOST;
+    (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: DataSource, useValue: mockDataSource },
+        { provide: getRepositoryToken(User), useValue: mockUserRepository },
+        { provide: getRepositoryToken(UserRole), useValue: mockUserRolesRepository },
+        { provide: TenantService, useValue: mockTenantService },
+        { provide: HrEntityContextService, useValue: mockHrEntityCtx },
+        { provide: AUTH_PROVIDER, useValue: mockAuthProvider },
+      ],
+    }).compile();
+    service = module.get<AuthService>(AuthService);
+  });
+
+  afterEach(() => {
+    delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
+    delete process.env.NODE_ENV;
+    delete process.env.EMAIL_HOST;
+  });
+
+  function mockTokenInsertUser() {
+    mockDataSource.query
+      .mockResolvedValueOnce([{ user_id: 'user-1', is_active: true }])
+      .mockResolvedValueOnce([]);
+  }
+
+  it('never exposes a reset token when the explicit developer flag is absent', async () => {
+    mockTokenInsertUser();
+    await expect(service.forgotPassword('faculty@mygyanvihar.com', 'sgvu')).resolves.toEqual({ sent: true });
+  });
+
+  it('only exposes a token for explicitly opted-in non-production smoke tests', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
+    mockTokenInsertUser();
+    const result = await service.forgotPassword('faculty@mygyanvihar.com', 'sgvu');
+    expect(result.sent).toBe(true);
+    expect(result.reset_token).toEqual(expect.any(String));
+  });
+
+  it('suppresses the token even when the developer flag is accidentally set in production', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
+    mockTokenInsertUser();
+    await expect(service.forgotPassword('faculty@mygyanvihar.com', 'sgvu')).resolves.toEqual({ sent: true });
+  });
+
+  it('sends an SMTP reset link without returning the raw token', async () => {
+    process.env.EMAIL_HOST = 'smtp.example.test';
+    process.env.EMAIL_USER = 'noreply@example.test';
+    process.env.EMAIL_PASSWORD = 'secret';
+    const sendMail = jest.fn().mockResolvedValue(undefined);
+    const nodemailer = require('nodemailer') as { createTransport: jest.Mock };
+    nodemailer.createTransport.mockReturnValue({ sendMail });
+    mockTokenInsertUser();
+    const result = await service.forgotPassword('faculty@mygyanvihar.com', 'sgvu');
+    expect(result).toEqual({ sent: true });
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({
+      to: 'faculty@mygyanvihar.com',
+      html: expect.stringContaining('/reset-password?token='),
+    }));
+  });
+
+  it('locks and consumes a reset token atomically', async () => {
+    const manager = { query: jest.fn() };
+    mockDataSource.transaction.mockImplementation(async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager));
+    manager.query
+      .mockResolvedValueOnce([{ token_id: 'token-1', user_id: 'user-1', tenant_id: 'tenant-1' }])
+      .mockResolvedValueOnce([{ user_id: 'user-1' }])
+      .mockResolvedValueOnce([{ token_id: 'token-1' }]);
+
+    await expect(service.resetPasswordWithToken('raw-reset-token', 'New-password-1!')).resolves.toEqual({ success: true });
+    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('FOR UPDATE OF t, u'), expect.any(Array));
+    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('SET used_at = NOW()'), expect.any(Array));
+  });
+
+  it('rejects a replay after the token has already been consumed', async () => {
+    const manager = { query: jest.fn().mockResolvedValueOnce([]) };
+    mockDataSource.transaction.mockImplementation(async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager));
+    await expect(service.resetPasswordWithToken('raw-reset-token', 'New-password-1!')).rejects.toThrow('Reset link expired or invalid');
+    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('used_at IS NULL'), expect.any(Array));
   });
 });

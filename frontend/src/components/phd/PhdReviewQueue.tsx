@@ -1,7 +1,7 @@
 'use client';
 
 import { Select } from '@/components/ui/select';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,12 @@ import {
   type PhdCandidate,
 } from '@/lib/phd-lifecycle';
 import { PhdPipeline } from './PhdPipeline';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoPhdScholars } from '@/lib/mock/faculty-portal-demo';
 
 type GuideOption = { user_id: string; name: string; official_email?: string | null; dept_name?: string | null };
 
@@ -37,24 +43,47 @@ export function PhdReviewQueue({
 }) {
   const api = useAuthedApi();
   const [rows, setRows] = useState<PhdCandidate[]>(initialRows ?? []);
-  const [loading, setLoading] = useState(!embedded);
+  const [loading, setLoading] = useState(Boolean(listPath) && !initialRows?.length);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState<Record<string, string>>({});
   const [guidePick, setGuidePick] = useState<Record<string, string>>({});
   const [guides, setGuides] = useState<GuideOption[]>([]);
+  const [deptFilter, setDeptFilter] = useState('ALL');
+
+  const departments = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of rows) {
+      if (row.dept_name) names.add(row.dept_name);
+    }
+    return Array.from(names).sort();
+  }, [rows]);
+
+  const visibleRows = useMemo(() => {
+    if (deptFilter === 'ALL') return rows;
+    return rows.filter((row) => row.dept_name === deptFilter);
+  }, [rows, deptFilter]);
 
   const load = useCallback(async () => {
-    if (embedded || !listPath) return;
+    if (!listPath) return;
     setLoading(true);
     try {
       const data = await api.get<PhdCandidate[]>(listPath);
-      setRows(Array.isArray(data) ? data : []);
+      const live = Array.isArray(data) ? data : [];
+      setRows(
+        role === 'Faculty'
+          ? withFacultyDemoFallback(live, facultyDemoPhdScholars() as PhdCandidate[], isEmptyArray)
+          : live,
+      );
     } catch {
-      setRows([]);
+      setRows(
+        role === 'Faculty'
+          ? withFacultyDemoFallback([], facultyDemoPhdScholars() as PhdCandidate[], isEmptyArray)
+          : [],
+      );
     } finally {
       setLoading(false);
     }
-  }, [api, embedded, listPath]);
+  }, [api, listPath, role]);
 
   useEffect(() => {
     void load();
@@ -77,6 +106,10 @@ export function PhdReviewQueue({
       toast.error('Please select a research guide from the dropdown first.');
       return;
     }
+    if (isFacultyDemoSmokeId(candidateId)) {
+      toast.success(`${success} (demo)`);
+      return;
+    }
     setBusyId(candidateId);
     try {
       await api.post(`/api/phd-lifecycle/candidates/${candidateId}/action`, {
@@ -96,14 +129,32 @@ export function PhdReviewQueue({
 
   const content = (
     <>
+      {role === 'Dean' && departments.length > 1 ? (
+        <Select
+          className="mb-4 w-full max-w-xs rounded-lg border px-3 py-2 text-sm"
+          value={deptFilter}
+          onChange={(e) => setDeptFilter(e.target.value)}
+        >
+          <option value="ALL">All departments in your school</option>
+          {departments.map((dept) => (
+            <option key={dept} value={dept}>
+              {dept}
+            </option>
+          ))}
+        </Select>
+      ) : null}
       {loading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading queue…
         </p>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No Ph.D. records in your queue.</p>
+      ) : visibleRows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {rows.length === 0
+            ? 'No Ph.D. records in your school queue.'
+            : 'No records match the selected department.'}
+        </p>
       ) : (
-        rows.map((row) => {
+        visibleRows.map((row) => {
           const actions = phdActionsForStatus(row.lifecycle_status, role);
           const needsGuide = actions.some((a) => a === 'ALLOCATE_SUPERVISOR' || a === 'ALLOCATE_GUIDE');
           return (
@@ -114,6 +165,9 @@ export function PhdReviewQueue({
                   <Badge variant="outline">{phdStatusLabel(row.lifecycle_status)}</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">{row.proposed_topic}</p>
+                {row.dept_name ? (
+                  <p className="text-xs text-muted-foreground">Department: {row.dept_name}</p>
+                ) : null}
                 {row.guide_name ? (
                   <p className="text-xs text-muted-foreground">Guide: {row.guide_name}</p>
                 ) : null}

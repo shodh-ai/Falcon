@@ -22,7 +22,13 @@ export default function FinanceRndBudgetPage() {
   const [remarks, setRemarks] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
-    setQueue(await rndApi.budgetQueue());
+    try {
+      const rows = await rndApi.budgetQueue();
+      setQueue(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not load budget queue');
+      setQueue([]);
+    }
   }, [rndApi]);
 
   useEffect(() => {

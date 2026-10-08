@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   ParseIntPipe,
   Patch,
@@ -15,7 +16,11 @@ import {
   UseGuards,
   UseInterceptors,
   BadRequestException,
+  ForbiddenException,
+  StreamableFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import {
   assignmentPdfInterceptor,
@@ -25,23 +30,35 @@ import {
 } from './lms-upload.config';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Roles, Public } from '../../common/decorators/roles.decorator';
 import { AcademicsService } from './academics.service';
 import { AcademicsFacultyService } from './academics-faculty.service';
 import { AssignmentsService } from './assignments.service';
 import { FacultyWorkspacesService } from './faculty-workspaces.service';
+import type { ListQueryParams } from '../../common/utils/pagination';
 import { CourseLmsService } from './course-lms.service';
 import { AcademicProxyService } from './academic-proxy.service';
 import { MarksheetPdfService } from './pdf/marksheet-pdf.service';
 import { MarksHistoryService } from './marks-history.service';
-import { CourseAllocationBulkService } from './course-allocation-bulk.service';
+import {
+  CourseAllocationBulkService,
+  type CourseAllocationRowInput,
+} from './course-allocation-bulk.service';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { CreateGradingPolicyDto } from './dto/create-grading-policy.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { SaveMarksDraftDto } from './dto/save-marks-draft.dto';
+import { HodPortalExtService } from './hod-portal-ext.service';
+import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
+import { BelongsToModule } from '../../module-control/module-control.decorators';
 
-type AuthUser = { user_id: string; role?: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  role?: string;
+  roles?: string[];
+  tenant_id?: string;
+};
 
 @Controller('api/academics')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -56,6 +73,8 @@ export class AcademicsController {
     private readonly marksheetPdf: MarksheetPdfService,
     private readonly marksHistoryService: MarksHistoryService,
     private readonly courseAllocationBulk: CourseAllocationBulkService,
+    private readonly hodPortalExt: HodPortalExtService,
+    private readonly teachingDepartments: FacultyTeachingDepartmentsService,
   ) {}
 
   @Get('subjects')
@@ -77,13 +96,75 @@ export class AcademicsController {
   @Post('enrollments/assign-roll-numbers')
   @Roles('SuperAdmin', 'Registrar', 'HOD')
   assignRollNumbers(
-    @Req() req: { user: AuthUser },
+    @Req()
+    req: {
+      user: AuthUser;
+      ip?: string;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Body()
     dto: { semester: number; course_id?: string; sort_by?: 'name' | 'merit' },
   ) {
+    const forwarded = req.headers?.['x-forwarded-for'];
     return this.academics.assignSemesterRollNumbers(
       this.resolveTenantId(req.user),
       dto,
+      {
+        userId: req.user.user_id,
+        role: req.user.role,
+        ip:
+          req.ip ??
+          (typeof forwarded === 'string'
+            ? forwarded.split(',')[0]?.trim()
+            : undefined),
+        sessionId:
+          typeof req.headers?.['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+      },
+    );
+  }
+
+  @Get('faculty/dashboard')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async getFacultyDashboard(@Req() req: { user: AuthUser }) {
+    const tenantId = this.resolveTenantId(req.user);
+    const deptId = await this.resolveFacultyDeptId(req);
+    const [
+      todayTimetable,
+      todayClasses,
+      teachingDepartments,
+      missingAttendance,
+    ] = await Promise.all([
+      this.facultyAcademics.getFacultyAcademicTimetableToday(
+        req.user.user_id,
+        tenantId,
+        deptId,
+      ),
+      this.facultyAcademics.getFacultyTodayClasses(req.user.user_id),
+      this.teachingDepartments.getTeachingDepartments(
+        req.user.user_id,
+        tenantId,
+      ),
+      this.facultyAcademics.getMissingAttendanceAlerts(
+        req.user.user_id,
+        tenantId,
+      ),
+    ]);
+    return {
+      today_timetable: todayTimetable,
+      today_classes: todayClasses,
+      teaching_departments: teachingDepartments,
+      missing_attendance: missingAttendance,
+    };
+  }
+
+  @Get('faculty/teaching-departments')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getFacultyTeachingDepartments(@Req() req: { user: AuthUser }) {
+    return this.teachingDepartments.getTeachingDepartments(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
     );
   }
 
@@ -95,19 +176,29 @@ export class AcademicsController {
 
   @Get('faculty/timetable/today')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  getFacultyAcademicTimetableToday(@Req() req: { user: AuthUser }) {
+  async getFacultyAcademicTimetableToday(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyAcademics.getFacultyAcademicTimetableToday(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
   @Get('faculty/attendance/missing')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  getMissingAttendanceAlerts(@Req() req: { user: AuthUser }) {
+  async getMissingAttendanceAlerts(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyAcademics.getMissingAttendanceAlerts(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
@@ -115,12 +206,14 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getFacultyCourseStudents(
     @Param('courseId') courseId: string,
+    @Query('timetableId') timetableId: string | undefined,
     @Req() req: { user: AuthUser },
   ) {
     return this.facultyAcademics.getCourseStudents(
       courseId,
       req.user.user_id,
       this.resolveTenantId(req.user),
+      timetableId,
     );
   }
 
@@ -252,6 +345,8 @@ export class AcademicsController {
       max_marks?: string;
       start_date?: string;
       due_date?: string;
+      semester?: string;
+      section_code?: string;
     },
     @UploadedFile() file?: Express.Multer.File,
   ) {
@@ -276,6 +371,8 @@ export class AcademicsController {
       max_marks?: string;
       start_date?: string;
       due_date?: string;
+      semester?: string;
+      section_code?: string;
     },
     @UploadedFile() file?: Express.Multer.File,
   ) {
@@ -390,7 +487,43 @@ export class AcademicsController {
   }
 
   @Get('results/student/:userId')
-  studentResults(@Param('userId') userId: string) {
+  @Roles(
+    'Student',
+    'Applicant',
+    'Faculty',
+    'HOD',
+    'Dean',
+    'Registrar',
+    'ExamCell',
+    'SuperAdmin',
+    'CampusAdmin',
+  )
+  studentResults(
+    @Param('userId') userId: string,
+    @Req()
+    req: {
+      user: AuthUser & { roles?: string[] };
+    },
+  ) {
+    const isSelf = req.user.user_id === userId;
+    const userRoles = [
+      ...(Array.isArray(req.user.roles) ? req.user.roles : []),
+      ...(req.user.role ? [req.user.role] : []),
+    ].map((r) => String(r).toLowerCase());
+    const staffRoles = new Set([
+      'faculty',
+      'hod',
+      'dean',
+      'registrar',
+      'examcell',
+      'exam_cell',
+      'superadmin',
+      'campusadmin',
+    ]);
+    const isStaff = userRoles.some((r) => staffRoles.has(r));
+    if (!isSelf && !isStaff) {
+      throw new ForbiddenException('You can only view your own results');
+    }
     return this.academics.listResultsForStudent(userId);
   }
 
@@ -416,6 +549,18 @@ export class AcademicsController {
   @Roles('Student')
   weeklyTimetable(@Req() req: { user: AuthUser }) {
     return this.academics.getWeeklyTimetable(req.user.user_id);
+  }
+
+  @Get('dashboard/timetable/week')
+  @Roles('Student')
+  weeklyTimetableCalendar(
+    @Req() req: { user: AuthUser },
+    @Query('weekStart') weekStart?: string,
+  ) {
+    return this.academics.getWeeklyTimetableCalendar(
+      req.user.user_id,
+      weekStart,
+    );
   }
 
   @Get('courses/my-enrollments')
@@ -454,6 +599,83 @@ export class AcademicsController {
     );
   }
 
+  @Post('hod/faculty/:facultyUserId/teaching-load-status')
+  @Roles('HOD', 'SuperAdmin')
+  setHodFacultyTeachingLoadStatus(
+    @Param('facultyUserId') facultyUserId: string,
+    @Req() req: { user: AuthUser },
+    @Headers('if-match') ifMatch: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body()
+    body: {
+      academic_year: string;
+      status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION';
+      reason?: string;
+    },
+  ) {
+    const expectedRevision = Number(String(ifMatch ?? '').replace(/"/g, ''));
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      throw new BadRequestException('If-Match revision is required');
+    }
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException('Idempotency-Key is required');
+    }
+    return this.academics.setHodFacultyLoadDeclaration(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role,
+      facultyUserId,
+      {
+        academicYear: body.academic_year,
+        status: body.status,
+        reason: body.reason,
+        expectedRevision,
+        idempotencyKey,
+      },
+    );
+  }
+
+  // Stable compatibility route for clients that do not use the HOD URL
+  // shape. It delegates to the same scoped, revision-checked command.
+  @Post('faculty/workload/status')
+  @Roles('HOD', 'SuperAdmin')
+  setFacultyWorkloadStatus(
+    @Req() req: { user: AuthUser },
+    @Headers('if-match') ifMatch: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body()
+    body: {
+      faculty_user_id: string;
+      academic_year: string;
+      status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION';
+      reason?: string;
+    },
+  ) {
+    const expectedRevision = Number(String(ifMatch ?? '').replace(/"/g, ''));
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      throw new BadRequestException('If-Match revision is required');
+    }
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException('Idempotency-Key is required');
+    }
+    if (!body?.faculty_user_id) {
+      throw new BadRequestException('faculty_user_id is required');
+    }
+    return this.academics.setHodFacultyLoadDeclaration(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role,
+      body.faculty_user_id,
+      {
+        academicYear: body.academic_year,
+        status: body.status,
+        reason: body.reason,
+        expectedRevision,
+        idempotencyKey,
+      },
+    );
+  }
+
   @Get('hod/department-timetable')
   @Roles('HOD', 'SuperAdmin')
   hodDepartmentTimetable(@Req() req: { user: AuthUser }) {
@@ -464,7 +686,7 @@ export class AcademicsController {
   }
 
   @Get('hod/course-allocation-slots')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodCourseAllocationSlots(@Req() req: { user: AuthUser }) {
     return this.academics.listHodCourseAllocationSlots(
       this.resolveTenantId(req.user),
@@ -473,7 +695,7 @@ export class AcademicsController {
   }
 
   @Get('hod/course-allocation-timetable-data')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodCourseAllocationTimetableData(@Req() req: { user: AuthUser }) {
     return this.academics.getHodCourseAllocationTimetableData(
       this.resolveTenantId(req.user),
@@ -482,10 +704,20 @@ export class AcademicsController {
   }
 
   @Post('hod/course-allocation-timetable-batch-save')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodCourseAllocationTimetableBatchSave(
     @Req() req: { user: AuthUser },
-    @Body() dto: { semester: string; slots: Array<{ course_id: string; faculty_user_id: string; day_of_week: number; start_time: string; end_time: string }> }
+    @Body()
+    dto: {
+      semester: string;
+      slots: Array<{
+        course_id: string;
+        faculty_user_id: string;
+        day_of_week: number;
+        start_time: string;
+        end_time: string;
+      }>;
+    },
   ) {
     return this.academics.saveHodCourseAllocationTimetableBatch(
       this.resolveTenantId(req.user),
@@ -494,10 +726,12 @@ export class AcademicsController {
     );
   }
 
-
   @Get('hod/courses/:courseId/students')
   @Roles('HOD', 'SuperAdmin')
-  hodCourseStudents(@Req() req: { user: AuthUser }, @Param('courseId') courseId: string) {
+  hodCourseStudents(
+    @Req() req: { user: AuthUser },
+    @Param('courseId') courseId: string,
+  ) {
     return this.academics.listHodCourseStudents(
       this.resolveTenantId(req.user),
       req.user.user_id,
@@ -523,6 +757,122 @@ export class AcademicsController {
     );
   }
 
+  @Get('hod/department-reports')
+  @Roles('HOD', 'SuperAdmin')
+  hodDepartmentReports(@Req() req: { user: AuthUser }) {
+    return this.academics.getHodDepartmentReports(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Get('hod/iqac/compiler')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodIqacCompiler(@Req() req: { user: AuthUser }) {
+    return this.academics.getHodIqacCompiler(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/iqac/evidence')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodIqacEvidence(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      criterion_id: number;
+      file_path: string;
+      file_name: string;
+      title?: string;
+    },
+  ) {
+    return this.academics.uploadHodIqacEvidence(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
+  }
+
+  @Post('hod/iqac/submit')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodIqacSubmit(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      comments?: string;
+      master_file_path?: string;
+      master_file_name?: string;
+    },
+  ) {
+    return this.academics.submitHodIqacDepartment(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
+  }
+
+  @Get('hod/iqac/additional-activities')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodIqacAdditionalActivities(@Req() req: { user: AuthUser }) {
+    return this.academics.listHodIqacAdditionalActivities(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/iqac/additional-activities')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodUploadIqacAdditionalActivity(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      activity_name: string;
+      activity_date?: string;
+      description?: string;
+      file_path: string;
+      file_name: string;
+    },
+  ) {
+    return this.academics.uploadHodIqacAdditionalActivity(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
+  }
+
+  @Get('hod/staff-roles')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodStaffRoles(@Req() req: { user: AuthUser }) {
+    return this.hodPortalExt.getStaffRoles(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/staff-roles')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodSetStaffRole(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { role_type: string; faculty_user_id: string },
+  ) {
+    return this.hodPortalExt.setStaffRole(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto.role_type,
+      dto.faculty_user_id,
+    );
+  }
+
+  @Get('hod/academic-calendar')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
+  hodAcademicCalendar(@Req() req: { user: AuthUser }) {
+    return this.hodPortalExt.listDepartmentAcademicCalendar(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
   @Get('hod/grievances')
   @Roles('HOD', 'SuperAdmin')
   hodGrievances(@Req() req: { user: AuthUser }) {
@@ -542,7 +892,7 @@ export class AcademicsController {
   }
 
   @Get('hod/appraisals')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
   hodAppraisals(@Req() req: { user: AuthUser }) {
     return this.academics.listHodAppraisals(
       this.resolveTenantId(req.user),
@@ -551,17 +901,25 @@ export class AcademicsController {
   }
 
   @Patch('hod/appraisals/:appraisalId/rating')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD', 'Dean', 'SuperAdmin')
   hodAppraisalRating(
     @Req() req: { user: AuthUser },
     @Param('appraisalId') appraisalId: string,
-    @Body() body: { hod_rating: number },
+    @Body()
+    body: {
+      hod_rating?: number;
+      research?: number;
+      academics?: number;
+      extension?: number;
+      administration?: number;
+      notes?: string;
+    },
   ) {
     return this.academics.submitHodAppraisalRating(
       this.resolveTenantId(req.user),
       req.user.user_id,
       appraisalId,
-      body.hod_rating,
+      body,
     );
   }
 
@@ -596,11 +954,412 @@ export class AcademicsController {
     );
   }
 
-  @Post('hod/course-allocation')
+  @Post('hod/faculty-audit/attendance-reminder')
   @Roles('HOD', 'SuperAdmin')
+  hodFacultyAttendanceReminder(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: {
+      faculty_user_id: string;
+      subject_code: string;
+      missing_classes: string[];
+    },
+  ) {
+    return this.academics.notifyFacultyMissingAttendance(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto,
+    );
+  }
+
+  @Get('hod/faculty-audit/export')
+  @Roles('HOD', 'SuperAdmin')
+  async hodFacultyAuditExport(
+    @Req() req: { user: AuthUser },
+    @Res({ passthrough: true }) res: Response,
+    @Query('faculty_user_id') facultyUserId?: string,
+  ) {
+    const buf = await this.hodPortalExt.exportFacultyAuditExcel(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      facultyUserId,
+    );
+    const suffix = facultyUserId ? 'faculty' : 'all-faculty';
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="hod-faculty-audit-${suffix}.xlsx"`,
+    );
+    return new StreamableFile(buf);
+  }
+
+  @Get('hod/compiled-results/courses')
+  @Roles('HOD', 'SuperAdmin')
+  hodCompiledResultsCourses(
+    @Req() req: { user: AuthUser },
+    @Query('semester') semesterRaw?: string,
+  ) {
+    const semester =
+      !semesterRaw || semesterRaw === 'all'
+        ? null
+        : Number.parseInt(semesterRaw, 10);
+    return this.hodPortalExt.listCompiledResultsCourses(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      Number.isFinite(semester) ? semester : null,
+    );
+  }
+
+  @Get('hod/compiled-results/table')
+  @Roles('HOD', 'SuperAdmin')
+  hodCompiledResultsTable(
+    @Req() req: { user: AuthUser },
+    @Query('semester', ParseIntPipe) semester: number,
+    @Query('course_id') courseId: string,
+  ) {
+    return this.hodPortalExt.getCompiledResultsTable(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      semester,
+      courseId,
+    );
+  }
+
+  @Get('hod/compiled-results/export')
+  @Roles('HOD', 'SuperAdmin')
+  async hodCompiledResultsExport(
+    @Req() req: { user: AuthUser },
+    @Res({ passthrough: true }) res: Response,
+    @Query('semester') semesterRaw: string,
+    @Query('course_id') courseId: string,
+    @Query('student_user_id') studentUserId?: string,
+  ) {
+    const semester =
+      semesterRaw === 'all' ? null : Number.parseInt(semesterRaw, 10);
+    const buf = await this.hodPortalExt.exportCompiledResultsExcel(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      Number.isFinite(semester) ? semester : null,
+      courseId,
+      studentUserId,
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    const filename =
+      semesterRaw === 'all' || courseId === 'all'
+        ? 'compiled-results-all.xlsx'
+        : `compiled-results-sem${semesterRaw}.xlsx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return new StreamableFile(buf);
+  }
+
+  @Get('hod/placement/settings')
+  @Roles('HOD', 'SuperAdmin')
+  hodPlacementSettings(@Req() req: { user: AuthUser }) {
+    return this.hodPortalExt.getPlacementSettings(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/placement/coordinator')
+  @Roles('HOD', 'SuperAdmin')
+  hodSetPlacementCoordinator(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { coordinator_user_id: string },
+  ) {
+    return this.hodPortalExt.setPlacementCoordinator(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      dto.coordinator_user_id,
+    );
+  }
+
+  @Get('hod/placement/drives')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodListPlacementDrives(@Req() req: { user: AuthUser & { role?: string } }) {
+    return this.hodPortalExt.listPlacementDrives(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+    );
+  }
+
+  @Post('hod/placement/drives')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodCreatePlacementDrive(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Body()
+    dto: {
+      company_name: string;
+      job_role?: string;
+      drive_date?: string;
+      drive_time?: string;
+      semester?: number;
+      form_url?: string;
+      form_type?: string;
+      description?: string;
+    },
+  ) {
+    return this.hodPortalExt.createPlacementDrive(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      dto,
+    );
+  }
+
+  @Patch('hod/placement/drives/:driveId')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodUpdatePlacementDrive(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Param('driveId') driveId: string,
+    @Body() dto: Record<string, unknown>,
+  ) {
+    return this.hodPortalExt.updatePlacementDrive(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      driveId,
+      dto,
+    );
+  }
+
+  @Delete('hod/placement/drives/:driveId')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodDeletePlacementDrive(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Param('driveId') driveId: string,
+  ) {
+    return this.hodPortalExt.deletePlacementDrive(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      driveId,
+    );
+  }
+
+  @Get('hod/placement/students/search')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodSearchPlacementStudents(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Query('q') query: string,
+    @Query('drive_id') driveId?: string,
+  ) {
+    return this.hodPortalExt.searchPlacementStudents(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      query ?? '',
+      driveId,
+    );
+  }
+
+  @Get('hod/placement/drives/:driveId/responses')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodListDriveResponses(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Param('driveId') driveId: string,
+    @Query('submitted_date') submittedDate?: string,
+  ) {
+    return this.hodPortalExt.listDriveResponses(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      driveId,
+      submittedDate,
+    );
+  }
+
+  @Post('hod/placement/drives/:driveId/responses')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodAddDriveResponse(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Param('driveId') driveId: string,
+    @Body()
+    dto: {
+      student_user_id?: string;
+      student_name?: string;
+      student_email?: string;
+      enrollment_no?: string;
+      phone?: string;
+      notes?: string;
+    },
+  ) {
+    return this.hodPortalExt.addManualDriveResponse(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      driveId,
+      dto,
+    );
+  }
+
+  @Get('hod/placement/drives/:driveId/registrations/export')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  async hodExportPlacementDriveRegistrations(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Res({ passthrough: true }) res: Response,
+    @Param('driveId') driveId: string,
+    @Query('response_id') responseId?: string,
+  ) {
+    const { buffer, filename } =
+      await this.hodPortalExt.exportPlacementDriveRegistrationsExcel(
+        this.resolveTenantId(req.user),
+        req.user.user_id,
+        req.user.role ?? 'Faculty',
+        driveId,
+        responseId,
+      );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return new StreamableFile(buffer);
+  }
+
+  @Get('hod/placement/registrations/export')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  async hodExportAllPlacementRegistrations(
+    @Req() req: { user: AuthUser & { role?: string } },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { buffer, filename } =
+      await this.hodPortalExt.exportAllPlacementRegistrationsExcel(
+        this.resolveTenantId(req.user),
+        req.user.user_id,
+        req.user.role ?? 'Faculty',
+      );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return new StreamableFile(buffer);
+  }
+
+  @Public()
+  @Post('placement/google-form/webhook')
+  googleFormPlacementWebhook(
+    @Body()
+    dto: {
+      drive_id: string;
+      secret: string;
+      student_name?: string;
+      student_email?: string;
+      enrollment_no?: string;
+      phone?: string;
+      google_response_id?: string;
+      fields?: Record<string, string>;
+    },
+  ) {
+    return this.hodPortalExt.handleGoogleFormWebhook(dto);
+  }
+
+  @Get('hod/placement/drives/:driveId/google-form-sync')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodGoogleFormSyncSetup(
+    @Req()
+    req: {
+      user: AuthUser & { role?: string };
+      protocol: string;
+      get: (h: string) => string | undefined;
+    },
+    @Param('driveId') driveId: string,
+  ) {
+    const webhookBaseUrl =
+      process.env.PUBLIC_API_URL?.trim() ||
+      `${req.protocol}://${req.get('host') ?? 'localhost:4000'}`;
+    return this.hodPortalExt.getGoogleFormSyncSetup(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      driveId,
+      webhookBaseUrl,
+    );
+  }
+
+  @Post('hod/placement/drives/:driveId/google-form-sync/regenerate-secret')
+  @Roles('HOD', 'SuperAdmin', 'Faculty')
+  hodRegenerateGoogleFormSyncSecret(
+    @Req()
+    req: {
+      user: AuthUser & { role?: string };
+      protocol: string;
+      get: (h: string) => string | undefined;
+    },
+    @Param('driveId') driveId: string,
+  ) {
+    const webhookBaseUrl =
+      process.env.PUBLIC_API_URL?.trim() ||
+      `${req.protocol}://${req.get('host') ?? 'localhost:4000'}`;
+    return this.hodPortalExt.regenerateGoogleFormWebhookSecret(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role ?? 'Faculty',
+      driveId,
+      webhookBaseUrl,
+    );
+  }
+
+  @Get('student/placement/drives')
+  @Roles('Student')
+  studentPlacementDrives(@Req() req: { user: AuthUser }) {
+    return this.hodPortalExt.listStudentPlacementDrives(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('student/placement/drives/:driveId/register')
+  @Roles('Student')
+  studentRegisterPlacementDrive(
+    @Req() req: { user: AuthUser },
+    @Param('driveId') driveId: string,
+    @Body()
+    dto: {
+      student_name?: string;
+      student_email?: string;
+      enrollment_no?: string;
+      phone?: string;
+      response_json?: Record<string, unknown>;
+    },
+  ) {
+    return this.hodPortalExt.submitDriveResponse(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      driveId,
+      dto,
+    );
+  }
+
+  @Get('faculty/placement/coordinator-status')
+  @Roles('Faculty', 'HOD', 'SuperAdmin')
+  facultyPlacementCoordinatorStatus(@Req() req: { user: AuthUser }) {
+    return this.hodPortalExt.isPlacementCoordinator(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/course-allocation')
+  @Roles('HOD')
   hodCourseAllocation(
     @Req() req: { user: AuthUser },
-    @Body() dto: { timetable_id: string; faculty_user_id: string; day_of_week?: number; start_time?: string; end_time?: string },
+    @Body()
+    dto: {
+      timetable_id: string;
+      faculty_user_id: string;
+      day_of_week?: number;
+      start_time?: string;
+      end_time?: string;
+    },
   ) {
     return this.academics.allocateHodCourse(
       this.resolveTenantId(req.user),
@@ -610,7 +1369,7 @@ export class AcademicsController {
   }
 
   @Get('hod/teaching-load/unassigned')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodUnassignedTeachingLoad(@Req() req: { user: AuthUser }) {
     return this.courseAllocationBulk.listUnassignedForHod(
       this.resolveTenantId(req.user),
@@ -618,8 +1377,17 @@ export class AcademicsController {
     );
   }
 
+  @Get('hod/teaching-load/assigned')
+  @Roles('HOD')
+  hodAssignedTeachingLoad(@Req() req: { user: AuthUser }) {
+    return this.courseAllocationBulk.listAssignedForHod(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+    );
+  }
+
   @Get('hod/teaching-load/unassigned/count')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   async hodUnassignedTeachingLoadCount(@Req() req: { user: AuthUser }) {
     const count = await this.courseAllocationBulk.countUnassigned(
       this.resolveTenantId(req.user),
@@ -629,7 +1397,7 @@ export class AcademicsController {
   }
 
   @Patch('hod/teaching-load/:allocationId/assign')
-  @Roles('HOD', 'SuperAdmin')
+  @Roles('HOD')
   hodAssignTeachingLoad(
     @Req() req: { user: AuthUser },
     @Param('allocationId') allocationId: string,
@@ -640,6 +1408,73 @@ export class AcademicsController {
       req.user.user_id,
       allocationId,
       dto.faculty_user_id,
+    );
+  }
+
+  @Patch('hod/teaching-load/:allocationId/reassign')
+  @Roles('HOD')
+  hodReassignTeachingLoad(
+    @Req() req: { user: AuthUser },
+    @Param('allocationId') allocationId: string,
+    @Body() dto: { faculty_user_id: string },
+  ) {
+    return this.courseAllocationBulk.reassignFacultyForHod(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      allocationId,
+      dto.faculty_user_id,
+    );
+  }
+
+  @Get('hod/course-mapper/template')
+  @Roles('HOD')
+  async hodCourseMapperTemplate(@Res({ passthrough: true }) res: Response) {
+    const buffer = await this.courseAllocationBulk.buildTemplateBuffer();
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition':
+        'attachment; filename="course-allocation-matrix-template.xlsx"',
+    });
+    return new StreamableFile(buffer);
+  }
+
+  @Post('hod/course-mapper/preview')
+  @Roles('HOD')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async hodCourseMapperPreview(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: { user: AuthUser },
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const rows = await this.courseAllocationBulk.parseUploadFile(
+      file.buffer,
+      file.originalname,
+    );
+    return this.courseAllocationBulk.buildPreview(
+      this.resolveTenantId(req.user),
+      rows,
+      req.user.user_id,
+    );
+  }
+
+  @Post('hod/course-mapper/execute')
+  @Roles('HOD')
+  hodCourseMapperExecute(
+    @Req() req: { user: AuthUser },
+    @Body()
+    dto: { academic_year: string; rows: CourseAllocationRowInput[] },
+  ) {
+    return this.courseAllocationBulk.executeBulkMap(
+      this.resolveTenantId(req.user),
+      dto.academic_year,
+      dto.rows,
+      req.user.user_id,
     );
   }
 
@@ -727,20 +1562,36 @@ export class AcademicsController {
 
   @Get('dean/departments')
   @Roles('Dean', 'SuperAdmin')
-  deanDepartments(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanDepartments(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-    );
+  deanDepartments(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanDepartmentsPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanDepartments(tenantId, req.user.user_id);
   }
 
   @Get('dean/faculty-workload')
   @Roles('Dean', 'SuperAdmin')
-  deanFacultyWorkload(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanFacultyWorkload(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-    );
+  deanFacultyWorkload(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanFacultyWorkloadPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanFacultyWorkload(tenantId, req.user.user_id);
   }
 
   @Get('dean/timetable')
@@ -784,12 +1635,19 @@ export class AcademicsController {
   deanStudents(
     @Req() req: { user: AuthUser },
     @Query('lowAttendance') lowAttendance?: string,
+    @Query() query?: ListQueryParams,
   ) {
-    return this.academics.listDeanStudents(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-      lowAttendance === 'true',
-    );
+    const tenantId = this.resolveTenantId(req.user);
+    const low = lowAttendance === 'true';
+    if (query?.page || query?.limit) {
+      return this.academics.listDeanStudentsPaged(
+        tenantId,
+        req.user.user_id,
+        low,
+        query,
+      );
+    }
+    return this.academics.listDeanStudents(tenantId, req.user.user_id, low);
   }
 
   @Get('dean/student-monitor/:studentId/detail')
@@ -816,10 +1674,34 @@ export class AcademicsController {
 
   @Get('dean/grievances')
   @Roles('Dean', 'SuperAdmin')
-  deanGrievances(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanGrievances(
+  deanGrievances(
+    @Req() req: { user: AuthUser },
+    @Query() query: ListQueryParams,
+  ) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanGrievancesPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanGrievances(tenantId, req.user.user_id);
+  }
+
+  @Post('dean/grievances/:ticketId/resolve')
+  @Roles('Dean', 'SuperAdmin')
+  resolveDeanGrievance(
+    @Req() req: { user: AuthUser & { ip?: string } },
+    @Param('ticketId') ticketId: string,
+    @Body() body: { message?: string },
+  ) {
+    return this.academics.resolveDeanGrievance(
       this.resolveTenantId(req.user),
       req.user.user_id,
+      ticketId,
+      body.message,
+      this.auditMetaFromReq(req),
     );
   }
 
@@ -834,11 +1716,16 @@ export class AcademicsController {
 
   @Get('dean/inbox')
   @Roles('Dean', 'SuperAdmin')
-  deanInbox(@Req() req: { user: AuthUser }) {
-    return this.academics.listDeanInbox(
-      this.resolveTenantId(req.user),
-      req.user.user_id,
-    );
+  deanInbox(@Req() req: { user: AuthUser }, @Query() query: ListQueryParams) {
+    const tenantId = this.resolveTenantId(req.user);
+    if (query.page || query.limit) {
+      return this.academics.listDeanInboxPaged(
+        tenantId,
+        req.user.user_id,
+        query,
+      );
+    }
+    return this.academics.listDeanInbox(tenantId, req.user.user_id);
   }
 
   @Patch('hod/approvals/extra-classes/:adjustmentId')
@@ -1075,28 +1962,90 @@ export class AcademicsController {
 
   @Get('faculty/workspaces/courses')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultyWorkspaceCourses(@Req() req: { user: AuthUser }) {
+  async facultyWorkspaceCourses(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.listFacultyCourses(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
+      this.isHod(req.user),
     );
   }
 
   @Get('faculty/workspaces/timetable')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultyWorkspaceTimetable(@Req() req: { user: AuthUser }) {
+  async facultyWorkspaceTimetable(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.getWeeklyTimetable(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
+    );
+  }
+
+  @Get('faculty/workspaces/timetable/schedule-data')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  async facultyWorkspaceScheduleData(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
+    return this.facultyWorkspaces.getFacultyScheduleData(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      deptId,
+    );
+  }
+
+  @Post('faculty/workspaces/timetable/slots')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  facultyWorkspaceTimetableSlotsBatch(
+    @Req() req: { user: AuthUser },
+    @Body() dto: { slots: Array<any> },
+  ) {
+    return this.facultyWorkspaces.scheduleTimetableSlotBatch(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      dto,
+    );
+  }
+
+  @Get('faculty/workspaces/timetable/rooms/availability')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  getAvailableRoomsForSlot(
+    @Req() req: { user: AuthUser },
+    @Query('day') day: string,
+    @Query('startTime') startTime: string,
+    @Query('endTime') endTime: string,
+  ) {
+    if (!day || !startTime || !endTime) {
+      throw new BadRequestException('day, startTime, and endTime are required');
+    }
+    return this.facultyWorkspaces.getAvailableRoomsForSlot(
+      this.resolveTenantId(req.user),
+      parseInt(day, 10),
+      startTime,
+      endTime,
     );
   }
 
   @Get('faculty/workspaces/timetable/stats')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
-  facultyWorkspaceTimetableStats(@Req() req: { user: AuthUser }) {
+  async facultyWorkspaceTimetableStats(
+    @Req() req: { user: AuthUser },
+    @Query('deptId') deptIdRaw?: string,
+  ) {
+    const deptId = await this.resolveFacultyDeptId(req, deptIdRaw);
     return this.facultyWorkspaces.getTimetableStats(
       req.user.user_id,
       this.resolveTenantId(req.user),
+      deptId,
     );
   }
 
@@ -1158,20 +2107,23 @@ export class AcademicsController {
   }
 
   @Get('faculty/workspaces/grading-components')
-  @Roles('Faculty')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   listGradingComponents() {
     return this.facultyWorkspaces.listGradingComponents();
   }
 
   @Get('faculty/workspaces/course/:courseId/unified-marks')
-  @Roles('Faculty')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getUnifiedCourseMarks(
     @Req() req: { user: AuthUser },
     @Param('courseId') courseId: string,
     @Query('components') components?: string,
   ) {
     const componentList = components
-      ? components.split(',').map((item) => item.trim()).filter(Boolean)
+      ? components
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
       : undefined;
     return this.facultyWorkspaces.getUnifiedCourseMarks(
       req.user.user_id,
@@ -1182,7 +2134,7 @@ export class AcademicsController {
   }
 
   @Post('faculty/workspaces/course/:courseId/publish-all')
-  @Roles('Faculty')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   publishAllCourseMarks(
     @Req() req: { user: AuthUser },
     @Param('courseId') courseId: string,
@@ -1288,6 +2240,82 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/workspaces/invigilation/:assignmentId/swap-partners')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listInvigilationSwapPartners(
+    @Req() req: { user: AuthUser },
+    @Param('assignmentId') assignmentId: string,
+  ) {
+    return this.facultyWorkspaces.listInvigilationSwapPartners(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+    );
+  }
+
+  @Get('faculty/workspaces/invigilation-swaps')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listInvigilationSwaps(@Req() req: { user: AuthUser }) {
+    return this.facultyWorkspaces.listInvigilationSwaps(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+    );
+  }
+
+  @Post('faculty/workspaces/invigilation/:assignmentId/swap')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  requestInvigilationDutySwap(
+    @Req() req: { user: AuthUser },
+    @Param('assignmentId') assignmentId: string,
+    @Body()
+    body: { target_faculty_user_id?: string; reason?: string },
+  ) {
+    if (!body.target_faculty_user_id?.trim()) {
+      throw new BadRequestException('target_faculty_user_id is required');
+    }
+    if (!body.reason?.trim())
+      throw new BadRequestException('Reason is required');
+    return this.facultyWorkspaces.requestInvigilationDutySwap(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      assignmentId,
+      body.target_faculty_user_id,
+      body.reason,
+    );
+  }
+
+  @Post('faculty/workspaces/invigilation-swaps/:swapId/respond')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  respondInvigilationDutySwap(
+    @Req() req: { user: AuthUser },
+    @Param('swapId') swapId: string,
+    @Body() body: { accept?: boolean; comment?: string },
+  ) {
+    if (typeof body.accept !== 'boolean') {
+      throw new BadRequestException('accept (boolean) is required');
+    }
+    return this.facultyWorkspaces.respondInvigilationDutySwap(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      swapId,
+      body.accept,
+      body.comment,
+    );
+  }
+
+  @Post('faculty/workspaces/invigilation-swaps/:swapId/cancel')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  cancelInvigilationDutySwap(
+    @Req() req: { user: AuthUser },
+    @Param('swapId') swapId: string,
+  ) {
+    return this.facultyWorkspaces.cancelInvigilationDutySwap(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      swapId,
+    );
+  }
+
   @Post('faculty/workspaces/projects/assign')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   assignProjectGuide(
@@ -1379,6 +2407,10 @@ export class AcademicsController {
 
   @Get('hod/funding-requests')
   @Roles('HOD', 'Dean', 'SuperAdmin')
+  // This workspace is launched with Finance for finance-only tenants.  The
+  // implementation remains in the academics controller for compatibility,
+  // but its business owner is Finance/Procurement rather than SIS.
+  @BelongsToModule('finance_procurement')
   listHodFundingRequests(@Req() req: { user: AuthUser }) {
     return this.facultyWorkspaces.listHodFundingRequests(
       req.user.user_id,
@@ -1388,6 +2420,7 @@ export class AcademicsController {
 
   @Patch('hod/funding-requests/:requestId')
   @Roles('HOD', 'Dean', 'SuperAdmin')
+  @BelongsToModule('finance_procurement')
   updateHodFundingRequest(
     @Req() req: { user: AuthUser },
     @Param('requestId') requestId: string,
@@ -1408,6 +2441,7 @@ export class AcademicsController {
   listDeanFundingRequests(@Req() req: { user: AuthUser }) {
     return this.facultyWorkspaces.listDeanFundingRequests(
       this.resolveTenantId(req.user),
+      req.user.user_id,
     );
   }
 
@@ -1479,6 +2513,34 @@ export class AcademicsController {
     @Query('courseId') courseId: string,
   ) {
     return this.facultyWorkspaces.getFacultySubjectStudentReport(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      studentUserId,
+    );
+  }
+
+  @Get('faculty/workspaces/student-directory')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  searchDepartmentStudentDirectory(
+    @Req() req: { user: AuthUser },
+    @Query('q') q: string,
+  ) {
+    return this.facultyWorkspaces.searchDepartmentStudents(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      q,
+    );
+  }
+
+  @Get('faculty/workspaces/student-directory/:studentUserId/report')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  departmentStudentReport(
+    @Req() req: { user: AuthUser },
+    @Param('studentUserId') studentUserId: string,
+    @Query('courseId') courseId: string,
+  ) {
+    return this.facultyWorkspaces.getDepartmentStudentReport(
       req.user.user_id,
       this.resolveTenantId(req.user),
       courseId,
@@ -1573,6 +2635,96 @@ export class AcademicsController {
     );
   }
 
+  @Get('faculty/courses/:courseId/announcements')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listFacultyCourseAnnouncements(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.listAnnouncements(
+      this.resolveTenantId(req.user),
+      courseId,
+      { userId: req.user.user_id, role: 'faculty' },
+    );
+  }
+
+  @Post('faculty/courses/:courseId/announcements')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  createFacultyCourseAnnouncement(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+    @Body() body: { title?: string; body?: string },
+  ) {
+    return this.courseLms.createAnnouncement(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+      body,
+    );
+  }
+
+  @Get('student/courses/:courseId/announcements')
+  @Roles('Student')
+  listStudentCourseAnnouncements(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.listAnnouncements(
+      this.resolveTenantId(req.user),
+      courseId,
+      { userId: req.user.user_id, role: 'student' },
+    );
+  }
+
+  @Get('faculty/question-bank')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  listFacultyQuestionBank(
+    @Req() req: { user: AuthUser },
+    @Query('courseId') courseId?: string,
+  ) {
+    return this.courseLms.listQuestionBank(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      courseId,
+    );
+  }
+
+  @Post('faculty/question-bank')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  createFacultyQuestionBankItem(
+    @Req() req: { user: AuthUser },
+    @Body()
+    body: {
+      course_id?: string;
+      question_text?: string;
+      option_a?: string;
+      option_b?: string;
+      option_c?: string;
+      option_d?: string;
+      correct_option?: string;
+      tags?: string;
+    },
+  ) {
+    return this.courseLms.createQuestionBankItem(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      body,
+    );
+  }
+
+  @Delete('faculty/question-bank/:questionId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  deleteFacultyQuestionBankItem(
+    @Param('questionId') questionId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.deleteQuestionBankItem(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      questionId,
+    );
+  }
+
   @Post('faculty/courses/:courseId/syllabus')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   setupSyllabus(
@@ -1652,6 +2804,19 @@ export class AcademicsController {
     );
   }
 
+  @Delete('faculty/courses/modules/:moduleId')
+  @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
+  deleteCourseModule(
+    @Param('moduleId') moduleId: string,
+    @Req() req: { user: AuthUser },
+  ) {
+    return this.courseLms.deleteModule(
+      req.user.user_id,
+      this.resolveTenantId(req.user),
+      moduleId,
+    );
+  }
+
   @Delete('faculty/courses/materials/:materialId')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   deleteCourseMaterial(
@@ -1672,7 +2837,12 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFiles() files: Express.Multer.File[],
-    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    @Body()
+    body: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     return this.courseLms.uploadModuleMaterials(
       req.user.user_id,
@@ -1690,7 +2860,12 @@ export class AcademicsController {
     @Param('moduleId') moduleId: string,
     @Req() req: { user: AuthUser },
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { title?: string; material_type?: string; allocation_ids?: string | string[] },
+    @Body()
+    body: {
+      title?: string;
+      material_type?: string;
+      allocation_ids?: string | string[];
+    },
   ) {
     return this.courseLms.completeModuleWithUpload(
       req.user.user_id,
@@ -1801,5 +2976,45 @@ export class AcademicsController {
 
   private resolveTenantId(user: AuthUser) {
     return user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  private auditMetaFromReq(req: {
+    user: AuthUser;
+    headers?: Record<string, string | string[] | undefined>;
+    ip?: string;
+  }) {
+    const forwarded = req.headers?.['x-forwarded-for'];
+    const ip =
+      (typeof forwarded === 'string'
+        ? forwarded.split(',')[0]?.trim()
+        : undefined) ??
+      req.ip ??
+      undefined;
+    const userAgent = req.headers?.['user-agent'];
+    return {
+      role: req.user.role ?? 'Dean',
+      ip,
+      userAgent: typeof userAgent === 'string' ? userAgent : undefined,
+    };
+  }
+
+  private async resolveFacultyDeptId(
+    req: { user: AuthUser },
+    deptIdRaw?: string,
+  ): Promise<number | null> {
+    const deptId = this.teachingDepartments.resolveOptionalDeptId(deptIdRaw);
+    if (deptId != null) {
+      await this.teachingDepartments.assertTeachesInDepartment(
+        req.user.user_id,
+        this.resolveTenantId(req.user),
+        deptId,
+      );
+    }
+    return deptId;
+  }
+
+  private isHod(user: AuthUser) {
+    return [...(user.roles ?? []), user.role ?? '']
+      .some((role) => String(role).toLowerCase() === 'hod');
   }
 }

@@ -1,0 +1,1010 @@
+{
+  "academic_year": "2026-2027",
+  "program_name": "BPT",
+  "program_code": "BPT",
+  "dept_name": "BPT",
+  "faculty": {
+    "RG": "riya.gupta@mygyanvihar.com",
+    "PB": "prachi.baheti@mygyanvihar.com",
+    "AS": "ajit.surana@mygyanvihar.com",
+    "HOD": "gaurav.agarwal@mygyanvihar.com",
+    "AD": "gaurav.agarwal@mygyanvihar.com",
+    "HM": "gaurav.agarwal@mygyanvihar.com",
+    "SR": "gaurav.agarwal@mygyanvihar.com",
+    "SS": "gaurav.agarwal@mygyanvihar.com",
+    "VS": "gaurav.agarwal@mygyanvihar.com",
+    "NF": "gaurav.agarwal@mygyanvihar.com",
+    "NF 1": "gaurav.agarwal@mygyanvihar.com",
+    "NF 2": "gaurav.agarwal@mygyanvihar.com"
+  },
+  "hod_email": "gaurav.agarwal@mygyanvihar.com",
+  "mentorship_by_semester": {
+    "3": "RG",
+    "5": "RG"
+  },
+  "semesters": {
+    "III": {
+      "room": "BPT-LT-1",
+      "section": "A",
+      "courses": [
+        {
+          "code": "BPT3EXERCIT",
+          "name": "EXERCISE THERAPY 1",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "RG",
+          "semester": "III"
+        },
+        {
+          "code": "BPT3PHARMAT",
+          "name": "Pharmacology-I",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "AD",
+          "semester": "III"
+        },
+        {
+          "code": "BPT3CASESET",
+          "name": "case seminar / Pathology Microbiology",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HM",
+          "semester": "III"
+        },
+        {
+          "code": "BPT3CASESE02",
+          "name": "case seminar ( SS",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "HOD",
+          "semester": "III"
+        },
+        {
+          "code": "BPT3ELECTRT",
+          "name": "Electrotherapy 1",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "NF 1",
+          "semester": "III"
+        },
+        {
+          "code": "BPT3CASESE07",
+          "name": "Case Seminar / Pharmacology -I",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "AD",
+          "semester": "III"
+        },
+        {
+          "code": "BPT3ELECTRP",
+          "name": "Electrotherapy 1 (Lab)",
+          "credits": 2,
+          "type": "LAB",
+          "faculty": "NF 1",
+          "semester": "III"
+        }
+      ],
+      "slots": [
+        {
+          "course": "BPT3EXERCIT",
+          "day": 1,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "RG",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3PHARMAT",
+          "day": 1,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "AD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESET",
+          "day": 1,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "HM",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESE02",
+          "day": 1,
+          "start": "02:20",
+          "end": "03:10",
+          "faculty": "HOD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3EXERCIT",
+          "day": 2,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "RG",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3PHARMAT",
+          "day": 2,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "AD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESET",
+          "day": 2,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "HM",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESE02",
+          "day": 2,
+          "start": "02:20",
+          "end": "03:10",
+          "faculty": "HOD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3EXERCIT",
+          "day": 3,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "RG",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3PHARMAT",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "AD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESET",
+          "day": 3,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "HM",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESE02",
+          "day": 3,
+          "start": "02:20",
+          "end": "03:10",
+          "faculty": "HOD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3ELECTRT",
+          "day": 4,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "NF 1",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESE07",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "AD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3ELECTRP",
+          "day": 4,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "NF 1",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3ELECTRT",
+          "day": 5,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "NF 1",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESE07",
+          "day": 5,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "AD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3ELECTRP",
+          "day": 5,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "NF 1",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3ELECTRT",
+          "day": 6,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "NF 1",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3CASESE07",
+          "day": 6,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "AD",
+          "room": "BPT-LT-1",
+          "section": "A"
+        },
+        {
+          "course": "BPT3ELECTRP",
+          "day": 6,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "NF 1",
+          "room": "BPT-LT-1",
+          "section": "A"
+        }
+      ]
+    },
+    "V": {
+      "room": "BPT-LT-2",
+      "section": "A",
+      "courses": [
+        {
+          "code": "BPT5CBRT",
+          "name": "CBR",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "SS",
+          "semester": "V"
+        },
+        {
+          "code": "BPT5CASESET",
+          "name": "CASE SEMINAR /clinical surgery &obs Gyane",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "SR",
+          "semester": "V"
+        },
+        {
+          "code": "BPT5CASESE02",
+          "name": "CASE SEMINAR",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "AD",
+          "semester": "V"
+        },
+        {
+          "code": "BPT5CLINICT",
+          "name": "CLINICAL ORTHO",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "RG",
+          "semester": "V"
+        },
+        {
+          "code": "BPT5CASESE10",
+          "name": "CASE SEMINAR /CBR",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "SS",
+          "semester": "V"
+        },
+        {
+          "code": "BPT5CLINIC02",
+          "name": "clinical surgery &obs Gyane",
+          "credits": 4,
+          "type": "THEORY",
+          "faculty": "SR",
+          "semester": "V"
+        }
+      ],
+      "slots": [
+        {
+          "course": "BPT5CBRT",
+          "day": 1,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "SS",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESET",
+          "day": 1,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "SR",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE02",
+          "day": 1,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "AD",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE02",
+          "day": 1,
+          "start": "02:20",
+          "end": "03:10",
+          "faculty": "HM",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CBRT",
+          "day": 2,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "SS",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESET",
+          "day": 2,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "SR",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE02",
+          "day": 2,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "AD",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE02",
+          "day": 2,
+          "start": "02:20",
+          "end": "03:10",
+          "faculty": "HM",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CBRT",
+          "day": 3,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "SS",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESET",
+          "day": 3,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "SR",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE02",
+          "day": 3,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "AD",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE02",
+          "day": 3,
+          "start": "02:20",
+          "end": "03:10",
+          "faculty": "HM",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CLINICT",
+          "day": 4,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "RG",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE10",
+          "day": 4,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "SS",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CLINIC02",
+          "day": 4,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "SR",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CLINICT",
+          "day": 5,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "RG",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE10",
+          "day": 5,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "SS",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CLINIC02",
+          "day": 5,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "SR",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CLINICT",
+          "day": 6,
+          "start": "09:10",
+          "end": "10:00",
+          "faculty": "RG",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CASESE10",
+          "day": 6,
+          "start": "10:00",
+          "end": "10:50",
+          "faculty": "SS",
+          "room": "BPT-LT-2",
+          "section": "A"
+        },
+        {
+          "course": "BPT5CLINIC02",
+          "day": 6,
+          "start": "11:40",
+          "end": "12:30",
+          "faculty": "SR",
+          "room": "BPT-LT-2",
+          "section": "A"
+        }
+      ]
+    }
+  },
+  "faculty_timetable_slots": [
+    {
+      "course": "BPT3EXERCI02",
+      "semester": "III",
+      "day": 1,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT3EXERCI03",
+      "semester": "III",
+      "day": 1,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT3EXERCI02",
+      "semester": "III",
+      "day": 2,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT3EXERCI03",
+      "semester": "III",
+      "day": 2,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT3EXERCI02",
+      "semester": "III",
+      "day": 3,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT3EXERCI03",
+      "semester": "III",
+      "day": 3,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT5CLINIC03",
+      "semester": "V",
+      "day": 4,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT5CLINIC04",
+      "semester": "V",
+      "day": 4,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT5CLINIC03",
+      "semester": "V",
+      "day": 5,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT5CLINIC04",
+      "semester": "V",
+      "day": 5,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT5CLINIC03",
+      "semester": "V",
+      "day": 6,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT5CLINIC04",
+      "semester": "V",
+      "day": 6,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "RG",
+      "room": "BPT-LT-1"
+    },
+    {
+      "course": "BPT7PTINCAT",
+      "semester": "VII",
+      "day": 1,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "PB",
+      "room": "BPT-LT-2"
+    },
+    {
+      "course": "BPT7PTINCAT",
+      "semester": "VII",
+      "day": 2,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "PB",
+      "room": "BPT-LT-2"
+    },
+    {
+      "course": "BPT7PTINCAT",
+      "semester": "VII",
+      "day": 3,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "PB",
+      "room": "BPT-LT-2"
+    },
+    {
+      "course": "BPT7PTINCAT",
+      "semester": "VII",
+      "day": 4,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "PB",
+      "room": "BPT-LT-2"
+    },
+    {
+      "course": "BPT7PTINCAT",
+      "semester": "VII",
+      "day": 5,
+      "start": "10:00",
+      "end": "10:50",
+      "faculty": "PB",
+      "room": "BPT-LT-2"
+    },
+    {
+      "course": "BPT7PTINNET",
+      "semester": "VII",
+      "day": 1,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AS",
+      "room": "BPT-LT-3"
+    },
+    {
+      "course": "BPT7PTINNET",
+      "semester": "VII",
+      "day": 2,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AS",
+      "room": "BPT-LT-3"
+    },
+    {
+      "course": "BPT7PTINNET",
+      "semester": "VII",
+      "day": 3,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AS",
+      "room": "BPT-LT-3"
+    },
+    {
+      "course": "BPT7PTINNET",
+      "semester": "VII",
+      "day": 4,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AS",
+      "room": "BPT-LT-3"
+    },
+    {
+      "course": "BPT7PTINNET",
+      "semester": "VII",
+      "day": 5,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AS",
+      "room": "BPT-LT-3"
+    },
+    {
+      "course": "BPT7PTINNEP",
+      "semester": "VII",
+      "day": 6,
+      "start": "09:10",
+      "end": "10:00",
+      "faculty": "AS",
+      "room": "BPT-LT-3"
+    }
+  ],
+  "catalog": [
+    {
+      "code": "BPT3EXERCIT",
+      "name": "EXERCISE THERAPY 1",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RG",
+      "semester": "III"
+    },
+    {
+      "code": "BPT3PHARMAT",
+      "name": "Pharmacology-I",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AD",
+      "semester": "III"
+    },
+    {
+      "code": "BPT3CASESET",
+      "name": "case seminar / Pathology Microbiology",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HM",
+      "semester": "III"
+    },
+    {
+      "code": "BPT3CASESE02",
+      "name": "case seminar ( SS",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "HOD",
+      "semester": "III"
+    },
+    {
+      "code": "BPT3ELECTRT",
+      "name": "Electrotherapy 1",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "NF 1",
+      "semester": "III"
+    },
+    {
+      "code": "BPT3CASESE07",
+      "name": "Case Seminar / Pharmacology -I",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AD",
+      "semester": "III"
+    },
+    {
+      "code": "BPT3ELECTRP",
+      "name": "Electrotherapy 1 (Lab)",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "NF 1",
+      "semester": "III"
+    },
+    {
+      "code": "BPT5CBRT",
+      "name": "CBR",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "SS",
+      "semester": "V"
+    },
+    {
+      "code": "BPT5CASESET",
+      "name": "CASE SEMINAR /clinical surgery &obs Gyane",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "SR",
+      "semester": "V"
+    },
+    {
+      "code": "BPT5CASESE02",
+      "name": "CASE SEMINAR",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AD",
+      "semester": "V"
+    },
+    {
+      "code": "BPT5CLINICT",
+      "name": "CLINICAL ORTHO",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RG",
+      "semester": "V"
+    },
+    {
+      "code": "BPT5CASESE10",
+      "name": "CASE SEMINAR /CBR",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "SS",
+      "semester": "V"
+    },
+    {
+      "code": "BPT5CLINIC02",
+      "name": "clinical surgery &obs Gyane",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "SR",
+      "semester": "V"
+    },
+    {
+      "code": "BPT3EXERCI02",
+      "name": "EXERCISE THERAPY 1 BATCH A 3RD SEM",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RG",
+      "semester": "III"
+    },
+    {
+      "code": "BPT3EXERCI03",
+      "name": "EXERCISE THERAPY 1 BATCH B 3RD SEM",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RG",
+      "semester": "III"
+    },
+    {
+      "code": "BPT5CLINIC03",
+      "name": "CLINICAL ORTHO BATCH A V SEM",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RG",
+      "semester": "V"
+    },
+    {
+      "code": "BPT5CLINIC04",
+      "name": "CLINICAL ORTHO BATCH B (V SEM)",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "RG",
+      "semester": "V"
+    },
+    {
+      "code": "BPT7PTINCAT",
+      "name": "PT in Cardiotoracic & Respiratory Conditions 7TH SEM",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "PB",
+      "semester": "VII"
+    },
+    {
+      "code": "BPT7PTINNET",
+      "name": "PT in Neurological Conditions-I 7TH SEM",
+      "credits": 4,
+      "type": "THEORY",
+      "faculty": "AS",
+      "semester": "VII"
+    },
+    {
+      "code": "BPT7PTINNEP",
+      "name": "PT in Neurological Conditions-I 7TH SEM LAB",
+      "credits": 2,
+      "type": "LAB",
+      "faculty": "AS",
+      "semester": "VII"
+    }
+  ],
+  "students": [
+    {
+      "email": "akansha.2550136@mygyanvihar.com",
+      "semester": 3,
+      "section": "A"
+    },
+    {
+      "email": "chaya.2547767@mygyanvihar.com",
+      "semester": 3,
+      "section": "A"
+    },
+    {
+      "email": "anant.2547204@mygyanvihar.com",
+      "semester": 3,
+      "section": "A"
+    },
+    {
+      "email": "balveer.2550122@mygyanvihar.com",
+      "semester": 3,
+      "section": "A"
+    },
+    {
+      "email": "chandra.2548459@mygyanvihar.com",
+      "semester": 3,
+      "section": "A"
+    },
+    {
+      "email": "harendra.2455633@mygyanvihar.com",
+      "semester": 5,
+      "section": "A"
+    },
+    {
+      "email": "anshu.2453216@mygyanvihar.com",
+      "semester": 5,
+      "section": "A"
+    },
+    {
+      "email": "akansha.2455506@mygyanvihar.com",
+      "semester": 5,
+      "section": "A"
+    },
+    {
+      "email": "harsh.2451251@mygyanvihar.com",
+      "semester": 5,
+      "section": "A"
+    },
+    {
+      "email": "mantu.2449522@mygyanvihar.com",
+      "semester": 5,
+      "section": "A"
+    }
+  ],
+  "student_users_to_ensure": [
+    {
+      "email": "akansha.2550136@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Akansha 2550136"
+    },
+    {
+      "email": "chaya.2547767@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Chaya 2547767"
+    },
+    {
+      "email": "anant.2547204@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Anant 2547204"
+    },
+    {
+      "email": "balveer.2550122@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Balveer 2550122"
+    },
+    {
+      "email": "chandra.2548459@mygyanvihar.com",
+      "semester": 3,
+      "section": "A",
+      "name": "Chandra 2548459"
+    },
+    {
+      "email": "harendra.2455633@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Harendra 2455633"
+    },
+    {
+      "email": "anshu.2453216@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Anshu 2453216"
+    },
+    {
+      "email": "akansha.2455506@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Akansha 2455506"
+    },
+    {
+      "email": "harsh.2451251@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Harsh 2451251"
+    },
+    {
+      "email": "mantu.2449522@mygyanvihar.com",
+      "semester": 5,
+      "section": "A",
+      "name": "Mantu 2449522"
+    }
+  ]
+}

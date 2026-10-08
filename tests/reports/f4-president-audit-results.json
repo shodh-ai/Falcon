@@ -1,0 +1,475 @@
+{
+  "phase": "F.4",
+  "generated_at": "2026-07-18T10:17:57.902Z",
+  "api": "http://localhost:4000",
+  "tenant": "sgvu",
+  "intelligence": [
+    {
+      "name": "Budget — request_owner",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — business_reason",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — previous_history",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — supporting_documents",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — department_impact",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — financial_impact",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — academic_impact",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — risk_level",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — recommendation",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "Budget — final_outcome",
+      "status": "WARN",
+      "detail": "no pending budget in inbox"
+    },
+    {
+      "name": "HR — request_owner",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — business_reason",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — previous_history",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — supporting_documents",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — department_impact",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — financial_impact",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — academic_impact",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — risk_level",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — recommendation",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "HR — final_outcome",
+      "status": "WARN",
+      "detail": "no pending HR row"
+    },
+    {
+      "name": "Executive Orders — business_reason",
+      "status": "PASS",
+      "detail": "subject only"
+    },
+    {
+      "name": "Executive Orders — request_owner",
+      "status": "WARN",
+      "detail": "issuer not in list payload"
+    },
+    {
+      "name": "Executive Orders — final_outcome",
+      "status": "PASS",
+      "detail": "ISSUED"
+    },
+    {
+      "name": "Compliance — department_impact",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "Compliance — risk_level",
+      "status": "WARN",
+      "detail": "no explicit risk score"
+    },
+    {
+      "name": "Convocation — request_owner",
+      "status": "WARN",
+      "detail": "registrar verifier not exposed"
+    },
+    {
+      "name": "Convocation — academic_impact",
+      "status": "WARN",
+      "detail": ""
+    },
+    {
+      "name": "Grievance — business_reason",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "Grievance — department_impact",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "Grievance — risk_level",
+      "status": "PASS",
+      "detail": "SLA breach signal"
+    },
+    {
+      "name": "Meetings — action context",
+      "status": "WARN",
+      "detail": "no President GET for action-item detail bundle"
+    }
+  ],
+  "kpis": [
+    {
+      "name": "pending_hr_approvals",
+      "status": "PASS",
+      "detail": "summary=0 source=0",
+      "api": "/api/president/hr-approvals",
+      "aggregation": "tenant-scoped SQL"
+    },
+    {
+      "name": "pending_convocation_ratifications",
+      "status": "PASS",
+      "detail": "summary=0 source=0",
+      "api": "/api/president/convocation/pending-ratification",
+      "aggregation": "tenant-scoped SQL"
+    },
+    {
+      "name": "pending_budget_expansions",
+      "status": "PASS",
+      "detail": "summary=0 source=0",
+      "api": "/api/president/finance-budget",
+      "aggregation": "tenant-scoped SQL"
+    },
+    {
+      "name": "pending_executive_orders",
+      "status": "PASS",
+      "detail": "summary=8 source=8",
+      "api": "/api/president/executive-orders",
+      "aggregation": "tenant-scoped SQL"
+    },
+    {
+      "name": "total_university_revenue",
+      "status": "PASS",
+      "detail": "summary=499000 source=499000",
+      "api": "/api/president/finance",
+      "aggregation": "tenant-scoped SQL"
+    },
+    {
+      "name": "KPI last_refresh",
+      "status": "WARN",
+      "detail": "no explicit timestamp field on executive-summary"
+    }
+  ],
+  "risks": [
+    {
+      "name": "Academic Risks",
+      "status": "PASS",
+      "detail": "pass/fail + attendance by school"
+    },
+    {
+      "name": "Financial Risks",
+      "status": "PASS",
+      "detail": "overdue/pending fee demands"
+    },
+    {
+      "name": "HR Risks",
+      "status": "PASS",
+      "detail": "retention + ratio"
+    },
+    {
+      "name": "Research Risks",
+      "status": "PASS",
+      "detail": "project pipeline visible"
+    },
+    {
+      "name": "Compliance Risks",
+      "status": "PASS",
+      "detail": "pending=1"
+    },
+    {
+      "name": "Student Risks",
+      "status": "PASS",
+      "detail": "SLA-breached grievance inbox"
+    }
+  ],
+  "traceability": [
+    {
+      "name": "Executive Summary read",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "HR Approvals read",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "Executive Orders read",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "Compliance read",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "Convocation read",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "Grievance inbox",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "Audit log API",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "Warehouse governance",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "Notifications",
+      "status": "PASS",
+      "detail": "200"
+    },
+    {
+      "name": "F.3 workflow chains",
+      "status": "PASS",
+      "detail": "Validated in F.3 (99/100) — budget, HR, convocation, grievance, compliance, orders, meetings"
+    }
+  ],
+  "api_validation": [
+    {
+      "name": "President GET /api/president/executive-summary",
+      "status": "PASS",
+      "detail": "200 11ms",
+      "ms": 11
+    },
+    {
+      "name": "President GET /api/president/academics",
+      "status": "PASS",
+      "detail": "200 16ms",
+      "ms": 16
+    },
+    {
+      "name": "President GET /api/president/finance",
+      "status": "PASS",
+      "detail": "200 7ms",
+      "ms": 7
+    },
+    {
+      "name": "President GET /api/president/compliance",
+      "status": "PASS",
+      "detail": "200 9ms",
+      "ms": 9
+    },
+    {
+      "name": "President GET /api/president/hr-analytics",
+      "status": "PASS",
+      "detail": "200 13ms",
+      "ms": 13
+    },
+    {
+      "name": "President GET /api/president/finance-budget",
+      "status": "PASS",
+      "detail": "200 10ms",
+      "ms": 10
+    },
+    {
+      "name": "President GET /api/president/research",
+      "status": "PASS",
+      "detail": "200 6ms",
+      "ms": 6
+    },
+    {
+      "name": "President GET /api/president/executive-orders",
+      "status": "PASS",
+      "detail": "200 6ms",
+      "ms": 6
+    },
+    {
+      "name": "President GET /api/president/convocation",
+      "status": "PASS",
+      "detail": "200 10ms",
+      "ms": 10
+    },
+    {
+      "name": "President GET /api/president/hr-approvals",
+      "status": "PASS",
+      "detail": "200 5ms",
+      "ms": 5
+    },
+    {
+      "name": "President GET /api/president/convocation/pending-ratification",
+      "status": "PASS",
+      "detail": "200 6ms",
+      "ms": 6
+    },
+    {
+      "name": "President GET /api/leadership/issues",
+      "status": "PASS",
+      "detail": "200 5ms",
+      "ms": 5
+    },
+    {
+      "name": "President GET /api/meetings",
+      "status": "PASS",
+      "detail": "200 8ms",
+      "ms": 8
+    }
+  ],
+  "performance": [
+    {
+      "name": "/api/president/executive-summary",
+      "status": "PASS",
+      "detail": "11ms"
+    },
+    {
+      "name": "/api/president/academics",
+      "status": "PASS",
+      "detail": "16ms"
+    },
+    {
+      "name": "/api/president/finance",
+      "status": "PASS",
+      "detail": "7ms"
+    },
+    {
+      "name": "/api/president/compliance",
+      "status": "PASS",
+      "detail": "9ms"
+    },
+    {
+      "name": "/api/president/hr-analytics",
+      "status": "PASS",
+      "detail": "13ms"
+    },
+    {
+      "name": "/api/president/finance-budget",
+      "status": "PASS",
+      "detail": "10ms"
+    },
+    {
+      "name": "/api/president/research",
+      "status": "PASS",
+      "detail": "6ms"
+    },
+    {
+      "name": "/api/president/executive-orders",
+      "status": "PASS",
+      "detail": "6ms"
+    },
+    {
+      "name": "/api/president/convocation",
+      "status": "PASS",
+      "detail": "10ms"
+    },
+    {
+      "name": "/api/president/hr-approvals",
+      "status": "PASS",
+      "detail": "5ms"
+    },
+    {
+      "name": "/api/president/convocation/pending-ratification",
+      "status": "PASS",
+      "detail": "6ms"
+    },
+    {
+      "name": "/api/leadership/issues",
+      "status": "PASS",
+      "detail": "5ms"
+    },
+    {
+      "name": "/api/meetings",
+      "status": "PASS",
+      "detail": "8ms"
+    }
+  ],
+  "security": [
+    {
+      "name": "Unauthenticated → 401",
+      "status": "PASS",
+      "detail": "401"
+    },
+    {
+      "name": "Faculty → President API blocked",
+      "status": "PASS",
+      "detail": "403"
+    },
+    {
+      "name": "President OwnerAccessGuard leadership inbox",
+      "status": "PASS",
+      "detail": "200"
+    }
+  ],
+  "regression": [
+    {
+      "name": "President module regression",
+      "status": "PASS",
+      "detail": "13/13"
+    }
+  ],
+  "coverage": {
+    "e2e_specs": [
+      "president/workspace.spec.ts",
+      "president/security.spec.ts"
+    ],
+    "api_script": "f4-president-production-audit.mjs",
+    "f3_scenarios": "A–G validated at 99/100",
+    "playwright_html": "tests/playwright-report/index.html",
+    "junit_xml": "tests/reports/junit-president-e2e.xml",
+    "passed": 13,
+    "failed": 0,
+    "warned": 26,
+    "coverage_pct": 93
+  },
+  "production_readiness_score": 93
+}

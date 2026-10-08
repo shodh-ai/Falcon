@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import {
@@ -7,6 +7,7 @@ import {
   type FalconNotificationIntent,
   type FalconNotificationSeverity,
 } from '../../entities/falcon-notification.entity';
+import { NotificationsGateway } from './notifications.gateway';
 
 export type CreateFalconNotificationInput = {
   tenantId: string;
@@ -28,6 +29,7 @@ export class FalconNotificationsService {
   constructor(
     @InjectRepository(FalconNotification)
     private readonly notifications: Repository<FalconNotification>,
+    @Optional() private readonly realtime?: NotificationsGateway,
   ) {}
 
   async create(
@@ -46,7 +48,13 @@ export class FalconNotificationsService {
       metadata: input.metadata ?? null,
       is_read: false,
     });
-    return this.notifications.save(row);
+    const saved = await this.notifications.save(row);
+    try {
+      this.realtime?.emitNotificationCreated(saved);
+    } catch {
+      // Realtime fan-out must never block persistence.
+    }
+    return saved;
   }
 
   private scopedWhere(tenantId: string, userId: string) {
@@ -92,6 +100,7 @@ export class FalconNotificationsService {
     });
     if (!row) throw new NotFoundException('Notification not found');
     row.is_read = true;
+    row.read_at = row.read_at ?? new Date();
     return this.notifications.save(row);
   }
 
@@ -103,7 +112,7 @@ export class FalconNotificationsService {
         is_read: false,
         deleted_at: IsNull(),
       },
-      { is_read: true },
+      { is_read: true, read_at: new Date() },
     );
     return { updated: true };
   }

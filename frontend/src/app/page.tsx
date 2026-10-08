@@ -7,15 +7,18 @@ import { api } from '@/lib/api';
 import { getPostLoginPath } from '@/lib/auth-routing';
 import { FalconLogo } from '@/components/brand/FalconLogo';
 import { FalconLoader } from '@/components/brand/FalconLoader';
-import { LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
 
 export default function Home() {
   const { isAuthenticated, login, user, isLoading, refreshUser } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [forgotSent, setForgotSent] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated || !user || isLoading) return;
@@ -32,8 +35,13 @@ export default function Home() {
     setLocalError(null);
     try {
       const result = await api.localLogin(email.trim(), password);
-      login(result.token, result.user);
-      const fresh = await refreshUser();
+      login(result.token, result.user, rememberMe);
+      let fresh = null;
+      try {
+        fresh = await refreshUser();
+      } catch {
+        /* keep login payload if profile refresh fails */
+      }
       router.push(getPostLoginPath(fresh ?? result.user));
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : 'Login failed');
@@ -163,16 +171,64 @@ export default function Home() {
                   <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-gray-700">
                     Password
                   </label>
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="password123"
-                    className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sgvu-gold"
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="w-full rounded-xl border border-gray-200 px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-sgvu-gold"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer text-gray-400 transition-colors hover:text-sgvu-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold focus-visible:ring-offset-2"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-5 w-5" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-5 w-5" aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
                 </div>
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <label className="inline-flex items-center gap-2 text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                    />
+                    Remember me
+                  </label>
+                  <button
+                    type="button"
+                    className="font-medium text-sgvu-navy underline-offset-2 hover:underline"
+                    onClick={async () => {
+                      if (!email.trim()) {
+                        setLocalError('Enter your email first');
+                        return;
+                      }
+                      try {
+                        const data = await api.forgotPassword(email.trim());
+                        setForgotSent(
+                          data.reset_token
+                            ? `Reset token (dev): ${data.reset_token}`
+                            : 'If the account exists, a reset link was issued.',
+                        );
+                        setLocalError(null);
+                      } catch {
+                        setLocalError('Could not start password reset');
+                      }
+                    }}
+                  >
+                    Forgot password
+                  </button>
+                </div>
+                {forgotSent ? <p className="text-sm text-emerald-700">{forgotSent}</p> : null}
                 {localError && <p className="text-sm text-red-600">{localError}</p>}
                 <button
                   type="submit"
@@ -191,8 +247,13 @@ export default function Home() {
               </form>
 
               <p className="text-center text-xs font-medium text-muted-foreground">
-                Google: @mygyanvihar.com / @mygyanvihar.org · QA: library@ / registrar@ /
-                dev.librarian@ / dev.registrar@ — password123
+                Google SSO: institutional @mygyanvihar.com / @mygyanvihar.org accounts
+                {process.env.NODE_ENV === 'development' ? (
+                  <>
+                    {' '}
+                    · Local QA seeds use password123 (never on public production)
+                  </>
+                ) : null}
               </p>
             </div>
           </div>

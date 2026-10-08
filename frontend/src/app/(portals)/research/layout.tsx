@@ -8,7 +8,12 @@ import { filterPortalConfigForRole, researchPortal } from '@/lib/navigation';
 
 export default function ResearchLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const config = filterPortalConfigForRole(researchPortal, user?.role);
+  const roles = user?.roles?.length
+    ? user.roles
+    : user?.role
+      ? [user.role]
+      : [];
+  const config = filterPortalConfigForRole(researchPortal, roles);
 
   return (
     <RoleGate>

@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
+import { isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoHelpdeskTicketDetail } from '@/lib/mock/faculty-portal-demo-modules';
 
 type TicketDetail = {
   ticket_id: string;
@@ -63,11 +65,20 @@ export function MyHelpdeskTicketDetail({
       const data = await api.get<TicketDetail>(
         `/api/helpdesk/tickets/${encodeURIComponent(ticketId)}`,
       );
-      setTicket(data);
-      setError(null);
+      const resolved = withFacultyDemoFallback(
+        data,
+        facultyDemoHelpdeskTicketDetail(ticketId) as TicketDetail | null,
+        (v) => !v?.ticket_id,
+      );
+      setTicket(resolved);
+      setError(resolved ? null : 'Ticket not found');
     } catch (e) {
-      setTicket(null);
-      setError(e instanceof Error ? e.message : 'Ticket not found');
+      const resolved = withFacultyDemoFallback(
+        null,
+        facultyDemoHelpdeskTicketDetail(ticketId) as TicketDetail | null,
+      );
+      setTicket(resolved);
+      setError(resolved ? null : e instanceof Error ? e.message : 'Ticket not found');
     } finally {
       setLoading(false);
     }
@@ -84,6 +95,27 @@ export function MyHelpdeskTicketDetail({
     }
     setSubmitting(true);
     try {
+      if (isFacultyDemoSmokeId(ticket.ticket_id)) {
+        setTicket((prev) =>
+          prev
+            ? {
+                ...prev,
+                conversation: [
+                  ...(prev.conversation ?? []),
+                  {
+                    sender_user_id: 'faculty-demo',
+                    sender_role: 'FACULTY',
+                    message: message.trim(),
+                    sent_at: new Date().toISOString(),
+                  },
+                ],
+              }
+            : prev,
+        );
+        toast.success('Message recorded locally (demo ticket)');
+        setMessage('');
+        return;
+      }
       await api.post(`/api/helpdesk/tickets/${ticket.ticket_id}/messages`, {
         message: message.trim(),
       });

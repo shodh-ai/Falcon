@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -10,16 +10,40 @@ import {
   useNotificationHistory,
   toAppNotification,
 } from '@/hooks/useNotifications';
+import { useNotificationRealtime } from '@/hooks/useNotificationRealtime';
 import { notificationsApi } from '@/lib/api/notifications';
 import { handleNotificationAction } from '@/lib/notifications/notification-actions';
+import { areInAppAlertsEnabled } from '@/lib/notifications/account-prefs';
 
 export function LiveNotificationBell() {
   const router = useRouter();
   const { token } = useAuth();
-  const { count, refresh: refreshCount } = useNotificationUnreadCount();
+  useNotificationRealtime();
+  const { refresh: refreshCount } = useNotificationUnreadCount();
   const { notifications, isLoading, refresh: refreshList } = useNotificationHistory();
+  const [inAppEnabled, setInAppEnabled] = useState(true);
 
-  const items = notifications.map(toAppNotification).slice(0, 20);
+  useEffect(() => {
+    setInAppEnabled(areInAppAlertsEnabled());
+    const onPrefs = () => setInAppEnabled(areInAppAlertsEnabled());
+    window.addEventListener('falcon:account-prefs-changed', onPrefs);
+    window.addEventListener('storage', onPrefs);
+    return () => {
+      window.removeEventListener('falcon:account-prefs-changed', onPrefs);
+      window.removeEventListener('storage', onPrefs);
+    };
+  }, []);
+
+  const items = useMemo(
+    () => (inAppEnabled ? notifications.map(toAppNotification) : []),
+    [notifications, inAppEnabled],
+  );
+  const previewItems = useMemo(() => items.slice(0, 20), [items]);
+  // Badge must match visible (role-filtered) rows — not the raw API unread-count.
+  const visibleUnread = useMemo(
+    () => (inAppEnabled ? items.filter((n) => n.unread).length : 0),
+    [items, inAppEnabled],
+  );
 
   useEffect(() => {
     const onRefresh = () => {
@@ -53,12 +77,6 @@ export function LiveNotificationBell() {
       (current) => current?.filter((row) => row.notification_id !== n.id) ?? [],
       { revalidate: false },
     );
-    if (n.unread) {
-      await refreshCount(
-        (current) => ({ count: Math.max(0, (current?.count ?? 1) - 1) }),
-        { revalidate: false },
-      );
-    }
 
     try {
       await notificationsApi.dismiss(token, n.id);
@@ -77,9 +95,9 @@ export function LiveNotificationBell() {
 
   return (
     <NotificationBell
-      notifications={items}
-      unreadCount={count}
-      isLoading={isLoading}
+      notifications={previewItems}
+      unreadCount={visibleUnread}
+      isLoading={inAppEnabled && isLoading}
       onSelect={handleSelect}
       onDismiss={handleDismiss}
       viewAllHref="/notifications"

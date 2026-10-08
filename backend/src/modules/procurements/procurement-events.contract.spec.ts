@@ -1,0 +1,72 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+const service = readFileSync(
+  join(process.cwd(), 'src/modules/procurements/procurement.service.ts'),
+  'utf8',
+);
+
+describe('Module 2 event and compatibility contract', () => {
+  it.each([
+    'ProcurementOrderIssued.v1',
+    'ProcurementOrderCancelled.v1',
+    'ProcurementInvoiceVerified.v1',
+    'PackageReceiptRecorded.v1',
+    'GoodsReceiptRecorded.v1',
+    'ServiceAcceptanceRecorded.v1',
+    'PaymentPosted.v1',
+    'ReturnRecorded.v1',
+    'RefundPosted.v1',
+    'ProcurementFinalized.v1',
+  ])('publishes %s transactionally', (eventType) => {
+    expect(service).toContain(eventType);
+  });
+
+  it('separates sealed-package custody from requester product acceptance', () => {
+    expect(service).toContain('PACKAGE_RECEIPT_RECORDED');
+    expect(service).toContain("acceptance_status='PRODUCT_CONFIRMED'");
+    expect(service).toContain('PRODUCT_ACCEPTANCE_REQUESTER_REQUIRED');
+    expect(service).toContain("purpose='RECEIVED_PRODUCT'");
+  });
+
+  it('uses sequence and revision in every event envelope', () => {
+    expect(service).toContain('aggregate_revision: revision');
+    expect(service).toContain('aggregate_sequence: sequence');
+    expect(service).toContain('next_event_sequence=$3');
+  });
+
+  it('verifies Module 3 events with the producer canonical hash', () => {
+    const start = service.indexOf('async applyIntegrityDecision');
+    const end = service.indexOf('async invalidateIntegrityClearance');
+    const consumer = service.slice(start, end);
+    expect(consumer).toContain(
+      'integrityHash(event.payload) !== event.payload_hash',
+    );
+    expect(consumer).not.toContain(
+      'hash(event.payload) !== event.payload_hash',
+    );
+  });
+
+  it('writes legacy projections only from canonical actions', () => {
+    expect(service).toContain("'MODULE2'");
+    expect(service).toContain('INSERT INTO fin_purchase_orders');
+    expect(service).toContain('INSERT INTO fin_vendor_invoices');
+    expect(service).toContain('INSERT INTO fin_goods_receipts');
+    expect(service).toContain("CASE WHEN $2::text='PAID'");
+  });
+
+  it('creates the canonical receipt before back-linking the legacy GRN', () => {
+    const legacyInsert = service.indexOf('INSERT INTO fin_goods_receipts');
+    const canonicalInsert = service.indexOf('INSERT INTO proc_receipts');
+    const legacyBackLink = service.indexOf(
+      'UPDATE fin_goods_receipts SET proc_receipt_id=$2',
+    );
+
+    expect(legacyInsert).toBeGreaterThanOrEqual(0);
+    expect(canonicalInsert).toBeGreaterThan(legacyInsert);
+    expect(legacyBackLink).toBeGreaterThan(canonicalInsert);
+    expect(
+      service.slice(legacyInsert, canonicalInsert),
+    ).not.toContain('proc_receipt_id,source_system');
+  });
+});

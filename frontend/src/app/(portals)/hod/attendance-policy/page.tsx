@@ -33,14 +33,9 @@ export default function HodAttendancePolicyPage() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Form states for Formal Request (Dean Approval)
-  const [percent, setPercent] = useState('70');
-  const [reason, setReason] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  // States for Direct Department Adjustment
+  // States for Department Threshold Request (Dean Approval)
   const [deptPercent, setDeptPercent] = useState('75');
-  const [deptReason, setDeptReason] = useState('Direct HOD policy update');
+  const [deptReason, setDeptReason] = useState('');
   const [deptSubmitting, setDeptSubmitting] = useState(false);
 
   // States for Subject Overrides
@@ -78,52 +73,30 @@ export default function HodAttendancePolicyPage() {
 
   const activeDeptThreshold = rows.find((r) => r.status === 'APPROVED')?.requested_min_percent ?? 75;
 
-  // Direct HOD Update (Immediate Effect)
-  async function submitDirectUpdate() {
+  // Department threshold change — routed to Dean for approval
+  async function submitDepartmentRequest() {
     const pct = Number(deptPercent);
     if (!Number.isFinite(pct) || pct < 1 || pct > 100) {
       toast.error('Enter a percentage between 1 and 100');
       return;
     }
-    setDeptSubmitting(true);
-    try {
-      await api.post('/api/attendance-policy/hod/department-threshold', {
-        requested_min_percent: pct,
-        reason: deptReason.trim(),
-      });
-      toast.success('Department minimum attendance policy updated');
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Adjustment failed');
-    } finally {
-      setDeptSubmitting(false);
-    }
-  }
-
-  // Submit formal request to Dean (parities/original workflow)
-  async function submitFormalRequest() {
-    const pct = Number(percent);
-    if (!Number.isFinite(pct) || pct < 1 || pct > 100) {
-      toast.error('Enter a percentage between 1 and 100');
-      return;
-    }
-    if (!reason.trim()) {
+    if (!deptReason.trim()) {
       toast.error('A justification is required');
       return;
     }
-    setSubmitting(true);
+    setDeptSubmitting(true);
     try {
       await api.post('/api/attendance-policy/hod/threshold-requests', {
         requested_min_percent: pct,
-        reason: reason.trim(),
+        reason: deptReason.trim(),
       });
       toast.success('Request sent to Dean for approval');
-      setReason('');
+      setDeptReason('');
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Submission failed');
     } finally {
-      setSubmitting(false);
+      setDeptSubmitting(false);
     }
   }
 
@@ -165,91 +138,55 @@ export default function HodAttendancePolicyPage() {
       <div>
         <h1 className="text-2xl font-bold text-sgvu-navy">Attendance Policy Configuration</h1>
         <p className="text-sm text-muted-foreground">
-          Directly configure your department&apos;s attendance policy, set general thresholds, or define custom overrides per subject.
+          Request department-wide attendance threshold changes (Dean approval required) or set subject-level overrides.
         </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Card 1: Direct HOD Policy Adjustment */}
-        <Card className="flex flex-col justify-between">
-          <CardHeader>
-            <CardTitle className="text-base">Direct Department Adjustment</CardTitle>
-            <CardDescription>Update the minimum threshold directly with HOD authority (takes effect immediately).</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 flex-1 flex flex-col justify-between">
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-slate-500">Minimum Attendance %</label>
-                <div className="flex items-center gap-2 mt-1">
-                  <Input
-                    type="number"
-                    value={deptPercent}
-                    onChange={(e) => setDeptPercent(e.target.value)}
-                    className="w-28 text-center font-semibold text-slate-800"
-                    min="1"
-                    max="100"
-                  />
-                  <span className="text-sm font-medium text-slate-600">%</span>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500">Reason/Remarks</label>
+      <Card className="max-w-2xl">
+        <CardHeader>
+          <CardTitle className="text-base">Department Threshold Request</CardTitle>
+          <CardDescription>
+            Propose a new minimum attendance percentage for your department. The request is sent to the Dean Office for
+            sign-off before it takes effect.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-slate-500">Requested Minimum Attendance %</label>
+              <div className="mt-1 flex items-center gap-2">
                 <Input
-                  value={deptReason}
-                  onChange={(e) => setDeptReason(e.target.value)}
-                  placeholder="e.g., General review / Adjustment"
-                  className="mt-1"
+                  type="number"
+                  value={deptPercent}
+                  onChange={(e) => setDeptPercent(e.target.value)}
+                  className="w-28 text-center font-semibold text-slate-800"
+                  min="1"
+                  max="100"
                 />
+                <span className="text-sm font-medium text-slate-600">%</span>
               </div>
             </div>
-            <div className="pt-4 border-t mt-4 flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                Current active default: <strong className="text-sgvu-navy">{activeDeptThreshold}%</strong>
-              </span>
-              <Button onClick={() => void submitDirectUpdate()} disabled={deptSubmitting}>
-                {deptSubmitting ? 'Updating…' : 'Apply Directly'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Card 2: Formal Dean Approval Request */}
-        <Card className="flex flex-col justify-between">
-          <CardHeader>
-            <CardTitle className="text-base">Request Policy Change (Dean Sign-off)</CardTitle>
-            <CardDescription>Submit a formal request to the Dean Office if you need official relaxations.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 flex-1 flex flex-col justify-between">
-            <div className="space-y-3">
-              <div className="flex items-end gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500">Requested min %</label>
-                  <Input
-                    type="number"
-                    value={percent}
-                    onChange={(e) => setPercent(e.target.value)}
-                    className="mt-1 w-28 text-center"
-                    min="1"
-                    max="100"
-                  />
-                </div>
-              </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500">Justification</label>
               <textarea
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm"
                 rows={3}
-                placeholder="Justification (e.g. medical outbreak, severe weather disruptions)"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Medical outbreak, severe weather disruptions, industry internship season"
+                value={deptReason}
+                onChange={(e) => setDeptReason(e.target.value)}
               />
             </div>
-            <div className="pt-4 border-t mt-4 text-right">
-              <Button variant="outline" onClick={() => void submitFormalRequest()} disabled={submitting}>
-                {submitting ? 'Submitting…' : 'Send to Dean'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+          <div className="flex items-center justify-between border-t pt-4">
+            <span className="text-xs text-muted-foreground">
+              Current active default: <strong className="text-sgvu-navy">{activeDeptThreshold}%</strong>
+            </span>
+            <Button onClick={() => void submitDepartmentRequest()} disabled={deptSubmitting}>
+              {deptSubmitting ? 'Submitting…' : 'Send to Dean'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Subject-Specific Policies (Overrides) */}
       <Card>

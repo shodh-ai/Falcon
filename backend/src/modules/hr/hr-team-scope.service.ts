@@ -43,10 +43,39 @@ export class HrTeamScopeService {
           AND ${userAlias}.is_active = true`;
         break;
       case 'dept':
+        // HODs see department faculty only (Faculty/HOD/Dean), not HR/admin staff
+        // seeded into the same dept_id (e.g. HR Admin on Computer Science).
         clause = ` AND ${userAlias}.tenant_id = ${pTenant}
-          AND ${userAlias}.dept_id = (SELECT dept_id FROM users WHERE user_id = ${pManager} LIMIT 1)
           AND ${userAlias}.user_id != ${pManager}
-          AND ${userAlias}.is_active = true`;
+          AND ${userAlias}.is_active = true
+          AND (
+            (
+              EXISTS (
+                SELECT 1 FROM departments d
+                WHERE d.hod_user_id = ${pManager}
+              )
+              AND ${userAlias}.dept_id IN (
+                SELECT d.dept_id FROM departments d WHERE d.hod_user_id = ${pManager}
+                UNION
+                SELECT u0.dept_id FROM users u0
+                WHERE u0.user_id = ${pManager} AND u0.dept_id IS NOT NULL
+              )
+              AND EXISTS (
+                SELECT 1 FROM roles r
+                WHERE r.role_id = ${userAlias}.role_id
+                  AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+              )
+            )
+            OR (
+              NOT EXISTS (
+                SELECT 1 FROM departments d
+                WHERE d.hod_user_id = ${pManager}
+              )
+              AND ${userAlias}.dept_id = (
+                SELECT dept_id FROM users WHERE user_id = ${pManager} LIMIT 1
+              )
+            )
+          )`;
         break;
     }
 
@@ -96,9 +125,28 @@ export class HrTeamScopeService {
             AND u.is_active = true) AS indirect,
          (SELECT COUNT(*)::int FROM users u
           WHERE u.tenant_id = $1
-            AND u.dept_id = (SELECT dept_id FROM users WHERE user_id = $2 LIMIT 1)
             AND u.user_id != $2
-            AND u.is_active = true) AS dept`,
+            AND u.is_active = true
+            AND (
+              (
+                EXISTS (SELECT 1 FROM departments d WHERE d.hod_user_id = $2)
+                AND u.dept_id IN (
+                  SELECT d.dept_id FROM departments d WHERE d.hod_user_id = $2
+                  UNION
+                  SELECT u0.dept_id FROM users u0
+                  WHERE u0.user_id = $2 AND u0.dept_id IS NOT NULL
+                )
+                AND EXISTS (
+                  SELECT 1 FROM roles r
+                  WHERE r.role_id = u.role_id
+                    AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+                )
+              )
+              OR (
+                NOT EXISTS (SELECT 1 FROM departments d WHERE d.hod_user_id = $2)
+                AND u.dept_id = (SELECT dept_id FROM users WHERE user_id = $2 LIMIT 1)
+              )
+            )) AS dept`,
       [tenantId, managerId],
     );
     const r = rows[0];

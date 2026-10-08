@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import {
   HodDataTable,
@@ -11,6 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthedApi } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import {
   ResponsiveContainer,
   BarChart,
@@ -27,9 +28,41 @@ type Row = {
   name: string;
   email: string | null;
   hours_per_week: number;
+  assigned_load_credits: number;
+  assigned_load_hours: number;
+  scheduled_minutes: number;
+  scheduled_hours: number;
   course_count: number;
-  workload_status: 'OVERLOADED' | 'UNDERUTILIZED' | 'BALANCED';
+  unscheduled_course_count: number;
+  workload_status:
+    | 'OVERLOADED'
+    | 'UNDERUTILIZED'
+    | 'BALANCED'
+    | 'NO_TEACHING_LOAD'
+    | 'NO_ACTIVE_ALLOCATION'
+    | 'SCHEDULE_MISSING';
+  load_declaration_status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION' | null;
+  load_declaration_reason: string | null;
+  load_declaration_revision: number;
+  load_declaration_academic_year: string;
 };
+
+function currentAcademicYear() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const start = now.getUTCMonth() >= 6 ? year : year - 1;
+  return `${start}-${start + 1}`;
+}
+
+/** Render the exact timetable duration without rounding 40-minute periods to decimal hours. */
+function formatDuration(minutes: number | undefined, fallbackHours = 0) {
+  const totalMinutes = Number.isFinite(minutes)
+    ? Math.max(0, Math.round(Number(minutes)))
+    : Math.max(0, Math.round(Number(fallbackHours) * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const remainder = totalMinutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
 
 function StatusTag({ status }: { status: Row['workload_status'] }) {
   return (
@@ -39,6 +72,9 @@ function StatusTag({ status }: { status: Row['workload_status'] }) {
         status === 'OVERLOADED' && 'border-red-200 bg-red-50 text-red-700',
         status === 'UNDERUTILIZED' && 'border-slate-200 bg-slate-50 text-muted-foreground',
         status === 'BALANCED' && 'border-green-200 bg-green-50 text-green-700',
+        status === 'NO_TEACHING_LOAD' && 'border-blue-200 bg-blue-50 text-blue-700',
+        status === 'NO_ACTIVE_ALLOCATION' && 'border-slate-200 bg-slate-50 text-slate-600',
+        status === 'SCHEDULE_MISSING' && 'border-amber-200 bg-amber-50 text-amber-700',
       )}
     >
       {status.replace('_', ' ')}
@@ -50,6 +86,7 @@ export default function HodFacultyWorkloadPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -66,21 +103,79 @@ export default function HodFacultyWorkloadPage() {
     })();
   }, [api]);
 
+  const changeLoadStatus = useCallback(
+    async (row: Row) => {
+      const markingNoLoad = row.load_declaration_status !== 'NO_TEACHING_LOAD';
+      const reason = markingNoLoad
+        ? window.prompt(
+            `Reason ${row.name} has no teaching load for ${currentAcademicYear()}:`,
+          )
+        : 'Faculty is available for course allocation';
+      if (markingNoLoad && !reason?.trim()) return;
+
+      setUpdatingUserId(row.user_id);
+      try {
+        await api.post(
+          `/api/academics/hod/faculty/${row.user_id}/teaching-load-status`,
+          {
+            academic_year: currentAcademicYear(),
+            status: markingNoLoad
+              ? 'NO_TEACHING_LOAD'
+              : 'AVAILABLE_FOR_ALLOCATION',
+            reason,
+          },
+          {
+            'If-Match': String(row.load_declaration_revision ?? 0),
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+        );
+        toast.success(
+          markingNoLoad
+            ? `${row.name} marked with no teaching load.`
+            : `${row.name} is now available for allocation.`,
+        );
+        const data = await api.get<Row[]>('/api/academics/hod/faculty-workload');
+        setRows(data);
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to update teaching-load status',
+        );
+      } finally {
+        setUpdatingUserId(null);
+      }
+    },
+    [api],
+  );
+
   const stats = useMemo(() => {
     const overloaded = rows.filter((r) => r.workload_status === 'OVERLOADED').length;
     const under = rows.filter((r) => r.workload_status === 'UNDERUTILIZED').length;
-    const avg =
+    const noLoad = rows.filter((r) => r.workload_status === 'NO_TEACHING_LOAD').length;
+    const noAllocation = rows.filter((r) => r.workload_status === 'NO_ACTIVE_ALLOCATION').length;
+    const scheduleMissing = rows.filter((r) => r.workload_status === 'SCHEDULE_MISSING').length;
+    const avgMinutes =
       rows.length > 0
-        ? (rows.reduce((s, r) => s + r.hours_per_week, 0) / rows.length).toFixed(1)
-        : '0';
-    return { total: rows.length, overloaded, under, avg };
+        ? rows.reduce(
+            (s, r) =>
+              s +
+              (Number.isFinite(r.scheduled_minutes)
+                ? r.scheduled_minutes
+                : r.scheduled_hours * 60),
+            0,
+          ) / rows.length
+        : 0;
+    const avg = formatDuration(avgMinutes);
+    return { total: rows.length, overloaded, under, noLoad, noAllocation, scheduleMissing, avg };
   }, [rows]);
 
   const chartData = useMemo(() => {
     return rows.map((r) => ({
       name: r.name.split(' ')[0], // Use first name for space optimization
       fullName: r.name,
-      hours: r.hours_per_week,
+      hours: r.scheduled_hours,
+      scheduledMinutes: r.scheduled_minutes,
+      scheduledHours: r.scheduled_hours,
+      assignedLoadHours: r.assigned_load_credits,
       status: r.workload_status,
     }));
   }, [rows]);
@@ -89,13 +184,16 @@ export default function HodFacultyWorkloadPage() {
     <HodPageFrame>
       <HodPageHeader
         title="Faculty Roster & Workload"
-        description="Teaching hours per week from department timetable."
+        description="Actual timetable hours per week, with approved allocation load shown separately."
         meta={
           <>
             <HodMetricChip label="Faculty" value={stats.total} emphasis />
             <HodMetricChip label="Avg hrs/wk" value={stats.avg} />
             <HodMetricChip label="Overloaded" value={stats.overloaded} />
             <HodMetricChip label="Under-utilized" value={stats.under} />
+            <HodMetricChip label="Schedule missing" value={stats.scheduleMissing} />
+            <HodMetricChip label="No active allocation" value={stats.noAllocation} />
+            <HodMetricChip label="No teaching load" value={stats.noLoad} />
           </>
         }
       />
@@ -104,10 +202,10 @@ export default function HodFacultyWorkloadPage() {
         <Card className="border-gray-100 shadow-sm mb-6 bg-white overflow-hidden">
           <CardHeader className="bg-slate-50/50 pb-4 border-b border-gray-100">
             <CardTitle className="text-base font-bold text-sgvu-navy flex items-center gap-2">
-              Teaching Load Analysis (Hours/Week)
+              Teaching Load Analysis (Contact Hours / Week)
               {stats.overloaded > 0 && (
                 <span className="text-xs bg-red-100 border border-red-200 text-red-700 px-2 py-0.5 rounded-full font-medium">
-                  {stats.overloaded} Overloaded (&gt;12 hrs)
+                  {stats.overloaded} Overloaded (&gt;16 hrs)
                 </span>
               )}
             </CardTitle>
@@ -140,12 +238,14 @@ export default function HodFacultyWorkloadPage() {
                           <div className="bg-white p-3 border border-slate-100 rounded-xl shadow-lg space-y-1">
                             <p className="font-bold text-xs text-sgvu-navy">{data.fullName}</p>
                             <p className="text-xs text-muted-foreground">
-                              Workload: <span className="font-semibold text-sgvu-navy">{data.hours} hrs/week</span>
+                              Contact hours: <span className="font-semibold text-sgvu-navy">{formatDuration(data.scheduledMinutes, data.hours)}/week</span>
+                              <br />Assigned credits: <span className="font-semibold text-sgvu-navy">{data.assignedLoadHours}</span>
                             </p>
                             <p className={cn(
                               "text-[10px] font-semibold uppercase tracking-wider",
                               data.status === 'OVERLOADED' ? "text-red-600" :
-                              data.status === 'BALANCED' ? "text-green-600" : "text-slate-500"
+                              data.status === 'BALANCED' ? "text-green-600" :
+                              data.status === 'SCHEDULE_MISSING' ? "text-amber-600" : "text-slate-500"
                             )}>
                               {data.status}
                             </p>
@@ -159,7 +259,7 @@ export default function HodFacultyWorkloadPage() {
                     {chartData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
-                        fill={entry.hours > 12 ? '#EF4444' : '#0F172A'}
+                        fill={entry.hours > 16 ? '#EF4444' : '#0F172A'}
                       />
                     ))}
                   </Bar>
@@ -188,9 +288,21 @@ export default function HodFacultyWorkloadPage() {
           },
           {
             key: 'hours',
-            label: 'Hrs / Week',
-            className: 'w-24 tabular-nums font-bold',
-            render: (r) => `${r.hours_per_week}h`,
+            label: 'Contact hours / week',
+            className: 'w-40 tabular-nums font-bold',
+            render: (r) => (
+              <div>
+                <p>{formatDuration(r.scheduled_minutes, r.scheduled_hours)}</p>
+                <p className="text-xs font-normal text-muted-foreground">
+                  {r.assigned_load_credits} assigned credits
+                </p>
+                {r.unscheduled_course_count > 0 ? (
+                  <p className="text-xs font-normal text-amber-700">
+                    {r.unscheduled_course_count} course{r.unscheduled_course_count === 1 ? '' : 's'} unscheduled
+                  </p>
+                ) : null}
+              </div>
+            ),
           },
           {
             key: 'courses',
@@ -201,8 +313,41 @@ export default function HodFacultyWorkloadPage() {
           {
             key: 'status',
             label: 'Status',
-            className: 'w-32',
-            render: (r) => <StatusTag status={r.workload_status} />,
+            className: 'w-44',
+            render: (r) => (
+              <div className="space-y-1">
+                <StatusTag status={r.workload_status} />
+                {r.load_declaration_reason ? (
+                  <p className="max-w-44 text-xs text-muted-foreground">
+                    {r.load_declaration_reason}
+                  </p>
+                ) : null}
+              </div>
+            ),
+          },
+          {
+            key: 'action',
+            label: 'Teaching load',
+            className: 'w-44',
+            render: (r) => (
+              <Button
+                type="button"
+                size="sm"
+                variant={
+                  r.load_declaration_status === 'NO_TEACHING_LOAD'
+                    ? 'outline'
+                    : 'secondary'
+                }
+                disabled={updatingUserId === r.user_id}
+                onClick={() => void changeLoadStatus(r)}
+              >
+                {updatingUserId === r.user_id
+                  ? 'Updating…'
+                  : r.load_declaration_status === 'NO_TEACHING_LOAD'
+                    ? 'Allow allocation'
+                    : 'Mark no load'}
+              </Button>
+            ),
           },
         ]}
       />

@@ -1,5 +1,5 @@
-import { WorkspaceRoutePage } from '@/components/workspaces/WorkspaceRoutePage';
+import { ExecutiveSummaryWithAlerts } from '@/components/president/ExecutiveSummaryWithAlerts';
 
 export default function PresidentExecutiveSummaryPage() {
-  return <WorkspaceRoutePage portal="president" page="executiveSummary" />;
+  return <ExecutiveSummaryWithAlerts />;
 }

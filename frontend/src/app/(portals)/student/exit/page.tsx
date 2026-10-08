@@ -33,7 +33,7 @@ export default function StudentGraduationHubPage() {
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
-        title="Graduation & Alumni"
+        title="Graduation"
         description="Clear no-dues, apply for your degree certificate, and transition to the Alumni network — one hub."
       />
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
@@ -13,7 +13,9 @@ type Row = {
   category: string;
   status: string;
   created_at: string;
-  student_user_id: string;
+  student_user_id?: string;
+  raised_by_name?: string;
+  raised_by_email?: string;
 };
 
 export default function FinanceGrievancesPage() {
@@ -24,6 +26,23 @@ export default function FinanceGrievancesPage() {
   const [message, setMessage] = useState('');
   const [resolving, setResolving] = useState(false);
 
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<Row[]>('/api/helpdesk/tickets/finance-grievances');
+      setRows(Array.isArray(data) ? data : []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load grievances');
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void loadRows();
+  }, [loadRows]);
+
   const handleResolve = async () => {
     if (!selectedTicket) return;
     setResolving(true);
@@ -33,38 +52,30 @@ export default function FinanceGrievancesPage() {
       }
       await api.patch(`/api/helpdesk/tickets/${selectedTicket.ticket_id}/status`, { status: 'RESOLVED' });
       toast.success('Ticket resolved successfully');
-      setRows(rows.map(r => r.ticket_id === selectedTicket.ticket_id ? { ...r, status: 'RESOLVED' } : r));
+      setRows((prev) => prev.filter((r) => r.ticket_id !== selectedTicket.ticket_id));
       setSelectedTicket(null);
       setMessage('');
     } catch (e) {
-      toast.error('Failed to resolve ticket');
+      toast.error(e instanceof Error ? e.message : 'Failed to resolve ticket');
     } finally {
       setResolving(false);
     }
   };
-
-  useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      try {
-        const data = await api.get<Row[]>('/api/helpdesk/tickets/assigned');
-        setRows(data);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load grievances');
-        setRows([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [api]);
 
   return (
     <div className="space-y-6 p-6">
       <Card>
         <CardHeader>
           <CardTitle>Grievance Escalations</CardTitle>
-          <p className="text-sm text-muted-foreground">Finance helpdesk tickets escalated to Accountant.</p>
-          <p className="text-sm font-medium">{rows.length} open ticket{rows.length === 1 ? '' : 's'}</p>
+          <p className="text-sm text-muted-foreground">
+            Finance helpdesk tickets (fee, refund, payment disputes) escalated to the finance desk.
+          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm font-medium">{rows.length} open ticket{rows.length === 1 ? '' : 's'}</p>
+            <Button size="sm" variant="outline" onClick={() => void loadRows()} disabled={loading}>
+              Refresh
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border">
@@ -86,19 +97,24 @@ export default function FinanceGrievancesPage() {
                   rows.map((r) => (
                     <tr key={r.ticket_id} className="border-b">
                       <td className="p-3">
-                        <p className="font-semibold text-xs text-muted-foreground">{r.student_user_id}</p>
+                        <p className="font-medium">{r.raised_by_name ?? 'Student'}</p>
+                        <p className="text-xs text-muted-foreground">{r.raised_by_email ?? r.student_user_id}</p>
                       </td>
                       <td className="p-3">
                         <p className="font-medium">{r.subject}</p>
                         <p className="text-muted-foreground">{r.category}</p>
                       </td>
                       <td className="p-3">
-                        <span 
-                          onClick={() => r.status === 'PENDING' ? setSelectedTicket(r) : undefined}
+                        <span
+                          onClick={() => (r.status === 'PENDING' || r.status === 'IN_PROGRESS' || r.status === 'OPEN') ? setSelectedTicket(r) : undefined}
                           className={`rounded-md border px-2 py-1 text-xs font-medium uppercase ${
-                            r.status === 'PENDING' ? 'bg-red-50 text-red-600 border-red-200 cursor-pointer hover:bg-red-100' : 
-                            r.status === 'RESOLVED' ? 'bg-green-50 text-green-600 border-green-200' :
-                            'bg-slate-50 border-gray-200'
+                            r.status === 'PENDING' || r.status === 'OPEN'
+                              ? 'cursor-pointer border-red-200 bg-red-50 text-red-600 hover:bg-red-100'
+                              : r.status === 'IN_PROGRESS'
+                                ? 'cursor-pointer border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                : r.status === 'RESOLVED'
+                                  ? 'border-green-200 bg-green-50 text-green-600'
+                                  : 'border-gray-200 bg-slate-50'
                           }`}
                         >
                           {r.status}
@@ -122,8 +138,8 @@ export default function FinanceGrievancesPage() {
             <DialogTitle>Resolve Ticket</DialogTitle>
           </DialogHeader>
           <div className="py-4">
-            <textarea 
-              className="w-full border rounded-md p-3 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+            <textarea
+              className="w-full rounded-md border p-3 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
               rows={4}
               placeholder="Optional message to student..."
               value={message}
@@ -132,7 +148,9 @@ export default function FinanceGrievancesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSelectedTicket(null)}>Cancel</Button>
-            <Button onClick={handleResolve} disabled={resolving}>{resolving ? 'Resolving...' : 'Resolve'}</Button>
+            <Button onClick={() => void handleResolve()} disabled={resolving}>
+              {resolving ? 'Resolving...' : 'Resolve'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

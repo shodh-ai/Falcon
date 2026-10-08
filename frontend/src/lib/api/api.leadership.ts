@@ -206,6 +206,20 @@ export type AdmissionsAnalytics = {
     converted: number;
     conversion_rate_pct: number;
   }>;
+  golden_ticket_leads?: Array<{
+    lead_id: string;
+    full_name: string;
+    email: string;
+    stage: string;
+    golden_ticket_code: string | null;
+    competition_title: string;
+    created_at: string;
+  }>;
+  golden_ticket_summary?: {
+    total: number;
+    enrolled: number;
+    pending_conversion: number;
+  };
 };
 
 export function useLeadershipApi() {
@@ -245,7 +259,10 @@ export function useLeadershipApi() {
         ),
       flagToHod: (body: { node_key: string; label: string; message?: string }) =>
         api.post<{ success: boolean; notified_hod: string }>('/api/leadership/flag-to-hod', body),
-      issues: () => api.get<Record<string, unknown>>('/api/leadership/issues'),
+      issues: (period?: ExecutivePeriod) =>
+        api.get<Record<string, unknown>>(
+          `/api/leadership/issues${period ? `?period=${period}` : ''}`,
+        ),
       escalateIssue: (ticketId: string) =>
         api.post<{ success: boolean; notified_hod: string }>(`/api/leadership/issues/${ticketId}/escalate`, {}),
       ticker: () => api.get<IntelligenceTicker>('/api/leadership/intelligence/ticker'),

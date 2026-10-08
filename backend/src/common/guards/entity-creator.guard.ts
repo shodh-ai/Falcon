@@ -7,7 +7,10 @@ import {
 import { Reflector } from '@nestjs/core';
 import { ENTITY_CREATOR_KEY } from '../decorators/entity-creator.decorator';
 
-const ENTITY_CREATOR_EMAIL = 'superadmin@mygyanvihar.com';
+import { isCampusAdminFamilyRole } from '../config/campus-admin.roles';
+import { CAMPUS_ADMIN_LOGIN_EMAIL } from '../config/campus-admin.roles';
+
+const ENTITY_CREATOR_EMAIL = CAMPUS_ADMIN_LOGIN_EMAIL;
 
 @Injectable()
 export class EntityCreatorGuard implements CanActivate {
@@ -26,7 +29,7 @@ export class EntityCreatorGuard implements CanActivate {
     const email = (req.user?.email ?? '').trim().toLowerCase();
     if (email !== ENTITY_CREATOR_EMAIL) {
       throw new ForbiddenException(
-        'Entity management is restricted to the master Super Admin account',
+        'Entity management is restricted to the master Campus Admin account',
       );
     }
     return true;

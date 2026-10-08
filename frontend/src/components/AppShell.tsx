@@ -114,7 +114,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function EmptyTaskState() {
+export function EmptyTaskState({
+  onCheckTasks,
+  checking = false,
+}: {
+  onCheckTasks?: () => void | Promise<void>;
+  checking?: boolean;
+} = {}) {
+  const handleCheckTasks = () => {
+    void (async () => {
+      if (onCheckTasks) {
+        await onCheckTasks();
+        return;
+      }
+      window.location.reload();
+    })();
+  };
+
+  const handleViewCalendar = () => {
+    const path = window.location.pathname || '/dashboard';
+    const next = `${path}?section=calendar`;
+    window.history.pushState({}, '', next);
+    window.dispatchEvent(new Event('dashboard-section-change'));
+  };
+
+  const primaryBtn =
+    'rounded-xl border border-[#0B2447] bg-[#0B2447] px-5 py-3 text-sm font-semibold text-white shadow-md transition-colors hover:bg-[#123A6D] active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:cursor-not-allowed disabled:opacity-60';
+  const secondaryBtn =
+    'rounded-xl border border-[#0B2447] bg-white px-5 py-3 text-sm font-semibold text-[#0B2447] transition-colors hover:bg-[#0B2447]/5 active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy';
+
   return (
     <div className="rounded-3xl border border-dashed border-[#d6b65d]/70 bg-gradient-to-br from-white to-[#fff8e1] p-8 text-center shadow-sm">
       <div className="mx-auto mb-6 flex h-40 max-w-xs items-center justify-center rounded-[2rem] bg-[#08234a] p-6 shadow-xl shadow-[#08234a]/10">
@@ -129,18 +157,12 @@ export function EmptyTaskState() {
         Your monthly governance tasks will appear here when IQAC distributes assignments for your role and department.
       </p>
       <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
-        <button
-          onClick={() => window.location.reload()}
-          className="rounded-xl bg-[#08234a] px-5 py-3 text-sm font-semibold text-white shadow-md hover:bg-[#0b3166]"
-        >
-          Check for New Tasks
+        <button type="button" onClick={handleCheckTasks} disabled={checking} className={primaryBtn}>
+          {checking ? 'Checking…' : 'Check for New Tasks'}
         </button>
-        <a
-          href="/dashboard?section=calendar"
-          className="rounded-xl border border-[#d6b65d] px-5 py-3 text-sm font-semibold text-[#08234a] hover:bg-[#fff8e1]"
-        >
+        <button type="button" onClick={handleViewCalendar} className={secondaryBtn}>
           View Yearly Calendar
-        </a>
+        </button>
       </div>
     </div>
   );

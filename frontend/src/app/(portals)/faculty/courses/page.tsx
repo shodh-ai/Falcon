@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { BookOpen, ChevronRight, GraduationCap } from 'lucide-react';
 import {
   FacultyPageHeader,
@@ -13,9 +14,18 @@ import {
 } from '@/components/faculty';
 import { Badge } from '@/components/ui/badge';
 import { useFacultyCourses } from '@/components/faculty/useFacultyCourses';
+import { useOptionalTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
 
 export default function FacultyCoursesIndexPage() {
   const { courses, loading, error } = useFacultyCourses();
+  // HOD course views are rendered inside the HOD shell (which intentionally
+  // has no faculty department switcher), so use the optional context here.
+  const { activeDepartment, isMultiDepartment } = useOptionalTeachingDepartment() ?? {
+    activeDepartment: null,
+    isMultiDepartment: false,
+  };
+  const pathname = usePathname();
+  const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
 
   const totalCredits = courses.reduce((sum, c) => sum + (Number(c.credits) || 0), 0);
   const isFetchError = error && error !== 'No courses allocated to your timetable yet.';
@@ -23,7 +33,12 @@ export default function FacultyCoursesIndexPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Open a subject to plan syllabus modules, track coverage, upload materials, and manage digital assignments."
+        title="Courses"
+        description={
+          isMultiDepartment && activeDepartment
+            ? `Courses in ${activeDepartment.dept_name}. Manage course materials, assignments, and announcements.`
+            : 'Manage course materials, assignments, and announcements.'
+        }
         meta={
           !loading && courses.length > 0 ? (
             <>
@@ -41,8 +56,8 @@ export default function FacultyCoursesIndexPage() {
           <FacultyErrorBanner message={error!} />
         ) : (
           <FacultyEmptyState
-            title="No courses assigned"
-            description="When courses are allocated to your timetable, they will appear here as workspaces."
+            title="No teaching load assigned"
+            description="Your faculty account remains active. If the department assigns a teaching load later, the course workspaces will appear here."
           />
         )
       ) : (
@@ -55,7 +70,7 @@ export default function FacultyCoursesIndexPage() {
             {courses.map((c) => (
               <Link
                 key={c.allocation_id ?? c.course_id}
-                href={`/faculty/courses/${c.course_id}`}
+                href={`${workspacePrefix}/courses/${c.course_id}`}
                 className="group flex items-start gap-3 rounded-xl border border-border/60 bg-background p-4 shadow-sm transition hover:border-sgvu-gold/50 hover:bg-sgvu-gold/5 hover:shadow-md"
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sgvu-navy/5 text-sgvu-navy group-hover:bg-sgvu-gold/15">

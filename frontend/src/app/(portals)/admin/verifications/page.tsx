@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { CheckCircle2, Eye, XCircle } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,6 +29,8 @@ type QueueRow = {
   portal_kind: string;
   submitted_at: string | null;
   doc_count: string;
+  tenant_subdomain?: string;
+  tenant_name?: string;
 };
 
 type VerificationDetail = {
@@ -84,8 +87,8 @@ const DOC_LABELS: Record<string, string> = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-function buildPreviewUrl(studentUserId: string, docType: string) {
-  return `${API_URL}/api/admin/student-verifications/${studentUserId}/documents/${docType}/preview`;
+function buildPreviewUrl(basePath: string, userId: string, docType: string) {
+  return `${API_URL}${basePath}/${userId}/documents/${docType}/preview`;
 }
 
 function parseApiError(err: unknown) {
@@ -103,9 +106,17 @@ function parseApiError(err: unknown) {
 export default function AdminStudentVerificationsPage() {
   const api = useAuthedApi();
   const { token } = useAuth();
+  const pathname = usePathname();
+  const staffMode =
+    pathname.startsWith('/admin/faculty-verifications') ||
+    pathname.startsWith('/super-admin/faculty-verifications');
+  const verificationBase = staffMode
+    ? '/api/staff/verifications'
+    : '/api/admin/student-verifications';
   const [queue, setQueue] = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedTenant, setSelectedTenant] = useState<string | null>(null);
   const [detail, setDetail] = useState<VerificationDetail | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [acting, setActing] = useState(false);
@@ -115,14 +126,14 @@ export default function AdminStudentVerificationsPage() {
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await api.get<QueueRow[]>('/api/admin/student-verifications/queue');
+      const rows = await api.get<QueueRow[]>(`${verificationBase}/queue`);
       setQueue(rows);
     } catch (err) {
       toast.error(parseApiError(err));
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, verificationBase]);
 
   useEffect(() => {
     void loadQueue();
@@ -143,10 +154,10 @@ export default function AdminStudentVerificationsPage() {
           setPreviewUrl(previewDoc);
           return;
         }
-        const response = await fetch(buildPreviewUrl(selectedId, doc.doc_type), {
+        const response = await fetch(buildPreviewUrl(verificationBase, selectedId, doc.doc_type), {
           headers: {
             Authorization: `Bearer ${token}`,
-            'x-tenant-subdomain': getSubdomainFromClient(),
+            'x-tenant-subdomain': selectedTenant ?? getSubdomainFromClient(),
           },
         });
         if (!response.ok) throw new Error('Preview failed');
@@ -161,14 +172,19 @@ export default function AdminStudentVerificationsPage() {
     return () => {
       if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [detail?.documents, previewDoc, selectedId, token]);
+  }, [detail?.documents, previewDoc, selectedId, selectedTenant, token, verificationBase]);
 
-  const openReview = async (userId: string) => {
+  const openReview = async (row: QueueRow) => {
+    const userId = row.user_id;
+    const tenant = row.tenant_subdomain ?? getSubdomainFromClient();
     setSelectedId(userId);
+    setSelectedTenant(tenant);
     setRejectReason('');
     setPreviewDoc(null);
     try {
-      const data = await api.get<VerificationDetail>(`/api/admin/student-verifications/${userId}`);
+      const data = await api.get<VerificationDetail>(`${verificationBase}/${userId}`, {
+        'x-tenant-subdomain': tenant,
+      });
       setDetail(data);
       if (data.documents[0]) setPreviewDoc(data.documents[0].file_path);
       if (data.person.onboarding_status !== 'PENDING_ADMIN_APPROVAL') {
@@ -181,6 +197,7 @@ export default function AdminStudentVerificationsPage() {
     } catch (err) {
       toast.error(parseApiError(err));
       setSelectedId(null);
+      setSelectedTenant(null);
     }
   };
 
@@ -190,11 +207,15 @@ export default function AdminStudentVerificationsPage() {
     if (!selectedId) return;
     setActing(true);
     try {
-      await api.post(`/api/admin/student-verifications/${selectedId}/approve`);
+      await api.post(`${verificationBase}/${selectedId}/approve`, undefined, {
+        'x-tenant-subdomain': selectedTenant ?? getSubdomainFromClient(),
+      });
       toast.success('Approved — portal unlocked');
       setSelectedId(null);
+      setSelectedTenant(null);
       setDetail(null);
       await loadQueue();
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
     } catch (err) {
       toast.error(parseApiError(err));
     } finally {
@@ -209,13 +230,17 @@ export default function AdminStudentVerificationsPage() {
     }
     setActing(true);
     try {
-      await api.post(`/api/admin/student-verifications/${selectedId}/reject`, {
+      await api.post(`${verificationBase}/${selectedId}/reject`, {
         remarks: rejectReason.trim(),
+      }, {
+        'x-tenant-subdomain': selectedTenant ?? getSubdomainFromClient(),
       });
       toast.success('Sent back for corrections');
       setSelectedId(null);
+      setSelectedTenant(null);
       setDetail(null);
       await loadQueue();
+      window.dispatchEvent(new Event('falcon:notifications-refresh'));
     } catch (err) {
       toast.error(parseApiError(err));
     } finally {
@@ -225,17 +250,25 @@ export default function AdminStudentVerificationsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-bold text-sgvu-navy">First-Login Onboarding Verifications</h2>
-        <p className="text-sm text-muted-foreground">
-          Review students, faculty, and HOD submissions awaiting approval.
-        </p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <h2 className="text-xl font-bold text-sgvu-navy">
+            {staffMode ? 'Faculty & Staff Verifications' : 'Student Verifications'}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {staffMode
+              ? 'Campus Admin and Super Admin review faculty and staff onboarding submissions.'
+              : 'Review student onboarding submissions awaiting Admissions approval.'}
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Verification Queue</CardTitle>
-          <CardDescription>{queue.length} user(s) pending admin approval</CardDescription>
+          <CardDescription>
+            {queue.length} {staffMode ? 'staff member(s)' : 'student(s)'} pending approval
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -250,6 +283,7 @@ export default function AdminStudentVerificationsPage() {
                     <th className="py-2 pr-4 font-medium">Name</th>
                     <th className="py-2 pr-4 font-medium">Role</th>
                     <th className="py-2 pr-4 font-medium">Email</th>
+                    {staffMode ? <th className="py-2 pr-4 font-medium">Institution</th> : null}
                     <th className="py-2 pr-4 font-medium">Docs</th>
                     <th className="py-2 pr-4 font-medium">Submitted</th>
                     <th className="py-2 font-medium">Action</th>
@@ -257,12 +291,17 @@ export default function AdminStudentVerificationsPage() {
                 </thead>
                 <tbody>
                   {queue.map((row) => (
-                    <tr key={row.user_id} className="border-b last:border-0">
+                    <tr key={`${row.tenant_subdomain ?? 'current'}:${row.user_id}`} className="border-b last:border-0">
                       <td className="py-3 pr-4 font-medium">{row.name}</td>
                       <td className="py-3 pr-4">
                         <Badge variant="outline">{row.role_name}</Badge>
                       </td>
                       <td className="py-3 pr-4">{row.official_email}</td>
+                      {staffMode ? (
+                        <td className="py-3 pr-4 text-muted-foreground">
+                          {row.tenant_name ?? row.tenant_subdomain ?? 'Current institution'}
+                        </td>
+                      ) : null}
                       <td className="py-3 pr-4">
                         <Badge variant="outline">{row.doc_count} files</Badge>
                       </td>
@@ -270,7 +309,7 @@ export default function AdminStudentVerificationsPage() {
                         {row.submitted_at ? new Date(row.submitted_at).toLocaleString() : '—'}
                       </td>
                       <td className="py-3">
-                        <Button size="sm" variant="outline" onClick={() => void openReview(row.user_id)}>
+                        <Button size="sm" variant="outline" onClick={() => void openReview(row)}>
                           <Eye className="mr-1 h-4 w-4" />
                           Review
                         </Button>
@@ -284,7 +323,16 @@ export default function AdminStudentVerificationsPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={Boolean(selectedId && detail)} onOpenChange={(open) => !open && setSelectedId(null)}>
+      <Dialog
+        open={Boolean(selectedId && detail)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedId(null);
+            setSelectedTenant(null);
+            setDetail(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-6xl">
           <DialogHeader>
             <DialogTitle>{detail?.person.name}</DialogTitle>

@@ -1,0 +1,12 @@
+{
+  "name": "falcon",
+  "private": true,
+  "scripts": {
+    "test": "npm --prefix tests test",
+    "test:unit": "npm --prefix tests run test:unit",
+    "test:integration": "npm --prefix tests run test:integration",
+    "test:e2e": "npm --prefix tests run test:e2e",
+    "coverage": "npm --prefix tests run coverage",
+    "test:ci": "npm --prefix tests run test:ci"
+  }
+}

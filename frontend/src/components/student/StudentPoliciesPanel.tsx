@@ -22,6 +22,7 @@ type Policy = {
 
 export function StudentPoliciesPanel() {
   const api = useAuthedApi();
+  const { token } = useAuth();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -125,15 +126,6 @@ export function StudentPoliciesPanel() {
                     </Button>
                   </>
                 )}
-                
-                {p.acknowledged && !p.user_vote ? (
-                  <span className="flex items-center gap-1 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Acknowledged
-                  </span>
-                ) : !p.acknowledged ? (
-                  <Button size="sm" onClick={() => acknowledge(p.policy_id)}>Acknowledge</Button>
-                ) : null}
               </div>
             </div>
           </div>

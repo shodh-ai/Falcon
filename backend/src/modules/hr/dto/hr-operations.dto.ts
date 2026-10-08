@@ -1,4 +1,10 @@
-import { IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  ValidateIf,
+} from 'class-validator';
 
 export class UpdateEmployeeDto {
   @IsOptional()
@@ -13,7 +19,7 @@ export class UpdateEmployeeDto {
   @IsString()
   salary_base?: string;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== null && value !== undefined)
   @IsUUID()
   reporting_officer_id?: string | null;
 }

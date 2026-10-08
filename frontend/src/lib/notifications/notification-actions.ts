@@ -32,8 +32,20 @@ export async function handleNotificationAction(
     if (path === '/student/fees') {
       path = isLaunchModuleEnabled('finance') ? '/student/finance' : '/student/dashboard';
     }
-    if (path === '/student/timetable') {
+    if (path === '/student/library' && !isLaunchModuleEnabled('library')) {
       path = '/student/dashboard';
+    }
+    if (path === '/student/onboarding' || path === '/student/onboarding/documents') {
+      path = '/student/onboarding';
+    }
+    if (path === '/student/admission-vault' && !isLaunchModuleEnabled('admissionVault')) {
+      path = '/student/profile';
+    }
+    if (path === '/student/gate-pass' || path === '/student/hostel') {
+      path = '/student/campus-life';
+    }
+    if (path.startsWith('/student/club-management')) {
+      path = '/student/falcon-events';
     }
     if (path === '/student/grades') {
       path = '/student/marks';

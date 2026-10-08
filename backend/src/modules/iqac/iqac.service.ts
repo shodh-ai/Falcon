@@ -107,7 +107,7 @@ export class IqacService {
       order: { dept_name: 'ASC' },
     });
     const pendingAssignments = await this.taskAssignments.find({
-      where: { status: 'Pending' },
+      where: { status: 'OPEN' },
       relations: ['assigned_user', 'task'],
       order: { due_date: 'ASC' },
     });
@@ -127,20 +127,24 @@ export class IqacService {
     };
   }
 
-  listTaskMaster() {
+  listTaskMaster(tenantId: string) {
     return this.taskMaster.find({
+      where: { tenant_id: tenantId },
       relations: ['role'],
       order: { month: 'ASC', task_id: 'ASC' },
     });
   }
 
-  createTaskMaster(dto: {
-    task_name?: string;
-    task_description?: string;
-    role_id?: number;
-    month?: string;
-    is_recurring?: boolean;
-  }) {
+  createTaskMaster(
+    dto: {
+      task_name?: string;
+      task_description?: string;
+      role_id?: number;
+      month?: string;
+      is_recurring?: boolean;
+    },
+    tenantId: string,
+  ) {
     const task = new TaskMaster();
     task.task_name = dto.task_name ?? 'Monthly Compliance Report';
     task.task_description = dto.task_description ?? null;
@@ -148,15 +152,32 @@ export class IqacService {
     task.month =
       dto.month ?? new Date().toLocaleString('en-US', { month: 'long' });
     task.is_recurring = dto.is_recurring ?? true;
+    task.tenant_id = tenantId;
+    task.academic_year = this.currentAcademicYear();
+    task.due_date_policy = 'MONTH_END';
+    task.evidence_requirements = [];
+    task.source_module = null;
+    task.owner_label = null;
+    task.default_assignee_id = null;
+    task.source_reference = null;
+    task.source_hash = null;
+    task.version = 1;
     return this.taskMaster.save(task);
   }
 
-  listDocumentVault() {
+  listDocumentVault(tenantId: string) {
     return this.submissions.find({
+      where: { tenant_id: tenantId },
       relations: ['assignment', 'assignment.task', 'assignment.assigned_user'],
       order: { uploaded_at: 'DESC' },
       take: 100,
     });
+  }
+
+  private currentAcademicYear(date = new Date()) {
+    const start =
+      date.getMonth() >= 6 ? date.getFullYear() : date.getFullYear() - 1;
+    return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
   }
 
   listStudentAchievements() {

@@ -16,19 +16,22 @@ interface User {
   department?: string;
   dept_id?: number;
   tenant_id?: string;
+  tenant_subdomain?: string;
   tenant_schema?: string;
   features?: string[];
   hr_capabilities?: Record<string, 'none' | 'read' | 'write'>;
   permissions?: string[];
   allowed_entities?: AllowedEntity[];
   onboarding_status?: string;
+  password_reset_required?: boolean;
   has_direct_reports?: boolean;
+  is_department_hod?: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (token: string, user: User) => void;
+  login: (token: string, user: User, rememberMe?: boolean) => void;
   refreshUser: () => Promise<User | null>;
   logout: () => void;
   isAuthenticated: boolean;
@@ -36,6 +39,22 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const AUTH_COOKIE = 'falcon_auth_token';
+
+function writeAuthCookie(token: string | null, rememberMe = false) {
+  if (typeof document === 'undefined') return;
+  // Still readable by JS (middleware gate) — not HttpOnly. Prefer short TTL + HTTPS Secure.
+  // Full HttpOnly cookie sessions need a backend Set-Cookie login path.
+  const secure =
+    typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : '';
+  const maxAgeSeconds = rememberMe ? 60 * 60 * 24 * 30 : 60 * 60 * 8;
+  if (token) {
+    document.cookie = `${AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
+  } else {
+    document.cookie = `${AUTH_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0${secure}`;
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -50,12 +69,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (storedToken && storedUser) {
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
+        writeAuthCookie(storedToken);
         try {
           const api = getApiBaseUrl();
           const { getSubdomainFromClient } = await import('@/lib/tenant');
+          const tenantSubdomain = getSubdomainFromClient();
           const headers = {
             Authorization: `Bearer ${storedToken}`,
-            'x-tenant-subdomain': getSubdomainFromClient(),
+            'x-tenant-subdomain': tenantSubdomain,
           };
           const [profileRes, permsRes] = await Promise.all([
             fetch(`${api}/api/auth/me`, { headers }).catch(() => fetch(`${api}/auth/profile`, { headers })),
@@ -63,6 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ]);
           if (profileRes.ok) {
             const fresh = await profileRes.json();
+            // The profile endpoint is tenant-scoped but does not currently
+            // repeat the tenant subdomain. Keep that resolved context on the
+            // cached user so post-login routing cannot fall back to an
+            // unrelated role workspace on the shared Falcon hostname.
+            fresh.tenant_subdomain ??= tenantSubdomain;
             if (permsRes.ok) {
               const perms = await permsRes.json();
               fresh.permissions = perms.permissions ?? fresh.permissions;
@@ -81,11 +107,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void load();
   }, []);
 
-  const login = useCallback((newToken: string, newUser: User) => {
+  const login = useCallback((newToken: string, newUser: User, rememberMe = false) => {
     setToken(newToken);
     setUser(newUser);
     localStorage.setItem('token', newToken);
     localStorage.setItem('user', JSON.stringify(newUser));
+    writeAuthCookie(newToken, rememberMe);
   }, []);
 
   const logout = useCallback(() => {
@@ -93,6 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    writeAuthCookie(null);
   }, []);
 
   const refreshUser = useCallback(async () => {
@@ -100,9 +128,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!activeToken) return null;
 
     const { getSubdomainFromClient } = await import('@/lib/tenant');
+    const tenantSubdomain = getSubdomainFromClient();
     const headers = {
       Authorization: `Bearer ${activeToken}`,
-      'x-tenant-subdomain': getSubdomainFromClient(),
+      'x-tenant-subdomain': tenantSubdomain,
     };
     const api = getApiBaseUrl();
     const [response, permsRes] = await Promise.all([
@@ -113,6 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!response.ok) return null;
 
     const freshUser = await response.json();
+    freshUser.tenant_subdomain ??= tenantSubdomain;
     if (permsRes.ok) {
       const perms = await permsRes.json();
       freshUser.permissions = perms.permissions ?? freshUser.permissions;

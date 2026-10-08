@@ -32,7 +32,8 @@ export class AttendanceRecord extends BaseSoftDeleteEntity {
   @Column({ length: 20, nullable: true })
   session_slot: string;
 
-  @Column({ length: 10, default: 'PRESENT' })
+  // Unmarked attendance must never grant credit by default.
+  @Column({ length: 10, default: 'ABSENT' })
   status: AttendanceStatus;
 
   @Column({ type: 'uuid', nullable: true })

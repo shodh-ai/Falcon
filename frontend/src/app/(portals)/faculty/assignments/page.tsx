@@ -1,6 +1,7 @@
-import { redirect } from 'next/navigation';
+'use client';
 
-/** DA lives in each course workspace — keep this route as a redirect for old links. */
+import { FacultyCourseFeatureHub } from '@/components/faculty/FacultyCourseFeatureHub';
+
 export default function FacultyAssignmentsPage() {
-  redirect('/faculty/courses');
+  return <FacultyCourseFeatureHub feature="assignments" />;
 }

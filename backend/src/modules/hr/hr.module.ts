@@ -10,6 +10,7 @@ import { LeaveBalance } from '../../entities/leave-balance.entity';
 import { StaffAttendance } from '../../entities/staff-attendance.entity';
 import { StaffLeaveRequest } from '../../entities/staff-leave-request.entity';
 import { StaffPayslip } from '../../entities/staff-payslip.entity';
+import { StaffPayslipDownloadRequest } from '../../entities/staff-payslip-download-request.entity';
 import { StaffGatePass } from '../../entities/staff-gate-pass.entity';
 import { User } from '../../entities/user.entity';
 import { HrHoliday } from '../../entities/hr-holiday.entity';
@@ -45,6 +46,7 @@ import { HrDocumentExportProcessor } from './hr-document-export.processor';
 import { HrPayrollProcessor } from './hr-payroll.processor';
 import { HrTeamScopeService } from './hr-team-scope.service';
 import { HrTeamService } from './hr-team.service';
+import { PayslipPdfService } from './payslip-pdf.service';
 import { FinanceModule } from '../finance/finance.module';
 import { NotificationsModule } from '../../core/notifications/notifications.module';
 
@@ -61,6 +63,7 @@ import { NotificationsModule } from '../../core/notifications/notifications.modu
       StaffAttendance,
       StaffLeaveRequest,
       StaffPayslip,
+      StaffPayslipDownloadRequest,
       StaffGatePass,
       User,
       HrHoliday,
@@ -100,6 +103,7 @@ import { NotificationsModule } from '../../core/notifications/notifications.modu
     HrPayrollProcessor,
     HrTeamScopeService,
     HrTeamService,
+    PayslipPdfService,
   ],
   exports: [
     HrService,

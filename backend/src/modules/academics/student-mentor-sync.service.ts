@@ -48,7 +48,9 @@ export class StudentMentorSyncService {
 
     const results: MentorSyncResult[] = [];
     for (const student of students) {
-      results.push(await this.syncStudent(tenantId, student.user_id, academicYear));
+      results.push(
+        await this.syncStudent(tenantId, student.user_id, academicYear),
+      );
     }
     return results;
   }

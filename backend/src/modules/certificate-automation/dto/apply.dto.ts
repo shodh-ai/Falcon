@@ -1,6 +1,7 @@
-import { IsUUID } from 'class-validator';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class ApplyCertEventDto {
-  @IsUUID()
+  @IsString()
+  @IsNotEmpty()
   event_id!: string;
 }

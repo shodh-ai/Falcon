@@ -8,6 +8,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
 import { AttendanceEligibilityService } from './attendance-eligibility.service';
+import {
+  isDepartmentInDeanScope,
+  resolveDeanDepartmentIds,
+} from '../academics/dean-scope.util';
 
 const EXEMPTION_REASONS = [
   'MEDICAL',
@@ -15,6 +19,7 @@ const EXEMPTION_REASONS = [
   'INTERNSHIP',
   'BEREAVEMENT',
   'OTHER',
+  'ELITE_FELLOW',
 ];
 
 interface CreateExemptionDto {
@@ -316,12 +321,40 @@ export class AttendancePolicyService {
          (tenant_id, dept_id, requested_min_percent, reason, requested_by, status, decided_by, decided_at)
        VALUES ($1, $2, $3, $4, $5, 'APPROVED', $5, NOW())
        RETURNING *`,
-      [tenantId, deptId, pct, dto.reason?.trim() || 'Direct HOD Override', hodUserId],
+      [
+        tenantId,
+        deptId,
+        pct,
+        dto.reason?.trim() || 'Direct HOD Override',
+        hodUserId,
+      ],
     );
     return rows[0];
   }
 
-  async listCourses(tenantId: string) {
+  async listCourses(tenantId: string, hodUserId?: string) {
+    const deptIds =
+      hodUserId != null ? await this.resolveHodDepartmentIds(hodUserId) : null;
+    if (hodUserId != null && !deptIds?.length) return [];
+
+    const deptFilter =
+      deptIds?.length != null && deptIds.length > 0
+        ? `AND (
+             EXISTS (
+               SELECT 1 FROM academic_timetables t
+               JOIN users fu ON fu.user_id = t.faculty_user_id
+               WHERE t.course_id = c.course_id AND t.tenant_id = $1
+                 AND fu.dept_id = ANY($2::int[])
+             )
+             OR EXISTS (
+               SELECT 1 FROM student_course_enrollments e
+               JOIN users su ON su.user_id = e.student_user_id
+               WHERE e.course_id = c.course_id AND e.tenant_id = $1
+                 AND su.dept_id = ANY($2::int[])
+             )
+           )`
+        : '';
+
     return this.db.query(
       `SELECT 
          c.course_id, 
@@ -343,8 +376,9 @@ export class AttendancePolicyService {
          ) AS faculty_name
        FROM academic_courses c
        WHERE c.tenant_id = $1
+       ${deptFilter}
        ORDER BY c.course_code ASC`,
-      [tenantId],
+      deptIds?.length ? [tenantId, deptIds] : [tenantId],
     );
   }
 
@@ -352,6 +386,7 @@ export class AttendancePolicyService {
     tenantId: string,
     courseId: string,
     minPercent: number | null,
+    hodUserId?: string,
   ) {
     if (minPercent !== null) {
       const pct = Number(minPercent);
@@ -359,6 +394,18 @@ export class AttendancePolicyService {
         throw new BadRequestException('Threshold must be between 0 and 100.');
       }
     }
+
+    if (hodUserId != null) {
+      const scoped = await this.listCourses(tenantId, hodUserId);
+      if (
+        !scoped.some((row: { course_id: string }) => row.course_id === courseId)
+      ) {
+        throw new ForbiddenException(
+          'Course is outside your department scope.',
+        );
+      }
+    }
+
     const result = await this.db.query(
       `UPDATE academic_courses
        SET min_attendance = $1
@@ -395,11 +442,36 @@ export class AttendancePolicyService {
     );
   }
 
+  async listDeanPendingThresholdRequests(
+    tenantId: string,
+    deanUserId: string,
+    actorRole?: string,
+  ) {
+    if (actorRole === 'SuperAdmin') {
+      return this.listPendingThresholdRequests(tenantId);
+    }
+
+    const deptIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+    if (!deptIds.length) return [];
+
+    return this.db.query(
+      `SELECT r.*, d.dept_name, u.name AS requested_by_name
+       FROM attendance_threshold_requests r
+       LEFT JOIN departments d ON d.dept_id = r.dept_id
+       LEFT JOIN users u ON u.user_id = r.requested_by
+       WHERE r.tenant_id = $1
+         AND r.dept_id = ANY($2::int[])
+       ORDER BY (r.status = 'PENDING_DEAN') DESC, r.created_at DESC`,
+      [tenantId, deptIds],
+    );
+  }
+
   async decideThresholdRequest(
     tenantId: string,
     deanUserId: string,
     requestId: string,
     dto: DecisionDto,
+    actorRole?: string,
   ) {
     const [request] = await this.db.query(
       `SELECT * FROM attendance_threshold_requests WHERE request_id = $1 AND tenant_id = $2`,
@@ -408,6 +480,15 @@ export class AttendancePolicyService {
     if (!request) throw new NotFoundException('Threshold request not found');
     if (request.status !== 'PENDING_DEAN') {
       throw new BadRequestException('This request has already been decided.');
+    }
+
+    if (actorRole !== 'SuperAdmin') {
+      const deptIds = await resolveDeanDepartmentIds(this.db, deanUserId);
+      if (!isDepartmentInDeanScope(request.dept_id, deptIds)) {
+        throw new ForbiddenException(
+          'This threshold request is outside your school scope.',
+        );
+      }
     }
 
     const newStatus = dto.decision === 'REJECT' ? 'REJECTED' : 'APPROVED';
@@ -528,5 +609,38 @@ export class AttendancePolicyService {
         ...payload,
       });
     }
+  }
+
+  /** Auto-approve 100% attendance waiver for elite / Hacker Filter fellows. */
+  async ensureEliteFellowWaiver(tenantId: string, studentUserId: string) {
+    if (!studentUserId) {
+      throw new BadRequestException(
+        'studentUserId is required for elite fellow waiver',
+      );
+    }
+    const existing = await this.db.query(
+      `SELECT * FROM student_attendance_exemptions
+       WHERE tenant_id = $1 AND student_user_id = $2
+         AND reason_category = 'ELITE_FELLOW' AND status = 'APPROVED'
+       LIMIT 1`,
+      [tenantId, studentUserId],
+    );
+    if (existing[0]) return existing[0];
+
+    const attendance =
+      await this.eligibility.computeAttendancePercent(studentUserId);
+
+    const rows = await this.db.query(
+      `INSERT INTO student_attendance_exemptions
+         (tenant_id, student_user_id, reason_category, description, supporting_doc_url,
+          attendance_percent_at_request, status, final_decided_at, final_remarks)
+       VALUES ($1, $2, 'ELITE_FELLOW',
+               'Elite fellow / Hacker Filter — 100% lecture attendance waiver (UROP)',
+               'system://hacker-filter',
+               $3, 'APPROVED', NOW(), 'Auto-approved via fellowship conversion')
+       RETURNING *`,
+      [tenantId, studentUserId, attendance],
+    );
+    return rows[0];
   }
 }

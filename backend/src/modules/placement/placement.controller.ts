@@ -29,6 +29,12 @@ export class PlacementController {
     return req.user.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
   }
 
+  @Get('dashboard')
+  @Roles('SuperAdmin', 'PlacementCell', 'Registrar', 'CampusAdmin')
+  dashboard(@Req() req: { user: AuthUser }) {
+    return this.placement.dashboard(this.tenant(req));
+  }
+
   @Get('companies')
   @Roles('SuperAdmin', 'PlacementCell', 'Registrar')
   companies(@Req() req: { user: AuthUser }) {

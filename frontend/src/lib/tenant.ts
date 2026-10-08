@@ -1,7 +1,7 @@
 export const TENANT_COOKIE = 'falcon_tenant_subdomain';
 
 import {
-  extractSubdomainFromHost,
+  resolveTenantFromHost,
   resolveTenantSubdomain,
 } from '@/lib/resolve-tenant-subdomain';
 
@@ -20,18 +20,30 @@ export function getSubdomainFromClient(): string {
     return resolveTenantSubdomain(null);
   }
 
-  const fromCookie = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith(`${TENANT_COOKIE}=`))
-    ?.split('=')[1];
-  if (fromCookie?.trim()) {
-    return resolveTenantSubdomain(decodeURIComponent(fromCookie));
+  const hostname = window.location.hostname;
+  if (hostname) {
+    const fromCookie = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith(`${TENANT_COOKIE}=`))
+      ?.split('=')[1];
+    return resolveTenantFromHost(hostname, fromCookie ? decodeURIComponent(fromCookie) : null);
   }
 
-  const fromHost = extractSubdomainFromHost(window.location.hostname);
-  if (fromHost) return fromHost;
-
   return resolveTenantSubdomain(null);
+}
+
+export function rememberTenantSubdomain(subdomain: string): void {
+  if (typeof document === 'undefined') return;
+  const normalized = subdomain.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalized)) return;
+  document.cookie = `${TENANT_COOKIE}=${encodeURIComponent(normalized)}; Path=/; SameSite=Lax`;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem('tenant_subdomain', normalized);
+    } catch {
+      // Cookies are authoritative; storage can be unavailable in private mode.
+    }
+  }
 }
 
 export async function fetchTenantBranding(subdomain: string): Promise<TenantBranding> {

@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, QueryRunner } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { NotificationEmitterService } from '../../core/notifications/notification-emitter.service';
+import { AuthService } from '../../auth/auth.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
 
@@ -68,6 +69,90 @@ const HEADER_ALIASES: Record<string, string> = {
 
 const NF_VALUES = new Set(['nf', 'n/f', 'no faculty', 'unassigned', '-', '']);
 
+function normalizeProgramKey(value: string | null | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[._-]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/^bacheloroftechnology/, 'btech');
+}
+
+function isUnassignedFaculty(value: string | null | undefined): boolean {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[—–]/g, '-')
+    .replace(/\s+/g, ' ');
+  return (
+    NF_VALUES.has(normalized) ||
+    normalized === 'nf - unassigned' ||
+    normalized === 'n/f - unassigned' ||
+    normalized.includes('no faculty') ||
+    normalized.includes('unassigned')
+  );
+}
+
+function departmentAcronym(value: string | null | undefined): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((part) => part && !['and', 'of', 'the'].includes(part))
+    .map((part) => part[0])
+    .join('');
+}
+
+/**
+ * Legacy programme rows are not always linked to a department. Keep the
+ * scope check strict by deriving only well-known aliases from the department
+ * name, rather than treating every unowned programme as in-scope.
+ */
+function departmentProgramKeys(value: string | null | undefined): string[] {
+  const normalized = normalizeProgramKey(value);
+  const acronym = departmentAcronym(value);
+  const keys = new Set<string>();
+  if (normalized) keys.add(normalized);
+  if (acronym) keys.add(acronym);
+
+  const aliases: Array<[string, string]> = [
+    ['computerscience', 'cse'],
+    ['informationtechnology', 'it'],
+    ['electronicsandcommunication', 'ece'],
+    ['electronicsandelectrical', 'eee'],
+    ['electricalandelectronics', 'eee'],
+    ['mechanicalengineering', 'me'],
+    ['civilengineering', 'ce'],
+    ['pharmacy', 'pharmacy'],
+    ['physiotherapy', 'bpt'],
+    ['agriculture', 'agri'],
+  ];
+  for (const [name, alias] of aliases) {
+    if (normalized.includes(name)) keys.add(alias);
+  }
+  return [...keys];
+}
+
+function programBelongsToDepartment(
+  programName: string | null | undefined,
+  programCode: string | null | undefined,
+  departmentName: string | null | undefined,
+): boolean {
+  const programKeys = [
+    normalizeProgramKey(programName),
+    normalizeProgramKey(programCode),
+  ].filter(Boolean);
+  const departmentKeys = departmentProgramKeys(departmentName);
+  return departmentKeys.some((departmentKey) =>
+    programKeys.some(
+      (programKey) =>
+        programKey === departmentKey ||
+        programKey.includes(departmentKey) ||
+        (programKey.startsWith('btech') &&
+          programKey.slice('btech'.length) === departmentKey),
+    ),
+  );
+}
+
 @Injectable()
 export class CourseAllocationBulkService {
   private readonly logger = new Logger(CourseAllocationBulkService.name);
@@ -75,9 +160,17 @@ export class CourseAllocationBulkService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly notify: NotificationEmitterService,
+    private readonly authService: AuthService,
     private readonly enrollmentSync: StudentEnrollmentSyncService,
     private readonly mentorSync: StudentMentorSyncService,
   ) {}
+
+  private async syncTeachingFacultyRole(
+    facultyUserId: string | null | undefined,
+  ) {
+    if (!facultyUserId) return;
+    await this.authService.ensureTeachingFacultyRoleForHod(facultyUserId);
+  }
 
   async buildTemplateBuffer(): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
@@ -123,11 +216,16 @@ export class CourseAllocationBulkService {
   ): Promise<CourseAllocationRowInput[]> {
     const lower = filename.toLowerCase();
     if (lower.endsWith('.csv')) return this.parseCsv(buffer);
-    if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+    if (lower.endsWith('.xlsx')) {
       return this.parseExcel(buffer);
     }
+    if (lower.endsWith('.xls')) {
+      throw new BadRequestException(
+        'Legacy .xls files are not supported. Save the workbook as .xlsx or CSV and upload it again.',
+      );
+    }
     throw new BadRequestException(
-      'Only .xlsx, .xls, or .csv files are supported',
+      'Only .xlsx or .csv files are supported',
     );
   }
 
@@ -150,6 +248,7 @@ export class CourseAllocationBulkService {
   async buildPreview(
     tenantId: string,
     rows: CourseAllocationRowInput[],
+    hodUserId?: string,
   ): Promise<{ rows: PreviewRow[]; summary: Record<string, number> }> {
     const existingSubjects = await this.dataSource.query<
       { subject_id: number; subject_code: string }[]
@@ -170,20 +269,43 @@ export class CourseAllocationBulkService {
     >(
       `SELECT u.user_id, u.name, u.official_email
        FROM users u
-       INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean')`,
+         AND (
+           EXISTS (
+             SELECT 1 FROM roles primary_role
+             WHERE primary_role.role_id = u.role_id
+               AND primary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+         )`,
       [tenantId],
     );
     const facultyByUsername = this.buildFacultyUsernameIndex(facultyRows);
+
+    let allowedPrograms: Set<string> | null = null;
+    if (hodUserId) {
+      const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+      if (!deptIds.length) {
+        throw new BadRequestException(
+          'Your HOD account is not linked to a department yet',
+        );
+      }
+      allowedPrograms = await this.resolveAllowedProgramNames(deptIds);
+    }
 
     const previewRows: PreviewRow[] = rows.map((row, idx) => {
       const codeKey = this.normalizeCourseCode(row.subject_code);
       const existingId = subjectByCode.get(codeKey) ?? null;
       const isNew = existingId === null;
-      const isUnassigned = NF_VALUES.has(row.faculty_username.trim().toLowerCase());
+      const isUnassigned = isUnassignedFaculty(row.faculty_username);
       const warnings: string[] = [];
 
       let facultyUserId: string | null = null;
@@ -199,7 +321,9 @@ export class CourseAllocationBulkService {
           facultyName = match.name;
           facultyEmail = match.official_email;
         } else {
-          warnings.push(`Faculty "${row.faculty_username}" not found — will save as unassigned`);
+          warnings.push(
+            `Faculty "${row.faculty_username}" not found — will save as unassigned`,
+          );
         }
       }
 
@@ -208,6 +332,15 @@ export class CourseAllocationBulkService {
       }
       if (!row.subject_fullname.trim()) {
         warnings.push('Subject fullname is empty');
+      }
+
+      if (allowedPrograms) {
+        const programKey = normalizeProgramKey(row.program_name);
+        if (!programKey || !allowedPrograms.has(programKey)) {
+          warnings.push(
+            `Program "${row.program_name || '(empty)'}" is outside your department scope`,
+          );
+        }
       }
 
       return {
@@ -242,6 +375,7 @@ export class CourseAllocationBulkService {
     tenantId: string,
     academicYear: string,
     rows: CourseAllocationRowInput[],
+    hodUserId?: string,
   ): Promise<ExecuteResult> {
     if (!academicYear?.trim()) {
       throw new BadRequestException('Academic year is required');
@@ -250,7 +384,15 @@ export class CourseAllocationBulkService {
       throw new BadRequestException('No rows to import');
     }
 
-    const preview = await this.buildPreview(tenantId, rows);
+    const preview = await this.buildPreview(tenantId, rows, hodUserId);
+    const outOfScope = preview.rows.filter((r) =>
+      r.warnings.some((w) => w.includes('outside your department scope')),
+    );
+    if (outOfScope.length) {
+      throw new BadRequestException(
+        `Row ${outOfScope[0].row_number}: program is outside your department scope`,
+      );
+    }
     const blocking = preview.rows.filter(
       (r) => !r.subject_code.trim() || !r.subject_fullname.trim(),
     );
@@ -260,7 +402,10 @@ export class CourseAllocationBulkService {
       );
     }
 
-    const defaultProgramId = await this.resolveDefaultProgramId();
+    const scopedDeptIds = hodUserId
+      ? await this.resolveHodDepartmentIds(hodUserId)
+      : undefined;
+    const defaultProgramId = await this.resolveDefaultProgramId(scopedDeptIds);
 
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -274,8 +419,35 @@ export class CourseAllocationBulkService {
       workspaces_assigned: 0,
       unassigned_count: 0,
     };
+    const assignedFacultyIds = new Set<string>();
 
     try {
+      const proposedFacultyIds = [
+        ...new Set(
+          preview.rows
+            .filter((row) => !row.is_unassigned && row.faculty_user_id)
+            .map((row) => row.faculty_user_id as string),
+        ),
+      ];
+      if (proposedFacultyIds.length) {
+        const blocked = await qr.query(
+          `SELECT d.faculty_user_id, u.name, u.official_email
+           FROM academic_faculty_load_declarations d
+           JOIN users u
+             ON u.user_id = d.faculty_user_id AND u.tenant_id = d.tenant_id
+           WHERE d.tenant_id = $1
+             AND d.academic_year = $2
+             AND d.status = 'NO_TEACHING_LOAD'
+             AND d.faculty_user_id = ANY($3::uuid[])`,
+          [tenantId, academicYear.trim(), proposedFacultyIds],
+        );
+        if (blocked.length) {
+          throw new BadRequestException(
+            `${blocked[0].name} is marked No Teaching Load for ${academicYear.trim()}. Clear the declaration before allocating a course.`,
+          );
+        }
+      }
+
       for (const row of preview.rows) {
         const subjectId = await this.upsertSubject(
           qr,
@@ -283,19 +455,15 @@ export class CourseAllocationBulkService {
           defaultProgramId,
           result,
         );
-        const courseId = await this.ensureCourse(
-          qr,
-          tenantId,
-          row,
-          result,
-        );
+        const courseId = await this.ensureCourse(qr, tenantId, row, result);
         const facultyId = row.is_unassigned ? null : row.faculty_user_id;
 
         await qr.query(
           `INSERT INTO academic_course_allocations
              (tenant_id, subject_id, program_name, semester, faculty_user_id, academic_year, course_id, status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')
-           ON CONFLICT (tenant_id, subject_id, program_name, semester, academic_year)
+           ON CONFLICT (tenant_id, subject_id, program_name, semester, academic_year, faculty_user_id)
+             WHERE status = 'ACTIVE'
            DO UPDATE SET
              faculty_user_id = EXCLUDED.faculty_user_id,
              course_id = EXCLUDED.course_id,
@@ -313,12 +481,10 @@ export class CourseAllocationBulkService {
         result.allocations_created += 1;
 
         if (facultyId && courseId) {
-          await this.ensureFacultyTimetableSlot(
-            qr,
-            tenantId,
-            courseId,
-            facultyId,
-          );
+          assignedFacultyIds.add(facultyId);
+          // Allocation establishes teaching access, not a schedule. A teaching
+          // matrix has no approved day/time/batch, so it must neither invent a
+          // slot nor replace another faculty member's existing timetable.
           result.workspaces_assigned += 1;
           this.notify.timetableChanged({
             tenantId,
@@ -332,7 +498,13 @@ export class CourseAllocationBulkService {
       }
 
       await qr.commitTransaction();
-      await this.enrollmentSync.syncTenantStudents(tenantId, academicYear.trim());
+      await Promise.all(
+        [...assignedFacultyIds].map((id) => this.syncTeachingFacultyRole(id)),
+      );
+      await this.enrollmentSync.syncTenantStudents(
+        tenantId,
+        academicYear.trim(),
+      );
       await this.mentorSync.syncTenantStudents(tenantId, academicYear.trim());
       return result;
     } catch (err) {
@@ -351,17 +523,12 @@ export class CourseAllocationBulkService {
       `SELECT COUNT(*)::text AS count
        FROM academic_course_allocations a
        INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
-       LEFT JOIN users u ON u.user_id = a.faculty_user_id
        WHERE a.tenant_id = $1
          AND a.faculty_user_id IS NULL
          AND a.status = 'ACTIVE'
-         AND EXISTS (
-           SELECT 1 FROM pg_tables
-           WHERE schemaname = 'public' AND tablename = 'academic_course_allocations'
-         )`,
-      [tenantId],
+         AND ${this.allocationScopedToDepartmentsSql('a', 's', '$2')}`,
+      [tenantId, deptIds],
     );
-    void deptIds;
     return Number(rows[0]?.count ?? 0);
   }
 
@@ -375,6 +542,8 @@ export class CourseAllocationBulkService {
     if (!tableExists[0]?.exists) return { items: [], faculty: [] };
 
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { items: [], faculty: [] };
+
     const faculty = await this.listDepartmentFaculty(tenantId, deptIds);
 
     const items = await this.dataSource.query<
@@ -402,12 +571,124 @@ export class CourseAllocationBulkService {
        WHERE a.tenant_id = $1
          AND a.faculty_user_id IS NULL
          AND a.status = 'ACTIVE'
+         AND ${this.allocationScopedToDepartmentsSql('a', 's', '$2')}
        ORDER BY a.academic_year DESC, a.program_name, a.semester, s.subject_code`,
-      [tenantId],
+      [tenantId, deptIds],
     );
 
-    void deptIds;
     return { items, faculty };
+  }
+
+  async listAssignedForHod(tenantId: string, hodUserId: string) {
+    const tableExists = await this.dataSource.query<{ exists: boolean }[]>(
+      `SELECT EXISTS (
+         SELECT 1 FROM pg_tables
+         WHERE schemaname = 'public' AND tablename = 'academic_course_allocations'
+       ) AS exists`,
+    );
+    if (!tableExists[0]?.exists) return { items: [], faculty: [] };
+
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) return { items: [], faculty: [] };
+
+    const faculty = await this.listDepartmentFaculty(tenantId, deptIds);
+
+    const items = await this.dataSource.query<
+      {
+        allocation_id: string;
+        course_id: string | null;
+        subject_code: string;
+        subject_name: string;
+        subject_type: string;
+        credits: number;
+        program_name: string;
+        semester: string;
+        academic_year: string;
+        faculty_user_id: string;
+        faculty_name: string;
+      }[]
+    >(
+      `SELECT a.allocation_id,
+              a.course_id,
+              s.subject_code,
+              s.subject_name,
+              s.subject_type,
+              s.credits,
+              a.program_name,
+              a.semester,
+              a.academic_year,
+              a.faculty_user_id,
+              u.name AS faculty_name
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.tenant_id = $1
+         AND a.faculty_user_id IS NOT NULL
+         AND a.status = 'ACTIVE'
+         AND u.dept_id = ANY($2::int[])
+       ORDER BY a.academic_year DESC, s.subject_code ASC, a.semester ASC`,
+      [tenantId, deptIds],
+    );
+
+    return { items, faculty };
+  }
+
+  async reassignFacultyForHod(
+    tenantId: string,
+    hodUserId: string,
+    allocationId: string,
+    newFacultyUserId: string,
+  ) {
+    const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    const allocation = await this.dataSource.query<
+      {
+        allocation_id: string;
+        course_id: string | null;
+        faculty_user_id: string;
+        faculty_dept_id: number;
+        subject_name: string;
+        subject_code: string;
+        academic_year: string;
+      }[]
+    >(
+      `SELECT a.allocation_id, a.course_id, a.faculty_user_id, u.dept_id AS faculty_dept_id,
+              s.subject_name, s.subject_code, a.academic_year
+       FROM academic_course_allocations a
+       INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
+       INNER JOIN users u ON u.user_id = a.faculty_user_id
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'`,
+      [allocationId, tenantId],
+    );
+    if (!allocation[0]) throw new NotFoundException('Allocation not found');
+    if (!deptIds.includes(Number(allocation[0].faculty_dept_id))) {
+      throw new BadRequestException(
+        'This subject is outside your department scope',
+      );
+    }
+    if (allocation[0].faculty_user_id === newFacultyUserId) {
+      throw new BadRequestException(
+        'Subject is already assigned to this faculty member',
+      );
+    }
+
+    const oldFacultyUserId = allocation[0].faculty_user_id;
+    const result = await this.assignFacultyToAllocation(
+      tenantId,
+      hodUserId,
+      allocationId,
+      newFacultyUserId,
+    );
+
+    if (oldFacultyUserId) {
+      this.notify.timetableChanged({
+        tenantId,
+        userId: oldFacultyUserId,
+        courseName: allocation[0].subject_name,
+        changeSummary: `${allocation[0].subject_name} (${allocation[0].subject_code}) has been reassigned to another faculty member for ${allocation[0].academic_year}.`,
+      });
+    }
+
+    return result;
   }
 
   async assignFacultyToAllocation(
@@ -417,14 +698,33 @@ export class CourseAllocationBulkService {
     facultyUserId: string,
   ) {
     const deptIds = await this.resolveHodDepartmentIds(hodUserId);
+    if (!deptIds.length) {
+      throw new BadRequestException(
+        'Your HOD account is not linked to a department',
+      );
+    }
+
     const faculty = await this.dataSource.query<
       { user_id: string; name: string; dept_id: number }[]
     >(
       `SELECT u.user_id, u.name, u.dept_id
        FROM users u
-       INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.user_id = $1 AND u.tenant_id = $2 AND u.is_active = true
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean')`,
+         AND u.deleted_at IS NULL
+         AND (
+           EXISTS (
+             SELECT 1 FROM roles primary_role
+             WHERE primary_role.role_id = u.role_id
+               AND primary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+         )`,
       [facultyUserId, tenantId],
     );
     if (!faculty[0]) throw new NotFoundException('Faculty member not found');
@@ -446,12 +746,15 @@ export class CourseAllocationBulkService {
       `SELECT a.allocation_id, a.course_id, s.subject_name, s.subject_code, a.academic_year
        FROM academic_course_allocations a
        INNER JOIN academic_subjects s ON s.subject_id = a.subject_id
-       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'`,
-      [allocationId, tenantId],
+       WHERE a.allocation_id = $1 AND a.tenant_id = $2 AND a.status = 'ACTIVE'
+         AND ${this.allocationScopedToDepartmentsSql('a', 's', '$3')}`,
+      [allocationId, tenantId, deptIds],
     );
     if (!allocation[0]) throw new NotFoundException('Allocation not found');
     if (!allocation[0].course_id) {
-      throw new BadRequestException('Course workspace not provisioned for this allocation');
+      throw new BadRequestException(
+        'Course workspace not provisioned for this allocation',
+      );
     }
 
     await this.dataSource.query(
@@ -474,7 +777,13 @@ export class CourseAllocationBulkService {
       changeSummary: `You have been assigned to teach ${allocation[0].subject_name} (${allocation[0].subject_code}) for ${allocation[0].academic_year}.`,
     });
 
-    return { success: true, allocation_id: allocationId, faculty_user_id: facultyUserId };
+    await this.syncTeachingFacultyRole(facultyUserId);
+
+    return {
+      success: true,
+      allocation_id: allocationId,
+      faculty_user_id: facultyUserId,
+    };
   }
 
   async listAllAllocations(tenantId: string) {
@@ -506,13 +815,17 @@ export class CourseAllocationBulkService {
        WHERE u.tenant_id = $1 AND u.is_active = true
          AND r.role_name IN ('Faculty', 'HOD', 'Dean')
        ORDER BY u.name`,
-      [tenantId]
+      [tenantId],
     );
 
     return { items, faculty };
   }
 
-  async updateAllocationFaculty(tenantId: string, allocationId: string, newFacultyUserId: string | null) {
+  async updateAllocationFaculty(
+    tenantId: string,
+    allocationId: string,
+    newFacultyUserId: string | null,
+  ) {
     const allocation = await this.dataSource.query(
       `SELECT a.allocation_id, a.course_id, a.faculty_user_id, s.subject_name, s.subject_code, a.academic_year
        FROM academic_course_allocations a
@@ -537,10 +850,10 @@ export class CourseAllocationBulkService {
         await this.dataSource.query(
           `DELETE FROM academic_timetables
            WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3`,
-          [tenantId, courseId, oldFacultyUserId]
+          [tenantId, courseId, oldFacultyUserId],
         );
       }
-      
+
       if (newFacultyUserId) {
         await this.ensureFacultyTimetableSlotDirect(
           tenantId,
@@ -557,7 +870,13 @@ export class CourseAllocationBulkService {
       }
     }
 
-    return { success: true, allocation_id: allocationId, faculty_user_id: newFacultyUserId };
+    await this.syncTeachingFacultyRole(newFacultyUserId);
+
+    return {
+      success: true,
+      allocation_id: allocationId,
+      faculty_user_id: newFacultyUserId,
+    };
   }
 
   async deleteAllocation(tenantId: string, allocationId: string) {
@@ -575,14 +894,14 @@ export class CourseAllocationBulkService {
       await this.dataSource.query(
         `DELETE FROM academic_timetables
          WHERE tenant_id = $1 AND course_id = $2 AND faculty_user_id = $3`,
-        [tenantId, course_id, faculty_user_id]
+        [tenantId, course_id, faculty_user_id],
       );
     }
 
     await this.dataSource.query(
       `DELETE FROM academic_course_allocations
        WHERE allocation_id = $1 AND tenant_id = $2`,
-      [allocationId, tenantId]
+      [allocationId, tenantId],
     );
 
     return { success: true };
@@ -596,8 +915,12 @@ export class CourseAllocationBulkService {
   ): Promise<number> {
     const code = this.normalizeCourseCode(row.subject_code);
     const shortname =
-      row.subject_fullname.trim().split(/\s+/).slice(0, 3).join(' ').slice(0, 50) ||
-      code;
+      row.subject_fullname
+        .trim()
+        .split(/\s+/)
+        .slice(0, 3)
+        .join(' ')
+        .slice(0, 50) || code;
     const subType = this.normalizeSubType(row.sub_type);
 
     const inserted = (await qr.query(
@@ -725,18 +1048,171 @@ export class CourseAllocationBulkService {
     );
   }
 
-  private async resolveDefaultProgramId(): Promise<number> {
-    const rows = await this.dataSource.query<{ program_id: number }[]>(
-      `SELECT program_id FROM iam_programs WHERE deleted_at IS NULL ORDER BY program_id LIMIT 1`,
+  private async resolveDefaultProgramId(deptIds?: number[]): Promise<number> {
+    const rows = await this.dataSource.query<
+      { program_id: number; program_name: string; program_code: string; dept_name: string | null }[]
+    >(
+      `SELECT program_id
+              , program_name
+              , program_code
+              , d.dept_name
+       FROM iam_programs p
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE p.deleted_at IS NULL
+         AND ($1::int[] IS NULL OR p.dept_id = ANY($1::int[]))
+       ORDER BY program_id
+       LIMIT 1`,
+      [deptIds?.length ? deptIds : null],
     );
-    return rows[0]?.program_id ?? 1;
+    if (rows[0]?.program_id) return rows[0].program_id;
+
+    if (deptIds?.length) {
+      const fallback = await this.dataSource.query<
+        { program_id: number; program_name: string; program_code: string; dept_name: string | null }[]
+      >(
+        `SELECT p.program_id, p.program_name, p.program_code, d.dept_name
+         FROM iam_programs p
+         LEFT JOIN departments d ON d.dept_id = p.dept_id
+         WHERE p.deleted_at IS NULL
+         ORDER BY p.program_id`,
+      );
+      const departments = await this.dataSource.query<
+        { dept_name: string }[]
+      >(
+        `SELECT dept_name FROM departments WHERE dept_id = ANY($1::int[])`,
+        [deptIds],
+      );
+      const departmentNames = departments.map((row) => row.dept_name);
+      const match = fallback.find((program) =>
+        departmentNames.some((deptName) =>
+          programBelongsToDepartment(
+            program.program_name,
+            program.program_code,
+            deptName,
+          ),
+        ),
+      );
+      if (match?.program_id) return match.program_id;
+    }
+    throw new BadRequestException(
+      'No active programme is configured for the selected department. Configure the programme before importing this matrix.',
+    );
+  }
+
+  private async resolveAllowedProgramNames(
+    deptIds: number[],
+  ): Promise<Set<string>> {
+    if (!deptIds.length) return new Set();
+    const departments = await this.dataSource.query<
+      { dept_name: string }[]
+    >(
+      `SELECT dept_name FROM departments WHERE dept_id = ANY($1::int[])`,
+      [deptIds],
+    );
+    const departmentNames = departments.map((row) => row.dept_name);
+    const rows = await this.dataSource.query<
+      {
+        program_name: string;
+        program_code: string;
+        dept_name: string | null;
+        scope_proven: boolean;
+      }[]
+    >(
+      `SELECT DISTINCT p.program_name,
+                       p.program_code,
+                       d.dept_name,
+                       (p.dept_id = ANY($1::int[])) AS scope_proven
+       FROM iam_programs p
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE p.deleted_at IS NULL
+         AND (p.dept_id = ANY($1::int[]) OR p.dept_id IS NULL)`,
+      [deptIds],
+    );
+    const allocationRows = await this.dataSource.query<
+      {
+        program_name: string;
+        program_code: string;
+        dept_name: string | null;
+        scope_proven: boolean;
+      }[]
+    >(
+      `SELECT DISTINCT a.program_name,
+                       p.program_code,
+                       d.dept_name,
+                       true AS scope_proven
+       FROM academic_course_allocations a
+       JOIN academic_subjects s ON s.subject_id = a.subject_id
+       JOIN iam_programs p ON p.program_id = s.program_id
+       LEFT JOIN departments d ON d.dept_id = p.dept_id
+       WHERE a.program_name IS NOT NULL
+         AND a.status = 'ACTIVE'
+         AND p.deleted_at IS NULL
+         AND (
+           p.dept_id = ANY($1::int[])
+           OR EXISTS (
+             SELECT 1 FROM users faculty
+             WHERE faculty.user_id = a.faculty_user_id
+               AND faculty.dept_id = ANY($1::int[])
+           )
+         )`,
+      [deptIds],
+    );
+    rows.push(...allocationRows);
+    const keys = new Set<string>();
+    for (const row of rows) {
+      const programKey = normalizeProgramKey(row.program_name);
+      const codeKey = normalizeProgramKey(row.program_code);
+      if (row.scope_proven) {
+        if (programKey) keys.add(programKey);
+        if (codeKey) keys.add(codeKey);
+      }
+      for (const departmentName of departmentNames) {
+        if (
+          programBelongsToDepartment(
+            row.program_name,
+            row.program_code,
+            departmentName,
+          )
+        ) {
+          if (programKey) keys.add(programKey);
+          if (codeKey) keys.add(codeKey);
+          for (const departmentKey of departmentProgramKeys(departmentName)) {
+            keys.add(departmentKey);
+            keys.add(`btech${departmentKey}`);
+          }
+        }
+      }
+    }
+    return keys;
+  }
+
+  private allocationScopedToDepartmentsSql(
+    aliasA: string,
+    aliasS: string,
+    deptParam: string,
+  ): string {
+    return `EXISTS (
+      SELECT 1 FROM iam_programs p
+      WHERE p.deleted_at IS NULL
+        AND p.dept_id = ANY(${deptParam}::int[])
+        AND (
+          (
+            COALESCE(trim(${aliasA}.program_name), '') <> ''
+            AND lower(trim(p.program_name)) = lower(trim(${aliasA}.program_name))
+          )
+          OR EXISTS (
+            SELECT 1 FROM academic_subjects sub
+            WHERE sub.subject_id = ${aliasS}.subject_id
+              AND sub.program_id = p.program_id
+          )
+        )
+    )`;
   }
 
   private async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
-    const directDepartments = await this.dataSource.query<{ dept_id: number }[]>(
-      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
-      [hodUserId],
-    );
+    const directDepartments = await this.dataSource.query<
+      { dept_id: number }[]
+    >(`SELECT dept_id FROM departments WHERE hod_user_id = $1`, [hodUserId]);
     const hod = await this.dataSource.query<{ dept_id: number | null }[]>(
       `SELECT dept_id FROM users WHERE user_id = $1`,
       [hodUserId],
@@ -756,12 +1232,24 @@ export class CourseAllocationBulkService {
     >(
       `SELECT u.user_id, u.name, u.official_email AS email
        FROM users u
-       INNER JOIN roles r ON r.role_id = u.role_id
        WHERE u.tenant_id = $1
          AND u.dept_id = ANY($2::int[])
          AND u.is_active = true
          AND u.deleted_at IS NULL
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean')
+         AND (
+           EXISTS (
+             SELECT 1 FROM roles primary_role
+             WHERE primary_role.role_id = u.role_id
+               AND primary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM user_roles ur
+             INNER JOIN roles secondary_role ON secondary_role.role_id = ur.role_id
+             WHERE ur.user_id = u.user_id
+               AND secondary_role.role_name IN ('Faculty', 'HOD', 'Dean')
+           )
+         )
        ORDER BY u.name`,
       [tenantId, deptIds],
     );
@@ -828,11 +1316,7 @@ export class CourseAllocationBulkService {
       program_name: get('program_name'),
       credits,
     };
-    if (
-      !row.faculty_username &&
-      !row.subject_code &&
-      !row.subject_fullname
-    ) {
+    if (!row.faculty_username && !row.subject_code && !row.subject_fullname) {
       throw new BadRequestException(`Row ${lineNumber}: empty row`);
     }
     return row;
@@ -846,21 +1330,60 @@ export class CourseAllocationBulkService {
         'CSV must include a header row and at least one data row',
       );
     }
-    const headers = lines[0]
-      .split(',')
-      .map((h) => this.normalizeHeader(h));
+    const headers = this.parseCsvLine(lines[0]).map((h) =>
+      this.normalizeHeader(h),
+    );
     this.validateHeaders(headers);
-    return lines.slice(1).map((line, idx) => {
-      const values = line.split(',').map((v) => v.trim());
+    return lines.slice(1).flatMap((line, idx) => {
+      const values = this.parseCsvLine(line).map((v) => v.trim());
+      if (values.every((value) => !value)) return [];
       const row: Record<string, string> = {};
       headers.forEach((h, i) => {
         row[h] = values[i] ?? '';
       });
-      return this.normalizeRow(row, idx + 2);
+      return [this.normalizeRow(row, idx + 2)];
     });
   }
 
-  private async parseExcel(buffer: Buffer): Promise<CourseAllocationRowInput[]> {
+  /**
+   * Parse one RFC 4180-style CSV record. A hand-written split(',') parser
+   * corrupts valid matrix rows when a subject/program name contains a comma.
+   * We intentionally keep this dependency-free because uploads are parsed in
+   * the request path and the supported file formats are already constrained to
+   * CSV and XLSX.
+   */
+  private parseCsvLine(line: string): string[] {
+    const values: string[] = [];
+    let value = '';
+    let quoted = false;
+
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      if (char === '"') {
+        if (quoted && line[index + 1] === '"') {
+          value += '"';
+          index += 1;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (char === ',' && !quoted) {
+        values.push(value);
+        value = '';
+      } else {
+        value += char;
+      }
+    }
+
+    if (quoted) {
+      throw new BadRequestException('CSV contains an unterminated quoted field');
+    }
+    values.push(value);
+    return values;
+  }
+
+  private async parseExcel(
+    buffer: Buffer,
+  ): Promise<CourseAllocationRowInput[]> {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
     const sheet = wb.worksheets[0];

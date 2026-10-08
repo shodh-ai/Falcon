@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { FinancialFeedEmitter } from './financial-feed.emitter';
 import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
 import { financialAnomalyMessage } from '../../core/notifications/notification-message.catalog';
+import { detectInvoiceSplitting } from '../coo-ops/invoice-split.util';
 
 export type AnomalySeverity = 'GREEN' | 'YELLOW' | 'RED';
 
@@ -191,7 +192,69 @@ export class AnomalyDetectionService {
     );
   }
 
-  private async raiseFlag(
+  /** Nightly / on-demand invoice-splitting scan across recent POs */
+  async runNightlyProcurementScan(tenantId: string) {
+    const limitRows = await this.db.query(
+      `SELECT max_amount_inr FROM fin_dofa_rules
+       WHERE tenant_id = $1 AND role_name IN ('HOD','LabAdmin','Accountant')
+       ORDER BY max_amount_inr DESC LIMIT 1`,
+      [tenantId],
+    );
+    const dofaLimit = Number(limitRows[0]?.max_amount_inr ?? 100000);
+
+    const pairs = await this.db.query(
+      `SELECT DISTINCT vendor_id, requested_by
+       FROM fin_purchase_orders
+       WHERE tenant_id = $1 AND deleted_at IS NULL
+         AND vendor_id IS NOT NULL AND requested_by IS NOT NULL
+         AND created_at >= NOW() - INTERVAL '30 days'`,
+      [tenantId],
+    );
+
+    let signalCount = 0;
+    for (const p of pairs as { vendor_id: string; requested_by: string }[]) {
+      const pos = await this.db.query(
+        `SELECT po_id, amount, vendor_id, requested_by, created_at
+         FROM fin_purchase_orders
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND vendor_id = $2 AND requested_by = $3
+           AND created_at >= NOW() - INTERVAL '30 days'
+           AND status IN ('PENDING','APPROVED','PAID','PENDING_BOARD_APPROVAL')`,
+        [tenantId, p.vendor_id, p.requested_by],
+      );
+      const signals = detectInvoiceSplitting(
+        pos.map(
+          (row: {
+            po_id: string;
+            amount: string;
+            vendor_id: string;
+            requested_by: string;
+            created_at: string;
+          }) => ({
+            po_id: row.po_id,
+            amount: Number(row.amount),
+            vendor_id: row.vendor_id,
+            requested_by: row.requested_by,
+            created_at: row.created_at,
+          }),
+        ),
+        dofaLimit,
+      );
+      for (const signal of signals) {
+        await this.raiseFlag(tenantId, 'RED', 'INVOICE_SPLITTING', {
+          ...signal,
+          amount: signal.total_amount,
+        });
+        signalCount += 1;
+      }
+    }
+    this.logger.log(
+      `Nightly procurement scan tenant=${tenantId} pairs=${pairs.length} signals=${signalCount}`,
+    );
+    return { pairs: pairs.length, signals: signalCount };
+  }
+
+  async raiseFlag(
     tenantId: string,
     severity: AnomalySeverity,
     ruleCode: string,

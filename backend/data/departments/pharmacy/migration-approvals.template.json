@@ -1,0 +1,11 @@
+{
+  "calendar_approved": false,
+  "calendar_events_structured": false,
+  "continuing_students_reconciled": false,
+  "lms_history_reconciled": false,
+  "programme_structure_complete": false,
+  "production_directory_verified": false,
+  "seed_supersession_approved": false,
+  "dry_run_accepted": false,
+  "security_tests_passed": false
+}

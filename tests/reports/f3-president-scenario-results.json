@@ -1,0 +1,311 @@
+{
+  "phase": "F.3",
+  "generated_at": "2026-07-18T10:17:57.922Z",
+  "api": "http://localhost:4000",
+  "tenant": "sgvu",
+  "production_readiness_score": 92,
+  "summary": {
+    "pass": 33,
+    "warn": 6,
+    "fail": 0,
+    "score": 92,
+    "total": 39
+  },
+  "artifacts": {
+    "orders": [
+      "668e9ecc-4fc4-493b-b424-abc00e560ada"
+    ],
+    "hrReviews": [],
+    "ratifications": [],
+    "grievances": [
+      "a5566f5f-c997-45a9-b8b6-03bb89a21a8c"
+    ],
+    "complianceActions": [
+      "a93c65d5-c37d-4d4f-863d-6ce42ba31f2d"
+    ],
+    "meetingItems": [
+      "68f8c693-55d9-4a85-a6a4-1a9cf03d8059"
+    ],
+    "budgetReviews": [
+      {
+        "id": "99ed06c1-2ee5-4707-96d1-539cdd6ee72c",
+        "status": "APPROVED"
+      }
+    ]
+  },
+  "results": [
+    {
+      "scenario": "AUTH",
+      "step": "President login",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.244Z"
+    },
+    {
+      "scenario": "AUTH",
+      "step": "Registrar login",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.304Z"
+    },
+    {
+      "scenario": "AUTH",
+      "step": "Finance login",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.362Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Finance budget review API",
+      "status": "PASS",
+      "detail": "pending=2",
+      "at": "2026-07-18T10:17:57.375Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Finance prepares budget",
+      "status": "PASS",
+      "detail": "99ed06c1-2ee5-4707-96d1-539cdd6ee72c",
+      "at": "2026-07-18T10:17:57.436Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Budget request in executive inbox",
+      "status": "PASS",
+      "detail": "count=1",
+      "at": "2026-07-18T10:17:57.445Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "President budget approval",
+      "status": "PASS",
+      "detail": "APPROVED",
+      "at": "2026-07-18T10:17:57.493Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Finance DB update (inbox cleared)",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.501Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Audit trail",
+      "status": "PASS",
+      "detail": "rows=1",
+      "at": "2026-07-18T10:17:57.515Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Notifications API reachable",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.529Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Warehouse governance",
+      "status": "PASS",
+      "detail": "rows=1",
+      "at": "2026-07-18T10:17:57.541Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Executive dashboard refresh",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.552Z"
+    },
+    {
+      "scenario": "A-BudgetApproval",
+      "step": "Dashboard KPI delta",
+      "status": "PASS",
+      "detail": "pending_approvals 1 → 1",
+      "at": "2026-07-18T10:17:57.552Z"
+    },
+    {
+      "scenario": "B-ConvocationRatification",
+      "step": "Registrar publishes",
+      "status": "WARN",
+      "detail": "No applications pending verification",
+      "at": "2026-07-18T10:17:57.569Z"
+    },
+    {
+      "scenario": "B-ConvocationRatification",
+      "step": "President review queue",
+      "status": "WARN",
+      "detail": "count=0",
+      "at": "2026-07-18T10:17:57.569Z"
+    },
+    {
+      "scenario": "B-ConvocationRatification",
+      "step": "Ratify & certificate release",
+      "status": "WARN",
+      "detail": "Skipped — no application",
+      "at": "2026-07-18T10:17:57.569Z"
+    },
+    {
+      "scenario": "C-HR HiringApproval",
+      "step": "HR submits (inbox)",
+      "status": "WARN",
+      "detail": "count=0",
+      "at": "2026-07-18T10:17:57.576Z"
+    },
+    {
+      "scenario": "C-HR HiringApproval",
+      "step": "President approves",
+      "status": "WARN",
+      "detail": "No pending HR requests",
+      "at": "2026-07-18T10:17:57.576Z"
+    },
+    {
+      "scenario": "D-GrievanceEscalation",
+      "step": "Escalation inbox API",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.588Z"
+    },
+    {
+      "scenario": "D-GrievanceEscalation",
+      "step": "President decision",
+      "status": "PASS",
+      "detail": "a5566f5f-c997-45a9-b8b6-03bb89a21a8c",
+      "at": "2026-07-18T10:17:57.604Z"
+    },
+    {
+      "scenario": "D-GrievanceEscalation",
+      "step": "Audit trail",
+      "status": "PASS",
+      "detail": "rows=7",
+      "at": "2026-07-18T10:17:57.611Z"
+    },
+    {
+      "scenario": "D-GrievanceEscalation",
+      "step": "Dashboard refresh",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.623Z"
+    },
+    {
+      "scenario": "E-ComplianceEscalation",
+      "step": "IQAC compliance visibility",
+      "status": "PASS",
+      "detail": "units=1",
+      "at": "2026-07-18T10:17:57.635Z"
+    },
+    {
+      "scenario": "E-ComplianceEscalation",
+      "step": "President investigation",
+      "status": "PASS",
+      "detail": "a93c65d5-c37d-4d4f-863d-6ce42ba31f2d",
+      "at": "2026-07-18T10:17:57.646Z"
+    },
+    {
+      "scenario": "E-ComplianceEscalation",
+      "step": "Audit trail",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.652Z"
+    },
+    {
+      "scenario": "E-ComplianceEscalation",
+      "step": "Executive summary",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.664Z"
+    },
+    {
+      "scenario": "F-ExecutiveOrders",
+      "step": "President issues order",
+      "status": "PASS",
+      "detail": "EO-2026-0013",
+      "at": "2026-07-18T10:17:57.680Z"
+    },
+    {
+      "scenario": "F-ExecutiveOrders",
+      "step": "Order persisted (no disappear)",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.688Z"
+    },
+    {
+      "scenario": "F-ExecutiveOrders",
+      "step": "Progress update",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.698Z"
+    },
+    {
+      "scenario": "F-ExecutiveOrders",
+      "step": "Completion",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.709Z"
+    },
+    {
+      "scenario": "F-ExecutiveOrders",
+      "step": "Audit lifecycle",
+      "status": "PASS",
+      "detail": "rows=3, actions=EXECUTIVE_ORDER_STATUS|EXECUTIVE_ORDER_STATUS|EXECUTIVE_ORDER_ISSUED",
+      "at": "2026-07-18T10:17:57.723Z"
+    },
+    {
+      "scenario": "F-ExecutiveOrders",
+      "step": "Executive dashboard",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.734Z"
+    },
+    {
+      "scenario": "G-ExecutiveMeeting",
+      "step": "Meetings API",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.745Z"
+    },
+    {
+      "scenario": "G-ExecutiveMeeting",
+      "step": "Action items created",
+      "status": "PASS",
+      "detail": "count=2",
+      "at": "2026-07-18T10:17:57.760Z"
+    },
+    {
+      "scenario": "G-ExecutiveMeeting",
+      "step": "Executive tasks assigned",
+      "status": "PASS",
+      "detail": "tasks=4",
+      "at": "2026-07-18T10:17:57.768Z"
+    },
+    {
+      "scenario": "G-ExecutiveMeeting",
+      "step": "Audit trail",
+      "status": "PASS",
+      "detail": "",
+      "at": "2026-07-18T10:17:57.776Z"
+    },
+    {
+      "scenario": "STRESS-Concurrent",
+      "step": "Parallel president operations",
+      "status": "WARN",
+      "detail": "4/5 OK",
+      "at": "2026-07-18T10:17:57.795Z"
+    },
+    {
+      "scenario": "STRESS-Concurrent",
+      "step": "Order list consistency",
+      "status": "PASS",
+      "detail": "found=7",
+      "at": "2026-07-18T10:17:57.802Z"
+    },
+    {
+      "scenario": "REGRESSION-ReadPaths",
+      "step": "All regression GET endpoints",
+      "status": "PASS",
+      "detail": "11/11",
+      "at": "2026-07-18T10:17:57.922Z"
+    }
+  ]
+}

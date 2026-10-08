@@ -20,12 +20,16 @@ export default function FinanceEventsPage() {
   const [transferForms, setTransferForms] = useState<Record<string, { amount: string; ref: string }>>({});
 
   const load = useCallback(async () => {
-    setPending(await eventsApi.financePending());
+    const rows = await eventsApi.financePending();
+    setPending(Array.isArray(rows) ? rows : []);
   }, [eventsApi]);
 
   useEffect(() => {
     void load()
-      .catch(() => toast.error('Could not load fund transfer queue'))
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : 'Could not load fund transfer queue');
+        setPending([]);
+      })
       .finally(() => setLoading(false));
   }, [load]);
 

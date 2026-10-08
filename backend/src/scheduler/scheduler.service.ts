@@ -371,7 +371,7 @@ export class SchedulerService {
         month: 'long',
       });
       const pendingAssignments = await this.taskAssignmentRepository.find({
-        where: { status: 'Pending' },
+        where: { status: 'OPEN' },
         relations: ['assigned_user', 'task'],
       });
 
@@ -405,30 +405,31 @@ export class SchedulerService {
     }
   }
 
-  // Defaulter Generator - Runs on the 30th of every month at 5:00 PM
-  @Cron('0 17 30 * *')
-  async generateDefaulterReport(month?: string) {
+  // Evaluates daily but acts only on the actual month end, including February.
+  @Cron('0 17 * * *')
+  async generateDefaulterReport(month?: string, force = false) {
     this.logger.log('Generating defaulter report...');
 
     try {
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      if (!force && !month && tomorrow.getMonth() === today.getMonth()) {
+        return { skipped: true, reason: 'NOT_MONTH_END' };
+      }
       const currentMonth =
         month || new Date().toLocaleString('en-US', { month: 'long' });
+      await this.tasksService.markOverdue(new Date());
       const overdueAssignments = await this.taskAssignmentRepository
         .createQueryBuilder('assignment')
         .leftJoinAndSelect('assignment.assigned_user', 'user')
         .leftJoinAndSelect('user.department', 'department')
         .leftJoinAndSelect('assignment.task', 'task')
         .leftJoinAndSelect('task.role', 'role')
-        .where('assignment.status = :status', { status: 'Pending' })
+        .where('assignment.status = :status', { status: 'OVERDUE' })
         .andWhere('task.month = :month', { month: currentMonth })
         .andWhere('assignment.due_date < :now', { now: new Date() })
         .getMany();
-
-      // Update status to Overdue
-      for (const assignment of overdueAssignments) {
-        assignment.status = 'Overdue';
-        await this.taskAssignmentRepository.save(assignment);
-      }
 
       // Generate report
       const report = this.generateDefaulterReportContent(
@@ -557,7 +558,7 @@ export class SchedulerService {
   async manualSendReminders(month: string) {
     this.logger.log(`Manual reminder emails triggered for ${month}`);
     const pendingAssignments = await this.taskAssignmentRepository.find({
-      where: { status: 'Pending' },
+      where: { status: 'OPEN' },
       relations: ['assigned_user', 'task'],
     });
 
@@ -582,6 +583,6 @@ export class SchedulerService {
 
   async manualGenerateReport(month: string) {
     this.logger.log(`Manual defaulter report triggered for ${month}`);
-    return this.generateDefaulterReport(month);
+    return this.generateDefaulterReport(month, true);
   }
 }

@@ -160,6 +160,7 @@ export class FacultyProfileService {
     tenantId: string,
     userId: string,
     dto: {
+      phone?: string | null;
       emergency_contact_name?: string;
       emergency_contact_phone?: string;
       permanent_address?: string;
@@ -171,6 +172,17 @@ export class FacultyProfileService {
       industry_experience_years?: number;
     },
   ) {
+    if (dto.phone !== undefined) {
+      const phone = dto.phone?.trim() || null;
+      if (phone && !/^[0-9+\-\s()]{7,20}$/.test(phone)) {
+        throw new BadRequestException('Enter a valid phone number');
+      }
+      await this.dataSource.query(
+        `UPDATE users SET phone = $1, updated_at = NOW() WHERE user_id = $2 AND tenant_id = $3`,
+        [phone, userId, tenantId],
+      );
+    }
+
     const onboardingPatch: Record<string, unknown> = {};
     if (dto.emergency_contact_name !== undefined)
       onboardingPatch.emergency_contact_name = dto.emergency_contact_name;

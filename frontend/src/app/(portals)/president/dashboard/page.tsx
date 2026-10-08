@@ -1,3 +1,5 @@
-import PresidentExecutiveSummaryPage from '../executive-summary/page';
+import { redirect } from 'next/navigation';
 
-export default PresidentExecutiveSummaryPage;
+export default function PresidentDashboardPage() {
+  redirect('/president/executive-summary');
+}

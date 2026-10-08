@@ -11,6 +11,7 @@ import { AuthService } from '../auth.service';
 import { TenantService } from '../../tenant/tenant.service';
 import { resolveTenantSubdomain } from '../../tenant/resolve-tenant-subdomain';
 import { resolveAllowedEmailDomains } from '../utils/resolve-allowed-domains';
+import { isStudentEnrollmentEmail } from '../utils/student-enrollment-email.util';
 import { getInitialOnboardingStatusForRole } from '../../modules/student-onboarding/onboarding-portal.util';
 
 @Injectable()
@@ -91,8 +92,11 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     if (!user) {
+      const defaultRoleName = isStudentEnrollmentEmail(email)
+        ? 'Student'
+        : 'Faculty';
       const defaultRole = await this.roleRepository.findOne({
-        where: { role_name: 'Faculty' },
+        where: { role_name: defaultRoleName },
       });
 
       user = this.userRepository.create({
@@ -117,6 +121,14 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       await this.userRepository.save(user);
     }
 
+    if (user) {
+      user =
+        (await this.authService.correctStudentRoleForEnrollmentEmail(
+          user,
+          tenant.tenant_id,
+        )) ?? user;
+    }
+
     if (!user) {
       throw new UnauthorizedException(
         'Could not create or locate user account',
@@ -128,10 +140,12 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     }
 
     await this.authService.ensurePrimaryRoleMapping(user);
-    const refreshed = await this.authService.findById(
-      user.user_id,
-      tenant.tenant_id,
-    );
+    await this.authService.syncMultiHatWorkspaceRoles(user.user_id);
+    const refreshed =
+      (await this.authService.loadUserWithSyncedWorkspaceRoles(
+        user.user_id,
+        tenant.tenant_id,
+      )) ?? (await this.authService.findById(user.user_id, tenant.tenant_id));
     const token = this.authService.signToken(
       refreshed ?? user,
       tenant.tenant_id,

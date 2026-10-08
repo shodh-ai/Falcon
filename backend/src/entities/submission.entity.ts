@@ -25,6 +25,15 @@ export class Submission extends BaseSoftDeleteEntity {
   @Column({ name: 'assignment_id' })
   assignment_id: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  tenant_id: string | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'SUPPORTING_DOCUMENT' })
+  evidence_type: string;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  content_hash: string | null;
+
   @Column({ length: 500, nullable: true })
   file_path: string;
 

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -37,12 +37,20 @@ import { ResearchModule } from './modules/research/research.module';
 import { ClinicModule } from './modules/clinic/clinic.module';
 import { SearchModule } from './modules/search/search.module';
 import { OperationsModule } from './modules/operations/operations.module';
+import { CooOpsModule } from './modules/coo-ops/coo-ops.module';
+import { LabsModule } from './modules/labs/labs.module';
+import { CompetitionsModule } from './modules/competitions/competitions.module';
+import { MoonshotsModule } from './modules/moonshots/moonshots.module';
+import { SpecialProgramsModule } from './modules/special-programs/special-programs.module';
+import { UosGovernanceModule } from './modules/uos-governance/uos-governance.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module';
 import { StudentOnboardingModule } from './modules/student-onboarding/student-onboarding.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
+import { CampusAdminModule } from './modules/campus-admin/campus-admin.module';
+import { CampusScopeModule } from './common/campus-scope/campus-scope.module';
 import { LmsExtendedModule } from './modules/lms-extended/lms-extended.module';
 import { HostelTatkalModule } from './modules/hostel-tatkal/hostel-tatkal.module';
 import { CampusWalletModule } from './modules/campus-wallet/campus-wallet.module';
@@ -61,6 +69,19 @@ import { MasterDataModule } from './modules/master-data/master-data.module';
 import { AcademicRndModule } from './modules/academic-rnd/academic-rnd.module';
 import { CertificateAutomationModule } from './modules/certificate-automation/certificate-automation.module';
 import { WeeklyTestsModule } from './modules/weekly-tests/weekly-tests.module';
+import { FacultyAiModule } from './modules/faculty-ai/faculty-ai.module';
+import { RegistrarModule } from './modules/registrar/registrar.module';
+import { AdminControlModule } from './modules/admin-control/admin-control.module';
+import { AcquisitionModule } from './modules/acquisitions/acquisition.module';
+import { ProcurementModule } from './modules/procurements/procurement.module';
+import { InvoiceIntegrityModule } from './modules/invoice-integrity/invoice-integrity.module';
+import { ProductVerificationModule } from './modules/product-verification/product-verification.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { ConsumablesModule } from './modules/consumables/consumables.module';
+import { ReturnsModule } from './modules/returns/returns.module';
+import { AssetServiceModule } from './modules/asset-service/asset-service.module';
+import { AssetRetirementModule } from './modules/asset-retirement/asset-retirement.module';
+import { PhysicalIdentityModule } from './modules/physical-identity/physical-identity.module';
 import { AuditModule } from './core/audit/audit.module';
 import { RedisModule } from './core/redis/redis.module';
 import { ImpersonationReadOnlyGuard } from './common/guards/impersonation-readonly.guard';
@@ -73,6 +94,9 @@ import { TenantSchemaInterceptor } from './tenant/interceptors/tenant-schema.int
 import { HrEntityScopeInterceptor } from './common/interceptors/hr-entity-scope.interceptor';
 import { EntityScopeSubscriber } from './common/entity-scope/entity-scope.subscriber';
 import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
+import { ModuleControlModule } from './module-control/module-control.module';
+import { ModuleAvailabilityInterceptor } from './module-control/module-availability.interceptor';
+import { DatabaseExceptionFilter } from './common/filters/database-exception.filter';
 
 @Module({
   imports: [
@@ -136,6 +160,7 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     StorageModule,
     MetricsModule,
     SystemModule,
+    ModuleControlModule,
     AuthModule,
     UploadsModule,
     TasksModule,
@@ -162,12 +187,20 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     ClinicModule,
     SearchModule,
     OperationsModule,
+    CooOpsModule,
+    LabsModule,
+    CompetitionsModule,
+    MoonshotsModule,
+    SpecialProgramsModule,
+    UosGovernanceModule,
     SettingsModule,
     HelpdeskModule,
     StudentPortalModule,
     StudentOnboardingModule,
     ReportsModule,
     SuperAdminModule,
+    CampusAdminModule,
+    CampusScopeModule,
     LmsExtendedModule,
     HostelTatkalModule,
     CampusWalletModule,
@@ -186,12 +219,27 @@ import { SystemAuditSubscriber } from './core/audit/system-audit.subscriber';
     AcademicRndModule,
     CertificateAutomationModule,
     WeeklyTestsModule,
+    FacultyAiModule,
+    RegistrarModule,
+    AdminControlModule,
+    AcquisitionModule,
+    ProcurementModule,
+    InvoiceIntegrityModule,
+    ProductVerificationModule,
+    InventoryModule,
+    ConsumablesModule,
+    ReturnsModule,
+    AssetServiceModule,
+    AssetRetirementModule,
+    PhysicalIdentityModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_FILTER, useClass: DatabaseExceptionFilter },
     { provide: APP_GUARD, useClass: ImpersonationReadOnlyGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: ModuleAvailabilityInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TenantSchemaInterceptor },
     HrEntityScopeInterceptor,
     { provide: APP_INTERCEPTOR, useClass: HrEntityScopeInterceptor },

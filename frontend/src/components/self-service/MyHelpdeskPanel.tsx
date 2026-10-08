@@ -52,9 +52,31 @@ export function MyHelpdeskPanel() {
   async function loadTickets() {
     try {
       const data = await api.get<TicketRow[]>('/api/helpdesk/tickets/my-tickets');
-      setTickets(data);
+      if (pathname?.startsWith('/faculty')) {
+        const { isEmptyArray, withFacultyDemoFallback } = await import('@/lib/faculty-demo-mode');
+        const { facultyDemoHelpdeskTickets } = await import('@/lib/mock/faculty-portal-demo');
+        setTickets(
+          withFacultyDemoFallback(data, facultyDemoHelpdeskTickets() as TicketRow[], isEmptyArray),
+        );
+      } else {
+        setTickets(data);
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load tickets');
+      if (pathname?.startsWith('/faculty')) {
+        const { isEmptyArray, withFacultyDemoFallback } = await import('@/lib/faculty-demo-mode');
+        const { facultyDemoHelpdeskTickets } = await import('@/lib/mock/faculty-portal-demo');
+        const demo = withFacultyDemoFallback(
+          [],
+          facultyDemoHelpdeskTickets() as TicketRow[],
+          isEmptyArray,
+        );
+        setTickets(demo);
+        if (demo.length === 0) {
+          toast.error(error instanceof Error ? error.message : 'Failed to load tickets');
+        }
+      } else {
+        toast.error(error instanceof Error ? error.message : 'Failed to load tickets');
+      }
     } finally {
       setLoading(false);
     }

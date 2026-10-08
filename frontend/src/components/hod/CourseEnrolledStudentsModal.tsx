@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAuthedApi } from '@/lib/api';
 import { Loader2 } from 'lucide-react';
+import { toast } from '@/lib/notifications/falcon-toast';
 
 type Student = {
   user_id: string;
@@ -41,7 +42,10 @@ export function CourseEnrolledStudentsModal({
       api
         .get<Student[]>(`/api/academics/hod/courses/${courseId}/students`)
         .then((data) => setStudents(data))
-        .catch((err) => console.error(err))
+        .catch((err) => {
+          toast.error(err instanceof Error ? err.message : 'Failed to load students');
+          setStudents([]);
+        })
         .finally(() => setLoading(false));
     } else {
       setStudents([]);

@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../auth.service';
+import { resolveJwtSecret } from '../../common/config/jwt-secret';
 import { normalizeOnboardingStatusForWizard } from '../../modules/student-onboarding/onboarding-portal.util';
 import type { AuthTokenPayload } from '../interfaces/auth-provider.interface';
 
@@ -13,9 +14,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private authService: AuthService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        // Intentionally no query-string token — leaks via logs/Referer.
+        (req: { cookies?: { falcon_auth_token?: string } }) =>
+          req?.cookies?.falcon_auth_token ?? null,
+      ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get('JWT_SECRET') || 'default-secret-key',
+      secretOrKey: resolveJwtSecret(configService),
     });
   }
 
@@ -51,22 +57,29 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account is inactive');
     }
 
-    const roleClaims = this.authService.getRoleClaims(user);
+    await this.authService.syncMultiHatWorkspaceRoles(user.user_id);
+    const refreshedUser =
+      (await this.authService.loadUserWithSyncedWorkspaceRoles(
+        user.user_id,
+        payload.tenantId,
+      )) ?? user;
+
+    const roleClaims = this.authService.getRoleClaims(refreshedUser);
 
     const baseUser = {
-      user_id: user.user_id,
-      email: user.email,
-      name: user.name,
+      user_id: refreshedUser.user_id,
+      email: refreshedUser.email,
+      name: refreshedUser.name,
       role: roleClaims.primaryRole,
       roles: roleClaims.roles,
       primaryRole: roleClaims.primaryRole,
-      role_id: user.role_id,
-      department: user.department?.dept_name,
-      dept_id: user.dept_id,
+      role_id: refreshedUser.role_id,
+      department: refreshedUser.department?.dept_name,
+      dept_id: refreshedUser.dept_id,
       tenant_id: payload.tenantId,
       tenant_schema: payload.tenantSchema ?? 'public',
       onboarding_status: normalizeOnboardingStatusForWizard(
-        user.onboarding_status,
+        refreshedUser.onboarding_status,
         roleClaims.primaryRole,
       ),
     };

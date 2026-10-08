@@ -47,7 +47,9 @@ export class VenueBookingService {
 
     if (tags) {
       const tagsArray = Array.isArray(tags) ? tags : [tags];
-      const validTags = tagsArray.filter(t => t.trim().length > 0).map(t => t.trim());
+      const validTags = tagsArray
+        .filter((t) => t.trim().length > 0)
+        .map((t) => t.trim());
       if (validTags.length > 0) {
         params.push(validTags);
         tagClause = ` AND amenities @> to_jsonb($2::text[])`;

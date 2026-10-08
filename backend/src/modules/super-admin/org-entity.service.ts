@@ -14,13 +14,14 @@ export class OrgEntityService {
   async listEntitiesWithStats(tenantId: string) {
     return this.dataSource.query(
       `SELECT oe.entity_id, oe.entity_code, oe.entity_name, oe.address, oe.contact_email,
-              oe.tax_id, oe.logo_url, oe.is_active, oe.created_at,
+              oe.tax_id, oe.logo_url, oe.is_active,
               COUNT(DISTINCT ep.user_id)::int AS employee_count
        FROM org_entities oe
        LEFT JOIN hr_employee_profiles ep
          ON ep.entity_id = oe.entity_id AND ep.tenant_id = oe.tenant_id
        WHERE oe.tenant_id = $1
-       GROUP BY oe.entity_id
+       GROUP BY oe.entity_id, oe.entity_code, oe.entity_name, oe.address,
+                oe.contact_email, oe.tax_id, oe.logo_url, oe.is_active
        ORDER BY oe.entity_id ASC`,
       [tenantId],
     );
@@ -58,8 +59,8 @@ export class OrgEntityService {
     const entity = rows[0];
 
     await this.dataSource.query(
-      `INSERT INTO user_entity_access (user_id, entity_id, granted_by_user_id)
-       VALUES ($1, $2, $1)
+      `INSERT INTO user_entity_access (user_id, entity_id)
+       VALUES ($1, $2)
        ON CONFLICT (user_id, entity_id) DO NOTHING`,
       [creatorUserId, entity.entity_id],
     );
@@ -77,8 +78,12 @@ export class OrgEntityService {
   async listEntityAccess(tenantId: string, entityId: number) {
     await this.assertEntityInTenant(tenantId, entityId);
     return this.dataSource.query(
-      `SELECT uea.access_id, u.user_id, u.name, u.official_email AS email,
-              r.role_name AS role, uea.granted_at
+      `SELECT u.user_id::text AS access_id,
+              u.user_id,
+              u.name,
+              u.official_email AS email,
+              r.role_name AS role,
+              NOW() AS granted_at
        FROM user_entity_access uea
        INNER JOIN users u ON u.user_id = uea.user_id
        LEFT JOIN roles r ON r.role_id = u.role_id
@@ -92,7 +97,7 @@ export class OrgEntityService {
     tenantId: string,
     entityId: number,
     userId: string,
-    grantedByUserId: string,
+    _grantedByUserId: string,
   ) {
     await this.assertEntityInTenant(tenantId, entityId);
     const userRows = await this.dataSource.query(
@@ -102,10 +107,10 @@ export class OrgEntityService {
     if (!userRows[0]) throw new NotFoundException('User not found in tenant');
 
     await this.dataSource.query(
-      `INSERT INTO user_entity_access (user_id, entity_id, granted_by_user_id)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, entity_id) DO UPDATE SET granted_by_user_id = EXCLUDED.granted_by_user_id`,
-      [userId, entityId, grantedByUserId],
+      `INSERT INTO user_entity_access (user_id, entity_id)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id, entity_id) DO NOTHING`,
+      [userId, entityId],
     );
     return this.listEntityAccess(tenantId, entityId);
   }

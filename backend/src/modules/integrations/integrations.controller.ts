@@ -1,10 +1,13 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { IntegrationsService } from './integrations.service';
 import { NotificationService } from './notification.service';
+import { ChatbotAskDto } from './dto/chatbot-ask.dto';
 
 @Controller('api/integrations')
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class IntegrationsController {
   constructor(
     private readonly integrations: IntegrationsService,
@@ -12,14 +15,12 @@ export class IntegrationsController {
   ) {}
 
   @Get('jobs')
-  @UseGuards(JwtAuthGuard)
   @Roles('SuperAdmin', 'Registrar')
   jobs() {
     return this.integrations.jobs();
   }
 
   @Post('government/push')
-  @UseGuards(JwtAuthGuard)
   @Roles('SuperAdmin', 'Registrar')
   governmentPush(
     @Body()
@@ -37,28 +38,30 @@ export class IntegrationsController {
   }
 
   @Post('whatsapp/send')
-  @UseGuards(JwtAuthGuard)
   @Roles('SuperAdmin', 'Registrar', 'Accountant')
   sendWhatsApp(@Body() dto: { to: string; message: string }) {
     return this.notifications.queueWhatsApp(dto.to, dto.message);
   }
 
   @Get('moodle/sso')
-  @UseGuards(JwtAuthGuard)
   @Roles('Student', 'Faculty', 'SuperAdmin')
   moodleSso(@Req() req: { user: { user_id: string; email: string } }) {
     return this.integrations.moodleSsoToken(req.user.user_id, req.user.email);
   }
 
   @Post('chatbot/ask')
-  @UseGuards(JwtAuthGuard)
   @Roles('Student', 'Applicant')
-  chatbot(@Body('question') question: string) {
-    return this.integrations.studentFaqChat(question);
+  chatbot(
+    @Req() req: { user: { user_id: string; tenant_id?: string } },
+    @Body() body: ChatbotAskDto,
+  ) {
+    return this.integrations.studentFaqChat(body.question, {
+      userId: req.user.user_id,
+      tenantId: req.user.tenant_id,
+    });
   }
 
   @Post('alerts/attendance/run')
-  @UseGuards(JwtAuthGuard)
   @Roles('SuperAdmin')
   attendanceAlerts() {
     return this.notifications.checkAttendanceAlerts();

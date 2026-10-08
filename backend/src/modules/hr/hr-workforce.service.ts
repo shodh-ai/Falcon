@@ -35,9 +35,12 @@ export type ApplyWorkforceRequestDto = {
   leave_type?: string;
   start_date?: string;
   end_date?: string;
+  start_time?: string;
+  end_time?: string;
   regularization_date?: string;
   missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
   reason?: string;
+  supporting_doc_urls?: string[];
 };
 
 @Injectable()
@@ -249,6 +252,24 @@ export class HrWorkforceService {
     let endDate = dto.end_date;
     let leaveType = dto.leave_type ?? 'CL';
 
+    const hasStartTime = Boolean(dto.start_time?.trim());
+    const hasEndTime = Boolean(dto.end_time?.trim());
+    if (hasStartTime !== hasEndTime) {
+      throw new BadRequestException('Both start_time and end_time are required for a partial-day request');
+    }
+    if (hasStartTime && hasEndTime) {
+      if (!startDate || !endDate || startDate !== endDate) {
+        throw new BadRequestException('Partial-day leave/on-duty must be for one date');
+      }
+      const timePattern = /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+      if (!timePattern.test(dto.start_time!.trim()) || !timePattern.test(dto.end_time!.trim())) {
+        throw new BadRequestException('Times must use HH:MM format');
+      }
+      if (dto.start_time!.trim() >= dto.end_time!.trim()) {
+        throw new BadRequestException('end_time must be after start_time');
+      }
+    }
+
     if (requestType === 'REGULARIZATION') {
       if (!dto.regularization_date) {
         throw new BadRequestException('regularization_date is required');
@@ -272,6 +293,10 @@ export class HrWorkforceService {
     } else {
       if (!startDate || !endDate)
         throw new BadRequestException('start_date and end_date are required');
+    }
+
+    if (startDate && endDate && endDate < startDate) {
+      throw new BadRequestException('end_date cannot be before start_date');
     }
 
     const actorRoles = options?.actorRoles ?? [];
@@ -309,9 +334,16 @@ export class HrWorkforceService {
       leave_type: leaveType,
       start_date: startDate,
       end_date: endDate,
+      start_time: hasStartTime ? dto.start_time!.trim() : null,
+      end_time: hasEndTime ? dto.end_time!.trim() : null,
       reason: dto.reason?.trim() ?? null,
       regularization_date: dto.regularization_date ?? null,
       missed_punch_type: dto.missed_punch_type ?? null,
+      supporting_doc_urls: Array.isArray(dto.supporting_doc_urls)
+        ? dto.supporting_doc_urls.filter(
+            (u) => typeof u === 'string' && u.trim(),
+          )
+        : [],
       status: routing.is_final ? 'HR_APPROVED' : 'PENDING',
       entity_id: entityId,
       workflow_id: routing.workflow_id,
@@ -383,6 +415,8 @@ export class HrWorkforceService {
         start_date: string;
         end_date: string;
         regularization_date: string | null;
+        start_time: string | null;
+        end_time: string | null;
         missed_punch_type: string | null;
         reason: string | null;
         status: string;
@@ -395,7 +429,7 @@ export class HrWorkforceService {
       }>
     >(
       `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
-              r.regularization_date, r.missed_punch_type, r.reason, r.status, r.applied_at,
+              r.start_time, r.end_time, r.regularization_date, r.missed_punch_type, r.reason, r.status, r.applied_at,
               r.staff_user_id, r.current_step_order,
               u.name AS employee_name, u.official_email AS employee_email, d.dept_name AS employee_dept
        FROM staff_leave_requests r
@@ -416,6 +450,8 @@ export class HrWorkforceService {
       leave_type: r.leave_type,
       start_date: r.start_date,
       end_date: r.end_date,
+      start_time: r.start_time,
+      end_time: r.end_time,
       regularization_date: r.regularization_date,
       missed_punch_type: r.missed_punch_type,
       reason: r.reason,
@@ -574,6 +610,20 @@ export class HrWorkforceService {
     const entityId =
       row.entity_id ??
       (await this.resolveEmployeeEntityId(tenantId, row.staff_user_id));
+    const stepType = await this.resolveCurrentStepApproverType(tenantId, row);
+    const isHodStep =
+      stepType === 'REPORTING_MANAGER' || stepType === 'DEPT_HEAD';
+
+    if (isHodStep && this.shouldFinalizeAfterHodApproval(row)) {
+      row.status = 'HR_APPROVED';
+      row.current_approver_user_id = null;
+      row.approver_remarks = comment?.trim() ?? row.approver_remarks;
+      const saved = await this.requests.save(row);
+      await this.applyApprovalSideEffects(saved);
+      void this.notifyEmployeeDecision(staff, saved, true, comment);
+      return saved;
+    }
+
     const next = await this.hrWorkflow.advanceAfterApproval(
       tenantId,
       entityId,
@@ -585,6 +635,7 @@ export class HrWorkforceService {
     if (next.is_final) {
       row.status = 'HR_APPROVED';
       row.current_approver_user_id = null;
+      row.approver_remarks = comment?.trim() ?? row.approver_remarks;
       const saved = await this.requests.save(row);
       await this.applyApprovalSideEffects(saved);
       void this.notifyEmployeeDecision(staff, saved, true, comment);
@@ -593,6 +644,7 @@ export class HrWorkforceService {
 
     row.current_step_order = next.step_order;
     row.current_approver_user_id = next.approver_user_id;
+    row.approver_remarks = comment?.trim() ?? row.approver_remarks;
     const saved = await this.requests.save(row);
 
     if (next.approver_user_id) {
@@ -767,7 +819,16 @@ export class HrWorkforceService {
     } else if (row.request_type === 'ON_DUTY') {
       const dates = this.expandDates(row.start_date, row.end_date);
       for (const date of dates) {
-        await this.markPresentForOd(row.staff_user_id, date);
+        if (row.start_time && row.end_time && dates.length === 1) {
+          await this.markPresentForOdWindow(
+            row.staff_user_id,
+            date,
+            row.start_time,
+            row.end_time,
+          );
+        } else {
+          await this.markPresentForOd(row.staff_user_id, date);
+        }
       }
     } else if (row.request_type === 'COMP_OFF_CREDIT') {
       await this.creditCompOff(row.staff_user_id, 1);
@@ -826,6 +887,33 @@ export class HrWorkforceService {
     await this.attendanceCalc.calculateAndPersist(userId, date);
   }
 
+  /** Apply a partial OD window without manufacturing a full 8-hour day. */
+  private async markPresentForOdWindow(
+    userId: string,
+    date: string,
+    startTime: string,
+    endTime: string,
+  ) {
+    let row = await this.dailyAttendance.findOne({ where: { user_id: userId, date } });
+    if (!row) {
+      row = this.dailyAttendance.create({
+        user_id: userId,
+        date,
+        status: 'PRESENT',
+        is_regularized: false,
+      });
+    }
+    if (!row.first_in_time) row.first_in_time = new Date(`${date}T${startTime}`);
+    if (!row.last_out_time) row.last_out_time = new Date(`${date}T${endTime}`);
+    row.status = 'PRESENT';
+    // Keep this false so the attendance calculator reports the actual partial
+    // hours instead of converting the request into FULL_DAY.
+    row.is_regularized = false;
+    row.total_hours = this.computeHours(row.first_in_time, row.last_out_time).toFixed(2);
+    await this.dailyAttendance.save(row);
+    await this.attendanceCalc.calculateAndPersist(userId, date);
+  }
+
   private async creditCompOff(userId: string, days: number) {
     const year = new Date().getFullYear();
     let balance = await this.balances.findOne({
@@ -852,13 +940,32 @@ export class HrWorkforceService {
     });
     if (!balance) return;
 
-    const days = this.expandDates(row.start_date, row.end_date).filter((d) => {
+    const dates = this.expandDates(row.start_date, row.end_date).filter((d) => {
       const dow = new Date(d).getDay();
       return dow !== 0 && dow !== 6;
-    }).length;
+    });
+    let days = dates.length;
+    if (row.start_time && row.end_time && dates.length === 1) {
+      let fullDayHours = 8;
+      try {
+        const shift = await this.attendanceCalc.getEmployeeShift(row.staff_user_id);
+        fullDayHours = Number(shift.full_day_min_hours || 8);
+      } catch {
+        // The configured default is explicit and keeps balance deduction safe
+        // when an employee has no shift assignment yet.
+      }
+      const partialHours = this.hoursBetweenClocks(row.start_time, row.end_time);
+      days = Math.min(1, Math.max(0, partialHours / fullDayHours));
+    }
 
     balance.used = Number(balance.used) + days;
     await this.balances.save(balance);
+  }
+
+  private hoursBetweenClocks(start: string, end: string): number {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
   }
 
   private async upsertDailyFromPunches(
@@ -915,6 +1022,15 @@ export class HrWorkforceService {
       startDate: row.start_date,
       endDate: row.end_date,
     });
+  }
+
+  private shouldFinalizeAfterHodApproval(row: StaffLeaveRequest): boolean {
+    if (row.request_type === 'ON_DUTY') return true;
+    if (row.request_type === 'LEAVE') {
+      const leaveType = (row.leave_type ?? '').toUpperCase();
+      return ['CL', 'CCL', 'OD', 'RH'].includes(leaveType);
+    }
+    return false;
   }
 
   private async resolveCurrentStepApproverType(

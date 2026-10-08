@@ -11,6 +11,8 @@ import { StudentCourseEnrollment } from '../../entities/student-course-enrollmen
 import { AcademicTimetable } from '../../entities/academic-timetable.entity';
 import { AcademicAssignment } from '../../entities/academic-assignment.entity';
 import { AssignmentSubmission } from '../../entities/assignment-submission.entity';
+import { AssignmentNotificationAudit } from '../../entities/assignment-notification-audit.entity';
+import { FalconNotification } from '../../entities/falcon-notification.entity';
 import { CourseAttendanceLog } from '../../entities/course-attendance-log.entity';
 import { CourseMaterial } from '../../entities/course-material.entity';
 import { CourseModule } from '../../entities/course-module.entity';
@@ -47,6 +49,8 @@ import { MarksHistoryService } from './marks-history.service';
 import { StorageModule } from '../../storage/storage.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
 import { HrModule } from '../hr/hr.module';
+import { AuthModule } from '../../auth/auth.module';
+import { ExamCellModule } from '../exam-cell/exam-cell.module';
 
 import { EarlyWarningService } from './early-warning.service';
 import { EarlyWarningController } from './early-warning.controller';
@@ -55,12 +59,19 @@ import { InsightsController } from './insights.controller';
 import { CourseAllocationBulkService } from './course-allocation-bulk.service';
 import { StudentEnrollmentSyncService } from './student-enrollment-sync.service';
 import { StudentMentorSyncService } from './student-mentor-sync.service';
+import { HodPortalExtService } from './hod-portal-ext.service';
+import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
+import { DeanIntelligenceService } from './dean-intelligence.service';
+import { DeanIntelligenceController } from './dean-intelligence.controller';
+import { DeanAuditService } from './dean-audit.service';
 
 @Module({
   imports: [
     StorageModule,
     HelpdeskModule,
     HrModule,
+    AuthModule,
+    ExamCellModule,
     TypeOrmModule.forFeature([
       Subject,
       Batch,
@@ -73,6 +84,8 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
       AcademicTimetable,
       AcademicAssignment,
       AssignmentSubmission,
+      AssignmentNotificationAudit,
+      FalconNotification,
       CourseAttendanceLog,
       CourseMaterial,
       CourseModule,
@@ -98,6 +111,7 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
     EarlyWarningController,
     FacultyProfileController,
     InsightsController,
+    DeanIntelligenceController,
   ],
   providers: [
     AcademicsService,
@@ -118,6 +132,10 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
     CourseAllocationBulkService,
     StudentEnrollmentSyncService,
     StudentMentorSyncService,
+    HodPortalExtService,
+    FacultyTeachingDepartmentsService,
+    DeanIntelligenceService,
+    DeanAuditService,
   ],
   exports: [
     AcademicsService,
@@ -135,6 +153,7 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
     CourseAllocationBulkService,
     StudentEnrollmentSyncService,
     StudentMentorSyncService,
+    DeanAuditService,
   ],
 })
 export class AcademicsModule {}

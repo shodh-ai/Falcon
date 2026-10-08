@@ -49,6 +49,13 @@ const ROUTE_HINTS: Array<{
     message: 'Payment or fee processing did not complete. Verify dues and try again.',
     category: 'FINANCE',
   },
+  {
+    pattern: /related.party|RELATED_PARTY_QUOTES|shared PAN/i,
+    title: 'Related-party quotes blocked',
+    message:
+      'Two or more quotes share the same vendor PAN (GSTIN characters 3–12). Each quote must be from a genuinely different company — changing only the last GSTIN digit is not enough. Create a new PR and use three distinct GSTINs (e.g. 27AABCU9603R1ZM, 29AABCT1332L1ZV, 07AAACS4429R1ZR).',
+    category: 'FINANCE',
+  },
 ];
 
 function matchRouteHint(raw: string): ParsedApiError | null {
@@ -217,9 +224,20 @@ export function extractApiErrorMessage(text: string, status: number, path?: stri
     return `Request failed with status ${status}`;
   }
   try {
-    const errorData = JSON.parse(text) as { message?: string | string[]; error?: string };
+    const errorData = JSON.parse(text) as {
+      message?: string | string[];
+      error?: string;
+      code?: string;
+      module_key?: string;
+    };
     if (errorData.message) {
       return Array.isArray(errorData.message) ? String(errorData.message[0]) : String(errorData.message);
+    }
+    if (errorData.code === 'MODULE_NOT_AVAILABLE') {
+      return 'This module is not available for your account right now. Please contact your administrator.';
+    }
+    if (errorData.code === 'MODULE_PAUSED') {
+      return 'This module is temporarily paused. Please try again later.';
     }
     if (errorData.error) {
       const err = String(errorData.error);

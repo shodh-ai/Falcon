@@ -1,5 +1,5 @@
-import { WorkspaceRoutePage } from '@/components/workspaces/WorkspaceRoutePage';
+import { HrAnalyticsDashboard } from '@/components/president/HrAnalyticsDashboard';
 
 export default function PresidentHrAnalyticsPage() {
-  return <WorkspaceRoutePage portal="president" page="hrAnalytics" />;
+  return <HrAnalyticsDashboard />;
 }

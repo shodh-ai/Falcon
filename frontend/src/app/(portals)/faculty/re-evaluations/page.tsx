@@ -7,6 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { FacultyPageHeader, FacultyPageShell } from '@/components/faculty';
+import {
+  isEmptyArray,
+  isFacultyDemoSmokeId,
+  withFacultyDemoFallback,
+} from '@/lib/faculty-demo-mode';
+import { facultyDemoReEvaluations } from '@/lib/mock/faculty-portal-demo';
 
 type ReEvalCase = {
   exam_application_id: string;
@@ -30,12 +37,30 @@ export default function FacultyReEvaluationsPage() {
   const selected = cases.find((item) => item.exam_application_id === selectedId) ?? null;
 
   const load = useCallback(() => {
-    void api.get<ReEvalCase[]>('/api/academics/faculty/re-evaluations').then((rows) => {
-      setCases(rows);
-      if (selectedId && !rows.some((r) => r.exam_application_id === selectedId)) {
-        setSelectedId(rows[0]?.exam_application_id ?? null);
-      }
-    });
+    void api
+      .get<ReEvalCase[]>('/api/academics/faculty/re-evaluations')
+      .then((rows) => {
+        const resolved = withFacultyDemoFallback(
+          rows,
+          facultyDemoReEvaluations() as ReEvalCase[],
+          isEmptyArray,
+        );
+        setCases(resolved);
+        if (selectedId && !resolved.some((r) => r.exam_application_id === selectedId)) {
+          setSelectedId(resolved[0]?.exam_application_id ?? null);
+        } else if (!selectedId && resolved[0]) {
+          setSelectedId(resolved[0].exam_application_id);
+        }
+      })
+      .catch(() => {
+        const resolved = withFacultyDemoFallback(
+          [],
+          facultyDemoReEvaluations() as ReEvalCase[],
+          isEmptyArray,
+        );
+        setCases(resolved);
+        setSelectedId(resolved[0]?.exam_application_id ?? null);
+      });
   }, [api, selectedId]);
 
   useEffect(() => {
@@ -59,6 +84,22 @@ export default function FacultyReEvaluationsPage() {
       toast.error('Add reassessment notes');
       return;
     }
+    if (isFacultyDemoSmokeId(selected.exam_application_id)) {
+      setCases((prev) =>
+        prev.map((c) =>
+          c.exam_application_id === selected.exam_application_id
+            ? {
+                ...c,
+                revised_marks: marks,
+                report_notes: reportNotes.trim(),
+                status: 'REPORT_SUBMITTED',
+              }
+            : c,
+        ),
+      );
+      toast.success('Reassessment report submitted to Exam Cell (demo)');
+      return;
+    }
     setBusy(true);
     try {
       await api.post(`/api/academics/faculty/re-evaluations/${selected.exam_application_id}/report`, {
@@ -75,14 +116,11 @@ export default function FacultyReEvaluationsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      <div>
-        <p className="text-sm font-semibold text-sgvu-gold">Faculty Workspace</p>
-        <h1 className="text-2xl font-bold text-sgvu-navy">Re-evaluation Reassessment</h1>
-        <p className="text-sm text-muted-foreground">
-          Cases assigned by Exam Cell. Submit your report for COE review and publishing.
-        </p>
-      </div>
+    <FacultyPageShell>
+      <FacultyPageHeader
+        title="Re-evaluation"
+        description="Cases assigned by Exam Cell. Submit your report for COE review and publishing."
+      />
 
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         <Card>
@@ -177,6 +215,6 @@ export default function FacultyReEvaluationsPage() {
           </Card>
         )}
       </div>
-    </div>
+    </FacultyPageShell>
   );
 }

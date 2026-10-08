@@ -128,13 +128,14 @@ export class IqacController {
 
   @Get('task-master')
   @Roles('SuperAdmin', 'IQAC')
-  listTaskMaster() {
-    return this.iqac.listTaskMaster();
+  listTaskMaster(@Req() req: { user: AuthUser }) {
+    return this.iqac.listTaskMaster(this.tenant(req));
   }
 
   @Post('task-master')
   @Roles('SuperAdmin', 'IQAC')
   createTaskMaster(
+    @Req() req: { user: AuthUser },
     @Body()
     dto: {
       task_name?: string;
@@ -144,13 +145,13 @@ export class IqacController {
       is_recurring?: boolean;
     },
   ) {
-    return this.iqac.createTaskMaster(dto);
+    return this.iqac.createTaskMaster(dto, this.tenant(req));
   }
 
   @Get('document-vault')
   @Roles('SuperAdmin', 'IQAC')
-  documentVault() {
-    return this.iqac.listDocumentVault();
+  documentVault(@Req() req: { user: AuthUser }) {
+    return this.iqac.listDocumentVault(this.tenant(req));
   }
 
   @Get('student-achievements')

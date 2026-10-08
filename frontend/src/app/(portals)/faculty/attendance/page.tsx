@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle, BookOpen, Check, Send, X } from 'lucide-react';
+import { BookOpen, Check, Send, X } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { cn } from '@/lib/utils';
 import {
@@ -14,11 +14,27 @@ import {
   FacultyEmptyState,
   FacultyInlineLoading,
   FacultyMetricChip,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthedApi } from '@/lib/api';
+import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentContext';
+import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
+import {
+  completeAttendancePayload,
+  initializeAttendanceForm,
+  type AttendanceFormStatus,
+} from '@/lib/faculty/attendance-form';
+
+/**
+ * The attendance form deliberately starts every student as ABSENT.  A blank
+ * or PRESENT default is unsafe because an unreviewed student would silently
+ * receive credit for attending.  LEAVE is the faculty-facing label for the
+ * academic EXCUSED status persisted by the API.
+ */
+type UiStatus = AttendanceFormStatus;
 
 type FacultyClass = {
   timetable_id: string | null;
@@ -29,22 +45,15 @@ type FacultyClass = {
   start_time: string;
   end_time: string;
   student_count: number;
+  section?: string | null;
+  is_practical?: boolean;
 };
 
 type Student = {
   student_id: string;
   name: string;
   roll_number: string;
-};
-
-type MissingAttendanceAlert = {
-  timetable_id: string;
-  course_id: string;
-  course_code: string;
-  course_name: string;
-  start_time: string;
-  end_time: string;
-  student_count: number;
+  section_code?: string | null;
 };
 
 type AttendanceAnalytics = {
@@ -67,8 +76,6 @@ type AttendanceAnalytics = {
   }[];
 };
 
-type UiStatus = 'PRESENT' | 'ABSENT';
-
 function todayIso() {
   const d = new Date();
   const y = d.getFullYear();
@@ -79,10 +86,10 @@ function todayIso() {
 
 function MarkAttendanceContent() {
   const api = useAuthedApi();
+  const { activeDeptId, loading: deptLoading } = useTeachingDepartment();
   const params = useSearchParams();
   const initialCourseId = params.get('courseId');
   const [classes, setClasses] = useState<FacultyClass[]>([]);
-  const [missingAlerts, setMissingAlerts] = useState<MissingAttendanceAlert[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(initialCourseId);
   const [selectedTimetableId, setSelectedTimetableId] = useState<string | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -94,6 +101,8 @@ function MarkAttendanceContent() {
   const [rosterLoading, setRosterLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [classesError, setClassesError] = useState<string | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
   const selectedClass = useMemo(
     () =>
@@ -106,34 +115,40 @@ function MarkAttendanceContent() {
   );
 
   const filteredStudents = useMemo(
-    () =>
-      students.filter(
-        (s) =>
-          !searchQuery.trim() ||
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.roll_number?.toLowerCase().includes(searchQuery.toLowerCase()),
-      ),
+    () => {
+      const query = searchQuery.trim().toLowerCase();
+      return students.filter((s) => {
+        const matchesSearch =
+          !query ||
+          s.name.toLowerCase().includes(query) ||
+          s.roll_number?.toLowerCase().includes(query);
+        return matchesSearch;
+      });
+    },
     [students, searchQuery],
   );
 
   const presentCount = useMemo(
-    () => students.filter((s) => attendance[s.student_id] === 'PRESENT').length,
+    () => students.filter((s) => attendance[s.student_id] === 'PRESENT' || attendance[s.student_id] === 'LATE').length,
     [students, attendance],
   );
   const absentCount = useMemo(
     () => students.filter((s) => attendance[s.student_id] === 'ABSENT').length,
     [students, attendance],
   );
+  const leaveCount = useMemo(
+    () => students.filter((s) => attendance[s.student_id] === 'LEAVE').length,
+    [students, attendance],
+  );
 
   useEffect(() => {
+    if (deptLoading) return;
+    setClassesError(null);
     void api
-      .get<FacultyClass[]>('/api/academics/faculty/timetable/today')
-      .then(async (data) => {
-        const missing = await api.get<MissingAttendanceAlert[]>('/api/academics/faculty/attendance/missing').catch(() => []);
-        const assignedCourseIds = new Set(data.map((c) => c.course_id));
-        const relevantMissing = missing.filter((alert) => assignedCourseIds.has(alert.course_id));
+      .get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId))
+      .then((data) => {
+        if (!Array.isArray(data)) throw new Error('Timetable API returned an invalid response');
         setClasses(data);
-        setMissingAlerts(relevantMissing);
         if (data.length === 0) {
           setSelectedCourseId(null);
           return;
@@ -141,23 +156,49 @@ function MarkAttendanceContent() {
         const fromUrl = initialCourseId
           ? data.find((c) => c.course_id === initialCourseId)
           : undefined;
-        const pick = fromUrl ?? data[0];
+        const pick = fromUrl ?? data[0]!;
         setSelectedCourseId(pick.course_id);
         setSelectedTimetableId(pick.timetable_id);
       })
+      .catch((error: unknown) => {
+        setClasses([]);
+        setSelectedCourseId(null);
+        setClassesError(error instanceof Error ? error.message : 'Failed to load classes');
+      })
       .finally(() => setLoading(false));
-  }, [api, initialCourseId]);
+  }, [api, initialCourseId, activeDeptId, deptLoading]);
 
   useEffect(() => {
-    if (!selectedCourseId) return;
+    if (!selectedCourseId) {
+      setStudents([]);
+      setRosterError(null);
+      return;
+    }
     let cancelled = false;
     setRosterLoading(true);
+    setRosterError(null);
     const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
+
+    function applyRoster(
+      rosterResolved: Student[],
+      stateResolved: { locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null },
+      analyticsResolved: AttendanceAnalytics | null,
+    ) {
+      if (cancelled) return;
+      setStudents(rosterResolved);
+      setAnalytics(analyticsResolved);
+      setLocked(Boolean(stateResolved.locked));
+      setAttendance(initializeAttendanceForm(rosterResolved, stateResolved.attendance_data));
+      setSearchQuery('');
+    }
+
     (async () => {
       try {
         const timetableQuery = timetableId ? `&timetableId=${timetableId}` : '';
         const [roster, state] = await Promise.all([
-          api.get<Student[]>(`/api/academics/faculty/course/${selectedCourseId}/students`),
+          api.get<Student[]>(
+            `/api/academics/faculty/course/${selectedCourseId}/students?date=${selectedDate}${timetableQuery}`,
+          ),
           api.get<{ locked: boolean; attendance_data: { student_id: string; status: UiStatus }[] | null }>(
             `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableQuery}`,
           ),
@@ -167,20 +208,14 @@ function MarkAttendanceContent() {
             `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
           )
           .catch(() => null);
-        if (cancelled) return;
-        setStudents(roster);
-        setAnalytics(courseAnalytics);
-        setLocked(state.locked);
-        const map: Record<string, UiStatus> = {};
-        for (const s of roster) map[s.student_id] = 'PRESENT';
-        for (const row of state.attendance_data ?? []) {
-          if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
+        if (!Array.isArray(roster)) throw new Error('Student roster API returned an invalid response');
+        if (!state || typeof state !== 'object') throw new Error('Attendance API returned an invalid response');
+        applyRoster(roster, state, courseAnalytics);
+      } catch (error: unknown) {
+        if (!cancelled) {
+          setStudents([]);
+          setRosterError(error instanceof Error ? error.message : 'Failed to load roster');
         }
-        setAttendance(map);
-        setSearchQuery('');
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to load roster');
-        setStudents([]);
       } finally {
         if (!cancelled) setRosterLoading(false);
       }
@@ -192,6 +227,7 @@ function MarkAttendanceContent() {
 
   async function copyPreviousAttendance() {
     if (!selectedCourseId || !selectedTimetableId || locked) return;
+
     try {
       const prev = await api.get<{ attendance_data: { student_id: string; status: UiStatus }[] | null }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/previous-session?date=${selectedDate}&timetableId=${selectedTimetableId}`,
@@ -200,11 +236,7 @@ function MarkAttendanceContent() {
         toast.error('No previous session attendance found for this batch today.');
         return;
       }
-      const map: Record<string, UiStatus> = {};
-      for (const row of prev.attendance_data) {
-        if (row.status === 'PRESENT' || row.status === 'ABSENT') map[row.student_id] = row.status;
-      }
-      setAttendance(map);
+      setAttendance(initializeAttendanceForm(students, prev.attendance_data));
       toast.success('Copied attendance from previous hour');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not copy previous attendance');
@@ -213,9 +245,11 @@ function MarkAttendanceContent() {
 
   function markAll(status: UiStatus) {
     if (locked) return;
-    const next: Record<string, UiStatus> = {};
-    for (const s of students) next[s.student_id] = status;
-    setAttendance(next);
+    setAttendance((current) => {
+      const next = { ...current };
+      for (const s of filteredStudents) next[s.student_id] = status;
+      return next;
+    });
   }
 
   async function save() {
@@ -224,24 +258,26 @@ function MarkAttendanceContent() {
       toast.error('No students on the roster — cannot save attendance.');
       return;
     }
-    const payload = Object.entries(attendance).map(([student_id, status]) => ({ student_id, status }));
+    const payload = completeAttendancePayload(students, attendance);
     if (payload.length === 0) {
       toast.error('Mark at least one student before saving.');
       return;
     }
     setSaving(true);
     try {
+      const timetableId = selectedTimetableId ?? selectedClass?.timetable_id;
+
       const result = await api.post<{ saved: number; attendance_updated?: { attendance_percent: string }[] }>(
         '/api/academics/faculty/attendance',
         {
           course_id: selectedCourseId,
           date: selectedDate,
-          timetable_id: selectedTimetableId ?? selectedClass?.timetable_id,
+          timetable_id: timetableId,
           attendance_data: payload,
         },
       );
       const state = await api.get<{ locked: boolean }>(
-        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}`,
+        `/api/academics/faculty/course/${selectedCourseId}/attendance?date=${selectedDate}${timetableId ? `&timetableId=${encodeURIComponent(timetableId)}` : ''}`,
       );
       setLocked(state.locked);
       const synced = result.attendance_updated?.length ?? 0;
@@ -250,7 +286,6 @@ function MarkAttendanceContent() {
       } else {
         toast.success(`Attendance saved · ${synced} student${synced === 1 ? '' : 's'} synced to enrollment %`);
       }
-      setMissingAlerts((prev) => prev.filter((row) => row.course_id !== selectedCourseId));
       const courseAnalytics = await api
         .get<AttendanceAnalytics>(
           `/api/academics/faculty/course/${selectedCourseId}/attendance/analytics?date=${selectedDate}`,
@@ -266,6 +301,7 @@ function MarkAttendanceContent() {
 
   async function sendWarnings() {
     if (!selectedCourseId || !analytics?.defaulters.length) return;
+
     try {
       const result = await api.post<{ notified: number }>(
         `/api/academics/faculty/course/${selectedCourseId}/attendance/warnings`,
@@ -284,7 +320,8 @@ function MarkAttendanceContent() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
-        description="Select today's class, mark present or absent, then log the lecture in your class logbook."
+        title="Attendance"
+        description="Mark and review student attendance records."
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/faculty/logbook">
@@ -295,35 +332,8 @@ function MarkAttendanceContent() {
         }
       />
 
-      {missingAlerts.length > 0 ? (
-        <div className="sticky top-3 z-20 rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-red-950 shadow-lg">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex gap-3">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-700" />
-              <div>
-                <p className="font-bold">ACTION REQUIRED: Unmarked attendance</p>
-                <p className="text-sm">
-                  You have unmarked attendance for {missingAlerts[0].course_code} from{' '}
-                  {String(missingAlerts[0].start_time).slice(0, 5)} today.
-                </p>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => {
-                setSelectedCourseId(missingAlerts[0].course_id);
-                setSelectedTimetableId(missingAlerts[0].timetable_id);
-                setSelectedDate(todayIso());
-              }}
-            >
-              Click here to mark now
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {classes.length === 0 ? (
+      {classesError ? <FacultyErrorBanner message={classesError} /> : null}
+      {!classesError && classes.length === 0 ? (
         <FacultyEmptyState
           title="No classes today"
           description="When you have sessions on the timetable, they will appear here for attendance marking."
@@ -369,86 +379,10 @@ function MarkAttendanceContent() {
               <FacultyEmptyState description="Select a class from the list to load the roster." />
             ) : rosterLoading ? (
               <FacultyInlineLoading label="Loading roster…" />
+            ) : rosterError ? (
+              <FacultyErrorBanner message={rosterError} />
             ) : (
               <div className="space-y-4">
-                {analytics ? (
-                  <div className="space-y-4">
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <FacultyMetricChip
-                        label="Sessions scheduled"
-                        value={`${analytics.health.scheduled_classes}`}
-                      />
-                      <FacultyMetricChip
-                        label="Attendance marked"
-                        value={`${analytics.health.conducted_classes}`}
-                        emphasis
-                      />
-                      <FacultyMetricChip
-                        label="Avg attendance"
-                        value={`${analytics.health.average_attendance_percent}%`}
-                      />
-                    </div>
-
-                    <div className="grid gap-4 xl:grid-cols-2">
-                      <div className="rounded-xl border border-red-200 bg-red-50/80 p-3">
-                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-bold text-red-950">Danger Zone: Below 75%</p>
-                            <p className="text-xs text-red-900/80">Pre-filtered defaulters list</p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            disabled={analytics.defaulters.length === 0}
-                            onClick={() => void sendWarnings()}
-                            className="gap-1.5"
-                          >
-                            <Send className="h-3.5 w-3.5" />
-                            Send Warning Alert
-                          </Button>
-                        </div>
-                        {analytics.defaulters.length === 0 ? (
-                          <p className="text-sm text-red-900/80">No student is below 75%.</p>
-                        ) : (
-                          <div className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-background">
-                            <table className="w-full text-xs">
-                              <tbody>
-                                {analytics.defaulters.map((row) => (
-                                  <tr key={row.student_user_id} className="border-b last:border-0">
-                                    <td className="px-2 py-1.5 font-medium text-sgvu-navy">{row.name}</td>
-                                    <td className="px-2 py-1.5 text-muted-foreground">{row.roll_number}</td>
-                                    <td className="px-2 py-1.5 text-right font-bold text-red-700">
-                                      {Number(row.attendance_percent).toFixed(2)}%
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
-                        <p className="text-sm font-bold text-amber-950">Habitual Absentees</p>
-                        <p className="mb-2 text-xs text-amber-900/80">Missed the last 3 consecutive classes</p>
-                        {analytics.habitual_absentees.length === 0 ? (
-                          <p className="text-sm text-amber-900/80">No habitual absentees in the last 3 classes.</p>
-                        ) : (
-                          <ul className="space-y-1 text-sm">
-                            {analytics.habitual_absentees.map((row) => (
-                              <li key={row.student_user_id} className="rounded-lg border bg-background px-3 py-2">
-                                <span className="font-medium text-sgvu-navy">{row.name}</span>
-                                <span className="ml-2 text-xs text-muted-foreground">{row.roll_number}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <input
                     type="date"
@@ -467,8 +401,17 @@ function MarkAttendanceContent() {
                     {locked ? <Badge variant="secondary">Locked</Badge> : null}
                     <FacultyMetricChip label="Present" value={presentCount} emphasis />
                     <FacultyMetricChip label="Absent" value={absentCount} />
+                    <FacultyMetricChip label="Leave" value={leaveCount} />
                   </div>
                 </div>
+
+                {selectedClass.is_practical ? (
+                  <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                    <span className="font-medium text-sgvu-navy">Practical batch: </span>
+                    {selectedClass.section || 'Not mapped — contact your HOD'}.
+                    Select the scheduled batch session from the class list; attendance applies only to its mapped students.
+                  </p>
+                ) : null}
 
                 {!locked && students.length > 0 && (
                   <div className="flex flex-wrap gap-2">
@@ -521,6 +464,15 @@ function MarkAttendanceContent() {
                             >
                               Absent
                             </Button>
+                            <Button
+                              size="sm"
+                              className="min-w-[5.5rem]"
+                              variant={attendance[s.student_id] === 'LEAVE' ? 'secondary' : 'outline'}
+                              disabled={locked}
+                              onClick={() => setAttendance((a) => ({ ...a, [s.student_id]: 'LEAVE' }))}
+                            >
+                              Leave
+                            </Button>
                           </div>
                         </li>
                       ))}
@@ -531,7 +483,7 @@ function MarkAttendanceContent() {
                 <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-xs text-muted-foreground">
                     {students.length > 0
-                      ? `${presentCount} present · ${absentCount} absent · ${students.length} total`
+                      ? `${presentCount} present · ${absentCount} absent · ${leaveCount} leave · ${students.length} in scheduled roster (${filteredStudents.length} shown)`
                       : 'Save syncs attendance to enrollment percentages.'}
                   </p>
                   <Button
@@ -542,6 +494,66 @@ function MarkAttendanceContent() {
                     {saving ? 'Saving…' : 'Save attendance'}
                   </Button>
                 </div>
+
+                {analytics ? (
+                  <div className="grid gap-4 border-t border-border/50 pt-4 xl:grid-cols-2">
+                    <div className="rounded-xl border border-red-200 bg-red-50/80 p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold text-red-950">Danger Zone: Below 75%</p>
+                          <p className="text-xs text-red-900/80">Pre-filtered defaulters list</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          disabled={analytics.defaulters.length === 0}
+                          onClick={() => void sendWarnings()}
+                          className="gap-1.5"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Send Warning Alert
+                        </Button>
+                      </div>
+                      {analytics.defaulters.length === 0 ? (
+                        <p className="text-sm text-red-900/80">No student is below 75%.</p>
+                      ) : (
+                        <div className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-background">
+                          <table className="w-full text-xs">
+                            <tbody>
+                              {analytics.defaulters.map((row) => (
+                                <tr key={row.student_user_id} className="border-b last:border-0">
+                                  <td className="px-2 py-1.5 font-medium text-sgvu-navy">{row.name}</td>
+                                  <td className="px-2 py-1.5 text-muted-foreground">{row.roll_number}</td>
+                                  <td className="px-2 py-1.5 text-right font-bold text-red-700">
+                                    {Number(row.attendance_percent).toFixed(2)}%
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+                      <p className="text-sm font-bold text-amber-950">Habitual Absentees</p>
+                      <p className="mb-2 text-xs text-amber-900/80">Missed the last 3 consecutive classes</p>
+                      {analytics.habitual_absentees.length === 0 ? (
+                        <p className="text-sm text-amber-900/80">No habitual absentees in the last 3 classes.</p>
+                      ) : (
+                        <ul className="space-y-1 text-sm">
+                          {analytics.habitual_absentees.map((row) => (
+                            <li key={row.student_user_id} className="rounded-lg border bg-background px-3 py-2">
+                              <span className="font-medium text-sgvu-navy">{row.name}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">{row.roll_number}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </FacultyPanel>

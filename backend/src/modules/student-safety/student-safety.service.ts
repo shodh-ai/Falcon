@@ -79,19 +79,6 @@ export class StudentSafetyService {
       );
     }
 
-    const open = await this.db.query(
-      `SELECT 1 FROM student_safety_concerns
-       WHERE tenant_id = $1 AND reporter_user_id = $2
-         AND status = ANY($3::text[])
-       LIMIT 1`,
-      [tenantId, reporterUserId, ACTIVE_STATUSES],
-    );
-    if (open.length > 0) {
-      throw new BadRequestException(
-        'You already have an active safety concern under review.',
-      );
-    }
-
     if (dto.accused_user_id) {
       await this.validateAccusedUser(
         tenantId,
@@ -317,7 +304,11 @@ export class StudentSafetyService {
       concern.accused_description as string | null,
     );
 
-    if (nextStatus === 'UNDER_REVIEW' && !concern.accused_notified_at && accusedUserId) {
+    if (
+      nextStatus === 'UNDER_REVIEW' &&
+      !concern.accused_notified_at &&
+      accusedUserId
+    ) {
       await this.notifyAccused(
         tenantId,
         accusedUserId,
@@ -561,7 +552,8 @@ export class StudentSafetyService {
     const roles = roleMap[accusedType];
     if (!roles.length) return null;
 
-    const nameHint = accusedDescription.split('·')[0]?.trim() ?? accusedDescription.trim();
+    const nameHint =
+      accusedDescription.split('·')[0]?.trim() ?? accusedDescription.trim();
     if (!nameHint) return null;
 
     const [exact] = await this.db.query(

@@ -1,13 +1,13 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { RoleGate } from '@/components/layout/RoleGate';
 import { FacultyShell } from '@/components/layout/FacultyShell';
 import { PortalOnboardingGuard } from '@/components/onboarding/PortalOnboardingGuard';
 import { FACULTY_ONBOARDING_CONFIG } from '@/lib/onboarding/portal-onboarding';
 
-export default function FacultyPortalLayout({ children }: { children: ReactNode }) {
+function FacultyPortalLayoutInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isOnboarding = pathname.startsWith('/faculty/onboarding');
 
@@ -25,5 +25,13 @@ export default function FacultyPortalLayout({ children }: { children: ReactNode 
         <FacultyShell>{children}</FacultyShell>
       </PortalOnboardingGuard>
     </RoleGate>
+  );
+}
+
+export default function FacultyPortalLayout({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={null}>
+      <FacultyPortalLayoutInner>{children}</FacultyPortalLayoutInner>
+    </Suspense>
   );
 }

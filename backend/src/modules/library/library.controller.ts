@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -101,6 +102,9 @@ export class LibraryAdminController {
     @Req() req: { user: AuthUser },
     @Query('barcode') barcode: string,
   ) {
+    if (!barcode?.trim()) {
+      throw new BadRequestException('barcode is required');
+    }
     return this.library.resolveUserByBarcode(this.tenant(req), barcode);
   }
 
@@ -130,6 +134,9 @@ export class LibraryAdminController {
   @Get('isbn-lookup')
   @Roles('Librarian', 'SuperAdmin')
   isbnLookup(@Query('isbn') isbn: string) {
+    if (!isbn?.trim()) {
+      throw new BadRequestException('isbn is required');
+    }
     return this.library.lookupIsbn(isbn);
   }
 
@@ -199,8 +206,14 @@ export class LibraryAdminController {
     return this.library.gateStats(this.tenant(req));
   }
 
+  @Get('dashboard')
+  @Roles('Librarian', 'SuperAdmin', 'CampusAdmin')
+  dashboard(@Req() req: { user: AuthUser }) {
+    return this.library.getDashboardMetrics(this.tenant(req));
+  }
+
   @Get('dashboard/metrics')
-  @Roles('Librarian', 'SuperAdmin')
+  @Roles('Librarian', 'SuperAdmin', 'CampusAdmin')
   dashboardMetrics(@Req() req: { user: AuthUser }) {
     return this.library.getDashboardMetrics(this.tenant(req));
   }

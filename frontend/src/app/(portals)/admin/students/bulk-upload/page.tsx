@@ -1,13 +1,17 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Download, Upload } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/context/AuthContext';
 import { API_URL } from '@/lib/api/client';
 import { getSubdomainFromClient } from '@/lib/tenant';
+import { cn } from '@/lib/utils';
+
+const BRAND_BTN =
+  'border border-[#0B2447] bg-[#0B2447] text-white transition-colors hover:bg-[#123A6D] hover:text-white active:border-sgvu-gold active:bg-sgvu-gold active:text-sgvu-navy disabled:opacity-60';
 
 export default function AdminStudentBulkUploadPage() {
   const { token } = useAuth();
@@ -82,13 +86,15 @@ export default function AdminStudentBulkUploadPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-sgvu-navy">Student Excel Upload</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Bulk ingest students at the start of the year. Each row creates a student account,
-          assigns the Student role, generates a PRN, and sends welcome credentials by email.
-        </p>
-      </div>
+      <Card className="border-sgvu-navy/10 bg-white shadow-sm">
+        <CardContent className="p-5 md:p-6">
+          <h1 className="text-2xl font-semibold text-sgvu-navy">Student Excel Upload</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Bulk ingest students at the start of the year. Each row creates a student account,
+            assigns the Student role, generates a PRN, and sends welcome credentials by email.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -99,8 +105,11 @@ export default function AdminStudentBulkUploadPage() {
             Columns: Name, Email, Phone, Father Name, Batch. Configure an enrollment/PRN rule in
             Super Admin settings before uploading.
           </p>
-          <Button variant="outline" className="gap-2" onClick={() => void downloadTemplate()}>
-            <Download className="h-4 w-4" />
+          <Button
+            type="button"
+            className={cn('h-10', BRAND_BTN)}
+            onClick={() => void downloadTemplate()}
+          >
             Download template
           </Button>
 
@@ -133,7 +142,7 @@ export default function AdminStudentBulkUploadPage() {
                   if (file) void uploadFile(file);
                 }}
               />
-              <Button variant="secondary" size="sm" disabled={uploading} asChild>
+              <Button type="button" size="sm" disabled={uploading} className={cn('h-9', BRAND_BTN)} asChild>
                 <span>{uploading ? 'Uploading…' : 'Choose file'}</span>
               </Button>
             </label>

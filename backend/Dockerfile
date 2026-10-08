@@ -36,17 +36,31 @@ FROM ${NODE_IMAGE} AS production
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.source="https://github.com/shodh-ai/Falcon" \
+      org.opencontainers.image.description="Falcon API service" \
+      org.opencontainers.image.licenses="UNLICENSED"
+
 ENV NODE_ENV=production
 ENV PORT=4000
+ENV NODE_OPTIONS=--max-old-space-size=768
 
-COPY package.json package-lock.json .npmrc ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/migrations ./migrations
-COPY --from=builder /app/scripts ./scripts
+COPY --chown=node:node package.json ./
+COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+COPY --chown=node:node --from=builder /app/dist ./dist
+COPY --chown=node:node --from=builder /app/migrations ./migrations
+COPY --chown=node:node --from=builder /app/scripts ./scripts
+COPY --chown=node:node --from=builder /app/data ./data
 
-RUN mkdir -p /app/uploads
+# PDF-to-CSV department preparation is an offline build/ops task. Production
+# bootstrap consumes committed CSV files with --skip-parse, so shipping Python,
+# pip and pypdf in every API image only increases deploy/unpack pressure.
+RUN mkdir -p /app/uploads && chown node:node /app/uploads
 
 EXPOSE 4000
 
-CMD ["node", "dist/main"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
+  CMD node scripts/healthcheck.js
+
+# Apply forward-only, ledgered migrations before accepting traffic. The runner
+# uses a PostgreSQL advisory lock, so parallel replicas cannot race the schema.
+CMD ["sh", "-c", "npm run db:migrate && exec node dist/main.js"]

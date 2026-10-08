@@ -8,7 +8,7 @@ export default function StudentPhdPage() {
   return (
     <StudentPageShell>
       <StudentPageHeader
-        title="Ph.D. Programme"
+        title="PhD Portal"
         description="Apply for admission and track your full Ph.D. lifecycle from guide allocation to degree award."
       />
       <PhdApplicationPanel />

@@ -1,4 +1,4 @@
-import { getDashboardPathForRole } from '@/lib/auth-routing';
+import { getAccountSettingsHrefForPortal, getDashboardPathForRole } from '@/lib/auth-routing';
 
 export type WorkspacePrefix = 'faculty' | 'hod' | 'dean' | 'hr';
 
@@ -27,6 +27,7 @@ export function selfServicePaths(prefix: WorkspacePrefix) {
     policies: `/${prefix}/me/policies`,
     onboarding: `/${prefix}/me/onboarding`,
     offboarding: `/${prefix}/me/offboarding`,
+    settings: getAccountSettingsHrefForPortal(`/${prefix}`),
   };
 }
 
@@ -64,5 +65,6 @@ export function mapEssPathToWorkspace(pathname: string, role: string): string {
   if (pathname.startsWith('/ess/policies')) return paths.policies;
   if (pathname.startsWith('/ess/onboarding')) return paths.onboarding;
   if (pathname.startsWith('/ess/offboarding')) return paths.offboarding;
+  if (pathname.startsWith('/ess/settings')) return paths.settings;
   return paths.workforce;
 }

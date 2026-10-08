@@ -218,7 +218,7 @@ export function UniversalSearchOmnibar({ navGroups = [] }: UniversalSearchOmniba
         <Search className="h-4 w-4" />
       </button>
 
-      <CommandDialog open={open} onOpenChange={setOpen}>
+      <CommandDialog open={open} onOpenChange={setOpen} shouldFilter={false}>
         <CommandInput
           placeholder={
             onLeadership

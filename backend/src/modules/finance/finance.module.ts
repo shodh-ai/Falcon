@@ -17,6 +17,7 @@ import { FinanceApprovalsService } from './finance-approvals.service';
 import { FinanceChequeService } from './finance-cheque.service';
 import { FinanceBulkDemandProcessor } from './finance-bulk-demand.processor';
 import { BudgetFpaModule } from '../leadership/budget-fpa.module';
+import { GatewayPaymentService } from './gateway-payment.service';
 
 @Module({
   imports: [
@@ -36,7 +37,13 @@ import { BudgetFpaModule } from '../leadership/budget-fpa.module';
     FinanceApprovalsService,
     FinanceChequeService,
     FinanceBulkDemandProcessor,
+    GatewayPaymentService,
   ],
-  exports: [FinanceService, FinanceLedgerService, FinanceReceiptService],
+  exports: [
+    FinanceService,
+    FinanceLedgerService,
+    FinanceReceiptService,
+    GatewayPaymentService,
+  ],
 })
 export class FinanceModule {}

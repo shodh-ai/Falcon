@@ -243,14 +243,16 @@ export class EcellFounderService {
       `SELECT u.user_id, u.name, r.role_name,
               d.dept_name,
               'Faculty' AS mentor_type,
-              COALESCE(u.phone, 'Campus mentor') AS expertise_label
+              COALESCE(u.phone, 'Campus mentor') AS expertise_label,
+              COALESCE(mp.mentor_tier, 'CAMPUS') AS mentor_tier
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
+       LEFT JOIN ecell_mentor_profiles mp ON mp.user_id = u.user_id AND mp.tenant_id = u.tenant_id
        WHERE u.tenant_id = $1
          AND u.is_active = true
-         AND r.role_name IN ('Faculty', 'HOD', 'Dean', 'President')
-       ORDER BY u.name ASC
+         AND r.role_name IN ('Faculty', 'HOD', 'Dean', 'President', 'Wrangler')
+       ORDER BY CASE WHEN mp.mentor_tier = 'WRANGLER' THEN 0 ELSE 1 END, u.name ASC
        LIMIT 50`,
       [tid],
     );
@@ -258,9 +260,11 @@ export class EcellFounderService {
       `SELECT u.user_id, ap.name, 'Alumni' AS role_name,
               ap.current_organization AS dept_name,
               'Alumni' AS mentor_type,
-              COALESCE(ap.designation, 'Industry mentor') AS expertise_label
+              COALESCE(ap.designation, 'Industry mentor') AS expertise_label,
+              COALESCE(mp.mentor_tier, 'ALUMNI') AS mentor_tier
        FROM alumni_profiles ap
        JOIN users u ON u.user_id = COALESCE(ap.user_id, ap.student_user_id)
+       LEFT JOIN ecell_mentor_profiles mp ON mp.user_id = u.user_id AND mp.tenant_id = ap.tenant_id
        WHERE ap.tenant_id = $1
          AND ap.opt_in_mentorship = true
          AND ap.verification_status IN ('VERIFIED', 'APPROVED')
@@ -268,7 +272,24 @@ export class EcellFounderService {
        LIMIT 50`,
       [tid],
     );
-    return [...faculty, ...alumni];
+    const wranglers = await this.db.query(
+      `SELECT u.user_id, u.name, 'Wrangler' AS role_name,
+              mp.org AS dept_name, 'Wrangler' AS mentor_type,
+              COALESCE(mp.expertise_label, 'Industry Drill Sergeant') AS expertise_label,
+              mp.mentor_tier
+       FROM ecell_mentor_profiles mp
+       JOIN users u ON u.user_id = mp.user_id
+       WHERE mp.tenant_id = $1 AND mp.mentor_tier = 'WRANGLER' AND u.is_active = true`,
+      [tid],
+    );
+    const seen = new Set<string>();
+    const merged = [...wranglers, ...faculty, ...alumni].filter((m) => {
+      const id = String(m.user_id);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    return merged;
   }
 
   async requestMentorMeeting(

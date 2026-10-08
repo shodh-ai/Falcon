@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { StaffRequestType } from '../../entities/staff-leave-request.entity';
@@ -44,12 +48,22 @@ export class HrWorkflowRoutingService {
     );
 
     if (!workflow[0]) {
+      const fallbackApprover =
+        await this.workflowBuilder.resolveDefaultApprover(
+          tenantId,
+          requesterUserId,
+        );
+      if (!fallbackApprover) {
+        throw new BadRequestException(
+          'A leave approver is not configured for your department. Please contact HR.',
+        );
+      }
       return {
         workflow_id: null,
-        step_order: 0,
-        approver_user_id: null,
-        approver_type: null,
-        is_final: true,
+        step_order: 1,
+        approver_user_id: fallbackApprover,
+        approver_type: 'REPORTING_MANAGER',
+        is_final: false,
       };
     }
 
@@ -62,13 +76,9 @@ export class HrWorkflowRoutingService {
     );
 
     if (!first) {
-      return {
-        workflow_id: workflow[0].workflow_id,
-        step_order: 0,
-        approver_user_id: null,
-        approver_type: null,
-        is_final: true,
-      };
+      throw new BadRequestException(
+        'No eligible approver is configured for this request. Please contact HR.',
+      );
     }
 
     return {

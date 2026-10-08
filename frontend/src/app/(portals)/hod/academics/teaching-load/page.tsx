@@ -86,7 +86,7 @@ export default function HodTeachingLoadPage() {
     <HodPageFrame>
       <HodPageHeader
         title="Unassigned Teaching Load"
-        description="Subjects uploaded with NF (No Faculty) from the Course Allocation Matrix. Assign faculty to push courses to their Faculty Portal and mobile app instantly."
+        description="Subjects marked NF (No Faculty) in your teaching load matrix. Assign faculty to push courses to their Faculty Portal instantly."
         meta={
           !loading && items.length > 0 ? (
             <span className="inline-flex items-center gap-1.5 font-medium text-red-600">
@@ -96,9 +96,14 @@ export default function HodTeachingLoadPage() {
           ) : null
         }
         actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/hod/academics/course-allocation">Timetable allocation</Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/hod/academics/course-mapper">Upload matrix</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/hod/academics/course-allocation">Timetable allocation</Link>
+            </Button>
+          </div>
         }
       />
 

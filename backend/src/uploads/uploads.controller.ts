@@ -8,20 +8,40 @@ import {
   UploadedFile,
   UploadedFiles,
   BadRequestException,
+  UnauthorizedException,
   UseGuards,
   NotFoundException,
   Req,
 } from '@nestjs/common';
-import { Public } from '../common/decorators/roles.decorator';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { ObjectStorageService } from '../storage/object-storage.service';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { basename, resolve } from 'path';
 import type { Response } from 'express';
+
+/** Authenticated campus roles that may upload files through the shared endpoint. */
+const UPLOAD_ROLES = [
+  'Student',
+  'Faculty',
+  'HOD',
+  'Dean',
+  'SuperAdmin',
+  'Admin',
+  'IQAC',
+  'HR',
+  'HRAdmin',
+  'Registrar',
+  'President',
+  'ExamCell',
+  'Accountant',
+  'HostelAdmin',
+] as const;
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -36,7 +56,7 @@ const ALLOWED_MIME_TYPES = [
 
 const multerOptions = {
   storage: memoryStorage(),
-  limits: { fileSize: 104857600 },
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB — IQAC evidence / shared uploads
   fileFilter: (
     _req: unknown,
     file: Express.Multer.File,
@@ -58,7 +78,8 @@ const multerOptions = {
 type AuthRequest = { user?: { tenant_id?: string } };
 
 @Controller(['uploads', 'api/uploads'])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(...UPLOAD_ROLES)
 export class UploadsController {
   constructor(private readonly objectStorage: ObjectStorageService) {}
 
@@ -87,14 +108,26 @@ export class UploadsController {
     return Promise.all(files.map((f) => this.persistFile(f, tenantId)));
   }
 
-  @Public()
   @Get('download')
   async downloadFile(
     @Query('path') filePath: string,
     @Query('key') objectKey: string,
+    @Req() req: AuthRequest & { user?: { tenant_id?: string } },
     @Res() res: Response,
   ) {
+    // Class-level JwtAuthGuard applies (Bearer, access_token query, or auth cookie).
+    if (!req.user) {
+      throw new UnauthorizedException(
+        'Authentication required to download files',
+      );
+    }
+
     if (objectKey && this.objectStorage.isEnabled()) {
+      const tenantId = req.user.tenant_id;
+      // Object keys are tenant-prefixed by ObjectStorageService.buildKey
+      if (tenantId && !objectKey.startsWith(`${tenantId}/`)) {
+        throw new NotFoundException('File not found');
+      }
       const stream = await this.objectStorage.getDownloadStream(objectKey);
       res.setHeader(
         'Content-Disposition',
@@ -119,6 +152,14 @@ export class UploadsController {
 
     if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
       throw new NotFoundException('File not found');
+    }
+
+    const tenantId = req.user.tenant_id;
+    if (tenantId) {
+      const tenantRoot = resolve(uploadRoot, tenantId);
+      if (!resolvedPath.startsWith(tenantRoot)) {
+        throw new NotFoundException('File not found');
+      }
     }
 
     res.setHeader(

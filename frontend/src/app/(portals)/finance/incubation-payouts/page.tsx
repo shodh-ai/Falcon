@@ -22,8 +22,11 @@ export default function FinanceIncubationPayoutsPage() {
   useEffect(() => {
     void ecellApi
       .financePayouts()
-      .then(setPayouts)
-      .catch(() => toast.error('Could not load incubation payouts'))
+      .then((rows) => setPayouts(Array.isArray(rows) ? rows : []))
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : 'Could not load incubation payouts');
+        setPayouts([]);
+      })
       .finally(() => setLoading(false));
   }, [ecellApi]);
 

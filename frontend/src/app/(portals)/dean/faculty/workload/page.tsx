@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuthedApi } from '@/lib/api';
+import { toast } from '@/lib/notifications/falcon-toast';
 import { Users, BookOpen, Clock, Building2, ChevronDown } from 'lucide-react';
 
 interface WorkloadRecord {
@@ -16,8 +17,17 @@ interface WorkloadRecord {
   hod_name: string;
   hod_email: string;
   hours_per_week: number;
+  assigned_load_credits?: number;
+  scheduled_hours?: number;
+  unscheduled_course_count?: number;
   course_count: number;
-  workload_status: 'OVERLOADED' | 'UNDERUTILIZED' | 'BALANCED';
+  workload_status:
+    | 'OVERLOADED'
+    | 'UNDERUTILIZED'
+    | 'BALANCED'
+    | 'NO_TEACHING_LOAD'
+    | 'NO_ACTIVE_ALLOCATION'
+    | 'SCHEDULE_MISSING';
 }
 
 interface GroupedDepartment {
@@ -57,7 +67,9 @@ export default function DeanFacultyWorkloadPage() {
 
         setDepartments(Object.values(grouped).sort((a, b) => a.dept_name.localeCompare(b.dept_name)));
       })
-      .catch((err) => console.error('Failed to load workload data:', err))
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : 'Failed to load workload data');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -68,6 +80,9 @@ export default function DeanFacultyWorkloadPage() {
       case 'OVERLOADED': return 'bg-red-500/10 text-red-600 border-red-200';
       case 'UNDERUTILIZED': return 'bg-amber-500/10 text-amber-600 border-amber-200';
       case 'BALANCED': return 'bg-emerald-500/10 text-emerald-600 border-emerald-200';
+      case 'SCHEDULE_MISSING': return 'bg-amber-500/10 text-amber-700 border-amber-200';
+      case 'NO_TEACHING_LOAD':
+      case 'NO_ACTIVE_ALLOCATION': return 'bg-slate-500/10 text-slate-600 border-slate-200';
       default: return '';
     }
   };
@@ -145,7 +160,11 @@ export default function DeanFacultyWorkloadPage() {
                         </div>
                         <div className="flex items-center gap-1.5 text-slate-600 mt-0.5">
                           <Clock className="h-4 w-4 opacity-70" />
-                          <span className="text-sm font-medium">{faculty.hours_per_week} hrs/wk</span>
+                          <span className="text-sm font-medium">{Number(faculty.scheduled_hours ?? faculty.hours_per_week).toFixed(1)} contact hrs/wk</span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {faculty.assigned_load_credits ?? 0} assigned credits
+                          {faculty.unscheduled_course_count ? ` · ${faculty.unscheduled_course_count} unscheduled` : ''}
                         </div>
                       </div>
 

@@ -1,5 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { DataSource } from 'typeorm';
 
 type GradeCardStage = 'DRAFT' | 'PROVISIONAL' | 'FINAL';
@@ -183,6 +188,170 @@ export class SemesterResultsService {
        LIMIT $3`,
       [tenantId, semester, Math.min(Math.max(Number(limit) || 10, 1), 100)],
     );
+  }
+
+  async exportGradeCardPdf(tenantId: string, gradeCardId: string) {
+    const rows = await this.db.query<
+      Array<{
+        grade_card_id: string;
+        student_name: string;
+        enrollment_number: string | null;
+        semester: number;
+        cgpa: string | number | null;
+        status: string;
+        payload: GradeCardPayload & {
+          courses?: Array<{
+            course_code: string;
+            course_name: string;
+            credits: number;
+            grade: string | null;
+            grade_points: number | null;
+          }>;
+        };
+      }>
+    >(
+      `SELECT g.grade_card_id, g.semester, g.cgpa, g.status, g.payload,
+              u.name AS student_name,
+              COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+       FROM grade_cards g
+       JOIN users u ON u.user_id = g.student_user_id
+       LEFT JOIN student_profiles sp ON sp.user_id = g.student_user_id
+       WHERE g.tenant_id = $1 AND g.grade_card_id = $2
+       LIMIT 1`,
+      [tenantId, gradeCardId],
+    );
+    const row = rows[0];
+    if (!row) throw new NotFoundException('Grade card not found');
+
+    const payload = row.payload ?? ({} as GradeCardPayload);
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([595, 842]);
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const navy = rgb(0.12, 0.23, 0.37);
+    const gold = rgb(0.79, 0.66, 0.28);
+    let y = 800;
+
+    page.drawText('Suresh Gyan Vihar University', {
+      x: 50,
+      y,
+      size: 14,
+      font: bold,
+      color: navy,
+    });
+    y -= 22;
+    page.drawText('Examination Cell — Semester Grade Card', {
+      x: 50,
+      y,
+      size: 11,
+      font,
+      color: navy,
+    });
+    y -= 28;
+    page.drawText(`Student: ${row.student_name}`, { x: 50, y, size: 10, font });
+    y -= 16;
+    page.drawText(
+      `Enrollment: ${row.enrollment_number ?? '—'} · Semester ${row.semester}`,
+      { x: 50, y, size: 10, font },
+    );
+    y -= 16;
+    page.drawText(
+      `SGPA: ${payload.sgpa ?? '—'} · CGPA: ${row.cgpa ?? payload.cgpa ?? '—'} · Rank: ${payload.rank ?? '—'}`,
+      { x: 50, y, size: 10, font: bold, color: gold },
+    );
+    y -= 24;
+    page.drawText('Course', { x: 50, y, size: 9, font: bold, color: navy });
+    page.drawText('Credits', { x: 280, y, size: 9, font: bold, color: navy });
+    page.drawText('Grade', { x: 340, y, size: 9, font: bold, color: navy });
+    page.drawText('GP', { x: 400, y, size: 9, font: bold, color: navy });
+    y -= 12;
+    page.drawLine({
+      start: { x: 50, y },
+      end: { x: 545, y },
+      thickness: 1,
+      color: gold,
+    });
+    y -= 16;
+
+    for (const course of payload.courses ?? []) {
+      if (y < 120) break;
+      page.drawText(
+        `${course.course_code} — ${course.course_name}`.slice(0, 42),
+        {
+          x: 50,
+          y,
+          size: 8,
+          font,
+        },
+      );
+      page.drawText(String(course.credits ?? '—'), {
+        x: 290,
+        y,
+        size: 8,
+        font,
+      });
+      page.drawText(String(course.grade ?? '—'), { x: 350, y, size: 8, font });
+      page.drawText(String(course.grade_points ?? '—'), {
+        x: 410,
+        y,
+        size: 8,
+        font,
+      });
+      y -= 14;
+    }
+
+    y = Math.min(y, 110);
+    page.drawText('[ QR Code Placeholder ]', {
+      x: 50,
+      y,
+      size: 8,
+      font,
+      color: navy,
+    });
+    page.drawText('Controller of Examinations', {
+      x: 380,
+      y: 70,
+      size: 8,
+      font: bold,
+      color: navy,
+    });
+    page.drawText('Authorized Signatory: ____________________', {
+      x: 340,
+      y: 54,
+      size: 8,
+      font,
+      color: navy,
+    });
+    const generatedAt = new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+    });
+    page.drawText(`Generated: ${generatedAt}`, {
+      x: 50,
+      y: 40,
+      size: 8,
+      font,
+      color: navy,
+    });
+    page.drawText(
+      `Verification ID: ${payload.verification_id ?? gradeCardId.slice(0, 8)}`,
+      {
+        x: 50,
+        y: 26,
+        size: 8,
+        font,
+        color: navy,
+      },
+    );
+
+    const buffer = Buffer.from(await pdf.save());
+    const safeName = (row.enrollment_number ?? row.student_name)
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .slice(0, 40);
+    return {
+      contentType: 'application/pdf',
+      filename: `grade-card-${safeName}-sem${row.semester}.pdf`,
+      buffer,
+    };
   }
 
   private async transitionStage(

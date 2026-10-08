@@ -45,6 +45,21 @@ export class FinVendor extends BaseTenantEntity {
   @Column({ type: 'numeric', precision: 5, scale: 2, default: 0 })
   risk_score: number;
 
+  @Column({ type: 'varchar', length: 40, default: 'UNVERIFIED' })
+  gst_verify_status: string;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  gst_verified_at: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  gst_legal_name: string | null;
+
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  pan_from_gst: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  related_party_hash: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 }

@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { NotificationDispatchService } from '../../core/notifications/notification-dispatch.service';
 import { budgetAlertMessage } from '../../core/notifications/notification-message.catalog';
+import { evaluateThreeWayMatch } from '../coo-ops/three-way-match.util';
 
 type DeptAllocation = { department_id: number; allocated_amount: number };
 
@@ -20,6 +21,52 @@ export class BudgetFpaService {
 
   private tenantId(tenantId?: string) {
     return tenantId ?? 'a0000000-0000-4000-8000-000000000001';
+  }
+
+  /** Hard gate: PO payment requires GRN + matching invoice (3-way). */
+  async assertThreeWayMatchForPay(tenantId: string, poId: string) {
+    const tid = this.tenantId(tenantId);
+    const poRows = await this.db.query(
+      `SELECT po_id, amount, status FROM fin_purchase_orders
+       WHERE po_id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      [poId, tid],
+    );
+    if (!poRows[0]) {
+      throw new NotFoundException({
+        message: 'PO not found',
+        code: 'PO_NOT_FOUND',
+      });
+    }
+    const grn = await this.db.query(
+      `SELECT grn_id FROM fin_goods_receipts WHERE po_id = $1 AND tenant_id = $2 LIMIT 1`,
+      [poId, tid],
+    );
+    const invoices = await this.db.query(
+      `SELECT invoice_id, COALESCE(total_amount, 0) AS amount
+       FROM fin_vendor_invoices
+       WHERE po_id = $1 AND tenant_id = $2`,
+      [poId, tid],
+    );
+    const poAmount = Number(poRows[0].amount);
+    const invoiceAmount = (
+      invoices as Array<{ amount: string | number }>
+    ).reduce((sum, inv) => sum + Number(inv.amount ?? 0), 0);
+    const evaluated = evaluateThreeWayMatch({
+      poStatus: String(poRows[0].status),
+      poAmount,
+      hasGrn: Boolean(grn[0]),
+      invoiceCount: invoices.length,
+      invoiceAmount,
+    });
+    return {
+      po_id: poId,
+      has_grn: Boolean(grn[0]),
+      invoice_count: invoices.length,
+      po_amount: poAmount,
+      invoice_amount: invoiceAmount,
+      match_status: evaluated.match_status,
+      can_pay: evaluated.can_pay,
+    };
   }
 
   currentFinancialYear() {
@@ -514,7 +561,7 @@ export class BudgetFpaService {
 
     if (dto.po_id) {
       const poRows = await this.db.query(
-        `SELECT amount, program_id, budget_id, status FROM fin_purchase_orders WHERE po_id = $1`,
+        `SELECT amount, program_id, budget_id, status, source_system, proc_order_id FROM fin_purchase_orders WHERE po_id = $1`,
         [dto.po_id],
       );
       const po = poRows[0] as {
@@ -522,7 +569,17 @@ export class BudgetFpaService {
         program_id: string;
         budget_id: string;
         status: string;
+        source_system?: string;
+        proc_order_id?: string;
       };
+      if (po?.source_system === 'MODULE2') {
+        throw new ForbiddenException({
+          statusCode: 403,
+          message: 'Post expenditure through Progressive Procurement',
+          code: 'MODULE2_CANONICAL_RECORD',
+          proc_order_id: po.proc_order_id,
+        });
+      }
       if (po?.status && po.status !== 'APPROVED') {
         throw new ForbiddenException({
           statusCode: 403,
@@ -532,6 +589,19 @@ export class BudgetFpaService {
           status: po.status,
         });
       }
+
+      const match = await this.assertThreeWayMatchForPay(tid, dto.po_id);
+      if (!match.can_pay) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          message:
+            '3-way match failed — cannot pay PO until GRN and invoice align',
+          code: 'THREE_WAY_MISMATCH',
+          po_id: dto.po_id,
+          match,
+        });
+      }
+
       if (po?.program_id) {
         await this.db.query(
           `UPDATE fin_program_budgets SET encumbered_amount = GREATEST(0, encumbered_amount - $2),

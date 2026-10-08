@@ -14,6 +14,10 @@ export function StudentShell({ children }: { children: ReactNode }) {
   const [isCoordinator, setIsCoordinator] = useState(false);
 
   useEffect(() => {
+    void api.post('/api/student/portal-bootstrap', {}).catch(() => undefined);
+  }, [api]);
+
+  useEffect(() => {
     void eventsApi
       .isClubCoordinator()
       .then((r) => setIsCoordinator(r.is_coordinator))
@@ -23,10 +27,10 @@ export function StudentShell({ children }: { children: ReactNode }) {
   const config: PortalConfig = useMemo(() => {
     if (!isCoordinator) return studentPortal;
     const clubItem = {
-      label: 'Club Management',
+      label: 'My Clubs',
       href: '/student/club-management',
       icon: Users,
-      keywords: ['events', 'club', 'coordinator'],
+      keywords: ['events', 'club', 'coordinator', 'club management'],
     };
     return {
       ...studentPortal,

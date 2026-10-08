@@ -9,6 +9,7 @@ import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 import { useAuth } from '@/context/AuthContext';
 
 type Bed = {
@@ -23,8 +24,6 @@ type Floor = { floor: string; rooms: Room[] };
 type HostelBlock = { hostel_block: string; floors: Floor[] };
 type DoorPos = 'left' | 'right' | 'top' | 'bottom';
 type FloorKind = 'ground' | 'first' | 'second';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 const STAIR_HATCH =
   'bg-[repeating-linear-gradient(0deg,transparent,transparent_4px,#cbd5e1_4px,#cbd5e1_6px)]';
@@ -48,8 +47,9 @@ function FloorMapFit({ children }: { children: ReactNode }) {
     if (natW === 0 || natH === 0) return;
 
     // Fill horizontal space (upscale on wide screens, downscale on narrow). No height cap.
+    // Allow deep downscale on phones so the 1320px blueprint never forces page-level overflow.
     const widthScale = (availW / natW) * 0.99;
-    const nextScale = Math.max(0.52, Math.min(1.45, widthScale));
+    const nextScale = Math.max(0.2, Math.min(1.45, widthScale));
 
     setScale(nextScale);
     setFittedHeight(natH * nextScale);
@@ -73,10 +73,14 @@ function FloorMapFit({ children }: { children: ReactNode }) {
   }, [recalc, children]);
 
   return (
-    <div ref={containerRef} className="relative w-full" style={{ height: fittedHeight }}>
+    <div
+      ref={containerRef}
+      className="relative w-full max-w-full overflow-x-auto overscroll-x-contain"
+      style={{ height: fittedHeight }}
+    >
       <div
         ref={contentRef}
-        className="absolute left-1/2 top-0 w-max"
+        className="absolute left-1/2 top-0 w-max max-w-none"
         style={{
           transform: `translateX(-50%) scale(${scale})`,
           transformOrigin: 'top center',
@@ -564,7 +568,7 @@ export default function StudentHostelBookingPage() {
   }, [api]);
 
   useEffect(() => {
-    const socket: Socket = io(`${API_BASE}/hostel-tatkal`, { transports: ['websocket'] });
+    const socket: Socket = io(`${getApiBaseUrl()}/hostel-tatkal`, { transports: ['websocket'] });
     const tenantId = user?.tenant_id ?? 'a0000000-0000-4000-8000-000000000001';
     socket.emit('joinSale', { tenant_id: tenantId });
     socket.on('bed.update', (payload: { bed_id?: string; bedId?: string; display_status?: string; status?: string }) => {

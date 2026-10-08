@@ -12,7 +12,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 import type { BusLocation, MapStop } from '@/components/transport/TransportMap';
+import { DEMO_TRANSPORT } from '@/lib/mock/student-portal-demo';
+import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
 
 const TransportMap = dynamic(
   () => import('@/components/transport/TransportMap').then((m) => m.TransportMap),
@@ -37,7 +40,28 @@ type Allocation = {
   pass_status: string;
   route_id: string;
   bus_number?: string;
+  pickup_time?: string;
+  drop_time?: string;
+  driver_name?: string;
+  driver_phone?: string;
 };
+
+function demoAllocation(): Allocation {
+  return {
+    allocation_id: DEMO_TRANSPORT.allocation_id,
+    route_name: DEMO_TRANSPORT.route_name,
+    stop_name: DEMO_TRANSPORT.stop_name,
+    fee_amount: DEMO_TRANSPORT.fee_amount,
+    payment_status: DEMO_TRANSPORT.payment_status,
+    pass_status: DEMO_TRANSPORT.pass_status,
+    route_id: DEMO_TRANSPORT.route_id,
+    bus_number: DEMO_TRANSPORT.bus_number,
+    pickup_time: DEMO_TRANSPORT.pickup_time,
+    drop_time: DEMO_TRANSPORT.drop_time,
+    driver_name: DEMO_TRANSPORT.driver_name,
+    driver_phone: DEMO_TRANSPORT.driver_phone,
+  };
+}
 
 type LiveData = {
   route_id: string;
@@ -62,7 +86,7 @@ type Tab = 'find' | 'pass' | 'track';
 
 export default function StudentTransportPage() {
   const api = useAuthedApi();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+  const apiUrl = getApiBaseUrl();
 
   const [tab, setTab] = useState<Tab>('find');
   const [home, setHome] = useState<[number, number]>(DEFAULT_CENTER);
@@ -78,13 +102,35 @@ export default function StudentTransportPage() {
   const [routeChangeOpen, setRouteChangeOpen] = useState(false);
 
   const loadAllocation = useCallback(() => {
-    void api.get<Allocation | null>('/api/transport/my-allocation').then((a) => {
-      setAllocation(a);
-      if (a?.payment_status === 'PAID') setTab('pass');
-      if (a?.payment_status === 'PENDING') {
-        setPendingPay({ allocation_id: a.allocation_id, amount: Number(a.fee_amount) });
-      }
-    });
+    void api
+      .get<Allocation | null>('/api/transport/my-allocation')
+      .then((a) => {
+        const next = a
+          ? {
+              ...a,
+              bus_number: a.bus_number ?? (isStudentDemoModeEnabled() ? DEMO_TRANSPORT.bus_number : a.bus_number),
+              pickup_time: a.pickup_time ?? (isStudentDemoModeEnabled() ? DEMO_TRANSPORT.pickup_time : a.pickup_time),
+              drop_time: a.drop_time ?? (isStudentDemoModeEnabled() ? DEMO_TRANSPORT.drop_time : a.drop_time),
+              driver_name: a.driver_name ?? (isStudentDemoModeEnabled() ? DEMO_TRANSPORT.driver_name : a.driver_name),
+              driver_phone: a.driver_phone ?? (isStudentDemoModeEnabled() ? DEMO_TRANSPORT.driver_phone : a.driver_phone),
+            }
+          : isStudentDemoModeEnabled()
+            ? demoAllocation()
+            : null;
+        setAllocation(next);
+        if (next?.payment_status === 'PAID') setTab('pass');
+        if (next?.payment_status === 'PENDING') {
+          setPendingPay({ allocation_id: next.allocation_id, amount: Number(next.fee_amount) });
+        }
+      })
+      .catch(() => {
+        if (isStudentDemoModeEnabled()) {
+          setAllocation(demoAllocation());
+          setTab('pass');
+        } else {
+          setAllocation(null);
+        }
+      });
   }, [api]);
 
   const loadNearby = useCallback(
@@ -115,13 +161,22 @@ export default function StudentTransportPage() {
 
   useEffect(() => {
     if (allocation?.pass_status !== 'ACTIVE') return;
+    const demoQr = (): QrPayload => ({
+      qr_payload: `FALCON-BUS|${allocation.bus_number ?? DEMO_TRANSPORT.bus_number}|${allocation.route_id}|${Date.now()}`,
+      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      route_name: allocation.route_name,
+      stop_name: allocation.stop_name,
+    });
     const refresh = () => {
-      void api.get<QrPayload>('/api/transport/bus-pass/qr').then(setQr).catch(() => undefined);
+      void api
+        .get<QrPayload>('/api/transport/bus-pass/qr')
+        .then(setQr)
+        .catch(() => setQr(demoQr()));
     };
     refresh();
     const id = window.setInterval(refresh, 30_000);
     return () => window.clearInterval(id);
-  }, [api, allocation?.pass_status]);
+  }, [api, allocation]);
 
   useEffect(() => {
     if (tab !== 'track' || !allocation?.route_id) return;
@@ -233,7 +288,7 @@ export default function StudentTransportPage() {
   return (
     <StudentPageShell width="5xl">
       <StudentPageHeader
-        title="Transport Hub"
+        title="Transport"
         description="Find your route, pay zone-based fees, show your digital bus pass, and track your bus live."
       />
 
@@ -325,7 +380,7 @@ export default function StudentTransportPage() {
                   {selected.distance_km.toFixed(1)} km from you · {selected.seats_available} seats left
                 </p>
                 {!allocation || allocation.payment_status !== 'PAID' ? (
-                  <Button className="bg-sgvu-navy" onClick={() => void optIn()}>
+                  <Button className="w-full bg-sgvu-navy sm:w-auto" onClick={() => void optIn()}>
                     Opt-In & Pay
                   </Button>
                 ) : (
@@ -387,9 +442,37 @@ export default function StudentTransportPage() {
                   <QrCode className="h-24 w-24 text-sgvu-navy" />
                   <p className="mt-2 text-center text-[10px] font-mono break-all">{qr.qr_payload.slice(0, 40)}…</p>
                 </div>
-                <p className="text-center text-sm">
-                  {qr.route_name} · {qr.stop_name}
-                </p>
+                <div className="grid gap-2 rounded-xl border border-sgvu-navy/10 bg-slate-50/80 p-3 text-sm sm:grid-cols-2">
+                  <p>
+                    <span className="text-muted-foreground">Bus</span>
+                    <br />
+                    <span className="font-semibold text-sgvu-navy">
+                      {allocation.bus_number ?? DEMO_TRANSPORT.bus_number}
+                    </span>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Route</span>
+                    <br />
+                    <span className="font-semibold text-sgvu-navy">{qr.route_name}</span>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Pickup</span>
+                    <br />
+                    <span className="font-semibold text-sgvu-navy">
+                      {qr.stop_name} · {allocation.pickup_time ?? DEMO_TRANSPORT.pickup_time}
+                    </span>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Driver</span>
+                    <br />
+                    <span className="font-semibold text-sgvu-navy">
+                      {allocation.driver_name ?? DEMO_TRANSPORT.driver_name}
+                      {allocation.driver_phone || DEMO_TRANSPORT.driver_phone
+                        ? ` · ${allocation.driver_phone ?? DEMO_TRANSPORT.driver_phone}`
+                        : ''}
+                    </span>
+                  </p>
+                </div>
                 <p className="text-center text-xs text-muted-foreground">
                   Refreshes every 30s · Show to conductor when boarding
                 </p>

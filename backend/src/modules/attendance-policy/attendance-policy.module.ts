@@ -8,6 +8,6 @@ import { AttendanceEligibilityService } from './attendance-eligibility.service';
   imports: [NotificationsModule],
   controllers: [AttendancePolicyController],
   providers: [AttendancePolicyService, AttendanceEligibilityService],
-  exports: [AttendanceEligibilityService],
+  exports: [AttendanceEligibilityService, AttendancePolicyService],
 })
 export class AttendancePolicyModule {}

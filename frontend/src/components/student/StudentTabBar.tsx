@@ -41,7 +41,7 @@ export function StudentTabBar<T extends string>({
               type="button"
               onClick={() => onChange(tab.id)}
               className={cn(
-                'relative inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors sm:px-4',
+                'relative inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors touch-target sm:px-4',
                 isActive ? 'text-white' : 'text-muted-foreground hover:bg-background hover:text-sgvu-navy',
               )}
             >

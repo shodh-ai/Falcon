@@ -20,6 +20,8 @@ import { useAuth } from '@/context/AuthContext';
 import { getSubdomainFromClient } from '@/lib/tenant';
 import { MentorshipChatMessenger } from '@/components/mentorship/MentorshipChatMessenger';
 import { EcellMentorInbox } from '@/components/ecell/EcellMentorInbox';
+import { isEmptyArray, isFacultyDemoSmokeId, withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
+import { facultyDemoMentees, facultyDemoPendingApprovals } from '@/lib/mock/faculty-portal-demo';
 
 interface StudentInfo {
   mentorship_id: string;
@@ -65,14 +67,33 @@ export default function FacultyMentorshipPage() {
       api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
     ])
       .then(([studentsData, approvals]) => {
-        setStudents(studentsData);
+        const mentees = withFacultyDemoFallback(studentsData, facultyDemoMentees(), isEmptyArray);
+        const demoApprovals = facultyDemoPendingApprovals();
+        const approvalsResolved = withFacultyDemoFallback(
+          approvals,
+          demoApprovals,
+          (v) =>
+            !v ||
+            ((v.certificates?.length ?? 0) === 0 &&
+              (v.meetings?.length ?? 0) === 0 &&
+              (v.leave_requests?.length ?? 0) === 0),
+        );
+        setStudents(mentees);
+        setPendingCertificates(approvalsResolved.certificates);
+        setPendingMeetings(approvalsResolved.meetings ?? []);
+        setPendingLeaveRequests(approvalsResolved.leave_requests ?? []);
+        setLoading(false);
+      })
+      .catch((err) => {
+        const mentees = withFacultyDemoFallback([], facultyDemoMentees(), isEmptyArray);
+        const approvals = facultyDemoPendingApprovals();
+        if (mentees.length === 0) {
+          toast.error(err.message || 'Failed to load mentorship workspace');
+        }
+        setStudents(mentees);
         setPendingCertificates(approvals.certificates);
         setPendingMeetings(approvals.meetings ?? []);
         setPendingLeaveRequests(approvals.leave_requests ?? []);
-        setLoading(false);
-      })
-      .catch(err => {
-        toast.error(err.message || 'Failed to load mentorship workspace');
         setLoading(false);
       });
   }
@@ -107,6 +128,11 @@ export default function FacultyMentorshipPage() {
       : undefined;
 
     try {
+      if (isFacultyDemoSmokeId(certificateId)) {
+        setPendingCertificates((prev) => prev.filter((item) => item.certificate_id !== certificateId));
+        toast.success(status === 'VERIFIED' ? 'Certificate approved (demo)' : 'Certificate rejected (demo)');
+        return;
+      }
       await api.post('/api/academics/proctor/approve-certificate', {
         certificate_id: certificateId,
         status,
@@ -122,6 +148,7 @@ export default function FacultyMentorshipPage() {
   return (
     <FacultyPageShell>
       <FacultyPageHeader
+        title="Mentorship"
         description="View and manage mentees assigned to you for mentorship."
         meta={
           <>
@@ -212,19 +239,29 @@ export default function FacultyMentorshipPage() {
                 <div className="flex items-center gap-3">
                   <Avatar className="h-11 w-11">
                     <AvatarFallback className="bg-sgvu-gold/20 text-sgvu-navy">
-                      {item.student.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                      {(item.student?.name ?? 'ST')
+                        .split(' ')
+                        .map((n) => n[0])
+                        .join('')
+                        .slice(0, 2)
+                        .toUpperCase() || 'ST'}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
-                    <p className="font-semibold text-sgvu-navy">{item.student.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">{item.student.email}</p>
+                    <p className="font-semibold text-sgvu-navy">{item.student?.name ?? 'Mentee'}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {item.student?.email ?? '—'}
+                    </p>
                   </div>
                 </div>
                 <Button
                   className="mt-3 w-full"
                   variant="outline"
                   size="sm"
-                  onClick={() => window.open(`mailto:${item.student.email}`)}
+                  disabled={!item.student?.email}
+                  onClick={() => {
+                    if (item.student?.email) window.open(`mailto:${item.student.email}`);
+                  }}
                 >
                   Send email
                 </Button>

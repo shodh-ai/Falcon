@@ -24,6 +24,8 @@ export interface DataTableProps<T> {
  * higher-level wrappers per domain when needed.
  */
 export function DataTable<T>({ columns, rows, rowKey, emptyMessage, isLoading }: DataTableProps<T>) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -48,7 +50,7 @@ export function DataTable<T>({ columns, rows, rowKey, emptyMessage, isLoading }:
               </td>
             </tr>
           )}
-          {!isLoading && rows.length === 0 && (
+          {!isLoading && safeRows.length === 0 && (
             <tr>
               <td className="px-5 py-8 text-center text-slate-500" colSpan={columns.length}>
                 {emptyMessage ?? 'No records found.'}
@@ -56,7 +58,7 @@ export function DataTable<T>({ columns, rows, rowKey, emptyMessage, isLoading }:
             </tr>
           )}
           {!isLoading &&
-            rows.map((row, idx) => (
+            safeRows.map((row, idx) => (
               <tr key={rowKey(row, idx)} className="hover:bg-slate-50">
                 {columns.map((col) => (
                   <td key={col.key} className={`px-5 py-4 ${col.className ?? ''}`}>

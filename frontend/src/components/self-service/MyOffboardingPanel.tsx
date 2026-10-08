@@ -9,7 +9,7 @@ import { workforceMinDate } from '@/lib/workforce-dates';
 
 export function MyOffboardingPanel() {
   const api = useAuthedApi();
-  const [form, setForm] = useState({ resignation_date: '', reason: '' });
+  const [form, setForm] = useState({ last_working_day: '', reason: '' });
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(e: FormEvent) {
@@ -17,8 +17,8 @@ export function MyOffboardingPanel() {
     setSubmitting(true);
     try {
       await api.post('/api/hr/ess/resignation', form);
-      toast.success('Resignation submitted to HR');
-      setForm({ resignation_date: '', reason: '' });
+      toast.success('Resignation submitted — pending HOD clearance');
+      setForm({ last_working_day: '', reason: '' });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Submit failed');
     } finally {
@@ -31,8 +31,8 @@ export function MyOffboardingPanel() {
       <Input
         type="date"
         min={workforceMinDate()}
-        value={form.resignation_date}
-        onChange={(e) => setForm((f) => ({ ...f, resignation_date: e.target.value }))}
+        value={form.last_working_day}
+        onChange={(e) => setForm((f) => ({ ...f, last_working_day: e.target.value }))}
         required
       />
       <textarea

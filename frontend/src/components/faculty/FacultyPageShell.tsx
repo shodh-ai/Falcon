@@ -7,5 +7,5 @@ import { cn } from '@/lib/utils';
 export const FACULTY_CONTENT_MAX_CLASS = 'max-w-6xl';
 
 export function FacultyPageShell({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('space-y-4', className)}>{children}</div>;
+  return <div className={cn('min-w-0 space-y-4 overflow-x-hidden', className)}>{children}</div>;
 }

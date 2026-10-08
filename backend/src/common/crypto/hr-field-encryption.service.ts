@@ -16,9 +16,16 @@ export class HrFieldEncryptionService {
 
   constructor(config: ConfigService) {
     const secret =
-      config.get<string>('HR_ENCRYPTION_KEY') ??
-      config.get<string>('JWT_SECRET') ??
-      'local-hr-encryption-key-change-me';
+      (config.get<string>('HR_ENCRYPTION_KEY') ?? '').trim() ||
+      (config.get<string>('JWT_SECRET') ?? '').trim() ||
+      (process.env.NODE_ENV === 'production'
+        ? ''
+        : 'local-hr-encryption-key-change-me');
+    if (!secret) {
+      throw new Error(
+        'HR_ENCRYPTION_KEY or JWT_SECRET must be set when NODE_ENV=production',
+      );
+    }
     this.key = scryptSync(secret, 'falcon-hr-pii', 32);
   }
 

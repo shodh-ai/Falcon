@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
     root: process.cwd(),
   },
   experimental: {
+    // Keep production builds safe on the shared Coolify host. Without this,
+    // Next.js sizes workers from host CPUs (nine workers on the current VPS),
+    // which causes large simultaneous memory spikes while prerendering.
+    cpus: 2,
+    memoryBasedWorkersCount: false,
     optimizePackageImports: [
       'lucide-react',
       'recharts',

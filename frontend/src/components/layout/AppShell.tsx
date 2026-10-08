@@ -1,13 +1,30 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { AppTopBar } from '@/components/layout/AppTopBar';
 import { AppSidebar } from '@/components/layout/AppSidebar';
+import { useAuth } from '@/context/AuthContext';
+import { resolveUserRoleList } from '@/lib/available-workspaces';
+import { resolveDofaInboxPathForUser } from '@/lib/dofa-portal-routes';
 import { filterPortalConfigForLaunchModules } from '@/lib/launch-modules';
-import type { PortalConfig } from '@/lib/navigation';
+import { useModuleRuntime } from '@/context/ModuleRuntimeContext';
+import {
+  collectNavHrefs,
+  isNavHrefActive,
+  resolveActiveNavHref,
+  withAccountSettingsNav,
+  withRoleAwareDofaInboxNav,
+  type PortalConfig,
+} from '@/lib/navigation';
+import {
+  getSidebarCollapsedServerSnapshot,
+  getSidebarCollapsedSnapshot,
+  subscribeSidebarCollapsed,
+  writeSidebarCollapsed,
+} from '@/lib/sidebar-ui-state';
 
 interface AppShellProps {
   config: PortalConfig;
@@ -20,43 +37,63 @@ interface AppShellProps {
 
 function findActiveNavItem(config: PortalConfig, pathname: string | null) {
   if (!pathname) return null;
+  const hrefs = collectNavHrefs(config.navGroups);
+  const activeHref = resolveActiveNavHref(pathname, hrefs);
+  if (!activeHref) return null;
   for (const group of config.navGroups) {
     for (const item of group.items) {
-      if (pathname === item.href || pathname.startsWith(`${item.href}/`)) {
-        return item;
-      }
+      if (item.href === activeHref) return item;
     }
   }
   return null;
 }
 
 export function AppShell({ config, children, profileHref, headerExtra, contentMaxWidthClass }: AppShellProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useSyncExternalStore(
+    subscribeSidebarCollapsed,
+    getSidebarCollapsedSnapshot,
+    getSidebarCollapsedServerSnapshot,
+  );
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const launchConfig = useMemo(() => filterPortalConfigForLaunchModules(config), [config]);
+  const { user } = useAuth();
+  const { manifest } = useModuleRuntime();
+  const launchConfig = useMemo(() => {
+    const roles = resolveUserRoleList(user);
+    const inboxHref = resolveDofaInboxPathForUser(roles, pathname);
+    const withDofa = withRoleAwareDofaInboxNav(config, inboxHref);
+    return withAccountSettingsNav(filterPortalConfigForLaunchModules(withDofa, manifest));
+  }, [config, manifest, pathname, user]);
 
   const activeNav = useMemo(() => findActiveNavItem(launchConfig, pathname), [launchConfig, pathname]);
   const isHome = pathname === launchConfig.homeHref;
   const mobileItems = launchConfig.mobileNavItems ?? launchConfig.commandItems.slice(0, 4);
+  const mobileHrefs = mobileItems.map((item) => item.href);
+
+  // Close the mobile drawer after route changes (sidebar Link navigation).
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   const sidebar = (
     <AppSidebar
       personaLabel={launchConfig.personaLabel}
       navGroups={launchConfig.navGroups}
       collapsed={collapsed}
-      onToggleCollapse={() => setCollapsed((v) => !v)}
+      onToggleCollapse={() => writeSidebarCollapsed(!collapsed)}
       className="h-full"
     />
   );
 
   return (
-    <div className="bg-sgvu-surface">
-      <div className="fixed inset-y-0 left-0 z-30 hidden h-svh lg:block">{sidebar}</div>
+    <div className="min-w-0 overflow-x-hidden bg-sgvu-surface">
+      <div className="fixed inset-y-0 left-0 z-30 hidden h-svh min-h-0 overflow-hidden lg:block">
+        {sidebar}
+      </div>
 
       <div
         className={cn(
-          'flex h-svh flex-col overflow-hidden transition-[padding] duration-200',
+          'flex h-svh min-w-0 flex-col overflow-hidden transition-[padding] duration-200',
           collapsed ? 'lg:pl-[var(--sidebar-width-collapsed)]' : 'lg:pl-[var(--sidebar-width)]',
         )}
       >
@@ -70,8 +107,10 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
           onMobileOpenChange={setMobileOpen}
         />
 
-        <main className="min-h-0 flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
-          <div className={cn('mx-auto w-full px-3 py-4 sm:px-6 sm:py-5', contentMaxWidthClass)}>
+        {/* Below lg the bottom padding clears the fixed mobile nav; at lg+ the wrapper's own
+            py already provides ~20px, so only a small extra keeps total trailing space ≈32px. */}
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-3">
+          <div className={cn('mx-auto w-full min-w-0 px-3 py-3 sm:px-5 sm:py-5 lg:px-6', contentMaxWidthClass)}>
             {children}
           </div>
         </main>
@@ -84,14 +123,14 @@ export function AppShell({ config, children, profileHref, headerExtra, contentMa
         <ul className="mx-auto grid max-w-lg grid-cols-4 gap-0.5 px-1 pt-1">
           {mobileItems.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            const active = isNavHrefActive(pathname, item.href, mobileHrefs);
             const label = item.shortLabel ?? item.label;
             return (
               <li key={item.href}>
                 <Link
                   href={item.href}
                   className={cn(
-                    'flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-2 text-[10px] font-semibold touch-target transition-colors',
+                    'flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-2 text-[10px] font-semibold touch-target transition-colors',
                     active
                       ? 'bg-sgvu-navy/8 text-sgvu-navy'
                       : 'text-muted-foreground hover:text-sgvu-navy',

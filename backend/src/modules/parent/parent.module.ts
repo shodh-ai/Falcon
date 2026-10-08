@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { resolveJwtSecret } from '../../common/config/jwt-secret';
 import { ReadOnlyPortalGuard } from '../../common/guards/read-only-portal.guard';
 import { NotificationsModule } from '../../core/notifications/notifications.module';
 import { TransportModule } from '../transport/transport.module';
@@ -14,7 +15,7 @@ import { ParentService } from './parent.service';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
-        secret: config.get('JWT_SECRET') || 'default-secret-key',
+        secret: resolveJwtSecret(config),
         signOptions: { expiresIn: config.get('JWT_EXPIRATION') || '7d' },
       }),
       inject: [ConfigService],

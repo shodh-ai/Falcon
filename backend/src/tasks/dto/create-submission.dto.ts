@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber, Matches } from 'class-validator';
 
 export class CreateSubmissionDto {
   @IsString()
@@ -20,4 +20,13 @@ export class CreateSubmissionDto {
   @IsString()
   @IsOptional()
   text_input?: string;
+
+  @IsString()
+  @IsOptional()
+  evidence_type?: string;
+
+  @IsString()
+  @Matches(/^[0-9a-fA-F]{64}$/)
+  @IsOptional()
+  content_hash?: string;
 }

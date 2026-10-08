@@ -57,7 +57,7 @@ function PitchTracker({ project }: { project: EcellProject }) {
           This pitch was rejected. You may submit again in a future cohort if applications reopen.
         </p>
       ) : (
-        <ol className="grid gap-3 sm:grid-cols-5">
+        <ol className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
           {ECELL_TRACKER_STEPS.map((step, idx) => {
             const done = idx <= activeIdx;
             const current = idx === activeIdx;
@@ -91,6 +91,7 @@ export default function StudentEcellPage() {
   const [founderTab, setFounderTab] = useState<FounderTab>('dashboard');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [applyingFilter, setApplyingFilter] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [projects, setProjects] = useState<EcellProject[]>([]);
   const [founderStatus, setFounderStatus] = useState<EcellFounderStatus | null>(null);
@@ -180,6 +181,21 @@ export default function StudentEcellPage() {
     }
   }
 
+  async function applyHackerFilter() {
+    setApplyingFilter(true);
+    try {
+      await ecellApi.applyFellowship({
+        linked_project_id: projects[0]?.project_id,
+        paid_stipend_inr: 25000,
+      });
+      toast.success('Hacker Filter trial started (30 days)');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start trial');
+    } finally {
+      setApplyingFilter(false);
+    }
+  }
+
   if (loading) return <StudentLoadingState label="Loading E-Cell hub…" />;
 
   if (founderUnlocked && founderProject) {
@@ -225,8 +241,17 @@ export default function StudentEcellPage() {
   return (
     <StudentPageShell>
       <StudentPageHeader
-        title="E-Cell & Incubation Hub"
+        title="Innovation Hub"
         description="Pitch your startup idea, track multi-tier approvals, and receive grant funding through Falcon ERP."
+        actions={
+          <Button
+            variant="outline"
+            disabled={applyingFilter}
+            onClick={() => void applyHackerFilter()}
+          >
+            {applyingFilter ? 'Starting…' : 'Apply Hacker Filter (30-day)'}
+          </Button>
+        }
       />
 
       <StudentTabBar
