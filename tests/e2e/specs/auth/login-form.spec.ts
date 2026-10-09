@@ -25,7 +25,7 @@ test.describe('Real login form E2E', () => {
     }
     await identifier.fill(TEST_USERS.faculty.email);
     await password.fill(TEST_PASSWORD);
-    await page.getByRole('button', { name: /sign in|login|continue/i }).first().click();
+    await page.locator('form button[type="submit"]').click();
     await page.waitForURL(/faculty|dashboard|\//, { timeout: 15000 });
   });
 
@@ -40,7 +40,7 @@ test.describe('Real login form E2E', () => {
     await identifier.waitFor({ state: 'visible' });
     await identifier.fill('2548727');
     await password.fill('temporary-password');
-    await page.getByRole('button', { name: /sign in|login|continue/i }).first().click();
+    await page.locator('form button[type="submit"]').click();
 
     const request = await loginRequest;
     expect(request.postDataJSON()).toEqual({
