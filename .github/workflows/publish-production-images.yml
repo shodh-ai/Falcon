@@ -14,8 +14,6 @@ on:
 permissions:
   contents: read
   packages: write
-  id-token: write
-  attestations: write
 
 concurrency:
   group: falcon-production-images-${{ inputs.release_sha || github.event.workflow_run.head_sha }}
@@ -81,18 +79,17 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+          # Coolify's production Docker engine pulls a single-platform image.
+          # Keep the published tag a plain OCI image so it does not reference
+          # provenance/attestation descriptors that the host registry path
+          # cannot retrieve reliably.
+          provenance: false
+          sbom: false
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.PRODUCTION_API_URL || 'https://apifalcon.jataka.io' }}
             NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.PRODUCTION_GOOGLE_CLIENT_ID }}
             NEXT_PUBLIC_SAAS_BASE_DOMAIN=${{ vars.PRODUCTION_SAAS_BASE_DOMAIN || 'jataka.io' }}
             NEXT_PUBLIC_DEFAULT_TENANT_SUBDOMAIN=${{ vars.PRODUCTION_DEFAULT_TENANT || 'sgvu' }}
-
-      - name: Attest published image
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: ${{ matrix.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
 
   manifest:
     if: >-
