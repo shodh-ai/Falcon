@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BookOpen, CalendarRange, TrendingUp } from 'lucide-react';
+import { BookOpen, CalendarRange, Info, TrendingUp } from 'lucide-react';
 import { StudentPageHeader } from '@/components/student/StudentPageHeader';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
@@ -55,9 +55,13 @@ export default function StudentAttendancePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     void api
       .get<AttendanceData>('/api/student/attendance')
       .then((payload) => {
+        if (cancelled) return;
+        setLoadError(null);
         if (!payload?.subject_wise?.length) {
           setData(
             isStudentDemoModeEnabled()
@@ -78,7 +82,11 @@ export default function StudentAttendancePage() {
           setData(payload);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(
+          error instanceof Error && error.message ? error.message : 'Attendance could not be loaded. Please try again.',
+        );
         setData(
           isStudentDemoModeEnabled()
             ? {
@@ -93,7 +101,14 @@ export default function StudentAttendancePage() {
                 progression: [],
               },
         );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [api]);
 
   const overall = data?.overall_percent ?? (isStudentDemoModeEnabled() ? DEMO_ATTENDANCE_SUMMARY.overall_percent : 0);
@@ -121,6 +136,30 @@ export default function StudentAttendancePage() {
         icon={TrendingUp}
         tone={overallTone}
       />
+
+      <StudentSectionCard
+        title="How attendance is calculated"
+        description="A simple view of the numbers behind your percentage"
+        icon={Info}
+      >
+        <div className="space-y-2 text-sm text-slate-700">
+          <p>
+            <span className="font-semibold text-sgvu-navy">Attendance %</span> = classes attended ÷ classes marked ×
+            100.
+          </p>
+          <p>
+            Present, late and approved-excused classes count as attended. Only classes marked absent reduce the
+            percentage.
+          </p>
+          <p className="rounded-lg bg-slate-50 px-3 py-2 font-medium text-sgvu-navy">
+            Example: 8 attended out of 10 marked classes = 8 ÷ 10 × 100 = 80%.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            The usual minimum is 75%. If a course has no marked classes yet, its percentage will appear after the first
+            attendance is recorded.
+          </p>
+        </div>
+      </StudentSectionCard>
 
       <StudentSectionCard
         title="Course-wise attendance"
