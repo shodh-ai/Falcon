@@ -526,6 +526,69 @@ describe('AuthService password recovery', () => {
     }));
   });
 
+  it('sends a student-ID reset link only to a linked official email', async () => {
+    process.env.EMAIL_HOST = 'smtp.example.test';
+    process.env.EMAIL_USER = 'noreply@example.test';
+    process.env.EMAIL_PASSWORD = 'secret';
+    const sendMail = jest.fn().mockResolvedValue(undefined);
+    const nodemailer = require('nodemailer') as { createTransport: jest.Mock };
+    nodemailer.createTransport.mockReturnValue({ sendMail });
+    mockDataSource.query
+      .mockResolvedValueOnce([
+        {
+          user_id: 'student-user-1',
+          is_active: true,
+          official_email: 'student.one@mygyanavihar.com',
+          onboarding_profile: { email_pending: false },
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await expect(service.forgotPassword('2548727', 'sgvu')).resolves.toEqual({
+      sent: true,
+    });
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'student.one@mygyanavihar.com' }),
+    );
+  });
+
+  it('does not create or send a reset link for pending student contact details', async () => {
+    process.env.EMAIL_HOST = 'smtp.example.test';
+    process.env.EMAIL_USER = 'noreply@example.test';
+    process.env.EMAIL_PASSWORD = 'secret';
+    const sendMail = jest.fn().mockResolvedValue(undefined);
+    const nodemailer = require('nodemailer') as { createTransport: jest.Mock };
+    nodemailer.createTransport.mockReturnValue({ sendMail });
+    mockDataSource.query.mockResolvedValueOnce([
+      {
+        user_id: 'student-user-1',
+        is_active: true,
+        official_email: 'student.2548727@pending.invalid',
+        onboarding_profile: { email_pending: true },
+      },
+    ]);
+
+    await expect(service.forgotPassword('2548727', 'sgvu')).resolves.toEqual({
+      sent: true,
+      requires_admin_reset: true,
+    });
+    expect(mockDataSource.query).toHaveBeenCalledTimes(1);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('does not resolve a student ID outside the requested tenant', async () => {
+    mockDataSource.query.mockResolvedValueOnce([]);
+
+    await expect(service.forgotPassword('2548727', 'sgvu')).resolves.toEqual({
+      sent: true,
+    });
+    expect(mockDataSource.query).toHaveBeenCalledTimes(1);
+    expect(mockDataSource.query.mock.calls[0][1]).toEqual([
+      TENANT.tenant_id,
+      '2548727',
+    ]);
+  });
+
   it('locks and consumes a reset token atomically', async () => {
     const manager = { query: jest.fn() };
     mockDataSource.transaction.mockImplementation(async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager));

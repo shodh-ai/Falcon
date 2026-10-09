@@ -189,26 +189,38 @@ export class StudentOnboardingService {
     if (!valid) throw new UnauthorizedException('Invalid current password');
 
     const hash = await bcrypt.hash(newPassword, 10);
+    // A newly provisioned account is marked PASSWORD_RESET_REQUIRED before
+    // the student has completed the first-login wizard.  Treating that flag
+    // as a completed-user reset would preserve PENDING_PASSWORD_RESET and
+    // send the student straight back to step 1 after setting a password.
+    // Only preserve the existing onboarding state for an account that had
+    // already completed its wizard; first-login accounts must advance to
+    // profile/document setup and become active.
+    const currentOnboardingStatus = String(row.onboarding_status ?? '')
+      .trim()
+      .toUpperCase();
+    const isFirstLoginReset = currentOnboardingStatus === 'PENDING_PASSWORD_RESET';
+    const preserveOnboardingStatus = !isFirstLoginReset;
+    const nextOnboardingStatus = preserveOnboardingStatus
+      ? row.onboarding_status
+      : 'PENDING_DOCUMENTS';
+    const activateAfterReset = adminResetRequired || isFirstLoginReset;
+
     await this.dataSource.query(
       `UPDATE users
        SET password_hash = $1,
-           onboarding_status = CASE
-             WHEN $4::boolean THEN onboarding_status
-             ELSE 'PENDING_DOCUMENTS'
-           END,
+           onboarding_status = $4,
            account_status = CASE
-             WHEN $4::boolean THEN 'ACTIVE'
+             WHEN $5::boolean THEN 'ACTIVE'
              ELSE account_status
            END,
            updated_at = NOW()
        WHERE user_id = $2 AND tenant_id = $3`,
-      [hash, userId, tenant, adminResetRequired],
+      [hash, userId, tenant, nextOnboardingStatus, activateAfterReset],
     );
 
     return {
-      onboarding_status: adminResetRequired
-        ? row.onboarding_status
-        : 'PENDING_DOCUMENTS',
+      onboarding_status: nextOnboardingStatus,
     };
   }
 

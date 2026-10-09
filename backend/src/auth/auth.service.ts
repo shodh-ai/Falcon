@@ -391,24 +391,38 @@ export class AuthService {
   async forgotPassword(
     identifier: string,
     tenantSubdomain?: string,
-  ): Promise<{ sent: true; reset_token?: string }> {
+  ): Promise<{
+    sent: true;
+    reset_token?: string;
+    requires_admin_reset?: true;
+  }> {
     const loginIdentifier = identifier?.trim();
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
     const tenant = await this.tenantService.findBySubdomain(subdomain);
     const isEmailIdentifier = loginIdentifier?.includes('@') ?? false;
     const users = isEmailIdentifier
       ? await this.dataSource.query<
-          Array<{ user_id: string; is_active: boolean; official_email?: string }>
+          Array<{
+            user_id: string;
+            is_active: boolean;
+            official_email?: string;
+            onboarding_profile?: { email_pending?: boolean } | null;
+          }>
         >(
-          `SELECT user_id, is_active, official_email FROM users
+          `SELECT user_id, is_active, official_email, onboarding_profile FROM users
            WHERE tenant_id = $1 AND lower(official_email) = lower($2)
            LIMIT 2`,
           [tenant.tenant_id, loginIdentifier],
         )
       : await this.dataSource.query<
-          Array<{ user_id: string; is_active: boolean; official_email?: string }>
+          Array<{
+            user_id: string;
+            is_active: boolean;
+            official_email?: string;
+            onboarding_profile?: { email_pending?: boolean } | null;
+          }>
         >(
-          `SELECT u.user_id, u.is_active, u.official_email
+          `SELECT u.user_id, u.is_active, u.official_email, u.onboarding_profile
            FROM users u
            INNER JOIN student_profiles sp
             ON sp.user_id = u.user_id
@@ -430,6 +444,18 @@ export class AuthService {
     }
     const targetEmail = user.official_email || (isEmailIdentifier ? loginIdentifier : null);
     if (!targetEmail) return { sent: true };
+    const normalizedTargetEmail = targetEmail.trim().toLowerCase();
+    // Student accounts created before their university email is available use
+    // a reserved non-deliverable address. Never create a reset token or claim
+    // that a link was sent to such an address; the campus administrator must
+    // issue/reset the account after the official contact is mapped.
+    if (
+      user.onboarding_profile?.email_pending === true ||
+      normalizedTargetEmail.endsWith('.invalid') ||
+      normalizedTargetEmail.includes('@pending.')
+    ) {
+      return { sent: true, requires_admin_reset: true };
+    }
     const raw = randomBytes(24).toString('hex');
     const tokenHash = createHash('sha256').update(raw).digest('hex');
     try {

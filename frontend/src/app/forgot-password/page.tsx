@@ -20,7 +20,9 @@ export default function ForgotPasswordPage() {
     try {
       const res = await api.forgotPassword(identifier.trim());
       setMessage(
-        res.reset_token
+        res.requires_admin_reset
+          ? 'No verified university email is linked yet. Contact Campus Admin to reset your student account.'
+          : res.reset_token
           ? 'A reset token was generated for this development environment.'
           : 'If the account exists, a reset link has been sent. If it does not arrive, contact Campus Admin.',
       );

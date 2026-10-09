@@ -215,7 +215,9 @@ export default function Home() {
                       try {
                         const data = await api.forgotPassword(identifier.trim());
                         setForgotSent(
-                          data.reset_token
+                          data.requires_admin_reset
+                            ? 'No verified university email is linked yet. Contact Campus Admin to reset your student account.'
+                            : data.reset_token
                             ? `Reset token (dev): ${data.reset_token}`
                             : 'If the account exists, a reset link was issued.',
                         );

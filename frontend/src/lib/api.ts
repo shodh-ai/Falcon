@@ -175,7 +175,11 @@ export const api = {
         ),
       );
     }
-    return response.json() as Promise<{ sent: true; reset_token?: string }>;
+    return response.json() as Promise<{
+      sent: true;
+      reset_token?: string;
+      requires_admin_reset?: true;
+    }>;
   },
   resetPasswordWithToken: async (token: string, newPassword: string) => {
     const response = await fetch(`${getApiBaseUrl()}/api/auth/reset-password`, {

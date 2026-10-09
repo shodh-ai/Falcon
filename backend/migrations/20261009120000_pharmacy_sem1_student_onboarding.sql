@@ -40,6 +40,7 @@ DECLARE
   v_profile_count INTEGER;
   v_expected_enrollment_count INTEGER;
   v_user UUID;
+  v_existing_count INTEGER;
   rec RECORD;
 BEGIN
   SELECT tenant_id INTO v_tenant
@@ -237,11 +238,22 @@ BEGIN
   -- address. This makes reruns safe even if an administrator has already
   -- replaced a pending placeholder with the student's university address.
   FOR rec IN SELECT * FROM pharmacy_sem1_students LOOP
+    v_user := NULL;
     SELECT sp.user_id INTO v_user
     FROM student_profiles sp
     WHERE sp.tenant_id = v_tenant
       AND sp.student_login_id = rec.student_login_id
     LIMIT 1;
+
+    IF v_user IS NULL THEN
+      SELECT COUNT(*), MIN(sp.user_id::text)::UUID INTO v_existing_count, v_user
+      FROM student_profiles sp
+      WHERE sp.tenant_id = v_tenant
+        AND sp.enrollment_no = rec.enrollment_number;
+      IF v_existing_count > 1 THEN
+        RAISE EXCEPTION 'Ambiguous existing enrollment number %', rec.enrollment_number;
+      END IF;
+    END IF;
 
     IF v_user IS NULL THEN
       SELECT u.user_id INTO v_user
@@ -269,21 +281,39 @@ BEGIN
       )
       RETURNING user_id INTO v_user;
     ELSE
+      -- Never revive an inactive identity, overwrite another role/department,
+      -- or send an already-onboarded student back through onboarding on retry.
+      IF NOT EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.user_id = v_user AND u.tenant_id = v_tenant
+          AND u.role_id = v_role AND u.dept_id = v_dept
+          AND u.is_active = true AND u.deleted_at IS NULL
+      ) THEN
+        RAISE EXCEPTION 'Existing account for SID % requires manual identity reconciliation', rec.student_login_id;
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM student_profiles sp
+        WHERE sp.user_id = v_user
+          AND (
+            sp.tenant_id IS DISTINCT FROM v_tenant
+            OR (sp.student_login_id IS NOT NULL AND sp.student_login_id <> rec.student_login_id)
+            OR (sp.enrollment_no IS NOT NULL AND sp.enrollment_no <> rec.enrollment_number)
+            OR (sp.current_semester IS NOT NULL AND sp.current_semester <> 1)
+            OR sp.deleted_at IS NOT NULL
+            OR UPPER(COALESCE(sp.status, 'ACTIVE')) <> 'ACTIVE'
+          )
+      ) THEN
+        RAISE EXCEPTION 'Existing profile for SID % conflicts with the source; no overwrite performed', rec.student_login_id;
+      END IF;
       UPDATE users
       SET name = rec.student_name,
-          role_id = v_role,
-          dept_id = v_dept,
           entity_id = COALESCE(v_entity, entity_id),
-          is_active = true,
-          onboarding_status = 'PENDING_PASSWORD_RESET',
           onboarding_profile = COALESCE(onboarding_profile, '{}'::jsonb)
             || jsonb_build_object(
               'student_login_id', rec.student_login_id,
-              'email_pending', true,
+              'email_pending', official_email LIKE '%@pending.invalid',
               'source', '2026 Students (1).xls'
             ),
-          account_status = 'PASSWORD_RESET_REQUIRED',
-          deleted_at = NULL,
           updated_at = NOW()
       WHERE user_id = v_user;
     END IF;
@@ -300,7 +330,7 @@ BEGIN
     ON CONFLICT (user_id) DO UPDATE SET
       tenant_id = EXCLUDED.tenant_id,
       student_login_id = EXCLUDED.student_login_id,
-      prn_number = EXCLUDED.prn_number,
+      prn_number = COALESCE(student_profiles.prn_number, EXCLUDED.prn_number),
       enrollment_no = EXCLUDED.enrollment_no,
       enrollment_number = EXCLUDED.enrollment_number,
       batch = EXCLUDED.batch,
@@ -422,8 +452,7 @@ BEGIN
 
   INSERT INTO student_migration_manifest(tenant_id, source_file_name, source_file_sha256, eligible_count, excluded_count)
   VALUES(v_tenant, '2026 Students (1).xls', '4759dae54192010eca8207707ac6dc299c882e5172c6eca6bc1c9c7f5b02c5ca', 151, 1)
-  ON CONFLICT (tenant_id, source_file_sha256) DO UPDATE SET
-    eligible_count = EXCLUDED.eligible_count, excluded_count = EXCLUDED.excluded_count, imported_at = NOW();
+  ON CONFLICT (tenant_id, source_file_sha256) DO NOTHING;
 END $$;
 
 COMMIT;
