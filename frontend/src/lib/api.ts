@@ -153,7 +153,7 @@ export const api = {
     const tenant = getSubdomainFromClient();
     return `${getApiBaseUrl()}/auth/google?tenant=${encodeURIComponent(tenant)}`;
   },
-  forgotPassword: async (email: string) => {
+  forgotPassword: async (identifier: string) => {
     const response = await fetch(
       `${getApiBaseUrl()}/api/auth/forgot-password`,
       {
@@ -162,7 +162,7 @@ export const api = {
           'Content-Type': 'application/json',
           ...tenantHeaders(),
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ identifier }),
       },
     );
     if (!response.ok) {
@@ -195,14 +195,14 @@ export const api = {
     }
     return response.json() as Promise<{ success: true }>;
   },
-  localLogin: async (email: string, password: string) => {
+  localLogin: async (identifier: string, password: string) => {
     const response = await fetch(`${getApiBaseUrl()}/api/auth/local-login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...tenantHeaders(),
       },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');

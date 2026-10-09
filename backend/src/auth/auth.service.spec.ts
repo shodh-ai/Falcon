@@ -187,6 +187,46 @@ describe('AuthService.localLogin', () => {
     expect(mockUserRepository.findOne).not.toHaveBeenCalled();
   });
 
+  it('authenticates a student with a tenant-scoped student login ID', async () => {
+    const fixture = buildLoginFixture({
+      user_id: 'student-user-1',
+      email: 'student.2548727@mygyanavihar.com',
+      name: 'Pharmacy Student',
+      role_id: 3,
+      roleName: 'Student',
+      dept_id: 43,
+      dept_name: 'Pharmacy',
+    });
+    mockSuccessfulLoginQueries(fixture);
+
+    const result = await service.localLogin('2548727', 'password123', 'sgvu');
+
+    expect(result.token).toBe('signed-jwt');
+    expect(result.user.role).toBe('Student');
+    const lookup = mockDataSource.query.mock.calls.find(([sql]) =>
+      String(sql).includes('student_login_id'),
+    );
+    expect(lookup?.[1]).toEqual(['2548727', TENANT.tenant_id]);
+    expect(String(lookup?.[0])).toContain('INNER JOIN student_profiles');
+  });
+
+  it('fails closed when a student login ID is duplicated in the tenant', async () => {
+    mockDataSource.query.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('student_login_id')) {
+        return [
+          { user_id: 'student-1', password_hash: PASSWORD_HASH, is_active: true },
+          { user_id: 'student-2', password_hash: PASSWORD_HASH, is_active: true },
+        ];
+      }
+      return [];
+    });
+
+    await expect(
+      service.localLogin('2548727', 'password123', 'sgvu'),
+    ).rejects.toThrow('Invalid email or password');
+    expect(mockTenantService.findById).not.toHaveBeenCalled();
+  });
+
   it('casts the login audit resource id so PostgreSQL does not infer conflicting types', async () => {
     const fixture = buildLoginFixture({
       user_id: '00000000-0000-4000-8000-000000000001',

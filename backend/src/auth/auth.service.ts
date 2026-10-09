@@ -166,27 +166,57 @@ export class AuthService {
   }
 
   async localLogin(
-    email: string,
+    identifier: string,
     password: string,
     tenantSubdomain?: string,
   ): Promise<{ token: string; user: Record<string, unknown> }> {
+    const loginIdentifier = identifier?.trim();
+    if (!loginIdentifier) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
     let tenant = await this.tenantService.findBySubdomain(subdomain);
 
-    let [credential] = await this.dataSource.query<LoginCredentialRow[]>(
-      `SELECT user_id, password_hash, is_active
-       FROM users
-       WHERE LOWER(official_email) = LOWER($1)
-         AND tenant_id = $2
-       LIMIT 1`,
-      [email, tenant.tenant_id],
-    );
+    // Email login remains the legacy path. Student IDs are intentionally
+    // resolved only within the requested tenant and only through a student
+    // profile; they must never be treated as a cross-tenant username.
+    const isEmailIdentifier = loginIdentifier.includes('@');
+    const credentials = isEmailIdentifier
+      ? await this.dataSource.query<LoginCredentialRow[]>(
+          `SELECT u.user_id, u.password_hash, u.is_active
+           FROM users u
+           WHERE LOWER(u.official_email) = LOWER($1)
+             AND u.tenant_id = $2
+           LIMIT 2`,
+          [loginIdentifier, tenant.tenant_id],
+        )
+      : await this.dataSource.query<LoginCredentialRow[]>(
+          `SELECT u.user_id, u.password_hash, u.is_active
+           FROM users u
+           INNER JOIN student_profiles sp
+           ON sp.user_id = u.user_id
+            AND sp.tenant_id = u.tenant_id
+           WHERE u.tenant_id = $2
+             AND sp.deleted_at IS NULL
+             AND COALESCE(UPPER(sp.status), 'ACTIVE') = 'ACTIVE'
+             AND (
+               LOWER(NULLIF(BTRIM(sp.student_login_id), '')) = LOWER(BTRIM($1))
+               OR LOWER(NULLIF(BTRIM(sp.enrollment_no), '')) = LOWER(BTRIM($1))
+               OR LOWER(NULLIF(BTRIM(sp.prn_number), '')) = LOWER(BTRIM($1))
+             )
+           LIMIT 2`,
+          [loginIdentifier, tenant.tenant_id],
+        );
+
+    // Multiple active profiles sharing an identifier are an integrity error;
+    // fail closed rather than authenticating an arbitrary account.
+    let credential = credentials.length === 1 ? credentials[0] : undefined;
 
     // The shared Falcon hostname defaults to SGVU. If that default tenant has
-    // no such account, resolve the email only when it belongs to exactly one
+    // no such account, resolve an email only when it belongs to exactly one
     // active tenant. Duplicate emails fail closed and still return the neutral
     // login error, so this never guesses between tenants or leaks membership.
-    if (!credential) {
+    if (!credential && isEmailIdentifier) {
       const candidates = await this.dataSource.query<LoginCredentialRow[]>(
         `SELECT u.user_id, u.password_hash, u.is_active, u.tenant_id
          FROM users u
@@ -195,7 +225,7 @@ export class AuthService {
            AND t.is_active = true
          ORDER BY u.user_id
          LIMIT 2`,
-        [email],
+        [loginIdentifier],
       );
       if (candidates.length === 1 && candidates[0].tenant_id) {
         credential = candidates[0];
@@ -216,7 +246,7 @@ export class AuthService {
       await this.recordLoginAttempt(
         tenant.tenant_id,
         credential.user_id,
-        email,
+        loginIdentifier,
         false,
       );
       throw new UnauthorizedException('Invalid email or password');
@@ -225,7 +255,7 @@ export class AuthService {
     await this.recordLoginAttempt(
       tenant.tenant_id,
       credential.user_id,
-      email,
+      loginIdentifier,
       true,
     );
 
@@ -316,7 +346,8 @@ export class AuthService {
         ),
         password_reset_required:
           (tokenUser as User & { account_status?: string | null }).account_status ===
-          'PASSWORD_RESET_REQUIRED',
+            'PASSWORD_RESET_REQUIRED' ||
+          tokenUser.onboarding_status === 'PENDING_PASSWORD_RESET',
         has_direct_reports: directReports,
         is_department_hod: isDepartmentHod,
         last_login_at: new Date().toISOString(),
@@ -358,22 +389,47 @@ export class AuthService {
   }
 
   async forgotPassword(
-    email: string,
+    identifier: string,
     tenantSubdomain?: string,
   ): Promise<{ sent: true; reset_token?: string }> {
+    const loginIdentifier = identifier?.trim();
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
     const tenant = await this.tenantService.findBySubdomain(subdomain);
-    const [user] = await this.dataSource.query<
-      Array<{ user_id: string; is_active: boolean }>
-    >(
-      `SELECT user_id, is_active FROM users
-       WHERE tenant_id = $1 AND lower(official_email) = lower($2)
-       LIMIT 1`,
-      [tenant.tenant_id, email.trim()],
-    );
+    const isEmailIdentifier = loginIdentifier?.includes('@') ?? false;
+    const users = isEmailIdentifier
+      ? await this.dataSource.query<
+          Array<{ user_id: string; is_active: boolean; official_email?: string }>
+        >(
+          `SELECT user_id, is_active, official_email FROM users
+           WHERE tenant_id = $1 AND lower(official_email) = lower($2)
+           LIMIT 2`,
+          [tenant.tenant_id, loginIdentifier],
+        )
+      : await this.dataSource.query<
+          Array<{ user_id: string; is_active: boolean; official_email?: string }>
+        >(
+          `SELECT u.user_id, u.is_active, u.official_email
+           FROM users u
+           INNER JOIN student_profiles sp
+            ON sp.user_id = u.user_id
+            AND sp.tenant_id = u.tenant_id
+           WHERE u.tenant_id = $1
+             AND sp.deleted_at IS NULL
+             AND COALESCE(UPPER(sp.status), 'ACTIVE') = 'ACTIVE'
+             AND (
+               LOWER(NULLIF(BTRIM(sp.student_login_id), '')) = LOWER(BTRIM($2))
+               OR LOWER(NULLIF(BTRIM(sp.enrollment_no), '')) = LOWER(BTRIM($2))
+               OR LOWER(NULLIF(BTRIM(sp.prn_number), '')) = LOWER(BTRIM($2))
+             )
+           LIMIT 2`,
+          [tenant.tenant_id, loginIdentifier],
+        );
+    const user = users.length === 1 ? users[0] : undefined;
     if (!user?.is_active) {
       return { sent: true };
     }
+    const targetEmail = user.official_email || (isEmailIdentifier ? loginIdentifier : null);
+    if (!targetEmail) return { sent: true };
     const raw = randomBytes(24).toString('hex');
     const tokenHash = createHash('sha256').update(raw).digest('hex');
     try {
@@ -390,7 +446,7 @@ export class AuthService {
     // Deliver the one-hour link through the configured SMTP provider.  The
     // endpoint remains deliberately non-enumerating: callers never learn
     // whether an address exists or whether SMTP is configured.
-    await this.sendPasswordResetEmail(email.trim(), raw);
+    await this.sendPasswordResetEmail(targetEmail.trim(), raw);
 
     // A reset token is only returned when a developer explicitly opts into
     // local smoke testing.  NODE_ENV alone is not a safe gate because a

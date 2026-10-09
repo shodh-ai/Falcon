@@ -2093,7 +2093,8 @@ export class AcademicsService {
     if (!deptIds.length) return [];
 
     return this.users.manager.query(
-      `SELECT u.user_id, u.name, u.official_email AS email, sp.enrollment_no,
+      `SELECT u.user_id, u.name, u.official_email AS email,
+              sp.student_login_id, sp.enrollment_no,
               e.attendance_percent, e.grade_points, e.status
        FROM student_course_enrollments e
        INNER JOIN users u ON u.user_id = e.student_user_id

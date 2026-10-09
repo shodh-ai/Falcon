@@ -64,6 +64,7 @@ const FACULTY_COURSE_ACCESS_SQL = `(
 /** Canonical roll-number expression — semester roll on enrollment, then permanent PRN. */
 const ROLL_NUMBER_SQL = `COALESCE(
   NULLIF(BTRIM(e.roll_number), ''),
+  NULLIF(BTRIM(sp.student_login_id), ''),
   NULLIF(BTRIM(sp.prn_number), ''),
   NULLIF(BTRIM(sp.enrollment_no), ''),
   NULLIF(BTRIM(sp.enrollment_number), ''),

@@ -24,7 +24,7 @@ export function parseAllocationSemester(semester: string | null | undefined): {
 }
 
 export function normalizeProgram(value: string | null | undefined): string {
-  return (value ?? '').replace(/\s+/g, '').toUpperCase();
+  return (value ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
 }
 
 /** Match allocation program labels to varied official student batch names. */
@@ -36,6 +36,29 @@ export function programsMatch(
   const prog = normalizeProgram(studentProgram);
   if (!prog || !alloc) return true;
   if (prog === alloc) return true;
+  // Pharmacy programmes are deliberately exact.  A broad `PHARM` match
+  // would put D.Pharm and M.Pharm students into B.Pharm offerings during
+  // roster/enrollment reconciliation.
+  const pharmacyProgram = (value: string): string | null => {
+    if (value === 'BPHARM' || value.startsWith('BPHARMLATERAL')) {
+      return 'BPHARM';
+    }
+    if (value === 'DPHARM' || value.startsWith('DPHARMREGULAR')) {
+      return 'DPHARM';
+    }
+    if (
+      value === 'MPHARMPHARMACEUTICS' ||
+      value.startsWith('MPHARMPHARMACEUTICS')
+    ) {
+      return 'MPHARMPHARMACEUTICS';
+    }
+    return null;
+  };
+  const allocPharmacy = pharmacyProgram(alloc);
+  const progPharmacy = pharmacyProgram(prog);
+  if (allocPharmacy || progPharmacy) {
+    return allocPharmacy != null && allocPharmacy === progPharmacy;
+  }
   if (
     alloc.includes('ME') &&
     (prog.includes('MECHANICAL') || prog.includes('MECH'))
@@ -43,7 +66,6 @@ export function programsMatch(
     return true;
   }
   if (alloc.includes('AGRI') && prog.includes('AGRI')) return true;
-  if (alloc.includes('PHARM') && prog.includes('PHARM')) return true;
   if (
     alloc.includes('CSE') &&
     (prog.includes('COMPUTER') || prog.includes('CSE'))
