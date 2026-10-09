@@ -30,22 +30,20 @@ test.describe('Real login form E2E', () => {
   });
 
   test('sends a student ID as the login identifier', async ({ page }) => {
-    let requestBody: Record<string, unknown> | undefined;
-    await page.route('**/api/auth/local-login', async (route) => {
-      requestBody = route.request().postDataJSON() as Record<string, unknown>;
-      await route.fulfill({
-        status: 401,
-        contentType: 'application/json',
-        body: JSON.stringify({ message: 'Invalid email or password' }),
-      });
-    });
+    const loginRequest = page.waitForRequest((request) =>
+      request.url().includes('/api/auth/local-login'),
+    );
 
     await page.goto('/');
-    await page.locator('#identifier, input[name="identifier"]').first().fill('2548727');
-    await page.locator('input[type="password"]').first().fill('temporary-password');
+    const identifier = page.locator('#identifier, input[name="identifier"]').first();
+    const password = page.locator('input[type="password"]').first();
+    await identifier.waitFor({ state: 'visible' });
+    await identifier.fill('2548727');
+    await password.fill('temporary-password');
     await page.getByRole('button', { name: /sign in|login|continue/i }).first().click();
 
-    await expect.poll(() => requestBody).toEqual({
+    const request = await loginRequest;
+    expect(request.postDataJSON()).toEqual({
       identifier: '2548727',
       password: 'temporary-password',
     });
