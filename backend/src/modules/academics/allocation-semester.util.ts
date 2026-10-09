@@ -24,7 +24,7 @@ export function parseAllocationSemester(semester: string | null | undefined): {
 }
 
 export function normalizeProgram(value: string | null | undefined): string {
-  return (value ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  return (value ?? '').replace(/\s+/g, '').toUpperCase();
 }
 
 /** Match allocation program labels to varied official student batch names. */
@@ -40,15 +40,16 @@ export function programsMatch(
   // would put D.Pharm and M.Pharm students into B.Pharm offerings during
   // roster/enrollment reconciliation.
   const pharmacyProgram = (value: string): string | null => {
-    if (value === 'BPHARM' || value.startsWith('BPHARMLATERAL')) {
+    const canonical = value.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    if (canonical === 'BPHARM' || canonical.startsWith('BPHARMLATERAL')) {
       return 'BPHARM';
     }
-    if (value === 'DPHARM' || value.startsWith('DPHARMREGULAR')) {
+    if (canonical === 'DPHARM' || canonical.startsWith('DPHARMREGULAR')) {
       return 'DPHARM';
     }
     if (
-      value === 'MPHARMPHARMACEUTICS' ||
-      value.startsWith('MPHARMPHARMACEUTICS')
+      canonical === 'MPHARMPHARMACEUTICS' ||
+      canonical.startsWith('MPHARMPHARMACEUTICS')
     ) {
       return 'MPHARMPHARMACEUTICS';
     }
