@@ -20,7 +20,7 @@ Required before production import:
 - Canonical programmes, schemes, cohorts, terms, sections and offering dates.
 - Continuing-student rosters for every programme and active term.
 - Current-provider LMS history, file manifest, hashes, reconciliation totals, freeze timestamp and final delta.
-- Corrected or formally approved 2026-27 calendar title.
+- Registrar-approved 2026-27 calendar source (received and verified on 22 September 2026).
 
 Never copy the source student password column into a migration package, log, report or database.
 
@@ -31,7 +31,7 @@ Install the parser dependencies from `backend/scripts/department-import/requirem
 ```bash
 cd backend
 python3 scripts/pharmacy-migration/prepare-pharmacy-migration.py \
-  --calendar "/path/to/Academic Calendar_Final_25 May 2026.pdf" \
+  --calendar "/path/to/Academic Calendar_Final_25 May 2026-1 (1).pdf" \
   --subjects "/path/to/Subject.docx" \
   --faculty "/path/to/Faculty list.xlsx" \
   --students "/path/to/2026 Students.xls" \
@@ -81,6 +81,14 @@ The 22 September 2026 review run produced:
 - 151 provisionally eligible students and one excluded admission row.
 - Zero exported password fields and zero copied source password values.
 - 30 provisional-seed conflicts requiring an approved supersession map.
+
+The authoritative calendar source is the Registrar-signed notification
+`F.9(23) REG/SGVU/2026/615`, dated 25 May 2026, for academic session 2026-27.
+Its approval metadata and SHA-256 hash are retained in
+`backend/data/departments/pharmacy/calendar-source.json` and repeated in the
+generated staging manifest. Calendar source approval is therefore satisfied;
+structuring and reviewing every multi-event record and applicability scope
+remains a separate production gate.
 
 This result is not production-ready. The machine-readable gate remains false until the approval checklist, HR/account reconciliation, programme structure, continuing rosters, LMS history, allocation corrections and acceptance evidence are complete.
 

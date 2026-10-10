@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -66,11 +66,24 @@ const REQUIRED_HEADERS = [
 ];
 
 function normalizeHeader(h: string) {
-  return h.trim().toLowerCase();
+  return h.replace(/^\uFEFF/, '').trim().toLowerCase();
 }
 
 async function validateCsvHeaders(file: File): Promise<boolean> {
-  if (!file.name.toLowerCase().endsWith('.csv')) return true;
+  const extension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+  if (!['.xlsx', '.csv'].includes(extension)) {
+    toast.error('Choose an .xlsx or .csv teaching matrix');
+    return false;
+  }
+  if (file.size === 0) {
+    toast.error('The selected matrix is empty');
+    return false;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    toast.error('Teaching matrix files must be 10MB or smaller');
+    return false;
+  }
+  if (extension !== '.csv') return true;
   const text = await file.slice(0, 2048).text();
   const firstLine = text.split(/\r?\n/)[0] ?? '';
   const headers = firstLine.split(',').map(normalizeHeader);
@@ -80,6 +93,19 @@ async function validateCsvHeaders(file: File): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+function apiErrorMessage(text: string, fallback: string) {
+  if (!text.trim()) return fallback;
+  try {
+    const parsed = JSON.parse(text) as { message?: string | string[]; error?: string; detail?: string };
+    const message = parsed.message ?? parsed.detail ?? parsed.error;
+    if (Array.isArray(message)) return message.join(', ');
+    if (message) return message;
+  } catch {
+    // Keep the server's plain-text error below.
+  }
+  return text;
 }
 
 export function CourseMapperPanel({
@@ -100,6 +126,7 @@ export function CourseMapperPanel({
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [fileName, setFileName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const authHeaders = useMemo(
     () => ({
@@ -115,7 +142,8 @@ export function CourseMapperPanel({
       headers: authHeaders,
     });
     if (!res.ok) {
-      toast.error('Failed to download template');
+      const text = await res.text().catch(() => '');
+      toast.error(apiErrorMessage(text, 'Failed to download template'));
       return;
     }
     const blob = await res.blob();
@@ -149,14 +177,7 @@ export function CourseMapperPanel({
         });
         const text = await res.text();
         if (!res.ok) {
-          let msg = text;
-          try {
-            const parsed = JSON.parse(text) as { message?: string };
-            if (parsed.message) msg = parsed.message;
-          } catch {
-            /* keep raw */
-          }
-          throw new Error(msg);
+          throw new Error(apiErrorMessage(text, 'Preview failed'));
         }
         const data = JSON.parse(text) as PreviewPayload;
         setPreview(data);
@@ -192,14 +213,7 @@ export function CourseMapperPanel({
       });
       const text = await res.text();
       if (!res.ok) {
-        let msg = text;
-        try {
-          const parsed = JSON.parse(text) as { message?: string };
-          if (parsed.message) msg = parsed.message;
-        } catch {
-          /* keep raw */
-        }
-        throw new Error(msg);
+        throw new Error(apiErrorMessage(text, 'Import failed'));
       }
       const data = JSON.parse(text) as ExecuteResult;
       setResult(data);
@@ -217,6 +231,7 @@ export function CourseMapperPanel({
     setPreview(null);
     setResult(null);
     setFileName('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   return (
@@ -270,9 +285,10 @@ export function CourseMapperPanel({
               <p className="mt-1 text-sm text-muted-foreground">Teaching load matrix for your department</p>
               <label className="mt-4 inline-block">
                 <input
+                  ref={fileInputRef}
                   type="file"
                   className="hidden"
-                  accept=".xlsx,.xls,.csv"
+                  accept=".xlsx,.csv"
                   disabled={loading}
                   onChange={(e) => {
                     const file = e.target.files?.[0];

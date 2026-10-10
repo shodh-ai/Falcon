@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -31,8 +33,16 @@ const TICKET_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TICKET_REF_RE = /^TKT-/i;
 
+function databaseErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 @Injectable()
 export class TicketService {
+  private readonly logger = new Logger(TicketService.name);
+
   constructor(
     @Inject(TICKET_PROVIDER)
     private readonly ticketProvider: ITicketProvider,
@@ -424,9 +434,14 @@ export class TicketService {
 
   async resolveHodDepartmentIds(hodUserId: string): Promise<number[]> {
     const rows = await this.dataSource.query<{ dept_id: number }[]>(
-      `SELECT dept_id FROM departments WHERE hod_user_id = $1
+      `SELECT dept_id
+       FROM departments
+       WHERE hod_user_id = $1
        UNION
-       SELECT dept_id FROM users WHERE user_id = $1 AND dept_id IS NOT NULL`,
+       SELECT dept_id
+       FROM users
+       WHERE user_id = $1
+         AND dept_id IS NOT NULL`,
       [hodUserId],
     );
     return rows
@@ -440,6 +455,16 @@ export class TicketService {
     deptIds?: number[],
     actor?: ScopedAuthUser,
   ) {
+    const actorRoles = new Set(
+      [...(actor?.roles ?? []), actor?.role ?? '']
+        .map((role) => String(role).trim().toLowerCase())
+        .filter(Boolean),
+    );
+    // A HOD without a resolved department must never fall back to the
+    // unrestricted queue. This also protects direct service callers that do
+    // not go through the controller's department resolver.
+    if (actorRoles.has('hod') && !deptIds?.length) return [];
+
     const campusIds = actor
       ? await this.campusScope.resolveCampusIds(actor)
       : null;
@@ -459,7 +484,8 @@ export class TicketService {
       .createQueryBuilder('t')
       .innerJoin('users', 'u', 'u.user_id = t.student_user_id')
       .where('t.status = :status', { status: 'PENDING' })
-      .andWhere('u.tenant_id = :tenantId', { tenantId })
+      .andWhere('COALESCE(t.tenant_id, u.tenant_id) = :tenantId', { tenantId })
+      .andWhere('t.deleted_at IS NULL')
       .andWhere(
         `(t.category = 'STUDENT_PROFILE' OR (t.category = 'ACADEMICS' AND t.subject ILIKE :profileHint))`,
         { profileHint: '%profile%' },
@@ -475,73 +501,161 @@ export class TicketService {
   async updateStatus(
     ticketId: string,
     dto: UpdateTicketStatusDto,
-    actor?: { userId: string; role: string; tenantId: string; roles?: string[] },
+    actor?: {
+      userId: string;
+      role: string;
+      tenantId: string;
+      roles?: string[];
+    },
   ) {
+    if (!TICKET_UUID_RE.test(ticketId) && !TICKET_REF_RE.test(ticketId)) {
+      throw new BadRequestException('Invalid ticket ID');
+    }
+    if (
+      !['PENDING', 'IN_PROGRESS', 'RESOLVED', 'REJECTED'].includes(dto?.status)
+    ) {
+      throw new BadRequestException('Invalid ticket status');
+    }
     if (dto.status === 'REJECTED' && !dto.rejection_reason?.trim()) {
       throw new BadRequestException(
         'rejection_reason is required when rejecting a ticket',
       );
     }
 
-    const ticket = await this.tickets.findOne({
-      where: { ticket_id: ticketId },
-    });
-    if (!ticket) throw new NotFoundException('Ticket not found');
+    let saved: HelpdeskTicket;
+    let changed = false;
+    try {
+      saved = await this.dataSource.transaction(async (manager) => {
+        const repository = manager.getRepository(HelpdeskTicket);
+        const ticket = await repository.findOne({
+          where: TICKET_UUID_RE.test(ticketId)
+            ? { ticket_id: ticketId }
+            : { ticket_ref: ticketId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!ticket) throw new NotFoundException('Ticket not found');
+        if (actor?.tenantId) {
+          const [owner] = await manager.query<{ tenant_id: string }[]>(
+            `SELECT tenant_id FROM users WHERE user_id = $1 LIMIT 1`,
+            [ticket.student_user_id],
+          );
+          if (!owner || owner.tenant_id !== actor.tenantId) {
+            throw new ForbiddenException('Ticket is outside your tenant scope');
+          }
+        }
+        if (actor) {
+          await this.assertTicketCampus(
+            {
+              user_id: actor.userId,
+              role: actor.role,
+              roles: actor.roles,
+              tenant_id: actor.tenantId,
+            },
+            ticket.student_user_id,
+          );
+          await this.assertTicketActorScope(ticket, actor);
+        }
 
-    if (actor) {
-      await this.assertTicketCampus(
-        {
-          user_id: actor.userId,
-          role: actor.role,
-          roles: actor.roles,
-          tenant_id: actor.tenantId,
-        },
-        ticket.student_user_id,
-      );
-      await this.assertTicketActorScope(ticket, actor);
-    }
+        if (ticket.status !== 'PENDING' && ticket.status !== 'IN_PROGRESS') {
+          // Retrying the same decision must not reopen/extend the unlock window.
+          if (
+            ticket.status === dto.status &&
+            (dto.status !== 'REJECTED' ||
+              ticket.rejection_reason === dto.rejection_reason?.trim()) &&
+            (dto.assigned_to_user_id === undefined ||
+              ticket.assigned_to_user_id === dto.assigned_to_user_id)
+          )
+            return ticket;
+          throw new ConflictException(
+            'Ticket has already been decided. Refresh the queue.',
+          );
+        }
 
-    ticket.status = dto.status;
-    if (dto.assigned_to_user_id !== undefined) {
-      ticket.assigned_to_user_id = dto.assigned_to_user_id;
-    }
-    if (dto.status === 'REJECTED') {
-      ticket.rejection_reason = dto.rejection_reason!.trim();
-      ticket.resolved_at = new Date();
-    }
-    if (dto.status === 'RESOLVED') {
-      ticket.resolved_at = new Date();
-      ticket.rejection_reason = null;
-    }
+        ticket.status = dto.status;
+        if (dto.assigned_to_user_id !== undefined) {
+          ticket.assigned_to_user_id = dto.assigned_to_user_id;
+        }
+        if (dto.status === 'REJECTED') {
+          ticket.rejection_reason = dto.rejection_reason!.trim();
+          ticket.resolved_at = new Date();
+        }
+        if (dto.status === 'RESOLVED') {
+          ticket.resolved_at = new Date();
+          ticket.rejection_reason = null;
+        }
 
-    const saved = await this.tickets.save(ticket);
+        if (actor?.userId) ticket.resolved_by = actor.userId;
 
-    if (dto.status === 'RESOLVED' && ticket.category === 'STUDENT_PROFILE') {
-      await this.dataSource.query(
-        `UPDATE student_profiles
+        const result = await repository.save(ticket);
+        if (
+          dto.status === 'RESOLVED' &&
+          this.isProfileCorrectionTicket(ticket)
+        ) {
+          const unlocked = await manager.query(
+            `UPDATE student_profiles
          SET profile_unlocked_until = NOW() + INTERVAL '15 minutes'
-         WHERE user_id = $1`,
-        [ticket.student_user_id],
-      );
+         WHERE user_id = $1
+           AND ($2::uuid IS NULL OR tenant_id = $2::uuid)
+         RETURNING user_id`,
+            [
+              ticket.student_user_id,
+              ticket.tenant_id ?? actor?.tenantId ?? null,
+            ],
+          );
+          if (!unlocked.length) {
+            throw new BadRequestException(
+              'Student profile is missing; approval was not committed',
+            );
+          }
+        }
+        changed = true;
+        return result;
+      });
+    } catch (error) {
+      const code = databaseErrorCode(error);
+      if (code === '23514') {
+        throw new BadRequestException(
+          'This helpdesk status is not enabled in the database. Run the helpdesk status migration and retry.',
+        );
+      }
+      if (code === '23505') {
+        throw new ConflictException(
+          'This helpdesk ticket was updated by another operator. Refresh and retry.',
+        );
+      }
+      if (code === '42703' || code === '42P01') {
+        throw new BadRequestException(
+          'Helpdesk storage is not migrated. Apply the latest migrations and retry.',
+        );
+      }
+      throw error;
     }
 
-    if (dto.status === 'REJECTED') {
-      const student = await this.users.findOne({
-        where: { user_id: ticket.student_user_id },
-      });
-      const tenantId =
-        student?.tenant_id ??
-        ticket.tenant_id ??
-        'a0000000-0000-4000-8000-000000000001';
-      this.notify.ticketReply({
-        tenantId,
-        userId: ticket.student_user_id,
-        ticketId: ticket.ticket_id,
-        subject: ticket.subject,
-        title: 'Helpdesk request rejected',
-        message: dto.rejection_reason!.trim(),
-        actionLink: '/student/helpdesk',
-      });
+    // Notifications are best effort after commit. The unlock is not optional:
+    // it commits atomically with the approval above.
+    try {
+      if (changed && dto.status === 'REJECTED') {
+        const student = await this.users.findOne({
+          where: { user_id: saved.student_user_id },
+        });
+        const tenantId =
+          student?.tenant_id ??
+          saved.tenant_id ??
+          'a0000000-0000-4000-8000-000000000001';
+        await this.notify.ticketReply({
+          tenantId,
+          userId: saved.student_user_id,
+          ticketId: saved.ticket_id,
+          subject: saved.subject,
+          title: 'Helpdesk request rejected',
+          message: dto.rejection_reason!.trim(),
+          actionLink: '/student/helpdesk',
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Helpdesk post-status side effect failed for ${saved.ticket_id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     return saved;
@@ -597,19 +711,26 @@ export class TicketService {
       return;
     }
 
-    if (role === 'hod') {
-      const deptRows = await this.dataSource.query<Array<{ dept_id: number }>>(
-        `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
-        [actor.userId],
-      );
-      const deptIds = deptRows.map((row) => Number(row.dept_id));
-      if (
-        student.dept_id == null ||
-        !deptIds.includes(Number(student.dept_id))
-      ) {
-        throw new ForbiddenException('Ticket is outside your department scope');
-      }
+    // HOD mappings are deployed in two compatible forms: a canonical
+    // departments.hod_user_id link, or the user's own dept_id. Resolve the
+    // same union used by the queue so a listed request can be approved.
+    const deptIds = await this.resolveHodDepartmentIds(actor.userId);
+    if (
+      student.dept_id == null ||
+      !deptIds.includes(Number(student.dept_id))
+    ) {
+      throw new ForbiddenException('Ticket is outside your department scope');
     }
+  }
+
+  private isProfileCorrectionTicket(
+    ticket: Pick<HelpdeskTicket, 'category' | 'subject'>,
+  ) {
+    return (
+      ticket.category === 'STUDENT_PROFILE' ||
+      (ticket.category === 'ACADEMICS' &&
+        /profile/i.test(String(ticket.subject ?? '')))
+    );
   }
 
   async addMessage(

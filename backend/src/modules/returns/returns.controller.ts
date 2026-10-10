@@ -36,6 +36,11 @@ export class ReturnsController {
   @Get('dashboard') dashboard(@Req() req: { user: InventoryActor }) {
     return this.service.dashboard(req.user);
   }
+  @Get('eligible-inventory') eligibleInventory(
+    @Req() req: { user: InventoryActor },
+  ) {
+    return this.service.eligibleInventory(req.user);
+  }
   @Get('cases') queue(@Req() req: { user: InventoryActor }) {
     return this.service.queue(req.user);
   }

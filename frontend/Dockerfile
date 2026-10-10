@@ -60,8 +60,10 @@ RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs
 
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/.next-local/standalone ./
+# The standalone server keeps distDirRoot as `.next-local`; static assets must
+# live under the same dist directory or Next returns 404 for every CSS/JS asset.
+COPY --from=builder --chown=nextjs:nodejs /app/.next-local/static ./.next-local/static
 
 USER nextjs
 

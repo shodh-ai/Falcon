@@ -1,10 +1,18 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class LocalLoginDto {
+  /** Current clients may send `identifier`; `email` remains for compatibility. */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  identifier?: string;
+
+  @IsOptional()
   @IsEmail()
-  email: string;
+  email?: string;
 
   @IsString()
   @MinLength(6)
-  password: string;
+  password!: string;
 }

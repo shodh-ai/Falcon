@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { FalconLogo } from '@/components/brand/FalconLogo';
 
 export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,9 +17,13 @@ export default function ForgotPasswordPage() {
     setMessage(null);
     setLoading(true);
     try {
-      await api.forgotPassword(email.trim());
-      setMessage("If an account exists for this email, you'll receive a password reset link shortly. Please check your inbox and spam folder.");
-    } catch (err) {
+      const res = await api.forgotPassword(identifier.trim());
+      setMessage(
+        res.requires_admin_reset
+          ? 'No verified university email is linked yet. Contact Campus Admin to reset your student account.'
+          : "If an account exists for this email or student ID, you'll receive a password reset link shortly. Please check your inbox and spam folder.",
+      );
+    } catch {
       setError('Unable to process your request. Please try again later.');
     } finally {
       setLoading(false);
@@ -32,12 +36,12 @@ export default function ForgotPasswordPage() {
         <FalconLogo variant="full" size={48} />
         <h1 className="text-xl font-bold text-sgvu-navy">Forgot password</h1>
         <input
-          type="email"
+          type="text"
           required
           className="w-full rounded-xl border px-4 py-3 text-sm"
-          placeholder="official email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          placeholder="student ID or official email"
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
         />
         <button type="submit" disabled={loading} className="w-full rounded-xl bg-sgvu-navy py-3 font-semibold text-white disabled:opacity-60">
           {loading ? 'Sending…' : 'Send reset'}

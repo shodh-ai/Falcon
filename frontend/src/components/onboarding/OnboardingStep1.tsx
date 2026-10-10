@@ -166,9 +166,20 @@ export function OnboardingStep1({ config }: { config: PortalOnboardingConfig }) 
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
-      await refreshUser();
-      toast.success('Password updated. Continue to profile setup.');
-      router.replace(`${config.portalPrefix}/onboarding/step-2`);
+      const freshUser = await refreshUser();
+      const onboardingComplete = ['ACTIVE', 'COMPLETED'].includes(
+        String(freshUser?.onboarding_status ?? '').toUpperCase(),
+      );
+      toast.success(
+        onboardingComplete
+          ? 'Password updated. Redirecting to your workspace.'
+          : 'Password updated. Continue to profile setup.',
+      );
+      router.replace(
+        onboardingComplete
+          ? config.dashboardPath
+          : `${config.portalPrefix}/onboarding/step-2`,
+      );
     } catch (err) {
       const message = parseApiError(err);
       setFormError(message);

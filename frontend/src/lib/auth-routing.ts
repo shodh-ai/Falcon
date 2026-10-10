@@ -539,7 +539,7 @@ export const DOFA_FINANCE_MODULE_PATH_ROLES: Readonly<
     'internalauditor', 'tenantadmin', 'superadmin', 'campusadmin',
   ],
   '/finance/product-verification': [
-    'stores', 'receivingclerk', 'procurementhead', 'internalauditor',
+    'stores', 'receivingclerk', 'inventoryverifier', 'procurementhead', 'internalauditor',
     'tenantadmin', 'superadmin',
   ],
   '/finance/inventory': [
@@ -1043,6 +1043,7 @@ export function getPostLoginPath(user: {
   tenant_subdomain?: string;
   is_department_hod?: boolean;
   onboarding_status?: string;
+  password_reset_required?: boolean;
 }): string {
   const roles = (user.roles ?? [user.primaryRole ?? user.role])
     .filter((role): role is string => Boolean(role))
@@ -1067,6 +1068,9 @@ export function getPostLoginPath(user: {
 
   const config = getOnboardingConfigForRole(landingRole);
   if (config) {
+    if (user.password_reset_required) {
+      return `${config.portalPrefix}/onboarding/step-1`;
+    }
     const onboardingPath = getOnboardingStepPath(
       config.portalPrefix,
       user.onboarding_status,

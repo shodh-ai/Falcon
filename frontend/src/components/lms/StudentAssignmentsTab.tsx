@@ -157,14 +157,18 @@ export function StudentAssignmentsTab({ assignments, onSubmitted }: Props) {
                               variant="outline"
                               size="sm"
                               className="gap-2"
-                              onClick={() =>
-                                token &&
-                                downloadWithAuth(
+                              onClick={() => {
+                                if (!token) {
+                                  toast.error('Please sign in to download the question paper');
+                                  return;
+                                }
+
+                                void downloadWithAuth(
                                   `/api/academics/student/assignments/${row.assignment.assignment_id}/download`,
                                   token,
                                   `${row.assignment.title}_Question_Paper.pdf`
-                                ).catch((err) => toast.error('Failed to download PDF'))
-                              }
+                                ).catch(() => toast.error('Failed to download PDF'));
+                              }}
                             >
                               <Download className="h-4 w-4" />
                               Download

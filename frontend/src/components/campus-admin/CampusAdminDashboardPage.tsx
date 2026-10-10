@@ -75,6 +75,7 @@ export function CampusAdminDashboardPage() {
   const [applications, setApplications] = useState<ApplicationRow[] | null>(null);
   const [requests, setRequests] = useState<RequestRow[] | null>(null);
   const [queue, setQueue] = useState<QueueRow[] | null>(null);
+  const [staffQueue, setStaffQueue] = useState<QueueRow[] | null>(null);
   const [kanban, setKanban] = useState<KanbanColumn[] | null>(null);
   const [enrolled, setEnrolled] = useState<unknown[] | null>(null);
   const [seats, setSeats] = useState<SeatRow[] | null>(null);
@@ -92,6 +93,7 @@ export function CampusAdminDashboardPage() {
       api.get<unknown>('/api/campus-admin/applications'),
       api.get<unknown>('/api/campus-admin/requests'),
       api.get<unknown>('/api/admin/student-verifications/queue'),
+      api.get<unknown>('/api/staff/verifications/queue'),
       api.get<unknown>('/api/admissions-crm/kanban'),
       api.get<unknown>('/api/admissions-crm/enrolled-students'),
       api.get<unknown>('/api/admissions-crm/counseling/seats'),
@@ -114,10 +116,11 @@ export function CampusAdminDashboardPage() {
       setApplications(settledArray<ApplicationRow>(results[1]));
       setRequests(settledArray<RequestRow>(results[2]));
       setQueue(settledArray<QueueRow>(results[3]));
-      setKanban(settledArray<KanbanColumn>(results[4]));
-      setEnrolled(settledArray<unknown>(results[5]));
-      setSeats(settledArray<SeatRow>(results[6]));
-      setCalendar(settledArray<CalendarRow>(results[7]));
+      setStaffQueue(settledArray<QueueRow>(results[4]));
+      setKanban(settledArray<KanbanColumn>(results[5]));
+      setEnrolled(settledArray<unknown>(results[6]));
+      setSeats(settledArray<SeatRow>(results[7]));
+      setCalendar(settledArray<CalendarRow>(results[8]));
       setLoading(false);
     });
 
@@ -135,7 +138,10 @@ export function CampusAdminDashboardPage() {
   const facultyStaff = kpiFromDashboard(dashboard?.kpis, 'Faculty & staff');
   const applicationsCount = kpiFromDashboard(dashboard?.kpis, 'Applications');
   const enrolledCount: KpiValue = enrolled ? enrolled.length : 'N/A';
-  const pendingVerifications: KpiValue = queue ? queue.length : 'N/A';
+  const pendingVerifications: KpiValue =
+    queue || staffQueue
+      ? (queue?.length ?? 0) + (staffQueue?.length ?? 0)
+      : 'N/A';
 
   const stageCounts = useMemo(() => {
     const counts: Record<string, number> = {};

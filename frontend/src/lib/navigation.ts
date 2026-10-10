@@ -25,6 +25,7 @@ import {
   Banknote,
   BookOpen,
   FileText,
+  FileDown,
   PenLine,
   Eye,
   FlaskConical,
@@ -807,7 +808,7 @@ export const hrPortal: PortalConfig = {
       items: [
         { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, keywords: ['basic', 'hra', 'da', 'pf', 'tds'], hrModule: 'payroll' },
         { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, keywords: ['run payroll', 'payslip', 'lwp'], hrModule: 'payroll' },
-        { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: Download, keywords: ['payslip', 'download', 'approval', 'reason'], hrModule: 'payroll' },
+        { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: FileDown, keywords: ['payslip', 'download', 'request', 'pdf'], hrModule: 'payroll' },
       ],
     },
     {
@@ -850,7 +851,7 @@ export const hrPortal: PortalConfig = {
     { label: 'Leave Management', href: '/hr/leaves', icon: CalendarDays, hrModule: 'leaves' },
     { label: 'Salary Structures', href: '/hr/payroll/structures', icon: Wallet, hrModule: 'payroll' },
     { label: 'Payroll Processing', href: '/hr/payroll/processing', icon: Banknote, hrModule: 'payroll' },
-    { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: Download, hrModule: 'payroll' },
+    { label: 'Payslip Download Requests', href: '/hr/payroll/payslip-downloads', icon: FileDown, hrModule: 'payroll' },
     { label: 'Recruitment ATS', href: '/hr/recruitment', icon: Briefcase, hrModule: 'recruitment' },
     { label: 'Appraisals & API', href: '/hr/appraisals', icon: Award, hrModule: 'directory' },
     { label: 'Promotions', href: '/hr/promotions', icon: ArrowUpCircle, hrModule: 'directory' },
@@ -894,6 +895,9 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign', 'faculty', 'subjects', 'semester'] },
+        { label: 'Courses & Subjects', href: '/hod/academics/courses', icon: BookMarked, keywords: ['courses', 'subjects', 'catalogue', 'lms'] },
+        { label: 'Assignment Generation', href: '/hod/academics/assignments', icon: ClipboardList, keywords: ['assignments', 'digital assignment', 'da', 'generate'] },
+        { label: 'Weekly Tests (WT)', href: '/hod/academics/weekly-tests', icon: FileCheck2, keywords: ['wt', 'weekly test', 'test', 'marks'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix', 'teaching load', 'import'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf', 'unassigned', 'matrix', 'hod'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms', 'modules', 'coverage', 'units'] },
@@ -919,6 +923,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass', 'fail', 'exam', 'grades'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['marks', 'grades', 'export', 'semester'] },
+        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request', 'sis'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['sis', 'grade change', 'dofa', 'coe', 'approve'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['nervous system', 'grade change', 'approvals'] },
       ],
@@ -959,6 +964,9 @@ export const hodPortal: PortalConfig = {
       title: 'Faculty Management',
       items: [
         { label: 'Course Allocation', href: '/hod/academics/course-allocation', icon: BookOpen, keywords: ['assign faculty'] },
+        { label: 'Courses & Subjects', href: '/hod/academics/courses', icon: BookMarked, keywords: ['courses', 'subjects', 'catalogue'] },
+        { label: 'Assignment Generation', href: '/hod/academics/assignments', icon: ClipboardList, keywords: ['assignments', 'digital assignment'] },
+        { label: 'Weekly Tests (WT)', href: '/hod/academics/weekly-tests', icon: FileCheck2, keywords: ['wt', 'weekly test'] },
         { label: 'Upload Teaching Matrix', href: '/hod/academics/course-mapper', icon: Upload, keywords: ['excel', 'bulk', 'matrix'] },
         { label: 'Unassigned Teaching Load', href: '/hod/academics/teaching-load', icon: AlertTriangle, keywords: ['nf unassigned'] },
         { label: 'Syllabus & Lesson Tracking', href: '/hod/academics/syllabus-tracking', icon: ListChecks, keywords: ['lms'] },
@@ -981,6 +989,7 @@ export const hodPortal: PortalConfig = {
       items: [
         { label: 'Result Analytics', href: '/hod/academics/result-analytics', icon: BarChart3, keywords: ['pass fail'] },
         { label: 'Compiled Results', href: '/hod/dashboard?tab=results', icon: FileSpreadsheet, keywords: ['compiled results'] },
+        { label: 'Grade Change Request', href: '/hod/academics/grade-change', icon: PenLine, keywords: ['grade change', 'request'] },
         { label: 'Grade Change DOFA', href: '/hod/approvals/grade-change', icon: PenLine, keywords: ['grade change', 'dofa'] },
         { label: 'DOFA Inbox (Universal)', href: '/hod/approvals/dofa-inbox', icon: Inbox, keywords: ['dofa inbox'] },
       ],
@@ -1331,7 +1340,7 @@ export const financePortal: PortalConfig = {
         { label: 'Digital Acquisitions', href: '/finance/acquisitions', icon: Shield, keywords: ['acquisition', 'requester', 'vendor', 'budget', 'dofa'], roles: ['LabAdmin', 'HOD', 'Dean', 'Faculty', 'Procurement', 'ProcurementHead', 'ProcurementBuyer', 'Accountant', 'FinanceController', 'CFO', 'COO', 'InternalAuditor', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Progressive Procurement', href: '/finance/procurements', icon: PackageCheck, keywords: ['module 2', 'orders', 'receipts', 'invoice', 'commitment', 'fund utilization'], roles: ['LabAdmin', 'HOD', 'Faculty', 'Procurement', 'ProcurementHead', 'ProcurementBuyer', 'Stores', 'ReceivingClerk', 'APClerk', 'APManager', 'Accountant', 'FinanceController', 'CFO', 'InternalAuditor', 'SuperAdmin', 'CampusAdmin'] },
         { label: 'Invoice Integrity', href: '/finance/invoice-integrity', icon: ShieldCheck, keywords: ['module 3', 'invoice', 'evidence', 'forensics', 'integrity', 'certification'], roles: ['APClerk', 'APManager', 'Accountant', 'FinanceController', 'CFO', 'InternalAuditor', 'TenantAdmin', 'SuperAdmin', 'CampusAdmin'] },
-        { label: 'Physical Verification', href: '/finance/product-verification', icon: ScanLine, keywords: ['module 4', 'receiving', 'camera', 'geofence', 'product', 'inventory'], roles: ['Stores', 'ReceivingClerk', 'ProcurementHead', 'InternalAuditor', 'TenantAdmin', 'SuperAdmin'] },
+        { label: 'Physical Verification', href: '/finance/product-verification', icon: ScanLine, keywords: ['module 4', 'receiving', 'camera', 'geofence', 'product', 'inventory'], roles: ['Stores', 'ReceivingClerk', 'InventoryVerifier', 'ProcurementHead', 'InternalAuditor', 'TenantAdmin', 'SuperAdmin'] },
         { label: 'Universal Inventory', href: '/finance/inventory', icon: Archive, keywords: ['module 5', 'asset id', 'rfid', 'lot', 'custody', 'inventory identity'], roles: ['Stores', 'ReceivingClerk', 'InventoryVerifier', 'ProcurementHead', 'InternalAuditor', 'TenantAdmin', 'SuperAdmin'] },
         { label: 'Physical Identity & Gates', href: '/finance/physical-identity', icon: RadioTower, keywords: ['module x', 'rfid', 'label', 'kiosk', 'gate', 'physical identity'], roles: ['Stores', 'Security', 'InventoryVerifier', 'ProcurementHead', 'InternalAuditor', 'TenantAdmin', 'SuperAdmin'] },
         { label: 'Consumables Operations', href: '/finance/consumables', icon: Boxes, keywords: ['module 6', 'consumables', 'lot', 'fefo', 'reservation', 'stock count', 'replenishment'], roles: ['Faculty', 'LabAdmin', 'Stores', 'ProcurementHead', 'InternalAuditor', 'TenantAdmin', 'SuperAdmin'] },

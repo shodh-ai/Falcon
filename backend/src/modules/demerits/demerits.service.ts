@@ -37,38 +37,120 @@ export class DemeritsService {
 
   private static readonly UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  private static readonly EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
+  private static readonly ENROLLMENT_RE = /^(?=.*\d)[a-z0-9][a-z0-9._/-]{2,49}$/i;
 
-  async getFormOptions(tenantId: string, facultyUserId?: string) {
+  async getFormOptions(
+    tenantId: string,
+    actorUserId?: string,
+    hodScope = false,
+  ) {
+    const hodDeptIds = hodScope && actorUserId
+      ? await this.resolveHodDepartmentIds(actorUserId)
+      : [];
     const [students, courses] = await Promise.all([
       this.db.query(
-        `SELECT u.user_id, u.name, u.official_email,
-                COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
-         FROM users u
-         LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
-         JOIN roles r ON r.role_id = u.role_id
-         WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
-         ORDER BY u.name
-         LIMIT 500`,
-        [tenantId],
+        hodScope
+          ? `SELECT DISTINCT u.user_id, u.name, u.official_email,
+                    COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+             FROM users u
+             LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+             JOIN roles r ON r.role_id = u.role_id
+             WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
+               AND u.dept_id = ANY($2::int[])
+             ORDER BY u.name
+             LIMIT 500`
+          : actorUserId
+          ? `SELECT DISTINCT u.user_id, u.name, u.official_email,
+                    COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+             FROM users u
+             LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+             JOIN roles r ON r.role_id = u.role_id
+             WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
+               AND EXISTS (
+                 SELECT 1
+                 FROM student_course_enrollments sce
+                 WHERE sce.tenant_id = u.tenant_id
+                   AND sce.student_user_id = u.user_id
+                   AND sce.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                   AND (
+                     EXISTS (
+                       SELECT 1 FROM academic_course_allocations fca
+                       WHERE fca.tenant_id = sce.tenant_id
+                         AND fca.course_id = sce.course_id
+                         AND fca.faculty_user_id = $2
+                         AND fca.status = 'ACTIVE'
+                     )
+                     OR EXISTS (
+                       SELECT 1 FROM academic_timetables ft
+                       WHERE ft.tenant_id = sce.tenant_id
+                         AND ft.course_id = sce.course_id
+                         AND ft.faculty_user_id = $2
+                         AND ft.deleted_at IS NULL
+                     )
+                   )
+               )
+             ORDER BY u.name
+             LIMIT 500`
+          : `SELECT u.user_id, u.name, u.official_email,
+                    COALESCE(sp.enrollment_number, sp.enrollment_no) AS enrollment_number
+             FROM users u
+             LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
+             JOIN roles r ON r.role_id = u.role_id
+             WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
+             ORDER BY u.name
+             LIMIT 500`,
+        hodScope ? [tenantId, hodDeptIds] : actorUserId ? [tenantId, actorUserId] : [tenantId],
       ),
-      facultyUserId
-        ? this.db
-            .query(
-              `SELECT DISTINCT c.course_id, c.course_code, c.course_name
+      hodScope
+        ? this.db.query(
+            `SELECT DISTINCT c.course_id, c.course_code, c.course_name
              FROM academic_courses c
-             JOIN academic_course_allocations fca ON fca.course_id = c.course_id
-             WHERE c.tenant_id = $1 AND fca.faculty_user_id = $2 AND fca.status = 'ACTIVE'
+             WHERE c.tenant_id = $1
+               AND (
+                 EXISTS (
+                   SELECT 1 FROM academic_course_allocations a
+                   JOIN users f ON f.user_id = a.faculty_user_id
+                   WHERE a.tenant_id = c.tenant_id AND a.course_id = c.course_id
+                     AND a.status = 'ACTIVE' AND f.dept_id = ANY($2::int[])
+                 )
+                 OR EXISTS (
+                   SELECT 1 FROM student_course_enrollments sce
+                   JOIN users s ON s.user_id = sce.student_user_id
+                   WHERE sce.tenant_id = c.tenant_id AND sce.course_id = c.course_id
+                     AND sce.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                     AND s.dept_id = ANY($2::int[])
+                 )
+               )
              ORDER BY c.course_code
              LIMIT 200`,
-              [tenantId, facultyUserId],
-            )
-            .catch(() =>
-              this.db.query(
-                `SELECT course_id, course_code, course_name FROM academic_courses
-               WHERE tenant_id = $1 ORDER BY course_code LIMIT 200`,
-                [tenantId],
-              ),
-            )
+            [tenantId, hodDeptIds],
+          )
+        : actorUserId
+        ? this.db.query(
+            `SELECT DISTINCT c.course_id, c.course_code, c.course_name
+             FROM academic_courses c
+             WHERE c.tenant_id = $1
+               AND (
+                 EXISTS (
+                   SELECT 1 FROM academic_course_allocations fca
+                   WHERE fca.tenant_id = c.tenant_id
+                     AND fca.course_id = c.course_id
+                     AND fca.faculty_user_id = $2
+                     AND fca.status = 'ACTIVE'
+                 )
+                 OR EXISTS (
+                   SELECT 1 FROM academic_timetables ft
+                   WHERE ft.tenant_id = c.tenant_id
+                     AND ft.course_id = c.course_id
+                     AND ft.faculty_user_id = $2
+                     AND ft.deleted_at IS NULL
+                 )
+               )
+             ORDER BY c.course_code
+             LIMIT 200`,
+            [tenantId, actorUserId],
+          )
         : this.db.query(
             `SELECT course_id, course_code, course_name FROM academic_courses
              WHERE tenant_id = $1 ORDER BY course_code LIMIT 200`,
@@ -91,15 +173,36 @@ export class DemeritsService {
     tenantId: string,
     facultyUserId: string,
     dto: SubmitDemeritIncidentDto,
+    hodScope = false,
   ) {
+    const hodDeptIds = hodScope
+      ? await this.resolveHodDepartmentIds(facultyUserId)
+      : [];
     const studentUserId = await this.resolveStudentUserId(
       tenantId,
       dto.student_id.trim(),
+      hodDeptIds,
     );
     const courseId = await this.resolveCourseId(
       tenantId,
       dto.subject_id.trim(),
+      facultyUserId,
+      hodDeptIds,
     );
+
+    const [enrollment] = await this.db.query<{ enrollment_id: string }[]>(
+      `SELECT enrollment_id
+       FROM student_course_enrollments
+       WHERE tenant_id = $1 AND student_user_id = $2 AND course_id = $3
+         AND status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+       LIMIT 1`,
+      [tenantId, studentUserId, courseId],
+    );
+    if (!enrollment) {
+      throw new BadRequestException(
+        'Selected student is not enrolled in the selected course',
+      );
+    }
 
     const rows = await this.db.query<IncidentRow[]>(
       `INSERT INTO demerit_incidents (
@@ -121,9 +224,21 @@ export class DemeritsService {
     return this.enrichIncident(rows[0]);
   }
 
-  listFacultyHistory(tenantId: string, facultyUserId: string) {
+  async listFacultyHistory(
+    tenantId: string,
+    facultyUserId: string,
+    hodScope = false,
+  ) {
+    if (!hodScope) {
+      return this.listIncidents(tenantId, {
+        facultyUserId,
+        orderBy: 'created_at DESC',
+      });
+    }
+    const departments = await this.resolveHodDepartmentIds(facultyUserId);
+    if (!departments.length) return [];
     return this.listIncidents(tenantId, {
-      facultyUserId,
+      departmentIds: departments,
       orderBy: 'created_at DESC',
     });
   }
@@ -373,7 +488,12 @@ export class DemeritsService {
 
   private async listIncidents(
     tenantId: string,
-    opts: { status?: string; facultyUserId?: string; orderBy?: string },
+    opts: {
+      status?: string;
+      facultyUserId?: string;
+      departmentIds?: number[];
+      orderBy?: string;
+    },
   ) {
     const params: unknown[] = [tenantId];
     const filters = ['di.tenant_id = $1'];
@@ -384,6 +504,10 @@ export class DemeritsService {
     if (opts.facultyUserId) {
       params.push(opts.facultyUserId);
       filters.push(`di.faculty_user_id = $${params.length}`);
+    }
+    if (opts.departmentIds) {
+      params.push(opts.departmentIds);
+      filters.push(`su.dept_id = ANY($${params.length}::int[])`);
     }
     const order = opts.orderBy ?? 'di.created_at DESC';
     const rows = await this.db.query<IncidentRow[]>(
@@ -436,8 +560,18 @@ export class DemeritsService {
   private async resolveStudentUserId(
     tenantId: string,
     identifier: string,
+    departmentIds: number[] = [],
   ): Promise<string> {
     const isUuid = DemeritsService.UUID_RE.test(identifier);
+    if (
+      !isUuid &&
+      !DemeritsService.EMAIL_RE.test(identifier) &&
+      !DemeritsService.ENROLLMENT_RE.test(identifier)
+    ) {
+      throw new BadRequestException(
+        'Enter a valid university email, enrollment number, or student ID',
+      );
+    }
     let rows: Array<{ user_id: string }> = [];
 
     if (isUuid) {
@@ -447,8 +581,9 @@ export class DemeritsService {
          JOIN roles r ON r.role_id = u.role_id
          WHERE u.tenant_id = $1 AND u.is_active = true AND r.role_name = 'Student'
            AND u.user_id = $2::uuid
+           AND ($3::int[] IS NULL OR u.dept_id = ANY($3::int[]))
          LIMIT 1`,
-        [tenantId, identifier],
+        [tenantId, identifier, departmentIds.length ? departmentIds : null],
       );
     } else {
       rows = await this.db.query<Array<{ user_id: string }>>(
@@ -462,8 +597,9 @@ export class DemeritsService {
              OR lower(COALESCE(sp.enrollment_no, '')) = lower($2)
              OR lower(COALESCE(sp.enrollment_number, '')) = lower($2)
            )
+           AND ($3::int[] IS NULL OR u.dept_id = ANY($3::int[]))
          LIMIT 1`,
-        [tenantId, identifier],
+        [tenantId, identifier, departmentIds.length ? departmentIds : null],
       );
     }
     if (!rows[0]?.user_id) {
@@ -475,21 +611,56 @@ export class DemeritsService {
   private async resolveCourseId(
     tenantId: string,
     identifier: string,
+    facultyUserId: string,
+    departmentIds: number[] = [],
   ): Promise<string> {
     const isUuid = DemeritsService.UUID_RE.test(identifier);
     const rows = isUuid
       ? await this.db.query<Array<{ course_id: string }>>(
-          `SELECT course_id FROM academic_courses WHERE tenant_id = $1 AND course_id = $2::uuid LIMIT 1`,
-          [tenantId, identifier],
+          `SELECT c.course_id
+           FROM academic_courses c
+           WHERE c.tenant_id = $1 AND c.course_id = $2::uuid
+             AND (
+               EXISTS (SELECT 1 FROM academic_course_allocations a WHERE a.tenant_id = c.tenant_id AND a.course_id = c.course_id AND a.faculty_user_id = $3 AND a.status = 'ACTIVE')
+               OR EXISTS (SELECT 1 FROM academic_timetables t WHERE t.tenant_id = c.tenant_id AND t.course_id = c.course_id AND t.faculty_user_id = $3 AND t.deleted_at IS NULL)
+               OR EXISTS (SELECT 1 FROM academic_course_allocations a JOIN users f ON f.user_id = a.faculty_user_id WHERE a.tenant_id = c.tenant_id AND a.course_id = c.course_id AND a.status = 'ACTIVE' AND f.dept_id = ANY($4::int[]))
+               OR EXISTS (SELECT 1 FROM student_course_enrollments e JOIN users s ON s.user_id = e.student_user_id WHERE e.tenant_id = c.tenant_id AND e.course_id = c.course_id AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED') AND s.dept_id = ANY($4::int[]))
+             )
+           LIMIT 1`,
+          [tenantId, identifier, facultyUserId, departmentIds],
         )
       : await this.db.query<Array<{ course_id: string }>>(
-          `SELECT course_id FROM academic_courses WHERE tenant_id = $1 AND upper(course_code) = upper($2) LIMIT 1`,
-          [tenantId, identifier],
+          `SELECT c.course_id
+           FROM academic_courses c
+           WHERE c.tenant_id = $1 AND upper(c.course_code) = upper($2)
+             AND (
+               EXISTS (SELECT 1 FROM academic_course_allocations a WHERE a.tenant_id = c.tenant_id AND a.course_id = c.course_id AND a.faculty_user_id = $3 AND a.status = 'ACTIVE')
+               OR EXISTS (SELECT 1 FROM academic_timetables t WHERE t.tenant_id = c.tenant_id AND t.course_id = c.course_id AND t.faculty_user_id = $3 AND t.deleted_at IS NULL)
+               OR EXISTS (SELECT 1 FROM academic_course_allocations a JOIN users f ON f.user_id = a.faculty_user_id WHERE a.tenant_id = c.tenant_id AND a.course_id = c.course_id AND a.status = 'ACTIVE' AND f.dept_id = ANY($4::int[]))
+               OR EXISTS (SELECT 1 FROM student_course_enrollments e JOIN users s ON s.user_id = e.student_user_id WHERE e.tenant_id = c.tenant_id AND e.course_id = c.course_id AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED') AND s.dept_id = ANY($4::int[]))
+             )
+           LIMIT 1`,
+          [tenantId, identifier, facultyUserId, departmentIds],
         );
     if (!rows[0]?.course_id) {
       throw new BadRequestException('Subject/course not found');
     }
     return rows[0].course_id;
+  }
+
+  private async resolveHodDepartmentIds(hodUserId: string) {
+    const rows = await this.db.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1`,
+      [hodUserId],
+    );
+    const user = await this.db.query<Array<{ dept_id: number | null }>>(
+      `SELECT dept_id FROM users WHERE user_id = $1 LIMIT 1`,
+      [hodUserId],
+    );
+    return Array.from(new Set([
+      ...rows.map((row) => Number(row.dept_id)),
+      ...(user[0]?.dept_id ? [Number(user[0].dept_id)] : []),
+    ]));
   }
 
   private async tableExists(qr: QueryRunner, table: string): Promise<boolean> {

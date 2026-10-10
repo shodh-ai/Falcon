@@ -679,8 +679,11 @@ export class AdminControlService {
     dto: ResetPasswordDto,
   ) {
     const tid = this.tid(tenantId);
-    const [existing] = await this.db.query(
-      `SELECT user_id FROM users WHERE tenant_id = $1 AND user_id = $2`,
+    const [existing] = await this.db.query<
+      Array<{ user_id: string; onboarding_status: string | null }>
+    >(
+      `SELECT user_id, onboarding_status
+       FROM users WHERE tenant_id = $1 AND user_id = $2`,
       [tid, userId],
     );
     if (!existing) throw new NotFoundException('User not found');
@@ -692,16 +695,31 @@ export class AdminControlService {
       throw new BadRequestException('Password must be at least 8 characters');
     }
     const hash = await bcrypt.hash(temp, 10);
+    const completedOnboarding = ['COMPLETED', 'ACTIVE'].includes(
+      String(existing.onboarding_status ?? '').toUpperCase(),
+    );
     await this.db.query(
       `UPDATE users
        SET password_hash = $1,
-           onboarding_status = 'PENDING_PASSWORD_RESET',
+           onboarding_status = CASE
+             WHEN $4::boolean THEN onboarding_status
+             ELSE 'PENDING_PASSWORD_RESET'
+           END,
+           account_status = CASE
+             WHEN $4::boolean THEN 'PASSWORD_RESET_REQUIRED'
+             ELSE COALESCE(NULLIF(account_status, ''), 'ACTIVE')
+           END,
            updated_at = NOW()
        WHERE tenant_id = $2 AND user_id = $3`,
-      [hash, tid, userId],
+      [hash, tid, userId, completedOnboarding],
     );
     await this.writeAudit(tid, actorId, 'RESET_PASSWORD', 'user', userId);
-    return { user_id: userId, temporary_password: temp };
+    return {
+      user_id: userId,
+      temporary_password: temp,
+      onboarding_preserved: completedOnboarding,
+      password_reset_required: true,
+    };
   }
 
   async exportUsers(tenantId: string, role?: string) {

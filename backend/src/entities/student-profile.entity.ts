@@ -20,6 +20,16 @@ export class StudentProfile extends BaseSoftDeleteEntity {
   @Column({ length: 50, nullable: true })
   enrollment_no: string;
 
+  /**
+   * Stable university-issued student identifier used for password login.
+   *
+   * This is deliberately separate from enrollment/admission numbers: those
+   * fields have legacy meanings in different integrations, while the login
+   * identifier is an explicit, tenant-scoped authentication alias.
+   */
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  student_login_id: string | null;
+
   /** Permanent registration number — assigned once at admission. */
   @Column({ type: 'varchar', length: 50, nullable: true })
   prn_number: string | null;

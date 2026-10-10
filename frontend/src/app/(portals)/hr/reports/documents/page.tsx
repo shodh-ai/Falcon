@@ -100,7 +100,7 @@ export default function HrDocumentExportPage() {
         description="Filter employees by department and document type, then generate a secure ZIP archive asynchronously."
       />
 
-      <Card className="max-w-xl">
+      <Card className="w-full">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Archive className="h-5 w-5 text-sgvu-gold" />

@@ -25,6 +25,7 @@ import { BelongsToModule } from '../../module-control/module-control.decorators'
 import { ObjectStorageService } from '../../storage/object-storage.service';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
 import { StudentOnboardingService } from './student-onboarding.service';
+import { TenantService } from '../../tenant/tenant.service';
 import {
   getRequiredDocTypes,
   STAFF_ONBOARDING_DOC_TYPES,
@@ -39,6 +40,30 @@ type AuthUser = {
   role_name?: string;
   dept_id?: number | null;
 };
+
+/**
+ * Explicitly set the response type for uploaded documents. Without this,
+ * Express may default to text/plain and browsers render PDF bytes as text
+ * instead of opening the document viewer.
+ */
+function documentContentType(filePath: string): string {
+  const extension = extname(filePath.split('?')[0] ?? '').toLowerCase();
+  switch (extension) {
+    case '.pdf':
+      return 'application/pdf';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    default:
+      return 'application/octet-stream';
+  }
+}
 
 function auditActor(req: {
   user: AuthUser;
@@ -434,6 +459,7 @@ export class StudentVerificationAdminController {
 
     if (this.objectStorage.isEnabled() && !filePath.startsWith('/')) {
       const stream = await this.objectStorage.getDownloadStream(filePath);
+      res.setHeader('Content-Type', documentContentType(filePath));
       res.setHeader(
         'Content-Disposition',
         `inline; filename="${basename(filePath)}"`,
@@ -446,6 +472,7 @@ export class StudentVerificationAdminController {
     if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
       throw new BadRequestException('File not found');
     }
+    res.setHeader('Content-Type', documentContentType(resolvedPath));
     res.setHeader(
       'Content-Disposition',
       `inline; filename="${basename(resolvedPath)}"`,
@@ -463,40 +490,86 @@ export class StaffVerificationController {
     private readonly onboarding: StudentOnboardingService,
     private readonly objectStorage: ObjectStorageService,
     private readonly enterpriseAudit: EnterpriseAuditService,
+    private readonly tenantService: TenantService,
   ) {}
 
-  private tenant(req: { user: AuthUser }) {
+  private isSuperAdmin(user: AuthUser) {
+    return [...(user.roles ?? []), user.role ?? ''].some(
+      (role) => String(role).trim().toLowerCase() === 'superadmin',
+    );
+  }
+
+  /**
+   * A global Super Admin may select the institution being reviewed. The
+   * header is only a selector: the active JWT role is still required and the
+   * tenant is resolved from the canonical tenant table. Other reviewers stay
+   * bound to the tenant in their token.
+   */
+  private async tenant(req: {
+    user: AuthUser;
+    headers?: Record<string, string | string[] | undefined>;
+  }) {
+    const requested = req.headers?.['x-tenant-subdomain'];
+    if (
+      this.isSuperAdmin(req.user) &&
+      typeof requested === 'string' &&
+      requested.trim()
+    ) {
+      const tenant = await this.tenantService.findBySubdomain(requested);
+      return tenant.tenant_id;
+    }
     return this.onboarding.resolveTenantId(req.user.tenant_id);
   }
 
+  private isGlobalQueueRequest(req: { user: AuthUser }) {
+    return this.isSuperAdmin(req.user);
+  }
+
   @Get('queue')
-  queue(@Req() req: { user: AuthUser }) {
+  async queue(
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
+  ) {
+    if (this.isGlobalQueueRequest(req)) {
+      return this.onboarding.getVerificationQueue('*', 'staff', req.user);
+    }
     return this.onboarding.getVerificationQueue(
-      this.tenant(req),
+      await this.tenant(req),
       'staff',
       req.user,
     );
   }
 
   @Get('audit/recent')
-  auditRecent(
-    @Req() req: { user: AuthUser },
+  async auditRecent(
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Query('module') module?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.enterpriseAudit.listForTenant(this.tenant(req), {
+    return this.enterpriseAudit.listForTenant(await this.tenant(req), {
       module: module ?? 'faculty_verifications',
       limit: limit ? Number(limit) : 50,
     });
   }
 
   @Get(':targetUserId')
-  detail(
-    @Req() req: { user: AuthUser },
+  async detail(
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
   ) {
     return this.onboarding.getVerificationDetail(
-      this.tenant(req),
+      await this.tenant(req),
       targetUserId,
       req.user,
       'staff',
@@ -504,7 +577,7 @@ export class StaffVerificationController {
   }
 
   @Post(':targetUserId/approve')
-  approve(
+  async approve(
     @Req()
     req: {
       user: AuthUser;
@@ -514,7 +587,7 @@ export class StaffVerificationController {
     @Param('targetUserId') targetUserId: string,
   ) {
     return this.onboarding.approve(
-      this.tenant(req),
+      await this.tenant(req),
       targetUserId,
       auditActor(req),
       req.user,
@@ -523,7 +596,7 @@ export class StaffVerificationController {
   }
 
   @Post(':targetUserId/reject')
-  reject(
+  async reject(
     @Req()
     req: {
       user: AuthUser;
@@ -534,7 +607,7 @@ export class StaffVerificationController {
     @Body() body: { remarks: string },
   ) {
     return this.onboarding.reject(
-      this.tenant(req),
+      await this.tenant(req),
       targetUserId,
       body.remarks,
       auditActor(req),
@@ -545,13 +618,17 @@ export class StaffVerificationController {
 
   @Get(':targetUserId/documents/:docType/preview')
   async previewDocument(
-    @Req() req: { user: AuthUser },
+    @Req()
+    req: {
+      user: AuthUser;
+      headers?: Record<string, string | string[] | undefined>;
+    },
     @Param('targetUserId') targetUserId: string,
     @Param('docType') docType: string,
     @Res() res: Response,
   ) {
     const filePath = await this.onboarding.getDocumentPath(
-      this.tenant(req),
+      await this.tenant(req),
       targetUserId,
       docType.toUpperCase().replace(/-/g, '_'),
       req.user,
@@ -561,6 +638,7 @@ export class StaffVerificationController {
     if (filePath.startsWith('http')) return res.redirect(filePath);
     if (this.objectStorage.isEnabled() && !filePath.startsWith('/')) {
       const stream = await this.objectStorage.getDownloadStream(filePath);
+      res.setHeader('Content-Type', documentContentType(filePath));
       res.setHeader(
         'Content-Disposition',
         `inline; filename="${basename(filePath)}"`,
@@ -573,6 +651,7 @@ export class StaffVerificationController {
     if (!resolvedPath.startsWith(uploadRoot) || !existsSync(resolvedPath)) {
       throw new BadRequestException('File not found');
     }
+    res.setHeader('Content-Type', documentContentType(resolvedPath));
     res.setHeader(
       'Content-Disposition',
       `inline; filename="${basename(resolvedPath)}"`,

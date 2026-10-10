@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import {
@@ -10,6 +10,7 @@ import {
   FacultyPageLoading,
   FacultyMetricChip,
   FacultyTabBar,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import { FacultyMaterialsTab } from '@/components/lms/FacultyMaterialsTab';
 import { FacultyAssignmentsTab } from '@/components/lms/FacultyAssignmentsTab';
@@ -17,15 +18,16 @@ import { FacultyAnnouncementsTab } from '@/components/lms/FacultyAnnouncementsTa
 import { LmsExtendedTabs } from '@/components/lms/LmsExtendedTabs';
 import { useAuthedApi } from '@/lib/api';
 import type { FacultyWorkspace } from '@/lib/api/lms';
-import { withFacultyDemoFallback } from '@/lib/faculty-demo-mode';
-import { facultyDemoCourseWorkspace } from '@/lib/mock/faculty-portal-demo';
 
 type WorkspaceTab = 'materials' | 'assignments' | 'announcements' | 'live';
 
 export default function FacultyCourseWorkspacePage() {
   const { courseId } = useParams<{ courseId: string }>();
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const workspacePrefix = pathname.startsWith('/hod/') ? '/hod/academics' : '/faculty';
   const [workspace, setWorkspace] = useState<FacultyWorkspace | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<WorkspaceTab>('materials');
 
@@ -39,21 +41,32 @@ export default function FacultyCourseWorkspacePage() {
 
   const load = useCallback(() => {
     if (!courseId) return;
+    setError(null);
+    setWorkspace(null);
     void api
-      .get<FacultyWorkspace>(`/api/academics/faculty/courses/${courseId}/workspace`)
-      .then((data) =>
-        setWorkspace(
-          withFacultyDemoFallback(data, facultyDemoCourseWorkspace(courseId), (v) => !v?.modules?.length),
-        ),
-      )
-      .catch(() =>
-        setWorkspace(withFacultyDemoFallback(null, facultyDemoCourseWorkspace(courseId))),
-      );
+      .get<FacultyWorkspace>(`/api/academics/faculty/courses/${encodeURIComponent(courseId)}/workspace`)
+      .then((data) => {
+        if (!data?.course || !Array.isArray(data.modules)) {
+          throw new Error('Course workspace API returned an invalid response');
+        }
+        setWorkspace(data);
+      })
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
   }, [api, courseId]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  if (error) {
+    return (
+      <FacultyPageShell>
+        <FacultyErrorBanner message={error} />
+      </FacultyPageShell>
+    );
+  }
 
   if (!workspace) {
     return <FacultyPageLoading label="Loading course workspace…" branded />;
@@ -79,7 +92,7 @@ export default function FacultyCourseWorkspacePage() {
         }
         actions={
           <Link
-            href="/faculty/courses"
+            href={`${workspacePrefix}/courses`}
             className="inline-flex items-center gap-1.5 text-sm font-medium text-sgvu-navy hover:underline"
           >
             <ArrowLeft className="h-4 w-4" />

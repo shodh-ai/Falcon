@@ -104,4 +104,14 @@ describe('Auth routing — post login', () => {
       }),
     ).toContain('/faculty');
   });
+
+  it('routes an already onboarded account with a forced password reset to step one only', () => {
+    expect(
+      getPostLoginPath({
+        role: 'HOD',
+        onboarding_status: 'COMPLETED',
+        password_reset_required: true,
+      }),
+    ).toBe('/hod/onboarding/step-1');
+  });
 });

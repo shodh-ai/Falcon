@@ -165,16 +165,21 @@ export class StudentOnboardingService {
 
     const tenant = this.resolveTenantId(tenantId);
     const [row] = await this.dataSource.query<
-      Array<{ password_hash: string | null; onboarding_status: string }>
+      Array<{
+        password_hash: string | null;
+        onboarding_status: string;
+        account_status: string | null;
+      }>
     >(
-      `SELECT password_hash, onboarding_status
+      `SELECT password_hash, onboarding_status, account_status
        FROM users
        WHERE user_id = $1 AND tenant_id = $2`,
       [userId, tenant],
     );
     if (!row?.password_hash)
       throw new UnauthorizedException('Invalid current password');
-    if (row.onboarding_status !== 'PENDING_PASSWORD_RESET') {
+    const adminResetRequired = row.account_status === 'PASSWORD_RESET_REQUIRED';
+    if (row.onboarding_status !== 'PENDING_PASSWORD_RESET' && !adminResetRequired) {
       throw new BadRequestException(
         'Password reset is not required at this stage',
       );
@@ -184,14 +189,39 @@ export class StudentOnboardingService {
     if (!valid) throw new UnauthorizedException('Invalid current password');
 
     const hash = await bcrypt.hash(newPassword, 10);
+    // A newly provisioned account is marked PASSWORD_RESET_REQUIRED before
+    // the student has completed the first-login wizard.  Treating that flag
+    // as a completed-user reset would preserve PENDING_PASSWORD_RESET and
+    // send the student straight back to step 1 after setting a password.
+    // Only preserve the existing onboarding state for an account that had
+    // already completed its wizard; first-login accounts must advance to
+    // profile/document setup and become active.
+    const currentOnboardingStatus = String(row.onboarding_status ?? '')
+      .trim()
+      .toUpperCase();
+    const isFirstLoginReset = currentOnboardingStatus === 'PENDING_PASSWORD_RESET';
+    const preserveOnboardingStatus = !isFirstLoginReset;
+    const nextOnboardingStatus = preserveOnboardingStatus
+      ? row.onboarding_status
+      : 'PENDING_DOCUMENTS';
+    const activateAfterReset = adminResetRequired || isFirstLoginReset;
+
     await this.dataSource.query(
       `UPDATE users
-       SET password_hash = $1, onboarding_status = 'PENDING_DOCUMENTS', updated_at = NOW()
+       SET password_hash = $1,
+           onboarding_status = $4,
+           account_status = CASE
+             WHEN $5::boolean THEN 'ACTIVE'
+             ELSE account_status
+           END,
+           updated_at = NOW()
        WHERE user_id = $2 AND tenant_id = $3`,
-      [hash, userId, tenant],
+      [hash, userId, tenant, nextOnboardingStatus, activateAfterReset],
     );
 
-    return { onboarding_status: 'PENDING_DOCUMENTS' };
+    return {
+      onboarding_status: nextOnboardingStatus,
+    };
   }
 
   async getStep2Profile(tenantId: string, userId: string) {
@@ -417,6 +447,9 @@ export class StudentOnboardingService {
     portalKind?: OnboardingPortalKind | 'all',
     actor?: ScopedAuthUser,
   ) {
+    if (tenantId === '*' && this.isSuperAdmin(actor)) {
+      return this.getVerificationQueueAcrossTenants(portalKind, actor);
+    }
     const tenant = this.resolveTenantId(tenantId);
     await this.onboardingVerificationNotify
       .syncPendingVerificationNotifications(tenant)
@@ -476,6 +509,80 @@ export class StudentOnboardingService {
     return !portalKind || portalKind === 'all'
       ? rows
       : rows.filter((row) => row.portal_kind === portalKind);
+  }
+
+  /**
+   * The platform Super Admin is allowed to review onboarding submissions
+   * across institutions.  Keep this explicit rather than treating a tenant
+   * header as authority: Campus Admins remain strictly tenant-scoped.
+   */
+  private async getVerificationQueueAcrossTenants(
+    portalKind?: OnboardingPortalKind | 'all',
+    actor?: ScopedAuthUser,
+  ) {
+    const campusIds = actor
+      ? await this.campusScope.resolveCampusIds(actor)
+      : null;
+    if (campusIds && !campusIds.length) return [];
+
+    const campusSql = campusIds
+      ? `AND EXISTS (
+           SELECT 1
+           FROM departments d
+           JOIN schools s ON s.school_id = d.school_id AND s.deleted_at IS NULL
+           WHERE d.dept_id = u.dept_id
+             AND d.deleted_at IS NULL
+             AND s.campus_id = ANY($1::int[])
+         )`
+      : '';
+
+    const rows = await this.dataSource.query<
+      Array<{
+        user_id: string;
+        name: string;
+        official_email: string;
+        onboarding_status: string;
+        role_name: string;
+        portal_kind: string;
+        submitted_at: string | null;
+        doc_count: string;
+        tenant_subdomain: string;
+        tenant_name: string;
+      }>
+    >(
+      `SELECT u.user_id, u.name, u.official_email, u.onboarding_status, r.role_name,
+              CASE
+                WHEN lower(r.role_name) IN ('faculty', 'hod', 'dean') THEN 'staff'
+                ELSE 'student'
+              END AS portal_kind,
+              GREATEST(
+                (SELECT MAX(d.uploaded_at) FROM student_onboarding_docs d WHERE d.student_user_id = u.user_id AND d.tenant_id = u.tenant_id),
+                (SELECT MAX(d.uploaded_at) FROM staff_onboarding_docs d WHERE d.staff_user_id = u.user_id AND d.tenant_id = u.tenant_id)
+              ) AS submitted_at,
+              (
+                COALESCE((SELECT COUNT(*) FROM student_onboarding_docs d WHERE d.student_user_id = u.user_id AND d.tenant_id = u.tenant_id), 0)
+                + COALESCE((SELECT COUNT(*) FROM staff_onboarding_docs d WHERE d.staff_user_id = u.user_id AND d.tenant_id = u.tenant_id), 0)
+              )::text AS doc_count,
+              t.subdomain AS tenant_subdomain,
+              t.name AS tenant_name
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       JOIN tenants t ON t.tenant_id = u.tenant_id AND t.is_active = true
+       WHERE u.onboarding_status = 'PENDING_ADMIN_APPROVAL'
+         ${campusSql}
+       ORDER BY submitted_at DESC NULLS LAST, t.name ASC, u.name ASC`,
+      campusIds ? [campusIds] : [],
+    );
+
+    return !portalKind || portalKind === 'all'
+      ? rows
+      : rows.filter((row) => row.portal_kind === portalKind);
+  }
+
+  private isSuperAdmin(actor?: ScopedAuthUser) {
+    return [...(actor?.roles ?? []), actor?.role ?? ''].some(
+      (role) => String(role).trim().toLowerCase() === 'superadmin',
+    );
   }
 
   private async assertVerificationKindAndDepartment(

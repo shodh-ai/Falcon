@@ -29,12 +29,15 @@ export function PortalOnboardingGuard({
   const applies = Boolean(activeConfig && activeConfig.portalPrefix === config.portalPrefix);
   const onboardingPrefix = `${config.portalPrefix}/onboarding`;
   const onOnboardingRoute = pathname.startsWith(onboardingPrefix);
+  const passwordResetRequired = applies && user?.password_reset_required === true;
   const requiredPath = applies
-    ? getOnboardingStepPath(config.portalPrefix, user?.onboarding_status, role)
+    ? passwordResetRequired
+      ? `${config.portalPrefix}/onboarding/step-1`
+      : getOnboardingStepPath(config.portalPrefix, user?.onboarding_status, role)
     : null;
   const mustRedirect = Boolean(requiredPath && pathname !== requiredPath);
   const leaveOnboarding =
-    applies && isFirstLoginOnboardingComplete(user?.onboarding_status, role) && onOnboardingRoute;
+    applies && !passwordResetRequired && isFirstLoginOnboardingComplete(user?.onboarding_status, role) && onOnboardingRoute;
 
   useEffect(() => {
     if (isLoading || !user || !applies || redirectingRef.current) return;
@@ -72,7 +75,7 @@ export function PortalOnboardingGuard({
     return <FalconLoader label="Redirecting to onboarding…" className="min-h-screen" />;
   }
 
-  if (applies && needsPortalOnboarding(user.onboarding_status, role) && !onOnboardingRoute) {
+  if (applies && (passwordResetRequired || needsPortalOnboarding(user.onboarding_status, role)) && !onOnboardingRoute) {
     return <FalconLoader label="Redirecting to onboarding…" className="min-h-screen" />;
   }
 

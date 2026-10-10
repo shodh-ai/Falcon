@@ -64,6 +64,7 @@ const FACULTY_COURSE_ACCESS_SQL = `(
 /** Canonical roll-number expression — semester roll on enrollment, then permanent PRN. */
 const ROLL_NUMBER_SQL = `COALESCE(
   NULLIF(BTRIM(e.roll_number), ''),
+  NULLIF(BTRIM(sp.student_login_id), ''),
   NULLIF(BTRIM(sp.prn_number), ''),
   NULLIF(BTRIM(sp.enrollment_no), ''),
   NULLIF(BTRIM(sp.enrollment_number), ''),
@@ -84,9 +85,83 @@ export class FacultyWorkspacesService {
     facultyUserId: string,
     tenantId: string,
     deptId?: number | null,
+    hodScope = false,
   ) {
-    const fromAllocations = await this.dataSource.query(
-      `SELECT
+    const hodDepartmentIds = hodScope
+      ? await this.resolveHodDepartmentIds(facultyUserId)
+      : [];
+    if (hodDepartmentIds.length) {
+      return this.dataSource.query(
+        `WITH scoped_courses AS (
+           SELECT DISTINCT
+             a.allocation_id,
+             a.program_name,
+             a.semester,
+             a.academic_year,
+             c.course_id,
+             c.course_code,
+             c.course_name,
+             c.credits
+           FROM academic_course_allocations a
+           INNER JOIN academic_courses c
+             ON c.course_id = a.course_id AND c.tenant_id = a.tenant_id
+           LEFT JOIN users assigned ON assigned.user_id = a.faculty_user_id
+           WHERE a.tenant_id = $1
+             AND a.status = 'ACTIVE'
+             AND a.course_id IS NOT NULL
+             AND (
+               assigned.dept_id = ANY($2::int[])
+               OR EXISTS (
+                 SELECT 1
+                 FROM student_course_enrollments e
+                 JOIN users student ON student.user_id = e.student_user_id
+                 WHERE e.tenant_id = a.tenant_id
+                   AND e.course_id = a.course_id
+                   AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                   AND student.dept_id = ANY($2::int[])
+               )
+             )
+             AND ($3::int IS NULL OR assigned.dept_id = $3 OR EXISTS (
+               SELECT 1
+               FROM student_course_enrollments e2
+               JOIN users student2 ON student2.user_id = e2.student_user_id
+               WHERE e2.tenant_id = a.tenant_id AND e2.course_id = a.course_id
+                 AND e2.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                 AND student2.dept_id = $3
+             ))
+           UNION
+           SELECT DISTINCT
+             NULL::uuid AS allocation_id,
+             NULL::varchar AS program_name,
+             NULL::varchar AS semester,
+             NULL::varchar AS academic_year,
+             c.course_id,
+             c.course_code,
+             c.course_name,
+             c.credits
+           FROM academic_courses c
+           WHERE c.tenant_id = $1
+             AND EXISTS (
+               SELECT 1
+               FROM student_course_enrollments e
+               JOIN users student ON student.user_id = e.student_user_id
+               WHERE e.tenant_id = c.tenant_id
+                 AND e.course_id = c.course_id
+                 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                 AND student.dept_id = ANY($2::int[])
+                 AND ($3::int IS NULL OR student.dept_id = $3)
+             )
+         )
+         SELECT * FROM scoped_courses
+         ORDER BY academic_year DESC, program_name NULLS LAST,
+                  semester NULLS LAST, course_code`,
+        [tenantId, hodDepartmentIds, deptId ?? null],
+      );
+    }
+
+    const fromAllocations =
+      (await this.dataSource.query(
+        `SELECT
          a.allocation_id,
          a.program_name,
          a.semester,
@@ -102,12 +177,13 @@ export class FacultyWorkspacesService {
          AND a.course_id IS NOT NULL
          AND ($3::int IS NULL OR COALESCE(p.dept_id, code_dept.dept_id, u.dept_id) = $3)
        ORDER BY a.academic_year DESC, a.program_name NULLS LAST, a.semester NULLS LAST, c.course_code`,
-      [tenantId, facultyUserId, deptId ?? null],
-    );
+        [tenantId, facultyUserId, deptId ?? null],
+      )) ?? [];
     if (fromAllocations.length) return fromAllocations;
 
-    const fromTimetable = await this.dataSource.query(
-      `SELECT DISTINCT
+    const fromTimetable =
+      (await this.dataSource.query(
+        `SELECT DISTINCT
          NULL::uuid AS allocation_id,
          NULL::text AS program_name,
          NULL::text AS semester,
@@ -122,11 +198,25 @@ export class FacultyWorkspacesService {
          AND t.faculty_user_id = $2
          AND t.deleted_at IS NULL
        ORDER BY c.course_code`,
-      [tenantId, facultyUserId],
-    );
+        [tenantId, facultyUserId],
+      )) ?? [];
     if (fromTimetable.length) return fromTimetable;
 
     return [];
+  }
+
+  private async resolveHodDepartmentIds(
+    facultyUserId: string,
+  ): Promise<number[]> {
+    const rows = await this.dataSource.query<Array<{ dept_id: number }>>(
+      `SELECT dept_id FROM departments WHERE hod_user_id = $1 AND deleted_at IS NULL
+       UNION
+       SELECT u.dept_id FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE u.user_id = $1 AND u.dept_id IS NOT NULL AND lower(r.role_name) = 'hod'`,
+      [facultyUserId],
+    );
+    return [...new Set(rows.map((row) => Number(row.dept_id)).filter(Boolean))];
   }
 
   async getFacultyScheduleData(
@@ -134,47 +224,113 @@ export class FacultyWorkspacesService {
     tenantId: string,
     deptId?: number | null,
   ) {
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
     // ALLOCATION_WITH_DEPT_FROM already LEFT JOINs academic_courses AS c —
     // do not join `c` again (Postgres: table name "c" specified more than once).
-    const allocations = await this.dataSource.query(
-      `SELECT
-         a.allocation_id,
-         c.course_id,
-         c.course_code,
-         c.course_name,
-         u.user_id AS faculty_user_id,
-         u.name AS faculty_name
-       ${ALLOCATION_WITH_DEPT_FROM}
-       WHERE a.tenant_id = $1
-         AND a.faculty_user_id = $2
-         AND a.status = 'ACTIVE'
-         AND a.course_id IS NOT NULL
-         AND c.course_id IS NOT NULL
-         AND ($3::int IS NULL OR COALESCE(p.dept_id, code_dept.dept_id, u.dept_id) = $3)`,
-      [tenantId, facultyUserId, deptId ?? null],
-    );
+    const allocations = hodDepartmentIds.length
+      ? await this.dataSource.query(
+          `SELECT DISTINCT
+             a.allocation_id,
+             c.course_id,
+             c.course_code,
+             c.course_name,
+             u.user_id AS faculty_user_id,
+             u.name AS faculty_name
+           FROM academic_course_allocations a
+           INNER JOIN users u ON u.user_id = a.faculty_user_id
+           INNER JOIN academic_courses c ON c.course_id = a.course_id AND c.tenant_id = a.tenant_id
+           WHERE a.tenant_id = $1
+             AND a.status = 'ACTIVE'
+             AND a.course_id IS NOT NULL
+             AND (
+               u.dept_id = ANY($2::int[])
+               OR EXISTS (
+                 SELECT 1
+                 FROM student_course_enrollments e
+                 JOIN users student ON student.user_id = e.student_user_id
+                 WHERE e.tenant_id = a.tenant_id
+                   AND e.course_id = a.course_id
+                   AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                   AND student.dept_id = ANY($2::int[])
+               )
+             )
+             AND ($3::int IS NULL OR u.dept_id = $3)`,
+          [tenantId, hodDepartmentIds, deptId ?? null],
+        )
+      : await this.dataSource.query(
+          `SELECT
+             a.allocation_id,
+             c.course_id,
+             c.course_code,
+             c.course_name,
+             u.user_id AS faculty_user_id,
+             u.name AS faculty_name
+           ${ALLOCATION_WITH_DEPT_FROM}
+           WHERE a.tenant_id = $1
+             AND a.faculty_user_id = $2
+             AND a.status = 'ACTIVE'
+             AND a.course_id IS NOT NULL
+             AND c.course_id IS NOT NULL
+             AND ($3::int IS NULL OR COALESCE(p.dept_id, code_dept.dept_id, u.dept_id) = $3)`,
+          [tenantId, facultyUserId, deptId ?? null],
+        );
 
-    const timetables = await this.dataSource.query(
-      `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
-       SELECT
-         t.timetable_id,
-         t.course_id,
-         $2::uuid AS faculty_user_id,
-         c.course_code,
-         c.course_name,
-         u.name AS faculty_name,
-         t.day_of_week,
-         t.start_time,
-         t.end_time,
-         t.room,
-         t.section
-       FROM academic_timetables t
-       INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
-       INNER JOIN academic_courses c ON c.course_id = t.course_id
-       LEFT JOIN users u ON u.user_id = $2
-       WHERE t.tenant_id = $1 AND t.deleted_at IS NULL`,
-      [tenantId, facultyUserId, deptId ?? null],
-    );
+    const timetables = hodDepartmentIds.length
+      ? await this.dataSource.query(
+          `SELECT
+             t.timetable_id,
+             t.course_id,
+             t.faculty_user_id,
+             c.course_code,
+             c.course_name,
+             u.name AS faculty_name,
+             t.day_of_week,
+             t.start_time,
+             t.end_time,
+             t.room,
+             t.section
+           FROM academic_timetables t
+           INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+           LEFT JOIN users u ON u.user_id = t.faculty_user_id
+           WHERE t.tenant_id = $1
+             AND t.deleted_at IS NULL
+             AND (
+               u.dept_id = ANY($2::int[])
+               OR EXISTS (
+                 SELECT 1
+                 FROM student_course_enrollments e
+                 JOIN users student ON student.user_id = e.student_user_id
+                 WHERE e.tenant_id = t.tenant_id
+                   AND e.course_id = t.course_id
+                   AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                   AND student.dept_id = ANY($2::int[])
+               )
+             )
+             AND ($3::int IS NULL OR u.dept_id = $3)
+           ORDER BY t.day_of_week, t.start_time, c.course_code`,
+          [tenantId, hodDepartmentIds, deptId ?? null],
+        )
+      : await this.dataSource.query(
+          `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
+           SELECT
+             t.timetable_id,
+             t.course_id,
+             $2::uuid AS faculty_user_id,
+             c.course_code,
+             c.course_name,
+             u.name AS faculty_name,
+             t.day_of_week,
+             t.start_time,
+             t.end_time,
+             t.room,
+             t.section
+           FROM academic_timetables t
+           INNER JOIN faculty_courses fc ON fc.course_id = t.course_id
+           INNER JOIN academic_courses c ON c.course_id = t.course_id
+           LEFT JOIN users u ON u.user_id = $2
+           WHERE t.tenant_id = $1 AND t.deleted_at IS NULL`,
+          [tenantId, facultyUserId, deptId ?? null],
+        );
 
     const faculty = await this.dataSource.query(
       `SELECT user_id, name FROM users WHERE user_id = $1`,
@@ -189,6 +345,9 @@ export class FacultyWorkspacesService {
     tenantId: string,
     dto: { slots: Array<any> },
   ) {
+    if (!Array.isArray(dto?.slots)) {
+      throw new BadRequestException('Timetable slots must be an array');
+    }
     const isUuid = (value: unknown) =>
       typeof value === 'string' &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -197,6 +356,7 @@ export class FacultyWorkspacesService {
 
     const normalizeTime = (value: unknown) => {
       const raw = String(value ?? '').trim();
+      if (!/^\d{1,2}:\d{2}(?::\d{2})?$/.test(raw)) return raw;
       const parts = raw.split(':');
       if (parts.length < 2) return raw;
       const hour = (parts[0] ?? '00').padStart(2, '0');
@@ -205,26 +365,53 @@ export class FacultyWorkspacesService {
       return `${hour}:${minute}:${second}`;
     };
 
+    const timeToMinutes = (value: string) => {
+      const match = /^(\d{2}):(\d{2}):(\d{2})$/.exec(value);
+      if (!match) return Number.NaN;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      const second = Number(match[3]);
+      if (hour > 23 || minute > 59 || second > 59) return Number.NaN;
+      return hour * 3600 + minute * 60 + second;
+    };
+
+    const overlaps = (left: any, right: any) =>
+      left.day_of_week === right.day_of_week &&
+      timeToMinutes(left.start_time) < timeToMinutes(right.end_time) &&
+      timeToMinutes(left.end_time) > timeToMinutes(right.start_time);
+
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
 
     try {
-      const deduped = new Map<string, any>();
-      for (const slot of dto.slots ?? []) {
-        if (!slot?.course_id) continue;
-        // Keep one preferred slot per course (matches faculty schedule UI).
-        deduped.set(String(slot.course_id), {
+      await runner.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [`timetable:${tenantId}`],
+      );
+      const slots = dto.slots.map((slot) => {
+        if (!slot || typeof slot.course_id !== 'string') {
+          throw new BadRequestException(
+            'Every slot requires a valid course ID',
+          );
+        }
+        // Faculty identity comes from authentication, never from the payload.
+        if (slot.faculty_user_id && slot.faculty_user_id !== facultyUserId) {
+          throw new BadRequestException(
+            'Cannot schedule another faculty member',
+          );
+        }
+        return {
           ...slot,
+          faculty_user_id: facultyUserId,
           course_id: String(slot.course_id).trim(),
           day_of_week: Number(slot.day_of_week),
           start_time: normalizeTime(slot.start_time),
           end_time: normalizeTime(slot.end_time),
           room: slot.room ? String(slot.room).trim() : null,
           section: slot.section ? String(slot.section).trim() || 'A' : 'A',
-        });
-      }
-      const slots = [...deduped.values()];
+        };
+      });
 
       for (const slot of slots) {
         if (!isUuid(slot.course_id)) {
@@ -244,14 +431,43 @@ export class FacultyWorkspacesService {
         if (!slot.start_time || !slot.end_time) {
           throw new BadRequestException('Start time and end time are required');
         }
-        if (slot.start_time >= slot.end_time) {
+        const startMinutes = timeToMinutes(slot.start_time);
+        const endMinutes = timeToMinutes(slot.end_time);
+        if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) {
+          throw new BadRequestException(
+            `Invalid time for course ${slot.course_id}; use HH:MM or HH:MM:SS`,
+          );
+        }
+        if (startMinutes >= endMinutes) {
           throw new BadRequestException('Start time must be before end time');
+        }
+      }
+
+      for (let index = 0; index < slots.length; index += 1) {
+        const slot = slots[index];
+        for (
+          let otherIndex = index + 1;
+          otherIndex < slots.length;
+          otherIndex += 1
+        ) {
+          const other = slots[otherIndex];
+          if (overlaps(slot, other)) {
+            const sameFaculty =
+              !slot.faculty_user_id ||
+              !other.faculty_user_id ||
+              slot.faculty_user_id === other.faculty_user_id;
+            if (sameFaculty) {
+              throw new BadRequestException(
+                `Slot conflict detected on day ${slot.day_of_week}: ${slot.start_time.slice(0, 5)} - ${slot.end_time.slice(0, 5)}`,
+              );
+            }
+          }
         }
       }
 
       const facultySlotKeys = new Set<string>();
       for (const slot of slots) {
-        const key = `${slot.day_of_week}|${slot.start_time}|${slot.end_time}`;
+        const key = `${slot.day_of_week}|${slot.start_time}|${slot.end_time}|${slot.faculty_user_id ?? facultyUserId}`;
         if (facultySlotKeys.has(key)) {
           throw new BadRequestException(
             `You cannot teach two classes at ${slot.start_time} - ${slot.end_time} on day ${slot.day_of_week}`,
@@ -259,16 +475,6 @@ export class FacultyWorkspacesService {
         }
         facultySlotKeys.add(key);
       }
-
-      // Soft-delete existing slots (zero-deletion policy + safer with FKs).
-      await runner.query(
-        `UPDATE academic_timetables
-         SET deleted_at = NOW()
-         WHERE tenant_id = $1
-           AND faculty_user_id = $2
-           AND deleted_at IS NULL`,
-        [tenantId, facultyUserId],
-      );
 
       for (const slot of slots) {
         // Ensure the course exists and is allocated to this faculty (or already taught by them).
@@ -293,6 +499,7 @@ export class FacultyWorkspacesService {
                  WHERE t.tenant_id = c.tenant_id
                    AND t.course_id = c.course_id
                    AND t.faculty_user_id = $3
+                   AND t.deleted_at IS NULL
                )
              )
            LIMIT 1`,
@@ -303,7 +510,17 @@ export class FacultyWorkspacesService {
             `Course ${slot.course_id} is not allocated to you, so it cannot be scheduled.`,
           );
         }
+      }
 
+      // Validate permission before archiving current rows; never use historical
+      // teaching assignments to authorize a new schedule.
+      await runner.query(
+        `UPDATE academic_timetables SET deleted_at = NOW()
+         WHERE tenant_id = $1 AND faculty_user_id = $2 AND deleted_at IS NULL`,
+        [tenantId, facultyUserId],
+      );
+
+      for (const slot of slots) {
         const params: any[] = [
           tenantId,
           slot.day_of_week,
@@ -323,6 +540,7 @@ export class FacultyWorkspacesService {
             AND t.end_time > $3
             AND (
               t.faculty_user_id = $5
+              OR (t.course_id = $6::uuid AND t.section = $7)
               OR EXISTS (
                 SELECT 1
                 FROM academic_course_allocations alloc_existing
@@ -387,6 +605,20 @@ export class FacultyWorkspacesService {
           'Could not save timetable. Use allocated live courses (not demo sample IDs) and resolve any conflicts.',
         );
       }
+      const errorCode =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code ?? '')
+          : '';
+      if (errorCode === '23P01' || errorCode === '23505') {
+        throw new BadRequestException(
+          'Timetable slot conflicts with another saved slot. Refresh the schedule and choose another time.',
+        );
+      }
+      if (errorCode === '42703' || errorCode === '42P01') {
+        throw new BadRequestException(
+          'Timetable storage is not migrated. Run the latest database migrations and retry.',
+        );
+      }
       throw error;
     } finally {
       await runner.release();
@@ -439,6 +671,40 @@ export class FacultyWorkspacesService {
     tenantId: string,
     deptId?: number | null,
   ) {
+    const hodDepartmentIds = await this.resolveHodDepartmentIds(facultyUserId);
+    if (hodDepartmentIds.length) {
+      return this.dataSource.query(
+        `SELECT
+           t.timetable_id,
+           t.day_of_week,
+           t.start_time,
+           t.end_time,
+           t.room,
+           c.course_id,
+           c.course_code,
+           c.course_name
+         FROM academic_timetables t
+         INNER JOIN academic_courses c ON c.course_id = t.course_id AND c.tenant_id = t.tenant_id
+         LEFT JOIN users u ON u.user_id = t.faculty_user_id
+         WHERE t.tenant_id = $1
+           AND t.deleted_at IS NULL
+           AND (
+             u.dept_id = ANY($2::int[])
+             OR EXISTS (
+               SELECT 1
+               FROM student_course_enrollments e
+               JOIN users student ON student.user_id = e.student_user_id
+               WHERE e.tenant_id = t.tenant_id
+                 AND e.course_id = t.course_id
+                 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
+                 AND student.dept_id = ANY($2::int[])
+             )
+           )
+           AND ($3::int IS NULL OR u.dept_id = $3)
+         ORDER BY t.day_of_week, t.start_time, c.course_code`,
+        [tenantId, hodDepartmentIds, deptId ?? null],
+      );
+    }
     return this.dataSource.query(
       `WITH ${this.teachingDepartments.facultyCoursesCte(3)}
        SELECT
@@ -2264,7 +2530,7 @@ export class FacultyWorkspacesService {
        FROM student_course_enrollments e
        INNER JOIN users u ON u.user_id = e.student_user_id
        INNER JOIN academic_courses c ON c.course_id = e.course_id
-       WHERE e.tenant_id = $1 AND e.status = 'ENROLLED'
+       WHERE e.tenant_id = $1 AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
          AND ${FACULTY_COURSE_ACCESS_SQL}
          ${courseFilter}
        ORDER BY e.attendance_percent ASC, internal_avg_percent ASC`,
@@ -2339,7 +2605,7 @@ export class FacultyWorkspacesService {
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
          AND e.course_id = $3
          AND ${FACULTY_COURSE_ACCESS_SQL}
          ${searchFilter}
@@ -2408,7 +2674,7 @@ export class FacultyWorkspacesService {
        LEFT JOIN student_profiles sp ON sp.user_id = u.user_id
        LEFT JOIN departments d ON d.dept_id = u.dept_id
        WHERE e.tenant_id = $1
-         AND e.status = 'ENROLLED'
+         AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
          AND u.dept_id = $2
          AND (
            lower(u.name) LIKE $3
@@ -2476,7 +2742,7 @@ export class FacultyWorkspacesService {
          ON e.tenant_id = student.tenant_id
         AND e.student_user_id = student.user_id
         AND e.course_id = $4
-        AND e.status = 'ENROLLED'
+        AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
        WHERE faculty.tenant_id = $1
          AND faculty.user_id = $2
          AND faculty.dept_id IS NOT NULL
@@ -2518,7 +2784,7 @@ export class FacultyWorkspacesService {
            WHERE e.tenant_id = $1
              AND e.course_id = $2
              AND e.student_user_id = $3
-             AND e.status = 'ENROLLED'
+             AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
            LIMIT 1`,
         [tenantId, courseId, studentUserId],
       ),
@@ -2537,7 +2803,7 @@ export class FacultyWorkspacesService {
               AND m.status = 'PUBLISHED'
              WHERE e.tenant_id = $1
                AND e.course_id = $2
-               AND e.status = 'ENROLLED'
+               AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
              GROUP BY e.student_user_id
            ),
            ranked AS (
@@ -2555,7 +2821,7 @@ export class FacultyWorkspacesService {
                     WHERE e.tenant_id = $1
                       AND e.course_id = $2
                       AND e.student_user_id = $3
-                      AND e.status = 'ENROLLED'
+                      AND e.status IN ('ENROLLED', 'COMPLETED', 'FAILED')
                     LIMIT 1
                   ) AS attendance_percent,
                   r.class_average_percent,

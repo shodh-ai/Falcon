@@ -180,7 +180,12 @@ export class UosGovernanceController {
       reason: string;
     },
   ) {
-    return this.uos.createGradeChange(this.tenant(req), req.user.user_id, body);
+    return this.uos.createGradeChange(
+      this.tenant(req),
+      req.user.user_id,
+      body,
+      this.userRoles(req.user),
+    );
   }
 
   @Post('sis/grade-changes/:id/advance')

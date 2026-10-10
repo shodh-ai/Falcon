@@ -620,7 +620,7 @@ export class HrTeamService {
 
     const rows = await this.dataSource.query(
       `SELECT r.leave_id, r.request_type, r.leave_type, r.start_date, r.end_date,
-              r.regularization_date, r.reason, r.status, r.applied_at,
+              r.start_time, r.end_time, r.regularization_date, r.reason, r.status, r.applied_at,
               r.supporting_doc_urls,
               u.name AS employee_name, u.official_email AS employee_email,
               p.employee_id
@@ -647,6 +647,8 @@ export class HrTeamService {
         leave_type: r.leave_type,
         start_date: r.start_date,
         end_date: r.end_date,
+        start_time: r.start_time,
+        end_time: r.end_time,
         regularization_date: r.regularization_date,
         applied_date: r.start_date ?? r.regularization_date,
         raised_on: r.applied_at,

@@ -610,7 +610,14 @@ export class StudentPortalService {
         `SELECT c.course_code,
               c.course_name,
               e.semester,
-              e.attendance_percent,
+              CASE
+                WHEN COALESCE(stats.total_classes, 0) > 0 THEN ROUND(
+                  (COALESCE(stats.present_count, 0)::numeric /
+                    NULLIF(stats.total_classes, 0)) * 100,
+                  2
+                )
+                ELSE e.attendance_percent
+              END AS attendance_percent,
               e.status,
               COALESCE(stats.present_count, 0)::int AS present_count,
               COALESCE(stats.absent_count, 0)::int AS absent_count,
@@ -661,18 +668,37 @@ export class StudentPortalService {
       ),
     ]);
 
+    const markedRows = subjectWise.filter(
+      (row: { total_classes: number }) => Number(row.total_classes) > 0,
+    );
     const avg =
-      subjectWise.length > 0
+      markedRows.length > 0
         ? Number(
             (
-              subjectWise.reduce(
-                (s: number, r: { attendance_percent: string }) =>
-                  s + Number(r.attendance_percent),
+              (markedRows.reduce(
+                (s: number, r: { present_count: number }) =>
+                  s + Number(r.present_count ?? 0),
                 0,
-              ) / subjectWise.length
+              ) /
+                markedRows.reduce(
+                  (s: number, r: { total_classes: number }) =>
+                    s + Number(r.total_classes ?? 0),
+                  0,
+                )) *
+              100
             ).toFixed(2),
           )
-        : 0;
+        : subjectWise.length > 0
+          ? Number(
+              (
+                subjectWise.reduce(
+                  (s: number, r: { attendance_percent: string }) =>
+                    s + Number(r.attendance_percent ?? 0),
+                  0,
+                ) / subjectWise.length
+              ).toFixed(2),
+            )
+          : 0;
 
     const semesterMeta = semesterRows[0] as
       | {

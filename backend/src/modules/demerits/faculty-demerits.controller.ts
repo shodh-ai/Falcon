@@ -5,7 +5,12 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { DemeritsService } from './demerits.service';
 import { SubmitDemeritIncidentDto } from './dto/demerits.dto';
 
-type AuthUser = { user_id: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  tenant_id?: string;
+  role?: string;
+  roles?: string[];
+};
 
 @Controller('api/demerits')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -22,19 +27,33 @@ export class FacultyDemeritsController {
       this.tenant(req),
       req.user.user_id,
       dto,
+      this.isHod(req.user),
     );
   }
 
   @Get('faculty/history')
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   history(@Req() req: { user: AuthUser }) {
-    return this.demerits.listFacultyHistory(this.tenant(req), req.user.user_id);
+    return this.demerits.listFacultyHistory(
+      this.tenant(req),
+      req.user.user_id,
+      this.isHod(req.user),
+    );
   }
 
   @Get('form-options')
   @Roles('Faculty', 'HOD', 'Dean', 'DC_MEMBER', 'SuperAdmin')
   formOptions(@Req() req: { user: AuthUser }) {
-    return this.demerits.getFormOptions(this.tenant(req), req.user.user_id);
+    return this.demerits.getFormOptions(
+      this.tenant(req),
+      req.user.user_id,
+      this.isHod(req.user),
+    );
+  }
+
+  private isHod(user: AuthUser) {
+    return [ ...(user.roles ?? []), user.role ?? '' ]
+      .some((role) => String(role).toLowerCase() === 'hod');
   }
 
   private tenant(req: { user: AuthUser }) {

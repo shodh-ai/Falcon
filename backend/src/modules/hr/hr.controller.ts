@@ -2129,6 +2129,8 @@ export class HrController {
       leave_type?: string;
       start_date?: string;
       end_date?: string;
+      start_time?: string;
+      end_time?: string;
       regularization_date?: string;
       missed_punch_type?: 'IN' | 'OUT' | 'BOTH';
       reason?: string;

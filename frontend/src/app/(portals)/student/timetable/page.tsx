@@ -249,12 +249,15 @@ export default function TimetablePage() {
   const slots = data?.slots ?? [];
 
   const slotGrid = useMemo(() => {
-    const map = new Map<string, TimetableSlot>();
+    const map = new Map<string, TimetableSlot[]>();
     for (const slot of slots) {
       const key = `${slot.day_of_week}|${slotStartHour(slot.start_time)}`;
-      if (!map.has(key)) {
-        map.set(key, slot);
-      }
+      const entries = map.get(key) ?? [];
+      entries.push(slot);
+      map.set(key, entries);
+    }
+    for (const entries of map.values()) {
+      entries.sort((a, b) => a.start_time.localeCompare(b.start_time));
     }
     return map;
   }, [slots]);
@@ -362,14 +365,18 @@ export default function TimetablePage() {
                             );
                           }
 
-                          const slot = slotGrid.get(`${day.day_of_week}|${col.hour}`);
+                          const cellSlots = slotGrid.get(`${day.day_of_week}|${col.hour}`) ?? [];
                           return (
                             <td
                               key={`${day.date}-${col.hour}`}
                               className="relative h-[6.25rem] min-w-[120px] border-b border-r border-sgvu-navy/10 align-top p-1.5"
                             >
-                              {slot ? (
-                                <SlotButton slot={slot} onSelect={setSelectedSlot} />
+                              {cellSlots.length > 0 ? (
+                                <div className="flex h-full flex-col gap-1">
+                                  {cellSlots.map((slot) => (
+                                    <SlotButton key={slot.timetable_id} slot={slot} onSelect={setSelectedSlot} />
+                                  ))}
+                                </div>
                               ) : null}
                             </td>
                           );
@@ -527,4 +534,3 @@ export default function TimetablePage() {
     </StudentPageShell>
   );
 }
-

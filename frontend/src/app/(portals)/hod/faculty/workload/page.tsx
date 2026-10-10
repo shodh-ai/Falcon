@@ -30,6 +30,7 @@ type Row = {
   hours_per_week: number;
   assigned_load_credits: number;
   assigned_load_hours: number;
+  scheduled_minutes: number;
   scheduled_hours: number;
   course_count: number;
   unscheduled_course_count: number;
@@ -51,6 +52,16 @@ function currentAcademicYear() {
   const year = now.getUTCFullYear();
   const start = now.getUTCMonth() >= 6 ? year : year - 1;
   return `${start}-${start + 1}`;
+}
+
+/** Render the exact timetable duration without rounding 40-minute periods to decimal hours. */
+function formatDuration(minutes: number | undefined, fallbackHours = 0) {
+  const totalMinutes = Number.isFinite(minutes)
+    ? Math.max(0, Math.round(Number(minutes)))
+    : Math.max(0, Math.round(Number(fallbackHours) * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const remainder = totalMinutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
 }
 
 function StatusTag({ status }: { status: Row['workload_status'] }) {
@@ -142,10 +153,18 @@ export default function HodFacultyWorkloadPage() {
     const noLoad = rows.filter((r) => r.workload_status === 'NO_TEACHING_LOAD').length;
     const noAllocation = rows.filter((r) => r.workload_status === 'NO_ACTIVE_ALLOCATION').length;
     const scheduleMissing = rows.filter((r) => r.workload_status === 'SCHEDULE_MISSING').length;
-    const avg =
+    const avgMinutes =
       rows.length > 0
-        ? (rows.reduce((s, r) => s + r.scheduled_hours, 0) / rows.length).toFixed(1)
-        : '0';
+        ? rows.reduce(
+            (s, r) =>
+              s +
+              (Number.isFinite(r.scheduled_minutes)
+                ? r.scheduled_minutes
+                : r.scheduled_hours * 60),
+            0,
+          ) / rows.length
+        : 0;
+    const avg = formatDuration(avgMinutes);
     return { total: rows.length, overloaded, under, noLoad, noAllocation, scheduleMissing, avg };
   }, [rows]);
 
@@ -154,6 +173,7 @@ export default function HodFacultyWorkloadPage() {
       name: r.name.split(' ')[0], // Use first name for space optimization
       fullName: r.name,
       hours: r.scheduled_hours,
+      scheduledMinutes: r.scheduled_minutes,
       scheduledHours: r.scheduled_hours,
       assignedLoadHours: r.assigned_load_credits,
       status: r.workload_status,
@@ -218,7 +238,7 @@ export default function HodFacultyWorkloadPage() {
                           <div className="bg-white p-3 border border-slate-100 rounded-xl shadow-lg space-y-1">
                             <p className="font-bold text-xs text-sgvu-navy">{data.fullName}</p>
                             <p className="text-xs text-muted-foreground">
-                              Contact hours: <span className="font-semibold text-sgvu-navy">{Number(data.hours).toFixed(1)} hrs/week</span>
+                              Contact hours: <span className="font-semibold text-sgvu-navy">{formatDuration(data.scheduledMinutes, data.hours)}/week</span>
                               <br />Assigned credits: <span className="font-semibold text-sgvu-navy">{data.assignedLoadHours}</span>
                             </p>
                             <p className={cn(
@@ -272,7 +292,7 @@ export default function HodFacultyWorkloadPage() {
             className: 'w-40 tabular-nums font-bold',
             render: (r) => (
               <div>
-                <p>{r.scheduled_hours.toFixed(1)}h</p>
+                <p>{formatDuration(r.scheduled_minutes, r.scheduled_hours)}</p>
                 <p className="text-xs font-normal text-muted-foreground">
                   {r.assigned_load_credits} assigned credits
                 </p>

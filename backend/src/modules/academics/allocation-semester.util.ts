@@ -36,6 +36,30 @@ export function programsMatch(
   const prog = normalizeProgram(studentProgram);
   if (!prog || !alloc) return true;
   if (prog === alloc) return true;
+  // Pharmacy programmes are deliberately exact.  A broad `PHARM` match
+  // would put D.Pharm and M.Pharm students into B.Pharm offerings during
+  // roster/enrollment reconciliation.
+  const pharmacyProgram = (value: string): string | null => {
+    const canonical = value.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    if (canonical === 'BPHARM' || canonical.startsWith('BPHARMLATERAL')) {
+      return 'BPHARM';
+    }
+    if (canonical === 'DPHARM' || canonical.startsWith('DPHARMREGULAR')) {
+      return 'DPHARM';
+    }
+    if (
+      canonical === 'MPHARMPHARMACEUTICS' ||
+      canonical.startsWith('MPHARMPHARMACEUTICS')
+    ) {
+      return 'MPHARMPHARMACEUTICS';
+    }
+    return null;
+  };
+  const allocPharmacy = pharmacyProgram(alloc);
+  const progPharmacy = pharmacyProgram(prog);
+  if (allocPharmacy || progPharmacy) {
+    return allocPharmacy != null && allocPharmacy === progPharmacy;
+  }
   if (
     alloc.includes('ME') &&
     (prog.includes('MECHANICAL') || prog.includes('MECH'))
@@ -43,7 +67,6 @@ export function programsMatch(
     return true;
   }
   if (alloc.includes('AGRI') && prog.includes('AGRI')) return true;
-  if (alloc.includes('PHARM') && prog.includes('PHARM')) return true;
   if (
     alloc.includes('CSE') &&
     (prog.includes('COMPUTER') || prog.includes('CSE'))

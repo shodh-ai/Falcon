@@ -15,6 +15,7 @@ type Student = {
   user_id: string;
   name: string;
   email: string;
+  student_login_id?: string | null;
   enrollment_no: string;
   attendance_percent: number | null;
   grade_points: number | null;
@@ -86,7 +87,7 @@ export function CourseEnrolledStudentsModal({
                       <td className="px-4 py-3">
                         <p className="font-semibold text-sgvu-navy">{s.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {s.enrollment_no || s.email}
+                          {s.student_login_id || s.enrollment_no || s.email}
                         </p>
                       </td>
                       <td className="px-4 py-3 text-center">

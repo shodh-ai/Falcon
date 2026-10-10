@@ -2,6 +2,7 @@
 
 import { Select } from '@/components/ui/select';
 import { useEffect, useState, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Loader2, Plus, Upload, CheckCircle2, Trash2, Clock, Eye, EyeOff, BarChart3 } from 'lucide-react';
@@ -32,6 +33,10 @@ const TEST_TYPES = ['WT1', 'WT2'] as const;
 
 export default function FacultyWeeklyTestsPage() {
   const api = useAuthedApi();
+  const pathname = usePathname();
+  const questionBankPath = pathname.startsWith('/hod/')
+    ? '/hod/academics/question-bank'
+    : '/faculty/question-bank';
   const { courses, loading: coursesLoading } = useFacultyCourses();
 
   const [courseId, setCourseId] = useState('');
@@ -572,7 +577,7 @@ export default function FacultyWeeklyTestsPage() {
           description="Reusable question-bank authoring is not operational yet. Weekly-test workflows remain available without it."
         >
           <Button asChild variant="outline" size="sm">
-            <Link href="/faculty/question-bank">View availability</Link>
+            <Link href={questionBankPath}>View availability</Link>
           </Button>
         </FacultyPanel>
       </div>

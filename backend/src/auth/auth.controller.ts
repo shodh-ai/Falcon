@@ -127,7 +127,7 @@ export class AuthController {
     const primaryRole = roleClaims.primaryRole ?? roles[0];
     const dbUser = await this.userRepository.findOne({
       where: { user_id: user.user_id },
-      select: ['onboarding_status'],
+      select: ['onboarding_status', 'account_status'],
     });
     const caps = user.tenant_id
       ? await this.hrEntityCtx.getPermissions(user.tenant_id, user.user_id)
@@ -168,6 +168,9 @@ export class AuthController {
         dbUser?.onboarding_status,
         primaryRole,
       ),
+      password_reset_required:
+        dbUser?.account_status === 'PASSWORD_RESET_REQUIRED' ||
+        dbUser?.onboarding_status === 'PENDING_PASSWORD_RESET',
       hr_capabilities: caps ?? {},
       permissions,
       allowed_entities: this.hrEntityCtx.formatAllowedEntities(allowedRows),
@@ -182,8 +185,12 @@ export class AuthController {
     @Body() dto: LocalLoginDto,
     @Headers('x-tenant-subdomain') tenantSubdomain: string | undefined,
   ) {
+    const identifier = dto.identifier?.trim() || dto.email?.trim();
+    if (!identifier) {
+      throw new BadRequestException('Email or student ID is required');
+    }
     return this.authService.localLogin(
-      dto.email,
+      identifier,
       dto.password,
       tenantSubdomain,
     );
@@ -195,7 +202,11 @@ export class AuthController {
     @Body() dto: ForgotPasswordDto,
     @Headers('x-tenant-subdomain') tenantSubdomain: string | undefined,
   ) {
-    return this.authService.forgotPassword(dto.email, tenantSubdomain);
+    const identifier = dto.identifier?.trim() || dto.email?.trim();
+    if (!identifier) {
+      throw new BadRequestException('Email or student ID is required');
+    }
+    return this.authService.forgotPassword(identifier, tenantSubdomain);
   }
 
   @Public()

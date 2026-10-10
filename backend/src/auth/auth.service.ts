@@ -40,6 +40,7 @@ type LoginUserRow = {
   role_id: number | null;
   dept_id: number | null;
   onboarding_status: string | null;
+  account_status: string | null;
   role_name: string | null;
   dept_name: string | null;
 };
@@ -53,7 +54,8 @@ type LoginRoleRow = {
 type ForgotPasswordRow = {
   user_id: string;
   is_active: boolean;
-  official_email: string;
+  official_email?: string | null;
+  onboarding_profile?: { email_pending?: boolean } | null;
 };
 
 @Injectable()
@@ -124,6 +126,7 @@ export class AuthService {
               u.role_id,
               u.dept_id,
               u.onboarding_status,
+              u.account_status,
               r.role_name,
               d.dept_name
        FROM users u
@@ -152,6 +155,7 @@ export class AuthService {
       role_id: row.role_id,
       dept_id: row.dept_id,
       onboarding_status: row.onboarding_status,
+      account_status: row.account_status,
       role: row.role_name
         ? ({
             role_id: row.role_id ?? undefined,
@@ -177,27 +181,57 @@ export class AuthService {
   }
 
   async localLogin(
-    email: string,
+    identifier: string,
     password: string,
     tenantSubdomain?: string,
   ): Promise<{ token: string; user: Record<string, unknown> }> {
+    const loginIdentifier = identifier?.trim();
+    if (!loginIdentifier) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
     let tenant = await this.tenantService.findBySubdomain(subdomain);
 
-    let [credential] = await this.dataSource.query<LoginCredentialRow[]>(
-      `SELECT user_id, password_hash, is_active
-       FROM users
-       WHERE LOWER(official_email) = LOWER($1)
-         AND tenant_id = $2
-       LIMIT 1`,
-      [email, tenant.tenant_id],
-    );
+    // Email login remains the legacy path. Student IDs are intentionally
+    // resolved only within the requested tenant and only through a student
+    // profile; they must never be treated as a cross-tenant username.
+    const isEmailIdentifier = loginIdentifier.includes('@');
+    const credentials = isEmailIdentifier
+      ? await this.dataSource.query<LoginCredentialRow[]>(
+          `SELECT u.user_id, u.password_hash, u.is_active
+           FROM users u
+           WHERE LOWER(u.official_email) = LOWER($1)
+             AND u.tenant_id = $2
+           LIMIT 2`,
+          [loginIdentifier, tenant.tenant_id],
+        )
+      : await this.dataSource.query<LoginCredentialRow[]>(
+          `SELECT u.user_id, u.password_hash, u.is_active
+           FROM users u
+           INNER JOIN student_profiles sp
+           ON sp.user_id = u.user_id
+            AND sp.tenant_id = u.tenant_id
+           WHERE u.tenant_id = $2
+             AND sp.deleted_at IS NULL
+             AND COALESCE(UPPER(sp.status), 'ACTIVE') = 'ACTIVE'
+             AND (
+               LOWER(NULLIF(BTRIM(sp.student_login_id), '')) = LOWER(BTRIM($1))
+               OR LOWER(NULLIF(BTRIM(sp.enrollment_no), '')) = LOWER(BTRIM($1))
+               OR LOWER(NULLIF(BTRIM(sp.prn_number), '')) = LOWER(BTRIM($1))
+             )
+           LIMIT 2`,
+          [loginIdentifier, tenant.tenant_id],
+        );
+
+    // Multiple active profiles sharing an identifier are an integrity error;
+    // fail closed rather than authenticating an arbitrary account.
+    let credential = credentials.length === 1 ? credentials[0] : undefined;
 
     // The shared Falcon hostname defaults to SGVU. If that default tenant has
-    // no such account, resolve the email only when it belongs to exactly one
+    // no such account, resolve an email only when it belongs to exactly one
     // active tenant. Duplicate emails fail closed and still return the neutral
     // login error, so this never guesses between tenants or leaks membership.
-    if (!credential) {
+    if (!credential && isEmailIdentifier) {
       const candidates = await this.dataSource.query<LoginCredentialRow[]>(
         `SELECT u.user_id, u.password_hash, u.is_active, u.tenant_id
          FROM users u
@@ -206,7 +240,7 @@ export class AuthService {
            AND t.is_active = true
          ORDER BY u.user_id
          LIMIT 2`,
-        [email],
+        [loginIdentifier],
       );
       if (candidates.length === 1 && candidates[0].tenant_id) {
         credential = candidates[0];
@@ -227,7 +261,7 @@ export class AuthService {
       await this.recordLoginAttempt(
         tenant.tenant_id,
         credential.user_id,
-        email,
+        loginIdentifier,
         false,
       );
       throw new UnauthorizedException('Invalid email or password');
@@ -236,7 +270,7 @@ export class AuthService {
     await this.recordLoginAttempt(
       tenant.tenant_id,
       credential.user_id,
-      email,
+      loginIdentifier,
       true,
     );
 
@@ -325,6 +359,10 @@ export class AuthService {
           tokenUser.onboarding_status,
           roleClaims.primaryRole,
         ),
+        password_reset_required:
+          (tokenUser as User & { account_status?: string | null }).account_status ===
+            'PASSWORD_RESET_REQUIRED' ||
+          tokenUser.onboarding_status === 'PENDING_PASSWORD_RESET',
         has_direct_reports: directReports,
         is_department_hod: isDepartmentHod,
         last_login_at: new Date().toISOString(),
@@ -366,30 +404,36 @@ export class AuthService {
   }
 
   async forgotPassword(
-    email: string,
+    identifier: string,
     tenantSubdomain?: string,
-  ): Promise<{ sent: true; reset_token?: string }> {
+  ): Promise<{
+    sent: true;
+    reset_token?: string;
+    requires_admin_reset?: true;
+  }> {
+    const loginIdentifier = identifier?.trim() ?? '';
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
     let tenant: Tenant;
     try {
       tenant = await this.tenantService.findBySubdomain(subdomain);
     } catch (error) {
+      // Keep tenant lookup failures non-enumerating. A missing tenant must not
+      // reveal whether the supplied identifier belongs to another tenant.
       if (error instanceof NotFoundException) return { sent: true };
       throw error;
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedIdentifier = loginIdentifier.toLowerCase();
     const now = Date.now();
     for (const [key, value] of this.forgotPasswordAttempts) {
       if (now - value.windowStartedAt >= this.forgotPasswordWindowMs) {
         this.forgotPasswordAttempts.delete(key);
       }
     }
-    // Keep only a non-reversible identifier in process memory. This is a
-    // lightweight single-instance guard; production replicas still need a
-    // shared edge or Redis-backed rate limiter.
+    // Store only a one-way tenant/identifier key. This is a lightweight
+    // single-instance guard; multi-instance deployments need a shared limiter.
     const attemptKey = createHash('sha256')
-      .update(`${tenant.tenant_id}:${normalizedEmail}`)
+      .update(tenant.tenant_id + ':' + normalizedIdentifier)
       .digest('hex');
     const attempt = this.forgotPasswordAttempts.get(attemptKey);
     if (
@@ -405,18 +449,60 @@ export class AuthService {
       });
     }
 
-    const users = await this.dataSource.query<ForgotPasswordRow[]>(
-      `SELECT user_id, is_active, official_email FROM users
-       WHERE tenant_id = $1 AND lower(official_email) = lower($2)
-       LIMIT 2`,
-      [tenant.tenant_id, normalizedEmail],
-    );
+    const isEmailIdentifier = loginIdentifier.includes('@');
+    const users = isEmailIdentifier
+      ? await this.dataSource.query<ForgotPasswordRow[]>(
+          `SELECT user_id, is_active, official_email, onboarding_profile
+           FROM users
+           WHERE tenant_id = $1 AND lower(official_email) = lower($2)
+           LIMIT 2`,
+          [tenant.tenant_id, normalizedIdentifier],
+        )
+      : await this.dataSource.query<ForgotPasswordRow[]>(
+          `SELECT u.user_id, u.is_active, u.official_email, u.onboarding_profile
+           FROM users u
+           INNER JOIN student_profiles sp
+            ON sp.user_id = u.user_id
+            AND sp.tenant_id = u.tenant_id
+           WHERE u.tenant_id = $1
+             AND sp.deleted_at IS NULL
+             AND COALESCE(UPPER(sp.status), 'ACTIVE') = 'ACTIVE'
+             AND (
+               LOWER(NULLIF(BTRIM(sp.student_login_id), '')) = LOWER(BTRIM($2))
+               OR LOWER(NULLIF(BTRIM(sp.enrollment_no), '')) = LOWER(BTRIM($2))
+               OR LOWER(NULLIF(BTRIM(sp.prn_number), '')) = LOWER(BTRIM($2))
+             )
+           LIMIT 2`,
+          [tenant.tenant_id, loginIdentifier],
+        );
+
     // Ambiguous matches fail closed. The database should enforce uniqueness,
-    // but this also protects deployments with an incomplete/legacy schema.
-    if (users.length !== 1 || !users[0]?.is_active) {
+    // but this also protects legacy databases before the constraint exists.
+    const user = users.length === 1 ? users[0] : undefined;
+    if (!user?.is_active) {
       return { sent: true };
     }
-    const user = users[0];
+
+    // Never fall back to the submitted identifier: reset mail must go only to
+    // the canonical address stored on the matched account.
+    const canonicalEmail = user.official_email?.trim();
+    if (!canonicalEmail) {
+      return user.onboarding_profile?.email_pending === true && !isEmailIdentifier
+        ? { sent: true, requires_admin_reset: true }
+        : { sent: true };
+    }
+
+    const normalizedTargetEmail = canonicalEmail.toLowerCase();
+    // Student accounts created before their university email is available use
+    // a reserved non-deliverable address. Do not create a token for them.
+    if (
+      user.onboarding_profile?.email_pending === true ||
+      normalizedTargetEmail.endsWith('.invalid') ||
+      normalizedTargetEmail.includes('@pending.')
+    ) {
+      return { sent: true, requires_admin_reset: true };
+    }
+
     const raw = randomBytes(24).toString('hex');
     const tokenHash = createHash('sha256').update(raw).digest('hex');
     try {
@@ -430,14 +516,11 @@ export class AuthService {
       return { sent: true };
     }
 
-    // Deliver the one-hour link through the configured SMTP provider.  The
-    // endpoint remains deliberately non-enumerating: callers never learn
-    // whether an address exists or whether SMTP is configured.
-    await this.sendPasswordResetEmail(user.official_email, raw);
+    // Delivery and the public response remain deliberately non-enumerating.
+    await this.sendPasswordResetEmail(canonicalEmail, raw);
 
-    // A reset token is only returned when a developer explicitly opts into
-    // local smoke testing.  NODE_ENV alone is not a safe gate because a
-    // production deployment may omit or override it.
+    // A raw token is available only for an explicit non-production smoke-test
+    // opt-in. It is never rendered by the normal UI.
     return process.env.FALCON_EXPOSE_DEV_RESET_TOKEN === 'true' &&
       process.env.NODE_ENV !== 'production'
       ? { sent: true, reset_token: raw }
@@ -536,7 +619,7 @@ export class AuthService {
               : diagnostic.inactive
                 ? 'account inactive or missing'
                 : 'token/account validation failed';
-        this.logger.warn(`Password reset rejected: ${reason}`);
+        this.logger.warn('Password reset rejected: ' + reason);
         throw new BadRequestException('Reset link expired or invalid');
       }
       const updatedResult = await manager.query<Array<{ user_id: string }>>(
@@ -555,7 +638,7 @@ export class AuthService {
          RETURNING user_id`,
         [hash, row.user_id, row.tenant_id],
       );
-      // TypeORM's PostgreSQL driver returns UPDATE results as [rows, affected].
+      // PostgreSQL's TypeORM driver returns UPDATE results as [rows, affected].
       // Keep the flat-array form supported for lightweight unit-test doubles.
       const updated = Array.isArray(updatedResult?.[0])
         ? updatedResult[0]
@@ -798,9 +881,13 @@ export class AuthService {
     }
 
     const [row] = await this.dataSource.query<
-      Array<{ password_hash: string | null; onboarding_status: string | null }>
+      Array<{
+        password_hash: string | null;
+        onboarding_status: string | null;
+        account_status: string | null;
+      }>
     >(
-      `SELECT password_hash, onboarding_status
+      `SELECT password_hash, onboarding_status, account_status
        FROM users
        WHERE user_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)`,
       [userId, tenantId ?? null],
@@ -822,9 +909,15 @@ export class AuthService {
 
     await this.dataSource.query(
       `UPDATE users
-       SET password_hash = $1, onboarding_status = $2, updated_at = NOW()
-       WHERE user_id = $3`,
-      [hash, onboardingStatus, userId],
+       SET password_hash = $1,
+           onboarding_status = $2,
+           account_status = CASE
+             WHEN account_status = 'PASSWORD_RESET_REQUIRED' THEN 'ACTIVE'
+             ELSE account_status
+           END,
+           updated_at = NOW()
+       WHERE user_id = $3 AND ($4::uuid IS NULL OR tenant_id = $4)`,
+      [hash, onboardingStatus, userId, tenantId ?? null],
     );
 
     return { success: true, onboarding_status: onboardingStatus };

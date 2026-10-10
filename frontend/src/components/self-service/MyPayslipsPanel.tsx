@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { Download, Loader2, Send } from 'lucide-react';
+import { Download, FileText, Loader2, Send } from 'lucide-react';
 import { toast } from '@/lib/notifications/falcon-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -208,9 +208,17 @@ export function MyPayslipsPanel() {
 
   if (!published.length) {
     return (
-      <p className="text-sm text-muted-foreground">
-        No payslips published yet. They appear here after payroll is processed each month.
-      </p>
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center px-6 py-12 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sgvu-navy/5 text-sgvu-navy">
+            <FileText className="h-6 w-6" />
+          </div>
+          <h2 className="mt-4 font-semibold text-sgvu-navy">No payslips published yet</h2>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">
+            Your payslip will appear here after HR completes and publishes the monthly payroll.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 

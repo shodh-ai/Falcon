@@ -31,26 +31,6 @@ import { useTeachingDepartment } from '@/components/faculty/TeachingDepartmentCo
 import { withTeachingDeptId } from '@/lib/faculty/teaching-departments';
 import { createMeetingsApi, type PortalMeetingRecord } from '@/lib/api/api.meetings';
 import { notificationsApi, type FalconNotification } from '@/lib/api/notifications';
-import {
-  isEmptyArray,
-  isFacultyDemoSmokeId,
-  withFacultyDemoFallback,
-} from '@/lib/faculty-demo-mode';
-import {
-  facultyDemoAtRisk,
-  facultyDemoCourses,
-  facultyDemoDuties,
-  facultyDemoLeaveBalances,
-  facultyDemoMeetings,
-  facultyDemoMentees,
-  facultyDemoMissingAttendance,
-  facultyDemoNotifications,
-  facultyDemoPendingApprovals,
-  facultyDemoResearch,
-  facultyDemoTodayClasses,
-  facultyDemoWeeklyTests,
-  FACULTY_DEMO_PROFILE,
-} from '@/lib/mock/faculty-portal-demo';
 import { cn } from '@/lib/utils';
 
 type FacultyClass = {
@@ -538,6 +518,14 @@ export function FacultyDashboardWorkspace() {
       try {
         setLoading(true);
         setError(null);
+        const requestErrors: string[] = [];
+        const recover = <T,>(request: Promise<T>, fallback: T, label: string) =>
+          request.catch((requestError: unknown) => {
+            requestErrors.push(
+              `${label}: ${requestError instanceof Error ? requestError.message : String(requestError)}`,
+            );
+            return fallback;
+          });
         const [
           classData,
           missingAttendanceData,
@@ -555,134 +543,99 @@ export function FacultyDashboardWorkspace() {
           menteeData,
           meetingData,
         ] = await Promise.all([
-          api.get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId)).catch(() => []),
-          api.get<MissingAttendanceAlert[]>(withTeachingDeptId('/api/academics/faculty/attendance/missing', activeDeptId)).catch(() => []),
-          api.get<HrSummary>('/api/hr/workforce/today').catch(() =>
-            api.get<HrSummary>('/api/hr/attendance/my-summary').catch(() => null),
+          recover(
+            api.get<FacultyClass[]>(withTeachingDeptId('/api/academics/faculty/timetable/today', activeDeptId)),
+            [],
+            'Today\'s classes',
           ),
-          api.get<PendingApprovals>('/api/academics/proctor/pending-approvals').catch(() => ({ certificates: [] })),
+          recover(
+            api.get<MissingAttendanceAlert[]>(withTeachingDeptId('/api/academics/faculty/attendance/missing', activeDeptId)),
+            [],
+            'Missing attendance',
+          ),
+          recover(
+            api.get<HrSummary>('/api/hr/workforce/today').catch(() => api.get<HrSummary>('/api/hr/attendance/my-summary')),
+            null,
+            'HR summary',
+          ),
+          recover(
+            api.get<PendingApprovals>('/api/academics/proctor/pending-approvals'),
+            { certificates: [] },
+            'Pending approvals',
+          ),
           canManageTeam
-            ? api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals').catch(() => [])
+            ? recover(api.get<GatePassApproval[]>('/api/hr/gate-passes/pending-approvals'), [], 'Gate-pass approvals')
             : Promise.resolve([] as GatePassApproval[]),
-          api.get<LeaveBalance[]>('/api/hr/leaves/my-balances').catch(() => []),
-          api.get<{ needs_academic_profile: boolean; message: string | null }>(
-            '/api/academics/faculty/profile/compliance',
-          ).catch(() => null),
-          api.get<FacultyProfile>('/api/academics/faculty/profile').catch(() => null),
-          api.get<AtRiskStudent[]>('/api/academics/early-warning/dashboard').catch(() => []),
-          api.get<ResearchLog[]>('/api/academics/faculty/workspaces/research').catch(() => []),
-          api.get<Duty[]>('/api/academics/faculty/workspaces/invigilation').catch(() => []),
-          api.get<WeeklyTest[]>('/api/weekly-tests/faculty').catch(() => []),
-          api.get<CourseRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/courses', activeDeptId)).catch(() => []),
-          api.get<Mentee[]>('/api/academics/proctor/my-students').catch(() => []),
-          meetingsApi.list().catch(() => [] as PortalMeetingRecord[]),
+          recover(api.get<LeaveBalance[]>('/api/hr/leaves/my-balances'), [], 'Leave balances'),
+          recover(
+            api.get<{ needs_academic_profile: boolean; message: string | null }>(
+              '/api/academics/faculty/profile/compliance',
+            ),
+            null,
+            'Profile compliance',
+          ),
+          recover(api.get<FacultyProfile>('/api/academics/faculty/profile'), null, 'Faculty profile'),
+          recover(api.get<AtRiskStudent[]>('/api/academics/early-warning/dashboard'), [], 'At-risk students'),
+          recover(api.get<ResearchLog[]>('/api/academics/faculty/workspaces/research'), [], 'Research log'),
+          recover(api.get<Duty[]>('/api/academics/faculty/workspaces/invigilation'), [], 'Invigilation duties'),
+          recover(api.get<WeeklyTest[]>('/api/weekly-tests/faculty'), [], 'Weekly tests'),
+          recover(
+            api.get<CourseRow[]>(withTeachingDeptId('/api/academics/faculty/workspaces/courses', activeDeptId)),
+            [],
+            'Assigned courses',
+          ),
+          recover(api.get<Mentee[]>('/api/academics/proctor/my-students'), [], 'Mentees'),
+          recover(meetingsApi.list(), [], 'Meetings'),
         ]);
 
         let notifData: FalconNotification[] = [];
         if (token) {
-          notifData = await notificationsApi.recent(token).catch(() => []);
+          notifData = await recover(notificationsApi.recent(token), [], 'Notifications');
         }
 
         if (cancelled) return;
 
-        const demoClasses = facultyDemoTodayClasses();
-        const classesResolved = withFacultyDemoFallback(classData, demoClasses, isEmptyArray);
+        const classesResolved = Array.isArray(classData) ? classData : [];
         setClasses(classesResolved);
         const assignedCourseIds = new Set(classesResolved.map((c) => c.course_id));
-        const missingLive = missingAttendanceData.filter((a) => assignedCourseIds.has(a.course_id));
-        setMissingAttendance(
-          withFacultyDemoFallback(missingLive, facultyDemoMissingAttendance(), isEmptyArray),
-        );
-        setHrSummary(
-          withFacultyDemoFallback(hrData, {
-            today: {
-              check_in_at: new Date().toISOString(),
-              check_out_at: null,
-            },
-            week_hours: 34.5,
-            display: { in_time: '09:08', out_time: '—' },
-          }),
-        );
-        const approvalsResolved = withFacultyDemoFallback(
-          approvalData,
-          facultyDemoPendingApprovals() as PendingApprovals,
-          (v) => {
-            const row = v as PendingApprovals;
-            return (
-              (row.certificates?.length ?? 0) === 0 &&
-              (row.meetings?.length ?? 0) === 0 &&
-              (row.leave_requests?.length ?? 0) === 0
-            );
-          },
-        );
-        setPendingApprovals(approvalsResolved);
+        const missingLive = Array.isArray(missingAttendanceData)
+          ? missingAttendanceData.filter((a) => assignedCourseIds.has(a.course_id))
+          : [];
+        setMissingAttendance(missingLive);
+        setHrSummary(hrData);
+        setPendingApprovals(approvalData ?? { certificates: [] });
         setGatePassApprovals(gatePassData);
-        setLeaveBalances(
-          withFacultyDemoFallback(balanceData, facultyDemoLeaveBalances(), isEmptyArray),
-        );
-        if (complianceData) setProfileCompliance(complianceData);
-        setProfile(withFacultyDemoFallback(profileData, FACULTY_DEMO_PROFILE()));
-        setAtRisk(
-          withFacultyDemoFallback(
-            Array.isArray(atRiskData) ? atRiskData : [],
-            facultyDemoAtRisk(),
-            isEmptyArray,
-          ),
-        );
-        setResearch(
-          withFacultyDemoFallback(
-            Array.isArray(researchData) ? researchData : [],
-            facultyDemoResearch(),
-            isEmptyArray,
-          ),
-        );
-        setDuties(
-          withFacultyDemoFallback(
-            Array.isArray(dutyData) ? dutyData : [],
-            facultyDemoDuties(),
-            isEmptyArray,
-          ),
-        );
-        setWeeklyTests(
-          withFacultyDemoFallback(
-            Array.isArray(weeklyData) ? weeklyData : [],
-            facultyDemoWeeklyTests(),
-            isEmptyArray,
-          ),
-        );
-        setCourses(
-          withFacultyDemoFallback(
-            Array.isArray(courseData) ? courseData : [],
-            facultyDemoCourses(),
-            isEmptyArray,
-          ),
-        );
-        setMentees(
-          withFacultyDemoFallback(
-            Array.isArray(menteeData) ? menteeData : [],
-            facultyDemoMentees(),
-            isEmptyArray,
-          ),
-        );
-        setMeetings(
-          withFacultyDemoFallback(
-            Array.isArray(meetingData) ? meetingData : [],
-            facultyDemoMeetings(user?.user_id),
-            isEmptyArray,
-          ),
-        );
-        setNotifications(
-          withFacultyDemoFallback(
-            Array.isArray(notifData) ? notifData : [],
-            facultyDemoNotifications(user?.user_id),
-            isEmptyArray,
-          ).slice(0, 8),
-        );
+        setLeaveBalances(Array.isArray(balanceData) ? balanceData : []);
+        setProfileCompliance(complianceData);
+        setProfile(profileData);
+        setAtRisk(Array.isArray(atRiskData) ? atRiskData : []);
+        setResearch(Array.isArray(researchData) ? researchData : []);
+        setDuties(Array.isArray(dutyData) ? dutyData : []);
+        setWeeklyTests(Array.isArray(weeklyData) ? weeklyData : []);
+        setCourses(Array.isArray(courseData) ? courseData : []);
+        setMentees(Array.isArray(menteeData) ? menteeData : []);
+        setMeetings(Array.isArray(meetingData) ? meetingData : []);
+        setNotifications((Array.isArray(notifData) ? notifData : []).slice(0, 8));
+        if (requestErrors.length > 0) setError(requestErrors.join(' • '));
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'Failed to load dashboard');
-          const demo = facultyDemoTodayClasses();
-          setClasses(withFacultyDemoFallback([], demo, isEmptyArray));
+          setClasses([]);
+          setMissingAttendance([]);
+          setHrSummary(null);
+          setPendingApprovals({ certificates: [] });
+          setGatePassApprovals([]);
+          setLeaveBalances([]);
+          setProfileCompliance(null);
+          setProfile(null);
+          setAtRisk([]);
+          setResearch([]);
+          setDuties([]);
+          setWeeklyTests([]);
+          setCourses([]);
+          setMentees([]);
+          setMeetings([]);
+          setNotifications([]);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -698,10 +651,6 @@ export function FacultyDashboardWorkspace() {
     `/faculty/attendance?courseId=${encodeURIComponent(c.course_id)}`;
 
   async function actOnGatePass(passId: string, status: 'APPROVED' | 'REJECTED') {
-    if (isFacultyDemoSmokeId(passId)) {
-      setGatePassApprovals((prev) => prev.filter((pass) => pass.pass_id !== passId));
-      return;
-    }
     await api.patch(`/api/hr/gate-passes/${passId}/action`, { status });
     setGatePassApprovals((prev) => prev.filter((pass) => pass.pass_id !== passId));
   }

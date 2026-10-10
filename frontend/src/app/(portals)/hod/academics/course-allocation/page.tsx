@@ -28,6 +28,7 @@ type Allocation = {
 type TimetableSlot = {
   timetable_id?: string;
   course_id: string;
+  semester?: string;
   faculty_user_id: string;
   course_code?: string;
   course_name?: string;
@@ -83,6 +84,7 @@ export default function HodCourseAllocationPage() {
       const mappedTimetables: TimetableSlot[] = (data.timetables || []).map((t) => ({
         timetable_id: t.timetable_id,
         course_id: t.course_id,
+        semester: t.semester,
         faculty_user_id: t.faculty_user_id,
         course_code: t.course_code,
         course_name: t.course_name,
@@ -125,9 +127,16 @@ export default function HodCourseAllocationPage() {
   );
 
   const activeGridSlots = useMemo(() => {
-    const activeCourseIds = new Set(activeAllocations.map(a => a.course_id));
-    return gridSlots.filter((s) => activeCourseIds.has(s.course_id));
-  }, [gridSlots, activeAllocations]);
+    const activePairs = new Set(
+      activeAllocations.map((a) => `${a.course_id}:${a.faculty_user_id}`),
+    );
+    return gridSlots.filter((s) => {
+      // Timetable rows are shared across semester views. Never submit a row
+      // belonging to another semester or faculty allocation.
+      if (s.semester && s.semester !== selectedSemester) return false;
+      return activePairs.has(`${s.course_id}:${s.faculty_user_id}`);
+    });
+  }, [gridSlots, activeAllocations, selectedSemester]);
 
   function handleDragStart(e: React.DragEvent, sourceData: any) {
     e.dataTransfer.setData('application/json', JSON.stringify(sourceData));
@@ -147,6 +156,7 @@ export default function HodCourseAllocationPage() {
         const newSlot: TimetableSlot = {
           timetable_id: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           course_id: data.allocation.course_id,
+          semester: data.allocation.semester,
           faculty_user_id: data.allocation.faculty_user_id,
           course_code: data.allocation.course_code,
           course_name: data.allocation.course_name,
@@ -181,6 +191,17 @@ export default function HodCourseAllocationPage() {
 
   async function handleBatchSave() {
     if (!selectedSemester) return;
+
+    const seen = new Set<string>();
+    for (const slot of activeGridSlots) {
+      const key = `${slot.course_id}:${slot.day_of_week}:${slot.start_time}:${slot.end_time}`;
+      if (seen.has(key)) {
+        toast.error('This course already has an overlapping timetable slot. Move one slot and try again.');
+        return;
+      }
+      seen.add(key);
+    }
+
     setSaving(true);
     try {
       await api.post('/api/academics/hod/course-allocation-timetable-batch-save', {

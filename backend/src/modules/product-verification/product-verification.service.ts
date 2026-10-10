@@ -482,7 +482,9 @@ export class ProductVerificationService {
         [row.order_line_id],
       ),
       this.db.query(
-        `SELECT capture_session_id,subject_id,required_views,capture_mode,status,created_by,expires_at,completed_at,created_at FROM pv_capture_sessions WHERE verification_case_id=$1 ORDER BY created_at`,
+        `SELECT s.capture_session_id,s.subject_id,s.required_views,s.capture_mode,s.status,s.created_by,s.expires_at,s.completed_at,s.created_at,p.attributes
+         FROM pv_capture_sessions s JOIN pv_verification_policies p ON p.verification_policy_id=s.verification_policy_id
+         WHERE s.verification_case_id=$1 ORDER BY s.created_at`,
         [caseId],
       ),
       this.db.query(
@@ -1841,13 +1843,16 @@ export class ProductVerificationService {
             ai: input.ai ?? { status: 'NOT_USED' },
           };
           const analysisId = randomUUID();
-          await manager.query(
+          const calculationHash = verificationHash(calculation);
+          const insertedAnalysis = await manager.query(
             `INSERT INTO pv_analyses
            (analysis_id,tenant_id,verification_case_id,subject_id,reference_snapshot_id,
             verification_policy_id,policy_version,analysis_result,coverage_score,confidence_score,
             deterministic_result,ai_model_version,ai_prompt_policy_version,ai_sanitized_input_hash,
             ai_output_hash,ai_confidence,ai_status,calculation_hash)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18)
+           ON CONFLICT (calculation_hash) DO NOTHING
+           RETURNING analysis_id`,
             [
               analysisId,
               row.tenant_id,
@@ -1866,9 +1871,27 @@ export class ProductVerificationService {
               input.ai?.output_hash ?? null,
               input.ai?.confidence ?? null,
               input.ai?.status ?? 'NOT_USED',
-              verificationHash(calculation),
+              calculationHash,
             ],
           );
+          if (!insertedAnalysis[0]) {
+            const existing = await manager.query(
+              `SELECT analysis_id,analysis_result,coverage_score,confidence_score
+               FROM pv_analyses WHERE tenant_id=$1 AND calculation_hash=$2 LIMIT 1`,
+              [row.tenant_id, calculationHash],
+            );
+            if (!existing[0])
+              throw new ConflictException('Analysis already exists but could not be loaded');
+            return {
+              analysis_id: String(existing[0].analysis_id),
+              analysis_result: existing[0].analysis_result,
+              coverage_score: Number(existing[0].coverage_score),
+              confidence_score: Number(existing[0].confidence_score),
+              automated_clearance_eligible: false,
+              reused: true,
+              aggregate_revision: Number(row.aggregate_revision),
+            };
+          }
           for (const item of comparisons) {
             const comparisonHash = verificationHash({
               analysis_id: analysisId,

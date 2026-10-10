@@ -6,6 +6,7 @@ import { ThumbsUp, ThumbsDown, CheckCircle2, FileText } from 'lucide-react';
 import { FacultyEmptyState, FacultyPanel } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { useAuthedApi } from '@/lib/api';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 
 type Policy = {
   policy_id: string;
@@ -58,6 +59,12 @@ export function MyPoliciesPanel() {
     }
   }
 
+  function policyUrl(fileUrl: string) {
+    return /^https?:\/\//i.test(fileUrl)
+      ? fileUrl
+      : `${getApiBaseUrl()}${fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`}`;
+  }
+
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading policies…</p>;
   }
@@ -94,7 +101,7 @@ export function MyPoliciesPanel() {
                   <p className="text-sm text-muted-foreground">{p.category}</p>
                   {p.file_url && (
                     <a
-                      href={p.file_url}
+                      href={policyUrl(p.file_url)}
                       className="mt-1 text-sm font-medium text-sgvu-navy underline hover:text-sgvu-gold"
                       target="_blank"
                       rel="noopener noreferrer"

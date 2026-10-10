@@ -80,6 +80,7 @@ describe('AuthService.localLogin', () => {
 
   const mockDataSource = {
     query: jest.fn(),
+    transaction: jest.fn(),
   };
 
   const mockUserRepository = {
@@ -131,6 +132,7 @@ describe('AuthService.localLogin', () => {
       }
       return [];
     });
+    mockDataSource.transaction.mockReset();
   }
 
   beforeEach(async () => {
@@ -189,6 +191,46 @@ describe('AuthService.localLogin', () => {
     expect(result.user.roles).toContain('Librarian');
     expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
     expect(mockUserRepository.findOne).not.toHaveBeenCalled();
+  });
+
+  it('authenticates a student with a tenant-scoped student login ID', async () => {
+    const fixture = buildLoginFixture({
+      user_id: 'student-user-1',
+      email: 'student.2548727@mygyanavihar.com',
+      name: 'Pharmacy Student',
+      role_id: 3,
+      roleName: 'Student',
+      dept_id: 43,
+      dept_name: 'Pharmacy',
+    });
+    mockSuccessfulLoginQueries(fixture);
+
+    const result = await service.localLogin('2548727', 'password123', 'sgvu');
+
+    expect(result.token).toBe('signed-jwt');
+    expect(result.user.role).toBe('Student');
+    const lookup = mockDataSource.query.mock.calls.find(([sql]) =>
+      String(sql).includes('student_login_id'),
+    );
+    expect(lookup?.[1]).toEqual(['2548727', TENANT.tenant_id]);
+    expect(String(lookup?.[0])).toContain('INNER JOIN student_profiles');
+  });
+
+  it('fails closed when a student login ID is duplicated in the tenant', async () => {
+    mockDataSource.query.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('student_login_id')) {
+        return [
+          { user_id: 'student-1', password_hash: PASSWORD_HASH, is_active: true },
+          { user_id: 'student-2', password_hash: PASSWORD_HASH, is_active: true },
+        ];
+      }
+      return [];
+    });
+
+    await expect(
+      service.localLogin('2548727', 'password123', 'sgvu'),
+    ).rejects.toThrow('Invalid email or password');
+    expect(mockTenantService.findById).not.toHaveBeenCalled();
   });
 
   it('casts the login audit resource id so PostgreSQL does not infer conflicting types', async () => {
@@ -423,9 +465,15 @@ describe('AuthService password recovery', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockDataSource.query.mockReset();
+    mockDataSource.transaction.mockReset();
+    mockTenantService.findBySubdomain.mockReset();
+    mockTenantService.findBySubdomain.mockResolvedValue(TENANT);
     delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
     delete process.env.NODE_ENV;
     delete process.env.EMAIL_HOST;
+    delete process.env.EMAIL_USER;
+    delete process.env.EMAIL_PASSWORD;
     (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -445,18 +493,34 @@ describe('AuthService password recovery', () => {
     delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
     delete process.env.NODE_ENV;
     delete process.env.EMAIL_HOST;
+    delete process.env.EMAIL_USER;
+    delete process.env.EMAIL_PASSWORD;
   });
 
-  function mockTokenInsertUser() {
+  function mockTokenInsertUser(
+    officialEmail = 'canonical@mygyanvihar.com',
+    userId = 'user-1',
+  ) {
     mockDataSource.query
       .mockResolvedValueOnce([
         {
-          user_id: 'user-1',
+          user_id: userId,
           is_active: true,
-          official_email: 'canonical@mygyanvihar.com',
+          official_email: officialEmail,
+          onboarding_profile: { email_pending: false },
         },
       ])
       .mockResolvedValueOnce([]);
+  }
+
+  function mockSmtp() {
+    process.env.EMAIL_HOST = 'smtp.example.test';
+    process.env.EMAIL_USER = 'noreply@example.test';
+    process.env.EMAIL_PASSWORD = 'secret';
+    const sendMail = jest.fn().mockResolvedValue(undefined);
+    const nodemailer = require('nodemailer') as { createTransport: jest.Mock };
+    nodemailer.createTransport.mockReturnValue({ sendMail });
+    return sendMail;
   }
 
   it('never exposes a reset token when the explicit developer flag is absent', async () => {
@@ -487,16 +551,11 @@ describe('AuthService password recovery', () => {
     ).resolves.toEqual({ sent: true });
   });
 
-  it('sends an SMTP reset link without returning the raw token', async () => {
-    process.env.EMAIL_HOST = 'smtp.example.test';
-    process.env.EMAIL_USER = 'noreply@example.test';
-    process.env.EMAIL_PASSWORD = 'secret';
-    const sendMail = jest.fn().mockResolvedValue(undefined);
-    const nodemailer = require('nodemailer') as { createTransport: jest.Mock };
-    nodemailer.createTransport.mockReturnValue({ sendMail });
-    mockTokenInsertUser();
+  it('sends the reset link to the canonical stored email, never the submitted identifier', async () => {
+    const sendMail = mockSmtp();
+    mockTokenInsertUser('canonical@mygyanvihar.com');
     const result = await service.forgotPassword(
-      'faculty@mygyanvihar.com',
+      'FACULTY@MYGYANVIHAR.COM',
       'sgvu',
     );
     expect(result).toEqual({ sent: true });
@@ -518,12 +577,53 @@ describe('AuthService password recovery', () => {
     },
   );
 
+  it('sends a student-ID reset link only to its linked official email', async () => {
+    const sendMail = mockSmtp();
+    mockDataSource.query
+      .mockResolvedValueOnce([
+        {
+          user_id: 'student-user-1',
+          is_active: true,
+          official_email: 'student.one@mygyanvihar.com',
+          onboarding_profile: { email_pending: false },
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await expect(service.forgotPassword('2548727', 'sgvu')).resolves.toEqual({
+      sent: true,
+    });
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'student.one@mygyanvihar.com' }),
+    );
+  });
+
+  it('does not create or send a reset link for pending student contact details', async () => {
+    const sendMail = mockSmtp();
+    mockDataSource.query.mockResolvedValueOnce([
+      {
+        user_id: 'student-user-1',
+        is_active: true,
+        official_email: 'student.2548727@pending.invalid',
+        onboarding_profile: { email_pending: true },
+      },
+    ]);
+
+    await expect(service.forgotPassword('2548727', 'sgvu')).resolves.toEqual({
+      sent: true,
+      requires_admin_reset: true,
+    });
+    expect(mockDataSource.query).toHaveBeenCalledTimes(1);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
   it('returns the generic response for unknown and inactive accounts', async () => {
     mockDataSource.query.mockResolvedValueOnce([]);
     await expect(
       service.forgotPassword('unknown@mygyanvihar.com', 'sgvu'),
     ).resolves.toEqual({ sent: true });
 
+    mockDataSource.query.mockReset();
     mockDataSource.query.mockResolvedValueOnce([
       {
         user_id: 'inactive-user',
@@ -534,7 +634,7 @@ describe('AuthService password recovery', () => {
     await expect(
       service.forgotPassword('inactive@mygyanvihar.com', 'sgvu'),
     ).resolves.toEqual({ sent: true });
-    expect(mockDataSource.query).toHaveBeenCalledTimes(2);
+    expect(mockDataSource.query).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed for duplicate matches within a tenant', async () => {
@@ -573,7 +673,7 @@ describe('AuthService password recovery', () => {
     expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
   });
 
-  it('returns the generic response for an invalid tenant context', async () => {
+  it('returns a generic response for an invalid tenant context', async () => {
     mockTenantService.findBySubdomain.mockRejectedValueOnce(
       new NotFoundException('unknown tenant'),
     );
@@ -581,6 +681,18 @@ describe('AuthService password recovery', () => {
       service.forgotPassword('user@mygyanvihar.com', 'unknown'),
     ).resolves.toEqual({ sent: true });
     expect(mockDataSource.query).not.toHaveBeenCalled();
+  });
+
+  it('does not create a token when the matched account has no canonical email', async () => {
+    mockDataSource.query.mockResolvedValueOnce([
+      { user_id: 'user-1', is_active: true, official_email: null },
+    ]);
+    const sendMail = mockSmtp();
+    await expect(
+      service.forgotPassword('user@mygyanvihar.com', 'sgvu'),
+    ).resolves.toEqual({ sent: true });
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(mockDataSource.query).toHaveBeenCalledTimes(1);
   });
 
   it('rate limits repeated requests without revealing account existence', async () => {
@@ -593,7 +705,7 @@ describe('AuthService password recovery', () => {
     expect(mockDataSource.query).toHaveBeenCalledTimes(5);
   });
 
-  it('locks and consumes a reset token atomically', async () => {
+  it('locks and consumes a reset token atomically with PostgreSQL result tuples', async () => {
     const manager = { query: jest.fn() };
     mockDataSource.transaction.mockImplementation(
       async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager),
@@ -602,7 +714,6 @@ describe('AuthService password recovery', () => {
       .mockResolvedValueOnce([
         { token_id: 'token-1', user_id: 'user-1', tenant_id: 'tenant-1' },
       ])
-      // PostgreSQL UPDATE queries through TypeORM return [rows, affectedCount].
       .mockResolvedValueOnce([[{ user_id: 'user-1' }], 1])
       .mockResolvedValueOnce([[{ token_id: 'token-1' }], 1]);
 
@@ -613,10 +724,6 @@ describe('AuthService password recovery', () => {
       expect.stringContaining('FOR UPDATE OF t, u'),
       expect.any(Array),
     );
-    expect(manager.query).toHaveBeenCalledWith(
-      expect.stringContaining('SET used_at = NOW()'),
-      expect.any(Array),
-    );
     const calls = manager.query.mock.calls as unknown as Array<
       [string, unknown[]]
     >;
@@ -624,15 +731,28 @@ describe('AuthService password recovery', () => {
       String(sql).includes('UPDATE users'),
     );
     expect(updateCall).toBeDefined();
-    expect(updateCall![0]).toContain('WHERE user_id = $2 AND tenant_id = $3');
+    expect(updateCall![0]).toContain(
+      'WHERE user_id = $2 AND tenant_id = $3',
+    );
     expect(updateCall![0]).not.toContain('role_id =');
     expect(updateCall![1]).toEqual(['new-hash', 'user-1', 'tenant-1']);
+    const consumeCall = calls.find(([sql]) =>
+      String(sql).includes('UPDATE admin_password_reset_tokens'),
+    );
+    expect(consumeCall?.[1]).toEqual(['token-1', 'user-1', 'tenant-1']);
   });
 
   it('rejects a replay after the token has already been consumed', async () => {
     const manager = { query: jest.fn().mockResolvedValueOnce([]) };
-    mockDataSource.transaction.mockImplementation(async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager));
-    await expect(service.resetPasswordWithToken('raw-reset-token', 'New-password-1!')).rejects.toThrow('Reset link expired or invalid');
-    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('used_at IS NULL'), expect.any(Array));
+    mockDataSource.transaction.mockImplementation(
+      async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager),
+    );
+    await expect(
+      service.resetPasswordWithToken('raw-reset-token', 'New-password-1!'),
+    ).rejects.toThrow('Reset link expired or invalid');
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('used_at IS NULL'),
+      expect.any(Array),
+    );
   });
 });

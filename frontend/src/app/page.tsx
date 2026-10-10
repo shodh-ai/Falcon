@@ -12,7 +12,7 @@ import { Eye, EyeOff, LogIn } from 'lucide-react';
 export default function Home() {
   const { isAuthenticated, login, user, isLoading, refreshUser } = useAuth();
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [localLoading, setLocalLoading] = useState(false);
@@ -34,7 +34,7 @@ export default function Home() {
     setLocalLoading(true);
     setLocalError(null);
     try {
-      const result = await api.localLogin(email.trim(), password);
+      const result = await api.localLogin(identifier.trim(), password);
       login(result.token, result.user, rememberMe);
       let fresh = null;
       try {
@@ -110,7 +110,7 @@ export default function Home() {
             <div className="space-y-2">
               <h2 className="text-2xl font-black text-sgvu-navy">Sign in to Falcon</h2>
               <p className="text-sm font-medium text-muted-foreground">
-                Use your SGVU Google Workspace account or QA credentials.
+                Use your SGVU Google Workspace account or your student ID.
               </p>
             </div>
 
@@ -147,22 +147,22 @@ export default function Home() {
                 </div>
                 <div className="relative flex justify-center text-sm">
                   <span className="bg-white px-3 font-medium text-muted-foreground">
-                    or sign in with email
+                    or sign in with email or student ID
                   </span>
                 </div>
               </div>
 
               <form onSubmit={handleLocalLogin} className="space-y-4">
                 <div>
-                  <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-gray-700">
-                    Email
+                  <label htmlFor="identifier" className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Email or Student ID
                   </label>
                   <input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="hr@mygyanvihar.com"
+                    id="identifier"
+                    type="text"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="e.g. 2646383 or hr@mygyanvihar.com"
                     className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sgvu-gold"
                     required
                   />
@@ -208,13 +208,17 @@ export default function Home() {
                     type="button"
                     className="font-medium text-sgvu-navy underline-offset-2 hover:underline"
                     onClick={async () => {
-                      if (!email.trim()) {
-                        setLocalError('Enter your email first');
+                      if (!identifier.trim()) {
+                        setLocalError('Enter your email or student ID first');
                         return;
                       }
                       try {
-                        await api.forgotPassword(email.trim());
-                        setForgotSent("If an account exists for this email, you'll receive a password reset link shortly. Please check your inbox and spam folder.");
+                        const data = await api.forgotPassword(identifier.trim());
+                        setForgotSent(
+                          data.requires_admin_reset
+                            ? 'No verified university email is linked yet. Contact Campus Admin to reset your student account.'
+                            : "If an account exists for this email or student ID, you'll receive a password reset link shortly. Please check your inbox and spam folder.",
+                        );
                         setLocalError(null);
                       } catch {
                         setForgotSent(null);

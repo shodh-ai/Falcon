@@ -1,8 +1,16 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class ForgotPasswordDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  identifier?: string;
+
+  /** Backwards-compatible email payload used by older clients. */
+  @IsOptional()
   @IsEmail()
-  email!: string;
+  email?: string;
 }
 
 export class ResetPasswordWithTokenDto {

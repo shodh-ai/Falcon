@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useAuthedApi } from '@/lib/api';
 import { HodPageFrame, HodPageHeader, HodPanel } from '@/components/hod/HodPagePrimitives';
@@ -20,14 +20,24 @@ export default function HodSlowLearnersPage() {
   const api = useAuthedApi();
   const [rows, setRows] = useState<SlowLearnerRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
     void api
       .get<SlowLearnerRow[]>('/api/academics/hod/slow-learners')
       .then(setRows)
-      .catch(() => setRows([]))
+      .catch((e) => {
+        setRows([]);
+        setError(e instanceof Error ? e.message : 'Failed to load at-risk students');
+      })
       .finally(() => setLoading(false));
   }, [api]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
     <HodPageFrame>
@@ -39,6 +49,13 @@ export default function HodSlowLearnersPage() {
         {loading ? (
           <div className="py-16 flex justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-sgvu-gold" />
+          </div>
+        ) : error ? (
+          <div className="space-y-3 py-10 text-center" role="alert">
+            <p className="text-sm text-rose-700">{error}</p>
+            <button type="button" className="text-xs font-semibold text-sgvu-navy underline" onClick={() => void load()}>
+              Retry
+            </button>
           </div>
         ) : rows.length === 0 ? (
           <p className="py-12 text-center text-sm text-muted-foreground">No at-risk students flagged.</p>

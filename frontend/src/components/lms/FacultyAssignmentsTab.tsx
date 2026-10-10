@@ -6,6 +6,7 @@ import { toast } from '@/lib/notifications/falcon-toast';
 import {
   FacultyPanel,
   FacultyEmptyState,
+  FacultyErrorBanner,
 } from '@/components/faculty';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,58 +15,10 @@ import { useAuthedApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { AssignmentRosterRow, FacultyAssignment } from '@/lib/api/lms';
 import { downloadWithAuth, patchMultipart, postMultipart } from '@/lib/api/lms';
-import {
-  isEmptyArray,
-  isFacultyDemoEntityId,
-  isFacultyDemoSmokeId,
-  withFacultyDemoFallback,
-} from '@/lib/faculty-demo-mode';
-import {
-  facultyDemoAssignments,
-  getFacultyPortalDemoPack,
-  studentsForCourse,
-} from '@/lib/mock/faculty-portal-demo';
 
 type Props = {
   courseId: string;
 };
-
-function buildDemoAssignmentRoster(
-  assignmentId: string,
-  courseId: string,
-  maxMarks: number,
-): AssignmentRosterRow[] {
-  const pack = getFacultyPortalDemoPack();
-  const subs = pack.submissions.filter((s) => s.assignment_id === assignmentId);
-  if (subs.length > 0) {
-    return subs.map((s) => ({
-      student_user_id: s.student_id,
-      student_name: s.student_name,
-      submitted: s.status !== 'PENDING',
-      submission_id: s.submission_id,
-      marks_awarded: s.marks != null ? String(s.marks) : null,
-      status:
-        s.status === 'GRADED'
-          ? 'GRADED'
-          : s.status === 'RETURNED'
-            ? 'RETURNED_FOR_REVISION'
-            : s.status === 'PENDING'
-              ? 'NOT_SUBMITTED'
-              : 'SUBMITTED',
-      faculty_remarks: s.feedback,
-    }));
-  }
-  return studentsForCourse(courseId)
-    .slice(0, 24)
-    .map((s, i) => ({
-      student_user_id: s.user_id,
-      student_name: s.name,
-      submitted: i % 5 !== 0,
-      submission_id: i % 5 !== 0 ? `demo-sub-${assignmentId}-${i}` : null,
-      marks_awarded: i % 5 !== 0 ? String(Math.round((s.assignment_score / 100) * maxMarks)) : null,
-      status: i % 5 === 0 ? 'NOT_SUBMITTED' : i % 3 === 0 ? 'GRADED' : 'SUBMITTED',
-    }));
-}
 
 export function FacultyAssignmentsTab({ courseId }: Props) {
   const api = useAuthedApi();
@@ -91,75 +44,84 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   const [gradeMarks, setGradeMarks] = useState<Record<string, string>>({});
   const [returnRemarks, setReturnRemarks] = useState<Record<string, string>>({});
   const [returningId, setReturningId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
-  function loadAssignments() {
-    void api
-      .get<FacultyAssignment[]>(`/api/academics/faculty/assignments?courseId=${courseId}`)
-      .then((rows) =>
-        setAssignments(
-          withFacultyDemoFallback(
-            rows,
-            facultyDemoAssignments(courseId) as unknown as FacultyAssignment[],
-            isEmptyArray,
-          ),
-        ),
-      )
-      .catch(() =>
-        setAssignments(
-          withFacultyDemoFallback(
-            [],
-            facultyDemoAssignments(courseId) as unknown as FacultyAssignment[],
-            isEmptyArray,
-          ),
-        ),
+  async function loadAssignments() {
+    setLoadError(null);
+    try {
+      const rows = await api.get<FacultyAssignment[]>(
+        `/api/academics/faculty/assignments?courseId=${encodeURIComponent(courseId)}`,
       );
+      if (!Array.isArray(rows)) throw new Error('Assignments API returned an invalid response');
+      setAssignments(rows);
+    } catch (error: unknown) {
+      setAssignments([]);
+      setLoadError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   useEffect(() => {
-    loadAssignments();
+    void loadAssignments();
   }, [api, courseId]);
 
   async function openRoster(assignmentId: string, title: string, maxMarks: number) {
     setSelectedId(assignmentId);
     setSelectedTitle(title);
     setSelectedMaxMarks(maxMarks);
+    setRosterError(null);
     try {
       const data = await api.get<{ roster: AssignmentRosterRow[] }>(
         `/api/academics/faculty/assignments/${assignmentId}/roster`,
       );
-      const demoRoster = buildDemoAssignmentRoster(assignmentId, courseId, maxMarks);
-      const rosterResolved = withFacultyDemoFallback(data.roster, demoRoster, isEmptyArray);
-      setRoster(rosterResolved);
+      if (!data || !Array.isArray(data.roster)) {
+        throw new Error('Assignment roster API returned an invalid response');
+      }
+      setRoster(data.roster);
       const marks: Record<string, string> = {};
-      rosterResolved.forEach((r) => {
+      data.roster.forEach((r) => {
         if (r.marks_awarded) marks[r.submission_id ?? ''] = String(r.marks_awarded);
       });
       setGradeMarks(marks);
-    } catch {
-      const demoRoster = buildDemoAssignmentRoster(assignmentId, courseId, maxMarks);
-      setRoster(withFacultyDemoFallback([], demoRoster, isEmptyArray));
-      const marks: Record<string, string> = {};
-      demoRoster.forEach((r) => {
-        if (r.marks_awarded) marks[r.submission_id ?? ''] = String(r.marks_awarded);
-      });
-      setGradeMarks(marks);
+    } catch (error: unknown) {
+      setRoster([]);
+      setRosterError(error instanceof Error ? error.message : String(error));
     }
   }
 
   async function createDa(e: FormEvent) {
     e.preventDefault();
-    if (!token || !daTitle.trim() || !dueAt) return;
-    if (isFacultyDemoEntityId(courseId)) {
-      toast.success('Assignment published successfully (demo)');
-      setCreateOpen(false);
-      setDaTitle('');
-      setDaDescription('');
-      setSemester('');
-      setSectionCode('');
-      setPublishAt('');
-      setDueAt('');
-      setRefFile(null);
+    if (!token) {
+      toast.error('Your session has expired. Sign in again before creating an assignment.');
       return;
+    }
+    if (!daTitle.trim()) {
+      toast.error('Enter an assignment title');
+      return;
+    }
+    const parsedMaxMarks = Number(maxMarks);
+    if (!Number.isFinite(parsedMaxMarks) || parsedMaxMarks <= 0) {
+      toast.error('Total marks must be greater than zero');
+      return;
+    }
+    if (!dueAt || Number.isNaN(new Date(dueAt).getTime())) {
+      toast.error('Choose a valid due date');
+      return;
+    }
+    if (publishAt && new Date(publishAt).getTime() > new Date(dueAt).getTime()) {
+      toast.error('Publish date must be before the deadline');
+      return;
+    }
+    if (refFile) {
+      const isPdf = refFile.type === 'application/pdf' || refFile.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
+        toast.error('Reference attachment must be a PDF');
+        return;
+      }
+      if (refFile.size > 5 * 1024 * 1024) {
+        toast.error('Reference PDF must be 5MB or smaller');
+        return;
+      }
     }
     const form = new FormData();
     form.append('course_id', courseId);
@@ -196,20 +158,16 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       setPublishAt('');
       setDueAt('');
       setRefFile(null);
-      loadAssignments();
+      void loadAssignments();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Create failed');
     }
   }
 
-  async function gradeRow(submissionId: string, max: number) {
+  async function gradeRow(submissionId: string) {
     const raw = gradeMarks[submissionId];
     if (raw === undefined || raw === '') {
       toast.error('Enter marks first');
-      return;
-    }
-    if (isFacultyDemoSmokeId(submissionId)) {
-      toast.success('Marks saved (demo)');
       return;
     }
     try {
@@ -227,10 +185,6 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
     const remarks = returnRemarks[submissionId]?.trim();
     if (!remarks) {
       toast.error('Enter remarks explaining what the student must fix');
-      return;
-    }
-    if (isFacultyDemoSmokeId(submissionId)) {
-      toast.success('Returned to student for revision (demo)');
       return;
     }
     setReturningId(submissionId);
@@ -265,11 +219,6 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
   async function saveEdit(e: FormEvent) {
     e.preventDefault();
     if (!token || !editing) return;
-    if (isFacultyDemoSmokeId(editing.assignment_id)) {
-      toast.success('Assignment updated (demo)');
-      setEditing(null);
-      return;
-    }
     const form = new FormData();
     form.append('start_date', new Date(editStartAt).toISOString());
     form.append('due_date', new Date(editDueAt).toISOString());
@@ -278,7 +227,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
       await patchMultipart(`/api/academics/faculty/assignments/${editing.assignment_id}`, token, form);
       toast.success('Assignment updated');
       setEditing(null);
-      loadAssignments();
+      void loadAssignments();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Update failed');
     }
@@ -356,7 +305,14 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
           description="Grade submissions and download student PDFs"
           count={submittedCount}
         >
-          <div className="overflow-x-auto">
+          {rosterError ? <FacultyErrorBanner message={rosterError} /> : null}
+          {!rosterError && roster.length === 0 ? (
+            <FacultyEmptyState
+              title="No enrolled students"
+              description="No students are currently enrolled in this course for this assignment."
+            />
+          ) : null}
+          {roster.length > 0 ? <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/60 text-left text-xs font-medium text-muted-foreground">
@@ -425,7 +381,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                             {row.status !== 'RETURNED_FOR_REVISION' && (
                               <Button
                                 size="sm"
-                                onClick={() => void gradeRow(row.submission_id!, selectedMaxMarks)}
+                                onClick={() => void gradeRow(row.submission_id!)}
                               >
                                 Save marks
                               </Button>
@@ -461,7 +417,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </div> : null}
         </FacultyPanel>
       </div>
     );
@@ -476,7 +432,9 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
         </Button>
       </div>
 
-      {assignments.length === 0 ? (
+      {loadError ? <FacultyErrorBanner message={loadError} /> : null}
+
+      {!loadError && assignments.length === 0 ? (
         <FacultyEmptyState
           title="No digital assignments yet"
           description="Create a DA to collect PDF submissions from enrolled students with a strict deadline."
@@ -503,9 +461,16 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
 
       {createOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-digital-assignment-title"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl"
+          >
             <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-5 py-4">
-              <p className="text-sm font-bold text-sgvu-navy">Create digital assignment</p>
+              <p id="create-digital-assignment-title" className="text-sm font-bold text-sgvu-navy">
+                Create digital assignment
+              </p>
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
@@ -515,7 +480,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <form onSubmit={createDa} className="space-y-4 p-5">
+            <form onSubmit={createDa} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Assignment title</label>
                 <Input
@@ -595,7 +560,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
                 <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
               </div>
-              <div className="flex gap-2 pt-1">
+              <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-2 border-t border-border/50 bg-card/95 px-5 py-4 backdrop-blur supports-[backdrop-filter]:bg-card/80">
                 <Button type="submit">Publish Assignment</Button>
                 <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
                   Cancel
@@ -608,10 +573,17 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-digital-assignment-title"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-xl"
+          >
             <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-5 py-4">
               <div>
-                <p className="text-sm font-bold text-sgvu-navy">Edit digital assignment</p>
+                <p id="edit-digital-assignment-title" className="text-sm font-bold text-sgvu-navy">
+                  Edit digital assignment
+                </p>
                 <p className="text-xs text-muted-foreground">{editing.title}</p>
               </div>
               <button
@@ -623,7 +595,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <form onSubmit={saveEdit} className="space-y-4 p-5">
+            <form onSubmit={saveEdit} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-5">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Publish Date (Visible to Students)</label>
                 <Input
@@ -651,7 +623,7 @@ export function FacultyAssignmentsTab({ courseId }: Props) {
                 />
                 <p className="text-xs text-muted-foreground">PDF only · Max 5MB</p>
               </div>
-              <div className="flex gap-2 pt-1">
+              <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-2 border-t border-border/50 bg-card/95 px-5 py-4 backdrop-blur supports-[backdrop-filter]:bg-card/80">
                 <Button type="submit">Save changes</Button>
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                   Cancel

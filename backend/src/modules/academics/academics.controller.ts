@@ -53,7 +53,12 @@ import { HodPortalExtService } from './hod-portal-ext.service';
 import { FacultyTeachingDepartmentsService } from './faculty-teaching-departments.service';
 import { BelongsToModule } from '../../module-control/module-control.decorators';
 
-type AuthUser = { user_id: string; role?: string; tenant_id?: string };
+type AuthUser = {
+  user_id: string;
+  role?: string;
+  roles?: string[];
+  tenant_id?: string;
+};
 
 @Controller('api/academics')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -201,12 +206,14 @@ export class AcademicsController {
   @Roles('Faculty', 'HOD', 'Dean', 'SuperAdmin')
   getFacultyCourseStudents(
     @Param('courseId') courseId: string,
+    @Query('timetableId') timetableId: string | undefined,
     @Req() req: { user: AuthUser },
   ) {
     return this.facultyAcademics.getCourseStudents(
       courseId,
       req.user.user_id,
       this.resolveTenantId(req.user),
+      timetableId,
     );
   }
 
@@ -618,6 +625,47 @@ export class AcademicsController {
       req.user.user_id,
       req.user.role,
       facultyUserId,
+      {
+        academicYear: body.academic_year,
+        status: body.status,
+        reason: body.reason,
+        expectedRevision,
+        idempotencyKey,
+      },
+    );
+  }
+
+  // Stable compatibility route for clients that do not use the HOD URL
+  // shape. It delegates to the same scoped, revision-checked command.
+  @Post('faculty/workload/status')
+  @Roles('HOD', 'SuperAdmin')
+  setFacultyWorkloadStatus(
+    @Req() req: { user: AuthUser },
+    @Headers('if-match') ifMatch: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body()
+    body: {
+      faculty_user_id: string;
+      academic_year: string;
+      status: 'NO_TEACHING_LOAD' | 'AVAILABLE_FOR_ALLOCATION';
+      reason?: string;
+    },
+  ) {
+    const expectedRevision = Number(String(ifMatch ?? '').replace(/"/g, ''));
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      throw new BadRequestException('If-Match revision is required');
+    }
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException('Idempotency-Key is required');
+    }
+    if (!body?.faculty_user_id) {
+      throw new BadRequestException('faculty_user_id is required');
+    }
+    return this.academics.setHodFacultyLoadDeclaration(
+      this.resolveTenantId(req.user),
+      req.user.user_id,
+      req.user.role,
+      body.faculty_user_id,
       {
         academicYear: body.academic_year,
         status: body.status,
@@ -1923,6 +1971,7 @@ export class AcademicsController {
       req.user.user_id,
       this.resolveTenantId(req.user),
       deptId,
+      this.isHod(req.user),
     );
   }
 
@@ -2962,5 +3011,10 @@ export class AcademicsController {
       );
     }
     return deptId;
+  }
+
+  private isHod(user: AuthUser) {
+    return [...(user.roles ?? []), user.role ?? '']
+      .some((role) => String(role).toLowerCase() === 'hod');
   }
 }
