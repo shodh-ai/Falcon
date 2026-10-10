@@ -4055,87 +4055,11 @@ export class AcademicsService {
     return value.slice(0, 5);
   }
 
-  /** One slot per enrolled course; only re-slot courses that share the same day/time. */
+  /** Preserve every published session, including batch-specific practicals. */
   private resolveStudentTimetableSlots(
     rows: AcademicTimetable[],
   ): AcademicTimetable[] {
-    const byCourse = new Map<string, AcademicTimetable>();
-    for (const row of rows) {
-      if (!byCourse.has(row.course_id)) {
-        byCourse.set(row.course_id, row);
-      }
-    }
-
-    const unique = [...byCourse.values()].sort((a, b) =>
-      (a.course?.course_code ?? a.course_id).localeCompare(
-        b.course?.course_code ?? b.course_id,
-      ),
-    );
-    if (unique.length === 0) return [];
-
-    const slotKey = (row: AcademicTimetable) =>
-      `${row.day_of_week}|${this.normalizeTime(row.start_time)}`;
-
-    const buckets = new Map<string, AcademicTimetable[]>();
-    for (const row of unique) {
-      const key = slotKey(row);
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key)!.push(row);
-    }
-
-    const days = [1, 2, 3, 4, 5, 6];
-    const hours = [9, 10, 11, 12, 14, 15, 16];
-    const occupied = new Set<string>();
-    const result: AcademicTimetable[] = [];
-
-    const placeRow = (row: AcademicTimetable, day: number, hour: number) => {
-      const start = `${String(hour).padStart(2, '0')}:00:00`;
-      const end = `${String(Math.min(hour + 1, 17)).padStart(2, '0')}:00:00`;
-      occupied.add(`${day}|${start.slice(0, 5)}`);
-      result.push(
-        Object.assign(Object.create(Object.getPrototypeOf(row)), row, {
-          day_of_week: day,
-          start_time: start,
-          end_time: end,
-        }),
-      );
-    };
-
-    const findOpenSlot = (): { day: number; hour: number } | null => {
-      for (const day of days) {
-        for (const hour of hours) {
-          const key = `${day}|${String(hour).padStart(2, '0')}:00`;
-          if (!occupied.has(key)) return { day, hour };
-        }
-      }
-      return null;
-    };
-
-    for (const group of buckets.values()) {
-      const sorted = [...group].sort((a, b) =>
-        (a.course?.course_code ?? a.course_id).localeCompare(
-          b.course?.course_code ?? b.course_id,
-        ),
-      );
-      const anchor = sorted[0];
-      const anchorKey = slotKey(anchor);
-      if (!occupied.has(anchorKey)) {
-        occupied.add(anchorKey);
-        result.push(anchor);
-      } else {
-        const open = findOpenSlot();
-        if (open) placeRow(anchor, open.day, open.hour);
-        else result.push(anchor);
-      }
-
-      for (const row of sorted.slice(1)) {
-        const open = findOpenSlot();
-        if (open) placeRow(row, open.day, open.hour);
-        else result.push(row);
-      }
-    }
-
-    return result.sort(
+    return [...rows].sort(
       (a, b) =>
         a.day_of_week - b.day_of_week ||
         this.normalizeTime(a.start_time).localeCompare(
