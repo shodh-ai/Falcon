@@ -51,6 +51,8 @@ jobs:
         run: |
           docker buildx imagetools inspect "ghcr.io/shodh-ai/falcon-backend:sha-$RELEASE_SHA"
           docker buildx imagetools inspect "ghcr.io/shodh-ai/falcon-frontend:sha-$RELEASE_SHA"
+          docker pull --platform linux/amd64 "ghcr.io/shodh-ai/falcon-backend:sha-$RELEASE_SHA"
+          docker pull --platform linux/amd64 "ghcr.io/shodh-ai/falcon-frontend:sha-$RELEASE_SHA"
 
   promote:
     needs: validate

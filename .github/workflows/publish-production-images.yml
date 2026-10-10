@@ -74,7 +74,6 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.context }}/Dockerfile
           platforms: linux/amd64
-          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.component }}
@@ -85,6 +84,11 @@ jobs:
           # cannot retrieve reliably.
           provenance: false
           sbom: false
+          # Coolify's Docker 29 host can reach GHCR but the OCI config blob
+          # published by the default exporter is not retrievable on its pull
+          # path. Publish Docker media types so the manifest and config use
+          # the schema2-compatible descriptors expected by the host.
+          outputs: type=registry,push=true,oci-mediatypes=false
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.PRODUCTION_API_URL || 'https://apifalcon.jataka.io' }}
             NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.PRODUCTION_GOOGLE_CLIENT_ID }}
