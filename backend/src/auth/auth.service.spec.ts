@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -11,6 +11,9 @@ import { TenantService } from '../tenant/tenant.service';
 import { HrEntityContextService } from '../modules/hr/hr-entity-context.service';
 
 jest.mock('bcrypt');
+jest.mock('nodemailer', () => ({
+  createTransport: jest.fn(),
+}));
 
 const PASSWORD_HASH =
   '$2b$10$3M.gdiob7z.LbjCitlN4DuM//mv4oNU1x1yGYD51wXFw30qVt8MoO';
@@ -19,6 +22,12 @@ const TENANT = {
   tenant_id: 'a0000000-0000-4000-8000-000000000001',
   pg_schema: 'tenant_sgvu',
   subdomain: 'sgvu',
+};
+
+const OTHER_TENANT = {
+  tenant_id: 'b0000000-0000-4000-8000-000000000002',
+  pg_schema: 'tenant_other',
+  subdomain: 'other',
 };
 
 function buildLoginFixture(overrides: {
@@ -390,5 +399,240 @@ describe('AuthService.localLogin', () => {
     expect(result.user.role).toBe('Registrar');
     expect(result.user.primaryRole).toBe('Registrar');
     expect(result.user.roles).toEqual(['Registrar', 'Faculty']);
+  });
+});
+
+describe('AuthService password recovery', () => {
+  let service: AuthService;
+  const mockDataSource = {
+    query: jest.fn(),
+    transaction: jest.fn(),
+  };
+  const mockUserRepository = { findOne: jest.fn() };
+  const mockUserRolesRepository = { findOne: jest.fn(), save: jest.fn() };
+  const mockTenantService = {
+    findBySubdomain: jest.fn().mockResolvedValue(TENANT),
+  };
+  const mockHrEntityCtx = {
+    getPermissions: jest.fn().mockResolvedValue({}),
+    capabilitiesToPermissionList: jest.fn().mockReturnValue([]),
+    listAllowedEntities: jest.fn().mockResolvedValue([]),
+    formatAllowedEntities: jest.fn().mockReturnValue([]),
+  };
+  const mockAuthProvider = { signToken: jest.fn() };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
+    delete process.env.NODE_ENV;
+    delete process.env.EMAIL_HOST;
+    (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: DataSource, useValue: mockDataSource },
+        { provide: getRepositoryToken(User), useValue: mockUserRepository },
+        { provide: getRepositoryToken(UserRole), useValue: mockUserRolesRepository },
+        { provide: TenantService, useValue: mockTenantService },
+        { provide: HrEntityContextService, useValue: mockHrEntityCtx },
+        { provide: AUTH_PROVIDER, useValue: mockAuthProvider },
+      ],
+    }).compile();
+    service = module.get<AuthService>(AuthService);
+  });
+
+  afterEach(() => {
+    delete process.env.FALCON_EXPOSE_DEV_RESET_TOKEN;
+    delete process.env.NODE_ENV;
+    delete process.env.EMAIL_HOST;
+  });
+
+  function mockTokenInsertUser() {
+    mockDataSource.query
+      .mockResolvedValueOnce([
+        {
+          user_id: 'user-1',
+          is_active: true,
+          official_email: 'canonical@mygyanvihar.com',
+        },
+      ])
+      .mockResolvedValueOnce([]);
+  }
+
+  it('never exposes a reset token when the explicit developer flag is absent', async () => {
+    mockTokenInsertUser();
+    await expect(
+      service.forgotPassword('faculty@mygyanvihar.com', 'sgvu'),
+    ).resolves.toEqual({ sent: true });
+  });
+
+  it('only exposes a token for explicitly opted-in non-production smoke tests', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
+    mockTokenInsertUser();
+    const result = await service.forgotPassword(
+      'faculty@mygyanvihar.com',
+      'sgvu',
+    );
+    expect(result.sent).toBe(true);
+    expect(result.reset_token).toEqual(expect.any(String));
+  });
+
+  it('suppresses the token even when the developer flag is accidentally set in production', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.FALCON_EXPOSE_DEV_RESET_TOKEN = 'true';
+    mockTokenInsertUser();
+    await expect(
+      service.forgotPassword('faculty@mygyanvihar.com', 'sgvu'),
+    ).resolves.toEqual({ sent: true });
+  });
+
+  it('sends an SMTP reset link without returning the raw token', async () => {
+    process.env.EMAIL_HOST = 'smtp.example.test';
+    process.env.EMAIL_USER = 'noreply@example.test';
+    process.env.EMAIL_PASSWORD = 'secret';
+    const sendMail = jest.fn().mockResolvedValue(undefined);
+    const nodemailer = require('nodemailer') as { createTransport: jest.Mock };
+    nodemailer.createTransport.mockReturnValue({ sendMail });
+    mockTokenInsertUser();
+    const result = await service.forgotPassword(
+      'faculty@mygyanvihar.com',
+      'sgvu',
+    );
+    expect(result).toEqual({ sent: true });
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'canonical@mygyanvihar.com',
+        html: expect.stringContaining('/reset-password?token='),
+      }),
+    );
+  });
+
+  it.each(['Admin', 'Dean', 'Faculty', 'Student'])(
+    'does not apply role-specific restrictions to an active %s account',
+    async () => {
+      mockTokenInsertUser();
+      await expect(
+        service.forgotPassword('requester@mygyanvihar.com', 'sgvu'),
+      ).resolves.toEqual({ sent: true });
+    },
+  );
+
+  it('returns the generic response for unknown and inactive accounts', async () => {
+    mockDataSource.query.mockResolvedValueOnce([]);
+    await expect(
+      service.forgotPassword('unknown@mygyanvihar.com', 'sgvu'),
+    ).resolves.toEqual({ sent: true });
+
+    mockDataSource.query.mockResolvedValueOnce([
+      {
+        user_id: 'inactive-user',
+        is_active: false,
+        official_email: 'inactive@mygyanvihar.com',
+      },
+    ]);
+    await expect(
+      service.forgotPassword('inactive@mygyanvihar.com', 'sgvu'),
+    ).resolves.toEqual({ sent: true });
+    expect(mockDataSource.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed for duplicate matches within a tenant', async () => {
+    mockDataSource.query.mockResolvedValueOnce([
+      {
+        user_id: 'user-1',
+        is_active: true,
+        official_email: 'dup@mygyanvihar.com',
+      },
+      {
+        user_id: 'user-2',
+        is_active: true,
+        official_email: 'dup@mygyanvihar.com',
+      },
+    ]);
+    await expect(
+      service.forgotPassword('dup@mygyanvihar.com', 'sgvu'),
+    ).resolves.toEqual({ sent: true });
+    expect(mockDataSource.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps identical emails tenant-scoped', async () => {
+    mockTenantService.findBySubdomain.mockResolvedValueOnce(OTHER_TENANT);
+    mockDataSource.query.mockResolvedValueOnce([]);
+    await service.forgotPassword('same@mygyanvihar.com', 'other');
+    expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('other');
+    expect(mockDataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('tenant_id = $1'),
+      [OTHER_TENANT.tenant_id, 'same@mygyanvihar.com'],
+    );
+  });
+
+  it('uses the configured default tenant when the header is absent', async () => {
+    mockTokenInsertUser();
+    await service.forgotPassword('default@mygyanvihar.com');
+    expect(mockTenantService.findBySubdomain).toHaveBeenCalledWith('sgvu');
+  });
+
+  it('returns the generic response for an invalid tenant context', async () => {
+    mockTenantService.findBySubdomain.mockRejectedValueOnce(
+      new NotFoundException('unknown tenant'),
+    );
+    await expect(
+      service.forgotPassword('user@mygyanvihar.com', 'unknown'),
+    ).resolves.toEqual({ sent: true });
+    expect(mockDataSource.query).not.toHaveBeenCalled();
+  });
+
+  it('rate limits repeated requests without revealing account existence', async () => {
+    for (let i = 0; i < 6; i += 1) {
+      mockDataSource.query.mockResolvedValueOnce([]);
+      await expect(
+        service.forgotPassword('limited@mygyanvihar.com', 'sgvu'),
+      ).resolves.toEqual({ sent: true });
+    }
+    expect(mockDataSource.query).toHaveBeenCalledTimes(5);
+  });
+
+  it('locks and consumes a reset token atomically', async () => {
+    const manager = { query: jest.fn() };
+    mockDataSource.transaction.mockImplementation(
+      async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager),
+    );
+    manager.query
+      .mockResolvedValueOnce([
+        { token_id: 'token-1', user_id: 'user-1', tenant_id: 'tenant-1' },
+      ])
+      // PostgreSQL UPDATE queries through TypeORM return [rows, affectedCount].
+      .mockResolvedValueOnce([[{ user_id: 'user-1' }], 1])
+      .mockResolvedValueOnce([[{ token_id: 'token-1' }], 1]);
+
+    await expect(
+      service.resetPasswordWithToken('raw-reset-token', 'New-password-1!'),
+    ).resolves.toEqual({ success: true });
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('FOR UPDATE OF t, u'),
+      expect.any(Array),
+    );
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET used_at = NOW()'),
+      expect.any(Array),
+    );
+    const calls = manager.query.mock.calls as unknown as Array<
+      [string, unknown[]]
+    >;
+    const updateCall = calls.find(([sql]) =>
+      String(sql).includes('UPDATE users'),
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall![0]).toContain('WHERE user_id = $2 AND tenant_id = $3');
+    expect(updateCall![0]).not.toContain('role_id =');
+    expect(updateCall![1]).toEqual(['new-hash', 'user-1', 'tenant-1']);
+  });
+
+  it('rejects a replay after the token has already been consumed', async () => {
+    const manager = { query: jest.fn().mockResolvedValueOnce([]) };
+    mockDataSource.transaction.mockImplementation(async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager));
+    await expect(service.resetPasswordWithToken('raw-reset-token', 'New-password-1!')).rejects.toThrow('Reset link expired or invalid');
+    expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('used_at IS NULL'), expect.any(Array));
   });
 });

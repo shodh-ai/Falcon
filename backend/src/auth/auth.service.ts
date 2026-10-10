@@ -4,13 +4,16 @@ import {
   Logger,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
+import * as nodemailer from 'nodemailer';
 import { User } from '../entities/user.entity';
 import { UserRole } from '../entities/user-role.entity';
+import { Tenant } from '../entities/tenant.entity';
 import {
   AUTH_PROVIDER,
   type IAuthProvider,
@@ -21,6 +24,7 @@ import { HrEntityContextService } from '../modules/hr/hr-entity-context.service'
 import { normalizeOnboardingStatusForWizard } from '../modules/student-onboarding/onboarding-portal.util';
 import { isStudentEnrollmentEmail } from './utils/student-enrollment-email.util';
 import { hasDirectReports } from '../modules/hr/utils/reporting-officer.util';
+import { wrapFalconEmailHtml } from '../common/email/falcon-email.template';
 
 type LoginCredentialRow = {
   user_id: string;
@@ -46,9 +50,21 @@ type LoginRoleRow = {
   role_name: string;
 };
 
+type ForgotPasswordRow = {
+  user_id: string;
+  is_active: boolean;
+  official_email: string;
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly forgotPasswordAttempts = new Map<
+    string,
+    { count: number; windowStartedAt: number }
+  >();
+  private readonly forgotPasswordLimit = 5;
+  private readonly forgotPasswordWindowMs = 15 * 60 * 1000;
 
   constructor(
     @InjectRepository(User)
@@ -354,18 +370,53 @@ export class AuthService {
     tenantSubdomain?: string,
   ): Promise<{ sent: true; reset_token?: string }> {
     const subdomain = resolveTenantSubdomain(tenantSubdomain);
-    const tenant = await this.tenantService.findBySubdomain(subdomain);
-    const [user] = await this.dataSource.query<
-      Array<{ user_id: string; is_active: boolean }>
-    >(
-      `SELECT user_id, is_active FROM users
+    let tenant: Tenant;
+    try {
+      tenant = await this.tenantService.findBySubdomain(subdomain);
+    } catch (error) {
+      if (error instanceof NotFoundException) return { sent: true };
+      throw error;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const now = Date.now();
+    for (const [key, value] of this.forgotPasswordAttempts) {
+      if (now - value.windowStartedAt >= this.forgotPasswordWindowMs) {
+        this.forgotPasswordAttempts.delete(key);
+      }
+    }
+    // Keep only a non-reversible identifier in process memory. This is a
+    // lightweight single-instance guard; production replicas still need a
+    // shared edge or Redis-backed rate limiter.
+    const attemptKey = createHash('sha256')
+      .update(`${tenant.tenant_id}:${normalizedEmail}`)
+      .digest('hex');
+    const attempt = this.forgotPasswordAttempts.get(attemptKey);
+    if (
+      attempt &&
+      now - attempt.windowStartedAt < this.forgotPasswordWindowMs
+    ) {
+      if (attempt.count >= this.forgotPasswordLimit) return { sent: true };
+      attempt.count += 1;
+    } else {
+      this.forgotPasswordAttempts.set(attemptKey, {
+        count: 1,
+        windowStartedAt: now,
+      });
+    }
+
+    const users = await this.dataSource.query<ForgotPasswordRow[]>(
+      `SELECT user_id, is_active, official_email FROM users
        WHERE tenant_id = $1 AND lower(official_email) = lower($2)
-       LIMIT 1`,
-      [tenant.tenant_id, email.trim()],
+       LIMIT 2`,
+      [tenant.tenant_id, normalizedEmail],
     );
-    if (!user?.is_active) {
+    // Ambiguous matches fail closed. The database should enforce uniqueness,
+    // but this also protects deployments with an incomplete/legacy schema.
+    if (users.length !== 1 || !users[0]?.is_active) {
       return { sent: true };
     }
+    const user = users[0];
     const raw = randomBytes(24).toString('hex');
     const tokenHash = createHash('sha256').update(raw).digest('hex');
     try {
@@ -378,39 +429,161 @@ export class AuthService {
     } catch {
       return { sent: true };
     }
-    return process.env.NODE_ENV === 'production'
-      ? { sent: true }
-      : { sent: true, reset_token: raw };
+
+    // Deliver the one-hour link through the configured SMTP provider.  The
+    // endpoint remains deliberately non-enumerating: callers never learn
+    // whether an address exists or whether SMTP is configured.
+    await this.sendPasswordResetEmail(user.official_email, raw);
+
+    // A reset token is only returned when a developer explicitly opts into
+    // local smoke testing.  NODE_ENV alone is not a safe gate because a
+    // production deployment may omit or override it.
+    return process.env.FALCON_EXPOSE_DEV_RESET_TOKEN === 'true' &&
+      process.env.NODE_ENV !== 'production'
+      ? { sent: true, reset_token: raw }
+      : { sent: true };
+  }
+
+  private async sendPasswordResetEmail(email: string, token: string) {
+    const host = process.env.EMAIL_HOST;
+    const user = process.env.EMAIL_USER;
+    const pass = process.env.EMAIL_PASSWORD;
+    if (!host || !user || !pass) {
+      this.logger.warn(
+        'Password reset token stored but SMTP is not configured; configure EMAIL_HOST, EMAIL_USER and EMAIL_PASSWORD.',
+      );
+      return;
+    }
+
+    const frontend = process.env.FRONTEND_URL || 'https://falcon.jataka.io';
+    const resetUrl = `${frontend}/reset-password?token=${encodeURIComponent(token)}`;
+    const html = wrapFalconEmailHtml(
+      `<h2 style="margin:0 0 12px;color:#08234a;">Reset your Falcon password</h2>
+       <p>This link is valid for one hour and can be used once.</p>
+       <p style="margin:24px 0;"><a href="${resetUrl}" style="display:inline-block;background:#08234a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Reset password</a></p>
+       <p style="font-size:13px;color:#64748b;">If you did not request this, you can ignore this message.</p>`,
+      frontend,
+    );
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port: Number(process.env.EMAIL_PORT || 587),
+        secure: String(process.env.EMAIL_SECURE || '').toLowerCase() === 'true',
+        auth: { user, pass },
+      });
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || user,
+        to: email,
+        subject: 'Reset your Falcon password',
+        html,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Password reset email delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async resetPasswordWithToken(
     token: string,
     newPassword: string,
   ): Promise<{ success: true }> {
-    if (!token || newPassword.length < 8) {
+    if (!token || !newPassword || newPassword.length < 8) {
+      this.logger.warn(
+        'Password reset rejected: missing token or invalid password length',
+      );
       throw new BadRequestException('Invalid token or password');
     }
     const tokenHash = createHash('sha256').update(token).digest('hex');
-    const [row] = await this.dataSource.query<
-      Array<{ token_id: string; user_id: string; tenant_id: string }>
-    >(
-      `SELECT token_id, user_id, tenant_id
-       FROM admin_password_reset_tokens
-       WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
-       LIMIT 1`,
-      [tokenHash],
-    );
-    if (!row) throw new BadRequestException('Reset link expired or invalid');
     const hash = await bcrypt.hash(newPassword, 10);
-    await this.dataSource.query(
-      `UPDATE users SET password_hash = $1, onboarding_status = 'COMPLETED', updated_at = NOW()
-       WHERE user_id = $2 AND tenant_id = $3`,
-      [hash, row.user_id, row.tenant_id],
-    );
-    await this.dataSource.query(
-      `UPDATE admin_password_reset_tokens SET used_at = NOW() WHERE token_id = $1`,
-      [row.token_id],
-    );
+    await this.dataSource.transaction(async (manager) => {
+      // Lock both records. A second request waits for this transaction and
+      // rechecks used_at after commit, so the same token cannot be replayed.
+      const [row] = await manager.query<
+        Array<{ token_id: string; user_id: string; tenant_id: string }>
+      >(
+        `SELECT t.token_id, t.user_id, t.tenant_id
+         FROM admin_password_reset_tokens t
+         INNER JOIN users u ON u.user_id = t.user_id AND u.tenant_id = t.tenant_id
+         WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > NOW()
+           AND u.is_active = true
+         LIMIT 1
+         FOR UPDATE OF t, u`,
+        [tokenHash],
+      );
+      if (!row) {
+        const diagnosticRows =
+          (await manager.query<
+            Array<{ used: boolean; expired: boolean; inactive: boolean }>
+          >(
+            `SELECT t.used_at IS NOT NULL AS used,
+                  t.expires_at <= NOW() AS expired,
+                  COALESCE(u.is_active = false, true) AS inactive
+           FROM admin_password_reset_tokens t
+           LEFT JOIN users u ON u.user_id = t.user_id AND u.tenant_id = t.tenant_id
+           WHERE t.token_hash = $1
+           LIMIT 1`,
+            [tokenHash],
+          )) ?? [];
+        const diagnostic = diagnosticRows[0];
+        const reason = !diagnostic
+          ? 'hash mismatch or missing token record'
+          : diagnostic.used
+            ? 'token already used'
+            : diagnostic.expired
+              ? 'token expired'
+              : diagnostic.inactive
+                ? 'account inactive or missing'
+                : 'token/account validation failed';
+        this.logger.warn(`Password reset rejected: ${reason}`);
+        throw new BadRequestException('Reset link expired or invalid');
+      }
+      const updatedResult = await manager.query<Array<{ user_id: string }>>(
+        `UPDATE users
+         SET password_hash = $1,
+             onboarding_status = CASE
+               WHEN onboarding_status = 'PENDING_PASSWORD_RESET' THEN 'PENDING_DOCUMENTS'
+               ELSE onboarding_status
+             END,
+             account_status = CASE
+               WHEN account_status = 'PASSWORD_RESET_REQUIRED' THEN 'ACTIVE'
+               ELSE account_status
+             END,
+             updated_at = NOW()
+         WHERE user_id = $2 AND tenant_id = $3 AND is_active = true
+         RETURNING user_id`,
+        [hash, row.user_id, row.tenant_id],
+      );
+      // TypeORM's PostgreSQL driver returns UPDATE results as [rows, affected].
+      // Keep the flat-array form supported for lightweight unit-test doubles.
+      const updated = Array.isArray(updatedResult?.[0])
+        ? updatedResult[0]
+        : updatedResult;
+      if (updated.length !== 1) {
+        this.logger.warn(
+          'Password reset rejected: account update validation failed',
+        );
+        throw new BadRequestException('Reset link expired or invalid');
+      }
+      const consumedResult = await manager.query<Array<{ token_id: string }>>(
+        `UPDATE admin_password_reset_tokens
+         SET used_at = NOW()
+         WHERE token_id = $1 AND user_id = $2 AND tenant_id = $3
+           AND used_at IS NULL AND expires_at > NOW()
+         RETURNING token_id`,
+        [row.token_id, row.user_id, row.tenant_id],
+      );
+      const consumed = Array.isArray(consumedResult?.[0])
+        ? consumedResult[0]
+        : consumedResult;
+      if (consumed.length !== 1) {
+        this.logger.warn(
+          'Password reset rejected: token consumption race or expiry',
+        );
+        throw new BadRequestException('Reset link expired or invalid');
+      }
+    });
     return { success: true };
   }
 

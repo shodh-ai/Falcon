@@ -213,15 +213,12 @@ export default function Home() {
                         return;
                       }
                       try {
-                        const data = await api.forgotPassword(email.trim());
-                        setForgotSent(
-                          data.reset_token
-                            ? `Reset token (dev): ${data.reset_token}`
-                            : 'If the account exists, a reset link was issued.',
-                        );
+                        await api.forgotPassword(email.trim());
+                        setForgotSent("If an account exists for this email, you'll receive a password reset link shortly. Please check your inbox and spam folder.");
                         setLocalError(null);
                       } catch {
-                        setLocalError('Could not start password reset');
+                        setForgotSent(null);
+                        setLocalError('Unable to process your request. Please try again later.');
                       }
                     }}
                   >
