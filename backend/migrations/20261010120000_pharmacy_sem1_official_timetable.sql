@@ -42,6 +42,49 @@ INSERT INTO pharmacy_sem1_official_map(course_code,program_name,semester,faculty
   ('MPH105P','M.Pharm Pharmaceutics','I','tapasvi.gupta@mygyanvihar.com'),
   ('MPH106P','M.Pharm Pharmaceutics','I','manish1.gupta@mygyanvihar.com');
 
+-- The earlier zero-load declaration predates the department-approved M.Pharm
+-- timetable. Reconcile Vivek Gupta's declaration before the allocation trigger
+-- evaluates the approved MPAT assignment. Preeti Khulbe remains NO_TEACHING_LOAD.
+DO $$
+DECLARE
+  v_tenant UUID;
+  v_faculty UUID;
+  v_changed_by UUID;
+  v_declaration UUID;
+  v_revision INTEGER;
+BEGIN
+  SELECT tenant_id INTO v_tenant FROM public.tenants
+  WHERE subdomain='sgvu' AND is_active=true LIMIT 1;
+  SELECT u.user_id INTO v_faculty FROM users u
+  WHERE u.tenant_id=v_tenant AND lower(u.official_email)='vivek.gupta@mygyanvihar.com'
+    AND u.is_active=true AND u.deleted_at IS NULL LIMIT 1;
+  SELECT u.user_id INTO v_changed_by FROM users u
+  WHERE u.tenant_id=v_tenant AND lower(u.official_email)='hitesh.kumar@mygyanvihar.com'
+    AND u.is_active=true AND u.deleted_at IS NULL LIMIT 1;
+  IF v_faculty IS NOT NULL THEN
+    UPDATE academic_faculty_load_declarations
+    SET status='AVAILABLE_FOR_ALLOCATION',
+        reason='Department-approved M.Pharm Semester-I timetable effective 15 July 2026',
+        revision=revision+1,
+        declared_by=COALESCE(v_changed_by, declared_by),
+        updated_at=NOW()
+    WHERE tenant_id=v_tenant AND faculty_user_id=v_faculty
+      AND academic_year='2026-2027' AND status='NO_TEACHING_LOAD'
+    RETURNING declaration_id,revision INTO v_declaration,v_revision;
+    IF v_declaration IS NOT NULL THEN
+      INSERT INTO academic_faculty_load_declaration_history(
+        declaration_id,tenant_id,faculty_user_id,academic_year,status,reason,
+        revision,changed_by,idempotency_key,request_hash
+      ) VALUES (
+        v_declaration,v_tenant,v_faculty,'2026-2027','AVAILABLE_FOR_ALLOCATION',
+        'Department-approved M.Pharm Semester-I timetable effective 15 July 2026',
+        v_revision,v_changed_by,'pharmacy-sem1-official-timetable-v1',
+        '6c24a7d5f5d3cb8c8a1a65b7e8f640a32fd4b6e4a98a5fd0a75a2a31b6e0f59c'
+      ) ON CONFLICT DO NOTHING;
+    END IF;
+  END IF;
+END $$;
+
 -- Supersede stale Semester-I assignments before inserting the approved faculty map.
 UPDATE academic_course_allocations a
 SET status='SUPERSEDED', updated_at=NOW()
@@ -219,4 +262,3 @@ BEGIN
 END $$;
 
 COMMIT;
-
