@@ -36,8 +36,8 @@ export class AcademicTimetable extends BaseTenantEntity {
   room: string | null;
 
   /** Student-facing practical group. This is distinct from the classroom. */
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  section: string | null;
+  @Column({ type: 'varchar', length: 50, default: 'A' })
+  section: string;
 
   @Column({ type: 'uuid', nullable: true })
   faculty_user_id: string | null;
