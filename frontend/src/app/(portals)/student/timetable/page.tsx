@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, MapPin, User, Video } from 'lucide-react';
+import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Clock, MapPin, User, Video } from 'lucide-react';
 import { StudentPageShell } from '@/components/student/StudentPageShell';
 import { StudentSectionCard } from '@/components/student/StudentSectionCard';
 import { useAuthedApi } from '@/lib/api';
@@ -14,7 +14,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { DEMO_WEEKLY_TIMETABLE } from '@/lib/mock/student-portal-demo';
 import { isStudentDemoModeEnabled } from '@/lib/student-demo-mode';
 import { toast } from '@/lib/notifications/falcon-toast';
@@ -32,6 +31,7 @@ type TimetableSlot = {
   course_name: string;
   room: string | null;
   faculty_name: string | null;
+  section: string | null;
   day_of_week: number;
   start_time: string;
   end_time: string;
@@ -45,6 +45,12 @@ type WeekTimetableResponse = {
   week_start: string;
   week_dates: WeekDate[];
   slots: TimetableSlot[];
+  pending_practical_batches?: Array<{
+    course_id: string;
+    course_code: string;
+    course_name: string;
+  }>;
+  conflict_count?: number;
 };
 
 function formatDisplayDate(date: string) {
@@ -110,8 +116,11 @@ function buildDemoWeekTimetable(
   return {
     week_start: startIso,
     week_dates: dates,
+    pending_practical_batches: [],
+    conflict_count: 0,
     slots: DEMO_WEEKLY_TIMETABLE.map((s) => ({
       ...s,
+      section: null,
       session_date: dates.find((d) => d.day_of_week === s.day_of_week)?.date ?? null,
     })),
   };
@@ -127,54 +136,36 @@ function SlotButton({
   const subject = slot.course_name?.trim() || slot.course_code;
   const timing = `${to12h(slot.start_time)} – ${to12h(slot.end_time)}`;
   const room = slot.is_virtual ? 'Online' : slot.room?.trim() || 'Room TBA';
+  const batch = slot.section?.toUpperCase().startsWith('BATCH-')
+    ? `Batch ${slot.section.slice(6).replace(/[-_]/g, ' ').trim()}`
+    : null;
 
   return (
     <button
       type="button"
       onClick={() => onSelect(slot)}
-      title={`${subject} · ${timing} · ${room}`}
+      title={`${subject} · ${batch ? `${batch} · ` : ''}${timing} · ${room}`}
       className={cn(
-        'flex h-full min-h-[5.5rem] w-full flex-col justify-between gap-1 rounded-lg p-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
+        'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors hover:border-sgvu-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sgvu-gold',
         slot.is_virtual
-          ? 'border border-blue-200 bg-blue-50 text-blue-950'
-          : 'border border-sgvu-navy/10 bg-[#0B2447] text-white',
+          ? 'border-blue-200 bg-blue-50/70 text-blue-950'
+          : 'border-sgvu-navy/10 bg-white text-sgvu-navy hover:bg-sgvu-navy/[0.03]',
       )}
     >
-      <div className="min-w-0">
-        <p className="line-clamp-2 text-[11px] font-bold leading-snug">{subject}</p>
-        {slot.course_code && slot.course_name ? (
-          <p
-            className={cn(
-              'mt-0.5 truncate text-[9px] font-semibold uppercase tracking-wide',
-              slot.is_virtual ? 'text-blue-700/80' : 'text-sgvu-gold',
-            )}
-          >
-            {slot.course_code}
-          </p>
-        ) : null}
+      <div className="w-[6.2rem] shrink-0 border-r border-sgvu-navy/10 pr-3 text-xs font-semibold leading-5">
+        <span className="block">{to12h(slot.start_time)}</span>
+        <span className="block text-muted-foreground">{to12h(slot.end_time)}</span>
       </div>
-      <div className="min-w-0 space-y-0.5">
-        <p
-          className={cn(
-            'flex items-center gap-1 truncate text-[10px] font-semibold',
-            slot.is_virtual ? 'text-blue-900/85' : 'text-white/90',
-          )}
-        >
-          <Clock className="h-3 w-3 shrink-0 opacity-80" />
-          <span className="truncate">{timing}</span>
-        </p>
-        <p
-          className={cn(
-            'flex items-center gap-1 truncate text-[10px] font-semibold',
-            slot.is_virtual ? 'text-blue-900/85' : 'text-white/90',
-          )}
-        >
-          {slot.is_virtual ? (
-            <Video className="h-3 w-3 shrink-0 opacity-80" />
-          ) : (
-            <MapPin className="h-3 w-3 shrink-0 opacity-80" />
-          )}
-          <span className="truncate">{room}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold leading-snug">{subject}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="font-medium text-muted-foreground">{slot.course_code}</span>
+          {batch && <Badge variant="secondary">{batch}</Badge>}
+          {slot.is_virtual && <Badge variant="outline">Online</Badge>}
+        </div>
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{room}</span>
+          {slot.faculty_name && <span>Faculty: {slot.faculty_name}</span>}
         </p>
       </div>
     </button>
@@ -183,15 +174,13 @@ function SlotButton({
 
 export default function TimetablePage() {
   const api = useAuthedApi();
-  const [weekStart, setWeekStart] = useState<string | undefined>(undefined);
+  const [requestedWeekStart, setRequestedWeekStart] = useState<string | undefined>(undefined);
   const [data, setData] = useState<WeekTimetableResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSlot, setSelectedSlot] = useState<TimetableSlot | null>(null);
-  const [activeDay, setActiveDay] = useState('1');
 
   const loadWeek = useCallback(
     async (start?: string) => {
-      setLoading(true);
       try {
         const query = start ? `?weekStart=${encodeURIComponent(start)}` : '';
         const response = await api.get<WeekTimetableResponse>(
@@ -203,10 +192,8 @@ export default function TimetablePage() {
               ? buildDemoWeekTimetable(response.week_start, response.week_dates)
               : { ...response, slots: [] },
           );
-          setWeekStart(response.week_start);
         } else {
           setData(response);
-          setWeekStart(response.week_start);
         }
       } catch {
         if (isStudentDemoModeEnabled()) {
@@ -223,27 +210,23 @@ export default function TimetablePage() {
   );
 
   useEffect(() => {
-    void loadWeek(weekStart);
-  }, [weekStart, loadWeek]);
+    // Schedule the fetch after the effect's synchronous phase.
+    void Promise.resolve().then(() => loadWeek(requestedWeekStart));
+  }, [requestedWeekStart, loadWeek]);
 
   const weekDates = data?.week_dates ?? [];
-  const slots = data?.slots ?? [];
+  const slots = useMemo(() => data?.slots ?? [], [data?.slots]);
 
-  const timeColumns = useMemo(
-    () => [...new Set(slots.map((slot) => slot.start_time.slice(0, 5)))].sort(),
-    [slots],
-  );
-
-  const slotGrid = useMemo(() => {
-    const map = new Map<string, TimetableSlot[]>();
+  const slotsByDay = useMemo(() => {
+    const map = new Map<number, TimetableSlot[]>();
     for (const slot of slots) {
-      const key = `${slot.day_of_week}|${slot.start_time.slice(0, 5)}`;
-      const entries = map.get(key) ?? [];
+      const entries = map.get(slot.day_of_week) ?? [];
       entries.push(slot);
-      map.set(key, entries);
+      map.set(slot.day_of_week, entries);
     }
     for (const entries of map.values()) {
-      entries.sort((a, b) => a.start_time.localeCompare(b.start_time));
+      entries.sort((a, b) => a.start_time.localeCompare(b.start_time)
+        || a.course_code.localeCompare(b.course_code));
     }
     return map;
   }, [slots]);
@@ -261,13 +244,13 @@ export default function TimetablePage() {
           Timetable
         </h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Each class shows subject, timing, and room. Tap a slot for faculty and attendance details.
+          Your classes by day. Only your confirmed practical batch is shown.
         </p>
       </section>
 
       <StudentSectionCard
-        title="Schedule"
-        description="Subject · timing · room number for every class"
+        title="Your weekly schedule"
+        description="Time, subject, practical batch, room and faculty"
         icon={CalendarDays}
         className="border-sgvu-navy/10 bg-white"
       >
@@ -278,8 +261,13 @@ export default function TimetablePage() {
               variant="outline"
               size="icon"
               className="h-9 w-9 border-sgvu-navy/20 bg-white"
-              onClick={() => weekStart && setWeekStart(shiftWeekStart(weekStart, -1))}
-              disabled={!weekStart}
+              onClick={() => {
+                if (data?.week_start) {
+                  setLoading(true);
+                  setRequestedWeekStart(shiftWeekStart(data.week_start, -1));
+                }
+              }}
+              disabled={!data?.week_start}
               aria-label="Previous week"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -292,8 +280,13 @@ export default function TimetablePage() {
               variant="outline"
               size="icon"
               className="h-9 w-9 border-sgvu-navy/20 bg-white"
-              onClick={() => weekStart && setWeekStart(shiftWeekStart(weekStart, 1))}
-              disabled={!weekStart}
+              onClick={() => {
+                if (data?.week_start) {
+                  setLoading(true);
+                  setRequestedWeekStart(shiftWeekStart(data.week_start, 1));
+                }
+              }}
+              disabled={!data?.week_start}
               aria-label="Next week"
             >
               <ChevronRight className="h-4 w-4" />
@@ -307,127 +300,38 @@ export default function TimetablePage() {
           </div>
         ) : (
           <>
-            <div className="relative hidden overflow-x-auto pb-2 lg:block">
-              <div className="overflow-x-auto rounded-xl border border-sgvu-navy/10 bg-white">
-                <table className="w-full min-w-[1100px] border-collapse">
-                  <thead>
-                    <tr>
-                      <th className="sticky left-0 z-10 w-28 border-b border-r border-sgvu-navy/10 bg-white p-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Day
-                      </th>
-                      {timeColumns.map((startTime) => (
-                        <th
-                          key={startTime}
-                          className={cn(
-                            'min-w-[120px] border-b border-r border-sgvu-navy/10 bg-white p-2.5 text-center text-[10px] font-bold uppercase tracking-wider',
-                            'text-sgvu-navy',
-                          )}
-                        >
-                          {to12h(startTime)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {weekDates.map((day) => (
-                      <tr key={day.date}>
-                        <th className="sticky left-0 z-10 border-b border-r border-sgvu-navy/10 bg-white p-2.5 text-center align-middle">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-sgvu-navy">
-                            {day.label}
-                          </div>
-                          <div className="mt-0.5 text-[10px] font-medium text-muted-foreground">
-                            {formatDisplayDate(day.date)}
-                          </div>
-                        </th>
-                        {timeColumns.map((startTime) => {
-                          const cellSlots = slotGrid.get(`${day.day_of_week}|${startTime}`) ?? [];
-                          return (
-                            <td
-                              key={`${day.date}-${startTime}`}
-                              className="relative h-[6.25rem] min-w-[120px] border-b border-r border-sgvu-navy/10 align-top p-1.5"
-                            >
-                              {cellSlots.length > 0 ? (
-                                <div className="flex h-full flex-col gap-1">
-                                  {cellSlots.map((slot) => (
-                                    <SlotButton key={slot.timetable_id} slot={slot} onSelect={setSelectedSlot} />
-                                  ))}
-                                </div>
-                              ) : null}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {Boolean(data?.pending_practical_batches?.length) && (
+              <div className="mb-4 flex gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="status">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-semibold">Practical batch assignment pending</p>
+                  <p className="mt-1">Your department must confirm your batch for {data?.pending_practical_batches?.map((course) => course.course_code).join(', ')}. We are not showing an unconfirmed lab as your class.</p>
+                </div>
               </div>
-            </div>
-
-            <div className="mt-4 lg:hidden">
-              <Tabs value={activeDay} onValueChange={setActiveDay}>
-                <TabsList className="mb-4 flex w-full justify-start overflow-x-auto">
-                  {weekDates.map((day) => (
-                    <TabsTrigger key={day.date} value={String(day.day_of_week)} className="min-w-[72px]">
-                      {day.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                {weekDates.map((day) => {
-                  const daySlots = slots
-                    .filter((s) => s.day_of_week === day.day_of_week)
-                    .sort((a, b) => a.start_time.localeCompare(b.start_time));
-                  return (
-                    <TabsContent key={day.date} value={String(day.day_of_week)} className="space-y-3">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        {day.label}, {formatDisplayDate(day.date)}
-                      </p>
-                      {daySlots.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-12 text-center">
-                          <CalendarDays className="mb-3 h-10 w-10 text-muted-foreground/50" />
-                          <p className="text-sm font-medium text-muted-foreground">No classes today</p>
-                        </div>
-                      ) : (
-                        daySlots.map((slot) => (
-                          <button
-                            key={slot.timetable_id}
-                            type="button"
-                            onClick={() => setSelectedSlot(slot)}
-                            className={cn(
-                              'w-full rounded-xl border p-4 text-left shadow-sm transition hover:border-sgvu-gold/40',
-                              slot.is_virtual ? 'border-blue-200 bg-blue-50/30' : 'bg-white',
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="font-bold text-sgvu-navy">{slot.course_name}</p>
-                                <p className="text-xs font-medium text-muted-foreground">{slot.course_code}</p>
-                              </div>
-                              <div className="flex flex-col items-end gap-1">
-                                {slot.is_virtual && <Badge variant="secondary">Virtual</Badge>}
-                                {attendanceBadge(slot.attendance_status)}
-                              </div>
-                            </div>
-                            <div className="mt-4 grid grid-cols-1 gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-                              <div className="flex items-center gap-2">
-                                <Clock className="h-4 w-4 shrink-0 text-sgvu-navy" />
-                                <span className="font-medium text-sgvu-navy">
-                                  {to12h(slot.start_time)} – {to12h(slot.end_time)}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <MapPin className="h-4 w-4 shrink-0 text-sgvu-navy" />
-                                <span className="font-medium text-sgvu-navy">
-                                  {slot.is_virtual ? 'Online' : slot.room ?? 'Room TBA'}
-                                </span>
-                              </div>
-                            </div>
-                          </button>
-                        ))
-                      )}
-                    </TabsContent>
-                  );
-                })}
-              </Tabs>
+            )}
+            {Boolean(data?.conflict_count) && (
+              <div className="mb-4 flex gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-950" role="alert">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <p><strong>Published timetable conflict.</strong> Two confirmed sessions overlap. Please contact your department before attending or marking attendance.</p>
+              </div>
+            )}
+            <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+              {weekDates.map((day) => {
+                const daySlots = slotsByDay.get(day.day_of_week) ?? [];
+                return (
+                  <section key={day.date} className="overflow-hidden rounded-2xl border border-sgvu-navy/10 bg-slate-50/70">
+                    <div className="flex items-center justify-between border-b border-sgvu-navy/10 bg-white px-4 py-3">
+                      <h3 className="font-bold text-sgvu-navy">{day.label}, {formatDisplayDate(day.date)}</h3>
+                      <span className="text-xs text-muted-foreground">{daySlots.length} {daySlots.length === 1 ? 'class' : 'classes'}</span>
+                    </div>
+                    <div className="space-y-2 p-3">
+                      {daySlots.length ? daySlots.map((slot) => (
+                        <SlotButton key={slot.timetable_id} slot={slot} onSelect={setSelectedSlot} />
+                      )) : <p className="p-4 text-sm text-muted-foreground">No confirmed classes</p>}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           </>
         )}
@@ -445,6 +349,12 @@ export default function TimetablePage() {
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Course code</p>
                   <p className="font-semibold text-sgvu-navy">{selectedSlot.course_code}</p>
                 </div>
+                {selectedSlot.section?.toUpperCase().startsWith('BATCH-') && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Practical group</p>
+                    <p className="font-semibold text-sgvu-navy">{selectedSlot.section.replace('BATCH-', 'Batch ')}</p>
+                  </div>
+                )}
                 {selectedSlot.session_date && (
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Date</p>

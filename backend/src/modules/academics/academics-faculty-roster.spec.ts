@@ -31,9 +31,19 @@ describe('AcademicsFacultyService course roster', () => {
   });
 
   it('scopes a practical roster to the selected timetable batch', async () => {
-    const enrollmentRepo = { find: jest.fn().mockResolvedValue([]) };
+    const enrollmentRepo = { find: jest.fn().mockResolvedValue([
+      { student_user_id: 'student-a', section_code: 'A', student: { name: 'A' } },
+      { student_user_id: 'student-b', section_code: 'B', student: { name: 'B' } },
+    ]) };
     const dataSource = {
-      query: jest.fn().mockResolvedValue([{ section: 'B', is_practical: true }]),
+      query: jest.fn((sql: string) => {
+        if (sql.includes('SELECT t.section')) return Promise.resolve([{ section: 'B', is_practical: true }]);
+        if (sql.includes('SELECT batch_id')) return Promise.resolve([{ batch_id: 'batch-1' }]);
+        if (sql.includes('SELECT student_user_id FROM academic_practical_batch_members')) {
+          return Promise.resolve([{ student_user_id: 'student-b' }]);
+        }
+        return Promise.resolve([]);
+      }),
     };
     const service = new AcademicsFacultyService(
       dataSource as any,
@@ -47,15 +57,14 @@ describe('AcademicsFacultyService course roster', () => {
       {} as any,
     );
 
-    await service.getCourseStudents(
+    const roster = await service.getCourseStudents(
       'course-1',
       'faculty-1',
       'tenant-1',
       'timetable-1',
     );
 
-    const where = enrollmentRepo.find.mock.calls[0][0].where;
-    expect(where.section_code).toBe('B');
+    expect(roster.map((student) => student.student_id)).toEqual(['student-b']);
     expect(dataSource.query).toHaveBeenCalledWith(
       expect.stringContaining('timetable_id = $2::uuid'),
       ['tenant-1', 'timetable-1', 'course-1', 'faculty-1'],

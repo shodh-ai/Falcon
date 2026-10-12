@@ -558,6 +558,54 @@ export class AcademicsFacultyService {
         [tenantId, courseId, sectionCode, studentIds],
       );
       if (occupied.length) throw new ConflictException('A student is already assigned to another practical batch');
+      // A course lock prevents two editors changing the same roster. Student
+      // locks also serialize assignments across *different* practical courses,
+      // so both editors cannot independently approve overlapping labs.
+      for (const studentId of [...studentIds].sort()) {
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+          `practical-student:${tenantId}:${studentId}`,
+        ]);
+      }
+      if (studentIds.length) {
+        const overlapping = await manager.query<Array<{ student_user_id: string }>>(
+          `SELECT DISTINCT e.student_user_id
+           FROM academic_timetables requested
+           JOIN student_course_enrollments e
+             ON e.tenant_id = requested.tenant_id
+            AND e.student_user_id = ANY($3::uuid[])
+            AND e.course_id <> requested.course_id
+            AND e.status = 'ENROLLED'
+           JOIN academic_timetables other
+             ON other.tenant_id = e.tenant_id AND other.course_id = e.course_id
+            AND other.deleted_at IS NULL
+            AND other.day_of_week = requested.day_of_week
+            AND other.start_time < requested.end_time
+            AND requested.start_time < other.end_time
+           LEFT JOIN academic_practical_batch_members member
+             ON member.tenant_id = e.tenant_id AND member.course_id = e.course_id
+            AND member.student_user_id = e.student_user_id AND member.removed_at IS NULL
+           LEFT JOIN academic_practical_batches assigned
+             ON assigned.batch_id = member.batch_id
+           WHERE requested.tenant_id = $1 AND requested.course_id = $2
+             AND requested.deleted_at IS NULL
+             AND UPPER(REPLACE(REPLACE(TRIM(requested.section), ' ', '-'), '_', '-')) =
+                 UPPER(REPLACE(REPLACE(TRIM($4), ' ', '-'), '_', '-'))
+             AND (
+               UPPER(REPLACE(REPLACE(COALESCE(other.section, ''), ' ', '-'), '_', '-')) NOT LIKE 'BATCH-%'
+               OR UPPER(REPLACE(REPLACE(other.section, ' ', '-'), '_', '-')) =
+                  UPPER(REPLACE(REPLACE(assigned.section_code, ' ', '-'), '_', '-'))
+               OR (member.membership_id IS NULL
+                   AND UPPER(REPLACE(REPLACE(e.section_code, ' ', '-'), '_', '-')) LIKE 'BATCH-%'
+                   AND UPPER(REPLACE(REPLACE(other.section, ' ', '-'), '_', '-')) =
+                       UPPER(REPLACE(REPLACE(e.section_code, ' ', '-'), '_', '-')))
+             )
+           LIMIT 1`,
+          [tenantId, courseId, studentIds, sectionCode],
+        );
+        if (overlapping.length) {
+          throw new ConflictException('Batch overlaps another confirmed class for a selected student');
+        }
+      }
       const [savedBatch] = batch ? [batch] : await manager.query<Array<{ batch_id: string; revision: number }>>(
         `INSERT INTO academic_practical_batches
          (tenant_id, course_id, section_code, created_by, updated_by)

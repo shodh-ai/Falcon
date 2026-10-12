@@ -37,6 +37,11 @@ import { StudentMentorSyncService } from './student-mentor-sync.service';
 import { resolveDeanScope as resolveDeanScopeUtil } from './dean-scope.util';
 import { DeanAuditService } from './dean-audit.service';
 import { EnterpriseAuditService } from '../../core/audit/enterprise-audit.service';
+import {
+  countStudentTimetableConflicts,
+  type PendingPracticalBatch,
+  selectStudentTimetableRows,
+} from './student-timetable-visibility';
 
 type TimetableRange = {
   timetable_id?: string;
@@ -220,55 +225,63 @@ export class AcademicsService {
   }
 
   async getTodayTimetable(studentUserId: string) {
-    const enrolled = await this.courseEnrollments.find({
-      where: { student_user_id: studentUserId, status: 'ENROLLED' },
-    });
-    const courseIds = enrolled.map((row) => row.course_id);
-    if (courseIds.length === 0) return [];
-
+    const { slots } = await this.resolveStudentWeeklyTimetable(studentUserId);
     const isoDay = this.getIstDayOfWeek();
-    const rows = await this.timetables.find({
-      where: {
-        course_id: In(courseIds),
-        day_of_week: isoDay,
-      },
-      relations: ['course', 'faculty'],
-      order: { start_time: 'ASC' },
-    });
-
-    const liveByCourse = await this.fetchActiveLiveClasses(courseIds);
-
-    return rows.map((row) => {
-      const startTime = this.normalizeTime(row.start_time);
-      const endTime = this.normalizeTime(row.end_time);
-      const liveJoinUrl = liveByCourse.get(row.course_id) ?? null;
-      const isVirtual = Boolean(liveJoinUrl) || this.isVirtualRoom(row.room);
-
-      return {
-        timetable_id: row.timetable_id,
-        course_id: row.course_id,
-        course_code: row.course.course_code,
-        course_name: row.course.course_name,
-        credits: row.course.credits,
-        room: row.room,
-        faculty_name: row.faculty?.name ?? null,
-        start_time: startTime,
-        end_time: endTime,
-        status: this.getSlotStatus(startTime, endTime),
-        is_virtual: isVirtual,
-        live_join_url: liveJoinUrl,
-      };
-    });
+    return slots
+      .filter((slot) => slot.day_of_week === isoDay)
+      .map((slot) => ({
+        ...slot,
+        status: this.getSlotStatus(slot.start_time, slot.end_time),
+      }));
   }
 
   async getWeeklyTimetable(studentUserId: string) {
-    const enrolled = await this.courseEnrollments.find({
+    return (await this.resolveStudentWeeklyTimetable(studentUserId)).slots;
+  }
+
+  private async resolveStudentWeeklyTimetable(studentUserId: string): Promise<{
+    tenantId: string | null;
+    courseIds: string[];
+    slots: Array<{
+      timetable_id: string;
+      course_id: string;
+      course_code: string;
+      course_name: string;
+      credits: number;
+      room: string | null;
+      faculty_name: string | null;
+      section: string | null;
+      day_of_week: number;
+      start_time: string;
+      end_time: string;
+      is_virtual: boolean;
+      live_join_url: string | null;
+    }>;
+    pendingPracticalBatches: PendingPracticalBatch[];
+    conflictCount: number;
+  }> {
+    const initialEnrollments = await this.courseEnrollments.find({
       where: { student_user_id: studentUserId, status: 'ENROLLED' },
     });
-    if (enrolled.length === 0) return [];
+    const student = initialEnrollments.length === 0
+      ? await this.users.findOne({ where: { user_id: studentUserId } })
+      : null;
+    const tenantId = initialEnrollments[0]?.tenant_id ?? student?.tenant_id ?? null;
+    const empty = {
+      tenantId,
+      courseIds: [] as string[],
+      slots: [],
+      pendingPracticalBatches: [] as PendingPracticalBatch[],
+      conflictCount: 0,
+    };
+    if (!tenantId) return empty;
 
-    const tenantId = enrolled[0].tenant_id;
     await this.enrollmentSync.syncStudent(tenantId, studentUserId);
+    const enrolled = await this.courseEnrollments.find({
+      where: { tenant_id: tenantId, student_user_id: studentUserId, status: 'ENROLLED' },
+    });
+    if (enrolled.length === 0) return empty;
+
     const slot = await this.enrollmentSync.listValidCourseIdsForStudent(
       tenantId,
       studentUserId,
@@ -285,7 +298,7 @@ export class AcademicsService {
         .map((row) => row.course_id);
     }
     courseIds = [...new Set(courseIds)];
-    if (courseIds.length === 0) return [];
+    if (courseIds.length === 0) return empty;
 
     const rows = await this.timetables.find({
       where: {
@@ -296,10 +309,40 @@ export class AcademicsService {
       order: { day_of_week: 'ASC', start_time: 'ASC' },
     });
 
-    const resolvedRows = this.resolveStudentTimetableSlots(rows);
+    // A student's theory section (often just "A") is not an approved lab
+    // rotation. Only an explicit course-level practical batch can select one
+    // of several simultaneous BATCH-A/B/C laboratory sessions.
+    const enrollmentSectionByCourse = new Map(
+      enrolled.map((row) => [row.course_id, row.section_code] as const),
+    );
+    const batchByCourse = new Map<string, string>();
+    const [batchTable] = await this.courseEnrollments.manager.query<Array<{ available: boolean }>>(
+      `SELECT to_regclass('public.academic_practical_batch_members') IS NOT NULL
+         AND to_regclass('public.academic_practical_batches') IS NOT NULL AS available`,
+    );
+    if (batchTable?.available) {
+      const memberships = await this.courseEnrollments.manager.query<
+        Array<{ course_id: string; section_code: string }>
+      >(
+        `SELECT m.course_id, b.section_code
+         FROM academic_practical_batch_members m
+         JOIN academic_practical_batches b
+           ON b.batch_id = m.batch_id AND b.tenant_id = m.tenant_id
+         WHERE m.tenant_id = $1 AND m.student_user_id = $2
+           AND m.removed_at IS NULL AND m.course_id = ANY($3::uuid[])`,
+        [tenantId, studentUserId, courseIds],
+      );
+      for (const membership of memberships) {
+        batchByCourse.set(membership.course_id, membership.section_code);
+      }
+    }
+
+    const { rows: resolvedRows, pendingPracticalBatches } =
+      selectStudentTimetableRows(rows, batchByCourse, enrollmentSectionByCourse);
+    const conflictCount = countStudentTimetableConflicts(resolvedRows);
     const liveByCourse = await this.fetchActiveLiveClasses(courseIds);
 
-    return resolvedRows.map((row) => {
+    const slots = resolvedRows.map((row) => {
       const startTime = this.normalizeTime(row.start_time);
       const endTime = this.normalizeTime(row.end_time);
       const liveJoinUrl = liveByCourse.get(row.course_id) ?? null;
@@ -313,6 +356,7 @@ export class AcademicsService {
         credits: row.course.credits,
         room: row.room,
         faculty_name: row.faculty?.name ?? null,
+        section: row.section,
         day_of_week: row.day_of_week,
         start_time: startTime,
         end_time: endTime,
@@ -320,25 +364,24 @@ export class AcademicsService {
         live_join_url: liveJoinUrl,
       };
     });
+    return { tenantId, courseIds, slots, pendingPracticalBatches, conflictCount };
   }
 
   async getWeeklyTimetableCalendar(
     studentUserId: string,
     weekStartInput?: string,
   ) {
-    const enrolled = await this.courseEnrollments.find({
-      where: { student_user_id: studentUserId, status: 'ENROLLED' },
-    });
-    const tenantId = enrolled[0]?.tenant_id;
-    const courseIds = enrolled.map((row) => row.course_id);
+    const { tenantId, courseIds, slots: baseSlots, pendingPracticalBatches, conflictCount } =
+      await this.resolveStudentWeeklyTimetable(studentUserId);
     const weekStart = this.resolveWeekStartMonday(weekStartInput);
     const weekDates = this.buildWeekDateRange(weekStart);
-    const baseSlots = await this.getWeeklyTimetable(studentUserId);
 
     if (!tenantId || courseIds.length === 0) {
       return {
         week_start: weekStart,
         week_dates: weekDates,
+        pending_practical_batches: pendingPracticalBatches,
+        conflict_count: conflictCount,
         slots: baseSlots.map((slot) => ({
           ...slot,
           session_date:
@@ -384,8 +427,12 @@ export class AcademicsService {
       if (sessionDate && this.isSessionDone(sessionDate, slot.end_time)) {
         const withTimetable = `${sessionDate}|${slot.course_id}|${slot.timetable_id}`;
         const courseOnly = `${sessionDate}|${slot.course_id}|`;
-        const raw =
-          attendanceMap.get(withTimetable) ?? attendanceMap.get(courseOnly);
+        // A course-level attendance record must never mark the wrong
+        // practical rotation as attended.
+        const raw = attendanceMap.get(withTimetable)
+          ?? (slot.section?.toUpperCase().startsWith('BATCH-')
+            ? undefined
+            : attendanceMap.get(courseOnly));
         if (!raw) {
           attendance_status = 'PENDING';
         } else if (raw === 'ABSENT') {
@@ -398,7 +445,13 @@ export class AcademicsService {
       return { ...slot, session_date: sessionDate, attendance_status };
     });
 
-    return { week_start: weekStart, week_dates: weekDates, slots };
+    return {
+      week_start: weekStart,
+      week_dates: weekDates,
+      pending_practical_batches: pendingPracticalBatches,
+      conflict_count: conflictCount,
+      slots,
+    };
   }
 
   async listMyCourseEnrollments(studentUserId: string, tenantId: string) {
@@ -4053,19 +4106,6 @@ export class AcademicsService {
     const value = String(time);
     if (value.includes('T')) return value.slice(11, 16);
     return value.slice(0, 5);
-  }
-
-  /** Preserve every published session, including batch-specific practicals. */
-  private resolveStudentTimetableSlots(
-    rows: AcademicTimetable[],
-  ): AcademicTimetable[] {
-    return [...rows].sort(
-      (a, b) =>
-        a.day_of_week - b.day_of_week ||
-        this.normalizeTime(a.start_time).localeCompare(
-          this.normalizeTime(b.start_time),
-        ),
-    );
   }
 
   private resolveWeekStartMonday(input?: string): string {

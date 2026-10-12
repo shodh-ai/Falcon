@@ -156,6 +156,29 @@ describe('persistent practical batches', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('rejects a batch assignment that overlaps another confirmed course', async () => {
+    const { service, manager } = setup((sql) => {
+      if (sql.includes('FROM student_course_enrollments'))
+        return [{ student_user_id: STUDENT_ID }];
+      if (sql.includes('SELECT DISTINCT e.student_user_id'))
+        return [{ student_user_id: STUDENT_ID }];
+      return [];
+    });
+    await expect(
+      service.savePracticalBatch(
+        'course-1', 'slot-1', 'faculty-1', 'tenant-1', 0, [STUDENT_ID],
+      ),
+    ).rejects.toThrow('Batch overlaps another confirmed class');
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('SELECT DISTINCT e.student_user_id'),
+      ['tenant-1', 'course-1', [STUDENT_ID], 'BATCH-A'],
+    );
+    expect(manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO academic_practical_batches'),
+      expect.anything(),
+    );
+  });
+
   it('keeps an already saved session roster when the current batch changes', async () => {
     const otherId = '22222222-2222-4222-8222-222222222222';
     const { service } = setup(
